@@ -157,3 +157,4 @@ Actulizar Android:
 2. cd charly-app                                |  ir a la carpera para android 
 2. npx cap copy android	                        |  En la raíz del proyecto Capacitor (dentro de charly-app)
 3. npx cap open android (abre Android Studio)   |  También dentro de charly-app
+# Charly-Brown
