@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title></title>
+  <link href="https://unpkg.com/boxicons/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/trumbowyg@2.25.1/dist/trumbowyg.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <!-- Bootstrap Select CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+
+  <!-- Incluir Font Awesome para los iconos -->
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="chatbot.css">
+  <link rel="stylesheet" href="header.css">
+
+</head>
+<body>
+
+
+  <header class="main-header">
+    <div class="header-content">
+      <!-- Logo -->
+      <div class="logo-area">
+        <h4>Home</h4>
+      </div>
+  
+      <!-- Buscador -->
+      <div class="search-group position-relative">
+        <i class="fas fa-search"></i>
+        <input type="text" id="searchInput" class="form-control bg-transparent text-white" placeholder="Buscar...">
+      </div>
+  
+      <!-- Filtros -->
+      <div class="filters-container">
+
+          <i id="btnReiniciarFiltros"  class="fas fa-sync-alt"></i> 
+        
+        <select class="selectpicker" data-style="btn-light" id="filtroNivel">
+          <option value="">Nivel</option>
+          <option value="preescolar">Preescolar</option>
+          <option value="primaria">Primaria</option>
+          <option value="secundaria">Secundaria</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroGrado">
+          <option value="">Grado</option>
+          <option value="primero">Primero</option>
+          <option value="segundo">Segundo</option>
+          <option value="tercero">Tercero</option>
+          <option value="cuarto">Cuarto</option>
+          <option value="quinto">Quinto</option>
+          <option value="sexto">Sexto</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroTrimestre">
+          <option value="">Trim</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroUnidad">
+          <option value="">Unidad</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+  </header>
+  
+  
+  
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="sidebar-menu">
+      <a href="home.html" class="sidebar-link">
+        <i class="fas fa-home"></i>
+        <span>Inicio</span>
+      </a> 
+      <!--
+      <a href="unidadHome.html" class="sidebar-link">
+        <i class="fas fa-layer-group"></i>
+        <span>Unidades</span>
+      </a> -->
+      <a  href="generarLectura.html" class="sidebar-link" id="analisisEditorialLink">
+        <i class="fas fa-chart-line"></i>
+        <span>Análisis Editorial</span>
+      </a>
+      <a href="perfil.html" class="sidebar-link">
+        <i class="fas fa-user"></i>
+        <span>Perfil</span>
+      </a>
+      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink">
+        <i class="fas fa-users-cog"></i>
+        <span>Usuarios</span>
+      </a>
+      <a href="chat.html" class="sidebar-link" id="chatLink">
+        <i class="fas fa-comment"></i>
+        <span>Chat</span>
+        <span id="chat-notification-badge" class="badge bg-danger ms-1">0</span>
+      </a>
+      <a href="#" class="sidebar-link" id="logoutLink">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Cerrar sesión</span>
+      </a>
+
+
+    </div>
+</div>
+
+
+
+
+<!-- Modal de Updates -->
+<div id="modalUpdates" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center;">
+  <div style="background:white; padding:30px; border-radius:10px; max-width:500px; width:90%; text-align:center; position:relative;">
+    <span id="cerrarUpdates" style="position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer;">&times;</span>
+    <h2 style="color: black;">🚀 Novedades de la plataforma</h2>
+    <p style="color: black;">Te presento las nuevas funciones y mejoras de esta semana:</p>
+    <ul style="text-align:left; color: black;">
+      <li>Sección Home con Lecturas Nuevas</li>
+      <li>Compartir Lecturas con usuarios Exclusiva para autores</li>
+      <li>Sección análisis editorial exclusiva para autores</li>
+      <li>Asignar propuesta de Imágen, exclusiva para autores</li>
+    </ul>
+    <button id="btnCerrarUpdates" style="margin-top:20px; padding:10px 20px;">Entendido</button>
+  </div>
+</div>
+
+
+
+  <div id="chatbotBubble">
+    <img src="logoCharly2.png" alt="Logo" class="logo" />
+  </div>
+   
+   
+  <div class="chatbot-container resizable" id="chatbotContainer" data-x="0">
+    <!-- 🟣 Handle invisible para arrastrar (resize desde el lado izquierdo) -->
+    <div class="chatbot-resize-handle"></div>
+  
+    <div class="chatbot-header">
+      <div class="chatbot-brand">
+        <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
+        <span>Soy <b>Charly</b>, tu asistente</span>
+      </div>
+      <button class="chatbot-close" id="chatbotClose">&times;</button>
+    </div>
+    
+    <div class="chatbot-messages" id="chatbotMessages">
+      <!-- Aquí se mostrarán los mensajes -->
+    </div>
+  
+    <div class="chatbot-input">
+      <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
+      <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>
+  
+  
+  <div id="app-container-home" class="container-fluid">
+    <div class="main-content">
+      <button id="toggleArchivadosBtn" class="btn btn-sm btn-secondary mb-3" style="margin-bottom: 5px !important; margin-top: 20px; width: 140px; font-size: smaller;">
+        <i class='bx bx-box'></i> Mostrar archivados
+      </button>
+  
+      <button id="toggleIlustracionesBtn" class="btn btn-sm btn-secondary mb-3" style="margin-bottom: 5px  !important; margin-top: 20px; width: 140px; font-size: smaller;">
+        <i class='bx bx-image'></i> Mostrar ilustraciones
+      </button>
+  
+      <div id="contenedorPublicaciones">
+        <div class="contenedorLecturas">
+          <h4 class="fw-bold">Lecturas compartidas</h4>
+          <div id="contenedorLecturas"></div>
+        </div>
+  
+        <div id="contenedorImagenes" class="contenedorImagenes" style="display: none;">
+          <h4 class="fw-bold">Propuesta de ilustración</h4>
+          <div id="contenedorImagenesCompartidas"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Modal para agregar comentario -->
+<div id="modalComentario" class="contenedorImagenes" style="display: none;">
+  <div class="modal-content">
+    <span class="cerrar-modal">&times;</span>
+    <h3>Escribe tu comentario</h3>
+    <textarea id="inputComentario" placeholder="Escribe tu comentario sobre la selección..."></textarea>
+    <button id="guardarComentarioBtn">Guardar Comentario</button>
+  </div>
+</div>
+
+  
+  <!-- Modal para lectura -->
+  <div id="modalLectura" class="modal-lectura" style="display: none;">
+    <div class="modal-contenidoHome">
+      <!-- Encabezado -->
+      <div class="modal-header-home">
+        <h3 class="tituloLectura">Unidad/Tema</h3>
+        <span class="cerrar-modal">&times;</span>
+      </div>
+      <!-- Ahora un solo contenedor de texto -->
+      <div id="modalTextoLectura" class="modal-editor-home" contenteditable="false"></div>
+      <!-- Botones de acción -->
+      <div class="modal-footer-home">
+        <div id="btnEditarLectura" class="btn-icono">
+          <i class="fas fa-edit" title="Editar lectura"></i> <span class="btn-title">Editar</span>
+        </div>
+        <div id="exportarModalInDesignBtn" class="btn-icono">
+          <i class="fas fa-file-export" title="Exportar para InDesign"></i> <span class="btn-title">Exportar InDesign</span>
+        </div>
+        <button id="btnGuardarLectura" class="btn btn-success" style="display: none;">Guardar</button>
+        <button id="comentarBtn" class="btn btn-primary" style="display: none;">Comentar</button>
+      </div>
+      <!-- Comentarios flotante y panel (sin cambios) -->
+      <button id="toggleComentariosBtn" class="btn-flotante" title="Ver comentarios"><i class="bx bx-comment"></i></button>
+      <div id="panelComentarios" class="panel-comentarios">
+        <h3>Comentarios</h3>
+        <div id="comentarios-lista"></div>
+      </div>
+    </div>
+  </div>
+  
+
+
+  <script type="module" src="home.js"></script>
+  <script type="module" src="sidebar.js"></script>
+  <script type="module" src="chatbot.js"></script>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Bootstrap Select JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.3/vanilla-tilt.min.js"></script>
+
+</body>
+</html>

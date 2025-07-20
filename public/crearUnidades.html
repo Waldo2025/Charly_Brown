@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crear Unidad</title>
+
+  <!-- Incluir Boxicons para los iconos -->
+  <link href="https://unpkg.com/boxicons/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="crearUnidades.css">
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="chatbot.css">
+  <link rel="stylesheet" href="header.css">
+  <!-- Por estas -->
+  <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore-compat.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+
+  <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <!-- Bootstrap Select CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+
+</head>
+<body>
+
+  
+
+  <header class="main-header">
+    <div class="header-content">
+      <!-- Logo -->
+      <div class="logo-area">
+        <h4>Home</h4>
+      </div>
+  
+      <!-- Buscador -->
+      <div class="search-group position-relative">
+        <i class="fas fa-search"></i>
+        <input type="text" id="searchInput" class="form-control bg-transparent text-white" placeholder="Buscar...">
+      </div>
+  
+      <!-- Filtros -->
+      <div class="filters-container">
+        <select class="selectpicker" data-style="btn-light" id="filtroNivel">
+          <option value="">Nivel</option>
+          <option value="preescolar">Preescolar</option>
+          <option value="primaria">Primaria</option>
+          <option value="secundaria">Secundaria</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroGrado">
+          <option value="">Grado</option>
+          <option value="primero">Primero</option>
+          <option value="segundo">Segundo</option>
+          <option value="tercero">Tercero</option>
+          <option value="cuarto">Cuarto</option>
+          <option value="quinto">Quinto</option>
+          <option value="sexto">Sexto</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroTrimestre">
+          <option value="">Trim</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroUnidad">
+          <option value="">Unidad</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+  </header> 
+
+ 
+  
+  
+  
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="sidebar-menu">
+      <a href="home.html" class="sidebar-link">
+        <i class="fas fa-home"></i>
+        <span>Inicio</span>
+      </a>
+      <a href="unidadHome.html" class="sidebar-link">
+        <i class="fas fa-layer-group"></i>
+        <span>Unidades</span>
+      </a>
+      <a href="perfil.html" class="sidebar-link">
+        <i class="fas fa-user"></i>
+        <span>Perfil</span>
+      </a>
+      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink">
+        <i class="fas fa-users-cog"></i>
+        <span>Usuarios</span>
+      </a>
+      <a href="chat.html" class="sidebar-link" id="chatLink">
+        <i class="fas fa-comment"></i>
+        <span>Chat</span>
+      </a>
+      <a href="#" class="sidebar-link" id="logoutLink">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Cerrar sesión</span>
+      </a>
+    </div>
+  </div>
+
+
+
+  <div id="chatbotBubble">
+    <img src="logoCharly2.png" alt="Logo" class="logo" />
+  </div>
+ 
+ 
+ <!-- Contenedor del chatbot (Sidebar) -->
+ <div class="chatbot-container" id="chatbotContainer">
+  <div class="chatbot-header">
+    <div class="chatbot-brand">
+      <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
+      <span>Soy <b>Charly</b>, tu asistente</span>
+    </div>
+    <button class="chatbot-close" id="chatbotClose">&times;</button>
+  </div>
+ 
+  
+  <div class="chatbot-messages" id="chatbotMessages">
+      <!-- Aquí se mostrarán los mensajes -->
+  </div>
+  <div class="chatbot-input">
+   <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
+      <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
+  </div>
+ </div>
+ 
+ 
+
+
+  <!-- Contenedor para el Sidebar y el Header -->
+  <div class="main-content">
+    <h2>Crear Nueva Unidad</h2>
+    <form id="createUnidadForm" class="form-grid">
+      
+      <!-- Fila 1 -->
+      <div class="form-group">
+        <label for="nivel">Nivel</label>
+        <select class="selectform" id="nivel" name="nivel" required>
+          <option value="Preescolar">Preescolar</option>
+          <option value="PF">PF</option>
+          <option value="Primaria">Primaria</option>
+          <option value="Secundaria">Secundaria</option>
+        </select>
+      </div>
+  
+      <div class="form-group">
+        <label for="grado">Grado</label>
+        <select class="selectform" id="grado" name="grado" required></select>
+      </div>
+  
+      <div class="form-group">
+        <label for="trimestre">Trimestre</label>
+        <select class="selectform" id="trimestre" name="trimestre" required></select>
+      </div>
+  
+      <div class="form-group">
+        <label for="unidad">Unidad</label>
+        <select class="selectform" id="unidad" name="unidad" required></select>
+      </div>
+  
+      <!-- Fila 2 -->
+      <div class="form-group">
+        <label for="materia">Materia</label>
+        <select class="selectform" id="materia" name="materia" required>
+          <option value="Biología">Biología</option>
+          <option value="Español">Español</option>
+          <option value="Geografía">Geografía</option>
+          <option value="Matemáticas">Matemáticas</option>
+          <option value="Historia del mundo">Historia del mundo</option>
+          <option value="Física">Física</option>
+          <option value="Historia de México 1">Historia de México 1</option>
+          <option value="Química">Química</option>
+          <option value="Historia de México 2">Historia de México 2</option>
+          <option value="Inglés">Inglés</option>
+        </select>
+      </div>
+  
+      <div class="form-group" style="flex: 1 1 100%;">
+        <label for="nombreUnidad">Nombre de la Unidad</label>
+        <input class="selectform" type="text" id="nombreUnidad" name="nombreUnidad" required>
+      </div>
+  
+      <div class="form-group" style="flex: 1 1 50%;">
+        <label for="privacidad">Privacidad</label>
+        <select class="selectform" id="privacidad" name="privacidad">
+          <option value="Privado">Privado</option>
+          <option value="Público">Público</option>
+        </select>
+      </div>
+  
+      <div class="form-group" style="flex: 1 1 50%; display: flex; align-items: end;">
+        <button type="submit" class="btn-crear">Crear Unidad</button>
+      </div>
+  
+    </form>
+  </div>
+  
+
+  </div>
+
+  <!-- Modal de Confirmación -->
+  <div id="confirmationModal" class="modal">
+    <div class="modal-content">
+      <p>Unidad creada exitosamente.</p>
+      <button id="closeModalBtn">Cerrar</button>
+    </div>
+  </div>
+
+
+
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Bootstrap Select JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+
+  <script type="module" src="crearUnidades.js"></script>
+  <script type="module" src="sidebar.js"></script>
+
+
+</body>
+</html>

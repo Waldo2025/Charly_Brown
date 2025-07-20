@@ -1,0 +1,136 @@
+/* Estilo general del modal */
+#modalSecuencia .modal {
+    font-family: 'Segoe UI', sans-serif;
+  }
+  
+  #modalSecuencia h2 {
+    font-size: 1.6rem;
+    margin-bottom: 20px;
+  }
+  
+  #modalSecuencia h3 {
+    margin-top: 30px;
+    font-size: 1.3rem;
+    color: #333;
+    border-left: 5px solid #2196f3;
+    padding-left: 10px;
+  }
+  
+  #modalSecuencia form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  /* Inputs y selects */
+  #modalSecuencia input[type="text"],
+  #modalSecuencia select {
+    width: 100%;
+    padding: 8px 10px;
+    margin-top: 4px;
+    margin-bottom: 10px;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+  
+  /* Fieldsets */
+  #modalSecuencia fieldset {
+    border: 1px solid #e0e0e0;
+    border-left: 4px solid #2196f3;
+    border-radius: 4px;
+    padding: 10px 15px;
+    margin-bottom: 15px;
+    background: #f9f9f9;
+  }
+  
+  #modalSecuencia legend {
+    font-weight: bold;
+    font-size: 1rem;
+    padding: 0 5px;
+    color: #333;
+  }
+  
+  /* Etiquetas */
+  #modalSecuencia label {
+    display: block;
+    margin-top: 5px;
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: #444;
+  }
+  
+  /* Botón de guardar */
+  #modalSecuencia button[type="submit"] {
+    background-color: #2196f3;
+    color: #fff;
+    font-size: 1rem;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 20px;
+    align-self: flex-start;
+    transition: background-color 0.2s;
+  }
+  
+  #modalSecuencia button[type="submit"]:hover {
+    background-color: #1976d2;
+  }
+  
+  /* Cierre del modal */
+  #cerrarModalSecuencia {
+    font-size: 24px;
+    color: #444;
+  }
+  
+  @media screen and (max-width: 600px) {
+    #modalSecuencia .modal-content {
+      padding: 15px;
+    }
+  
+    #modalSecuencia h2, #modalSecuencia h3 {
+      font-size: 1.2rem;
+    }
+  }
+  
+
+.sya {
+    background: #fff;
+    margin: 5% auto;
+    padding: 20px;
+    width: 90%;
+    max-width: 800px;
+    border-radius: 10px;
+    position: relative;
+    font-family: sans-serif;
+    overflow-y: auto;
+    max-height: 80%;
+    z-index: 9999;
+}
+
+.form-grid-doble {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.form-grid-doble label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.form-grid-doble select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+}
+
+
+#modalSecuencia {
+  z-index: 99999 !important;
+}

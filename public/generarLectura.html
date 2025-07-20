@@ -1,0 +1,1967 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contenido de la Unidad</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Trumbowyg -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/dist/ui/trumbowyg.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
+
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+
+        <!-- DataTables -->
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.13.5/css/jquery.dataTables.min.css">
+        <script src="https://cdn.datatables.net/1.13.5/js/jquery.dataTables.min.js"></script>
+    
+
+    <link rel="stylesheet" href="generarLectura.css">
+    <link rel="stylesheet" href="sidebar.css">
+    <link rel="stylesheet" href="header.css">
+    <link rel="stylesheet" href="chatbot.css">
+    <link rel="stylesheet" href="imageGenerator.css">
+    <link rel="stylesheet" href="secuenciayalcance.css">
+    <link rel="stylesheet" href="generarUnidad.css">
+
+</head>
+<body>
+
+<header class="main-header">
+    <div class="header-content">
+        <!-- Logo -->
+        <div class="logo-area">
+            <h3 style="color:white">Panel de análisis</h3>
+        </div>
+    </div>
+</header> 
+
+<div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="sidebar-menu">
+      <a href="home.html" class="sidebar-link">
+        <i class="fas fa-home"></i>
+        <span>Inicio</span>
+      </a> 
+      <!--
+      <a href="unidadHome.html" class="sidebar-link">
+        <i class="fas fa-layer-group"></i>
+        <span>Unidades</span>
+      </a> -->
+      <a  href="generarLectura.html"  class="sidebar-link">
+        <i class="fas fa-chart-line"></i>
+        <span>Análisis Editorial</span>
+      </a>
+      <a href="perfil.html" class="sidebar-link">
+        <i class="fas fa-user"></i>
+        <span>Perfil</span>
+      </a>
+      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink">
+        <i class="fas fa-users-cog"></i>
+        <span>Usuarios</span>
+      </a>
+      <a href="chat.html" class="sidebar-link" id="chatLink">
+        <i class="fas fa-comment"></i>
+        <span>Chat</span>
+      </a>
+      <a href="#" class="sidebar-link" id="logoutLink">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Cerrar sesión</span>
+      </a>
+
+
+    </div>
+</div>
+
+
+    
+<div id="chatbotBubble">
+    <img src="logoCharly2.png" alt="Logo" class="logo" />
+</div>
+
+    <!-- Contenedor del chatbot (Sidebar) -->
+<div class="chatbot-container" id="chatbotContainer">
+    <div class="chatbot-header">
+    <div class="chatbot-brand">
+        <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
+        <span>Soy <b>Charly</b>, tu asistente</span>
+    </div>
+    <button class="chatbot-close" id="chatbotClose">&times;</button>
+    </div>
+
+
+    <div class="chatbot-messages" id="chatbotMessages">
+        <!-- Aquí se mostrarán los mensajes -->
+    </div>
+    <div class="chatbot-input">
+    <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
+        <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
+    </div>
+</div>
+
+<!-- Panel principal dividido -->
+<div class="contenedor-paneles">
+    <!-- Panel izquierdo -->
+    <div id="panel-izquierdo" class="panel-izquierdo">
+        <h6>Cargar:</h6>
+    
+        <!-- Botones adicionales -->
+        <div class="analisis-botones">
+            <button class="btn-analisis" id="btnMetodologia">
+                <i class="fas fa-project-diagram"></i>
+                <span class="btn-label">Metodología ASC</span>
+
+            </button>
+            <button class="btn-analisis" id="btnLecturas">
+                <i class="fas fa-book-reader"></i> 
+                <span class="btn-label">Lecturas ASC</span>
+            </button>
+            <button class="btn-analisis" id="btnAgregarEstilo">
+              <i class="fas fa-pen-nib"></i>
+              <span class="btn-label">Agregar estilo literario</span>
+            </button>
+            <button class="btn-analisis" id="btnCamposFormativos">
+              <i class="fas fa-shapes"></i> 
+              <span class="btn-label">Campos formativos</span>
+            </button>
+
+
+            <button class="btn-analisis" id="btnSecuenciaAlcance">
+              <i class="fas fa-stream"></i>
+              <span class="btn-label">Secuencia y alcance</span>
+            </button>
+        </div>
+
+        <h6>Ver:</h6>
+
+        <div class="analisis-botones">
+            <button class="btn-analisis" id="btnListaMetodologica">
+              <i class="fas fa-project-diagram"></i>
+                <span class="btn-label">Lista metodológica</span>
+            </button>
+            <button class="btn-analisis" id="btnListaLecturas">
+              <i class="fas fa-book-open"></i> 
+                <span class="btn-label">Lista de Lecturas</span>
+            </button>
+
+            <button class="btn-analisis" id="btnListaEstilos">
+              <i class="fas fa-pen-nib"></i> 
+              <span class="btn-label">Lista de Estilos Literarios</span>
+            </button>
+            
+            <button class="btn-analisis" id="btnListaCampos">
+              <i class="fas fa-shapes"></i> 
+              <span class="btn-label">Lista de Campos Formativos</span>
+            </button>
+            <button class="btn-analisis" id="btnVerSecuencias">
+              <i class="fas fa-layer-group"></i>
+              <span class="btn-label">Secuencia y Alcance</span>
+            </button>
+        </div>
+
+        <h6>Analizar:</h6>
+
+        <div class="analisis-botones">
+            <button class="btn-analisis" id="btnLecturasConcentradas">
+                <i class="fas fa-table"></i> 
+                <span class="btn-label">Lecturas concentradas</span>
+              </button>
+
+            <button class="btn-analisis" id="toggleChartPanel" title="Mostrar/Ocultar gráficas">
+                <i class="fas fa-chart-bar"></i>
+            </button>
+        </div>
+
+        <h6>Generar</h6>
+
+        <div class="analisis-botones">
+            <button class="btn-analisis" id="btnSugerenciasLectura">
+              <i class="fas fa-book-reader"></i>
+                <span class="btn-label">Lectura nueva</span>
+              </button>
+              <!-- Botón para abrir el modal -->
+              <button id="btnAbrirModalUnidad" class="btn-analisis">
+                <i class="fas fa-layer-group"></i> <span class="btn-label">Generar Unidad</span>
+              </button>
+        </div>
+
+        <h6>Ver nuevos</h6>
+        <div class="analisis-botones">
+          <button class="btn-analisis" id="btnListaLecturasNuevas">
+            <i class="fas fa-book-open"></i>
+            <span class="btn-label">Lista de lecturas nuevas</span>
+          </button>
+        <!-- Botón para ver unidades generadas -->
+        <button class="btn-analisis" id="btnListaUnidadesGuardadas">
+          <i class="fas fa-folder-open"></i>
+          <span class="btn-label">Unidades guardadas</span>
+        </button>
+
+       </div>
+
+        <h6>Imágenes</h6>
+        <div class="analisis-botones">
+            <!-- MindMaps sigue igual -->
+            <button id="btnVerMindMaps" class="btn-analisis">
+              <i class="fas fa-book-reader"></i>
+              <span class="btn-label">MindMaps</span>
+            </button>
+            
+            <!-- Ahora abre un modal-normal -->
+            <button id="btnAbrirPanelImagenes" class="btn-analisis">
+              <i class="fas fa-folder"></i>
+              <span class="btn-label">Imágenes</span>
+            </button>
+            
+            <!-- Generar ilustración con icono fa-image -->
+            <button id="btnAbrirGeneradorImagenes" class="btn-analisis">
+              <i class="fas fa-image"></i>
+              <span class="btn-label">Generar ilustración</span>
+            </button>
+          </div>
+ 
+    </div>
+    
+    <div class="panel-analisis">
+        <!-- Panel Medio -->
+        <div id="panel-texto-formatos" class="panel-medio">
+        
+            <div id="contenidoTextoFormateado" contenteditable="true">
+        
+            </div>     
+            <div class="scroll-buttons">
+                <button id="scrollUp" title="Ir arriba"><i class="fas fa-arrow-up"></i></button>
+                <button id="scrollDown" title="Ir abajo"><i class="fas fa-arrow-down"></i></button>
+            </div>
+        </div>
+      
+        <!-- Panel de Chat -->
+        <div id="panel-chat" class="panel-chat">
+          <div class="chat-header">Asistente  <span style="margin-left: 10px;"><i  id="btnResetChat"  class="fas fa-plus" title="Iniciar conversación nueva"></i></span></div>
+           
+      
+          <div class="chat-mensajes" id="chatMensajes"></div>
+          <div class="chat-input">
+            <input type="text" id="mensajeInput" placeholder="Escribe tu mensaje..." />
+            <button id="enviarMensaje"><i class="fas fa-paper-plane"></i></button>
+          </div>
+        </div>
+    </div>
+      
+    <!-- Panel de gráficas -->
+    <div id="panel-charts" class="panel-derecho oculto" >
+        <div id="charts">
+                <canvas id="grafica1"></canvas>
+        </div>
+    </div>
+</div>
+    
+
+<!-- Modal Metodología ASC -->
+<div id="modalMetodologiaASC" class="modal-asc">
+    <div class="modal-asc-contenido">
+        <span class="cerrar-modal-asc" id="cerrarModalMetodologia">&times;</span>
+        <h3>Metodología ASC</h3>
+
+        <div id="contenidoMetodologia">
+        <form id="formMetodologiaASC">
+            <div class="form-group">
+            <label for="temaMetodologia"><strong>Tema:</strong></label>
+            <input type="text" id="temaMetodologia" class="form-control" placeholder="Ej: Pilares ASC" required>
+            </div>
+
+            <div class="form-group">
+            <label for="conceptoMetodologia"><strong>Concepto:</strong></label>
+            <div id="conceptoMetodologia" class="form-control" contenteditable="true" placeholder="Describe brevemente el tema..."></div>
+        </div>
+
+            <div class="form-group">
+            <label for="comentariosMetodologia"><strong>Comentarios complementarios:</strong></label>
+            <div id="comentariosMetodologia" class="form-control" contenteditable="true" placeholder="Ejemplos, referencias, etc."></div>
+        </div>
+
+            <button type="submit" id="guardarMetodologiaBtn" class="btn-analisis">
+            <i class="fas fa-save"></i> Guardar en metodologíaASC
+            </button>
+        </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Lista Metodológica -->
+<div id="modalListaMetodologica" class="modal-asc" style="display: none;">
+    <div style="background:white; width:80%; max-width:900px; margin:5% auto; padding:20px; border-radius:10px; position:relative;">
+        <span id="cerrarModalLista" style="position:absolute; top:10px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+        <h3>Temas metodológicos</h3>
+        <input type="text" id="buscadorTemas" placeholder="Buscar tema..." style="width:100%; padding:10px; margin-bottom:15px;">
+        <div id="contenedorTemasMetodologicos" style="display:grid; gap:1rem; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); max-height:60vh; overflow-y:auto;">
+        <!-- Tarjetas aparecerán aquí -->
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Vista Previa -->
+<div id="modalVistaPrevia" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
+    <div style="padding:30px; background:white; width:90%; max-width:700px; height:90vh; margin:5vh auto; padding:0; border-radius:10px; position:relative; display:flex; flex-direction:column;">
+      
+      <div style="padding:1rem; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
+        <h3 id="vistaTema" style="margin:0;"></h3>
+        <span id="cerrarVistaPrevia" style="font-size:24px; cursor:pointer;">&times;</span>
+      </div>
+  
+      <div id="contenidoVista">
+          <h5>Concepto</h5>
+        <div id="vistaConcepto" style="margin-bottom:1rem;"></div>
+        <h5>Comentarios</h5>
+        <div id="vistaComentarios"></div>
+      </div>
+    </div>
+</div>
+    
+
+<!-- Modal Lecturas ASC -->
+<div id="modalLecturasASC" class="modal-asc" style="display: none;">
+  <div class="modal-asc-contenido">
+    <span class="cerrar-modal-asc" id="cerrarModalLecturas">&times;</span>
+    <h3>Lecturas ASC</h3>
+
+    <form id="formLecturasASC">
+        <div class="form-grid">
+        <div class="form-group">
+            <label for="serieLectura"><strong>Serie:</strong></label>
+            <input type="text" id="serieLectura" class="form-control" value="Primaria en Forma" readonly>
+        </div>
+        
+        <div class="form-group">
+            <label for="nivelLectura"><strong>Nivel:</strong></label>
+            <input type="text" id="nivelLectura" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="gradoLectura"><strong>Grado:</strong></label>
+            <input type="text" id="gradoLectura" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="trimestreLectura"><strong>Trimestre:</strong></label>
+            <input type="number" id="trimestreLectura" class="form-control" min="1" max="3" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="unidadLectura"><strong>Unidad:</strong></label>
+            <input type="number" id="unidadLectura" class="form-control" min="1" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="tituloLectura"><strong>Título de la lectura:</strong></label>
+            <input type="text" id="tituloLectura" class="form-control" required>
+        </div>
+        </div>
+                
+
+      <div class="form-group">
+        <label for="textoLectura"><strong>Lectura:</strong></label>
+        <div id="textoLectura" class="form-control" contenteditable="true" placeholder="Escribe la lectura aquí..."></div>
+      </div>
+
+      <div class="form-group">
+        <label><strong>Preguntas de comprensión:</strong></label>
+      
+        <!-- Pregunta 1 -->
+        <div class="pregunta-grupo">
+            <label><strong>Pregunta 1</strong></label>
+            <input type="text" id="pregunta1" class="form-control" placeholder="Escribe la pregunta" required>
+            <div class="pregunta-fila">
+            <div class="form-group-compact">
+                <label for="nivelPregunta1">Nivel:</label>
+                <select id="nivelPregunta1" class="form-control" required>
+                <option value="">Selecciona nivel</option>
+                <option value="Nivel 1">Nivel 1</option>
+                <option value="Nivel 2">Nivel 2</option>
+                <option value="Nivel 3">Nivel 3</option>
+                <option value="Nivel 4">Nivel 4</option>
+                <option value="Nivel 5">Nivel 5</option>
+                <option value="Nivel 6">Nivel 6</option>
+                </select>
+            </div>
+            <div class="form-group-compact">
+                <label for="respuestaPregunta1">Respuesta esperada:</label>
+                <input type="text" id="respuestaPregunta1" class="form-control" placeholder="Respuesta esperada">
+              </div>
+            <div class="form-group-compact">
+                <label for="criterioPregunta1">Criterio:</label>
+                <input type="text" id="criterioPregunta1" class="form-control" placeholder="Criterio o Criterio">
+            </div>
+            </div>
+        </div>
+        
+        <!-- Pregunta 2 -->
+        <div class="pregunta-grupo">
+            <label><strong>Pregunta 2</strong></label>
+            <input type="text" id="pregunta2" class="form-control" placeholder="Escribe la pregunta" required>
+            <div class="pregunta-fila">
+            <div class="form-group-compact">
+                <label for="nivelPregunta2">Nivel:</label>
+                <select id="nivelPregunta2" class="form-control" required>
+                <option value="">Selecciona nivel</option>
+                <option value="Nivel 1">Nivel 1</option>
+                <option value="Nivel 2">Nivel 2</option>
+                <option value="Nivel 3">Nivel 3</option>
+                <option value="Nivel 4">Nivel 4</option>
+                <option value="Nivel 5">Nivel 5</option>
+                <option value="Nivel 6">Nivel 6</option>
+                </select>
+            </div>
+            <div class="form-group-compact">
+                <label for="respuestaPregunta2">Respuesta esperada:</label>
+                <input type="text" id="respuestaPregunta2" class="form-control" placeholder="Respuesta esperada">
+              </div>
+            <div class="form-group-compact">
+                <label for="criterioPregunta2">Criterio:</label>
+                <input type="text" id="criterioPregunta2" class="form-control" placeholder="Criterio o Criterio">
+            </div>
+            </div>
+        </div>
+        
+        <!-- Pregunta 3 -->
+        <div class="pregunta-grupo">
+            <label><strong>Pregunta 3</strong></label>
+            <input type="text" id="pregunta3" class="form-control" placeholder="Escribe la pregunta" required>
+            <div class="pregunta-fila">
+            <div class="form-group-compact">
+                <label for="nivelPregunta3">Nivel:</label>
+                <select id="nivelPregunta3" class="form-control" required>
+                <option value="">Selecciona nivel</option>
+                <option value="Nivel 1">Nivel 1</option>
+                <option value="Nivel 2">Nivel 2</option>
+                <option value="Nivel 3">Nivel 3</option>
+                <option value="Nivel 4">Nivel 4</option>
+                <option value="Nivel 5">Nivel 5</option>
+                <option value="Nivel 6">Nivel 6</option>
+                </select>
+            </div>
+            <div class="form-group-compact">
+                <label for="respuestaPregunta3">Respuesta esperada:</label>
+                <input type="text" id="respuestaPregunta3" class="form-control" placeholder="Respuesta esperada">
+              </div>
+            <div class="form-group-compact">
+                <label for="criterioPregunta3">Criterio:</label>
+                <input type="text" id="criterioPregunta3" class="form-control" placeholder="Criterio o Criterio">
+            </div>
+            </div>
+        </div>
+        
+        <!-- Pregunta 4 -->
+        <div class="pregunta-grupo">
+            <label><strong>Pregunta 4</strong></label>
+            <input type="text" id="pregunta4" class="form-control" placeholder="Escribe la pregunta" required>
+            <div class="pregunta-fila">
+            <div class="form-group-compact">
+                <label for="nivelPregunta4">Nivel:</label>
+                <select id="nivelPregunta4" class="form-control" required>
+                <option value="">Selecciona nivel</option>
+                <option value="Nivel 1">Nivel 1</option>
+                <option value="Nivel 2">Nivel 2</option>
+                <option value="Nivel 3">Nivel 3</option>
+                <option value="Nivel 4">Nivel 4</option>
+                <option value="Nivel 5">Nivel 5</option>
+                <option value="Nivel 6">Nivel 6</option>
+                </select>
+            </div>
+            <div class="form-group-compact">
+                <label for="respuestaPregunta4">Respuesta esperada:</label>
+                <input type="text" id="respuestaPregunta4" class="form-control" placeholder="Respuesta esperada">
+              </div>
+            <div class="form-group-compact">
+                <label for="criterioPregunta4">Criterio:</label>
+                <input type="text" id="criterioPregunta4" class="form-control" placeholder="Criterio o Criterio">
+            </div>
+            </div>
+        </div>
+        
+        <!-- Pregunta 5 -->
+        <div class="pregunta-grupo">
+            <label><strong>Pregunta 5</strong></label>
+            <input type="text" id="pregunta5" class="form-control" placeholder="Escribe la pregunta" required>
+            <div class="pregunta-fila">
+            <div class="form-group-compact">
+                <label for="nivelPregunta5">Nivel:</label>
+                <select id="nivelPregunta5" class="form-control" required>
+                <option value="">Selecciona nivel</option>
+                <option value="Nivel 1">Nivel 1</option>
+                <option value="Nivel 2">Nivel 2</option>
+                <option value="Nivel 3">Nivel 3</option>
+                <option value="Nivel 4">Nivel 4</option>
+                <option value="Nivel 5">Nivel 5</option>
+                <option value="Nivel 6">Nivel 6</option>
+                </select>
+            </div>
+            <div class="form-group-compact">
+                <label for="respuestaPregunta5">Respuesta esperada:</label>
+                <input type="text" id="respuestaPregunta5" class="form-control" placeholder="Respuesta esperada">
+              </div>
+            <div class="form-group-compact">
+                <label for="criterioPregunta5">Criterio:</label>
+                <input type="text" id="criterioPregunta5" class="form-control" placeholder="Criterio o Criterio">
+            </div>
+            </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-analisis">
+        <i class="fas fa-save"></i> Guardar lectura
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Lista Lecturas ASC -->
+<div id="modalListaLecturas" class="modal-asc">
+    <div class="modal-asc-contenido">
+      <span class="cerrar-modal-asc" id="cerrarModalListaLecturas">&times;</span>
+      <h3>Lecturas ASC guardadas</h3>
+      <input type="text" id="buscadorLecturas" class="form-control" placeholder="Buscar lectura..." style="width:100%; padding:10px; margin-bottom:15px;">
+      <div id="contenedorLecturasGuardadas" class="lecturas-cards" style="display:grid; gap:1rem; max-height:60vh; overflow-y:auto;"></div>
+    </div>
+</div>
+
+
+<!-- Modal Vista Lectura -->
+<div id="modalVistaLectura" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999;">
+    <div style="padding:30px; background:white; width:90%; max-width:700px; height:90vh; margin:5vh auto; padding:0; border-radius:10px; position:relative; display:flex; flex-direction:column;">
+      
+    <div style="padding:1rem; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
+      <h3 id="vistaTituloLectura" style="margin:0;"></h3>
+      <span id="cerrarVistaLectura" style="font-size:24px; cursor:pointer;">&times;</span>
+    </div>
+
+    <div id="contenidoVistaLectura">
+      <div id="vistaTextoLectura" style="margin-bottom:1.5rem;"></div>
+      <hr style="margin:1.5rem 0;">
+      <h5>Preguntas de comprensión</h5>
+      <ul id="vistaPreguntasLectura" style="list-style:none; padding-left:0;"></ul>
+    </div>
+  </div>
+</div>
+
+<div id="modalLecturasConcentradas" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999;">
+    <div class="modal-contenido" style="background:white; width:90%; max-width:95%; height:90vh; margin:5vh auto; border-radius:10px; position:relative; display:flex; flex-direction:column; overflow:hidden;">
+      
+      <!-- Header del modal con botón de análisis -->
+      <div class="modal-header" style="padding: 15px 20px; background:#f0f0f0; display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">Lecturas concentradas</h3>
+        <div class="modal-icons">
+            <i id="iconToggleTabla" class="fas fa-table" title="Mostrar/Ocultar tabla de lecturas" style="cursor:pointer; margin-right:10px;"></i>
+            <i id="iconToggleAnalisis" class="fas fa-clipboard-list" title="Mostrar/Ocultar análisis guardados" style="cursor:pointer; margin-right:10px;"></i>
+            <i id="iconGuardarAnalisis" class="fas fa-save" title="Guardar análisis actual" style="cursor:pointer; color:green;"></i>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <!-- Botón nuevo para Gemini -->
+            <button id="btnGeminiAnalisisLecturas" title="Análisis con Gemini" style="border:none; background:none; font-size:1.2em; cursor:pointer; color:#4c83ff;">
+                <i class="fas fa-robot"></i>
+            </button>
+          <button id="cerrarModalLecturasConcentradas" title="Cerrar" style="border:none; background:none; font-size:1.2em; cursor:pointer;">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+  
+    <!-- Body con scroll interno -->
+    <div class="modal-body" style="padding: 40px; overflow-y: auto; flex:1;">
+        
+        <!-- 🔧 Aquí va el loading (dentro de modal-body, no afuera) -->
+        <div id="loadingAnalisis" style="display:none; text-align:center; margin-bottom: 20px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: #333;"></i>
+            <p>Iniciando análisis...</p>
+        </div>
+
+
+        <div id="contenedorAnalisisGuardados" style="margin-top: 30px; display: none;">
+            <h4>Análisis guardados</h4>
+            <ul id="listaAnalisisGuardados" style="list-style: none; padding-left: 0;"></ul>
+        </div>
+
+
+        <hr>
+
+
+        <div id="bloqueTablaLecturas">
+            <h4>Lecturas</h4>
+            <table id="tablaLecturasConcentradas" class="display" style="width:100%; border-collapse: collapse; font-size:14px;">
+                <thead style="position:relative; top:0; background:#f8f8f8;">
+                    <tr>
+                        <th></th> <!-- Flecha expandible -->
+                        <th>Grupo</th>
+                    </tr>
+                </thead>
+                <tbody id="tbodyLecturas"></tbody>
+            </table>
+        </div>
+        
+    </div>
+
+    </div>
+</div>
+
+<!-- Modal para vista de análisis -->
+<div id="modalVistaAnalisis" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999;">
+  <div style="background:white; width:90%; max-width:800px; height:80vh; margin:5vh auto; border-radius:10px; padding:20px; overflow:auto; position:relative;">
+    <button id="cerrarVistaAnalisis" style="position:absolute; top:10px; right:10px; font-size:18px; border:none; background:none; cursor:pointer;">✖</button>
+   
+    <!-- Botón de imprimir -->
+    <button id="imprimirAnalisis" title="Imprimir" style="position:absolute; top:10px; left:10px; font-size:18px; border:none; background:none; cursor:pointer;">
+        <i class="fas fa-print"></i>
+      </button>
+  
+   
+    <div id="contenidoVistaAnalisis"></div>
+  </div>
+</div>
+
+<!-- Modal Lectura Nueva -->
+<div id="modalNuevaLectura" class="modal-normal">
+    <div class="modal-normal-content" style="background:#fff; width:90%; max-width:500px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
+      <span id="cerrarModalNuevaLectura" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+      <h3>Crear Lectura Nueva</h3>
+      <form id="formNuevaLectura">
+        <div class="form-group">
+          <label for="temaNuevo"><strong>Tema nuevo:</strong></label>
+          <input type="text" id="temaNuevo" name="temaNuevo" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="autorReferencia">Autor de referencia:</label>
+          <select id="autorReferencia" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">Cargando autores...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="especificacionesNuevo"><strong>Especificaciones (opcional):</strong></label>
+          <textarea id="especificacionesNuevo" name="especificacionesNuevo"
+                    class="form-control" rows="3"
+                    placeholder="p. ej. ‘Incluir fuentes reales’, ‘Basarse en historia de México’, etc."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="nivelNuevo"><strong>Nivel académico:</strong></label>
+          <select id="nivelNuevo" name="nivelNuevo" class="form-control" required>
+            <option value="">Selecciona nivel</option>
+            <option value="Preescolar">Preescolar</option>
+            <option value="Primaria">Primaria</option>
+            <option value="Secundaria">Secundaria</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="gradoNuevo"><strong>Grado:</strong></label>
+          <select id="gradoNuevo" name="gradoNuevo" class="form-control" required>
+            <option value="">Selecciona grado</option>
+            <!-- Se llenará dinámicamente según nivel -->
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="trimestreNuevo"><strong>Trimestre:</strong></label>
+          <select id="trimestreNuevo" name="trimestreNuevo" class="form-control" required>
+            <option value="">Selecciona trimestre</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="unidadNuevo"><strong>Unidad:</strong></label>
+          <select id="unidadNuevo" name="unidadNuevo" class="form-control" required>
+            <option value="">Selecciona unidad</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <!-- Ajústalas a tus necesidades -->
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="ejeArticulador"><strong>Eje articulador:</strong></label>
+          <select id="ejeArticulador" name="ejeArticulador" class="form-control" required>
+            <option value="">Selecciona eje articulador</option>
+            <option value="Inclusión">Inclusión</option>
+            <option value="Pensamiento Crítico">Pensamiento Crítico</option>
+            <option value="Interculturalidad Crítica">Interculturalidad Crítica</option>
+            <option value="Igualdad de Género">Igualdad de Género</option>
+            <option value="Vida Saludable">Vida Saludable</option>
+            <option value="Apropiación de las Culturas a través de la Lectura y la Escritura">Apropiación de las Culturas a través de la Lectura y la Escritura</option>
+            <option value="Artes y Experiencias Estéticas">Artes y Experiencias Estéticas</option>
+          </select>
+        </div>
+
+        
+        <button type="submit" class="btn-analisis"><i class="fas fa-save"></i> Generar Lectura</button>
+      </form>
+      
+    </div>
+    
+  </div>
+
+  <div id="spinnerLectura" style="display:none;">
+    <div class="loader"></div>
+  </div>
+
+<!-- Modal de Resultado de Lectura -->
+<div id="modalResultadoLectura" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="position:relative; padding-bottom:70px;"> <!-- espacio para footer -->
+    <span id="cerrarModalResultado" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    
+    <div id="resultadoContenido" style="gap: 20px; height: calc(100vh - 200px); overflow: hidden; overflow-y: scroll;">
+      <div id="contenidoAlumno" style="flex: 1; overflow-y: auto; border-right: 2px solid #eee; padding-right: 10px;">
+        <!-- Aquí va la lectura y actividades para el alumno -->
+      </div>
+      <div id="contenidoNotasMaestro" style="flex: 1; overflow-y: auto; padding-left: 10px; border-left: 2px solid #eee;">
+        <!-- Aquí van las notas del maestro -->
+      </div>
+    </div>
+
+    <div id="spinnerLectura" style="display:none;">
+      <div class="loader"></div>
+    </div>
+
+    <div id="modalResultadoFooter" style="position:absolute; bottom:10px; right:20px;"></div>
+  </div>
+</div>
+
+
+
+
+<!-- Panel para mostrar lista -->
+<div id="panelLecturasGuardadas" class="panelLecturasGuardadas"  style="display: none; position: fixed; top: 80px; right: 20px; width: 30vh; background: white; border: 1px solid #ccc; padding: 1rem; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index: 99999; border-radius: 12px;">
+    <h4 style="margin-bottom: 1rem;">🧠 MindMaps Guardados</h4>
+    <div id="listaMindmaps"></div>
+    <button class="boton" onclick="document.getElementById('panelLecturasGuardadas').style.display='none'">Cerrar</button>
+  </div>
+  
+  <div id="modalNombreMindmap" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:99999;">
+    <div style="background:white; padding:2rem; border-radius:12px; max-width:400px; width:90%;">
+      <h3>Guardar lectura visual</h3>
+      <input type="text" id="inputNombreMindmap" placeholder="Nombre..." style="width:100%; padding:0.5rem; margin-top:1rem;" />
+      <div style="text-align:right; margin-top:1rem;">
+        <button id="cancelarGuardarMindmap">Cancelar</button>
+        <button id="confirmarGuardarMindmap">Guardar</button>
+      </div>
+    </div>
+  </div>
+  
+  
+
+
+<!-- Contenedor del panel de imágenes guardadas -->
+<div id="contenedorPanelGuardadas"  class="modal" >
+  <div class="panel-header">
+    <h2>Genera tu MindMap</h2>
+    <button id="cerrarPanelGuardadas" class="btn-cerrar">&times;</button>
+    
+    <!-- Íconos de acción -->
+    <div class="panel-actions">
+      <button id="nuevoMindMapBtn" class="btn-icon" title="Nuevo MindMap">
+        <i class="fas fa-project-diagram"></i>
+      </button>
+  
+      <label for="inputMultipleImagenes" class="btn-icon" title="Nueva palabra (Subir PNG)">
+        <i class="fas fa-upload"></i>
+      </label>
+      <input type="file" id="inputMultipleImagenes" accept="image/*" style="display: none;" multiple />
+
+         <!-- Ver galería -->
+      <button id="verGaleriaBtn" class="btn-icon" title="Ver galería">
+        <i class="fas fa-images"></i>
+      </button>
+
+      <button id="btnGuardarMindMap" class="btn-icon" title="Guardar lectura visual">
+        <i class="fas fa-save"></i>
+      </button>
+
+      <!-- Botón para generar voz -->
+      <button id="btnAbrirModalAudio" class="btn-icon" title="Crear voz en off">
+        <i class="fas fa-volume-up"></i>
+      </button>
+
+    </div>
+
+ 
+  </div>
+  
+  <!-- Caja de texto para pegar el cuento -->
+  <div id="areaNuevoMindmap" style="display:none; margin-top: 1rem;">
+    <strong>Pega tu cuento o texto:</strong>
+    <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 0.5rem;">
+      <div>
+        <label for="textoMindmapParte1">Parte 1 (lado izquierdo)</label>
+        <textarea id="textoMindmapParte1" rows="4" class="form-control" placeholder="Texto para el lado izquierdo..."></textarea>
+      </div>
+      <div>
+        <label for="textoMindmapParte2">Parte 2 (lado derecho)</label>
+        <textarea id="textoMindmapParte2" rows="4" class="form-control" placeholder="Texto para el lado derecho..."></textarea>
+      </div>
+    </div>
+
+  </div>
+
+  
+  <!-- Resultado del MindMap generado -->
+  <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
+</div>
+
+
+<!-- Modal de nombre para imagen -->
+<div id="modalNombreImagen" class="modal-imagen" style="display:none;">
+  <div class="modal-contenido">
+    <h4>¿Qué palabra representa esta imagen?</h4>
+    <input type="text" id="nombreImagenInput" class="form-control" placeholder="Ej. Brave, Tree, Cloud" />
+    <div class="modal-buttons">
+      <button id="cancelarNombreImagen" class="btn btn-secondary">Cancelar</button>
+      <button id="confirmarNombreImagen" class="btn btn-primary">Subir</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="modalImagenes" class="modal-normal" style="display:none;">
+    <div class="modal-normal-content" style="max-width:500px; margin:5% auto; padding:20px; position:relative;">
+      <span class="close-modal" onclick="document.getElementById('modalImagenes').style.display='none'" 
+            style="position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer;">&times;</span>
+    <!-- Reubicamos el contenido del panel original aquí -->
+    <div class="panel-header">
+      <input type="text" id="buscadorImagenes" placeholder="Buscar imagen..." class="buscador-imagenes" />
+      <div class="panel-actions">
+        <label for="inputUploadImagen" class="btn-icon" title="Nueva palabra (Subir PNG)">
+          <i class="fas fa-upload"></i>
+        </label>
+        <input type="file" id="inputUploadImagen" accept="image/png" style="display: none;" />
+      </div>
+    </div>
+
+
+    <div id="contenedorGuardadasManual" class="galeria-panel"></div>
+
+    <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
+  </div>
+</div>
+
+
+<!-- Modal para editar imagen con IA -->
+<div class="modal" id="modalEditarIA" style="display:none; position:fixed; z-index:999999; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center;">
+  <div style="background:white; padding:2rem; border-radius:10px; max-width:500px; width:90%;">
+    <h5>Editar Imagen con IA</h5>
+    <p style="font-size:0.9rem;">Describe lo que deseas cambiar o mejorar:</p>
+    <textarea id="promptEdicionIA" rows="4" style="width:100%; margin-bottom:1rem;"></textarea>
+    <div style="display:flex; justify-content: flex-end; gap:1rem;">
+      <button id="cancelarEdicionIA">Cancelar</button>
+      <button id="confirmarEdicionIA" style="background:#10b981; color:white; border:none; padding:0.5rem 1rem;">Generar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal para vista con cajas de texto -->
+<div class="modal fade" id="modalVistaCajasTexto" tabindex="-1" style="z-index: 99999;">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content" style="background:#000;">
+      <div class="modal-header">
+        <h5 class="modal-title text-white">Vista con cajas de texto</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-flex justify-content-center">
+        <div id="contenidoVistaConTexto">
+          <!-- Imagen y cajas se insertan dinámicamente -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Modal de Voz en Off -->
+<div class="modal fade" id="modalGenerarAudio" tabindex="-1" aria-labelledby="modalAudioLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title" id="modalAudioLabel">🎤 Generador de Voz en Off</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="textoFinalAudio" class="form-label">📝 Texto a convertir</label>
+          <textarea id="textoFinalAudio" class="form-control" rows="5" placeholder="Escribe el texto..."></textarea>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="tonoVoz" class="form-label">🎭 Tono</label>
+            <select id="tonoVoz" class="form-select">
+              <option value="neutral">Neutral</option>
+              <option value="amable">Amable</option>
+              <option value="entusiasta">Entusiasta</option>
+              <option value="serio">Serio</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label for="velocidadVoz" class="form-label">⏱️ Velocidad</label>
+            <select id="velocidadVoz" class="form-select">
+              <option value="normal">Normal</option>
+              <option value="lenta">Lenta</option>
+              <option value="rapida">Rápida</option>
+            </select>
+          </div>
+        </div>
+        <div id="audioPreview" style="display: none; margin-top: 1rem;">
+          <audio id="audioGenerado" controls style="width: 100%;">
+            Tu navegador no soporta la reproducción de audio.
+          </audio>
+        </div>
+
+        <div class="mb-3">
+          <label for="modeloTTS" class="form-label">🧠 Modelo TTS</label>
+          <select id="modeloTTS">
+            <option value="hexgrad/Kokoro-82M">Kokoro-82M</option>
+            <option value="canopylabs/orpheus-3b-0.1-ft">Orpheus</option>
+            <option value="OuteAI/OuteTTS-0.2-500M">OuteTTS</option>
+            <option value="senstella/csm-expressiva-1b">CSM Expressiva</option>
+            <option value="fishaudio/fish-speech-1.5">Fish Speech</option>
+            <option value="FunAudioLLM/CosyVoice2-0.5B">CosyVoice</option>
+          </select>
+        </div>
+      </div>
+
+
+      <div class="modal-footer">
+        <button id="btnGenerarAudioFinal" class="btn btn-primary">🎧 Generar Audio</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div id="modalGeneradorIlustracion" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999;">
+  <div style="display:flex; height:100%; width:100%; background:#fff; box-shadow:0 0 20px #000; position:relative;">
+    
+    <!-- Panel izquierdo: Formulario -->
+    <div style="width: 40%; padding: 20px; overflow-y:auto; border-right: 1px solid #ccc; position: relative;">
+      <span class="close-modal" data-action="close" 
+            style="position:absolute; top:10px; right:15px; font-size:28px; font-weight:bold; cursor:pointer; color:#333;">
+        &times;
+      </span>
+
+      <h3>🎨 Generar Ilustración</h3>
+      <form id="formGeneradorImagenes" class="gen-form">
+        <label>Prompt<textarea id="gen_prompt" required></textarea></label>
+        <button type="button" id="btnPromptBuilder" style="margin: 6px 0; background:#222; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">
+          🔮 Aplicar estilo Midjourney / Otomo / Sorayama
+        </button>
+
+        <label>Modelo
+          <select id="gen_modelo">
+            <optgroup label="Black Forest Labs - FLUX">
+              <option value="black-forest-labs/FLUX.1-schnell">FLUX.1 Schnell</option>
+              <option value="black-forest-labs/FLUX.1-dev">FLUX.1 Dev</option>
+            </optgroup>
+            <optgroup label="Stability AI">
+              <option value="stabilityai/stable-diffusion-3.5-large">SD 3.5 Large</option>
+              <option value="stabilityai/stable-diffusion-3.5-large-turbo">SD 3.5 Turbo</option>
+              <option value="stabilityai/stable-diffusion-3-medium-diffusers">SD 3 Medium</option>
+              <option value="stabilityai/stable-diffusion-xl-base-1.0">SDXL Base 1.0</option>
+            </optgroup>
+          </select>
+        </label>        
+        <label>Estilo
+          <select id="gen_estilo">
+            <option value="realista">Realista</option>
+            <option value="digital">Ilustración digital</option>
+            <option value="anime">Anime</option>
+            <option value="caricatura">Caricatura</option>
+          </select>
+        </label>
+
+        <label>Aspect Ratio
+          <select id="gen_ratio">
+            <option value="1:1">1:1</option>
+            <option value="3:4">3:4</option>
+            <option value="4:3">4:3</option>
+            <option value="16:9">16:9</option>
+          </select>
+        </label>
+
+        <label>Guidance Scale<input id="gen_guidance" type="number" min="1" max="20" value="7.5" step="0.5"/></label>
+        <label>Steps<input id="gen_steps" type="number" min="10" max="100" value="50"/></label>
+        <label>Quantity<input id="gen_count" type="number" min="1" max="4" value="1"/></label>
+        <label>Negative‑Prompt<textarea id="gen_negative" placeholder="Ej: blurry, ugly, distorted..."></textarea></label>
+        <button type="submit" id="gen_submit">Generar</button>
+      </form>
+      <div id="gen_status" class="gen-status" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- Panel derecho: imagen generada + galería -->
+    <div style="width: 60%; padding: 20px; display:flex; flex-direction:column; overflow:hidden;">
+      <!-- Imagen generada -->
+      <div id="gen_results"></div>
+      
+      <!-- Galería -->
+      <h4 style="margin-top: 10px;">Galería</h4>
+      <div id="gen_gallery" class="masonry-gallery"></div>
+
+      <!-- Lightbox (oculto por defecto) -->
+      <div id="lightboxOverlay" style="display:none;">
+        <img id="lightboxImage" src="" alt="Preview grande" />
+      </div>
+          </div>
+
+  </div>
+</div>
+
+
+<!-- ✅ Modal para compartir imagen -->
+<div id="modalCompartirImagenFirebase" class="modal-compartir-firebase" style="display: none;">
+  <div class="modal-contenido">
+    <h4>Compartir Imagen</h4>
+
+    <label for="compartirNivel"><strong>Nivel:</strong></label>
+    <select id="compartirNivel">
+      <option value="">-- Selecciona nivel --</option>
+      <option value="Preescolar">Preescolar</option>
+      <option value="Primaria">Primaria</option>
+      <option value="Secundaria">Secundaria</option>
+    </select>
+
+    <label for="compartirGrado"><strong>Grado:</strong></label>
+    <select id="compartirGrado">
+      <option value="">-- Selecciona grado --</option>
+    </select>
+
+    <label for="compartirTrimestre"><strong>Trimestre:</strong></label>
+    <select id="compartirTrimestre">
+      <option value="">-- Selecciona trimestre --</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+    </select>
+
+    <label for="compartirUnidad"><strong>Unidad:</strong></label>
+    <select id="compartirUnidad">
+      <option value="">-- Selecciona unidad --</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+      <option value="7">7</option>
+      <option value="8">8</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+      <option value="11">11</option>
+      <option value="12">12</option>
+      <option value="13">13</option>
+      <option value="14">14</option>
+      <option value="15">15</option>
+    </select>
+    
+
+    <div style="margin-top: 1rem; text-align: right;">
+      <button id="cancelarCompartirBtn">Cancelar</button>
+      <button id="confirmarCompartirBtn">Compartir</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- modal lista de lecturas nuevas generadas con gemini -->
+<div id="modalListaLecturasNuevas" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:700px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
+    <span id="cerrarModalListaLecturas" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h2>Lecturas Nuevas Guardadas</h2>
+    <div id="listaLecturasNuevas" class="lista-lecturas-container"></div>
+  </div>
+</div>
+
+<!-- Modal Compartir Lectura -->
+<div id="modalCompartirLectura" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:500px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
+    <span id="cerrarModalCompartirLectura" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h3>Compartir lectura con usuarios</h3>
+    <div id="listaUsuariosCompartir"></div>
+
+    <div style="margin-top:20px;">
+      <label for="materiaSeleccionada"><strong>Materia:</strong></label>
+      <select id="materiaSeleccionada" class="form-select" style="width:100%; margin-top:5px;">
+        <option value="">Selecciona materia</option>
+        <optgroup label="Preescolar / Primaria">
+          <option value="Español">Español</option>
+          <option value="Inglés">Inglés</option>
+        </optgroup>
+        <optgroup label="Secundaria">
+          <option value="Español">Español</option>
+          <option value="Inglés">Inglés</option>
+          <option value="Matemáticas">Matemáticas</option>
+          <option value="Geografía">Geografía</option>
+          <option value="Biología">Biología</option>
+          <option value="Historia del Mundo">Historia del Mundo</option>
+          <option value="Historia de México">Historia de México</option>
+          <option value="Física">Física</option>
+          <option value="Química">Química</option>
+          <option value="Formación Cívica y Ética">Formación Cívica y Ética</option>
+        </optgroup>
+      </select>
+    </div>
+    
+    <button id="btnConfirmarCompartir" class="btn-analisis" style="margin-top:20px;">Confirmar</button>
+  </div>
+</div>
+
+
+<!-- Modal: Ver lectura completa -->
+<div id="modalVerLecturaCompleta" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:800px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
+    <span id="cerrarModalLecturaCompleta" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <div id="contenidoLecturaCompleta"></div>
+
+    <!-- ✅ Botón para descargar en Word -->
+    <button id="btnDescargarLecturaWord" style="margin-top: 20px;">Descargar lectura en Word</button>
+  </div>
+</div>
+
+<!-- Modal: Editar lectura -->
+<div id="modalEditarLectura" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:800px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
+    <span id="cerrarModalEditarLectura" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h2>Editar Lectura</h2>
+    <div id="editorLectura" contenteditable="true" style="border:1px solid #ccc; padding:10px; border-radius:6px; min-height:200px;"></div>
+    <p style="font-size:12px; color:#888; margin-top:10px;">Los cambios se guardan automáticamente.</p>
+    <button id="btnDescargarEditorLectura" style="margin-top: 10px;">📄 Descargar en Word</button>
+
+  </div>
+</div>
+
+
+
+<!-- modal formulario agregar autores y estilos -->
+<div id="modalAgregarEstilo" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:500px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
+    <span id="cerrarModalEstilo" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h2>Agregar estilo de Autor</h2>
+    <div style="text-align:right; margin-top:-10px;">
+      <label title="Importar desde CSV" style="cursor:pointer;">
+        <i class="fas fa-file-csv" style="font-size:20px; color:#007bff;"></i>
+        <input type="file" id="csvAutoresInput" accept=".csv" style="display:none;">
+      </label>
+    </div>
+    <form id="formEstiloLiterario">
+      <div style="margin-bottom:10px;">
+        <label for="autorEstilo">Autor:</label>
+        <input type="text" id="autorEstilo" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <label for="tipoTextoEstilo">Tipo de texto:</label>
+        <input type="text" id="tipoTextoEstilo" placeholder="Ej: narrativo, descriptivo..." required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+      </div>
+      
+      <div style="margin-bottom:10px;">
+        <label for="textoEstilo">Literatura de ejemplo:</label>
+        <textarea id="textoEstilo" required rows="5" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;"></textarea>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label for="categoriaEstilo">Categoría:</label>
+        <select id="categoriaEstilo" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+          <option value="">Selecciona una categoría</option>
+          <option value="Análisis Literario">Análisis Literario</option>
+          <option value="Claridad y Precisión en la Explicación Gramatical y Lingüística">Claridad y Precisión en la Explicación Gramatical y Lingüística</option>
+          <option value="Desarrollo de Personajes y Narrativa">Desarrollo de Personajes y Narrativa</option>
+          <option value="Descripción y Análisis de Obras de Arte">Descripción y Análisis de Obras de Arte</option>
+          <option value="Ensayo Literario Argumentativo">Ensayo Literario Argumentativo</option>
+          <option value="Explicación Clara de Principios Económicos y Financieros">Explicación Clara de Principios Económicos y Financieros</option>
+          <option value="Explicación Clara y Concisa de Conceptos">Explicación Clara y Concisa de Conceptos</option>
+          <option value="Explicación Lógica y Deductiva de Conceptos Matemáticos">Explicación Lógica y Deductiva de Conceptos Matemáticos</option>
+          <option value="Narrativa Histórica Rigurosa y Atractiva">Narrativa Histórica Rigurosa y Atractiva</option>
+          <option value="Narrativa de Crisis y Mercados Financieros">Narrativa de Crisis y Mercados Financieros</option>
+          <option value="Narrativa de Descubrimientos y Procesos Científicos">Narrativa de Descubrimientos y Procesos Científicos</option>
+          <option value="Narrativa de la Historia y la Filosofía de las Matemáticas">Narrativa de la Historia y la Filosofía de las Matemáticas</option>
+          <option value="Reflexión Personal y Filosófica sobre el Arte">Reflexión Personal y Filosófica sobre el Arte</option>
+          <option value="Uso del Lenguaje y Estilo">Uso del Lenguaje y Estilo</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+
+
+      <button type="submit" class="btn-analisis">
+        Guardar estilo
+      </button>
+    </form>
+  </div>
+</div>
+
+
+<!-- Modal Campos Formativos -->
+<div id="modalCamposFormativos" style="display:none; position:fixed; top:-20px; left:0; width:100%; height:100%; background-color: rgba(0,0,0,0.5); z-index:9999; overflow-x: scroll;">
+  <div style="background: #fff; padding: 20px; width: 90%; max-width: 500px; margin: 5% auto; border-radius: 10px; position: relative; font-family: sans-serif;">
+    <span id="cerrarModalCampos" style="position:absolute; top:10px; right:15px; cursor:pointer; font-size:20px;">&times;</span>
+    <h4 style="margin-bottom: 15px;">Formulario - Campos Formativos</h4>
+
+    <form id="formCamposFormativos">
+      <div style="margin-bottom: 10px;">
+        <label><strong>Nivel:</strong></label>
+        <select name="nivel" class="form-control" required>
+          <option value="">Selecciona...</option>
+          <option value="Preescolar">Preescolar</option>
+          <option value="Primaria">Primaria</option>
+          <option value="Secundaria">Secundaria</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <label><strong>Unidad:</strong></label>
+        <select name="unidad" class="form-control" required>
+          <option value="">Selecciona una unidad</option>
+          <option value="1">Unidad 1</option>
+          <option value="2">Unidad 2</option>
+          <option value="3">Unidad 3</option>
+          <option value="4">Unidad 4</option>
+          <option value="5">Unidad 5</option>
+          <option value="6">Unidad 6</option>
+          <option value="7">Unidad 7</option>
+          <option value="8">Unidad 8</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <label><strong>Trimestre:</strong></label>
+        <select name="trimestre" class="form-control" required>
+          <option value="">Selecciona un trimestre</option>
+          <option value="1">Trimestre 1</option>
+          <option value="2">Trimestre 2</option>
+          <option value="3">Trimestre 3</option>
+        </select>
+      </div>
+            
+
+      <div style="margin-bottom: 10px;">
+        <label><strong>Campo formativo:</strong></label>
+        <select name="campo" class="form-control" required>
+          <option value="">Selecciona...</option>
+          <option>Lenguajes</option>
+          <option>De lo humano y comunitario</option>
+          <option>Saberes y pensamiento científico</option>
+          <option>Ética, Naturaleza y sociedad</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <label><strong>Asignatura:</strong></label>
+        <select name="asignatura" class="form-control" required id="selectAsignatura">
+          <option value="">Selecciona campo formativo primero...</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <label><strong>Aprendizaje esperado:</strong></label>
+        <textarea name="aprendizajeEsperado" class="form-control" rows="2" required></textarea>
+      </div>
+      
+      <div style="margin-bottom: 10px;">
+        <label><strong>PDA:</strong></label>
+        <textarea name="pda" class="form-control" rows="2" required></textarea>
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label><strong>Tipo de actividad:</strong></label>
+        <select name="tipoActividad" class="form-control" required>
+          <option value="">Selecciona una opción</option>
+          <option>Opción múltiple</option>
+          <option>Verdadero o falso</option>
+          <option>Relacionar columnas</option>
+          <option>Completar oraciones</option>
+          <option>Clasificación</option>
+          <option>Redacción de textos</option>
+          <option>Respuesta abierta</option>
+          <option>Resúmenes</option>
+          <option>Paráfrasis</option>
+          <option>Problemas matemáticos</option>
+          <option>Ejercicios de justificación</option>
+          <option>Sopa de letras</option>
+          <option>Crucigramas</option>
+          <option>Memorama</option>
+          <option>Bingo temático</option>
+          <option>Rompecabezas</option>
+          <option>Recortables</option>
+          <option>Dibujos de conceptos</option>
+          <option>Mapas conceptuales</option>
+          <option>Mapas mentales</option>
+          <option>Líneas del tiempo</option>
+          <option>Carteles informativos</option>
+          <option>Debates</option>
+          <option>Exposiciones</option>
+          <option>Investigaciones en equipo</option>
+          <option>Juegos de roles</option>
+          <option>Autoevaluaciones</option>
+          <option>Rúbricas</option>
+          <option>Listas de cotejo</option>
+          <option>Bitácoras de aprendizaje</option>
+          <option>Diario escolar</option>
+          <option>Ejercicios de atención plena</option>
+        </select>
+      </div>
+      
+
+      <div style="margin-bottom: 10px;">
+        <label><strong>Nivel de complejidad:</strong></label>
+        <select name="nivelEsperado" class="form-control" required>
+          <option value="">Selecciona...</option>
+          <option value="1">Nivel 1</option>
+          <option value="2">Nivel 2</option>
+          <option value="3">Nivel 3</option>
+          <option value="4">Nivel 4</option>
+          <option value="5">Nivel 5</option>
+          <option value="6">Nivel 6</option>
+        </select>
+      </div>
+      
+      <div style="margin-bottom: 15px;">
+        <label><strong>Diferenciación:</strong></label>
+        <select name="diferenciacion" class="form-control" required>
+          <option value="">Selecciona...</option>
+          <option value="Bajo (Nivel -1)">Bajo (Nivel -1)</option>
+          <option value="Alto (Nivel +1)">Alto (Nivel +1)</option>
+        </select>
+      </div>
+      
+
+      <div style="text-align: right;">
+        <button type="submit" class="btn btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<!-- Modal Estilos Literarios -->
+<div id="modalEstilosLiterarios" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:600px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
+    <span class="close-modal" id="cerrarModalEstilos" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h3>Estilos Literarios</h3>
+    <div id="contenedorEstilosLiterarios" style="max-height:400px; overflow:auto;">
+      <!-- Aquí se cargará la lista de estilos -->
+    </div>
+  </div>
+</div>
+
+<!-- Modal Campos Formativos -->
+<div id="listamodalCamposFormativos" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="background:#fff; width:90%; max-width:600px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
+    <span class="close-modal" id="cerrarModalCampos" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h3>Campos Formativos</h3>
+    <div id="contenedorCamposFormativos" style="max-height:400px; overflow:auto;">
+      <!-- Aquí se cargará la lista de campos -->
+    </div>
+  </div>
+</div>
+
+<div id="modalEditarCampoFormativo" class="modal-normal" style="display:none;">
+  <div class="modal-normal-content" style="width:90%; max-width:600px; padding:20px; position:relative;">
+    <span id="cerrarModalEditarCampo" class="close-modal" style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+    <h3>Editar Campo Formativo</h3>
+    <form id="formEditarCampo">
+      <input type="hidden" id="campoId">
+      <div class="form-group">
+        <label>Campo:</label>
+        <input type="text" id="editCampo" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Asignatura:</label>
+        <input type="text" id="editAsignatura" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Nivel:</label>
+        <input type="text" id="editNivel" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Trimestre:</label>
+        <input type="number" id="editTrimestre" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Unidad:</label>
+        <input type="number" id="editUnidad" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Aprendizaje esperado:</label>
+        <textarea id="editAprendizaje" class="form-control" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label>PDA:</label>
+        <textarea id="editPDA" class="form-control" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Tipo de actividad:</label>
+        <input type="text" id="editTipoActividad" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>Diferenciación:</label>
+        <input type="text" id="editDiferenciacion" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>Nivel esperado:</label>
+        <input type="number" id="editNivelEsperado" class="form-control">
+      </div>
+      <button type="submit" class="btn-analisis" style="margin-top:15px;">💾 Guardar cambios</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Secuencia y Alcance -->
+<div id="modalSecuencia" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#00000080; z-index:9999;">
+  <div  class="sya">
+    <span id="cerrarModalSecuencia" style="position:absolute; top:10px; right:20px; cursor:pointer; font-size:24px;">&times;</span>
+    <h2>📚 Secuencia y Alcance</h2>
+    <form id="formSecuenciaAlcance">
+      <input type="hidden" name="id" id="syaDocId">
+
+      <!-- Campos generales -->
+      <div class="form-grid-doble">
+        <div>
+          <label>Nivel:</label>
+          <select name="nivel" required>
+            <option value="">Selecciona</option>
+            <option>Preescolar</option>
+            <option>Primaria</option>
+            <option>Secundaria</option>
+          </select>
+        </div>
+      
+        <div>
+          <label>Grado:</label>
+          <select name="grado" required>
+            <option value="">Selecciona</option>
+            <option>Primero</option>
+            <option>Segundo</option>
+            <option>Tercero</option>
+            <option>Cuarto</option>
+            <option>Quinto</option>
+            <option>Sexto</option>
+          </select>
+        </div>
+      
+        <div>
+          <label>Trimestre:</label>
+          <select name="trimestre" required>
+            <option>1</option>
+            <option>2</option>
+            <option>3</option>
+          </select>
+        </div>
+      
+        <div>
+          <label>Unidad:</label>
+          <select name="unidad" required>
+            <option>1</option>
+            <option>2</option>
+            <option>3</option>
+            <option>4</option>
+            <option>5</option>
+            <option>6</option>
+            <option>7</option>
+            <option>8</option>
+            <option>9</option>
+            <option>10</option>
+            <option>11</option>
+            <option>12</option>
+            <option>13</option>
+            <option>14</option>
+            <option>15</option>
+          </select>
+          
+        </div>
+      </div>
+      
+      <hr>
+
+      <!-- CATEGORÍA: Lenguaje y comunicación -->
+      <h3>📘 Lenguaje y comunicación</h3>
+
+      <fieldset>
+        <legend>Ortografía</legend>
+        <label>T:</label><input type="text" name="Ortografía_T">
+        <label>AE:</label><input type="text" name="Ortografía_AE">
+        <label>C:</label><input type="text" name="Ortografía_C">
+        <label>P:</label><input type="text" name="Ortografía_P">
+      </fieldset>
+
+      <fieldset>
+        <legend>Gramática</legend>
+        <label>T:</label><input type="text" name="Gramatica_T">
+        <label>AE:</label><input type="text" name="Gramatica_AE">
+        <label>C:</label><input type="text" name="Gramatica_C">
+        <label>P:</label><input type="text" name="Gramatica_P">
+      </fieldset>
+
+      <fieldset>
+        <legend>Expresión escrita</legend>
+        <label>T:</label><input type="text" name="ExpresionEscrita_T">
+        <label>AE:</label><input type="text" name="ExpresionEscrita_AE">
+        <label>C:</label><input type="text" name="ExpresionEscrita_C">
+        <label>P:</label><input type="text" name="ExpresionEscrita_P">
+      </fieldset>
+
+      <fieldset>
+        <legend>Expresión oral</legend>
+        <label>T:</label><input type="text" name="ExpresionOral_T">
+        <label>AE:</label><input type="text" name="ExpresionOral_AE">
+        <label>C:</label><input type="text" name="ExpresionOral_C">
+        <label>P:</label><input type="text" name="ExpresionOral_P">
+      </fieldset>
+
+
+      <!-- CATEGORÍA: Ciencias experimentales -->
+      <h3>🧪 Ciencias experimentales</h3>
+
+      <fieldset>
+        <legend>Ciencias naturales</legend>
+        <label>T:</label><input type="text" name="Naturales_T">
+        <label>AE:</label><input type="text" name="Naturales_AE">
+        <label>C:</label><input type="text" name="Naturales_C">
+        <label>P:</label><input type="text" name="Naturales_P">
+      </fieldset>
+
+      <!-- CATEGORÍA: Ciencias sociales -->
+      <h3>🌍 Ciencias sociales</h3>
+
+      <fieldset>
+        <legend>Historia</legend>
+        <label>T:</label><input type="text" name="Historia_T">
+        <label>AE:</label><input type="text" name="Historia_AE">
+        <label>C:</label><input type="text" name="Historia_C">
+        <label>P:</label><input type="text" name="Historia_P">
+      </fieldset>
+
+      <fieldset>
+        <legend>Geografía</legend>
+        <label>T:</label><input type="text" name="Geografia_T">
+        <label>AE:</label><input type="text" name="Geografia_AE">
+        <label>C:</label><input type="text" name="Geografia_C">
+        <label>P:</label><input type="text" name="Geografia_P">
+      </fieldset>
+
+
+      <!-- CATEGORÍA: Formación socioemocional -->
+      <h3>💚 Formación socioemocional</h3>
+
+      <fieldset>
+        <legend>Formación cívica y ética</legend>
+        <label>T:</label><input type="text" name="CivicaEtica_T">
+        <label>AE:</label><input type="text" name="CivicaEtica_AE">
+        <label>C:</label><input type="text" name="CivicaEtica_C">
+        <label>P:</label><input type="text" name="CivicaEtica_P">
+      </fieldset>
+
+      <fieldset>
+        <legend>Educación socioemocional</legend>
+        <label>T:</label><input type="text" name="Socioemocional_T">
+        <label>AE:</label><input type="text" name="Socioemocional_AE">
+        <label>C:</label><input type="text" name="Socioemocional_C">
+        <label>P:</label><input type="text" name="Socioemocional_P">
+      </fieldset>
+
+      <!-- CATEGORÍA: Matemáticas -->
+      <h3>➕ Matemáticas</h3>
+
+      <fieldset>
+        <legend>Matemáticas</legend>
+        <label>T:</label><input type="text" name="Matematicas_T">
+        <label>AE:</label><input type="text" name="Matematicas_AE">
+        <label>C:</label><input type="text" name="Matematicas_C">
+        <label>P:</label><input type="text" name="Matematicas_P">
+      </fieldset>
+
+      <h3>🧠 Habilidades</h3>
+      <fieldset>
+        <legend>Habilidades</legend>
+        <label>T:</label><input type="text" name="Habilidades_T">
+        <label>AE:</label><input type="text" name="Habilidades_AE">
+        <label>C:</label><input type="text" name="Habilidades_C">
+        <label>P:</label><input type="text" name="Habilidades_P">
+      </fieldset>
+
+
+      <!-- NUEVAS CATEGORÍAS -->
+      <h3>🎨 Artes</h3>
+      <fieldset>
+        <legend>Artes</legend>
+        <label>T:</label><input type="text" name="Artes_T">
+        <label>AE:</label><input type="text" name="Artes_AE">
+        <label>C:</label><input type="text" name="Artes_C">
+        <label>P:</label><input type="text" name="Artes_P">
+      </fieldset>
+
+      <h3>💰 Finanzas</h3>
+      <fieldset>
+        <legend>Finanzas</legend>
+        <label>T:</label><input type="text" name="Finanzas_T">
+        <label>AE:</label><input type="text" name="Finanzas_AE">
+        <label>C:</label><input type="text" name="Finanzas_C">
+        <label>P:</label><input type="text" name="Finanzas_P">
+      </fieldset>
+
+      <h3>💻 Tecnología</h3>
+      <fieldset>
+        <legend>Tecnología</legend>
+        <label>T:</label><input type="text" name="Tecnologia_T">
+        <label>AE:</label><input type="text" name="Tecnologia_AE">
+        <label>C:</label><input type="text" name="Tecnologia_C">
+        <label>P:</label><input type="text" name="Tecnologia_P">
+      </fieldset>
+
+      <br>
+      <button type="submit" style="margin-top:20px;">Guardar</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Generar Unidad -->
+<div id="modalGenerarUnidad" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span id="cerrarModalUnidad" class="close">&times;</span>
+    <h3>📘 Generar Unidad de Ejercicios</h3>
+
+    <form id="formGenerarUnidad">
+      <!-- Fila de selección de nivel, grado, trimestre, unidad -->
+      <div class="form-row">
+        <div class="form-col">
+          <label for="unidadNivel">Nivel:</label>
+          <select id="unidadNivel" required>
+            <option value="">Selecciona</option>
+            <option>Preescolar</option>
+            <option>Primaria</option>
+            <option>Secundaria</option>
+          </select>
+        </div>
+
+        <div class="form-col">
+          <label for="unidadGrado">Grado:</label>
+          <select id="unidadGrado" required>
+            <option value="">Selecciona</option>
+            <option>Primero</option>
+            <option>Segundo</option>
+            <option>Tercero</option>
+            <option>Cuarto</option>
+            <option>Quinto</option>
+            <option>Sexto</option>
+          </select>
+        </div>
+
+        <div class="form-col">
+          <label for="unidadTrimestre">Trimestre:</label>
+          <select id="unidadTrimestre" required>
+            <option value="">Selecciona</option>
+            <option>1</option>
+            <option>2</option>
+            <option>3</option>
+          </select>
+        </div>
+
+        <div class="form-col">
+          <label for="unidadNumero">Unidad:</label>
+          <select id="unidadNumero" required>
+            <option value="">Selecciona</option>
+            <option>1</option>
+            <option>2</option>
+            <option>3</option>
+            <option>4</option>
+            <option>5</option>
+            <option>6</option>
+            <option>7</option>
+            <option>8</option>
+            <option>9</option>
+            <option>10</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Selección de lectura desde lecturas nuevas -->
+      <div class="form-col">
+        <label for="unidadTema">Selecciona una lectura (lecturasNuevas):</label>
+        <select id="unidadTema">
+          <option value="">Selecciona tema</option>
+        </select>
+      </div>
+
+      <!-- Nuevo select: lectura desde lecturasASC -->
+      <div class="form-col">
+        <label for="unidadTemaASC">O selecciona una lectura de ASC:</label>
+        <select id="unidadTemaASC">
+          <option value="">Selecciona lectura ASC</option>
+        </select>
+      </div>
+
+      <div class="form-col">
+        <label for="selectGeminiEndpoint">Modelo Gemini:</label>
+        <select id="selectGeminiEndpoint">
+          <!-- Modelos estables recientes -->
+          <option value="gemini-2.5-pro:generateContent" selected>✅ Gemini 2.5 Pro (Estable)</option>
+          <option value="gemini-2.5-flash:generateContent">Gemini 2.5 Flash (Estable)</option>
+
+          <!-- Versiones preview recientes -->
+          <option value="gemini-2.5-pro-preview-06-05:generateContent">Gemini 2.5 Pro Preview (Junio 2025)</option>
+          <option value="gemini-2.5-flash-preview-05-20:generateContent">Gemini 2.5 Flash Preview (Mayo 2025)</option>
+
+          <!-- Modelos anteriores por compatibilidad -->
+          <option value="gemini-1.5-pro-latest:generateContent">Gemini 1.5 Pro Latest</option>
+          <option value="gemini-1.5-flash-latest:generateContent">Gemini 1.5 Flash Latest</option>
+        </select>
+      </div>
+
+      <script>
+        document.addEventListener("DOMContentLoaded", () => {
+          const selectGemini = document.getElementById("selectGeminiEndpoint");
+          const modeloGuardado = localStorage.getItem("gemini_modelo");
+          if (modeloGuardado) selectGemini.value = modeloGuardado;
+
+          selectGemini.addEventListener("change", () => {
+            localStorage.setItem("gemini_modelo", selectGemini.value);
+          });
+        });
+      </script>
+
+
+
+
+      <!-- Campos de la secuencia y alcance -->
+      <div id="camposSecuencia" class="campos-secuencia">
+        <table id="tablaCamposSecuencia" class="tabla-campos">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Subtema</th>
+              <th>Relacionar con lectura</th>
+              <th>Transversalidad</th>
+              <th>Recortables</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpoCamposSecuencia">
+            <!-- Se llena desde JS -->
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <!-- Resultado generado -->
+    <div id="resultadoUnidadGenerada" style="margin-top: 20px;"></div>
+
+
+
+    <!-- 🔁 Botón para continuar generando -->
+    <button type="button" id="btnContinuarUnidad" class="btn-secundario" style="margin-left: 10px; display: none;">
+      Continuar generando unidad
+    </button>
+    <button id="btnCopiarHTML" class="btn-copiar"><i class="fas fa-copy"></i> Copiar unidad</button>
+
+    <button type="button" id="btnGuardarUnidad" class="btn-secundario" style="margin-left: 10px;">
+      Guardar unidad generada
+    </button>
+
+    <button id="btnDescargarWord">📄 Descargar Unidad del alumno</button>
+    <button id="btnDescargarMaestro">📄 Descargar Unidad del maestro</button>
+
+    <!-- Botones de navegación fijos -->
+    <div class="navegacion-modal-fixed">
+      <button id="scrollTopBtn" title="Ir arriba"><i class="fas fa-arrow-up"></i></button>
+      <button id="scrollMiddleBtn" title="Ir al medio"><i class="fas fa-circle"></i></button>
+      <button id="scrollBottomBtn" title="Ir abajo"><i class="fas fa-arrow-down"></i></button>
+    </div>
+
+  </div>
+</div>
+
+
+
+<div id="modalEstilos" style="display:none;">
+  <div class="modal-content">
+    <h3>📝 Asignar estilos antes de exportar</h3>
+    <form id="formEstilos">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+        <div>
+          <label><b>&lt;h2&gt;</b> →</label>
+          <input name="h2" placeholder="Ej: TITULO" />
+
+          <label><b>&lt;h3&gt;</b> →</label>
+          <input name="h3" placeholder="Ej: SUBTITULO" />
+
+          <label><b>&lt;p&gt;</b> →</label>
+          <input name="p" placeholder="Ej: TEXTO" />
+
+          <label>Listas <b>&lt;ul&gt;/&lt;ol&gt;</b> →</label>
+          <input name="list" placeholder="Ej: SUBINSTRUCCION" />
+
+          <label><b>Tablas</b> →</label>
+          <input name="table" placeholder="Ej: TABLA-CONTENIDO" />
+
+          <label>Bloques tipo <b>Actividad:</b></label>
+          <input name="instruccion" placeholder="Ej: INSTRUCCION" />
+
+          <label>Respuestas esperadas →</label>
+          <input name="respuesta" placeholder="Ej: RESPUESTA ALUMNO" />
+        </div>
+
+        <div>
+          <label><b>&lt;b&gt;/&lt;strong&gt;</b> →</label>
+          <input name="bold" placeholder="Ej: BOLD" />
+
+          <label><b>&lt;i&gt;/&lt;em&gt;</b> →</label>
+          <input name="italic" placeholder="Ej: ITALIC" />
+
+          <label><b>&lt;u&gt;</b> →</label>
+          <input name="underline" placeholder="Ej: SUBRAYADO" />
+
+          <label><b>Combinación bold + italic</b> →</label>
+          <input name="bolditalic" placeholder="Ej: BOLDITALIC" />
+
+          <label><b>Negrita subrayada</b> →</label>
+          <input name="boldunderline" placeholder="Ej: BOLD SUBRAYADO" />
+
+          <label><b>Superíndice</b> →</label>
+          <input name="sup" placeholder="Ej: SUPERINDICE" />
+
+          <label><b>Subíndice</b> →</label>
+          <input name="sub" placeholder="Ej: SUBINDICE" />
+
+          <label><b>Color destacado</b> →</label>
+          <input name="highlight" placeholder="Ej: COLOR SECUNDARIO" />
+
+          <label><b>NeuroAplicada</b> →</label>
+          <input name="neuro" placeholder="Ej: TEXTO NEUROLOGIA" />
+
+          <label><b>SPEC</b> →</label>
+          <input name="spec" placeholder="Ej: SPEC" />
+
+          <label><b>Links externos</b> →</label>
+          <input name="link" placeholder="Ej: ENLACE" />
+        </div>
+      </div>
+
+      <br>
+      <button type="submit">✅ Generar Word</button>
+      <button type="button" onclick="document.getElementById('modalEstilos').style.display='none'">Cancelar</button>
+      <button type="button" id="btnResetEstilos">🗑 Restablecer estilos</button>
+
+    </form>
+  </div>
+</div>
+
+
+
+
+<!-- 🔽 MODAL DE LISTADO DE SECUENCIAS -->
+<div id="modalListaSecuencias" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#00000080; z-index:9999;">
+  <div class="modal-contenido" style="max-width:800px; margin:auto; background:#fff; padding:20px; position:relative;">
+    <span id="cerrarModalListaSecuencias" style="position:absolute; top:10px; right:20px; font-size:22px; cursor:pointer;">&times;</span>
+    <h2>📚 Lista de Secuencias y Alcances</h2>
+    <div id="contenedorSecuenciasGuardadas" style="max-height:60vh; overflow-y:auto;"></div>
+  </div>
+</div>
+
+
+<!-- Modal Lista de Unidades -->
+<div id="modalUnidadesGuardadas" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span id="cerrarModalUnidades" class="close">&times;</span>
+    <h3><i class="fas fa-book"></i> Unidades generadas</h3>
+    <div style="overflow-x:auto;">
+      <table id="tablaUnidades" class="display" style="width:100%;">
+        <thead>
+          <tr>
+            <th>Nivel</th>
+            <th>Grado</th>
+            <th>Trimestre</th>
+            <th>Unidad</th>
+            <th>Título</th>
+            <th>Creado</th>
+            <th>Editado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="contenedorUnidadesGuardadas">
+          <!-- Aquí se inyectan las filas -->
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- Modal Editor en Tiempo Real -->
+<div id="modalEditarUnidad" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span id="cerrarModalEditarUnidad" class="close">&times;</span>
+    <h3>✏️ Editor de Unidad</h3>
+
+    <!-- Contenido editable -->
+    <div id="editorUnidadContenido" contenteditable="true"
+         style="border:1px solid #ccc; padding:15px; min-height:300px;"></div>
+
+    <p style="font-size: 0.9em; color:gray;">
+      💾 Se guarda automáticamente al dejar de escribir
+    </p>
+
+    <!-- ✅ Botones iguales al modal de generación -->
+    <div style="margin-top:15px; text-align:right;">
+      <button id="btnDescargarWordEditor" class="btn btn-primary">
+        📄 Descargar Unidad del alumno
+      </button>
+      <button id="btnDescargarMaestroEditor" class="btn btn-secondary">
+        📄 Descargar Unidad del maestro
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal para compartir unidad -->
+<div id="modalCompartirUnidad" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span id="cerrarModalCompartirUnidad" class="close">&times;</span>
+    <h3>👥 Compartir unidad</h3>
+    <p>Selecciona uno o más usuarios:</p>
+    <div id="listaUsuariosCompartirUnidad" class="lista-usuarios"></div>
+    <button id="btnConfirmarCompartir2" class="btn">✅ Compartir</button>
+
+  </div>
+</div>
+
+
+
+
+<style>
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  </style>
+  
+<script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/dist/trumbowyg.min.js"></script>
+<!-- Plugin de botones adicionales -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/fontsize/trumbowyg.fontsize.min.js"></script>
+
+<!-- Plugin foreColor -->
+<script src="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+
+<script type="module" src="generarLectura.js" ></script>
+<script type="module" src="sidebar.js"></script>
+<script type="module" src="imageGenerator.js"></script>
+<script type="module" src="secuenciayalcance.js"></script>
+<script type="module" src="generarUnidad.js"></script>
+
+</body>
+</html>

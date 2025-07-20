@@ -1,0 +1,137 @@
+/* === HEADER RESPONSIVO COMPACTO === */
+.main-header {
+  width: 100%;
+  background: linear-gradient(to right, #7c3b85, #3a4c8e, #c44b84);
+  color: white;
+  padding: 0.6rem 1rem;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  justify-content: center;
+  display: flex;
+}
+
+/* Contenido del header */
+.header-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 53px;
+  width: 90%;
+}
+
+/* Logo y texto */
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-header {
+  height: 34px;
+  object-fit: contain;
+}
+
+.logo-area h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* Buscador */
+.search-group {
+  display: grid;
+  align-items: center;
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 200px;
+}
+
+.search-group input {
+  border-radius: 30px;
+  padding: 0.45rem 1rem 0.45rem 2rem;
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border: none;
+  color: white;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+
+.hidden {
+  display: none !important;
+}
+
+
+.search-group i {
+  position: absolute;
+  left: 10px;
+  color: white;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.search-group input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Filtros en fila */
+.filters-container {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.filters-container .bootstrap-select {
+  min-width: 90px;
+  max-width: 100px;
+  font-size: 0.8rem;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+
+
+  
+  .header-content {
+    flex-wrap: wrap;
+    justify-content: center;
+    height: 90px;
+  }
+
+  .search-group {
+    max-width: 160px;
+    flex: none;
+  }
+
+  .filters-container {
+    flex-wrap: nowrap;
+    flex: none;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+
+  .filters-container .bootstrap-select {
+    min-width: 70px;
+    max-width: 70px !important;
+    font-size: 0.75rem;
+  }
+}
+
+
+/* Asegura que los dropdowns de bootstrap-select se vean por fuera */
+.bootstrap-select .dropdown-menu {
+  position: fixed !important;  /* importante: fuera del flujo del header */
+  top: auto !important;
+  left: 70px !important;
+  z-index: 9999 !important; /* por encima de todo */
+  transform: none !important; /* prevenir recortes por transform */
+  max-height: 300px; /* control de altura */
+  overflow-y: auto;
+}
+

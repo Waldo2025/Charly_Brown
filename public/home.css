@@ -1,0 +1,1144 @@
+/* Estilos generales */
+body {
+  font-family: 'Arial', sans-serif;
+  background-color: #3d164a;
+  color: #ffffff;
+  margin: 0;
+  padding: 0;
+}
+
+
+#btnReiniciarFiltros:hover {
+  transform: scale(1.2);
+  cursor: pointer;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.h1, h1 {
+  font-size: 16pt;
+  margin-bottom: 12pt;
+}
+
+table {
+  margin-bottom: 12pt;
+}
+
+table td {
+  border: 1px solid;
+  width: 30%;
+}
+table td {
+  border: 1px solid;
+  width: 30%;
+}
+
+table th {
+  border: 1px solid;
+  width: 50%;
+  background-color: #e66ce6e9;
+  color: white;
+}
+
+
+.post-feed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px;
+  overflow-y: auto;
+  max-height: calc(100vh - 150px); /* Aumenta el margen superior para dejar espacio */
+  width: 80%;
+}
+
+
+.post-card {
+  width: 60%;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0px 0px 2px rgba(255, 0, 0, 0.5);
+  padding: 1.5rem;
+  margin-bottom: 10px;
+  font-family: "Helvetica", sans-serif;
+  transition: box-shadow 0.2s ease-in-out;
+}
+
+.post-card:hover {
+  box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+  transform: scale(1.005);
+}
+
+.post-header {
+  font-weight: bold;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.post-unidad {
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #555;
+  margin-top: 2px;
+  margin-bottom: 8px;
+}
+
+.post-content {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.post-content h4 {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.post-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6em 1em 0.8em;
+  border-top: 1px solid #eee;
+  font-size: 1em;
+  color: #666;
+}
+
+.post-footer > div {
+  display: flex;
+  gap: 16px;
+}
+
+.post-footer i {
+  font-size: 1.2em;
+  cursor: pointer;
+  color: #777;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.post-footer i:hover {
+  color: #111;
+  transform: scale(1.2);
+}
+
+.comments-section {
+  margin-top: 0.75rem;
+}
+
+
+.add-comment {
+  display: flex;
+  margin-top: 0.5rem;
+  gap: 0.5rem;
+}
+
+.add-comment input {
+  flex: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  border: solid 1px;
+}
+
+.add-comment button {
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  border-color: #777;
+}
+
+/* Modal */
+.modal-lectura {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.6);
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-contenidoHome {
+  background-color: #fff;
+  padding: 30px;
+  border-radius: 12px;
+  max-width: 100%;
+  position: fixed;
+  overflow-y: auto;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  height: 100%;
+  z-index: 1;
+}
+
+
+.tituloLectura {
+  margin-top: 17px;
+}
+
+.modal-editor-home {
+  padding: 20px;
+  background-color: #fff;
+  color: #333;
+  line-height: 1.6;
+  font-family: 'Segoe UI', sans-serif;
+  border: 2px solid #c1ddeb;
+  border-radius: 8px;
+  max-height: 80%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  left: 0;
+  position: relative;
+  width: 58%;
+  top: 10px;
+  margin-bottom: 10px;
+  transition: width 0.3s ease;
+}
+
+/* Ocultar scrollbar en Chrome, Safari y Opera */
+.modal-editor-home::-webkit-scrollbar {
+  display: none;
+}
+.panel-comentarios {
+  padding: 15px;
+  background: #ffffff;
+  border-radius: 8px;
+  max-height: 100%;
+  overflow-y: auto; /* Habilita el scroll cuando es necesario */
+  scrollbar-width: none; /* Para Firefox */
+  -ms-overflow-style: none; /* Para IE y Edge */
+  z-index: 2;
+  width: 30%;
+  right: 50px;
+  top: 0;
+  position: absolute;
+  transition: all 0.3s ease; /* Añadido para transición suave */
+}
+
+
+/* Ocultar scrollbar en Chrome, Safari y Opera */
+.panel-comentarios::-webkit-scrollbar {
+  display: none;
+}
+
+
+
+/* Estilos para el botón flotante */
+.btn-flotante {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: #4e73df;
+  color: white;
+  border: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.btn-flotante:hover {
+  background-color: #2e59d9;
+  transform: scale(1.1);
+}
+
+/* Clase para cuando el panel está oculto */
+.panel-oculto {
+  transform: translateX(100%);
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  border: none;
+}
+
+/* Clase para cuando el editor ocupa todo el ancho */
+.editor-completo {
+  width: 95% !important;
+  transition: width 0.3s ease;
+}
+
+#modalTextoLectura[contenteditable="true"] {
+  font-family: "Helvetica", sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #333;
+  padding: 10px;
+  outline: none;
+}
+
+.cerrar-modal {
+  position: absolute;
+  top: 35px;
+  right: 20px;
+  font-size: 28px;
+  font-weight: bold;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.cerrar-modal:hover {
+  color: #e74c3c;
+}
+
+
+
+.contendorImagenes {
+  min-width: 45%;
+}
+
+
+#contenedorLecturas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+}
+
+
+@media (min-width: 768px) {
+  #contenedorLecturas {
+    flex: 2;
+    min-width: 0;
+  }
+
+  #contenedorImagenesCompartidas {
+    flex: 1;
+    min-width: 0;
+  }
+
+}
+
+/* comportamiento en pantallas pequeñas (stackeados) */
+@media (max-width: 767px) {
+  #contenedorPublicaciones {
+    flex-direction: column;
+  }
+
+  #contenedorLecturas,
+  #contenedorImagenesCompartidas {
+    width: 100%;
+    min-width: 100%;
+  }
+}
+
+.preview-lectura {
+  margin-left: 10px !important;
+  background-color: rgba(0, 0, 0, 0.536);
+}
+
+.lista-lecturas {
+  list-style: none;
+  padding: 0;
+  margin: 0 auto;
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+
+
+.item-lectura {
+  display: flex;
+  flex-direction: column;
+  border-left: 6px solid #7c3b85;
+  background: linear-gradient(130deg, #d395db, #8aa1f3, #e377f2);
+  border-radius: 12px;
+  box-shadow: 0px 1px 15px rgba(0, 0, 0, 0.06);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  width: 100%;
+  max-width: 400px;
+  flex: 1 1 300px;
+  margin-bottom: 20px;
+  height: auto;
+  min-height: 310px;
+  perspective: 1000px; /* Para efecto 3D */
+  will-change: transform;
+}
+
+.item-lectura:hover {
+  transform: scale(1.03) rotateX(2deg) rotateY(-2deg);
+  box-shadow: 0px 10px 25px  linear-gradient(130deg, #d395db, #8aa1f3, #e377f2);
+  z-index: 2;
+}
+
+
+
+
+/* asegúrate de que cada tarjeta de imagen esté por encima */
+.item-imagen {
+  position: relative;
+  z-index: 10;
+  display: block;        /* no inline */
+  clear: both;           /* quiebra floats si hay */
+}
+
+.imagen-preview {
+  width: 150px;
+  height: 150px;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.imagen-preview img{
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.imagen-tarjeta {
+  display: flex;
+  gap: 1rem;
+  background: linear-gradient(to right, #c3aed6, #a0c4ff);
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 1rem;
+  align-items: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  flex-wrap: wrap;
+  min-width: 100%;
+  margin: 0 auto 1rem auto;
+  margin-left: 0px;
+  border: 2px solid white;
+  height: auto;
+  justify-content: center;
+  
+}
+
+
+
+.item-lectura::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 100%;
+  background: linear-gradient(to bottom, #7c3b85, #3a4c8e, #7c3b85); /* tu degradado */
+  border-radius: 6px 0 0 6px;
+}
+
+.item-lectura:hover {
+box-shadow: 0 1px 15px rgba(0,0,0,0.02);
+}
+
+
+.mb-4  {
+  margin-left: 50px;
+}
+
+.encabezado-lectura {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.titulo-lectura {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #2d3436;
+  margin: 0;
+}
+
+.unidad-lectura {
+  font-size: 0.9rem;
+  color: #ffffff;
+}
+
+.texto-lectura {
+  font-size: 0.95rem;
+  color: #444;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+
+.contador-likes, .contador-dislikes {
+  font-size: 0.8rem;
+  min-width: 15px;
+  text-align: center;
+}
+
+.contador-likes {
+  color: green;
+}
+
+.contador-dislikes {
+  color: crimson;
+}
+
+
+.comments-section {
+  margin-top: 16px;
+  border-top: 1px solid #e6e6e6;
+  padding-top: 10px;
+}
+
+
+.add-comment {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.add-comment input {
+  flex: 1;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
+.add-comment button {
+  background-color: #3498db;
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.add-comment button:hover {
+  background-color: #2980b9;
+}
+
+
+
+
+.fila-lectura {
+  display: contents;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  height: 50px;
+}
+
+.autor {
+  font-size: 1rem;
+  color: #392c41;
+  flex: 1rgb(252, 252, 252)
+}
+
+.unidad {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;   /* número máximo de líneas */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4em;       /* altura de línea */
+  max-height: 2.8em;        /* 2 líneas * altura línea */
+}
+
+.acciones-lectura {
+  display: flex;
+  gap: 14px;
+  font-size: 1.3rem;
+  justify-content: flex-end;
+  flex: 0.7;
+  max-width: 152px;
+  margin-left: 40px;
+}
+
+.lectura-header{
+  background: linear-gradient(to right, #47044ee7, #0b2076c8, #c51467c0); 
+}
+
+.acciones-lectura i {
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+  color: #ffffff;
+}
+
+.acciones-lectura i:hover {
+  color: #2d3436;
+  transform: scale(1.1);
+}
+
+.tabla-responsive {
+  width: auto;
+}
+
+#contenedorPublicaciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  width: 98%;
+  margin-top: 0px;
+}
+
+
+.contenedorLecturas {
+  flex: 2;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 20px;
+  border-radius: 12px;
+  margin-top: -20px;
+}
+
+.contendorImagenes {
+  flex: 1;
+  max-width: 30%;
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid white;
+  border-radius: 12px;
+}
+
+.seccion-titulo {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+  color: white;
+}
+
+.contenedor-box {
+  border: 1px solid white;
+  border-radius: 12px;
+  padding: 20px;
+  background-color: transparent; /* o el color que prefieras */
+}
+
+.main-content {
+  margin-top: 80px;
+  margin-left: 65px;
+}
+
+
+
+
+@media screen and (max-width: 768px) {
+  #contenedorPublicaciones {
+    flex-direction: column;
+  }
+
+  .contenedorLecturas,
+  .contendorImagenes {
+    max-width: 100%;
+    flex: 100%;
+    margin-top: 0px;
+  }
+
+  .main-content {
+    margin-top: 110px;
+  }
+
+}
+
+
+#panelComentarios h3 {
+  margin-top: 0;
+}
+
+.comentario {
+  background-color: #fff;
+  border: 1px solid #ddd;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+}
+
+.comentario span {
+  color: #007bff;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+
+/* Estilos para el modal de comentario */
+.modal {
+  display: none; /* Ocultar por defecto */
+  position: fixed;
+  z-index: 1050; /* Asegúrate de que este z-index sea mayor que el del modal de lectura */
+  padding-top: 100px;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.4); /* Fondo semitransparente */
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 5% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+}
+
+
+textarea {
+  width: 100%;
+  height: 100px;
+}
+
+button {
+  color: #584326;
+  font-size: 22px;
+  cursor: pointer;
+  border: solid 1px #584326;
+  border-radius: 12px;
+  width: 200px;
+  padding: 10px;
+  text-align: center;
+}
+
+#exportarModalInDesignBtn  {
+  color:#584326 ;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 20px;
+  border: solid 1px #584326;
+  border-radius: 12px;
+  width: 200px;
+  padding: 10px;
+  text-align: center;
+  background-color:white;
+}
+#btnEditarLectura  {
+  color:#584326 ;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 20px;
+  border: solid 1px #584326;
+  border-radius: 12px;
+  width: 200px;
+  padding: 10px;
+  text-align: center;
+  background-color:white;
+}
+
+#btnGuardarLectura  {
+  color:#584326 ;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 20px;
+  border: solid 1px #584326;
+  border-radius: 12px;
+  width: 200px;
+  padding: 10px;
+  text-align: center;
+  background-color:white;
+}
+
+#comentarBtn  {
+  color:#584326 ;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 20px;
+  border: solid 1px #584326;
+  border-radius: 12px;
+  width: 200px;
+  padding: 10px;
+  text-align: center;
+  background-color:white;
+}
+
+
+.text-end, .mt-3, .footer {
+  position: fixed;
+  display: flex
+;
+}
+
+button:hover {
+  background-color: #45a049;
+}
+
+.cerrar-modal {
+  color: #aaa;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.cerrar-modal:hover,
+.cerrar-modal:focus {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Estilos para el panel de comentarios */
+
+
+.panel-comentarios h3 {
+  margin-top: 0;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 10px;
+}
+
+
+.comment strong {
+  color: #333;
+}
+
+.comment small {
+  color: #666;
+  font-size: 0.8em;
+  display: block;
+  margin-top: 5px;
+}
+
+.modal-footer {
+  margin-top: 20px;
+}
+
+
+.highlight-comment {
+  background-color: #ffeb3b;
+  box-shadow: 0 0 0 2px #ffeb3b;
+  border-radius: 3px;
+  transition: all 0.3s ease;
+  display: inline;
+}
+
+/* Estilos para los spans de posición (invisibles) */
+#modalTextoLectura span[data-start-pos] {
+  display: inline;
+  background: transparent;
+  position: relative;
+}
+
+.comment {
+  cursor: pointer;
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 6px;
+  background-color: #ffffff;
+  border-left: 3px solid #adb5bd;
+  transition: all 0.2s ease;
+  color: black;
+}
+
+.comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+
+.selection-count {
+  min-width: 15px;
+  text-align: center;
+  font-size: 0.8em;
+  color: #666;
+}
+
+.select-comment {
+  cursor: pointer;
+  font-size: 1.2em;
+  transition: all 0.2s;
+}
+
+.select-comment:hover {
+  opacity: 0.8;
+}
+
+.bxs-checkbox-checked {
+  color: green !important;
+}
+
+
+.comment-actions i {
+  cursor: pointer;
+  font-size: 18px;
+  color: #6c757d;
+  transition: color 0.2s;
+}
+
+.comment-actions i:hover {
+  color: #495057;
+}
+
+.bx-edit:hover {
+  color: #1971c2 !important;
+}
+
+.bx-trash:hover {
+  color: #e03131 !important;
+}
+
+
+
+.comment-content[contenteditable="true"] {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  cursor: text;
+  color: black;
+}
+
+.comment-content[contenteditable="true"]:focus {
+  outline: none;
+  border-color: #4dabf7;
+  background-color: #fff;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+.comment:hover {
+  background-color: #e9ecef;
+  border-left-color: #495057;
+}
+
+.commented-text {
+  font-style: italic;
+  color: #495057;
+  margin: 4px 0;
+  padding: 4px;
+  background-color: #ccdeef;
+  border-radius: 3px;
+}
+
+.comment-text {
+  margin: 6px 0;
+  color: #212529;
+}
+
+#modalTextoLectura {
+  max-height: none;       /* o la altura que quieras */
+  overflow-y: auto;
+  position: relative;
+}
+
+.highlight-paragraph {
+  background-color: #e7f5ff;
+  border-left: 4px solid #4dabf7;
+  padding: 8px 12px;
+  margin: 8px 0;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.highlight-comment {
+  background-color: #ffec99;
+  padding: 2px 4px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #ffd43b;
+}
+
+.panel-comentarios .comentario {
+  margin-bottom: 15px;
+}
+
+
+
+.comentario span:hover {
+  color: #f48fb1;
+}
+
+/* Modal para comentarios */
+.modal-comentarios {
+  display: none; /* Ocultar por defecto */
+  position: fixed;
+  z-index: 1050; /* z-index más alto para asegurarse de que esté por encima */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5); /* Fondo semitransparente */
+  overflow: auto;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.comment-modal {
+  background-color: white;
+  padding: 20px;
+  max-width: 600px;
+  width: 100%;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  z-index: 9999;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+
+#modalComentario {
+  z-index: 9999; /* Asegúrate de que sea lo suficientemente alto */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+}
+
+
+.comment-modal textarea {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  border-radius: 5px;
+  height: 100px;
+}
+
+.comment-modal button {
+  padding: 8px 15px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.comment-modal button:hover {
+  background-color: #45a049;
+}
+
+#app-container-home {
+  transition: margin-left 0.3s ease;
+  margin-top: 60px !important;
+}
+
+
+
+.modal-lectura {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background-color: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+
+.sidebar-link.d-none {
+  display: none !important;
+}
+
+
+.seccion-lectura {
+  position: relative;
+  padding: 20px;
+  border-radius: 8px;
+  background: #f9f9f9;
+}
+
+.lectura-container {
+  position: relative;
+  background: none;
+  min-height: 300px;
+}
+
+.imagen-fondo-lectura {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.3;
+  z-index: 0;
+}
+
+.contenido-lectura {
+  position: relative;
+  z-index: 1;
+}
+
+
+.modal-footer-home {
+  display: flex;
+}
+
+#modalComentario {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: none; /* Oculto por defecto */
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+#modalComentario .modal-content {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  position: relative;
+}
+
+.cerrar-modal {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+#modalComentario textarea {
+  width: 100%;
+  height: 100px;
+  margin-top: 1rem;
+  padding: 0.5rem;
+  resize: vertical;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+#modalComentario button {
+  margin-top: 1rem;
+  padding: 0.6rem 1.2rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#modalComentario button:hover {
+  background-color: #0056b3;
+}
+
+#imagenFondoLectura {
+  width: 100%;
+  /* la altura puedes ajustarla */
+  height: 0;             /* se reinicia por JavaScript a 200px cuando haya imagen */
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: height .3s ease;
+}

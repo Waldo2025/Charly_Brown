@@ -1,0 +1,8 @@
+.modal-normal-content { max-width:600px; margin:5% auto; padding:20px; position:relative; background:#fff; }
+.gen-form label { display:block; margin:0.5em 0; }
+.gen-form textarea { width:100%; height:4em; }
+.gen-form select, .gen-form input { width:100%; }
+.gen-status { margin:1em 0; font-style:italic; }
+.gen-results img, .gen-gallery img { max-width:100%; border-radius:4px; box-shadow:0 2px 6px rgba(0,0,0,0.2); }
+.gen-gallery { display:flex; flex-wrap:wrap; gap:0.5em; }
+.gen-gallery .thumb { width:100px; cursor:pointer; }

@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contenido de la Unidad</title>
+  <!-- jQuery primero -->
+  <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+  <link href="https://unpkg.com/boxicons/css/boxicons.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+
+    <!-- Trumbowyg CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/trumbowyg.min.css">
+
+    <!-- Plugins recomendados -->
+     <!-- ✅ Prism.js (para que funcione el plugin highlight de Trumbowyg) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <!-- Bootstrap Select CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+  
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+
+    <link rel="stylesheet" href="contenidoUnidad.css">
+    <link rel="stylesheet" href="sidebar.css">
+    <link rel="stylesheet" href="chatbot.css">
+    <link rel="stylesheet" href="header.css">
+
+</head>
+<body>
+
+
+
+
+  <header class="main-header">
+    <div class="header-content">
+      <!-- Logo -->
+      <div class="logo-area">
+        <h4>Contenido</h4>
+      </div>
+  
+      <!-- Buscador -->
+      <div class="search-group position-relative">
+        <i class="fas fa-search"></i>
+        <input type="text" id="searchInput" class="form-control bg-transparent text-white" placeholder="Buscar...">
+      </div>
+
+      <!-- Filtros -->
+      <div class="filters-container">
+              
+        <i id="btnReiniciarFiltros"  class="fas fa-sync-alt"></i> 
+
+
+        <select class="selectpicker" data-style="btn-light" id="filtroNivel">
+          <option value="">Nivel</option>
+          <option value="preescolar">Preescolar</option>
+          <option value="primaria">Primaria</option>
+          <option value="secundaria">Secundaria</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroGrado">
+          <option value="">Grado</option>
+          <option value="primero">Primero</option>
+          <option value="segundo">Segundo</option>
+          <option value="tercero">Tercero</option>
+          <option value="cuarto">Cuarto</option>
+          <option value="quinto">Quinto</option>
+          <option value="sexto">Sexto</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroTrimestre">
+          <option value="">Trim</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+  
+        <select class="selectpicker" data-style="btn-light" id="filtroUnidad">
+          <option value="">Unidad</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+  </header> 
+
+  
+
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+  
+    <div class="sidebar-menu">
+      <a href="home.html" class="sidebar-link">
+        <i class="fas fa-home"></i>
+        <span>Inicio</span>
+      </a>
+      <a href="unidadHome.html" class="sidebar-link">
+        <i class="fas fa-layer-group"></i>
+        <span>Unidades</span>
+      </a>
+      <a href="perfil.html" class="sidebar-link">
+        <i class="fas fa-user"></i>
+        <span>Perfil</span>
+      </a>
+      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink" style="display:none;">
+        <i class="fas fa-users-cog"></i>
+        <span>Gestión de usuarios</span>
+      </a>
+      <a href="#" class="sidebar-link" id="logoutLink">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Cerrar sesión</span>
+      </a>
+    </div>
+  </div>
+      
+    
+
+  
+  
+
+
+  <div id="chatbotBubble">
+    <img src="logoCharly2.png" alt="Logo" class="logo" />
+  </div>
+ 
+ <!-- Contenedor del chatbot (Sidebar) -->
+ <div class="chatbot-container" id="chatbotContainer">
+  <div class="chatbot-header">
+    <div class="chatbot-brand">
+      <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
+      <span>Soy <b>Charly</b>, tu asistente</span>
+    </div>
+    <button class="chatbot-close" id="chatbotClose">&times;</button>
+  </div>
+ 
+  
+  <div class="chatbot-messages" id="chatbotMessages">
+      <!-- Aquí se mostrarán los mensajes -->
+  </div>
+  <div class="chatbot-input">
+   <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
+      <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
+  </div>
+ </div>
+ 
+
+
+
+
+<!-- Botón para generar nueva lectura -->
+<button id="abrirUnidadBtn" class="btn-flotante-unidad" title="Ver información de la unidad">
+  <i class="bx bx-info-circle"></i>
+</button>
+
+
+
+<!-- Botón flotante para ver lecturas guardadas -->
+<button id="btnVerMindMaps" class="btn-flotante-imagenes3" title="Ver MindMaps Guardados" style="bottom: 220px;">
+  <i class="fas fa-book-reader"></i>
+</button>
+
+
+<!-- Botón flotante para ver imágenes guardadas -->
+<button id="btnAbrirPanelGuardadas" class="btn-flotante-imagenes2" title="Imágenes guardadas" style="bottom: 160px;">
+  <i class="bx bx-folder"></i>
+</button>
+
+<!-- Botón flotante para abrir el generador de imágenes -->
+<button id="btnAbrirGeneradorImagenes" class="btn-flotante-imagenes" title="Generar Imagen">
+  <i class="bx bx-image-add"></i>
+</button>
+
+
+<!-- Botón flotante para abrir el generador de lecturas -->
+<button id="btnAbrirGenerador" class="btn-flotante-generador" title="Generar Lectura">
+  <i class="bx bx-pencil"></i>
+</button>
+
+
+
+
+
+
+
+
+
+<!-- Modal de información de la unidad -->
+<div id="modalUnidad" class="modal-generador">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 class="header-title">Información de la Unidad</h3>
+      <span class="close-modal-unidad">&times;</span>
+    </div>
+    <div id="unidad-contenido">
+      <!-- Aquí se mostrará la información de la unidad dinámicamente -->
+    </div>
+  </div>
+</div>
+
+  <!-- Header simple -->
+  <div class="back-btn">
+    <a href="unidadHome.html"><i class="bx bx-arrow-back"></i> Volver</a>
+  </div>
+
+
+
+
+<!-- Modal del Generador de Lecturas -->
+<div id="modalGeneradorLecturas" class="modal fade">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h3>Generar nueva lectura</h3>
+        <span class="close-modal" id="cerrarGeneradorLecturas">&times;</span>
+      </div>
+
+      <section id="generador-lecturas" class="modal-body">
+
+
+        <div class="analizarbtn">
+          <div  id="analizarBtn" title="A partir de una lectura existente">
+            <i class="fas fa-microscope" ></i> <span class="btn-title">Analizar Lectura</span>
+
+          </div>        
+
+          <!-- Botón para generar la lectura original -->
+          <div id="analisisLecturaNueva" title="A partir de cero">
+            <i class="fas fa-file-alt" ></i> <span class="btn-title">Nueva Lectura</span>
+          </div>
+
+        </div>
+
+        <div class="acordeon-container">
+
+    
+
+          <button class="acordeon-btn">📖 Área de Lectura y Materiales</button>
+          <div class="acordeon-panel">
+        
+       
+              <div class="form-group mt-3" style="margin-bottom: 1rem;">
+                <label for="temaInput2"><strong>Tema específico a desarrollar (opcional):</strong></label>
+                <input type="text" id="temaInput2" class="form-control" placeholder="Ej. El sistema solar, La biodiversidad, etc.">
+              </div>
+        
+            <label for="lecturaOriginal"><strong>Lectura (opcional):</strong></label>
+            <div id="lecturaOriginal" contenteditable="true" class="editor-zona"></div>
+        
+            <label for="temarioTexto"><strong>Temario (o similar):</strong></label>
+            <div id="temarioTexto" contenteditable="true" class="editor-zona"></div>
+        
+            <label for="rubricaTexto"><strong>Contextualización Pedagógica (o similar):</strong></label>
+            <div id="rubricaTexto" contenteditable="true" class="editor-zona"></div>
+        
+            <div id="drop-area">
+              <p>Arrastra o haz clic para subir una imagen (Secuencia y alcance, Fichas, Anexos)</p>
+              <input type="file" id="imagenRubrica" accept="image/*" hidden />
+            </div>
+        
+          </div>
+        
+        </div>
+        
+        <div id="botonContinuarLecturaContainer" style="display:none; text-align:center; margin-top:1rem;">
+          <button id="continuarGeneracionBtnLectura" class="btn btn-warning">
+            ➡️ Continuar Generando Lectura
+          </button>
+        </div>
+      
+        <div class="acordeon-container">
+
+            <button class="acordeon-btn">Análisis Profesional</button>
+            <div class="acordeon-panel">
+
+            <!-- Análisis -->
+            <div id="analisisResultado" class="analisis-container" style="display: none;">
+              <h4>Análisis Profesional</h4>
+              <div id="analisisContenido"></div>
+            </div>
+
+            <!-- Sugerencias -->
+            <div id="sugerenciasLecturas"></div>
+          </div>
+        </div>
+
+ 
+
+            <!-- Parámetros -->
+        <div class="acordeon-container">
+
+          <button class="acordeon-btn">⚙️ Parámetros de la Lectura</button>
+          <div class="acordeon-panel">
+        
+            <div class="parametrosLectura">
+              <label for="generoSelect"><strong>Género literario:</strong></label>
+              <select id="generoSelect" class="form-select mb-2">
+                <option value="">-- Selecciona un género --</option>
+                <option value="Narrativo">Narrativo</option>
+                <option value="Lírico">Lírico</option>
+                <option value="Dramático">Dramático</option>
+                <option value="Didáctico">Didáctico</option>
+                <option value="Ensayo">Ensayo</option>
+                <option value="Científico">Científico</option>
+                <option value="Histórico">Histórico</option>
+                <option value="Policial">Policial</option>
+                <option value="Fantasía">Fantasía</option>
+                <option value="Fábula">Fábula</option>
+                <option value="Mito">Mito</option>
+                <option value="Leyenda">Leyenda</option>
+                <option value="Biografía">Biografía</option>
+                <option value="Autobiografía">Autobiografía</option>
+                <option value="Crónica">Crónica</option>
+                <option value="Epistolar">Epistolar</option>
+                <option value="Aventura">Aventura</option>
+                <option value="Cuento Digital">Cuento Digital</option>
+                <option value="Cuento Contemporáneo">Cuento Contemporáneo</option>
+                <option value="Ciencia Ficción">Ciencia Ficción</option>
+                <option value="Historias de Superhéroes">Historias de Superhéroes</option>
+                <option value="Misterio">Misterio</option>
+                <option value="Ficción Histórica">Ficción Histórica</option>
+                <option value="Literatura Infantil Inclusiva">Literatura Infantil Inclusiva</option>
+                <option value="Ficción en Primera Persona">Ficción en Primera Persona</option>
+                <option value="Literatura Ecológica">Literatura Ecológica</option>
+                <option value="Realismo Mágico">Realismo Mágico</option>
+                <option value="Literatura de Terror">Literatura de Terror</option>
+                <option value="Narrativa Visual">Narrativa Visual</option>
+                <option value="Narrativa Gráfica">Narrativa Gráfica</option>
+                <option value="Humorístico">Humorístico</option>
+                <option value="Aventuras Espaciales">Aventuras Espaciales</option>
+                <option value="Thriller">Thriller</option>
+                <option value="Ficción Juvenil">Ficción Juvenil</option>
+                <option value="Novela Gráfica">Novela Gráfica</option>
+                <option value="Cuento Infantil">Cuento Infantil</option>
+                <option value="Ficción Contemporánea">Ficción Contemporánea</option>
+                <option value="Cuento de Hadas">Cuento de Hadas</option>
+                <option value="Misterio Policial">Misterio Policial</option>
+                <option value="Cuento Filosófico">Cuento Filosófico</option>
+                <option value="Cuento Moralista">Cuento Moralista</option>
+                <option value="Ficción Psicológica">Ficción Psicológica</option>
+                <option value="Literatura de Viajes">Literatura de Viajes</option>
+                <option value="Aventuras en la Naturaleza">Aventuras en la Naturaleza</option>
+                <option value="Historias de Animales">Historias de Animales</option>
+                <option value="Mitología Contemporánea">Mitología Contemporánea</option>
+                <option value="Relatos Cortos">Relatos Cortos</option>
+                <option value="Relatos de Terror Infantil">Relatos de Terror Infantil</option>
+                <option value="Cuentos para Dormir">Cuentos para Dormir</option>
+                <option value="Ficción sobre la Amistad">Ficción sobre la Amistad</option>
+                <option value="Ficción sobre el Amor">Ficción sobre el Amor</option>
+                <option value="Ficción sobre la Familia">Ficción sobre la Familia</option>
+                <option value="Cuentos con Moraleja">Cuentos con Moraleja</option>
+                <option value="Cuentos con Enseñanza">Cuentos con Enseñanza</option>
+                <option value="Cuentos Filosóficos">Cuentos Filosóficos</option>
+                <option value="Cuentos de Ciencia Ficción">Cuentos de Ciencia Ficción</option>
+                <option value="Narrativa Social">Narrativa Social</option>
+                <option value="Cuentos Ecológicos">Cuentos Ecológicos</option>
+                <option value="Ficción Política">Ficción Política</option>
+                <option value="Cuentos Diversos">Cuentos Diversos</option>
+                <option value="Cuentos Cortos de Acción">Cuentos Cortos de Acción</option>
+                <option value="Novela Juvenil">Novela Juvenil</option>
+                <option value="Teatro Infantil">Teatro Infantil</option>
+                <option value="Cuentos Lúdicos">Cuentos Lúdicos</option>
+                <option value="Cuentos de Superación Personal">Cuentos de Superación Personal</option>
+                <option value="Ficción Alternativa">Ficción Alternativa</option>
+                <option value="Cuentos de Realidad Aumentada">Cuentos de Realidad Aumentada</option>
+                <option value="Novela Experimental">Novela Experimental</option>
+              </select>
+            
+
+              <label for="tonoSelect"><strong>Emoción/Tono:</strong></label>
+              <select id="tonoSelect" class="form-select mb-2">
+                <option value="">-- Selecciona una emoción o tono --</option>
+                <option value="Serio">Serio</option>
+                <option value="Alegre">Alegre</option>
+                <option value="Optimista">Optimista</option>
+                <option value="Melancólico">Melancólico</option>
+                <option value="Humorístico">Humorístico</option>
+                <option value="Motivador">Motivador</option>
+                <option value="Reflexivo">Reflexivo</option>
+              </select>
+
+              <label for="nivelSelect"><strong>Nivel educativo:</strong></label>
+              <select id="nivelSelect" class="form-select mb-2">
+                <option value="">-- Selecciona el nivel --</option>
+                <option value="Preescolar">Preescolar</option>
+                <option value="PF">PF</option>
+                <option value="Primaria">Primaria</option>
+                <option value="Secundaria">Secundaria</option>
+              </select>
+
+              <label for="gradoSelect"><strong>Grado:</strong></label>
+              <select id="gradoSelect" class="form-select mb-2">
+                <option value="">-- Selecciona un grado --</option>
+              </select>
+
+
+              <div class="form-group" id="materiaContainer">
+                <label for="materiaSelect"><strong>Materia:</strong></label>
+                <select id="materiaSelect" class="form-select mb-3" required>
+                  <option value="">-- Selecciona materia --</option>
+                  <!-- Se llenará con JS -->
+                </select>
+              </div>
+      
+              <div class="form-group" id="competenciasContainer" style="display: none;">
+                <label for="competenciasSelect"><strong>Competencias / Secciones:</strong></label>
+                <select id="competenciasSelect" class="form-select mb-3" multiple>
+                  <!-- Se llenará con JS -->
+                </select>
+                <small class="text-muted">Puedes seleccionar varias con Ctrl o Cmd.</small>
+              </div>
+      
+              <div class="form-group mt-3">
+                <label for="temaInput"><strong>Tema específico a desarrollar (opcional):</strong></label>
+                <input type="text" id="temaInput" class="form-control" placeholder="Ej. El sistema solar, La biodiversidad, etc.">
+              </div>
+      
+      
+
+              <!-- Opciones adicionales -->
+              <div class="opciones-extra mt-3">
+                <strong>¿Deseas incluir elementos adicionales?</strong><br>
+                <label><input type="checkbox" id="checkFichas" /> Fichas de trabajo</label><br>
+                <label><input type="checkbox" id="checkAnexos" /> Anexos</label><br>
+                <label><input type="checkbox" id="checkRecortables" /> Recortables</label>
+              </div>
+
+            </div>
+        
+          </div>
+        
+        </div>
+
+
+
+        <div class="generarbtn">
+          <div id="generarSugerenciasBtn">
+            <i class="fas fa-lightbulb"></i><span class="btn-title"> Generar Sugerencias</span> 
+          </div>
+
+
+          <div  id="generarLecturaBtn" >
+            <i class="fas fa-wand-magic"title=""></i> <span class="btn-title">Generar lectura</span>
+          </div>    
+        </div>   
+
+
+
+      </section>
+   
+
+
+
+
+      <!-- Resultado final -->
+      <div id="editorLectura" style="display: none;">
+        <h4>Lectura generada</h4>
+        <textarea id="textoLectura" rows="10" class="form-control mb-3"></textarea>
+        <div class="btnstextoLectura">
+          <button id="continuarGeneracionBtn" style="display:none;" class="btn btn-secondary">Continuar generando</button>
+          <button id="guardarLecturaBtn" class="btn btn-success">Guardar lectura</button>
+          <button onclick="exportarLecturaComoTaggedText()" class="btn btn-outline-primary">Exportar txt</button>
+          <button id="cerrarEditorLecturaBtn" class="btn btn-danger">Cerrar editor</button>
+        </div>
+        <div id="specsImagenContainer"></div>
+      </div>
+
+
+      <!-- Modal para seleccionar nivel y grado -->
+      <div id="modalNivelGrado" class="modal-generador">
+        <div class="modal-header">
+          <h3>Selecciona nivel, grado y materia</h3>
+          <span class="close-modal" id="cerrarModalNivelGrado">&times;</span>
+        </div>
+        <div class="modal-body">
+          <form id="formNivelGrado">
+            <div class="form-group">
+              <label for="modalNivelSelect"><strong>Nivel:</strong></label>
+              <select id="modalNivelSelect" class="form-select mb-3" required>
+                <option value="">-- Selecciona el nivel --</option>
+                <option value="Primaria">Primaria</option>
+                <option value="Secundaria">Secundaria</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="modalGradoSelect"><strong>Grado:</strong></label>
+              <select id="modalGradoSelect" class="form-select mb-3">
+                <option value="">-- Selecciona un grado --</option>
+              </select>
+            </div>
+
+            <div class="form-group mt-3">
+              <label for="temaInput2"><strong>Tema específico a desarrollar (opcional):</strong></label>
+              <input type="text" id="temaInput2" class="form-control" placeholder="Ej. El sistema solar, La biodiversidad, etc.">
+            </div>
+
+
+            <button type="submit" class="btn btn-primary">Continuar</button>
+          </form>
+        </div>
+      </div>
+
+
+    </div> 
+  </div>
+</div>
+
+
+
+
+
+
+
+  <!-- Lista de lecturas guardadas -->
+  <div id="app-container-contenido-unidad" class="LecturasGuardadas">
+    <div class="LecturasGuardadasInside">
+      <div id="listaLecturas"></div>
+    </div>
+  </div>
+  
+  <div id="modalCompartirLectura" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="cerrarModalCompartirLectura()">&times;</span>
+      <h4>¿Con quién deseas compartir esta lectura?</h4>
+  
+  
+      <label for="selectUsuarios">Selecciona usuarios específicos:</label>
+      <select id="emailCompartirLectura" class="form-select mt-2" multiple></select>
+  
+      <button id="btnCompartirUsuario" class="btn btn-primary w-100 mt-2">Compartir con usuario</button>
+    </div>
+  </div>
+  
+
+
+  <!--  =================
+  Modal para ver lecturas completas 
+  ================= -->
+
+
+<div id="lecturaModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header" style="position: relative;">
+      
+      <!-- Botón "X" para cerrar -->
+      <button id="cerrarModalBtnTop" style="
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        background: none;
+        border: none;
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #555;
+        cursor: pointer;
+        line-height: 1;
+      " aria-label="Cerrar modal">&times;</button>
+
+      <h4 id="modalTitulo" contenteditable="true" style="outline: none; margin-left: 70px;">Detalle de Lectura</h4>
+    </div>
+
+    <div id="modalEditor" class="modal-editor" contenteditable="true"></div>
+
+    <div class="modal-actions">
+      <div id="guardarCambiosBtn" class="btn" tabindex="0" style="cursor: pointer;">
+        <i class="fas fa-save"></i> <span class="btn-title">Guardar</span>
+      </div> 
+
+      <div id="exportarModalInDesignBtn">
+        <i class="fas fa-microscope" title=""></i> <span class="btn-title">InDesign</span>
+      </div>  
+
+      <div id="cerrarModalBtn">
+        <i class="fas fa-microscope" title=""></i> <span class="btn-title">Cerrar</span>
+      </div>  
+    </div>
+  </div>
+</div>
+
+
+
+
+<!-- Panel para mostrar lista -->
+<div id="panelLecturasGuardadas" class="panelLecturasGuardadas"  style="display: none; position: fixed; top: 80px; right: 20px; width: 30vh; background: white; border: 1px solid #ccc; padding: 1rem; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index: 99999; border-radius: 12px;">
+  <h4 style="margin-bottom: 1rem;">🧠 MindMaps Guardados</h4>
+  <div id="listaMindmaps"></div>
+  <button class="boton" onclick="document.getElementById('panelLecturasGuardadas').style.display='none'">Cerrar</button>
+</div>
+
+<div id="modalNombreMindmap" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:99999;">
+  <div style="background:white; padding:2rem; border-radius:12px; max-width:400px; width:90%;">
+    <h3>Guardar lectura visual</h3>
+    <input type="text" id="inputNombreMindmap" placeholder="Nombre..." style="width:100%; padding:0.5rem; margin-top:1rem;" />
+    <div style="text-align:right; margin-top:1rem;">
+      <button id="cancelarGuardarMindmap">Cancelar</button>
+      <button id="confirmarGuardarMindmap">Guardar</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- Contenedor del panel de imágenes guardadas -->
+<div id="contenedorPanelGuardadas"  class="modal" >
+  <div class="panel-header">
+    <h2>Genera tu MindMap</h2>
+    <button id="cerrarPanelGuardadas" class="btn-cerrar">&times;</button>
+    
+    <!-- Íconos de acción -->
+    <div class="panel-actions">
+      <button id="nuevoMindMapBtn" class="btn-icon" title="Nuevo MindMap">
+        <i class="fas fa-project-diagram"></i>
+      </button>
+  
+      <label for="inputMultipleImagenes" class="btn-icon" title="Nueva palabra (Subir PNG)">
+        <i class="fas fa-upload"></i>
+      </label>
+      <input type="file" id="inputMultipleImagenes" accept="image/*" style="display: none;" multiple />
+
+         <!-- Ver galería -->
+      <button id="verGaleriaBtn" class="btn-icon" title="Ver galería">
+        <i class="fas fa-images"></i>
+      </button>
+
+      <button id="btnGuardarMindMap" class="btn-icon" title="Guardar lectura visual">
+        <i class="fas fa-save"></i>
+      </button>
+
+      <!-- Botón para generar voz -->
+      <button id="btnAbrirModalAudio" class="btn-icon" title="Crear voz en off">
+        <i class="fas fa-volume-up"></i>
+      </button>
+
+    </div>
+
+ 
+  </div>
+  
+  <!-- Caja de texto para pegar el cuento -->
+  <div id="areaNuevoMindmap" style="display:none; margin-top: 1rem;">
+    <strong>Pega tu cuento o texto:</strong>
+    <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 0.5rem;">
+      <div>
+        <label for="textoMindmapParte1">Parte 1 (lado izquierdo)</label>
+        <textarea id="textoMindmapParte1" rows="4" class="form-control" placeholder="Texto para el lado izquierdo..."></textarea>
+      </div>
+      <div>
+        <label for="textoMindmapParte2">Parte 2 (lado derecho)</label>
+        <textarea id="textoMindmapParte2" rows="4" class="form-control" placeholder="Texto para el lado derecho..."></textarea>
+      </div>
+    </div>
+
+  </div>
+
+  
+  <!-- Resultado del MindMap generado -->
+  <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
+</div>
+
+
+<!-- Modal de nombre para imagen -->
+<div id="modalNombreImagen" class="modal-imagen" style="display:none;">
+  <div class="modal-contenido">
+    <h4>¿Qué palabra representa esta imagen?</h4>
+    <input type="text" id="nombreImagenInput" class="form-control" placeholder="Ej. Brave, Tree, Cloud" />
+    <div class="modal-buttons">
+      <button id="cancelarNombreImagen" class="btn btn-secondary">Cancelar</button>
+      <button id="confirmarNombreImagen" class="btn btn-primary">Subir</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="modalGaleriaImagenes" class="modal-galeria" style="display: none;">
+  <div class="modal-galeria-contenido">
+    <button id="cerrarModalGaleria" class="btn-cerrar">&times;</button>
+    <!-- Reubicamos el contenido del panel original aquí -->
+    <div class="panel-header">
+      <input type="text" id="buscadorImagenes" placeholder="Buscar imagen..." class="buscador-imagenes" />
+      <div class="panel-actions">
+        <label for="inputUploadImagen" class="btn-icon" title="Nueva palabra (Subir PNG)">
+          <i class="fas fa-upload"></i>
+        </label>
+        <input type="file" id="inputUploadImagen" accept="image/png" style="display: none;" />
+      </div>
+    </div>
+
+
+    <div id="contenedorGuardadasManual" class="galeria-panel"></div>
+
+    <div id="resultadoMindmap" style="margin-top: 1rem;"></div>
+  </div>
+</div>
+
+
+<!-- Modal para editar imagen con IA -->
+<div class="modal" id="modalEditarIA" style="display:none; position:fixed; z-index:999999; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center;">
+  <div style="background:white; padding:2rem; border-radius:10px; max-width:500px; width:90%;">
+    <h5>Editar Imagen con IA</h5>
+    <p style="font-size:0.9rem;">Describe lo que deseas cambiar o mejorar:</p>
+    <textarea id="promptEdicionIA" rows="4" style="width:100%; margin-bottom:1rem;"></textarea>
+    <div style="display:flex; justify-content: flex-end; gap:1rem;">
+      <button id="cancelarEdicionIA">Cancelar</button>
+      <button id="confirmarEdicionIA" style="background:#10b981; color:white; border:none; padding:0.5rem 1rem;">Generar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal para vista con cajas de texto -->
+<div class="modal fade" id="modalVistaCajasTexto" tabindex="-1" style="z-index: 99999;">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content" style="background:#000;">
+      <div class="modal-header">
+        <h5 class="modal-title text-white">Vista con cajas de texto</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-flex justify-content-center">
+        <div id="contenidoVistaConTexto">
+          <!-- Imagen y cajas se insertan dinámicamente -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Modal de Voz en Off -->
+<div class="modal fade" id="modalGenerarAudio" tabindex="-1" aria-labelledby="modalAudioLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title" id="modalAudioLabel">🎤 Generador de Voz en Off</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="textoFinalAudio" class="form-label">📝 Texto a convertir</label>
+          <textarea id="textoFinalAudio" class="form-control" rows="5" placeholder="Escribe el texto..."></textarea>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="tonoVoz" class="form-label">🎭 Tono</label>
+            <select id="tonoVoz" class="form-select">
+              <option value="neutral">Neutral</option>
+              <option value="amable">Amable</option>
+              <option value="entusiasta">Entusiasta</option>
+              <option value="serio">Serio</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label for="velocidadVoz" class="form-label">⏱️ Velocidad</label>
+            <select id="velocidadVoz" class="form-select">
+              <option value="normal">Normal</option>
+              <option value="lenta">Lenta</option>
+              <option value="rapida">Rápida</option>
+            </select>
+          </div>
+        </div>
+        <div id="audioPreview" style="display: none; margin-top: 1rem;">
+          <audio id="audioGenerado" controls style="width: 100%;">
+            Tu navegador no soporta la reproducción de audio.
+          </audio>
+        </div>
+
+        <div class="mb-3">
+          <label for="modeloTTS" class="form-label">🧠 Modelo TTS</label>
+          <select id="modeloTTS">
+            <option value="hexgrad/Kokoro-82M">Kokoro-82M</option>
+            <option value="canopylabs/orpheus-3b-0.1-ft">Orpheus</option>
+            <option value="OuteAI/OuteTTS-0.2-500M">OuteTTS</option>
+            <option value="senstella/csm-expressiva-1b">CSM Expressiva</option>
+            <option value="fishaudio/fish-speech-1.5">Fish Speech</option>
+            <option value="FunAudioLLM/CosyVoice2-0.5B">CosyVoice</option>
+          </select>
+        </div>
+      </div>
+
+
+      <div class="modal-footer">
+        <button id="btnGenerarAudioFinal" class="btn btn-primary">🎧 Generar Audio</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Contenedor del generador (modal flotante) -->
+<div id="contenedorGeneradorImagenes">
+  <div style="text-align: right;">
+    <button id="cerrarGeneradorImagenes" style="background: transparent; border: none; font-size: 1.2rem;">&times;</button>
+  </div>
+  <div id="generadorImagenesContainer"></div>
+  
+  <!-- 📸 Galería de imágenes guardadas - Actualizado -->
+  <div class="galeria-container">
+    <div id="galeriaImagenesGuardadas" 
+         style="display: grid; 
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); 
+                gap: 1rem; 
+                padding: 0.5rem;
+                overflow-y: auto;"></div>
+  </div>
+</div>
+
+
+<!-- ✅ Modal para compartir imagen -->
+<div id="modalCompartirImagenFirebase" class="modal-compartir-firebase" style="display: none;">
+  <div class="modal-contenido">
+    <h4>Compartir Imagen</h4>
+
+    <label for="compartirNivel"><strong>Nivel:</strong></label>
+    <select id="compartirNivel">
+      <option value="">-- Selecciona nivel --</option>
+      <option value="Preescolar">Preescolar</option>
+      <option value="Primaria">Primaria</option>
+      <option value="Secundaria">Secundaria</option>
+    </select>
+
+    <label for="compartirGrado"><strong>Grado:</strong></label>
+    <select id="compartirGrado">
+      <option value="">-- Selecciona grado --</option>
+    </select>
+
+    <label for="compartirTrimestre"><strong>Trimestre:</strong></label>
+    <select id="compartirTrimestre">
+      <option value="">-- Selecciona trimestre --</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+    </select>
+
+    <label for="compartirUnidad"><strong>Unidad:</strong></label>
+    <select id="compartirUnidad">
+      <option value="">-- Selecciona unidad --</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+      <option value="7">7</option>
+      <option value="8">8</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+      <option value="11">11</option>
+      <option value="12">12</option>
+      <option value="13">13</option>
+      <option value="14">14</option>
+      <option value="15">15</option>
+    </select>
+    
+
+    <div style="margin-top: 1rem; text-align: right;">
+      <button id="cancelarCompartirBtn">Cancelar</button>
+      <button id="confirmarCompartirBtn">Compartir</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- Trumbowyg JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/trumbowyg.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Bootstrap Select JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+
+<script>
+  // Inicializar los selectpickers
+  document.addEventListener('DOMContentLoaded', function () {
+    $('.selectpicker').selectpicker('render');
+  });
+</script>
+
+<!-- Plugins opcionales (recomendados) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/gh/evidenceprime/html-docx-js@0.3.1/dist/html-docx.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.3/vanilla-tilt.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>  
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/fontsize/trumbowyg.fontsize.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/highlight/trumbowyg.highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/resizimg/trumbowyg.resizimg.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/pasteimage/trumbowyg.pasteimage.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/base64/trumbowyg.base64.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/table/trumbowyg.table.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/noembed/trumbowyg.noembed.min.js"></script>
+
+
+
+
+<script type="module" src="contenidoUnidad.js"></script>
+<script type="module" src="sidebar.js"></script>
+<script type="module" src="chatbot.js"></script>
+<script type="module" src="generarImagenes.js"></script>
+
+</body>
+</html>

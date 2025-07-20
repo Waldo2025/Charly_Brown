@@ -1,0 +1,164 @@
+/* === NUEVO SIDEBAR MODERNO === */
+#sidebar {
+  position: fixed;
+  top: 70px;
+  left: 0;
+  height: calc(100% - 70px); /* <-- esto es más seguro */
+  width: 60px;
+  background: linear-gradient(180deg,  #7c3b85, #3a4c8e);
+  color: white;
+  transition: width 0.3s ease;
+  overflow: hidden;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 2rem; /* 👈 esto asegura que el logout quede abajo */
+}
+
+
+#sidebar .sidebar-menu {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.sidebar-link span {
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#sidebar.show .sidebar-link span {
+  opacity: 1;
+}
+
+.sidebar-link:hover {
+  background-color: #885a38;
+}
+
+.sidebar-logout {
+  width: 100%;
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+
+
+
+.sidebar-logout .sidebar-link span {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+}
+
+#sidebar.show .sidebar-logout .sidebar-link span {
+  opacity: 1;
+}
+
+.sidebar-logout .sidebar-link:hover {
+  background-color: #dc3545;
+  color: white;
+}
+
+
+/* === BOTÓN TOGGLE === */
+#menuToggle {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  margin-top: -1rem;
+  transition: transform 0.2s ease;
+}
+
+#menuToggle:hover {
+  transform: scale(1.1);
+}
+
+
+
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+  #sidebar {
+    position: fixed;
+    top: 100px;
+    left: 0;
+    height: 100%;
+    width: 60px;
+    background: linear-gradient(180deg, #7c3b85, #3a4c8e);
+    color: white;
+    transition: width 0.3s ease;
+    overflow: hidden;
+    z-index: 998;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 2rem;
+}
+  
+}
+
+
+
+
+#sidebar.show ~ #app-container {
+  margin-left: 200px; /* mismo valor que el width del sidebar expandido */
+}
+
+
+.bootstrap-select .dropdown-toggle .filter-option-inner-inner {
+  overflow: hidden;
+  font-size: small;
+}
+
+#sidebar.show {
+  width: 250px; /* Ancho normal cuando el sidebar está abierto */
+}
+
+#sidebar.sidebar-collapsed {
+  width: 60px; /* Ancho cuando el sidebar está colapsado */
+}
+
+/* Aseguramos que el contenido del sidebar se mantenga en orden */
+.sidebar-menu {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  height: calc(100% - 50px); /* Deja espacio para el logout */
+  padding-bottom: 20px;
+}
+
+
+/* Estilo de los iconos */
+.sidebar-link i {
+  margin-right: 10px; /* Espacio entre el icono y el texto */
+}
+
+/* Cuando el sidebar está colapsado, ocultar el texto */
+#sidebar.sidebar-collapsed .sidebar-link span {
+  display: none; /* Oculta el texto cuando el sidebar está colapsado */
+}
+
+/* Estilo para los links */
+.sidebar-link {
+  display: flex !important;
+  align-items: center; /* Alinea el icono y el texto */
+  padding: 10px 15px;
+  text-decoration: none;
+  color: #fff;
+  transition: background-color 0.3s ease;
+}
+
+.sidebar-link:hover {
+  background-color: #3b3b3b; /* Color de fondo al pasar el ratón */
+  width: 100%;
+}
+

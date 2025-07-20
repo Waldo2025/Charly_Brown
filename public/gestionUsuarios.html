@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Gestión de Usuarios - LibrosASC</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/2.2.2/css/dataTables.dataTables.min.css">
+  
+  <!-- Bootstrap Select CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="contenidoUnidad.css">
+  <link rel="stylesheet" href="chatbot.css">
+  <link rel="stylesheet" href="header.css">
+  <link rel="stylesheet" href="gestionUsuarios.css">
+</head>
+<body>
+  <header class="main-header">
+    <div class="header-content">
+      <div class="logo-area">
+        <h4>Gestión de usuarios</h4>
+      </div>
+    </div>
+  </header>
+
+  
+  
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="sidebar-menu">
+      <a href="home.html" class="sidebar-link">
+        <i class="fas fa-home"></i>
+        <span>Inicio</span>
+      </a> 
+      <!--
+      <a href="unidadHome.html" class="sidebar-link">
+        <i class="fas fa-layer-group"></i>
+        <span>Unidades</span>
+      </a> -->
+      <a  href="generarLectura.html"  class="sidebar-link">
+        <i class="fas fa-chart-line"></i>
+        <span>Análisis Editorial</span>
+      </a>
+      <a href="perfil.html" class="sidebar-link">
+        <i class="fas fa-user"></i>
+        <span>Perfil</span>
+      </a>
+      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink">
+        <i class="fas fa-users-cog"></i>
+        <span>Usuarios</span>
+      </a>
+      <a href="chat.html" class="sidebar-link" id="chatLink">
+        <i class="fas fa-comment"></i>
+        <span>Chat</span>
+      </a>
+      <a href="#" class="sidebar-link" id="logoutLink">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Cerrar sesión</span>
+      </a>
+
+
+    </div>
+</div>
+
+
+
+  <div id="chatbotBubble">
+    <img src="logoCharly2.png" alt="Logo" class="logo" />
+  </div>
+
+  <div class="chatbot-container resizable" id="chatbotContainer" data-x="0">
+    <div class="chatbot-resize-handle"></div>
+
+    <div class="chatbot-header">
+      <div class="chatbot-brand">
+        <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
+        <span>Soy <b>Charly</b>, tu asistente</span>
+      </div>
+      <button class="chatbot-close" id="chatbotClose">&times;</button>
+    </div>
+
+    <div class="chatbot-messages" id="chatbotMessages"></div>
+
+    <div class="chatbot-input">
+      <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
+      <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>
+
+
+
+  <div class="container mt-4" style="margin-top: 100px !important; margin-left: 60px !important;">
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">Gestión de Usuarios</h5>
+        <button class="btn btn-success" id="btnAgregarUsuario">
+          <i class="fas fa-plus me-2"></i>Nuevo Usuario
+        </button>
+      </div>
+    
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4 col-sm-12">
+            <input type="text" class="form-control" id="searchName" placeholder="Buscar por nombre">
+          </div>
+          <div class="col-md-4 col-sm-12">
+            <input type="text" class="form-control" id="searchArea" placeholder="Buscar por área">
+          </div>
+          <div class="col-md-4 col-sm-12">
+            <select class="form-select" id="searchRole">
+              <option value="">Todos los roles</option>
+              <option value="admin">Administrador</option>
+              <option value="author">Author</option>
+              <option value="editor">Editor</option>
+              <option value="designer">Designer</option>
+              <option value="developer">Developer</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+        
+    <div class="table-responsive">
+      <table id="myTable" class="table table-bordered">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Área</th>
+            <th>Rol</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    
+
+<!-- Modal para editar el rol de un usuario -->
+<div class="modal fade" id="editRoleModal" tabindex="-1" aria-labelledby="editRoleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editRoleModalLabel">Editar Rol de Usuario</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label for="newRole">Nuevo rol</label>
+                <select class="form-control" id="newRole">
+                    <option value="">Seleccione un rol</option>
+                    <option value="admin">Administrador</option>
+                    <option value="author">Author</option>
+                    <option value="editor">Editor</option>
+                    <option value="designer">Designer</option>
+                    <option value="developer">Developer</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="saveRoleButton">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Modal para crear un nuevo usuario -->
+<div class="modal fade" id="newUserModal" tabindex="-1" aria-labelledby="newUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" id="newUserForm">
+      <div class="modal-header">
+        <h5 class="modal-title" id="newUserModalLabel">Crear Nuevo Usuario</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <input class="form-control mb-2" type="text" id="newFirstName" placeholder="Nombre" required>
+        <input class="form-control mb-2" type="text" id="newLastName" placeholder="Apellido" required>
+        <input class="form-control mb-2" type="email" id="newEmail" placeholder="Correo electrónico" required>
+        <input class="form-control mb-2" type="text" id="newArea" placeholder="Área" required>
+        <select class="form-control mb-2" id="newRoleSelect" required>
+          <option value="">Seleccione un rol</option>
+          <option value="admin">Administrador</option>
+          <option value="author">Author</option>
+          <option value="editor">Editor</option>
+          <option value="designer">Designer</option>
+          <option value="developer">Developer</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Crear Usuario</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.3/vanilla-tilt.min.js"></script>
+  <script type="module" src="chatbot.js"></script>
+  <script type="module" src="sidebar.js"></script>
+  <script type="module" src="gestionUsuarios.js"></script>
+  
+  <!-- DataTables JS -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/2.2.2/js/dataTables.min.js"></script>
+
+</body>
+</html>

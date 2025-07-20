@@ -1,0 +1,106 @@
+.masonry-gallery {
+  column-count: 4;
+  column-gap: 12px;
+  padding: 10px 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.masonry-gallery img {
+  width: 100%;              /* ⚠️ Importante: llena solo su columna */
+  display: block;           /* evita que se comporten como inline */
+  margin-bottom: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  break-inside: avoid;      /* evita que se rompan entre columnas */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease;
+}
+  
+  .masonry-gallery img:hover {
+    transform: scale(1.01);
+  }
+  
+  /* Lightbox */
+  #lightboxOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+  }
+  
+  #lightboxOverlay img {
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 10px;
+  }
+  
+
+  .gen-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+
+.gen-form label {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  color: #333;
+}
+
+.gen-form textarea,
+.gen-form select,
+.gen-form input[type="number"],
+.gen-form input[type="text"] {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.gen-form textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.gen-form button {
+  background-color: #673ab7;
+  color: white;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+}
+
+.gen-form button:hover {
+  background-color: #512da8;
+}
+
+select, textarea, input {
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    font-family: sans-serif;
+    font-size: 14px;
+  }
+
+  #gen_results {
+    overflow-x: scroll;
+    height: 410vh;
+  }

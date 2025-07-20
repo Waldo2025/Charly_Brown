@@ -1,0 +1,469 @@
+/* Estilos generales */
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #3d164a;
+    color: #ffffff;
+    margin: 0;
+    padding: 0;
+  }
+  
+
+/* Chat Container */
+#chat-container {
+    height: calc(100vh - 80px);
+    width: calc(100% - 60px);
+    margin-left: 60px;
+    margin-top: 80px;
+    position: fixed;
+    background-color: #f0f2f5;
+    display: flex;
+}
+
+/* Contact List */
+.contacts-list {
+    background: #fff;
+    border-right: 1px solid #ccc;
+    height: 100%;
+    overflow-y: auto;
+    padding: 10px;
+    width: 60px; /* Contraído */
+    transition: width 0.3s ease;
+    position: relative;
+    margin-top: -7px;
+}
+
+.contacts-list:hover {
+    width: 300px; /* Expandido */
+}
+
+/* Ocultar texto cuando está contraído */
+.contacts-list .contact-button span {
+    display: none;
+    margin-left: 8px;
+    font-size: small;
+}
+
+#toggleFavorites {
+    display: none;
+  }
+  
+
+/* Mostrar nombres solo cuando se expande */
+@media (min-width: 769px) {
+    .contacts-list:hover .contact-button span {
+        display: inline;
+    }
+}
+
+/* SIEMPRE mostrar nombres en móvil */
+@media (max-width: 768px) {
+    .contacts-list .contact-button span {
+        display: inline !important;
+    }
+}
+
+
+/* Por defecto en escritorio */
+@media (min-width: 769px) {
+    .contacts-header {
+        display: none;
+    }
+
+    .contacts-list:hover .contacts-header {
+        display: block;
+    }
+}
+
+/* SIEMPRE visible en móvil */
+@media (max-width: 768px) {
+    .contacts-header {
+        display: block !important;
+    }
+}
+
+
+.contacts-header {
+    margin-bottom: 10px;
+}
+
+.contact-button {
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #000;
+    transition: background 0.2s ease;
+  }
+  
+  .contact-button:hover {
+    background-color: #f0eaff;
+    cursor: pointer;
+  }
+  
+  .contact-button.selected {
+    background-color: #d7cfff;
+    border-left: 4px solid #8a4af3;
+    font-weight: bold;
+    color: #333;
+  }
+  
+
+#users-list li button.contact-button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 10px;
+    font-size: 16px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+}
+
+#users-list li button.contact-button:hover {
+    background: #f7f7f7;
+}
+
+#chat-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #eadfe8;
+    flex: 1; /* ✅ en lugar de width fija */
+    display: none; /* OJO: esto lo controlamos por clase */
+    width: 86vh;
+    margin-top: -9px;
+}
+
+
+
+.h5, h5 {
+    font-size: small;
+}
+
+.h6, h6 {
+    font-size: small;
+    color: black;
+}
+
+#chat-header {
+    background: #14075e;
+    color: white;
+    padding: 10px;
+    font-size: small;
+}
+
+#chat-box {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    background: #eadfe8;
+    display: flex;
+    flex-direction: column;
+}
+
+#messages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#messages div {
+    max-width: 60%;
+    padding: 10px 15px;
+    border-radius: 10px;
+    word-break: break-word;
+    font-size: small;
+    display: block;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    color: black;
+}
+
+.sent {
+    background: #d5c6f8;
+    align-self: flex-end;
+    border-bottom-right-radius: 0;
+}
+
+.received {
+    background: #ffffff;
+    align-self: flex-start;
+    border-bottom-left-radius: 0;
+}
+
+
+/* Chat Input */
+.chat-input {
+    display: flex;
+    align-items: center;
+    gap: 0px;
+    padding: 10px;
+    background: #fff;
+    border-radius: 30px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+
+
+
+.chat-input input[type="text"] {
+    flex: 1;
+    border-radius: 20px;
+}
+
+.chat-input button {
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+}
+
+#voiceWaveform {
+    background-color: #f5f5f5;
+}
+
+
+
+.chat-input input {
+    border-radius: 20px;
+}
+
+.chat-input button {
+    border-radius: 50%;
+}
+
+#attachImageBtn, #voiceBtn {
+    background-color: transparent;
+    color: gray;
+    border: 0px;
+}
+
+#send-btn {
+    background-color: transparent;
+    color: rgb(0, 81, 255);
+    border: 0px;
+}
+
+.form-control {
+    font-size: small;
+}
+
+#users-list li button.contact-button span small {
+    font-size: 12px;
+    color: #888;
+}
+
+/* 🌐 Estilos adaptables para móviles */
+/* Diseño WhatsApp estilo móvil: <768px */
+@media (max-width: 768px) {
+
+    #toggleFavorites {
+        display: block !important;
+        margin-left: 14px !important;
+        color: #fff100;
+        background-color: transparent;
+        border: 0;
+      }
+    #chat-container {
+        flex-direction: column;
+        width: 100%;
+        margin: 0;
+        position: relative;
+        height: 100vh;
+    }
+
+    .contacts-list, #chat-panel {
+        position: absolute;
+        top: 59px;
+        left: 60px; /* Sidebar fijo */
+        height: calc(100vh - 50px); /* Ajustado al header */
+        width: calc(100vw - 60px); /* 100% del ancho menos sidebar */
+        overflow-y: auto;
+        z-index: 1;
+    }
+
+    /* Para ocultar uno u otro */
+    .mobile-hidden {
+        display: none !important;
+    }
+
+    #chat-header .back-button {
+        display: inline-block;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 20px;
+        margin-right: 10px;
+    }
+
+    .main-header {
+        left: 0 !important;
+        width: 100% !important;
+        height: 50px;
+    }
+
+    .header-content {
+        flex-wrap: wrap;
+        justify-content: center;
+        height: 32px !important;
+    }
+
+    #sidebar {
+        position: fixed;
+        top: 50px !important;
+        left: 0;
+        height: 100%;
+        width: 60px;
+        background: linear-gradient(180deg, #7c3b85, #3a4c8e);
+        color: white;
+        transition: width 0.3s ease;
+        overflow: hidden;
+        z-index: 998;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 2rem;
+    }
+  }
+  
+
+
+
+  #file-panel {
+  width: 220px;
+  border-left: 1px solid #ccc;
+  background: #f9f9f9;
+  padding: 10px;
+  box-shadow: -1px 0 2px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+}
+
+.file-panel-header {
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 5px;
+  margin-bottom: 10px;
+}
+
+.file-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+
+
+.favorite-btn {
+    background: none;
+    border: none;
+    color: #593b62;
+    font-size: 16px;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  
+  .favorite-btn.favorited {
+    color: #fff100;
+  }
+  
+  .favorite-item {
+    padding: 5px;
+    border-bottom: 1px solid #ddd;
+    font-size: 14px;
+    display: flex;
+    position: relative;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #fef9e7;
+    color: #575447;
+  }
+  
+
+  @media (max-width: 768px) {
+    #file-panel {
+      position: absolute;
+      top: 59px;
+      left: 60px;
+      width: calc(100vw - 60px);
+      height: calc(100vh - 59px);
+      background: #fffef5;
+      z-index: 2;
+      display: none; /* por defecto oculto */
+      overflow-y: auto;
+    }
+  
+    #file-panel.mobile-visible {
+      display: flex !important;
+      flex-direction: column;
+    }
+    #toggleFavorites {
+        margin-left: 14px !important;
+        color: #fff100;
+        background-color: transparent;
+        border: 0px;
+    }
+
+    #messages div img {
+        width: 74%;
+    }
+
+    audio {
+        width: 100%;
+        height: 54px;
+        min-width: 100px;
+    }
+    
+  }
+  
+
+  .favorite-item small.favorite-date {
+    display: none;
+}
+
+@media (hover: none) {
+    .favorite-item.clicked small.favorite-date {
+        display: block;
+    }
+}
+
+
+#users-list {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+#users-list .accordion-section {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: white;
+    overflow: hidden;
+}
+
+.accordion-header {
+    background: linear-gradient(to right, #7c3b85, #3a4c8e, #c44b84);
+    padding: 10px;
+    font-weight: normal;
+    font-size: small;
+}
+
+.contacts-list ul {
+    padding-left: 0;
+    margin-bottom: 0;
+}
+
+.contacts-list li {
+    list-style: none;
+}
+
+#chatLink { position: relative; }
+#chat-notification-badge {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: inline-block;
+}

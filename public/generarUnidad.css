@@ -1,0 +1,459 @@
+/* === Modal general === */
+.modal {
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: none;
+  }
+  
+  /* === Contenido del modal === */
+  .modal-content {
+    background-color: #fff;
+    margin: 4% auto;
+    padding: 30px 40px;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 90%;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    font-size: 14px;
+    line-height: 1.4;
+    font-family: Arial, sans-serif;
+  }
+  
+  /* === Botón cerrar === */
+  .modal .close {
+    color: #555;
+    float: right;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .modal .close:hover {
+    color: #000;
+  }
+  
+  /* === Formulario de selección (dos columnas) === */
+  .form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 20px;
+  }
+  .form-col {
+    flex: 1 1 220px;
+    min-width: 180px;
+  }
+  label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: bold;
+    font-size: 13px;
+  }
+  select,
+  input[type="number"],
+  input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 13px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  /* === Sección de campos de secuencia (dos columnas) === */
+
+  /* === Cada fila de campo === */
+  .campo-secuencia {
+    display: flow;
+    align-items: flex-start;
+    gap: 10px;
+    border-bottom: 1px dotted #ccc;
+    padding: 8px 0;
+  }
+  
+  /* === Checkbox === */
+  .campo-secuencia input[type="checkbox"] {
+    margin-top: 6px;
+  }
+  
+  /* === Etiqueta de campo === */
+  .campo-secuencia label {
+    flex: 1;
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  
+  /* === Input numérico para # ejercicios === */
+  .campo-secuencia input[type="number"] {
+    width: 80px;
+    font-size: 13px;
+    padding: 4px 6px;
+  }
+  
+  /* === Resultado generado === */
+  #resultadoUnidadGenerada {
+    margin-top: 30px;
+    padding: 15px;
+    border: 1px solid #e0e0e0;
+    background: #fafafa;
+    border-radius: 8px;
+    margin-bottom: 20px;
+  }
+  
+  /* === Botón principal === */
+  #btnGenerarUnidadEjercicios {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 14px;
+    background-color: #4a00e0;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #btnGenerarUnidadEjercicios:hover {
+    background-color: #3600b5;
+  }
+  
+
+  #modalGenerarUnidad .modal-content {
+    max-width: 90vw;
+    width: 90%;
+    font-size: 0.9rem;
+    padding: 20px;
+    top: -60px;
+  }
+  
+  /* Fila de 2 columnas para selectores */
+  .form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 15px;
+  }
+  .form-col {
+    flex: 1 1 45%;
+    min-width: 180px;
+  }
+  
+  /* Categoría con título */
+  #camposSecuencia h3 {
+    margin-top: 25px;
+    margin-bottom: 10px;
+    font-size: 1rem;
+    color: #333;
+  }
+  
+  /* Fieldsets para temas agrupados */
+  #camposSecuencia fieldset {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 25px;
+    border: 1px solid #ccc;
+    padding: 10px 15px;
+    border-radius: 6px;
+  }
+  #camposSecuencia legend {
+    grid-column: 1 / -1;
+    font-weight: bold;
+    padding-bottom: 5px;
+  }
+  
+  /* Cada línea de campo: checkbox + label + input */
+  .campo-secuencia {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border-bottom: 1px dotted #ccc;
+    padding-bottom: 6px;
+  }
+  .campo-secuencia label {
+    flex: 1;
+  }
+  .campo-secuencia input[type="checkbox"] {
+    margin-top: 6px;
+  }
+  .campo-secuencia input[type="number"] {
+    width: 70px;
+    font-size: 0.9rem;
+    padding: 4px;
+  }
+  .tabla-campos {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+  }
+  .tabla-campos thead {
+    background-color: #f0f0f0 !important;
+    border-radius: 0px;
+  }
+  .tabla-campos th, .tabla-campos td {
+    padding: 8px;
+    border: 1px solid #ccc;
+    vertical-align: top;
+    text-align: left;
+  }
+  .tabla-campos td input[type="number"] {
+    width: 60px;
+    padding: 4px;
+  }
+    
+
+
+  .tabla-secuencia {
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 0.9rem;
+  }
+  
+  .tabla-secuencia th,
+  .tabla-secuencia td {
+    border: 1px solid #ccc;
+    padding: 6px;
+    vertical-align: top;
+    text-align: left;
+  }
+  
+  .tabla-secuencia th {
+    background: #f8f8f8;
+  }
+  
+.etiqueta-transversal {
+  background-color: #d4edda;
+  color: #155724;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  display: inline-block;
+  margin-top: 5px;
+}
+
+
+.unidad-card {
+  background: #ffffff;
+  border: 1px solid #ddd;
+  border-left: 6px solid #6c63ff;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 10px 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.unidad-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.unidad-card h4 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.unidad-card .unidad-info {
+  font-size: 14px;
+  color: #555;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+
+
+#editorUnidadContenido button {
+  background: #fff;
+  border: 1px solid #ccc;
+}
+
+#listaUsuariosCompartir label {
+  padding: 6px 8px;
+  background: #f8f8f8;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+
+.lista-usuarios {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px;
+  background-color: #fff;
+}
+
+.usuario-item {
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 15px;
+  transition: background 0.2s;
+}
+
+input {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-family: sans-serif;
+  font-size: 14px;
+  min-width: 15%;
+}
+
+
+#tablaUnidades {
+  font-family: 'Segoe UI', sans-serif;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+#tablaUnidades th {
+  background-color: #dce6f9;
+  color: #333;
+  padding: 10px;
+  text-align: left;
+  border-radius: 0px;
+}
+
+#tablaUnidades td {
+  padding: 10px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+#tablaUnidades tr:hover {
+  background-color: #f9f9f9;
+}
+
+/* Quitar background y borde de los botones de acción */
+.btn-editar i,
+.btn-eliminar i,
+.btn-compartir i,
+.btn-copiar {
+  font-size: 16px;
+  color: #5c47d1;
+  cursor: pointer;
+  margin-right: 10px;
+  transition: transform 0.2s ease;
+  background-color: transparent;
+}
+
+.btn-editar i:hover,
+.btn-eliminar i:hover,
+.btn-compartir i:hover,
+.btn-copiar:hover {
+  transform: scale(1.2);
+  color: #2c1da1;
+  background-color: transparent !important;
+}
+
+/* Quitar estilos heredados de botones */
+.btn-editar,
+.btn-eliminar,
+.btn-compartir {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background-color: transparent !important;
+}
+
+.dataTables_wrapper .dataTables_filter input {
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  padding: 5px;
+  background-color: transparent;
+  color: inherit;
+  margin-left: 3px;
+  width: 200px;
+}
+
+.btn-generar-categoria {
+  background-color: #007bff;
+  border: 1px solid #ccc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  position: absolute;
+  right: 20px;
+  margin-top: 20px;
+}
+
+.btn-generar-categoria:hover {
+  background-color: #75aeeb;
+  color: white;
+  border-color: #007bff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.btn-generar-categoria:active {
+  transform: scale(0.97);
+  background-color: #0056b3;
+  border-color: #0056b3;
+}
+
+
+.notaMaestro {
+  background-color: #fff9c4; /* amarillo suave */
+  border-left: 6px solid #fbc02d; /* línea decorativa amarilla intensa */
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: 2rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.notaMaestro strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #795548; /* café suave */
+  font-size: 1rem;
+}
+
+
+/* Añade estas reglas */
+.activity > p > span {
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+.steps {
+  margin-top: 8px;
+  padding-left: 20px;
+}
+
+.answer {
+  margin-top: 10px;
+  font-style: italic;
+}
+
+
+.generando {
+  color: #666;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 5px;
+  margin: 10px 0;
+  border: 1px solid #eee;
+}
+
+#stream-content {
+  min-height: 100px;
+  font-family: monospace;
+  white-space: pre-wrap;
+}

@@ -1,0 +1,10 @@
+{
+    "appId": "com.charlybrown.ascapp",
+    "appName": "CharlyBrown",
+    "webDir": "www",
+    "bundledWebRuntime": false,
+    "server": {
+      "androidScheme": "https"
+    }
+  }
+  
