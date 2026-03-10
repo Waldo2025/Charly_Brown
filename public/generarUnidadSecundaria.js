@@ -16,7 +16,7 @@ const on = (id, event, handler) => {
    CONFIGURACIÓN FIREBASE
 ========================= */
 const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",

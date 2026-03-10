@@ -25,7 +25,7 @@ fi
 # Allow Firebase Web apiKey (public by design), but block other AIza keys.
 AZ_LINES="$(rg -n -S 'AIza[0-9A-Za-z_-]{20,}' . "${EXCLUDES[@]}" || true)"
 if [[ -n "$AZ_LINES" ]]; then
-  FILTERED="$(printf '%s\n' "$AZ_LINES" | rg -v 'apiKey\s*:\s*"AIza|firebase-web-config\.js' || true)"
+  FILTERED="$(printf '%s\n' "$AZ_LINES" | rg -v 'apiKey\s*:\s*.*"AIza|firebase-web-config\.js' || true)"
   if [[ -n "$FILTERED" ]]; then
     printf '%s\n' "$FILTERED"
     echo "[secret-scan] FAIL: potential non-Firebase Google API keys found"

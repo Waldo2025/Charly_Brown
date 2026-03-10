@@ -1,7 +1,7 @@
 // Firebase Web config is public by design (client SDK).
 // Keep secrets only on backend (Functions / Secret Manager).
 export const firebaseWebConfig = Object.freeze({
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",

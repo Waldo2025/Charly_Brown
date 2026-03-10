@@ -7,7 +7,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.
 const ASC_EDITOR_GEMINI_API_KEY = "__GEMINI_API_KEY_LOCAL__";
 
 const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",
