@@ -1,3 +1,4 @@
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // generarLectura.js
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
 import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
@@ -7,15 +8,7 @@ import setupImageGenerator from './imageGenerator.js';
 
 // Config
 // Configuración Firebase
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
+const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 
 // ✅ Inicializar Firebase

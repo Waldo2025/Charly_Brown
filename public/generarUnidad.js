@@ -1,3 +1,4 @@
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // generarUnidad.js
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
 import { initializeFirestore, getFirestore, addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
@@ -8,15 +9,7 @@ import { buildApiUrl } from "./api-client.js";
 import { escapeHtml, sanitizeHtml } from "./security-utils.js";
 
 // Configuración Firebase
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
+const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 let db;

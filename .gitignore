@@ -84,3 +84,6 @@ public/config.local.json
 *credentials*.json
 *.pem
 *.key
+
+# Local backup snapshots
+backups/
