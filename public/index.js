@@ -14,25 +14,27 @@ import {
   query,
   where,
 } from "https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 
-// 🔥 Configuración de Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
-  authDomain: "charly-brown.firebaseapp.com",
-  projectId: "charly-brown",
-  storageBucket: "charly-brown.firebasestorage.app",
-  messagingSenderId: "128488238449",
-  appId: "1:128488238449:web:2b99ef5c2f0272e9871ad0",
-  measurementId: "G-RL0BMDZKE6"
-};
+let app = null;
+let auth = null;
+let firestore = null;
 
-// Inicializar Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const firestore = getFirestore(app);
+try {
+  const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  firestore = getFirestore(app);
+} catch (err) {
+  const msg = err?.message || "No se pudo inicializar Firebase.";
+  alert(`Error de configuración: ${msg}`);
+}
 
 // Mostrar y ocultar modales
 document.addEventListener("DOMContentLoaded", () => {
+  if (!auth || !firestore) {
+    return;
+  }
   const loginBtn = document.getElementById("loginBtn");
   const registerBtn = document.getElementById("registerBtn");
   const userLoginBtn = document.getElementById("userLoginBtn");
@@ -73,7 +75,6 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
-        console.log("✅ Usuario autenticado:", user.email);
 
         const rolUsuario = await verificarRolUsuarioPorEmail(user.email);
         if (!rolUsuario) {
@@ -81,12 +82,13 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        console.log("🔍 Rol del usuario:", rolUsuario);
         window.location.href = "generarLectura.html"; // Redirige sin importar rol
 
       } catch (error) {
-        console.error("Error de inicio de sesión:", error.code);
         switch (error.code) {
+          case "auth/api-key-not-valid":
+            alert("Error de configuración de inicio de sesión. Contacta al administrador.");
+            break;
           case "auth/user-not-found":
             alert("El correo no está registrado.");
             break;
@@ -97,7 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("Correo inválido.");
             break;
           default:
-            alert(`Error: ${error.message}`);
+            alert("No se pudo iniciar sesión. Verifica tus datos e intenta nuevamente.");
         }
       }
     });
@@ -137,14 +139,16 @@ document.addEventListener("DOMContentLoaded", () => {
         // Esperar a que el usuario esté activo antes de redirigir
         onAuthStateChanged(auth, (user) => {
           if (user) {
-            window.location.href = "home.html";
+            window.location.href = "generarLectura.html";
           }
         });
         
 
       } catch (error) {
-        console.error("Error de registro:", error.code);
         switch (error.code) {
+          case "auth/api-key-not-valid":
+            alert("Error de configuración de registro. Contacta al administrador.");
+            break;
           case "auth/email-already-in-use":
             alert("Este correo ya está registrado.");
             break;
@@ -155,7 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
             alert("La contraseña debe tener al menos 6 caracteres.");
             break;
           default:
-            alert(`Error: ${error.message}`);
+            alert("No se pudo completar el registro. Intenta nuevamente.");
         }
       }
     });
@@ -168,11 +172,9 @@ async function verificarRolUsuarioPorEmail(email) {
   const querySnapshot = await getDocs(userQuery);
 
   if (querySnapshot.empty) {
-    console.warn("❌ No se encontró el usuario en Firestore.");
     return null;
   }
 
   const userData = querySnapshot.docs[0].data();
   return userData.role || null;
 }
-

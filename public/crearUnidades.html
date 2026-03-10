@@ -30,51 +30,7 @@
 
   <header class="main-header">
     <div class="header-content">
-      <!-- Logo -->
-      <div class="logo-area">
-        <h4>Home</h4>
-      </div>
-  
-      <!-- Buscador -->
-      <div class="search-group position-relative">
-        <i class="fas fa-search"></i>
-        <input type="text" id="searchInput" class="form-control bg-transparent text-white" placeholder="Buscar...">
-      </div>
-  
-      <!-- Filtros -->
-      <div class="filters-container">
-        <select class="selectpicker" data-style="btn-light" id="filtroNivel">
-          <option value="">Nivel</option>
-          <option value="preescolar">Preescolar</option>
-          <option value="primaria">Primaria</option>
-          <option value="secundaria">Secundaria</option>
-        </select>
-  
-        <select class="selectpicker" data-style="btn-light" id="filtroGrado">
-          <option value="">Grado</option>
-          <option value="primero">Primero</option>
-          <option value="segundo">Segundo</option>
-          <option value="tercero">Tercero</option>
-          <option value="cuarto">Cuarto</option>
-          <option value="quinto">Quinto</option>
-          <option value="sexto">Sexto</option>
-        </select>
-  
-        <select class="selectpicker" data-style="btn-light" id="filtroTrimestre">
-          <option value="">Trim</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-        </select>
-  
-        <select class="selectpicker" data-style="btn-light" id="filtroUnidad">
-          <option value="">Unidad</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-        </select>
-      </div>
+      <!-- header-content loaded from chromeLayout.js -->
     </div>
   </header> 
 
@@ -88,41 +44,10 @@
     </button>
 
     <div class="sidebar-menu">
-      <a href="home.html" class="sidebar-link">
-        <i class="fas fa-home"></i>
-        <span>Inicio</span>
-      </a>
-      <a href="unidadHome.html" class="sidebar-link">
-        <i class="fas fa-layer-group"></i>
-        <span>Unidades</span>
-      </a>
-      <a href="perfil.html" class="sidebar-link">
-        <i class="fas fa-user"></i>
-        <span>Perfil</span>
-      </a>
-      <a href="gestionUsuarios.html" class="sidebar-link" id="gestionUsuariosLink">
-        <i class="fas fa-users-cog"></i>
-        <span>Usuarios</span>
-      </a>
-      <a href="chat.html" class="sidebar-link" id="chatLink">
-        <i class="fas fa-comment"></i>
-        <span>Chat</span>
-      </a>
-      <a href="#" class="sidebar-link" id="logoutLink">
-        <i class="fas fa-sign-out-alt"></i>
-        <span>Cerrar sesión</span>
-      </a>
+      <!-- sidebar-menu loaded from chromeLayout.js -->
     </div>
   </div>
-
-
-
-  <div id="chatbotBubble">
-    <img src="logoCharly2.png" alt="Logo" class="logo" />
-  </div>
- 
- 
- <!-- Contenedor del chatbot (Sidebar) -->
+<!-- Contenedor del chatbot (Sidebar) -->
  <div class="chatbot-container" id="chatbotContainer">
   <div class="chatbot-header">
     <div class="chatbot-brand">
@@ -233,8 +158,29 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
 
   <script type="module" src="crearUnidades.js"></script>
+  <script src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
 
 
+<script>
+  (function(){
+    const load = async () => {
+      let v = '';
+      try {
+        const r = await fetch('version.json', { cache: 'no-store' });
+        const d = await r.json();
+        v = (d && d.version) ? String(d.version) : '';
+      } catch (_) {}
+      const s = document.createElement('script');
+      s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
+      document.body.appendChild(s);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', load);
+    } else {
+      load();
+    }
+  })();
+</script>
 </body>
 </html>

@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://charly-brown.web.app",
+      "http://127.0.0.1:5501",
+      "http://localhost:3000"
+    ],
+    "method": ["GET", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type"],
+    "maxAgeSeconds": 3600
+  }
+]

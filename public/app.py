@@ -12,7 +12,7 @@ app = Flask(__name__, static_url_path='', static_folder='.')
 pipeline = AutoPipelineForText2Image.from_pretrained(
     'black-forest-labs/FLUX.1-dev',
     torch_dtype=torch.float16,
-    use_auth_token="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"
+    use_auth_token="__HF_API_KEY_LOCAL__"
 ).to('cuda')
 
 # 🎯 Cargar LoRA personalizada

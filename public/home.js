@@ -1,28 +1,19 @@
 import {
   initializeApp
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
+} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-app.js";
 import {
   getFirestore, collection, query, where, getDocs, doc, 
   updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js";
 import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-auth.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { escapeHtml, safeUrl } from "./security-utils.js";
 
-// Configuración Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
-  authDomain: "charly-brown.firebaseapp.com",
-  projectId: "charly-brown",
-  storageBucket: "charly-brown.firebasestorage.app",
-  messagingSenderId: "128488238449",
-  appId: "1:128488238449:web:2b99ef5c2f0272e9871ad0",
-  measurementId: "G-RL0BMDZKE6"
-};
-
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 const db = getFirestore(app);
 const auth = getAuth(app);
 
@@ -30,7 +21,6 @@ const auth = getAuth(app);
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     await verificarRolUsuario(user);
-    console.log("Rol después de verificar:", currentUserRole);
 
     // — ocultar/mostrar “Usuarios” —
 
@@ -79,12 +69,9 @@ const verificarRolUsuario = async (user) => {
     if (userSnap.exists()) {
       const userData = userSnap.data();
       currentUserRole = userData.role || "editor"; // Asignar "editor" por defecto
-      console.log("Rol de usuario:", currentUserRole);  // Verifica el rol aquí
     } else {
-      console.warn("Usuario no encontrado en Firestore");
     }
   } else {
-    console.warn("No hay usuario autenticado.");
   }
 };
 
@@ -110,7 +97,6 @@ const obtenerNombreUsuarioActual = async (user) => {
     }
     return user.email || "Usuario sin nombre";
   } catch (error) {
-    console.warn("Error obteniendo nombre de usuario:", error);
     return user.email || "Usuario sin nombre";
   }
 };
@@ -185,9 +171,12 @@ function crearElementoComentario(comentarioData) {
   const estaSeleccionado = comentarioData.seleccionadoPor?.includes(auth.currentUser?.uid) || false;
   const totalSelecciones = comentarioData.seleccionadoPor?.length || 0;
 
+  const autorSafe = escapeHtml(comentarioData.autor || "Anónimo");
+  const comentarioSafe = escapeHtml(comentarioData.comentario || "");
+  const fechaSafe = escapeHtml(comentarioData.fecha?.toDate().toLocaleString() || "");
   comentarioElemento.innerHTML = `
     <div class="comment-header">
-      <strong>${comentarioData.autor}</strong>
+      <strong>${autorSafe}</strong>
       <div class="comment-actions">
         ${esPropietario ? `
         <i class="bx bx-trash delete-comment" title="Eliminar"></i>
@@ -202,8 +191,8 @@ function crearElementoComentario(comentarioData) {
         </span>
       </div>
     </div>
-    <div class="comment-content" contenteditable="${esPropietario}">${comentarioData.comentario}</div>
-    <small>${comentarioData.fecha?.toDate().toLocaleString() || ''}</small>
+    <div class="comment-content" contenteditable="${esPropietario}">${comentarioSafe}</div>
+    <small>${fechaSafe}</small>
   `;
 
   // Evento para resaltar texto al hacer clic en el comentario
@@ -235,7 +224,7 @@ function crearElementoComentario(comentarioData) {
   const contentEditable = comentarioElemento.querySelector('.comment-content');
   if (contentEditable && esPropietario) {
     contentEditable.addEventListener('blur', async (e) => {
-      const nuevoTexto = e.target.innerHTML;
+      const nuevoTexto = e.target.textContent || "";
       if (nuevoTexto !== comentarioData.comentario) {
         await actualizarComentario(comentarioData.id, nuevoTexto);
       }
@@ -276,7 +265,6 @@ async function toggleSeleccionComentario(comentarioId, seleccionar) {
       });
     }
   } catch (error) {
-    console.error("Error al actualizar selección de comentario:", error);
   }
 }
 
@@ -288,9 +276,7 @@ async function actualizarComentario(comentarioId, nuevoTexto) {
       comentario: nuevoTexto,
       fecha: new Date() // Actualizar fecha de modificación
     });
-    console.log("Comentario actualizado correctamente");
   } catch (error) {
-    console.error("Error al actualizar comentario:", error);
     alert("Hubo un error al actualizar el comentario");
   }
 }
@@ -300,11 +286,9 @@ async function eliminarComentario(comentarioId) {
   if (confirm("¿Estás seguro de que quieres eliminar este comentario?")) {
     try {
       await deleteDoc(doc(db, "comentarios", comentarioId));
-      console.log("Comentario eliminado correctamente");
       // Volver a renderizar los comentarios
       await renderComentarios(lecturaIdActual);
     } catch (error) {
-      console.error("Error al eliminar comentario:", error);
       alert("Hubo un error al eliminar el comentario");
     }
   }
@@ -314,7 +298,6 @@ async function eliminarComentario(comentarioId) {
 
 function resaltarTextoComentado(posicion, longitud, texto) {
  const editor = document.getElementById("modalTextoLectura");
- if (!editor) return console.warn("No existe #modalTextoLectura");
 
  // 1) limpiar resaltados previos
  editor.querySelectorAll('.highlight-comment').forEach(s => s.classList.remove('highlight-comment'));
@@ -359,7 +342,6 @@ function resaltarTextoComentado(posicion, longitud, texto) {
  }
 
  if (!startNode || !endNode) {
-   return console.warn("No pude ubicar nodos de texto para", posicion, longitud);
  }
 
  // 5) envolver sólo el fragmento deseado
@@ -466,7 +448,6 @@ const renderLecturas = () => {
           const userSnap = await getDoc(doc(db, "users", data.userId));
           usuariosCache.set(data.userId, userSnap.exists() ? userSnap.data() : null);
         } catch (e) {
-          console.warn("Error obteniendo usuario:", e);
         }
       }
       const u = usuariosCache.get(data.userId);
@@ -481,7 +462,6 @@ const renderLecturas = () => {
           const unidadSnap = await getDoc(doc(db, "Unidades", data.unidadId));
           unidadesCache.set(data.unidadId, unidadSnap.exists() ? unidadSnap.data() : null);
         } catch (e) {
-          console.warn("Error obteniendo unidad:", e);
         }
       }
       uUnidad = unidadesCache.get(data.unidadId);
@@ -539,23 +519,31 @@ const renderLecturas = () => {
       }
 
       const previewTexto = stripHTML(localStorage.getItem(`lectura_${docId}`) || "").slice(0, 280);
+      const autorNombreSafe = escapeHtml(autorNombre || "Autor desconocido");
+      const nombreUnidadSafe = escapeHtml(nombreUnidad || "-");
+      const materiaSafe = escapeHtml(materia || "-");
+      const nivelSafe = escapeHtml(nivel || "-");
+      const gradoSafe = escapeHtml(grado || "-");
+      const trimestreSafe = escapeHtml(trimestre || "-");
+      const numeroUnidadSafe = escapeHtml(numeroUnidad || "-");
+      const previewTextoSafe = escapeHtml(previewTexto || "");
 
       item.innerHTML = `
         <div class="lectura-header" style="color: #fff; padding: 0.75rem; border-radius: 8px 8px 0 0;">
-          <div><strong>${autorNombre}</strong></div>
+          <div><strong>${autorNombreSafe}</strong></div>
           <div style="font-size: smaller; margin-top: 0.3rem;">
-            <strong>Tema:</strong> ${nombreUnidad} &nbsp;|&nbsp;
-          <strong>Materia:</strong> ${materia} &nbsp;|&nbsp;
-          <strong>Nivel:</strong> ${nivel} &nbsp;|&nbsp;
-          <strong>Grado:</strong> ${grado} &nbsp;|&nbsp;
-          <strong>Trimestre:</strong> ${trimestre} &nbsp;|&nbsp;
-          <strong>Unidad:</strong> ${numeroUnidad}
+            <strong>Tema:</strong> ${nombreUnidadSafe} &nbsp;|&nbsp;
+          <strong>Materia:</strong> ${materiaSafe} &nbsp;|&nbsp;
+          <strong>Nivel:</strong> ${nivelSafe} &nbsp;|&nbsp;
+          <strong>Grado:</strong> ${gradoSafe} &nbsp;|&nbsp;
+          <strong>Trimestre:</strong> ${trimestreSafe} &nbsp;|&nbsp;
+          <strong>Unidad:</strong> ${numeroUnidadSafe}
 
           </div>
         </div>
 
         <div class="preview-lectura" style="font-size: smaller; margin: 0.75rem 0; padding: 0.5rem; border-radius: 6px; margin-top: 100px !important;">
-          ${previewTexto}...
+          ${previewTextoSafe}...
         </div>
 
         <div class="acciones-lectura">
@@ -754,7 +742,6 @@ const configurarEventos = () => {
       // Agregar comentario en Firestore
       await agregarComentario(seleccion, texto); // Usamos la función para agregar comentario
     } catch (err) {
-      console.error("Error al comentar:", err);
     }
   }
 
@@ -814,7 +801,6 @@ const configurarEventos = () => {
           item.remove();
         }
       } catch (err) {
-        console.error("❌ Error al actualizar estado de archivo:", err);
         alert("Ocurrió un error al archivar/desarchivar.");
       }
     }
@@ -866,7 +852,6 @@ const configurarEventos = () => {
           localStorage.setItem(`lectura_${id}`, textoGuardado);
         }
       } catch (err) {
-        console.warn("Error obteniendo lectura:", err);
       }
       if (!lecturaDoc) {
         alert("❌ La lectura no se encontró en Firestore.");
@@ -971,7 +956,6 @@ const configurarEventos = () => {
         document.getElementById("btnGuardarLectura").style.display = "none";
   
       } catch (err) {
-        console.error("Error al actualizar lectura:", err);
         alert("Hubo un error al guardar.");
       }
     }
@@ -1327,7 +1311,6 @@ async function agregarComentario(seccion, comentario) {
       document.getElementById("inputComentario").value = "";
     }
   } catch (error) {
-    console.error("Error al agregar comentario:", error);
   }
 }
 
@@ -1505,11 +1488,9 @@ function verificarContenidoAntesExportar() {
   
   // Verificar acentos
   const tieneAcentos = /[áéíóúÁÉÍÓÚñÑ]/.test(contenido);
-  if (!tieneAcentos) console.warn("No se detectaron acentos en el texto");
   
   // Verificar estilos
   const tieneEstiloTexto = /<ParaStyle:TEXTO>/.test(convertirNodo(divPrueba));
-  if (!tieneEstiloTexto) console.warn("No se detectó el estilo TEXTO en la conversión");
   
   return { tieneAcentos, tieneEstiloTexto };
 }
@@ -1542,7 +1523,6 @@ function exportarLecturaComoTaggedText() {
 
   // Convertir texto a Latin1 de forma segura
   const latin1Text = unescape(encodeURIComponent(taggedText)); // convierte a ISO-8859-1
-  console.log("TaggedText generado:", taggedText);
 
   // Crear data URL forzado a Latin1 para simular descarga
   const blob = new Blob([latin1Text], { type: "text/plain;charset=iso-8859-1" });
@@ -1628,7 +1608,6 @@ function stripHTML(html) {
         });
         await renderDesdeArray(imgsCacheadas);
       } catch (err) {
-        console.warn("⚠️ Error leyendo cache de imágenes:", err);
       }
     }
   
@@ -1701,12 +1680,18 @@ function stripHTML(html) {
           const userSnap = await getDoc(doc(db, "users", data.uid));
           usuariosCache.set(data.uid, userSnap.exists() ? userSnap.data() : null);
         } catch (err) {
-          console.warn("❗ Error obteniendo autor:", err);
         }
       }
   
       const u = usuariosCache.get(data.uid);
       if (u) autorNombre = `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email || data.uid;
+      const autorNombreSafe = escapeHtml(autorNombre || "Autor desconocido");
+      const nivelSafe = escapeHtml(data.nivel || "-");
+      const gradoSafe = escapeHtml(data.grado || "-");
+      const trimestreSafe = escapeHtml(data.trimestre || "-");
+      const unidadSafe = escapeHtml(data.unidad || "-");
+      const nombreSafe = escapeHtml(data.nombre || "imagen");
+      const imageUrlSafe = safeUrl(data.url, "#");
   
       const item = document.createElement("div");
       item.className = "item-imagen";
@@ -1719,21 +1704,21 @@ function stripHTML(html) {
       item.innerHTML = `
         <div class="imagen-tarjeta">
           <div class="imagen-preview">
-            <img src="${data.url}" alt="${data.nombre}" />
+            <img src="${imageUrlSafe}" alt="${nombreSafe}" />
           </div>
           <div class="info-preview" style="flex: 1; color: #222;">
-            <div style="font-weight: bold; margin-bottom: 0.5rem; font-size: 1rem;">Autor: ${autorNombre}</div>
+            <div style="font-weight: bold; margin-bottom: 0.5rem; font-size: 1rem;">Autor: ${autorNombreSafe}</div>
             <div style="margin-bottom: 0.4rem;">
-              <strong>Nivel:</strong> ${data.nivel || '-'} &nbsp;|&nbsp;
-              <strong>Grado:</strong> ${data.grado || '-'} &nbsp;|&nbsp;
-              <strong>Trimestre:</strong> ${data.trimestre || '-'} &nbsp;|&nbsp;
-              <strong>Unidad:</strong> ${data.unidad || '-'}
+              <strong>Nivel:</strong> ${nivelSafe} &nbsp;|&nbsp;
+              <strong>Grado:</strong> ${gradoSafe} &nbsp;|&nbsp;
+              <strong>Trimestre:</strong> ${trimestreSafe} &nbsp;|&nbsp;
+              <strong>Unidad:</strong> ${unidadSafe}
             </div>
             <div class="acciones-lectura" style="margin-top: 0.5rem;">
-              <a href="${data.url}" target="_blank" title="Ver imagen">
+              <a href="${imageUrlSafe}" target="_blank" rel="noopener noreferrer" title="Ver imagen">
                 <i class='bx bx-image-alt' style="font-size: 24px; margin-right: 12px;"></i>
               </a>
-              <a href="${data.url}" download="${data.nombre}.png" title="Descargar imagen">
+              <a href="${imageUrlSafe}" download="${nombreSafe}.png" rel="noopener noreferrer" title="Descargar imagen">
                 <i class='bx bx-download' style="font-size: 24px;"></i>
               </a>
               <i class='bx bx-archive archivar-imagen' 
@@ -1757,7 +1742,6 @@ function stripHTML(html) {
           });
           item.remove(); // quitar del DOM
         } catch (err) {
-          console.error("❌ Error al archivar imagen:", err);
         }
       });
 
@@ -1774,7 +1758,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const contenedorImagenes = document.getElementById("contenedorImagenes");
 
   if (!toggleIlustracionesBtn || !contenedorImagenes) {
-    console.warn("❗ Botón o contenedor de ilustraciones no encontrado");
     return;
   }
 
@@ -1816,4 +1799,3 @@ function mostrarModalUpdates(version = "v2.0.0") {
 }
 
 mostrarModalUpdates("v2.0.0");
-

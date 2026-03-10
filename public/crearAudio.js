@@ -1,17 +1,15 @@
 // crearAudio.js
 
-const HF_TOKEN = "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";
+const HF_TOKEN = "__HF_API_KEY_LOCAL__";
 
 document.addEventListener("DOMContentLoaded", () => {
   const modalEl = document.getElementById("modalGenerarAudio");
   const btnAudio = document.getElementById("btnAbrirModalAudio");
 
   if (!modalEl || !btnAudio) {
-    console.warn("❌ No se encontró el modal o el botón de audio");
     return;
   }
 
-  console.log("🎤 Modal de audio inicializado correctamente");
   const modalAudio = new bootstrap.Modal(modalEl);
 
   // Abrir modal al hacer clic en el botón
@@ -47,7 +45,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       if (!response.ok) {
-        console.error("❌ Error HTTP:", response.status);
         alert("Error generando el audio. Intenta más tarde.");
         return;
       }
@@ -60,7 +57,6 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("audioPreview").style.display = "block";
 
     } catch (error) {
-      console.error("❌ Error al conectar con Hugging Face:", error);
       alert("Error al generar el audio.");
     }
   });

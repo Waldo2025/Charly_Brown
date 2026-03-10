@@ -4,13 +4,14 @@ import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/
 import { metodologiaASC } from './metodologiaASC.js';
 import { insertarGeneradorImagenes } from './generarImagenes.js';
 import { estacionesPorNivelYMateria } from './metodologiaASC.js';
+import { sanitizeHtml } from './security-utils.js';
 import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/vanilla-tilt.es2015.min.js';
 import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@3.7.1/+esm';
 
 
 // Configuración Firebase
 const firebaseConfig = {
-apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
 authDomain: "charly-brown.firebaseapp.com",
 projectId: "charly-brown",
 storageBucket: "charly-brown.firebasestorage.app",
@@ -260,7 +261,7 @@ onAuthStateChanged(auth, async (user) => {
 
 
 
-const googleAPIKey = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw";
+const googleAPIKey = "__GEMINI_VISION_API_KEY_LOCAL__";
 const googleAPIEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 
@@ -327,7 +328,6 @@ const cargarUnidad = async (userId) => {
     }
 
     } catch (error) {
-    console.error("Error al cargar la unidad:", error);
     unidadContenido.innerHTML = "<p>Ocurrió un error al cargar la unidad.</p>";
     }
 };
@@ -426,7 +426,6 @@ function procesarPDF(file) {
             pdfEnProceso = false; 
 
         } catch (error) {
-            console.error("Error al procesar el PDF:", error);
             dropArea.innerHTML = `<p>Error al procesar el archivo PDF.</p>`;
         }
 
@@ -523,12 +522,10 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             throw new Error("La respuesta de la API no contiene texto válido");
         }
 
-        console.log("Texto bruto generado:", rawText);
 
         // Eliminar etiquetas de markdown ```html ``` si vienen
         if (/^```(?:html)?/i.test(rawText)) {
             rawText = rawText.replace(/```(?:html)?\s*([\s\S]*?)\s*```/gi, '$1').trim();
-            console.log("Se eliminó bloque markdown ``` de la respuesta.");
         }
 
         // Si viene HTML completo
@@ -538,7 +535,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             const bodyContent = doc.body?.innerHTML?.trim();
             if (bodyContent) {
                 rawText = bodyContent;
-                console.log("Se extrajo contenido del <body>.");
             }
         }
 
@@ -547,18 +543,15 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
         // 🔁 Si está cortado, continuar generando
         if (esRespuestaCortadaPorTokens(textoAcumuladoGlobal)) {
-            console.warn("⚠️ La respuesta parece cortada. Continuando automáticamente...");
             await forzarContinuacionAutomatica(textoAcumuladoGlobal);
         }
 
         // ✅ Ahora sí, ya con lectura COMPLETA, procesar
-        console.log("✅ Análisis completo generado:");
         localStorage.removeItem("formularioLectura");
         procesarRespuestaGemini(textoAcumuladoGlobal);
         guardarFormularioEnLocalStorage();
 
     } catch (error) {
-        console.error("Error en el análisis:", error);
         mostrarError(`Error al analizar: ${error.message}`);
     } finally {
         analizarBtn.disabled = false;
@@ -621,7 +614,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             const botonContinuar = document.getElementById("botonContinuarLecturaContainer");
     
             if (!analisisContenido) {
-                console.error("No se encontró el contenedor analisisContenido");
                 return;
             }
     
@@ -634,7 +626,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     
             // Extraer sugerencias antes de limpiar
             const sugerencias = extraerSugerencias(rawText);
-            console.log("✅ Sugerencias extraídas:", sugerencias);
     
             // Limpiar sección de sugerencias en el HTML para evitar duplicación
             const contieneHTML = /<\/?(html|head|body|div|h\d|p|ul|ol|li|span)[^>]*>/i.test(rawText);
@@ -679,7 +670,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             }
     
         } catch (error) {
-            console.error("Error al procesar respuesta Gemini:", error);
             mostrarError("Ocurrió un error procesando el análisis.");
         }
     }
@@ -691,7 +681,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         const sugerenciasContenedor = document.getElementById("sugerenciasLecturas");
         
         if (!sugerenciasContenedor) {
-            console.error("No se encontró el contenedor de sugerencias");
             return;
         }
     
@@ -914,7 +903,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     }
     
     
-    const HF_TOKEN = "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"; // << tu token ya está aquí
+    const HF_TOKEN = "__HF_API_KEY_LOCAL__"; // << tu token ya está aquí
     const inference = new InferenceClient(HF_TOKEN);
 
 
@@ -952,7 +941,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 throw new Error("Respuesta inválida generando imagen desde Hugging Face");
             }
         } catch (error) {
-            console.error("❌ Error generando imagen:", error);
             throw error; // Lo relanzamos para que procesarSpecsYGenerarImagenes() lo maneje
         }
     }
@@ -1086,8 +1074,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         
         
 
-        console.log("📚 Clave usada:", clave);
-        console.log("📌 Estaciones obtenidas:", estaciones);
         
         
         if (nivelSeleccionado === "Secundaria" && !estaciones.length) {
@@ -1230,10 +1216,8 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             }
 
             const data = await response.json();
-            console.log("Respuesta de Gemini:", data);
             
             if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                console.error("La respuesta de la API no contiene texto válido");            
                 throw new Error("La respuesta no contiene texto válido");
             }
 
@@ -1256,12 +1240,10 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
   
             // Si la respuesta fue cortada, continuar automáticamente
             if (esRespuestaCortadaPorTokens(lecturaGenerada)) {
-                console.warn("⚠️ Lectura cortada por tokens. Iniciando continuación...");
                 await forzarContinuacionAutomatica(lecturaGenerada);
             }
 
         } catch (error) {
-            console.error("Error al generar lectura:", error);
             mostrarError(`Error al generar lectura: ${error.message}`);
         } finally {
             generarBtn.disabled = false;
@@ -1296,12 +1278,10 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
     async function forzarContinuacionAutomatica(textoBase, intento = 1) {
         if (continuacionEnCurso) {
-            console.warn("⚠️ Ya hay una continuación automática en curso. Abortando duplicado.");
             return;
         }
         continuacionEnCurso = true;
 
-        console.log("⏭️ Forzando continuación automática de lectura... (intento " + intento + ")");
         const temaEspecifico = (typeof seleccionTema !== "undefined" && seleccionTema) ? seleccionTema : temaInput;
 
         if (!temaEspecifico) {
@@ -1356,7 +1336,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     
             if (!response.ok) {
                 if (response.status === 503 && intento < 3) {
-                    console.warn(`⚠️ API no disponible, reintentando en 3 segundos (intento ${intento + 1})...`);
                     await new Promise(res => setTimeout(res, 3000));
                     return forzarContinuacionAutomatica(textoBase, intento + 1);
                 } else {
@@ -1368,7 +1347,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             const textoNuevo = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     
             if (!textoNuevo || textoNuevo.length < 20) {
-                console.warn("⚠️ No se recibió contenido nuevo al continuar.");
                 return;
             }
     
@@ -1381,15 +1359,12 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     
     
             if (esRespuestaCortadaPorTokens(textoLimpio)) {
-                console.log("🔁 Segunda parte también se cortó, generando otra...");
                 await forzarContinuacionAutomatica(lecturaGenerada);
             }
 
             if (!textoNuevo || textoNuevo.length < 20) {
-                console.warn("⚠️ No se recibió contenido nuevo al continuar.");
                 
                 if (intento < 3) {
-                    console.log(`🔁 Reintentando continuación automática... intento ${intento + 1}`);
                     await new Promise(res => setTimeout(res, 3000));
                     return forzarContinuacionAutomatica(textoBase, intento + 1);
                 } else {
@@ -1402,7 +1377,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
 
         } catch (err) {
-            console.error("❌ Error al forzar continuación automática:", err);
             mostrarError("No se pudo continuar la lectura automáticamente.");
         } finally {
             continuacionEnCurso = false;
@@ -1522,7 +1496,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             guardarFormularioEnLocalStorage();
     
         } catch (error) {
-            console.error("Error al continuar generación:", error);
             mostrarError("Error al continuar la lectura: " + error.message);
         } finally {
             continuarBtn.disabled = false;
@@ -1581,7 +1554,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             document.getElementById("generador-lecturas").style.display = "none";
 
         } catch (error) {
-            console.error("Error al guardar:", error);
             alert("Error al guardar la lectura. Revisa la consola.");
         }
     });
@@ -1629,7 +1601,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 return docSnap.data();
             }
         } catch (err) {
-            console.error("Error obteniendo datos de la unidad:", err);
         }
         return null;
     };
@@ -1641,16 +1612,11 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         
         // Verificar que tenemos los IDs necesarios
         if (!currentUserId || !unidadId) {
-            console.error("Faltan datos para cargar lecturas:", {currentUserId, unidadId});
             cont.innerHTML = "<p>Error: Faltan datos para cargar lecturas.</p>";
             return;
         }
 
         try {
-            console.log("Buscando lecturas para:", {
-                userId: currentUserId,
-                unidadId: unidadId
-            });
 
             const q = query(
                 collection(db, "lecturas"),
@@ -1659,7 +1625,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             );
             
             const snapshot = await getDocs(q);
-            console.log("Resultados de consulta:", snapshot.docs.map(doc => doc.data()));
 
             if (snapshot.empty) {
                 cont.innerHTML = "<p>No hay lecturas guardadas para esta unidad.</p>";
@@ -1760,7 +1725,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                       mostrarModalCompartirLectura(docId);
                     }
                   } catch (error) {
-                    console.error("Error al alternar compartir:", error);
                     alert("Hubo un error al cambiar el estatus.");
                   }
                 });
@@ -1780,7 +1744,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                             await deleteDoc(doc(db, "lecturas", docId));
                             await cargarLecturas(); // Recargar lista
                         } catch (error) {
-                            console.error("Error al eliminar lectura:", error);
                             mostrarError("No se pudo eliminar la lectura.");
                         }
                     }
@@ -1797,7 +1760,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             });
 
         } catch (error) {
-            console.error("Error al cargar lecturas:", error);
             cont.innerHTML = `<p>Error al cargar lecturas: ${error.message}</p>`;
         }
     }
@@ -1824,7 +1786,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
           select.appendChild(option);
         });
       } catch (e) {
-        console.error("Error al cargar usuarios:", e);
         select.innerHTML = '<option disabled>Error al cargar</option>';
       }
     }
@@ -1949,7 +1910,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             }
             
         } catch (error) {
-            console.error("Error al mostrar lectura:", error);
             mostrarError("Error al cargar la lectura completa.");
         }
     }
@@ -1974,7 +1934,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
     document.addEventListener('click', async (e) => {
         
-        console.log("¡Click detectado!");
         const guardarBtn = e.target.closest('#guardarCambiosBtn');
         if (!guardarBtn) return;
 
@@ -1997,7 +1956,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             await cargarLecturas();
             document.getElementById('lecturaModal').style.display = 'none';
         } catch (error) {
-            console.error("Error al guardar cambios:", error);
             mostrarError("Error al guardar los cambios");
         }
     });
@@ -2146,11 +2104,9 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         
         // Verificar acentos
         const tieneAcentos = /[áéíóúÁÉÍÓÚñÑ]/.test(contenido);
-        if (!tieneAcentos) console.warn("No se detectaron acentos en el texto");
         
         // Verificar estilos
         const tieneEstiloTexto = /<ParaStyle:TEXTO>/.test(convertirNodo(divPrueba));
-        if (!tieneEstiloTexto) console.warn("No se detectó el estilo TEXTO en la conversión");
         
         return { tieneAcentos, tieneEstiloTexto };
     }
@@ -2182,7 +2138,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
         // Convertir texto a Latin1 de forma segura
         const latin1Text = unescape(encodeURIComponent(taggedText)); // convierte a ISO-8859-1
-        console.log("TaggedText generado:", taggedText);
 
         // Crear data URL forzado a Latin1 para simular descarga
         const blob = new Blob([latin1Text], { type: "text/plain;charset=iso-8859-1" });
@@ -2245,7 +2200,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             </body>
         </html>`;
 
-        console.log("FULL HTML generado para Word:", fullHTML);
 
         try {
             const blob = window.htmlDocx.asBlob(fullHTML);
@@ -2257,7 +2211,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
-            console.error("Error al exportar a Word:", err);
             alert("Error al exportar a Word. Revisa la consola.");
         }
     }
@@ -2323,9 +2276,9 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         const data = JSON.parse(localStorage.getItem("formularioLectura"));
         if (!data) return;
     
-        document.getElementById("lecturaOriginal").innerHTML = data.lecturaOriginal || "";
-        document.getElementById("temarioTexto").innerHTML = data.temarioTexto || "";
-        document.getElementById("rubricaTexto").innerHTML = data.rubricaTexto || "";
+        document.getElementById("lecturaOriginal").innerHTML = sanitizeHtml(data.lecturaOriginal || "");
+        document.getElementById("temarioTexto").innerHTML = sanitizeHtml(data.temarioTexto || "");
+        document.getElementById("rubricaTexto").innerHTML = sanitizeHtml(data.rubricaTexto || "");
     
         document.getElementById("generoSelect").value = data.genero || "";
         document.getElementById("tonoSelect").value = data.tono || "";
@@ -2348,7 +2301,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         document.getElementById("checkRecortables").checked = !!data.recortables;
     
         if (data.analisisHTML) {
-            document.getElementById("analisisContenido").innerHTML = data.analisisHTML;
+            document.getElementById("analisisContenido").innerHTML = sanitizeHtml(data.analisisHTML);
         
             const resultado = document.getElementById("analisisResultado");
             if (resultado) resultado.style.display = "block";
@@ -2543,7 +2496,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             });
       
           } catch (err) {
-            console.error("Error al cargar unidad:", err);
             cont.innerHTML = `<p>Error cargando datos.</p>`;
           }
         };
@@ -2590,7 +2542,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         // Recargar lista de lecturas para reflejar el nuevo título
         await cargarLecturas();
         } catch (error) {
-        console.error("Error al actualizar título:", error);
         mostrarError("No se pudo actualizar el título.");
         }
     });
@@ -2711,7 +2662,6 @@ btnContinuarLectura?.addEventListener("click", async () => {
     try {
         await continuarAnalisis(textoAcumuladoGlobal, nivelSeleccionadoGlobal, gradoSeleccionadoGlobal, temaSeleccionadoGlobal);
     } catch (err) {
-        console.error("❌ Error al continuar análisis:", err);
     } finally {
         btnContinuarLectura.disabled = false;
         btnContinuarLectura.innerHTML = "➡️ Continuar Generando Lectura";
@@ -2783,7 +2733,6 @@ IMPORTANTE añadir esta nota con dentro de un div con el estilo class="alertaIA"
             temaSeleccionadoGlobal = temaEspecifico;
         }
     } catch (err) {
-        console.error("Error al generar análisis:", err);
         mostrarError(`Error al generar análisis: ${err.message}`);
     } finally {
         generarBtn.disabled = false;
@@ -2814,7 +2763,6 @@ document.getElementById("generarSugerenciasBtn").addEventListener("click", async
         const guardado = localStorage.getItem("textoAnalisisLectura");
         if (guardado) {
             textoAcumuladoGlobal = guardado;
-            console.log("📥 Análisis cargado desde localStorage.");
         } else {
             alert("⚠️ Primero debes generar el análisis antes de sugerir lecturas.");
             return;
@@ -2823,7 +2771,6 @@ document.getElementById("generarSugerenciasBtn").addEventListener("click", async
 
     // 🔁 Si está cortado, continuar
     if (esRespuestaCortadaPorTokens(textoAcumuladoGlobal)) {
-        console.warn("⚠️ La respuesta está incompleta. Continuando automáticamente...");
         await continuarAnalisis(textoAcumuladoGlobal, nivel, grado, temaEspecifico);
     }
 
@@ -2886,7 +2833,6 @@ ${textoAcumuladoGlobal}
         renderizarSugerencias(sugerencias);
 
     } catch (err) {
-        console.error("❌ Error al generar sugerencias:", err);
         mostrarError("Error al generar sugerencias: " + err.message);
     } finally {
         sugerenciasBtn.disabled = false;
@@ -2898,10 +2844,8 @@ ${textoAcumuladoGlobal}
     
     
     async function continuarAnalisis(rawTextAcumulado, nivelSeleccionado, gradoSeleccionado, seleccionTema) {
-        console.log("🧠 Iniciando continuación del análisis...");
     
         const ultimaSeccion = detectarSeccionFinal(rawTextAcumulado);
-        console.log("🧩 Última sección detectada:", ultimaSeccion);
     
         let promptContinuacion = "";
     
@@ -2949,7 +2893,6 @@ ${textoAcumuladoGlobal}
             const nuevoTexto = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     
             if (!nuevoTexto) {
-                console.warn("⚠️ No se recibió texto al continuar análisis.");
                 return;
             }
 
@@ -2961,21 +2904,17 @@ ${textoAcumuladoGlobal}
                 document.getElementById("botonContinuarLecturaContainer").style.display = "none";
             }
     
-            console.log("✅ Continuación recibida:");
-            console.log(nuevoTexto);
     
             // ⬇️ Aquí aseguramos que sí procese sugerencias extra si vienen en la continuación
             procesarRespuestaGemini(nuevoTexto, true);
     
             const sugerenciasExtra = extraerSugerencias(nuevoTexto);
             if (sugerenciasExtra.length > 0) {
-                console.log("✅ Sugerencias adicionales extraídas:", sugerenciasExtra);
                 renderizarSugerencias(sugerenciasExtra);
             }
     
             guardarFormularioEnLocalStorage();
         } catch (error) {
-            console.error("❌ Error al continuar análisis:", error);
         }
     }
     
@@ -3089,7 +3028,6 @@ botonAbrirGenerador.addEventListener("click", async () => {
         document.body.appendChild(newScript);
       }
     } catch (e) {
-      console.error("❌ Error al cargar el generador de imágenes:", e);
     }
   }
 

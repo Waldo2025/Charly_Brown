@@ -230,6 +230,9 @@
     cursor: grab;
     z-index: 9999;
     pointer-events: auto;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   
   #chatbotClose:hover {

@@ -4,13 +4,14 @@ import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/
 import { metodologiaASC } from './metodologiaASC.js';
 import { insertarGeneradorImagenes } from './generarImagenes.js';
 import { estacionesPorNivelYMateria } from './metodologiaASC.js';
+import { escapeHtml } from './security-utils.js';
 import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/vanilla-tilt.es2015.min.js';
 import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@3.7.1/+esm';
 
 
 // Configuración Firebase
 const firebaseConfig = {
-apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
 authDomain: "charly-brown.firebaseapp.com",
 projectId: "charly-brown",
 storageBucket: "charly-brown.firebasestorage.app",
@@ -248,7 +249,6 @@ const cargarUnidad = async (userId) => {
     }
 
     } catch (error) {
-    console.error("Error al cargar la unidad:", error);
     unidadContenido.innerHTML = "<p>Ocurrió un error al cargar la unidad.</p>";
     }
 };
@@ -263,16 +263,11 @@ async function cargarLecturas() {
     
     // Verificar que tenemos los IDs necesarios
     if (!currentUserId || !unidadId) {
-        console.error("Faltan datos para cargar lecturas:", {currentUserId, unidadId});
         cont.innerHTML = "<p>Error: Faltan datos para cargar lecturas.</p>";
         return;
     }
 
     try {
-        console.log("Buscando lecturas para:", {
-            userId: currentUserId,
-            unidadId: unidadId
-        });
 
         const q = query(
             collection(db, "lecturas"),
@@ -281,7 +276,6 @@ async function cargarLecturas() {
         );
         
         const snapshot = await getDocs(q);
-        console.log("Resultados de consulta:", snapshot.docs.map(doc => doc.data()));
 
         if (snapshot.empty) {
             cont.innerHTML = "<p>No hay lecturas guardadas para esta unidad.</p>";
@@ -308,29 +302,29 @@ async function cargarLecturas() {
             
             const encabezadoUnidad = datosUnidad ? `
                 <div class="lectura-encabezado">
-                <strong>${datosUnidad.materia || 'Materia no definida'}</strong> – 
-                ${datosUnidad.nombreUnidad || 'Sin nombre'}
+                <strong>${escapeHtml(datosUnidad.materia || 'Materia no definida')}</strong> – 
+                ${escapeHtml(datosUnidad.nombreUnidad || 'Sin nombre')}
                 <br>
                 <small>
-                    Nivel: ${datosUnidad.nivel || '-'} | 
-                    Grado: ${datosUnidad.grado || '-'} | 
-                    Trimestre ${datosUnidad.trimestre || '-'}, Unidad ${datosUnidad.unidad || '-'}
+                    Nivel: ${escapeHtml(datosUnidad.nivel || '-')} | 
+                    Grado: ${escapeHtml(datosUnidad.grado || '-')} | 
+                    Trimestre ${escapeHtml(datosUnidad.trimestre || '-')}, Unidad ${escapeHtml(datosUnidad.unidad || '-')}
                 </small>
                 </div>
             ` : '';
             
             div.innerHTML = `
                 ${encabezadoUnidad}
-                <h4>${data.tema || 'Sin título'}</h4>
+                <h4>${escapeHtml(data.tema || 'Sin título')}</h4>
                 <p class="lectura-preview">
-                ${stripHTML(data.texto).slice(0, 120)}${stripHTML(data.texto).length > 120 ? '...' : ''}
+                ${escapeHtml(stripHTML(data.texto).slice(0, 120))}${stripHTML(data.texto).length > 120 ? '...' : ''}
                 </p>
                 <div class="lectura-meta">
                 <small>${data.createdAt?.toDate()?.toLocaleDateString() || 'Fecha no disponible'}</small>
                 <div class="lectura-acciones">
-                    <button class="editar-lectura" data-id="${doc.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                    <button class="eliminar-lectura" data-id="${doc.id}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
-                    <button class="toggle-estatus" data-id="${doc.id}" title="Compartir lectura">
+                    <button class="editar-lectura" data-id="${escapeHtml(doc.id)}" title="Editar"><i class="fas fa-pen"></i></button>
+                    <button class="eliminar-lectura" data-id="${escapeHtml(doc.id)}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
+                    <button class="toggle-estatus" data-id="${escapeHtml(doc.id)}" title="Compartir lectura">
                     <i class="fas fa-share-alt" style="color: ${data.estatusLectura === 'Compartido' ? 'green' : 'gray'}"></i>
                     </button>
                 </div>
@@ -382,7 +376,6 @@ async function cargarLecturas() {
                     mostrarModalCompartirLectura(docId);
                 }
                 } catch (error) {
-                console.error("Error al alternar compartir:", error);
                 alert("Hubo un error al cambiar el estatus.");
                 }
             });
@@ -398,7 +391,6 @@ async function cargarLecturas() {
                         await deleteDoc(doc(db, "lecturas", docId));
                         await cargarLecturas(); // Recargar lista
                     } catch (error) {
-                        console.error("Error al eliminar lectura:", error);
                         mostrarError("No se pudo eliminar la lectura.");
                     }
                 }
@@ -414,8 +406,7 @@ async function cargarLecturas() {
         });
 
     } catch (error) {
-        console.error("Error al cargar lecturas:", error);
-        cont.innerHTML = `<p>Error al cargar lecturas: ${error.message}</p>`;
+        cont.textContent = `Error al cargar lecturas: ${error.message || "sin detalle"}`;
     }
 }
 
@@ -428,7 +419,6 @@ const obtenerDatosUnidad = async (unidadId) => {
             return docSnap.data();
         }
     } catch (err) {
-        console.error("Error obteniendo datos de la unidad:", err);
     }
     return null;
 };
@@ -561,7 +551,6 @@ async function mostrarLecturaCompleta(docId) {
         }
         
     } catch (error) {
-        console.error("Error al mostrar lectura:", error);
         mostrarError("Error al cargar la lectura completa.");
     }
 }
@@ -584,7 +573,6 @@ if (cerrarModalBtn) {
 }
 
 document.addEventListener('click', async (e) => {
-    console.log("¡Click detectado!");
     const guardarBtn = e.target.closest('#guardarCambiosBtn');
     if (!guardarBtn) return;
 
@@ -607,7 +595,6 @@ document.addEventListener('click', async (e) => {
         await cargarLecturas();
         document.getElementById('lecturaModal').style.display = 'none';
     } catch (error) {
-        console.error("Error al guardar cambios:", error);
         mostrarError("Error al guardar los cambios");
     }
 });
@@ -662,7 +649,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (generador) generador.style.display = "none";
 
       } catch (error) {
-        console.error("Error al guardar:", error);
         alert("Error al guardar la lectura. Revisa la consola.");
       }
     });
@@ -691,7 +677,6 @@ document.getElementById("modalTitulo").addEventListener("blur", async (e) => {
     // Recargar lista de lecturas para reflejar el nuevo título
     await cargarLecturas();
     } catch (error) {
-    console.error("Error al actualizar título:", error);
     mostrarError("No se pudo actualizar el título.");
     }
 });
@@ -720,7 +705,6 @@ async function mostrarModalCompartirLectura(docId) {
         select.appendChild(option);
     });
     } catch (e) {
-    console.error("Error al cargar usuarios:", e);
     select.innerHTML = '<option disabled>Error al cargar</option>';
     }
 }
@@ -755,7 +739,6 @@ botonAbrirGenerador.addEventListener("click", async () => {
         document.body.appendChild(newScript);
       }
     } catch (e) {
-      console.error("❌ Error al cargar el generador de imágenes:", e);
     }
   }
 
@@ -952,7 +935,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
   
       } catch (err) {
-        console.error("Error al cargar unidad:", err);
         cont.innerHTML = `<p>Error cargando datos.</p>`;
       }
     };

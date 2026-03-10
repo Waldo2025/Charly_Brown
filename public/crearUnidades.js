@@ -4,7 +4,7 @@ import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.g
 
 // Configuración de Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",
@@ -114,7 +114,6 @@ document.addEventListener("DOMContentLoaded", () => {
           window.location.href = 'UnidadHome.html';
         }, 2000);
       } catch (err) {
-        console.error("Error al crear la unidad:", err);
         alert("Hubo un error al crear la unidad.");
       }
     });

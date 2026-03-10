@@ -8,7 +8,7 @@ import setupImageGenerator from './imageGenerator.js';
 // Config
 // Configuración Firebase
 const firebaseConfig = {
-    apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+    apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
     authDomain: "charly-brown.firebaseapp.com",
     projectId: "charly-brown",
     storageBucket: "charly-brown.firebasestorage.app",
@@ -31,71 +31,368 @@ export { auth, storage }; // ahora sí puedes exportar ambos
 
 
 let currentUserId = null;
+let resolveAuthReady;
+const authReady = new Promise((resolve) => {
+  resolveAuthReady = resolve;
+});
+let authInitialized = false;
 
 // Cargar conversación al iniciar
 onAuthStateChanged(auth, async (user) => {
+    currentUserId = user?.uid || null;
     if (user) {
-      currentUserId = user.uid;
       await cargarConversacionDesdeFirebase();
+    }
+    if (!authInitialized) {
+      authInitialized = true;
+      resolveAuthReady?.();
     }
   });
 
 const charts = [];
 
-const btnLista = document.getElementById("btnListaMetodologica");
-const modalLista = document.getElementById("modalListaMetodologica");
-const cerrarModal = document.getElementById("cerrarModalLista");
-const contenedor = document.getElementById("contenedorTemasMetodologicos");
 const buscador = document.getElementById("buscadorTemas");
 // Envío del formulario a firebase
-const form = document.getElementById("formMetodologiaASC");
 const historialMensajes = [];
 
 
 
-const API_KEY = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw";
-// const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
-// const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
-const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-// const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent";
-// const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-02-05:generateContent";
-// const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
+async function _geminiAuthHeaders() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("AUTH_REQUIRED");
+  const token = await user.getIdToken();
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`
+  };
+}
+
+const MODELOS_GEMINI_FALLBACK = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3-flash-preview"
+];
+
+function normalizeGeminiModel(modelo = "") {
+  return String(modelo || "").replace(":generateContent", "").trim() || "gemini-2.5-flash-lite";
+}
+
+function buildGeminiEndpointByModel(modelo = "") {
+  const model = normalizeGeminiModel(modelo);
+  return model;
+}
+
+function getGeminiEndpoint(selectId = "selectGeminiEndpoint") {
+  const modelo = normalizeGeminiModel(document.getElementById(selectId)?.value || "gemini-2.5-flash-lite");
+  return buildGeminiEndpointByModel(modelo);
+}
+
+function buildGeminiModelChain(selectId = "selectGeminiEndpoint2") {
+  const preferido = normalizeGeminiModel(document.getElementById(selectId)?.value || "gemini-2.5-flash-lite");
+  const prioridad = preferido.includes("preview")
+    ? [...MODELOS_GEMINI_FALLBACK, preferido]
+    : [preferido, ...MODELOS_GEMINI_FALLBACK];
+  return [...new Set(prioridad.map(normalizeGeminiModel).filter(Boolean))];
+}
+
+async function postGeminiWithModelFallback({ mensajes, selectId = "selectGeminiEndpoint2", maxIntentosPorModelo = 2 }) {
+  const modelos = buildGeminiModelChain(selectId);
+  let ultimoError = null;
+
+  for (const modelo of modelos) {
+    const endpoint = buildGeminiEndpointByModel(modelo);
+    for (let intento = 0; intento < maxIntentosPorModelo; intento += 1) {
+      try {
+        const headers = await _geminiAuthHeaders();
+        const response = await fetch(`/api/gemini/generate`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: endpoint,
+            payload: {
+              contents: (mensajes || []).map((m) => ({
+                role: m?.role || "user",
+                parts: [{ text: m?.text || "" }]
+              }))
+            }
+          })
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && !data?.error) {
+          const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          return raw.replace(/```[a-zA-Z]*\s*/g, "").replace(/```/g, "").trim();
+        }
+
+        const status = Number(response.status || 0);
+        const message = data?.error?.message || `HTTP ${status}`;
+        const isRetriable = [429, 500, 503].includes(status) || /high demand/i.test(message);
+        if (isRetriable && intento + 1 < maxIntentosPorModelo) {
+          await sleep(1200 + (intento * 600));
+          continue;
+        }
+        throw new Error(`${modelo}: ${message}`);
+      } catch (err) {
+        ultimoError = err;
+        if (intento + 1 < maxIntentosPorModelo) {
+          await sleep(1200 + (intento * 600));
+          continue;
+        }
+      }
+    }
+  }
+
+  throw new Error(`No se pudo generar contenido con Gemini (${ultimoError?.message || "sin detalle"})`);
+}
+
+
+// 🟢 Control de cola para peticiones a Gemini
+let colaPrompts = Promise.resolve();
+
+// 🟢 Retraso configurable para no saturar
+const DELAY_ENTRE_PETICIONES = 2000; // 1.5 segundos entre requests
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Colecciones disponibles para el contexto
+const COLECCIONES_DISPONIBLES = [
+  { id: "lecturasASC", label: "Lecturas ASC" },
+  { id: "lecturasNuevas", label: "Lecturas nuevas" },
+  { id: "camposFormativos", label: "Campos formativos" },
+  { id: "unidadesGeneradas", label: "Unidades generadas" },
+  { id: "Unidades", label: "Unidades clásicas" },
+  { id: "secuenciaAlcance", label: "Secuencia y alcance" },
+  { id: "moodleCourses", label: "Cursos Moodle" },
+  { id: "analisisLecturas", label: "Análisis lecturas" },
+  { id: "audioTranslate", label: "Audio sesiones" },
+  { id: "audioTranslateSegments", label: "Audio segmentos" },
+  { id: "audioTranslateSummaries", label: "Audio resúmenes" }
+];
+
+// Por simplicidad, usa todas las colecciones; el bot preguntará si falta contexto.
+const coleccionesSeleccionadas = new Set(COLECCIONES_DISPONIBLES.map(c => c.id));
+
+async function getScopedDocs(collectionName, { allowGlobal = false } = {}) {
+  await authReady;
+  const colRef = collection(db, collectionName);
+  const uid = currentUserId || auth.currentUser?.uid || null;
+  const email = (auth.currentUser?.email || "").toLowerCase();
+  const byIdKeys = ["ownerId", "userId", "uid", "createdBy"];
+  const merged = new Map();
+
+  if (uid) {
+    for (const key of byIdKeys) {
+      try {
+        const snap = await getDocs(query(colRef, where(key, "==", uid)));
+        snap.forEach((d) => merged.set(d.id, d));
+      } catch (_) {}
+    }
+  }
+
+  if (email) {
+    try {
+      const sharedSnap = await getDocs(query(colRef, where("sharedWith", "array-contains", email)));
+      sharedSnap.forEach((d) => merged.set(d.id, d));
+    } catch (_) {}
+  }
+
+  if (uid) {
+    try {
+      const sharedUidSnap = await getDocs(query(colRef, where("sharedWithUids", "array-contains", uid)));
+      sharedUidSnap.forEach((d) => merged.set(d.id, d));
+    } catch (_) {}
+  }
+
+  if (merged.size > 0) {
+    return Array.from(merged.values());
+  }
+
+  // Fallback defensivo: en algunos flujos el owner no queda indexado en el mismo campo.
+  // Si Firestore permite lectura, filtramos cliente por ownership/compartido.
+  try {
+    const snap = await getDocs(colRef);
+    snap.forEach((d) => {
+      const row = d.data() || {};
+      const ownerMatch = !!uid && (
+        row.userId === uid ||
+        row.ownerId === uid ||
+        row.uid === uid ||
+        row.createdBy === uid
+      );
+      const sharedEmail = !!email && Array.isArray(row.sharedWith) && row.sharedWith.map(v => String(v).toLowerCase()).includes(email);
+      const sharedUid = !!uid && Array.isArray(row.sharedWithUids) && row.sharedWithUids.map(String).includes(uid);
+      if (ownerMatch || sharedEmail || sharedUid) {
+        merged.set(d.id, d);
+      }
+    });
+  } catch (_) {}
+
+  if (merged.size > 0) {
+    return Array.from(merged.values());
+  }
+
+  if (allowGlobal) {
+    const snap = await getDocs(colRef);
+    return snap.docs;
+  }
+
+  return [];
+}
 
 async function construirContextoFirebase() {
   let contexto = "";
 
   // 🔹 Lecturas base
-  const lecturasSnap = await getDocs(collection(db, "lecturasASC"));
-  lecturasSnap.forEach(docSnap => {
-    const d = docSnap.data();
-    contexto += `📖 Lectura: ${d.titulo}\nNivel: ${d.nivel}, Grado: ${d.grado}, Serie: ${d.serie}\nTexto: ${(d.textoLectura || '').replace(/<[^>]+>/g,'').slice(0,300)}...\n\n`;
-  });
+  if (coleccionesSeleccionadas.has("lecturasASC")) {
+    const lecturasDocs = await getScopedDocs("lecturasASC", { allowGlobal: true });
+    lecturasDocs.forEach(docSnap => {
+      const d = docSnap.data();
+      contexto += `📖 Lectura: ${d.titulo}\nNivel: ${d.nivel}, Grado: ${d.grado}, Serie: ${d.serie}\nTexto: ${(d.textoLectura || '').replace(/<[^>]+>/g,'').slice(0,300)}...\n\n`;
+    });
+  }
 
   // 🔹 Lecturas nuevas
-  const nuevasSnap = await getDocs(collection(db, "lecturasNuevas"));
-  nuevasSnap.forEach(docSnap => {
-    const d = docSnap.data();
-    contexto += `📘 Lectura nueva: ${d.tema} (Nivel ${d.nivel} ${d.grado})\nAutor estilo: ${d.autorReferencia}\nContenido: ${(d.contenidoHTML || '').replace(/<[^>]+>/g,'').slice(0,300)}...\n\n`;
-  });
-
-  // 🔹 Metodología ASC
-  const metodoSnap = await getDocs(collection(db, "metodologiaASC"));
-  metodoSnap.forEach(docSnap => {
-    const d = docSnap.data();
-    contexto += `🧩 Tema metodológico: ${d.tema}\nConcepto: ${(d.concepto || '').replace(/<[^>]+>/g,'')}\nComentarios: ${(d.comentarios || '').replace(/<[^>]+>/g,'')}\n\n`;
-  });
+  if (coleccionesSeleccionadas.has("lecturasNuevas")) {
+    const nuevasDocs = await getScopedDocs("lecturasNuevas");
+    nuevasDocs.forEach(docSnap => {
+      const d = docSnap.data();
+      contexto += `📘 Lectura nueva: ${d.tema} (Nivel ${d.nivel} ${d.grado})\nAutor estilo: ${d.autorReferencia}\nContenido: ${(d.contenidoHTML || '').replace(/<[^>]+>/g,'').slice(0,300)}...\n\n`;
+    });
+  }
 
   // 🔹 Campos formativos
-  const camposSnap = await getDocs(collection(db, "camposFormativos"));
-  camposSnap.forEach(docSnap => {
-    const d = docSnap.data();
-    contexto += `📚 Campo: ${d.campo}, Asignatura: ${d.asignatura}\nNivel: ${d.nivel}, Trimestre: ${d.trimestre}, Unidad: ${d.unidad}\nAprendizaje esperado: ${d.aprendizajeEsperado || "—"}\n\n`;
-  });
+  if (coleccionesSeleccionadas.has("camposFormativos")) {
+    const camposDocs = await getScopedDocs("camposFormativos", { allowGlobal: true });
+    camposDocs.forEach(docSnap => {
+      const d = docSnap.data();
+      contexto += `📚 Campo: ${d.campo}, Asignatura: ${d.asignatura}\nNivel: ${d.nivel}, Trimestre: ${d.trimestre}, Unidad: ${d.unidad}\nAprendizaje esperado: ${d.aprendizajeEsperado || "—"}\n\n`;
+    });
+  }
+
+  // 🔹 Unidades generadas
+  if (coleccionesSeleccionadas.has("unidadesGeneradas")) {
+    const unidadesDocs = await getScopedDocs("unidadesGeneradas");
+    unidadesDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `📦 Unidad generada ${idx + 1}: ${d.nombre || d.titulo || 'Sin título'} • Materia: ${d.materia || 'N/A'} • Grado: ${d.grado || 'N/A'} • Nivel: ${d.nivel || 'N/A'}\n`;
+    });
+  }
+
+  // 🔹 Unidades (editor clásico)
+  if (coleccionesSeleccionadas.has("Unidades")) {
+    const unidadesClasicasDocs = await getScopedDocs("Unidades");
+    unidadesClasicasDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `🗂️ Unidad ${idx + 1}: ${d.nombreUnidad || 'Sin nombre'} • Materia: ${d.materia || 'N/A'} • Grado: ${d.grado || 'N/A'} • Nivel: ${d.nivel || 'N/A'}\n`;
+    });
+  }
+
+  // 🔹 Secuencia y alcance
+  if (coleccionesSeleccionadas.has("secuenciaAlcance")) {
+    const secuenciaDocs = await getScopedDocs("secuenciaAlcance", { allowGlobal: true });
+    secuenciaDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `📌 Secuencia ${idx + 1}: ${d.materia || 'Materia'} • ${d.nivel || 'Nivel'} • Grado ${d.grado || 'N/A'} • Unidad ${d.unidad || 'N/A'} • ${d.nombre || ''}\n`;
+    });
+  }
+
+  // 🔹 Cursos de Moodle
+  if (coleccionesSeleccionadas.has("moodleCourses")) {
+    const moodleDocs = await getScopedDocs("moodleCourses");
+    moodleDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `🎓 Curso Moodle ${idx + 1}: ${d.nombreCurso || d.titulo || 'Sin título'} • Nivel: ${d.nivel || 'N/A'} • Grado: ${d.grado || 'N/A'} • Módulos: ${(d.modulos && d.modulos.length) || d.totalModulos || 'N/A'}\n`;
+    });
+  }
+
+  // 🔹 Análisis de lecturas guardados
+  if (coleccionesSeleccionadas.has("analisisLecturas")) {
+    const analisisDocs = await getScopedDocs("analisisLecturas");
+    analisisDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `📑 Análisis ${idx + 1}: ${d.titulo || d.tema || 'Sin título'} • Nivel: ${d.nivel || 'N/A'} • Grado: ${d.grado || 'N/A'} • Resultado: ${(d.resultado || '').slice(0,120)}...\n`;
+    });
+  }
+
+  // 🔹 Audio: sesiones, segmentos y resúmenes (resumido)
+  const audioSessionIds = new Set();
+  if (coleccionesSeleccionadas.has("audioTranslate")) {
+    const audioDocs = await getScopedDocs("audioTranslate");
+    audioDocs.forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      audioSessionIds.add(docSnap.id);
+      const segsArr = Array.isArray(d.segments) ? d.segments : [];
+      let extracto = "";
+      if (segsArr.length) {
+        const maxChars = 1200;
+        for (let i = 0; i < segsArr.length && extracto.length < maxChars; i++) {
+          const s = segsArr[i];
+          const txt = (s?.original_raw || s?.raw || "").replace(/<[^>]+>/g, "").trim();
+          if (!txt) continue;
+          extracto += (extracto ? " " : "") + txt.slice(0, 200);
+        }
+        if (extracto.length > maxChars) extracto = extracto.slice(0, maxChars) + "...";
+      }
+      contexto += `🎙️ Sesión audio ${idx + 1}: ${d.title || `Sesión ${docSnap.id}`} • Segs: ${segsArr.length || d.segmentCount || 0} • Modelo: ${d.modelUsed || 'N/A'} • Estado: ${d.status || 'N/A'}${extracto ? " • Extracto: " + extracto : ""}\n`;
+    });
+  }
+
+  if (coleccionesSeleccionadas.has("audioTranslateSummaries") && audioSessionIds.size > 0) {
+    const summariesById = new Map();
+    for (const sessionId of audioSessionIds) {
+      try {
+        const q = query(collection(db, "audioTranslateSummaries"), where("sessionId", "==", sessionId));
+        const snap = await getDocs(q);
+        snap.forEach((docSnap) => summariesById.set(docSnap.id, docSnap));
+      } catch (_) {}
+    }
+    Array.from(summariesById.values()).forEach((docSnap, idx) => {
+      const d = docSnap.data();
+      contexto += `📝 Resumen audio ${idx + 1}: ${d.type || 'tipo'} • Tono: ${d.tone || 'raw'} • Modelo: ${d.model || 'N/A'} • Texto: ${(d.text || d.content || '').slice(0,120)}...\n`;
+    });
+  }
+
+  if (coleccionesSeleccionadas.has("audioTranslateSegments") && audioSessionIds.size > 0) {
+    const segmentsById = new Map();
+    for (const sessionId of audioSessionIds) {
+      try {
+        const segRef = doc(db, "audioTranslateSegments", sessionId);
+        const segSnap = await getDoc(segRef);
+        if (segSnap.exists()) segmentsById.set(segSnap.id, segSnap);
+      } catch (_) {}
+    }
+    Array.from(segmentsById.values()).forEach((docSnap) => {
+      const d = docSnap.data() || {};
+      const segsArr = Array.isArray(d.segments) ? d.segments : [];
+      const segs = segsArr.length;
+      let extracto = "";
+      let subtitulos = "";
+      if (segs) {
+        const maxChars = 1200;
+        const subs = [];
+        for (let i = 0; i < segsArr.length && extracto.length < maxChars; i++) {
+          const s = segsArr[i];
+          const txt = (s?.original_raw || s?.raw || "").replace(/<[^>]+>/g, "").trim();
+          if (!txt) continue;
+          extracto += (extracto ? " " : "") + txt.slice(0, 200);
+          if (s?.subtitle) subs.push(s.subtitle);
+        }
+        if (extracto.length > maxChars) extracto = extracto.slice(0, maxChars) + "...";
+        if (subs.length) subtitulos = subs.slice(0, 5).join(" | ");
+      }
+      contexto += `🧩 Segs sesión ${docSnap.id}: ${segs} segmentos${subtitulos ? " • Subtítulos: " + subtitulos : ""}${extracto ? " • Extracto: " + extracto : ""}\n`;
+    });
+  }
 
   return contexto;
 }
 
-async function prepararPromptConContexto(userMessage, contextoLecturasExtra = "") {
+async function prepararPromptConContexto(userMessage, contextoLecturasExtra = "", contextoSeleccionado = "") {
+  
   const contextoFirebase = await construirContextoFirebase();
 
   return [
@@ -107,20 +404,144 @@ Eres un asistente pedagógico experto. Tienes acceso a estos datos de Firebase:
 ${contextoFirebase}
 
 ${contextoLecturasExtra ? "También tienes lecturas relevantes específicas:\n" + contextoLecturasExtra : ""}
+${contextoSeleccionado ? "El usuario seleccionó este contenido y quiere que lo uses como foco principal:\n" + contextoSeleccionado : ""}
 
 Ahora responde la pregunta del usuario SOLO usando este contexto si aplica:
 
 ${userMessage}
 
 IMPORTANTE:
+- Si hay contenido seleccionado, úsalo como contexto principal antes de usar el resto.
 - Devuelve TODO el contenido ÚNICAMENTE en HTML.
 - Usa <strong> para negritas, <em> para cursivas.
 - No uses Markdown (**texto**, _texto_, etc.).
 - No incluyas bloques de código como \`\`\`html ni \`\`\`.
 - Usa <h2>, <h3>, <p>, <ul>, <li>, <table>, etc. correctamente.
+- Si no encuentras datos suficientes en el contexto, responde exactamente con: __INSUFFICIENT_CONTEXT__.
 `
     }
   ];
+}
+
+function isInsufficientLocalAnswer(answer = "") {
+  const text = String(answer || "").trim().toLowerCase();
+  if (!text) return true;
+  if (text.includes("__insufficient_context__")) return true;
+  const patterns = [
+    "no encontr",
+    "no cuento con información",
+    "no tengo información",
+    "no hay información",
+    "falta contexto",
+    "contexto insuficiente",
+    "insuficiente"
+  ];
+  return patterns.some(p => text.includes(p));
+}
+
+async function fetchWebContextForQuestion(question) {
+  const q = encodeURIComponent(String(question || "").trim());
+  if (!q) return "";
+  try {
+    const searchRes = await fetch(`https://es.wikipedia.org/w/rest.php/v1/search/title?q=${q}&limit=3`);
+    if (!searchRes.ok) return "";
+    const searchData = await searchRes.json().catch(() => ({}));
+    const pages = Array.isArray(searchData?.pages) ? searchData.pages.slice(0, 3) : [];
+    if (!pages.length) return "";
+
+    const chunks = [];
+    for (const page of pages) {
+      const title = page?.title;
+      if (!title) continue;
+      const sumRes = await fetch(`https://es.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+      if (!sumRes.ok) continue;
+      const sumData = await sumRes.json().catch(() => ({}));
+      const extract = String(sumData?.extract || "").trim();
+      if (!extract) continue;
+      chunks.push(`- ${title}: ${extract}`);
+    }
+
+    return chunks.join("\n");
+  } catch (_) {
+    return "";
+  }
+}
+
+function sourceTagHtml(source = "local") {
+  const normalized = String(source || "local").toLowerCase().trim();
+  const map = {
+    local: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--local inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Fuente: Local</span>`,
+    web: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--web inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200">Fuente: Web</span>`,
+    model: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--model inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Fuente: Modelo IA</span>`
+  };
+  return map[normalized] || map.local;
+}
+
+async function resolverRespuestaCharly(userMessage, contextoLecturasExtra = "", contextoSeleccionado = "", contextoConversacion = "") {
+  const localPrompt = await prepararPromptConContexto(userMessage, contextoLecturasExtra, contextoSeleccionado);
+  if (contextoConversacion && localPrompt?.[0]) {
+    localPrompt[0].text += `\n\nContexto de conversación previa (úsalo para continuidad):\n${contextoConversacion}`;
+  }
+  let localAnswer = await enviarPrompt(localPrompt);
+  localAnswer = String(localAnswer || "")
+    .replace(/```[a-zA-Z]*\s*/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  if (!isInsufficientLocalAnswer(localAnswer)) {
+    return { answer: localAnswer, source: "local" };
+  }
+
+  const webContext = await fetchWebContextForQuestion(userMessage);
+  if (webContext) {
+    const webPrompt = [
+      {
+        role: "user",
+        text: `
+Eres Charly. Responde con claridad usando estas referencias web.
+Devuelve SOLO HTML válido (sin Markdown ni bloques de código).
+
+Pregunta del usuario:
+${userMessage}
+
+${contextoConversacion ? `Contexto de conversación previa:\n${contextoConversacion}\n` : ""}
+
+Referencias web:
+${webContext}
+`
+      }
+    ];
+    let webAnswer = await enviarPrompt(webPrompt);
+    webAnswer = String(webAnswer || "")
+      .replace(/```[a-zA-Z]*\s*/g, "")
+      .replace(/```/g, "")
+      .trim();
+    if (!isInsufficientLocalAnswer(webAnswer)) {
+      return { answer: webAnswer, source: "web" };
+    }
+  }
+
+  const modelPrompt = [
+    {
+      role: "user",
+      text: `
+Eres Charly. Responde con conocimiento general y ejemplos prácticos cuando no exista contexto local suficiente.
+Devuelve SOLO HTML válido (sin Markdown ni bloques de código).
+
+Pregunta del usuario:
+${userMessage}
+${contextoConversacion ? `\n\nContexto de conversación previa:\n${contextoConversacion}` : ""}
+`
+    }
+  ];
+  const modelAnswer = await enviarPrompt(modelPrompt);
+  return {
+    answer: String(modelAnswer || "")
+      .replace(/```[a-zA-Z]*\s*/g, "")
+      .replace(/```/g, "")
+      .trim(),
+    source: "model"
+  };
 }
 
 
@@ -147,8 +568,101 @@ let historialConversacion = [];
 let contextoMetodologia = "";
 let contextoLecturas = "";
 
+function stripHtmlToText(html = "") {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildConversationContext(limit = 10) {
+  const tail = historialConversacion.slice(-limit);
+  if (!tail.length) return "";
+  return tail.map(msg => {
+    const rol = msg.tipo === "usuario" ? "Usuario" : "Asistente";
+    return `${rol}: ${String(msg.texto || "").trim()}`;
+  }).filter(Boolean).join("\n");
+}
+
+function initPanelIzquierdoToggle() {
+  const panel = document.getElementById("panel-izquierdo");
+  const btn = document.getElementById("btnTogglePanelIzquierdo");
+  if (!panel || !btn) return;
+  if (btn.dataset.bound === "1") return;
+
+  const key = "cb.panelIzquierdo.abierto";
+  const saved = localStorage.getItem(key);
+  const isOpen = saved === "1";
+  panel.classList.toggle("is-open", isOpen);
+  btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  btn.setAttribute("title", isOpen ? "Cerrar menú" : "Abrir menú");
+
+  btn.addEventListener("click", () => {
+    const open = !panel.classList.contains("is-open");
+    panel.classList.toggle("is-open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.setAttribute("title", open ? "Cerrar menú" : "Abrir menú");
+    localStorage.setItem(key, open ? "1" : "0");
+  });
+
+  btn.dataset.bound = "1";
+}
+
+function initStudioWorkspaceToggle() {
+  const workspace = document.querySelector(".panel-analisis.studio-workspace");
+  const panelChat = document.getElementById("panel-chat");
+  const btn = document.getElementById("btnToggleStudioWorkspace");
+  if (!workspace || !panelChat || !btn) return;
+  if (btn.dataset.bound === "1") return;
+
+  const key = "cb.chat.panel.visible";
+  const icon = btn.querySelector("i");
+  const notifyChatOpened = () => {
+    window.dispatchEvent(new CustomEvent("cb-studio-chat-opened"));
+  };
+
+  const applyState = (isVisible) => {
+    panelChat.classList.toggle("is-hidden", !isVisible);
+    btn.classList.toggle("is-active", isVisible);
+    btn.setAttribute("aria-pressed", isVisible ? "true" : "false");
+    btn.setAttribute("title", isVisible ? "Ocultar chat" : "Mostrar chat");
+    workspace.classList.remove("is-hidden");
+    if (icon) {
+      icon.classList.toggle("fa-comments", isVisible);
+      icon.classList.toggle("fa-comment-slash", !isVisible);
+    }
+    if (isVisible) notifyChatOpened();
+  };
+
+  const saved = localStorage.getItem(key);
+  const isVisible = saved !== "0";
+  applyState(isVisible);
+
+  btn.addEventListener("click", () => {
+    const nextVisible = panelChat.classList.contains("is-hidden");
+    applyState(nextVisible);
+    localStorage.setItem(key, nextVisible ? "1" : "0");
+  });
+
+  window.addEventListener("cb-chat-visibility-force", (event) => {
+    const forcedVisible = event?.detail?.visible;
+    if (typeof forcedVisible !== "boolean") return;
+    applyState(forcedVisible);
+    localStorage.setItem(key, forcedVisible ? "1" : "0");
+  });
+
+  btn.dataset.bound = "1";
+}
+
 // Ejemplo: manejar envío de formulario del generador
 document.addEventListener("DOMContentLoaded", () => {
+  initPanelIzquierdoToggle();
+  initStudioWorkspaceToggle();
+  const safeShow = (el) => { if (el) el.style.display = 'block'; };
+  const safeHide = (el) => { if (el) el.style.display = 'none'; };
+
   const btn = document.getElementById("btnGenerarLectura");
   const btnListaLecturas = document.getElementById("btnListaLecturas");
   const modalListaLecturas = document.getElementById("modalListaLecturas");
@@ -284,11 +798,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (lecturas.length > 0) {
                 graficarcriteriosPorNivel(lecturas);
             } else {
-                console.log("No hay lecturas para mostrar gráficas");
                 // Opcional: mostrar gráficas de ejemplo o mensaje
             }
         } catch (error) {
-            console.error("Error al cargar datos iniciales:", error);
         }
     }
 
@@ -446,28 +958,35 @@ document.addEventListener("DOMContentLoaded", () => {
         
     
     if (btnListaLecturas && modalListaLecturas) {
-        btnListaLecturas.addEventListener("click", async () => {
-        modalListaLecturas.style.display = "block";
-        await cargarLecturasGuardadas();
-        });
-    }
+  btnListaLecturas.addEventListener("click", async () => {
+    safeShow(modalListaLecturas);
+    await cargarLecturasGuardadas();
+  });
+}
 
-    if (cerrarModalListaLecturas) {
-        cerrarModalListaLecturas.addEventListener("click", () => {
-        modalListaLecturas.style.display = "none";
-        });
-    }
+// Cerrar lista de lecturas
+if (cerrarModalListaLecturas) {
+  cerrarModalListaLecturas.addEventListener("click", () => {
+    safeHide(modalListaLecturas);
+  });
+}
 
-    if (cerrarVistaLectura) {
-        cerrarVistaLectura.addEventListener("click", () => {
-        modalVistaLectura.style.display = "none";
-        });
-    }
+// Cerrar vista lectura
+if (cerrarVistaLectura) {
+  cerrarVistaLectura.addEventListener("click", () => {
+    safeHide(modalVistaLectura);
+  });
+}
 
-    window.addEventListener("click", (e) => {
-        if (e.target === modalListaLecturas) modalListaLecturas.style.display = "none";
-        if (e.target === modalVistaLectura) modalVistaLectura.style.display = "none";
-    });
+// Click fuera para cerrar
+window.addEventListener("click", (e) => {
+  if (modalListaLecturas && e.target === modalListaLecturas) safeHide(modalListaLecturas);
+  if (modalVistaLectura && e.target === modalVistaLectura) safeHide(modalVistaLectura);
+});
+
+// Modal lecturas ASC
+
+
 
 
     if (btn) {
@@ -486,257 +1005,19 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             alert("Lectura generada y guardada");
         } catch (err) {
-            console.error("Error al guardar lectura:", err);
         }
         });
     }
 
-    
-  const btnMetodologia = document.getElementById("btnMetodologia");
-  const modalMetodologia = document.getElementById("modalMetodologiaASC");
-  const cerrarModal = document.getElementById("cerrarModalMetodologia");
-  const modal = document.getElementById("modalMetodologiaASC");
-  const modalLista = document.getElementById("modalListaMetodologica");
-  const cerrarModalLista = document.getElementById("cerrarModalLista");
-
-  if (cerrarModalLista && modalLista) {
-    cerrarModalLista.addEventListener("click", () => {
-      modalLista.style.display = "none";
-    });
-  }
-
-  // También cerrar si se hace clic fuera del contenido
-  window.addEventListener("click", (e) => {
-    if (e.target === modalLista) {
-      modalLista.style.display = "none";
-    }
-  });
-  if (btnMetodologia && modalMetodologia) {
-    btnMetodologia.addEventListener("click", () => {
-      modalMetodologia.style.display = "block";
-    });
-  }
-  if (cerrarModal && modalMetodologia) {
-    cerrarModal.addEventListener("click", () => {
-      modalMetodologia.style.display = "none";
-    });
-  }
-  
-  window.addEventListener("click", (e) => {
-    if (e.target === modalLista) {
-        modalLista.style.display = "none";
-    }
-  });
-
-  if (cerrarModal && modal) {
-    cerrarModal.addEventListener("click", () => {
-      modal.style.display = "none";
-    });
-  }
-
-  // Opción: cerrar al hacer clic fuera del contenido
-  window.addEventListener("click", (e) => {
-    if (e.target === modal) {
-      modal.style.display = "none";
-    }
-  });
-
-  btnLista.addEventListener("click", async () => {
-    modalLista.style.display = "block";
-    await cargarTemasMetodologicos();
-  });
-  
-  cerrarModal.addEventListener("click", () => {
-    modalLista.style.display = "none";
-  });
-  // Simular placeholder en contenteditable
-  ["conceptoMetodologia", "comentariosMetodologia"].forEach(id => {
-    const div = document.getElementById(id);
-    const placeholder = div.getAttribute("placeholder");
-
-    const checkPlaceholder = () => {
-      if (div.textContent.trim() === "") {
-        div.innerHTML = `<span class="placeholder">${placeholder}</span>`;
-      }
-    };
-
-    div.addEventListener("focus", () => {
-      if (div.querySelector(".placeholder")) div.innerHTML = "";
-    });
-
-    div.addEventListener("blur", () => {
-      checkPlaceholder();
-    });
-
-    checkPlaceholder();
-  });
-
-
-
-  if (form) {
-    form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-      
-        const tema = document.getElementById("temaMetodologia")?.value.trim();
-        const concepto = $('#conceptoMetodologia').trumbowyg('html').trim();
-        const comentarios = $('#comentariosMetodologia').trumbowyg('html').trim();
-        const docId = form.getAttribute("data-id"); // obtener el ID si existe
-      
-        if (!tema || !concepto) {
-          alert("Tema y concepto son obligatorios.");
-          return;
-        }
-      
-        try {
-          if (docId) {
-            // 🔁 Actualizar documento existente
-            const ref = doc(db, "metodologiaASC", docId);
-            await updateDoc(ref, {
-              tema,
-              concepto,
-              comentarios,
-              updatedAt: new Date()
-            });
-            alert("✅ Documento actualizado.");
-          } else {
-            // ➕ Crear nuevo documento
-            await addDoc(collection(db, "metodologiaASC"), {
-              tema,
-              concepto,
-              comentarios,
-              createdAt: new Date(),
-              userId: auth.currentUser?.uid || "anónimo"
-            });
-            alert("✅ Documento guardado correctamente.");
-          }
-      
-          // Limpieza final
-          form.reset();
-          form.removeAttribute("data-id");
-          document.getElementById("conceptoMetodologia").innerHTML = "";
-          document.getElementById("comentariosMetodologia").innerHTML = "";
-          document.getElementById("modalMetodologiaASC").style.display = "none";
-          await cargarTemasMetodologicos(); // recargar lista si fue editado
-      
-        } catch (error) {
-          console.error("❌ Error al guardar:", error);
-          alert("Error al guardar el documento.");
-        }
-      });
-    }
-
-    const btnLecturas = document.getElementById("btnLecturas");
-    const modalLecturas = document.getElementById("modalLecturasASC");
-    const cerrarModalLecturas = document.getElementById("cerrarModalLecturas");
-
-    if (btnLecturas && modalLecturas) {
-    btnLecturas.addEventListener("click", () => {
-        modalLecturas.style.display = "block";
-    });
-    }
-
-    if (cerrarModalLecturas && modalLecturas) {
-    cerrarModalLecturas.addEventListener("click", () => {
-        modalLecturas.style.display = "none";
-    });
-    }
-
-    window.addEventListener("click", (e) => {
-    if (e.target === modalLecturas) {
-        modalLecturas.style.display = "none";
-    }
-    });
-
-    const formLecturas = document.getElementById("formLecturasASC");
-
-    if (formLecturas) {
-        formLecturas.addEventListener("submit", async (e) => {
-            e.preventDefault();
-
-            const lectura = {
-            serie: document.getElementById("serieLectura")?.value.trim(),
-            nivel: document.getElementById("nivelLectura")?.value.trim(),
-            grado: document.getElementById("gradoLectura")?.value.trim(),
-            trimestre: parseInt(document.getElementById("trimestreLectura")?.value),
-            unidad: parseInt(document.getElementById("unidadLectura")?.value),
-            titulo: document.getElementById("tituloLectura")?.value.trim(),
-            textoLectura: document.getElementById("textoLectura")?.innerHTML.trim(),
-            preguntas: [
-                {
-                texto: document.getElementById("pregunta1")?.value.trim(),
-                nivel: document.getElementById("nivelPregunta1")?.value,
-                criterio: document.getElementById("criterioPregunta1")?.value.trim(),
-                respuesta: document.getElementById("respuestaPregunta1")?.value.trim()
-                },
-                {
-                texto: document.getElementById("pregunta2")?.value.trim(),
-                nivel: document.getElementById("nivelPregunta2")?.value,
-                criterio: document.getElementById("criterioPregunta2")?.value.trim(),
-                respuesta: document.getElementById("respuestaPregunta2")?.value.trim()
-                },
-                {
-                texto: document.getElementById("pregunta3")?.value.trim(),
-                nivel: document.getElementById("nivelPregunta3")?.value,
-                criterio: document.getElementById("criterioPregunta3")?.value.trim(),
-                respuesta: document.getElementById("respuestaPregunta3")?.value.trim()
-                },
-                {
-                texto: document.getElementById("pregunta4")?.value.trim(),
-                nivel: document.getElementById("nivelPregunta4")?.value,
-                criterio: document.getElementById("criterioPregunta4")?.value.trim(),
-                respuesta: document.getElementById("respuestaPregunta4")?.value.trim()
-                },
-                {
-                texto: document.getElementById("pregunta5")?.value.trim(),
-                nivel: document.getElementById("nivelPregunta5")?.value,
-                criterio: document.getElementById("criterioPregunta5")?.value.trim(),
-                respuesta: document.getElementById("respuestaPregunta5")?.value.trim()
-                }
-            ],
-            
-            createdAt: new Date(),
-            userId: auth.currentUser?.uid || "anónimo"
-            };
-
-            if (!lectura.serie || !lectura.nivel || !lectura.grado || !lectura.textoLectura) {
-            alert("Por favor completa todos los campos requeridos.");
-            return;
-            }
-
-            const docId = formLecturas.getAttribute("data-id");
-
-            try {
-              if (docId) {
-                const ref = doc(db, "lecturasASC", docId);
-                await updateDoc(ref, lectura);
-                alert("✅ Lectura actualizada correctamente.");
-              } else {
-                await addDoc(collection(db, "lecturasASC"), lectura);
-                alert("✅ Lectura guardada correctamente.");
-              }
-            
-              // Limpiar formulario
-              formLecturas.reset();
-              formLecturas.removeAttribute("data-id");
-              document.getElementById("textoLectura").innerHTML = "";
-              modalLecturas.style.display = "none";
-              await cargarLecturasGuardadas();
-            } catch (error) {
-              console.error("❌ Error al guardar la lectura:", error);
-              alert("Ocurrió un error al guardar.");
-            }
-            
-        });    
-    }
 
     const btnLecturasConcentradas = document.getElementById("btnLecturasConcentradas");
     const modalLecturasConcentradas = document.getElementById("modalLecturasConcentradas");
     const cerrarModalLecturasConcentradas = document.getElementById("cerrarModalLecturasConcentradas");
 
-    if (btnLecturasConcentradas) {
-        btnLecturasConcentradas.addEventListener("click", async () => {
-            modalLecturasConcentradas.style.display = "block";
-            await cargarAnalisisGuardados();
+    if (btnLecturasConcentradas && modalLecturasConcentradas) {
+      btnLecturasConcentradas.addEventListener("click", async () => {
+        safeShow(modalLecturasConcentradas);
+        await cargarAnalisisGuardados();
             const snapshot = await getDocs(collection(db, "lecturasASC"));
             const lecturas = snapshot.docs.map(doc => doc.data());
           
@@ -837,11 +1118,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 
     }
 
-    if (cerrarModalLecturasConcentradas) {
-        cerrarModalLecturasConcentradas.addEventListener("click", () => {
-            modalLecturasConcentradas.style.display = "none";
-        });
+    if (cerrarModalLecturasConcentradas && modalLecturasConcentradas) {
+      cerrarModalLecturasConcentradas.addEventListener("click", () => {
+        safeHide(modalLecturasConcentradas);
+      });
     }
+
 
 
         // 🔍 Análisis con Gemini
@@ -918,7 +1200,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>`;
                 document.querySelector("#modalLecturasConcentradas .modal-body").prepend(output);
             } catch (err) {
-                console.error("❌ Error al analizar con Gemini:", err);
                 alert("Error al analizar con Gemini.");
             } finally {
                 document.getElementById("loadingAnalisis").style.display = "none"; // ✅ Ocultar loading
@@ -929,10 +1210,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     window.addEventListener("click", (e) => {
-    if (e.target === modalLecturasConcentradas) {
-        modalLecturasConcentradas.style.display = "none";
-    }
+      if (modalLecturasConcentradas && e.target === modalLecturasConcentradas) {
+        safeHide(modalLecturasConcentradas);
+      }
     });
+
 
     // Inicializar DataTable
     $(document).ready(() => {
@@ -1022,6 +1304,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("scrollUp").addEventListener("click", () => {
     contenidoTexto.scrollTo({ top: 0, behavior: "smooth" });
   });
+
+  document.getElementById("scrollMiddle").addEventListener("click", () => {
+    const maxScroll = Math.max(0, contenidoTexto.scrollHeight - contenidoTexto.clientHeight);
+    contenidoTexto.scrollTo({ top: Math.floor(maxScroll / 2), behavior: "smooth" });
+  });
   
   document.getElementById("scrollDown").addEventListener("click", () => {
     contenidoTexto.scrollTo({ top: contenidoTexto.scrollHeight, behavior: "smooth" });
@@ -1093,33 +1380,9 @@ function renderizarTarjetas(docs) {
     `;
     iconos.style.alignSelf = "flex-end";
 
-    const editarIcono = iconos.querySelector(".fa-pen");
-    const eliminarIcono = iconos.querySelector(".fa-trash");
 
-    editarIcono.addEventListener("click", (e) => {
-      e.stopPropagation();
-      document.getElementById("temaMetodologia").value = item.tema || "";
-      document.getElementById("conceptoMetodologia").innerHTML = item.concepto || "";
-      document.getElementById("comentariosMetodologia").innerHTML = item.comentarios || "";
-      form.setAttribute("data-id", item.id);
-      document.getElementById("modalMetodologiaASC").style.display = "block";
-      modalLista.style.display = "none";
-    });
 
-    eliminarIcono.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const confirmacion = confirm(`¿Eliminar "${item.tema}"?`);
-      if (confirmacion) {
-        try {
-          const ref = doc(db, "metodologiaASC", item.id);
-          await deleteDoc(ref);
-          alert("Documento eliminado");
-          await cargarTemasMetodologicos();
-        } catch (error) {
-          console.error("❌ Error al eliminar:", error);
-        }
-      }
-    });
+  
 
     card.addEventListener("click", () => {
       document.getElementById("vistaTema").textContent = item.tema || "(Sin título)";
@@ -1140,39 +1403,19 @@ document.getElementById("cerrarVistaPrevia").addEventListener("click", () => {
 });
 
 
-document.getElementById('toggleChartPanel').addEventListener('click', () => {
-    const panelCharts = document.getElementById('panel-charts');
-    panelCharts.classList.toggle('visible');
+//document.getElementById('toggleChartPanel').addEventListener('click', () => {
+//    const panelCharts = document.getElementById('panel-charts');
+//    panelCharts.classList.toggle('visible');
+ // });
+
+
+
+async function enviarPrompt(mensajes) {
+  return postGeminiWithModelFallback({
+    mensajes,
+    selectId: "selectGeminiEndpoint2",
+    maxIntentosPorModelo: 2
   });
-
-
-
-async function enviarPrompt(mensajes, intentos = 0) {
-  const response = await fetch(GEMINI_ENDPOINT + `?key=${API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: mensajes.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      }))
-    })
-  });
-
-  if (response.status === 503 && intentos < 2) {
-    console.warn("⏳ Servicio no disponible. Reintentando...");
-    await new Promise(res => setTimeout(res, 1500));
-    return await enviarPrompt(mensajes, intentos + 1);
-  }
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("❌ Error en la respuesta de Gemini:", data);
-    throw new Error("Error al generar contenido con Gemini");
-  }
-
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 
@@ -1181,6 +1424,145 @@ async function enviarPrompt(mensajes, intentos = 0) {
 
 // Cargar conversación al iniciar
 let respuestaSeleccionada = null;
+
+function extraerTextoPlano(html = "") {
+  return String(html || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function actualizarPlaceholderSeguimiento() {
+  const inputEl = document.getElementById("mensajeInput");
+  if (!inputEl) return;
+  inputEl.placeholder = respuestaSeleccionada
+    ? "Pregunta sobre el contenido seleccionado..."
+    : "Escribe tu mensaje...";
+}
+
+function limpiarSeleccionSeguimiento() {
+  respuestaSeleccionada = null;
+  document.querySelectorAll(".icono-seguimiento").forEach(el => {
+    el.classList.remove("is-selected");
+  });
+  actualizarPlaceholderSeguimiento();
+}
+
+function seleccionarRespuestaSeguimiento(texto, icono) {
+  document.querySelectorAll(".icono-seguimiento").forEach(el => {
+    el.classList.remove("is-selected");
+  });
+  respuestaSeleccionada = texto;
+  if (icono) icono.classList.add("is-selected");
+  actualizarPlaceholderSeguimiento();
+}
+
+function crearBloqueRespuestaIA(textoHTML) {
+  const div = document.createElement("div");
+  div.classList.add("respuesta-ia");
+
+  const contenidoRespuesta = document.createElement("div");
+  contenidoRespuesta.className = "respuesta-ia-contenido";
+  contenidoRespuesta.innerHTML = textoHTML || "";
+  div.appendChild(contenidoRespuesta);
+
+  const iconContainer = document.createElement("div");
+  iconContainer.style.display = "flex";
+  iconContainer.style.justifyContent = "flex-end";
+  iconContainer.style.gap = "10px";
+
+  // Ícono de seguimiento
+  const icono = document.createElement("i");
+  icono.className = "fas fa-plus-circle icono-seguimiento";
+  icono.style.cursor = "pointer";
+  icono.style.marginLeft = "10px";
+  if (respuestaSeleccionada && respuestaSeleccionada === (textoHTML || "")) icono.classList.add("is-selected");
+  icono.title = "Responder sobre este contenido";
+
+  icono.addEventListener("click", () => {
+    const textoActual = contenidoRespuesta.innerHTML;
+    if (respuestaSeleccionada && respuestaSeleccionada === textoActual) {
+      limpiarSeleccionSeguimiento();
+      return;
+    }
+    seleccionarRespuestaSeguimiento(textoActual, icono);
+    const inputEl = document.getElementById("mensajeInput");
+    inputEl?.focus();
+  });
+
+  // Ícono de copiar respuesta
+  const iconoCopiar = document.createElement("i");
+  iconoCopiar.className = "fas fa-copy";
+  iconoCopiar.style.cursor = "pointer";
+  iconoCopiar.style.marginLeft = "10px";
+  iconoCopiar.title = "Copiar contenido";
+
+  iconoCopiar.addEventListener("click", async () => {
+    const texto = String(contenidoRespuesta.innerText || contenidoRespuesta.textContent || "").trim();
+    if (!texto) return;
+
+    let copiado = false;
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(texto);
+        copiado = true;
+      } catch (_) {}
+    }
+
+    if (!copiado) {
+      const temp = document.createElement("textarea");
+      temp.value = texto;
+      temp.setAttribute("readonly", "readonly");
+      temp.style.position = "absolute";
+      temp.style.left = "-9999px";
+      document.body.appendChild(temp);
+      temp.select();
+      temp.setSelectionRange(0, temp.value.length);
+      try {
+        copiado = document.execCommand("copy");
+      } catch (_) {
+        copiado = false;
+      }
+      document.body.removeChild(temp);
+    }
+
+    const prevTitle = iconoCopiar.title;
+    const prevState = iconoCopiar.dataset.state || "";
+    iconoCopiar.title = copiado ? "Copiado" : "No se pudo copiar";
+    iconoCopiar.dataset.state = copiado ? "success" : "error";
+    setTimeout(() => {
+      iconoCopiar.title = prevTitle;
+      if (prevState) iconoCopiar.dataset.state = prevState;
+      else iconoCopiar.removeAttribute("data-state");
+    }, 1000);
+  });
+
+  // Ícono para continuar generación
+  const iconoContinuar = document.createElement("i");
+  iconoContinuar.className = "fas fa-forward";
+  iconoContinuar.title = "Continuar generación";
+  iconoContinuar.style.cursor = "pointer";
+  iconoContinuar.addEventListener("click", async () => {
+    const htmlAntes = contenidoRespuesta.innerHTML;
+    const textoParcial = contenidoRespuesta.innerText || contenidoRespuesta.textContent;
+    const nuevoTexto = await continuarGeneracionGemini(textoParcial);
+    if (!nuevoTexto || nuevoTexto.startsWith("[Error")) {
+      alert("No se pudo continuar la generación. Intenta de nuevo.");
+      return;
+    }
+    contenidoRespuesta.innerHTML += `<p>${nuevoTexto}</p>`;
+    if (respuestaSeleccionada && respuestaSeleccionada === htmlAntes) {
+      // Mantener contexto seleccionado actualizado solo si estaba seleccionada esta respuesta.
+      seleccionarRespuestaSeguimiento(contenidoRespuesta.innerHTML, icono);
+    }
+  });
+
+  iconContainer.appendChild(icono);
+  iconContainer.appendChild(iconoCopiar);
+  iconContainer.appendChild(iconoContinuar);
+  div.appendChild(iconContainer);
+  return div;
+}
 
 // Cargar conversación al iniciar
 async function cargarConversacionDesdeFirebase() {
@@ -1193,6 +1575,7 @@ async function cargarConversacionDesdeFirebase() {
   const q = query(collection(db, "conversacionIA"), where("userId", "==", currentUserId));
   const snap = await getDocs(q);
   const ordenados = snap.docs.map(doc => ({ ...doc.data(), id: doc.id })).sort((a, b) => a.timestamp - b.timestamp);
+  historialConversacion = [];
 
   ordenados.forEach(msg => {
     if (msg.tipo === "usuario") {
@@ -1200,87 +1583,15 @@ async function cargarConversacionDesdeFirebase() {
       div.classList.add("mensaje-usuario");
       div.textContent = `Tú: ${msg.texto}`;
       chat.appendChild(div);
+      historialConversacion.push({ tipo: "usuario", texto: String(msg.texto || "") });
     } else if (msg.tipo === "asistente") {
-        const div = document.createElement("div");
-        div.classList.add("respuesta-ia");
-        div.innerHTML = msg.texto;
-      
-        // Contenedor para los iconos
-        const iconContainer = document.createElement("div");
-        iconContainer.style.display = "flex";
-        iconContainer.style.justifyContent = "flex-end";
-        iconContainer.style.gap = "10px";
-      
-      // Ícono de seguimiento
-      const icono = document.createElement("i");
-      icono.className = "fas fa-plus-circle icono-seguimiento";
-      icono.style.cursor = "pointer";
-      icono.style.marginLeft = "10px";
-      icono.style.color = msg.id === respuestaSeleccionada ? "c970d6" : "gray";
-      icono.title = "Responder sobre este contenido";
-
-      icono.addEventListener("click", () => {
-        document.querySelectorAll(".icono-seguimiento").forEach(el => el.style.color = "gray");
-        icono.style.color = "#c970d6";
-        respuestaSeleccionada = msg.texto;
-        input.focus();
-      });
-
-      // Ícono de impresión
-      const iconoImprimir = document.createElement("i");
-      iconoImprimir.className = "fas fa-print";
-      iconoImprimir.style.cursor = "pointer";
-      iconoImprimir.style.marginLeft = "10px";
-      iconoImprimir.style.color = "#444";
-      iconoImprimir.title = "Imprimir esta respuesta";
-
-      iconoImprimir.addEventListener("click", () => {
-        const contenidoHTML = msg.texto;
-        const ventana = window.open("", "", "width=800,height=600");
-        ventana.document.write(`
-          <html>
-          <head>
-            <title>Imprimir</title>
-            <style>
-              body { font-family: 'Inter', sans-serif; padding: 20px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-              th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-            </style>
-          </head>
-          <body>${contenidoHTML}</body>
-          </html>
-        `);
-        
-        ventana.document.close();
-        ventana.focus();
-        ventana.print();
-        ventana.close();
-      });
-
-        // Icono para continuar generación
-        const iconoContinuar = document.createElement("i");
-        iconoContinuar.className = "fas fa-forward";
-        iconoContinuar.title = "Continuar generación";
-        iconoContinuar.style.cursor = "pointer";
-        iconoContinuar.addEventListener("click", async () => {
-            const textoParcial = div.innerText || div.textContent;
-            const nuevoTexto = await continuarGeneracionGemini(textoParcial);
-            div.innerHTML += `<p>${nuevoTexto}</p>`;
-        });
-
-        iconContainer.appendChild(icono);
-        iconContainer.appendChild(iconoImprimir);
-        iconContainer.appendChild(iconoContinuar);
-        div.appendChild(iconContainer);
-        
-      // Agregar ambos íconos al div de respuesta
-      div.appendChild(icono);
-      div.appendChild(iconoImprimir);
-      contenido.appendChild(div);
+      contenido.appendChild(crearBloqueRespuestaIA(msg.texto));
+      historialConversacion.push({ tipo: "asistente", texto: stripHtmlToText(msg.texto || "") });
     }
   });
 
   contenido.scrollTop = contenido.scrollHeight;
+  actualizarPlaceholderSeguimiento();
 }
 
 // Guardar mensaje
@@ -1304,25 +1615,32 @@ document.getElementById("btnResetChat").addEventListener("click", async () => {
   }
   document.getElementById("chatMensajes").innerHTML = "";
   document.getElementById("contenidoTextoFormateado").innerHTML = "";
+  historialConversacion = [];
   respuestaSeleccionada = null;
+  actualizarPlaceholderSeguimiento();
   alert("✅ Conversación eliminada.");
 });
   
 async function continuarGeneracionGemini(textoParcial) {
+    const baseText = (textoParcial || "").trim();
+    if (!baseText) return "[Error: texto vacío]";
+
+    const selectId = document.getElementById("selectGeminiEndpoint2")
+      ? "selectGeminiEndpoint2"
+      : "selectGeminiEndpoint";
+
     try {
-      const response = await fetch(`${GEMINI_ENDPOINT}?key=${API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: textoParcial + "\nPor favor continúa." }] }]
-        })
+      const generated = await postGeminiWithModelFallback({
+        mensajes: [{
+          role: "user",
+          text: `${baseText}\n\nContinúa exactamente desde donde terminó, sin repetir párrafos previos.`
+        }],
+        selectId,
+        maxIntentosPorModelo: 2
       });
-  
-      const data = await response.json();
-      if (!response.ok) throw new Error("Error en respuesta de Gemini");
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text || "[Sin respuesta]";
+      return generated || "[Sin respuesta]";
     } catch (err) {
-      console.error("Error al continuar generación:", err);
+      console.error("Error en continuarGeneracionGemini:", err);
       return "[Error al continuar la generación]";
     }
   }
@@ -1360,14 +1678,34 @@ function detectarTemaDesdeMensaje(mensaje) {
   
 // Evento al enviar mensaje
 const input = document.getElementById("mensajeInput");
+const btnEnviarMensaje = document.getElementById("enviarMensaje");
+
+function autoResizeMensajeInput() {
+  if (!input) return;
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+}
+
+if (input) {
+  input.addEventListener("input", autoResizeMensajeInput);
+  input.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      btnEnviarMensaje?.click();
+    }
+  });
+  autoResizeMensajeInput();
+}
 
 
 document.getElementById("enviarMensaje").addEventListener("click", async () => {
+  await authReady;
   const chat = document.getElementById("chatMensajes");
   const contenido = document.getElementById("contenidoTextoFormateado");
   const userMessage = input.value.trim();
   if (!userMessage) return;
   input.value = "";
+  autoResizeMensajeInput();
 
   // ✅ Normalizamos para detectar intenciones
   const mensajeNormalizado = userMessage.toLowerCase();
@@ -1376,6 +1714,9 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
   const mencionaLecturasBase = /\blecturas\b|lecturas base/.test(mensajeNormalizado);
   const mencionaAmbasLecturas = mencionaLecturasNuevas && mencionaLecturasBase;
   const esAnalisis = /analisis|analiza|compara/.test(mensajeNormalizado);
+  const contextoSeleccionado = respuestaSeleccionada
+    ? extraerTextoPlano(respuestaSeleccionada).slice(0, 5000)
+    : "";
 
   // ✅ Mostrar el mensaje del usuario
   const userDiv = document.createElement("div");
@@ -1383,6 +1724,7 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
   userDiv.textContent = `Tú: ${userMessage}`;
   chat.appendChild(userDiv);
   await guardarMensaje(userMessage, "usuario");
+  historialConversacion.push({ tipo: "usuario", texto: userMessage });
 
   // ✅ Mostrar "Cargando..."
   const loading = document.createElement("p");
@@ -1419,11 +1761,11 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
         }
       });
       document.getElementById("loadingMensajeIA").remove();
-      const div = document.createElement("div");
-      div.className = "respuesta-ia";
-      div.innerHTML = html;
+      const div = crearBloqueRespuestaIA(html);
       contenido.appendChild(div);
-      await guardarMensaje(div.innerHTML, "asistente");
+      await guardarMensaje(html, "asistente");
+      historialConversacion.push({ tipo: "asistente", texto: stripHtmlToText(html) });
+      contenido.scrollTop = contenido.scrollHeight;
       return; // ✅ Fin aquí, no llama a Gemini
     }
 
@@ -1454,22 +1796,20 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
       }).join("\n\n");
     }
 
-    // ✅ Construimos el PROMPT con contexto general Firebase + lecturas extra
-    const promptGemini = await prepararPromptConContexto(userMessage, contextoLecturas);
-
-    // ✅ Ahora sí llamamos a Gemini con todo el contexto
-    const respuestaIA = (await enviarPrompt(promptGemini)).trim();
+    // ✅ Resolver con prioridad local y fallback web/model como en Chat con Charly de voiceTranscribe
+    const contextoConversacion = buildConversationContext(12);
+    const result = await resolverRespuestaCharly(userMessage, contextoLecturas, contextoSeleccionado, contextoConversacion);
+    const respuestaIA = `${sourceTagHtml(result.source)}<div class="mt-2">${result.answer}</div>`;
 
     // ✅ Mostramos resultado
     document.getElementById("loadingMensajeIA").remove();
-    const respuestaDiv = document.createElement("div");
-    respuestaDiv.classList.add("respuesta-ia");
-    respuestaDiv.innerHTML = respuestaIA;
+    const respuestaDiv = crearBloqueRespuestaIA(respuestaIA);
     contenido.appendChild(respuestaDiv);
     await guardarMensaje(respuestaIA, "asistente");
+    historialConversacion.push({ tipo: "asistente", texto: stripHtmlToText(result.answer || "") });
+    contenido.scrollTop = contenido.scrollHeight;
 
   } catch (err) {
-    console.error("❌ Error generando respuesta:", err);
     document.getElementById("loadingMensajeIA")?.remove();
     alert("No se pudo generar la respuesta del asistente.");
   }
@@ -1523,604 +1863,6 @@ document.getElementById("imprimirAnalisis").addEventListener("click", () => {
 });
 
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Elementos del DOM
-    const btnSugerenciasLectura = document.getElementById('btnSugerenciasLectura');
-    const modalNuevaLectura = document.getElementById('modalNuevaLectura');
-    const cerrarModalNuevaLectura = document.getElementById('cerrarModalNuevaLectura');
-  
-    // Debug: Verificar elementos
-    console.log('Botón:', btnSugerenciasLectura);
-    console.log('Modal:', modalNuevaLectura);
-    console.log('Botón cerrar:', cerrarModalNuevaLectura);
-  
-    // Función para abrir el modal con más robustez
-    function abrirModal(e) {
-      if (e) e.preventDefault();
-      console.log('Intentando abrir modal...');
-      
-      // Verificación adicional
-      if (!modalNuevaLectura) {
-        console.error('Modal no encontrado');
-        return;
-      }
-      
-      modalNuevaLectura.style.display = 'block';
-      document.body.style.overflow = 'hidden';
-      
-      // Debug: Verificar estilos después de abrir
-      setTimeout(() => {
-        console.log('Estilos del modal después de abrir:', 
-          window.getComputedStyle(modalNuevaLectura).display);
-      }, 100);
-    }
-  
-    // Función para cerrar el modal
-    function cerrarModal() {
-      modalNuevaLectura.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  
-    // Event listeners
-    if (btnSugerenciasLectura) {
-      btnSugerenciasLectura.addEventListener('click', abrirModal);
-    } else {
-      console.error('Botón no encontrado');
-    }
-  
-    if (cerrarModalNuevaLectura) {
-      cerrarModalNuevaLectura.addEventListener('click', cerrarModal);
-    }
-  
-    // Cerrar al hacer clic fuera del contenido
-    modalNuevaLectura.addEventListener('click', function(e) {
-      if (e.target === modalNuevaLectura) {
-        cerrarModal();
-      }
-    });
-  
-    // Cerrar con tecla ESC
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && modalNuevaLectura.style.display === 'block') {
-        cerrarModal();
-      }
-    });
-  
-    // Prueba manual - descomenta para verificar
-    // window.abrirModalManual = abrirModal;
-    // console.log('Prueba manual disponible: ejecuta abrirModalManual() en la consola');
-  });
-
-document.addEventListener('DOMContentLoaded', () => {
-  // 1) Mapea cada nivel a sus grados válidos
-  const gradosPorNivel = {
-    Preescolar:  ['1', '2', '3'],
-    Primaria:    ['1', '2', '3', '4', '5', '6'],
-    Secundaria:  ['1', '2', '3']
-  };
-  const nivelSelect = document.getElementById('nivelNuevo');
-  const gradoSelect = document.getElementById('gradoNuevo');
-  const autorSelect = document.getElementById('autorReferencia');
-
-  nivelSelect.addEventListener('change', () => {
-    gradoSelect.innerHTML = '<option value="">Selecciona grado</option>';
-    (gradosPorNivel[nivelSelect.value] || []).forEach(g => {
-      const opt = document.createElement('option');
-      opt.value = g;
-      opt.textContent = g;
-      gradoSelect.appendChild(opt);
-    });
-  });
-
-  // Cargar autores desde Firestore al <select>
-  const cargarAutoresReferencia = async () => {
-    try {
-      const snap = await getDocs(collection(db, 'autoresEjemplo'));
-      autorSelect.innerHTML = '<option value="">Selecciona autor</option>';
-      snap.forEach(doc => {
-        const d = doc.data();
-        const opt = document.createElement('option');
-        opt.value = JSON.stringify({ autor: d.autor, ejemplo: d.ejemplo, tipoTexto: d.tipoTexto });
-        opt.textContent = `${d.autor} — ${d.tipoTexto}`;
-        autorSelect.appendChild(opt);
-      });
-    } catch (err) {
-      console.error('Error al cargar autores:', err);
-      autorSelect.innerHTML = '<option value="">Error al cargar autores</option>';
-    }
-  };
-
-  cargarAutoresReferencia();
-
-
-  // 2) Configura modal de resultado
-  const modalRes = document.getElementById('modalResultadoLectura');
-  const closeRes = document.getElementById('cerrarModalResultado');
-  const resultadoContenido = document.getElementById('resultadoContenido');
-
-  closeRes.addEventListener('click', () => {
-    modalRes.style.display = 'none';
-    document.body.style.overflow = 'auto';
-  });
-  modalRes.addEventListener('click', e => {
-    if (e.target === modalRes) {
-      modalRes.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  });
-
-  // 3) Listener del formulario
-  const form = document.getElementById('formNuevaLectura');
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const stripHTML = html => html.replace(/<[^>]+>/g, '').trim();
-  
-    // Leer inputs
-    const temaNuevo      = document.getElementById('temaNuevo').value.trim();
-    const nivelNuevo     = nivelSelect.value;
-    const gradoNuevo     = gradoSelect.value;
-    const trimestreNuevo = parseInt(document.getElementById('trimestreNuevo').value, 10);
-    const unidadNuevo    = parseInt(document.getElementById('unidadNuevo').value, 10);
-    const autorData      = autorSelect.value ? JSON.parse(autorSelect.value) : null;
-    const especificaciones = document.getElementById('especificacionesNuevo').value.trim();
-    const ejeArticulador = document.getElementById('ejeArticulador').value;
-
-    if (!temaNuevo || !nivelNuevo || !gradoNuevo || !trimestreNuevo || !unidadNuevo || !autorData || !ejeArticulador) {
-      return alert('Por favor completa todos los campos.');
-    }
-
-  
-    // Traer lecturas previas
-    const lecQ = query(
-      collection(db, 'lecturasASC'),
-      where('nivel',     '==', nivelNuevo),
-      where('grado',     '==', gradoNuevo),
-      where('trimestre', '==', trimestreNuevo),
-      where('unidad',    '==', unidadNuevo)
-    );
-    const lecSnap = await getDocs(lecQ);
-    const lecturas = lecSnap.docs.map(d => d.data());
-    if (!lecturas.length) {
-      return alert('No se encontraron lecturas previas para esos parámetros.');
-    }
-  
-    // Conteo de palabras
-    const primeroTexto   = stripHTML(lecturas[0].textoLectura || '');
-    const cuentaPalabras = primeroTexto.split(/\s+/).filter(w => w).length;
-  
-    // Contexto de texto y preguntas
-    const textosPlano = lecturas.map((l, i) =>
-      `Lectura ${i+1} (Título: ${l.titulo}):\n${stripHTML(l.textoLectura)}`
-    ).join('\n\n');
-  
-    const preguntasPlano = lecturas.flatMap((l, i) =>
-      (l.preguntas || []).map((p, j) =>
-        `Lectura ${i+1} · Pregunta ${j+1}: "${p.texto}" — Nivel: ${p.nivel}, Criterio: ${p.criterio}`
-      )
-    ).join('\n');
-  
-    const criteriosUnicos = Array.from(new Set(
-      lecturas.flatMap(l => (l.preguntas || []).map(p => p.criterio))
-    ));
-    const listaCriterios = criteriosUnicos.join(', ');
-  
-    const definicionesEjes = {
-      "Inclusión": "Busca garantizar el derecho a la educación de todas y todos, reconociendo y valorando la diversidad cultural, lingüística, social y de capacidades. Promueve una escuela que atienda las necesidades de cada estudiante, eliminando barreras para el aprendizaje y la participación.",
-      "Pensamiento Crítico": "Fomenta la capacidad de analizar, cuestionar y reflexionar sobre la realidad, desarrollando habilidades para la toma de decisiones informadas y responsables. Impulsa una ciudadanía activa y comprometida con la transformación social.",
-      "Interculturalidad Crítica": "Promueve el diálogo y el respeto entre diferentes culturas, reconociendo las desigualdades históricas y estructurales. Busca construir una sociedad más justa y equitativa, valorando la diversidad como una riqueza colectiva.",
-      "Igualdad de Género": "Impulsa la equidad entre mujeres y hombres, cuestionando estereotipos y roles de género. Busca eliminar prácticas discriminatorias y promover relaciones basadas en el respeto y la igualdad de oportunidades.",
-      "Vida Saludable": "Fomenta hábitos y estilos de vida que favorezcan el bienestar físico, emocional y social. Incluye la promoción de la actividad física, la alimentación equilibrada, la salud mental y el cuidado del medio ambiente.",
-      "Apropiación de las Culturas a través de la Lectura y la Escritura": "Valora la lectura y la escritura como medios para acceder al conocimiento, expresar ideas y fortalecer la identidad cultural. Promueve el desarrollo de competencias comunicativas en diversos contextos y lenguajes.",
-      "Artes y Experiencias Estéticas": "Incorpora las manifestaciones artísticas y culturales en el proceso educativo, estimulando la creatividad, la sensibilidad y la apreciación estética. Busca enriquecer la formación integral de los estudiantes a través del arte."
-    };
-
-
-    // Prompt SOLO para la lectura y análisis
-    const promptLectura = [{
-      role: 'user',
-      text: `
-  Tienes el siguiente contexto de las lecturas previas:
-  ${textosPlano}
-  
-  Y estas preguntas originales (con sus niveles y criterios de Firebase):
-  ${preguntasPlano}
-  IMPORTANTE no añadir comentarios, solo devolver lo que se pide
-  IMPORTANTE **Especificaciones adicionales:** ${especificaciones || 'Ninguna.'} para generar una lectura nueva
-
-  genera un analisis de la lectura vieja
-  
-  <h3>Análisis Breve</h3>
-  <ul>
-    <li><strong>Estilo de redacción de la lectura previa ${textosPlano} :</strong> …</li>
-    <li><strong>Género literario de la lectura previa ${textosPlano}:</strong> …</li>
-    <li><strong>Cantidad de palabras:</strong> ${cuentaPalabras}</li>
-    <li><strong>Fuente de información:</strong> Análisis realizado sobre las lecturas almacenadas para Nivel ${nivelNuevo}, Grado ${gradoNuevo}, Trimestre ${trimestreNuevo}, Unidad ${unidadNuevo}.</li>
-    <li><strong>Estilo de redacción de Lectura nueva:</strong> …</li>
-    <li><strong>Género literario de Lectura nueva:</strong> …</li>
-    <li><strong>Cantidad de palabras de Lectura nueva:</strong> …</li>
-    <li><strong>Eje Articulador:</strong> …</li>
-  </ul>
-
-  Genera una Lectura nueva sobre ${temaNuevo}</h2>
-  usar estilo literario de ${autorData.autor}, usando como referencia el estilo de su obra: "${autorData.ejemplo}" y el tipo de texto: "${autorData.tipoTexto}" solo como estilo de redacción del texto, pero sin usar frases o personajes de sus obras para evitar copyright.
-
-  IMPORTANTE: especificaciones para la lectura: 
-    - añade el eje **Eje articulador seleccionado:** ${ejeArticulador} al análisis de la lectura.
-    - Significado pedagógico: ${definicionesEjes[ejeArticulador] || ''}
-    - Asegúrate de que la lectura se desarrolle de forma pedagógica, explícita y transversal.
-    - que la lectura fomente valores como inclusión, respeto a la diversidad, pensamiento crítico y ciudadanía global
-    - que la lectura haga referencia (de forma explícita o implícita) a un aprendizaje esperado o competencia transversal de la NEM.
-    - Considera pedir que la lectura tenga referencias o ejemplos cercanos a la realidad mexicana o latinoamericana
-    - Importante: evitar temas, frases y palabras relaionada  con la violencia, maltrato, discriminación, sexualidad y temas religiosos
-    - IMPORTANTE, instrucciones para la lectura:
-    - Importante: marcar en <strong>Palabra</strong> hasta 15 palabras clave que puedan tener varios sinónimos contextuales y de uso común (palabras clave se componen de una palabra solamente)
-    - agrega un margin bottom de 20px a cada párrafo
-  EJemplo:
-      <h2>Título de la Lectura</h2>
-      <p>Introducción breve <strong>Palabra clave</strong> ...</p>
-      <p>Desarrollo 1 <strong>Palabra clave</strong>...</p>
-      <p>Desarrollo 2 <strong>Palabra clave</strong>...</p>
-      <p>Cierre <strong>Palabra clave</strong>...</p>      
-
-      Importante: extrae de la lecturas las palabras clave y genera una tabla en formato HTML de las palabras clave y sus sinónimos contextuales y de uso común.
-      <h3>Tabla de Sinónimos</h3>
-      <table>
-        <tr><th>Palabra clave</th><th>Sinónimos</th></tr>
-        <tr><td>ejemplo</td><td>modelo, muestra</td></tr>
-      </table>
-      
-      <h3 style="color:#c970d6;">Spec</h3>
-      <p style="color:#c970d6;">[Aquí una sola línea que describa con detalle la composición de la ilustración que acompañará esta lectura, incluir detalles de la lectura para generar una imagen acertada y detalles sobre el personaje principal, incliur ángulos, posiciones, detallar personajes principales, encuadre, elementos dentro de la composición, etc]</p>
-
-
-     Importante: 
-      - busca y cita al menos 3 fuentes reales para la lectura nueva, que sean actuales del 2021 en adelante</strong> (libros o artículos académicos) en formato APA 7, dentro de una lista ordenada e indica con texto color rojo en que parte de la lectura hace referencia<ol>.</p>
-      - que las fuentes sean de acceso abierto si es posible, y que sean relevantes al tema y al rango de edad.
-      Ejemplo:
-      h2>Bibliografía</h2>
-      <ol>
-        <li>Autor (2023). Título. Editorial.</li>
-      </ol> 
-
-      IMPORTANTE no añadir comentarios, solo devolver lo que se pide
-
-      `.trim()
-    }];
-  
-    // Enviar prompt y limpiar fences
-    document.getElementById('spinnerLectura').style.display = 'block';
-    document.getElementById('spinnerLectura').style.display = 'block';
-    let generado = '';
-    try {
-      generado = await enviarPrompt(promptLectura);
-      generado = generado.replace(/```html\s*/g, '').replace(/```/g, '').trim();
-      let contenidoHTMLFinal = generado; // lectura sin preguntas aún
-      let preguntasHTMLFinal = '';       // se llenará después
-    
-      // Mostrar en modal
-      resultadoContenido.innerHTML = contenidoHTMLFinal;
-
-      // 🔁 Conteo preciso de palabras de la Lectura nueva
-      const h2s = Array.from(resultadoContenido.querySelectorAll('h2'));
-      const h2Lectura = h2s.find(h2 => h2.textContent.toLowerCase().includes('lectura nueva'));
-      let parrafosLectura = [];
-
-      if (h2Lectura) {
-        let el = h2Lectura.nextElementSibling;
-        while (el && el.tagName !== 'H2') {
-          if (el.tagName === 'P') {
-            parrafosLectura.push(el);
-          }
-          el = el.nextElementSibling;
-        }
-      }
-
-      const textoPlanoLecturaNueva = parrafosLectura.map(p => p.textContent.trim()).join(' ');
-      const cuentaPalabrasNueva = textoPlanoLecturaNueva.split(/\s+/).filter(w => w).length;
-
-      // Actualiza el <li> del análisis
-      const lis = resultadoContenido.querySelectorAll('ul li');
-      lis.forEach(li => {
-        if (li.textContent.includes('Cantidad de palabras de Lectura nueva')) {
-          li.innerHTML = `<strong>Cantidad de palabras de Lectura nueva:</strong> ${cuentaPalabrasNueva}`;
-        }
-      });
-
-      modalRes.style.display = 'block';
-
-      // tras volcar contenidoHTMLFinal…
-      const hasBib = Array.from(
-        resultadoContenido.querySelectorAll('h2')
-      ).some(h2 => h2.textContent.trim().toLowerCase() === 'bibliografía');
-
-      if (!hasBib) {
-        const bibDiv = document.createElement('div');
-        bibDiv.innerHTML = `
-          <h2>Bibliografía</h2>
-          <p>No se consultaron fuentes externas.</p>
-        `;
-        resultadoContenido.appendChild(bibDiv);
-      }
-
-
-      document.body.style.overflow = 'hidden';
-
-            // ↓↓↓ INICIA bloque para inyectar fuentes reales ↓↓↓
-      const especs = document.getElementById('especificacionesNuevo').value.toLowerCase();
-      if (especs.includes('fuentes reales')) {
-        const refsReales = [
-          {
-            text: 'Santamaría, F. J. (1942). Diccionario general de americanismos. Editorial Pedro Robredo.',
-            usadoEn: 'Análisis de términos: “Huasteca”, “tambores” y “montículos”'
-          },
-          {
-            text: 'Wilkerson, S. J. K. (1987). El oriente de México: una nueva arqueología. Gobierno del Estado de Veracruz.',
-            usadoEn: 'Descripción de los montículos de Tamtoc (Párrafo 2 de la Lectura Nueva)'
-          },
-          {
-            text: 'INPI. (s.f.). Pueblo indígena huasteco. Instituto Nacional de Pueblos Indígenas. Recuperado de https://www.gob.mx/inpi/articulos/pueblo-indigena-huasteco',
-            usadoEn: 'Caracterización de la tradición de la coca y Doña Elena (Párrafo 3)'
-          }
-        ];
-        
-        const bibDiv = document.createElement('div');
-        bibDiv.innerHTML = `
-        <h2>Bibliografía</h2>
-        <ol>
-          ${refsReales.map(r => `
-            <li>
-              ${r.text}<br>
-              <small>(Usado en: ${r.usadoEn})</small>
-            </li>
-          `).join('')}
-        </ol>
-      `;
-
-        // si ya existe un <h2>Bibliografía>, lo reemplazamos; si no, lo añadimos
-        const existingH2 = Array.from(resultadoContenido.querySelectorAll('h2'))
-                                .find(h2 => h2.textContent.trim().toLowerCase() === 'bibliografía');
-        if (existingH2) {
-          // elimina lo que venga después (p “No se consultaron…”)
-          let nxt = existingH2.nextElementSibling;
-          if (nxt) nxt.remove();
-          existingH2.after(bibDiv.querySelector('ol'));
-        } else {
-          resultadoContenido.appendChild(bibDiv);
-        }
-      }
-
-      
-      // Aquí puedes seguir con la inserción de botones (btnPreguntas, btnGuardar, etc.)
-      
-    } catch (err) {
-      alert('❌ Error al generar lectura');
-      console.error(err);
-    } finally {
-      document.getElementById('spinnerLectura').style.display = 'none';
-    }
-    
-  
-    // Insertar botón para generar preguntas
-    const hr = document.createElement('hr');
-const btnPreguntas = document.createElement('button');
-btnPreguntas.textContent = 'Generar preguntas de comprensión';
-btnPreguntas.className = 'btn-analisis';
-btnPreguntas.style.marginTop = '15px';
-resultadoContenido.appendChild(hr);
-resultadoContenido.appendChild(btnPreguntas);
-
-// ➤ Aquí creamos un contenedor específico para las preguntas
-const contPreg = document.createElement('div');
-contPreg.id = 'preguntasComprension';
-resultadoContenido.appendChild(contPreg);
-
-let preguntasHTMLFinal = ''; 
-
-btnPreguntas.addEventListener('click', async () => {
-  // 1) extraer texto de la lectura
-  const textoLectura = Array.from(
-    resultadoContenido.querySelectorAll('h2 ~ p')
-  ).map(p => stripHTML(p.outerHTML)).join('\n');
-
-  if (!textoLectura) {
-    alert('No se encontró texto para generar preguntas.');
-    return;
-  }
-
-  // 2) preparar prompt (igual que antes)
-  const promptEdicion = [{
-    role: 'user',
-    text: `
-      Con base en la siguiente lectura:
-
-      ${textoLectura}
-
-      Genera 5 preguntas de comprensión (no literales).
-      IMPORTANTE: Al menos una pregunta debe ser metacognitiva.
-      Usa el formato:
-
-      <ol>
-        <li>
-          <p><strong>¿…texto de la pregunta…?</strong></p>
-          <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${listaCriterios}</p>
-          <p style="color:#c970d6;">…respuesta esperada…</p>
-        </li>
-      </ol>
-
-      Devuelve solo el bloque <ol>…</ol>.
-    `.trim()
-  }];
-
-  document.getElementById('spinnerLectura').style.display = 'block';
-
-  try {
-    // 3) obtener las preguntas
-    let preguntasGeneradas = await enviarPrompt(promptEdicion);
-    preguntasGeneradas = preguntasGeneradas
-      .replace(/```html\s*/g, '')
-      .replace(/```/g, '')
-      .trim();
-
-    // 4) limpiar SOLO el contenedor de preguntas, sin tocar la bibliografía
-    contPreg.innerHTML = '';
-
-    // 5) volcar el nuevo <ol>…</ol> dentro de nuestro contenedor
-    const fragmento = document.createRange()
-      .createContextualFragment(preguntasGeneradas);
-    contPreg.appendChild(fragmento);
-
-    preguntasHTMLFinal = preguntasGeneradas;
-
-  } catch (err) {
-    console.error('Error al generar preguntas:', err);
-    alert('❌ Error al generar preguntas.');
-  } finally {
-    document.getElementById('spinnerLectura').style.display = 'none';
-  }
-});
-
-    
-
-      // Habilitar edición de párrafos al hacer clic
-      resultadoContenido.addEventListener('click', async (event) => {
-        if (event.target.tagName === 'P') {
-          const p = event.target;
-          // Evitar duplicar botón
-          const existingBtn = document.getElementById('btnEditarParrafo');
-          if (existingBtn) existingBtn.remove();
-  
-          const btnEditar = document.createElement('button');
-          btnEditar.textContent = '✏️ Editar párrafo';
-          btnEditar.id = 'btnEditarParrafo';
-          btnEditar.style.position = 'absolute';
-          btnEditar.style.left = `${event.pageX + 10}px`;
-          btnEditar.style.top = `${event.pageY + 10}px`;
-          btnEditar.style.zIndex = '9999';
-          btnEditar.style.padding = '4px 10px';
-          btnEditar.style.borderRadius = '6px';
-          btnEditar.style.background = '#c970d6';
-          btnEditar.style.color = '#fff';
-          btnEditar.style.border = 'none';
-          btnEditar.style.cursor = 'pointer';
-  
-          document.body.appendChild(btnEditar);
-  
-          // Al hacer clic en el botón, reescribir el párrafo
-          btnEditar.addEventListener('click', async () => {
-            const textoOriginal = p.textContent.trim();
-          
-            const promptEdicion = [{
-              role: 'user',
-              text: `
-          Reescribe el siguiente párrafo en el mismo estilo del autor "${autorData.autor}", tipo de texto "${autorData.tipoTexto}", conserva las mismas dos o tres palabras clave en <strong></strong> (una sola palabra por palabra clave), manteniendo el significado pero mejorando la redacción:
-          
-          "${textoOriginal}"
-          
-          Devuelve solo un párrafo <p>…</p>.
-              `.trim()
-            }];
-          
-            try {
-              let resultado = await enviarPrompt(promptEdicion);
-              resultado = resultado.replace(/```html\s*/g, '').replace(/```/g, '').trim();
-          
-              if (resultado) {
-                const nuevoParrafo = document.createRange().createContextualFragment(resultado);
-                p.replaceWith(nuevoParrafo);
-          
-                // 🟣 Regenerar tabla de sinónimos tras editar
-                const lecturaHTML = Array.from(resultadoContenido.querySelectorAll('h2 ~ p'))
-                  .map(p => p.outerHTML)
-                  .join('\n');
-          
-                const promptSinonimos = [{
-                  role: 'user',
-                  text: `
-          A partir de la siguiente lectura en HTML:
-          
-          ${lecturaHTML}
-          
-          Extrae las palabras marcadas con <strong> (máximo 15) y genera una tabla HTML que muestre cada palabra clave con al menos 2 sinónimos. Usa este formato:
-          
-          <h2>Tabla de sinónimos</h2>
-          <table>
-          <tr><th>Palabra clave</th><th>Sinónimos</th></tr>
-          <tr><td>ejemplo</td><td>modelo, muestra</td></tr>
-          ...
-          </table>
-                  `.trim()
-                }];
-          
-                let nuevaTabla = await enviarPrompt(promptSinonimos);
-                nuevaTabla = nuevaTabla.replace(/```html\s*/g, '').replace(/```/g, '').trim();
-          
-                // Reemplazar tabla anterior si existe
-                const tablaAnterior = resultadoContenido.querySelector('h2 + table');
-                if (tablaAnterior && tablaAnterior.previousElementSibling?.textContent?.includes('Tabla de sinónimos')) {
-                  tablaAnterior.previousElementSibling.remove(); // h2
-                  tablaAnterior.remove(); // table
-                }
-          
-                const tablaFragmento = document.createRange().createContextualFragment(nuevaTabla);
-                resultadoContenido.appendChild(tablaFragmento);
-              }
-            } catch (err) {
-              console.error('Error al actualizar párrafo o tabla:', err);
-              alert('❌ Hubo un error al actualizar el párrafo o la tabla de sinónimos.');
-            }
-          
-            btnEditar.remove();
-          });
-                      
-          // Si el usuario hace clic fuera, remover el botón
-          const removeBtn = () => {
-            btnEditar.remove();
-            document.removeEventListener('click', removeBtn);
-          };
-          setTimeout(() => {
-            document.addEventListener('click', removeBtn, { once: true });
-          }, 10);
-        }
-      });
-
-      const btnGuardar = document.createElement('button');
-      btnGuardar.textContent = 'Guardar lectura y preguntas';
-      btnGuardar.className = 'btn-analisis';
-      btnGuardar.style.margin = '15px 0 0 10px';
-      setTimeout(() => {
-        const footer = document.getElementById('modalResultadoFooter');
-        footer.innerHTML = ''; // Limpia si ya existe
-        footer.appendChild(btnGuardar);
-      }, 100);
-      
-    // Guardar en Firestore
-    btnGuardar.addEventListener('click', async () => {
-      const contenidoTotal = resultadoContenido.innerHTML;
-      try {
-        await addDoc(collection(db, 'lecturasNuevas'), {
-          tema: temaNuevo,
-          autorReferencia: autorData.autor,
-          ejemploEstilo: autorData.ejemplo,
-          tipoTexto: autorData.tipoTexto,
-          nivel: nivelNuevo,
-          grado: gradoNuevo,
-          trimestre: trimestreNuevo,
-          unidad: unidadNuevo,
-          contenidoHTML: contenidoTotal,
-          timestamp: new Date()
-        });
-        alert('✅ Lectura y preguntas guardadas correctamente.');
-      } catch (err) {
-        console.error('❌ Error al guardar:', err);
-        alert('Ocurrió un error al guardar la lectura.');
-      }
-    });
-
-  
-  });
-
- 
-});
 
 
 document.querySelectorAll('.close-modal').forEach(btn => {
@@ -2159,124 +1901,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let lecturaEditandoId = null;
   let debounceTimeout = null;
 
-  // Abrir lista
-  btnListaLecturas.addEventListener('click', async () => {
-    modalLista.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-    listaLecturasUl.innerHTML = '<li>Cargando lecturas...</li>';
-
-    try {
-      // ← aquí ordenamos por timestamp descendente
-      const q = query(
-        collection(db, 'lecturasNuevas'),
-        orderBy('timestamp', 'desc')
-      );
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        listaLecturasUl.innerHTML = '<li>No hay lecturas guardadas.</li>';
-        return;
-      }
-
-      listaLecturasUl.innerHTML = '';
-      snap.forEach(docSnap => {
-        const d = docSnap.data();
-        const isShared = (d.sharewith?.length || 0) > 0;
-        const iconColor = isShared ? 'color:green;' : '';
-      
-        const div = document.createElement('div');
-        div.className = 'item-lectura-card';
-        div.innerHTML = `
-          <div class="item-lectura-info lectura-item" data-id="${docSnap.id}">
-            <strong>${d.tema}</strong> — ${d.nivel} ${d.grado}, Trim ${d.trimestre}, Unidad ${d.unidad}
-          </div>
-          <div class="item-lectura-actions">
-            <i class="fas fa-share-alt icon-compartir" data-id="${docSnap.id}" title="Compartir" style="${iconColor}"></i>
-            <i class="fas fa-edit icon-editar" data-id="${docSnap.id}" title="Editar"></i>
-            <i class="fas fa-trash-alt icon-eliminar" data-id="${docSnap.id}" title="Eliminar"></i>
-          </div>
-        `;
-        listaLecturasUl.appendChild(div);
-      
-        // ✅ Agrega el listener AQUÍ MISMO para ese ícono
-        div.querySelector('.icon-compartir').addEventListener('click', async e => {
-          e.stopPropagation();
-          const idLectura = e.target.dataset.id;
-          lecturaParaCompartir = idLectura;
-      
-          const docRef = doc(db, 'lecturasNuevas', idLectura);
-          const docSnap = await getDoc(docRef);
-          const lectura = docSnap.exists() ? docSnap.data() : null;
-          if (!lectura) return;
-      
-          const usuariosSnap = await getDocs(collection(db, 'users'));
-          listaUsuariosCompartir.innerHTML = '';
-          usuariosSnap.forEach(userDoc => {
-            const user = userDoc.data();
-            const isChecked = lectura.sharewith?.includes(userDoc.id) ? 'checked' : '';
-            listaUsuariosCompartir.innerHTML += `
-              <div>
-                <label>
-                  <input type="checkbox" value="${userDoc.id}" ${isChecked}> ${user.nombre || user.email || userDoc.id}
-                </label>
-              </div>
-            `;
-          });
-      
-          modalCompartir.style.display = 'block';
-          document.body.style.overflow = 'hidden';
-        });
-      });
-      
-      
-
-      // Ver lectura
-      listaLecturasUl.querySelectorAll('.lectura-item').forEach(span => {
-        span.addEventListener('click', async e => {
-          const id = e.target.dataset.id;
-          const docRef = doc(db, 'lecturasNuevas', id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            contenidoLectura.innerHTML = docSnap.data().contenidoHTML || '<p>Sin contenido.</p>';
-            modalVer.style.display = 'block';
-            document.body.style.overflow = 'hidden';
-          }
-        });
-      });
-
-      // Editar lectura
-      listaLecturasUl.querySelectorAll('.icon-editar').forEach(icon => {
-        icon.addEventListener('click', async e => {
-          e.stopPropagation();
-          const id = e.target.dataset.id;
-          const docRef = doc(db, 'lecturasNuevas', id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            lecturaEditandoId = id;
-            editorLectura.innerHTML = docSnap.data().contenidoHTML || '';
-            modalEditar.style.display = 'block';
-            document.body.style.overflow = 'hidden';
-          }
-        });
-      });
-
-      // Eliminar lectura
-      listaLecturasUl.querySelectorAll('.icon-eliminar').forEach(icon => {
-        icon.addEventListener('click', async e => {
-          e.stopPropagation();
-          const id = e.target.dataset.id;
-          const confirmar = confirm('¿Eliminar esta lectura? Esta acción no se puede deshacer.');
-          if (confirmar) {
-            await deleteDoc(doc(db, 'lecturasNuevas', id));
-            e.target.closest('.item-lectura-card').remove();
-          }
-        });
-      });
-
-    } catch (err) {
-      console.error('Error al cargar lecturas nuevas:', err);
-      listaLecturasUl.innerHTML = '<li>Error al obtener lecturas.</li>';
-    }
-  });
 
   // Cierre de modales
   if (cerrarLista) {
@@ -2316,9 +1940,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await updateDoc(doc(db, 'lecturasNuevas', lecturaEditandoId), {
           contenidoHTML: nuevoHTML
         });
-        console.log('✅ Cambios guardados automáticamente');
       } catch (err) {
-        console.error('❌ Error al guardar:', err);
       }
     }, 1000);
   });
@@ -2417,344 +2039,4 @@ document.getElementById("btnDescargarEditorLectura")?.addEventListener("click", 
   enlace.href = URL.createObjectURL(blob);
   enlace.download = nombreArchivo;
   enlace.click();
-});
-
-
-
-
-
-
-
-document.addEventListener('DOMContentLoaded', () => {
-  const btnEstilo     = document.getElementById('btnAgregarEstilo');
-  const modalEstilo   = document.getElementById('modalAgregarEstilo');
-  const cerrarEstilo  = document.getElementById('cerrarModalEstilo');
-  const formEstilo    = document.getElementById('formEstiloLiterario');
-  const autorInput    = document.getElementById('autorEstilo');
-  const textoInput    = document.getElementById('textoEstilo');
-  const tipoTextoInput = document.getElementById('tipoTextoEstilo');
-  const categoriaInput = document.getElementById('categoriaEstilo');
-
-  if (!btnEstilo || !modalEstilo || !cerrarEstilo || !formEstilo) return;
-
-  // Abrir modal
-  btnEstilo.addEventListener('click', () => {
-    modalEstilo.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-  });
-
-  // Cerrar modal
-  cerrarEstilo.addEventListener('click', () => {
-    modalEstilo.style.display = 'none';
-    document.body.style.overflow = 'auto';
-  });
-
-  modalEstilo.addEventListener('click', e => {
-    if (e.target === modalEstilo) {
-      modalEstilo.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  });
-
-  // Envío del formulario
-  formEstilo.addEventListener('submit', async e => {
-    e.preventDefault();
-    document.getElementById('spinnerLectura').style.display = 'flex';
-    const autor = autorInput.value.trim();
-    const ejemplo = textoInput.value.trim();
-    const tipoTexto = tipoTextoInput.value.trim();
-    const categoria = categoriaInput.value.trim();
-
-
-
-    if (!autor || !ejemplo || !tipoTexto || !categoria) {
-      alert('Por favor completa todos los campos.');
-      return;
-    }
-
-    try {
-      await addDoc(collection(db, 'autoresEjemplo'), {
-        autor,
-        ejemplo,
-        tipoTexto,
-        categoria,
-        fecha: new Date()
-      });
-
-      alert('Estilo guardado correctamente ✅');
-      formEstilo.reset();
-      modalEstilo.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    } catch (error) {
-      console.error('Error al guardar estilo:', error);
-      alert('❌ Error al guardar el estilo. Intenta de nuevo.');
-    }
-  });
-
-  document.getElementById('csvAutoresInput').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-  
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const contenido = event.target.result;
-      const lineas = contenido.split('\n').filter(l => l.trim() !== '');
-  
-      let exitos = 0;
-      let fallos = 0;
-  
-      for (let i = 1; i < lineas.length; i++) { // omitimos encabezado
-        const [autor, tipoTexto, ejemplo, categoria] = lineas[i].split(',').map(c => c?.trim());
-  
-        if (!autor || !tipoTexto || !ejemplo || !categoria) {
-          console.warn(`Línea ${i + 1} inválida:`, lineas[i]);
-          fallos++;
-          continue;
-        }
-  
-        try {
-          await addDoc(collection(db, 'autoresEjemplo'), {
-            autor,
-            tipoTexto,
-            ejemplo,
-            categoria,
-            fecha: new Date()
-          });
-          exitos++;
-        } catch (err) {
-          console.error(`❌ Error en línea ${i + 1}:`, err);
-          fallos++;
-        }
-      }
-  
-      alert(`✅ Estilos importados: ${exitos} exitosos, ${fallos} fallidos.`);
-      e.target.value = ''; // limpiar input
-    };
-  
-    reader.readAsText(file);
-  });
-  
-});
-
-
-document.getElementById("btnCamposFormativos").addEventListener("click", () => {
-  document.getElementById("modalCamposFormativos").style.display = "block";
-});
-
-// Cerrar el modal
-document.getElementById("cerrarModalCampos").addEventListener("click", () => {
-  document.getElementById("modalCamposFormativos").style.display = "none";
-});
-
-// Asignaturas dinámicas por campo formativo
-const campoFormativoSelect = document.querySelector('select[name="campo"]');
-const asignaturaSelect = document.getElementById("selectAsignatura");
-
-const asignaturasPorCampo = {
-  "Lenguajes": [
-    "Ortografía", "Gramática", "Expresión Escrita", "Expresión Oral", "Arte"
-  ],
-  "Saberes y pensamiento científico": [
-    "Ciencias Naturales", "Matemáticas", "Finanzas"
-  ],
-  "Ética, Naturaleza y sociedad": [
-    "Geografía", "Historia de México", "Historia del Mundo", "Conocimiento del mundo", "Conocimiento de mi localidad"
-  ],
-  "De lo humano y comunitario": [
-    "Formación Cívica y Ética", "Educación Socioemocional", "Valores", "Cultura de paz"
-  ]
-};
-
-campoFormativoSelect.addEventListener("change", () => {
-  const campoSeleccionado = campoFormativoSelect.value;
-  asignaturaSelect.innerHTML = '<option value="">Selecciona una asignatura</option>';
-  if (asignaturasPorCampo[campoSeleccionado]) {
-    asignaturasPorCampo[campoSeleccionado].forEach(asignatura => {
-      const option = document.createElement("option");
-      option.value = asignatura;
-      option.textContent = asignatura;
-      asignaturaSelect.appendChild(option);
-    });
-  }
-});
-
-// Guardar en Firestore
-document.getElementById("formCamposFormativos").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const data = Object.fromEntries(new FormData(form).entries());
-
-  try {
-    const user = auth.currentUser;
-    const userId = user ? user.uid : "anónimo";
-
-    const docRef = await addDoc(collection(db, "camposFormativos"), {
-      ...data,
-      userId,
-      timestamp: new Date().toISOString()
-    });
-
-    console.log("📦 Datos guardados en camposFormativos:", docRef.id);
-    alert("✅ Datos guardados correctamente.");
-    document.getElementById("modalCamposFormativos").style.display = "none";
-    form.reset();
-  } catch (error) {
-    console.error("❌ Error al guardar en Firestore:", error);
-    alert("Error al guardar los datos. Intenta nuevamente.");
-  }
-});
-
-
-async function cargarEstilosLiterarios() {
-  const contenedor = document.getElementById("contenedorEstilosLiterarios");
-  contenedor.innerHTML = "<p>Cargando estilos...</p>";
-
-  try {
-    const snap = await getDocs(collection(db, "autoresEjemplo"));
-    if (snap.empty) {
-      contenedor.innerHTML = "<p>No hay estilos guardados.</p>";
-      return;
-    }
-
-    contenedor.innerHTML = "";
-    snap.forEach(doc => {
-      const d = doc.data();
-      const div = document.createElement("div");
-      div.style.borderBottom = "1px solid #ddd";
-      div.style.padding = "10px 0";
-      div.innerHTML = `
-        <strong>${d.autor}</strong> — ${d.tipoTexto}<br>
-        <em>${d.ejemplo}</em><br>
-        <small style="color:#888;">Categoría: ${d.categoria || "General"}</small>
-      `;
-      contenedor.appendChild(div);
-    });
-
-  } catch (err) {
-    console.error("❌ Error al cargar estilos:", err);
-    contenedor.innerHTML = "<p>Error al cargar estilos.</p>";
-  }
-}
-
-
-async function cargarCamposFormativos() {
-  const contenedor = document.getElementById("contenedorCamposFormativos");
-  contenedor.innerHTML = "<p>Cargando campos...</p>";
-
-  try {
-    const snap = await getDocs(collection(db, "camposFormativos"));
-    if (snap.empty) {
-      contenedor.innerHTML = "<p>No hay campos formativos guardados.</p>";
-      return;
-    }
-
-    contenedor.innerHTML = "";
-    snap.forEach(doc => {
-      const d = doc.data();
-      const div = document.createElement("div");
-      div.classList.add("item-campo-formativo");
-      div.style.cursor = "pointer";
-      div.style.padding = "10px";
-      div.style.borderBottom = "1px solid #ccc";
-
-      div.innerHTML = `
-        <strong>${d.campo}</strong> — ${d.asignatura}<br>
-        <small>Nivel: ${d.nivel} | Trimestre: ${d.trimestre} | Unidad: ${d.unidad}</small>
-      `;
-
-      div.addEventListener("click", () => abrirModalEdicionCampo(doc.id, d));
-      contenedor.appendChild(div);
-    });
-
-  } catch (err) {
-    console.error("❌ Error al cargar campos:", err);
-    contenedor.innerHTML = "<p>Error al cargar campos.</p>";
-  }
-}
-
-
-function abrirModalEdicionCampo(id, data) {
-  document.getElementById('campoId').value = id;
-  document.getElementById('editCampo').value = data.campo || '';
-  document.getElementById('editAsignatura').value = data.asignatura || '';
-  document.getElementById('editNivel').value = data.nivel || '';
-  document.getElementById('editTrimestre').value = data.trimestre || '';
-  document.getElementById('editUnidad').value = data.unidad || '';
-  document.getElementById('editAprendizaje').value = data.aprendizajeEsperado || '';
-  document.getElementById('editPDA').value = data.pda || '';
-  document.getElementById('editTipoActividad').value = data.tipoActividad || '';
-  document.getElementById('editDiferenciacion').value = data.diferenciacion || '';
-  document.getElementById('editNivelEsperado').value = data.nivelEsperado || '';
-
-  document.getElementById('modalEditarCampoFormativo').style.display = 'block';
-}
-
-document.getElementById('formEditarCampo').addEventListener('submit', async e => {
-  e.preventDefault();
-  const id = document.getElementById('campoId').value;
-
-  const ref = doc(db, "camposFormativos", id);
-  await updateDoc(ref, {
-    campo: document.getElementById('editCampo').value,
-    asignatura: document.getElementById('editAsignatura').value,
-    nivel: document.getElementById('editNivel').value,
-    trimestre: document.getElementById('editTrimestre').value,
-    unidad: document.getElementById('editUnidad').value,
-    aprendizajeEsperado: document.getElementById('editAprendizaje').value,
-    pda: document.getElementById('editPDA').value,
-    tipoActividad: document.getElementById('editTipoActividad').value,
-    diferenciacion: document.getElementById('editDiferenciacion').value,
-    nivelEsperado: document.getElementById('editNivelEsperado').value
-  });
-
-  alert("✅ Campo formativo actualizado.");
-  document.getElementById('modalEditarCampoFormativo').style.display = 'none';
-  cargarCamposFormativos();
-});
-
-
-document.addEventListener('DOMContentLoaded', () => {
-  const btnEstilos = document.getElementById('btnListaEstilos');
-  const modalEstilos = document.getElementById('modalEstilosLiterarios');
-  const cerrarEstilos = document.getElementById('cerrarModalEstilos');
-
-  const btnCampos = document.getElementById('btnListaCampos');
-  const modalCampos = document.getElementById('listamodalCamposFormativos');
-  const cerrarCampos = document.getElementById('cerrarModalCampos');
-
-  btnEstilos?.addEventListener('click', () => {
-    modalEstilos.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-    cargarEstilosLiterarios(); // opcional
-  });
-
-  cerrarEstilos?.addEventListener('click', () => {
-    modalEstilos.style.display = 'none';
-    document.body.style.overflow = 'auto';
-  });
-
-  modalEstilos?.addEventListener('click', e => {
-    if (e.target === modalEstilos) {
-      modalEstilos.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  });
-
-  btnCampos?.addEventListener('click', () => {
-    modalCampos.style.display = 'block';
-    document.body.style.overflow = 'hidden';
-    cargarCamposFormativos(); // opcional
-  });
-
-  cerrarCampos?.addEventListener('click', () => {
-    modalCampos.style.display = 'none';
-    document.body.style.overflow = 'auto';
-  });
-
-  modalCampos?.addEventListener('click', e => {
-    if (e.target === modalCampos) {
-      modalCampos.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  });
 });

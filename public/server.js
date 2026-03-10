@@ -6,7 +6,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Configuración
-const HF_API_KEY = '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'; // Reemplaza con tu API key
+const HF_API_KEY = '__HF_API_KEY_LOCAL__'; // Reemplaza con tu API key
 const ttsService = new TTSService(HF_API_KEY);
 
 // Middlewares
@@ -32,12 +32,10 @@ app.post('/api/generate-tts', async (req, res) => {
     res.set('Content-Type', 'audio/wav');
     res.send(audio);
   } catch (error) {
-    console.error('Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // Iniciar servidor
 app.listen(port, () => {
-  console.log(`Servidor TTS escuchando en http://localhost:${port}`);
 });

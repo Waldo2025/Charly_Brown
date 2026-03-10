@@ -39,7 +39,6 @@ class TTSService {
       
       return response;
     } catch (error) {
-      console.error('Error generating TTS:', error);
       throw new Error('Failed to generate audio');
     }
   }

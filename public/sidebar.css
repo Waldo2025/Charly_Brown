@@ -1,164 +1,187 @@
-/* === NUEVO SIDEBAR MODERNO === */
-#sidebar {
-  position: fixed;
-  top: 70px;
-  left: 0;
-  height: calc(100% - 70px); /* <-- esto es más seguro */
-  width: 60px;
-  background: linear-gradient(180deg,  #7c3b85, #3a4c8e);
-  color: white;
-  transition: width 0.3s ease;
-  overflow: hidden;
-  z-index: 999;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 2rem; /* 👈 esto asegura que el logout quede abajo */
+:root {
+  --cb-header-height: 64px;
+  --cb-header-mobile-height: 56px;
+  --cb-sidebar-collapsed-width: 64px;
+  --cb-sidebar-expanded-width: 250px;
+  --cb-chrome-bg: #3f4d98;
 }
 
+#sidebar {
+  position: fixed;
+  top: var(--cb-header-height);
+  left: 0;
+  width: var(--cb-sidebar-collapsed-width);
+  height: calc(100vh - var(--cb-header-height));
+  background: var(--cb-chrome-bg);
+  color: #ffffff;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+  transition: width 0.28s ease;
+  z-index: 999;
+}
+
+#sidebar.show {
+  width: var(--cb-sidebar-expanded-width);
+}
+
+#sidebar.sidebar-collapsed,
+body.sidebar-collapsed #sidebar {
+  width: var(--cb-sidebar-collapsed-width);
+}
+
+#menuToggle {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+#menuToggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#menuToggle i {
+  font-size: 1rem;
+}
 
 #sidebar .sidebar-menu {
   display: flex;
   flex-direction: column;
+  gap: 0.35rem;
   width: 100%;
+  flex: 1;
+  padding: 0.6rem 0.45rem 0.75rem;
+  overflow-y: auto;
+}
+
+#sidebar .sidebar-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+#sidebar .sidebar-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+}
+
+.sidebar-link {
+  display: flex !important;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+  width: 100%;
+  border-radius: 0.72rem;
+  padding: 0.55rem 0.7rem;
+  color: rgba(255, 255, 255, 0.95);
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-link i {
+  width: 1.1rem;
+  text-align: center;
+  font-size: 0.92rem;
+  flex-shrink: 0;
+}
+
+.sidebar-link span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  width: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease, width 0.2s ease;
+}
+
+.sidebar-badge {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  background: #ef4444;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+  font-style: normal;
+}
+
+.sidebar-badge.is-visible {
+  display: inline-flex;
+}
+
+#sidebar.show .sidebar-badge {
+  margin-left: auto;
+}
+
+#sidebar:not(.show) .sidebar-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+}
+
+#sidebar.show .sidebar-link span {
+  opacity: 1;
+  width: auto;
+  transform: translateX(0);
+}
+
+#sidebar:not(.show) .sidebar-link {
+  justify-content: center;
+  padding: 0.55rem;
+}
+
+#sidebar:not(.show) .sidebar-link i {
+  margin-right: 0;
+}
+
+#sidebar.show .sidebar-link {
+  justify-content: flex-start;
+}
+
+.sidebar-link:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.sidebar-link.active,
+.sidebar-link[aria-current="page"] {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+#sidebar .sidebar-menu > #logoutLink {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 0.65rem;
+}
+
+.sidebar-logout {
+  margin-top: auto;
+  padding: 0 0.45rem 0.75rem;
 }
 
 .hidden {
   display: none !important;
 }
 
-.sidebar-link span {
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-#sidebar.show .sidebar-link span {
-  opacity: 1;
-}
-
-.sidebar-link:hover {
-  background-color: #885a38;
-}
-
-.sidebar-logout {
-  width: 100%;
-  text-align: center;
-  margin-bottom: 1rem;
-}
-
-
-
-
-.sidebar-logout .sidebar-link span {
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  white-space: nowrap;
-}
-
-#sidebar.show .sidebar-logout .sidebar-link span {
-  opacity: 1;
-}
-
-.sidebar-logout .sidebar-link:hover {
-  background-color: #dc3545;
-  color: white;
-}
-
-
-/* === BOTÓN TOGGLE === */
-#menuToggle {
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 20px;
-  cursor: pointer;
-  margin-top: -1rem;
-  transition: transform 0.2s ease;
-}
-
-#menuToggle:hover {
-  transform: scale(1.1);
-}
-
-
-
-
-/* === RESPONSIVE === */
 @media (max-width: 768px) {
   #sidebar {
-    position: fixed;
-    top: 100px;
-    left: 0;
-    height: 100%;
-    width: 60px;
-    background: linear-gradient(180deg, #7c3b85, #3a4c8e);
-    color: white;
-    transition: width 0.3s ease;
-    overflow: hidden;
-    z-index: 998;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding-top: 2rem;
+    top: var(--cb-header-mobile-height);
+    height: calc(100vh - var(--cb-header-mobile-height));
+  }
 }
-  
-}
-
-
-
-
-#sidebar.show ~ #app-container {
-  margin-left: 200px; /* mismo valor que el width del sidebar expandido */
-}
-
-
-.bootstrap-select .dropdown-toggle .filter-option-inner-inner {
-  overflow: hidden;
-  font-size: small;
-}
-
-#sidebar.show {
-  width: 250px; /* Ancho normal cuando el sidebar está abierto */
-}
-
-#sidebar.sidebar-collapsed {
-  width: 60px; /* Ancho cuando el sidebar está colapsado */
-}
-
-/* Aseguramos que el contenido del sidebar se mantenga en orden */
-.sidebar-menu {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: flex-start;
-  height: calc(100% - 50px); /* Deja espacio para el logout */
-  padding-bottom: 20px;
-}
-
-
-/* Estilo de los iconos */
-.sidebar-link i {
-  margin-right: 10px; /* Espacio entre el icono y el texto */
-}
-
-/* Cuando el sidebar está colapsado, ocultar el texto */
-#sidebar.sidebar-collapsed .sidebar-link span {
-  display: none; /* Oculta el texto cuando el sidebar está colapsado */
-}
-
-/* Estilo para los links */
-.sidebar-link {
-  display: flex !important;
-  align-items: center; /* Alinea el icono y el texto */
-  padding: 10px 15px;
-  text-decoration: none;
-  color: #fff;
-  transition: background-color 0.3s ease;
-}
-
-.sidebar-link:hover {
-  background-color: #3b3b3b; /* Color de fondo al pasar el ratón */
-  width: 100%;
-}
-

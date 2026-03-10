@@ -2,7 +2,7 @@ import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/fireba
 import { auth } from './generarLectura.js';
 import { listAll } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
 
-const HF_TOKEN = "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";
+const HF_TOKEN = "__HF_API_KEY_LOCAL__";
 
 // 🧠 FUNCIÓN: Generar imagen desde Hugging Face
 async function generarImagenDesdePrompt(prompt, negative_prompt, modelId, steps, guidance, width, height) {
@@ -51,7 +51,6 @@ function setupImageGenerator(storage) {
   const resultDiv = document.getElementById("gen_results");
 
   if (!modal || !openBtn || !form) {
-    console.warn("❗ Elementos del generador de imágenes no encontrados");
     return;
   }
 
@@ -193,7 +192,6 @@ function setupImageGenerator(storage) {
 
 
     } catch (err) {
-      console.error(err);
       resultDiv.innerHTML = `<p style="color:red; font-weight:bold;">❌ Error: ${err.message}</p>`;
     }
   });
@@ -205,7 +203,6 @@ export default setupImageGenerator;
 async function cargarGaleria(storage, userId) {
     const galleryDiv = document.getElementById("gen_gallery");
     if (!galleryDiv) {
-      console.warn("⚠️ Contenedor de galería no encontrado");
       return;
     }
   
@@ -249,7 +246,6 @@ async function cargarGaleria(storage, userId) {
       }
   
     } catch (error) {
-      console.error("❌ Error al cargar la galería:", error);
       galleryDiv.innerHTML = "❌ No se pudo cargar la galería.";
     }
   }

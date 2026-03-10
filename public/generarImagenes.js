@@ -5,12 +5,12 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gsta
 import { deleteObject } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js'; // Asegúrate de tener esta importación
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, deleteDoc, doc, setDoc } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
 
-const googleAPIKey = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw";
+const googleAPIKey = "__GEMINI_VISION_API_KEY_LOCAL__";
 const googleAPIEndpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent";
 
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",
@@ -27,19 +27,16 @@ const auth = getAuth(app);
 
 onAuthStateChanged(auth, (user) => {
     if (user) {
-      console.log("✅ Usuario autenticado:", user.uid);
     } else {
-      console.warn("⚠️ No hay sesión activa. Redirige a login si es necesario.");
     }
     if (!auth.currentUser) {
-        console.warn("⚠️ No estás autenticado. No puedes subir a Firebase Storage.");
         return;
       }
   });
 
 
 
-const HF_TOKEN = "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";
+const HF_TOKEN = "__HF_API_KEY_LOCAL__";
 const inference = new InferenceClient(HF_TOKEN);
 
 const falModels = new Set([
@@ -139,7 +136,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function mostrarModalConCajas(imagenUrl, nombreArchivo, index = 0, galeria = []) {
   if (!imagenUrl || !nombreArchivo) {
-    console.warn("❌ Datos incompletos para mostrar la imagen");
     return;
   }
 
@@ -350,7 +346,6 @@ async function cargarGaleriaImagenesGeneradas(panel, forceUpdate = false) {
   try {
     const user = auth.currentUser;
     if (!user) {
-      console.warn("Usuario no autenticado");
       panel.innerHTML = '<p class="info-message">Inicia sesión para ver tus imágenes</p>';
       return;
     }
@@ -413,7 +408,6 @@ async function cargarGaleriaImagenesGeneradas(panel, forceUpdate = false) {
     renderizarImagenes(panel, imagenes);
 
   } catch (error) {
-    console.error("Error cargando galería:", error);
     panel.innerHTML = `<p class="error-message">Error al cargar imágenes: ${error.message}</p>`;
   }
 }
@@ -461,7 +455,6 @@ async function guardarEnFirebase(nombre, blobUrl) {
 
   const refImg = ref(storage, `mindmap/${nombre}.png`);
   await uploadString(refImg, dataURL, 'data_url');
-  console.log("✅ Imagen guardada:", nombre);
 }
 
 async function guardarImagenGeneradaEnFirebase(nombre, blobUrl) {
@@ -480,7 +473,6 @@ async function guardarImagenGeneradaEnFirebase(nombre, blobUrl) {
 
   const refImg = ref(storage, `imagenes/${user.uid}/${nombre}.png`);
   await uploadString(refImg, dataURL, 'data_url');
-  console.log("✅ Imagen generada guardada:", nombre);
 }
 
   
@@ -700,7 +692,6 @@ function renderizarImagenes(panel, imagenes) {
           // Volver a renderizar
           renderizarImagenes(panel, updated);
         } catch (error) {
-          console.error("Error eliminando:", error);
           alert("Error al eliminar imagen");
         }
       }
@@ -830,7 +821,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
 
   } else {
-    console.warn("⚠️ No se encontraron los botones del panel guardado.");
   }
 
 
@@ -893,7 +883,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const texto2 = document.getElementById("textoMindmapParte2").value;
 
     if (!texto1.trim() && !texto2.trim()) {
-      console.log("🟡 No hay texto aún, solo mostrando fondo y controles.");
     }
 
     const palabrasIzquierda = texto1.split(/\s+/).map(p => p.toLowerCase().replace(/[.,;:!?()¿¡"]/g, ""));
@@ -1233,9 +1222,7 @@ function obtenerFilasDesdeInputs() {
           const dataURL = reader.result;
           const refImg = ref(storage, `mindmap/${nombre}.png`);
           await uploadString(refImg, dataURL, "data_url");
-          console.log(`✅ Imagen "${nombre}" subida correctamente.`);
         } catch (err) {
-          console.error(`❌ Error al subir imagen "${nombre}":`, err);
         }
       };
   
@@ -1264,7 +1251,6 @@ function obtenerFilasDesdeInputs() {
         imagenSeleccionada = null;
         cargarImagenesGuardadas(document.getElementById("contenedorGuardadasManual"));
       } catch (err) {
-        console.error("❌ Error al subir imagen:", err);
         alert("❌ No se pudo subir la imagen.");
       }
     };
@@ -1967,7 +1953,6 @@ async function autoguardarMindMap() {
   if (!snapshot.empty) {
     const docRef = snapshot.docs[0].ref;
     await updateDoc(docRef, { contenido });
-    console.log("💾 Autoguardado realizado.");
   }
 }
 
@@ -2008,7 +1993,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   
 
   if (!modalEl || !btnAudio || !btnGenerarAudio) {
-    console.error("❌ Elementos esenciales del modal de audio no encontrados");
     return;
   }
 
@@ -2026,7 +2010,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       resetAudioPlayer();
       modalAudio.show();
     } catch (error) {
-      console.error("Error al abrir modal:", error);
     }
   });
 
@@ -2034,7 +2017,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     audioQueue = audioQueue.then(async () => {
       await handleAudioGeneration();
     }).catch(error => {
-      console.error("Error en cola de audio:", error);
     });
   });
 
@@ -2084,9 +2066,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
 
       playGeneratedAudio(audioBlob);
-      console.log("✅ Audio generado localmente");
     } catch (error) {
-      console.error("Error en generación de audio:", error);
       showAlert(`❌ Error al generar audio: ${error.message || "Por favor intenta nuevamente"}`);
     } finally {
       setLoadingState(false);
@@ -2119,12 +2099,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     audioPreview.style.display = "block";
 
     audioElement.onerror = () => {
-      console.error("Error al reproducir audio");
       showAlert("❌ Error al reproducir el audio generado");
     };
 
     audioElement.play().catch(e => {
-      console.error("Error en play():", e);
       showAlert("⚠️ El audio se generó pero no se pudo reproducir automáticamente");
     });
   }

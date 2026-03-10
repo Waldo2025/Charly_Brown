@@ -1,137 +1,180 @@
-/* === HEADER RESPONSIVO COMPACTO === */
+:root {
+  --cb-header-height: 64px;
+  --cb-header-mobile-height: 56px;
+  --cb-chrome-bg: #3f4d98;
+  --cb-header-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+
 .main-header {
-  width: 100%;
-  background: linear-gradient(to right, #7c3b85, #3a4c8e, #c44b84);
-  color: white;
-  padding: 0.6rem 1rem;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 1000;
-  justify-content: center;
+  right: 0;
+  height: var(--cb-header-height);
+  background: var(--cb-chrome-bg);
+  color: #ffffff;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  box-shadow: var(--cb-header-shadow);
+  z-index: 1000;
 }
 
-/* Contenido del header */
-.header-content {
+.main-header .header-content {
+  width: min(1440px, calc(100% - 1rem));
+  height: 100%;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  height: 53px;
-  width: 90%;
+  gap: 0.75rem;
 }
 
-/* Logo y texto */
 .logo-area {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  height: 100%;
+  gap: 0.625rem;
+  min-width: 0;
 }
 
 .logo-header {
   height: 34px;
+  width: auto;
   object-fit: contain;
 }
 
 .logo-area h4 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  min-height: 100%;
+  color: inherit;
 }
 
-/* Buscador */
 .search-group {
+  position: relative;
   display: grid;
   align-items: center;
-  position: relative;
   flex: 1 1 auto;
-  max-width: 200px;
+  max-width: 260px;
 }
 
 .search-group input {
-  border-radius: 30px;
-  padding: 0.45rem 1rem 0.45rem 2rem;
-  background-color: rgba(255, 255, 255, 0.15) !important;
-  border: none;
-  color: white;
-  font-size: 0.85rem;
   width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem 0.45rem 2rem;
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #ffffff;
+  font-size: 0.85rem;
+  box-shadow: none;
 }
 
+.search-group input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.22) !important;
+}
+
+.search-group i {
+  position: absolute;
+  left: 0.75rem;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.86);
+  pointer-events: none;
+}
+
+.search-group input::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.filters-container {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.header-user-area {
+  margin-left: auto;
+  min-width: 0;
+}
+
+.header-user-email {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filters-container .bootstrap-select {
+  min-width: 86px;
+  max-width: 108px;
+  font-size: 0.8rem;
+}
 
 .hidden {
   display: none !important;
 }
 
-
-.search-group i {
-  position: absolute;
-  left: 10px;
-  color: white;
-  font-size: 14px;
-  pointer-events: none;
-}
-
-.search-group input::placeholder {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-/* Filtros en fila */
-.filters-container {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.filters-container .bootstrap-select {
-  min-width: 90px;
-  max-width: 100px;
-  font-size: 0.8rem;
-}
-
-/* === RESPONSIVE === */
 @media (max-width: 768px) {
+  .main-header {
+    height: var(--cb-header-mobile-height);
+    padding: 0 0.5rem;
+  }
 
+  .main-header .header-content {
+    width: 100%;
+    gap: 0.45rem;
+  }
 
-  
-  .header-content {
-    flex-wrap: wrap;
-    justify-content: center;
-    height: 90px;
+  .logo-header {
+    height: 28px;
+  }
+
+  .logo-area h4 {
+    font-size: 0.92rem;
   }
 
   .search-group {
-    max-width: 160px;
-    flex: none;
+    max-width: 170px;
   }
 
   .filters-container {
-    flex-wrap: nowrap;
-    flex: none;
     overflow-x: auto;
-    padding-bottom: 0.2rem;
+    scrollbar-width: none;
+  }
+
+  .filters-container::-webkit-scrollbar {
+    display: none;
   }
 
   .filters-container .bootstrap-select {
-    min-width: 70px;
-    max-width: 70px !important;
-    font-size: 0.75rem;
+    min-width: 68px;
+    max-width: 78px;
+    font-size: 0.73rem;
+  }
+
+  .header-user-email {
+    max-width: 130px;
+    font-size: 0.68rem;
+    padding: 0.22rem 0.5rem;
   }
 }
 
-
-/* Asegura que los dropdowns de bootstrap-select se vean por fuera */
+/* Evita que el menú de bootstrap-select quede oculto por el header */
 .bootstrap-select .dropdown-menu {
-  position: fixed !important;  /* importante: fuera del flujo del header */
-  top: auto !important;
-  left: 70px !important;
-  z-index: 9999 !important; /* por encima de todo */
-  transform: none !important; /* prevenir recortes por transform */
-  max-height: 300px; /* control de altura */
-  overflow-y: auto;
+  z-index: 2001 !important;
 }
-

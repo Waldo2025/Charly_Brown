@@ -1,10 +1,10 @@
 import { metodologiaASC } from './metodologiaASC.js';
+import { authFetchJson } from "./api-client.js";
 
 let historialConversacion = [];
 
-// 📌 Configuración de la API de Google Gemini
-const GOOGLE_AI_API_KEY = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw"; // Reemplázalo con tu clave real
-const GOOGLE_AI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+// 📌 Configuración de backend seguro
+const GOOGLE_AI_MODEL = "gemini-2.0-flash";
 
 // 📌 Lista de herramientas disponibles en la página
 const herramientas = [
@@ -101,20 +101,15 @@ Sigue esta metodología llamada ASC para todas tus respuestas:\n\n${metodologiaA
         });
 
         // 🔹 Enviar solicitud
-        const response = await fetch(`${GOOGLE_AI_ENDPOINT}?key=${GOOGLE_AI_API_KEY}`, {
+        const data = await authFetchJson(`/api/gemini/generate`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                contents: historialConversacion
+                model: GOOGLE_AI_MODEL,
+                payload: {
+                    contents: historialConversacion
+                }
             })
         });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`Error HTTP ${response.status}: ${errorBody}`);
-        }
-
-        const data = await response.json();
         const respuestaTexto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No tengo una respuesta en este momento.";
 
         // 🔹 Agregar respuesta al historial
@@ -136,7 +131,6 @@ Sigue esta metodología llamada ASC para todas tus respuestas:\n\n${metodologiaA
         return respuestaFinal;
 
     } catch (error) {
-        console.error("❌ Error con la API de Google:", error);
         return "Hubo un problema procesando tu solicitud.";
     }
 }
@@ -147,13 +141,17 @@ Sigue esta metodología llamada ASC para todas tus respuestas:\n\n${metodologiaA
 function agregarMensajeChatbot(remitente, mensaje, clase) {
     const chatboxMensajes = document.getElementById("chatbotMessages");
     if (!chatboxMensajes) {
-        console.error("❌ Error: No se encontró el contenedor de mensajes.");
         return;
     }
 
     const mensajeElemento = document.createElement("div");
     mensajeElemento.classList.add("chatbot-message", clase);
-    mensajeElemento.innerHTML = `<strong>${remitente}:</strong> ${mensaje}`;
+    const strong = document.createElement("strong");
+    strong.textContent = `${String(remitente || "")}:`;
+    const text = document.createElement("span");
+    text.textContent = ` ${String(mensaje || "").replace(/<[^>]*>/g, "")}`;
+    mensajeElemento.appendChild(strong);
+    mensajeElemento.appendChild(text);
     chatboxMensajes.appendChild(mensajeElemento);
     chatboxMensajes.scrollTop = chatboxMensajes.scrollHeight;
 }
@@ -182,6 +180,142 @@ async function manejarEnvioMensaje() {
     agregarMensajeChatbot("Charly", respuestaChatbot, "bot");
 }
 
+function hacerArrastrableConInercia(elemento, onTapCallback) {
+    if (!elemento) return;
+
+    let isDragging = false;
+    let wasDragged = false;
+    let suppressClick = false;
+    let startX = 0;
+    let startY = 0;
+    let offsetX = 0;
+    let offsetY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let velocityX = 0;
+    let velocityY = 0;
+    let animationFrame = null;
+    const DRAG_THRESHOLD = 6;
+
+    let posX = Number.isFinite(elemento.offsetLeft) ? elemento.offsetLeft : 10;
+    let posY = Number.isFinite(elemento.offsetTop) ? elemento.offsetTop : 10;
+
+    const clampToViewport = () => {
+        const maxX = Math.max(0, window.innerWidth - elemento.offsetWidth);
+        const maxY = Math.max(0, window.innerHeight - elemento.offsetHeight);
+        posX = Math.max(0, Math.min(posX, maxX));
+        posY = Math.max(0, Math.min(posY, maxY));
+    };
+
+    const paint = () => {
+        elemento.style.left = `${posX}px`;
+        elemento.style.top = `${posY}px`;
+    };
+
+    clampToViewport();
+    paint();
+
+    const onPointerDown = (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        if (animationFrame) cancelAnimationFrame(animationFrame);
+
+        isDragging = true;
+        wasDragged = false;
+        suppressClick = false;
+        velocityX = 0;
+        velocityY = 0;
+
+        startX = e.clientX;
+        startY = e.clientY;
+        offsetX = e.clientX - posX;
+        offsetY = e.clientY - posY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        elemento.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+        elemento.setPointerCapture?.(e.pointerId);
+    };
+
+    const onPointerMove = (e) => {
+        if (!isDragging) return;
+
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        if (!wasDragged && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+            wasDragged = true;
+        }
+
+        posX = e.clientX - offsetX;
+        posY = e.clientY - offsetY;
+        clampToViewport();
+
+        velocityX = e.clientX - lastX;
+        velocityY = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        paint();
+    };
+
+    const applyInertia = () => {
+        velocityX *= 0.92;
+        velocityY *= 0.92;
+        posX += velocityX;
+        posY += velocityY;
+
+        const maxX = Math.max(0, window.innerWidth - elemento.offsetWidth);
+        const maxY = Math.max(0, window.innerHeight - elemento.offsetHeight);
+
+        if (posX > maxX) { posX = maxX; velocityX *= -0.25; }
+        if (posY > maxY) { posY = maxY; velocityY *= -0.25; }
+        if (posX < 0) { posX = 0; velocityX *= -0.25; }
+        if (posY < 0) { posY = 0; velocityY *= -0.25; }
+
+        paint();
+
+        if (Math.abs(velocityX) > 0.35 || Math.abs(velocityY) > 0.35) {
+            animationFrame = requestAnimationFrame(applyInertia);
+        } else {
+            animationFrame = null;
+        }
+    };
+
+    const onPointerUp = (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        elemento.style.cursor = "grab";
+        document.body.style.userSelect = "";
+        elemento.releasePointerCapture?.(e.pointerId);
+
+        if (wasDragged) {
+            suppressClick = true;
+            applyInertia();
+            return;
+        }
+
+        if (typeof onTapCallback === "function") {
+            onTapCallback();
+        }
+    };
+
+    elemento.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("resize", () => {
+        clampToViewport();
+        paint();
+    });
+
+    elemento.addEventListener("click", (e) => {
+        if (suppressClick) {
+            e.preventDefault();
+            e.stopPropagation();
+            suppressClick = false;
+        }
+    }, true);
+}
+
 // 📌 Configuración del chatbot en la página
 document.addEventListener("DOMContentLoaded", function () {
     const chatbotContainer = document.getElementById("chatbotContainer");
@@ -189,144 +323,38 @@ document.addEventListener("DOMContentLoaded", function () {
     const chatbotMessages = document.getElementById("chatbotMessages");
     const chatbotInput = document.getElementById("chatbotInput");
     const chatbotSend = document.getElementById("chatbotSend");
-    const chatbotClose = document.getElementById("chatbotClose"); // Botón de cerrar
+    const chatbotClose = document.getElementById("chatbotClose");
 
-    // Verificar si los elementos existen antes de asignar eventos
-    if (chatbotBubble && chatbotContainer) {
-        chatbotBubble.addEventListener("click", function () {
-            chatbotContainer.classList.add("show");
+    if (!chatbotBubble || !chatbotContainer) return;
 
-            // Mostrar mensaje de bienvenida solo la primera vez
-            if (chatbotMessages && chatbotMessages.children.length === 0) {
-                agregarMensajeChatbot("Charly", mensajeBienvenida(), "bot");
-            }
-        });
+    const abrirChatbot = () => {
+        chatbotContainer.classList.add("show");
+        chatbotBubble.classList.remove("no-interactivo");
+        chatbotBubble.style.pointerEvents = "auto";
+        if (chatbotMessages && chatbotMessages.children.length === 0) {
+            agregarMensajeChatbot("Charly", mensajeBienvenida(), "bot");
+        }
+    };
+
+    const cerrarChatbot = () => {
+        chatbotContainer.classList.remove("show");
+        chatbotBubble.classList.remove("no-interactivo");
+        chatbotBubble.style.pointerEvents = "auto";
+    };
+
+    chatbotBubble.addEventListener("click", abrirChatbot);
+    hacerArrastrableConInercia(chatbotBubble, abrirChatbot);
+
+    if (chatbotClose) {
+        chatbotClose.addEventListener("click", cerrarChatbot);
     }
-
-    if (chatbotClose && chatbotContainer) {
-        chatbotClose.addEventListener("click", function () {
-          chatbotContainer.classList.remove("show");
-      
-          // ✅ Restaurar interacción con la burbuja al cerrar
-          const bubble = document.getElementById("chatbotBubble");
-          bubble.classList.remove("no-interactivo");
-          bubble.style.pointerEvents = "auto";
-        });
-      }
-      
 
     if (chatbotSend && chatbotInput) {
         chatbotSend.addEventListener("click", manejarEnvioMensaje);
         chatbotInput.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault(); // ❌ evitar salto y envío
+                event.preventDefault();
             }
         });
     }
 });
-
-
-
-function hacerArrastrableConInercia(elemento, onClickCallback) {
-    let isDragging = false;
-    let wasDragged = false;
-    let offsetX = 0, offsetY = 0;
-    let lastX = 0, lastY = 0;
-    let velocityX = 0, velocityY = 0;
-    let animationFrame;
-  
-    // Posición inicial
-    let posX = elemento.offsetLeft;
-    let posY = elemento.offsetTop;
-  
-    const onMouseDown = (e) => {
-      cancelAnimationFrame(animationFrame);
-      isDragging = true;
-      wasDragged = false;
-      const evt = e.touches ? e.touches[0] : e;
-      offsetX = evt.clientX - elemento.offsetLeft;
-      offsetY = evt.clientY - elemento.offsetTop;
-      lastX = evt.clientX;
-      lastY = evt.clientY;
-      elemento.style.cursor = "grabbing";
-    };
-  
-    const onMouseMove = (e) => {
-      if (!isDragging) return;
-      const evt = e.touches ? e.touches[0] : e;
-  
-      posX = evt.clientX - offsetX;
-      posY = evt.clientY - offsetY;
-  
-      // Marcar como que se arrastró
-      wasDragged = true;
-  
-      // Limitar dentro de ventana
-      const maxX = window.innerWidth - elemento.offsetWidth;
-      const maxY = window.innerHeight - elemento.offsetHeight;
-      posX = Math.max(0, Math.min(posX, maxX));
-      posY = Math.max(0, Math.min(posY, maxY));
-  
-      // Calcular velocidad
-      velocityX = evt.clientX - lastX;
-      velocityY = evt.clientY - lastY;
-  
-      lastX = evt.clientX;
-      lastY = evt.clientY;
-  
-      elemento.style.left = posX + "px";
-      elemento.style.top = posY + "px";
-    };
-  
-    const onMouseUp = () => {
-      if (!isDragging) return;
-      isDragging = false;
-      elemento.style.cursor = "grab";
-  
-      // Si no se arrastró, se trata de un clic real
-      if (!wasDragged && typeof onClickCallback === "function") {
-        onClickCallback();
-      }
-  
-      aplicarInercia();
-    };
-  
-    const aplicarInercia = () => {
-      velocityX *= 0.95;
-      velocityY *= 0.95;
-  
-      posX += velocityX;
-      posY += velocityY;
-  
-      const maxX = window.innerWidth - elemento.offsetWidth;
-      const maxY = window.innerHeight - elemento.offsetHeight;
-  
-      if (posX > maxX) { posX = maxX; velocityX *= -0.3; }
-      if (posY > maxY) { posY = maxY; velocityY *= -0.3; }
-      if (posX < 0) { posX = 0; velocityX *= -0.3; }
-      if (posY < 0) { posY = 0; velocityY *= -0.3; }
-  
-      elemento.style.left = posX + "px";
-      elemento.style.top = posY + "px";
-  
-      if (Math.abs(velocityX) > 0.5 || Math.abs(velocityY) > 0.5) {
-        animationFrame = requestAnimationFrame(aplicarInercia);
-      }
-    };
-  
-    // Eventos
-    elemento.addEventListener("mousedown", onMouseDown);
-    elemento.addEventListener("touchstart", onMouseDown);
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("touchmove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    document.addEventListener("touchend", onMouseUp);
-  }
-  
-
-// Inicializar cuando cargue
-document.addEventListener("DOMContentLoaded", () => {
-  const bubble = document.getElementById("chatbotBubble");
-  hacerArrastrableConInercia(bubble);
-});
-

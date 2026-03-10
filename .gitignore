@@ -64,6 +64,23 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env.local
+.env.*.local
+!.env.example
 
 # dataconnect generated files
 .dataconnect
+
+# Local runtime config (frontend)
+config.local.js
+config.local.json
+public/config.local.js
+public/config.local.json
+*.local
+
+# Service account / private credentials
+*firebase-adminsdk*.json
+*service-account*.json
+*credentials*.json
+*.pem
+*.key

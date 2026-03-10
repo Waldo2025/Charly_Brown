@@ -1,136 +1,62 @@
-/* Estilo general del modal */
-#modalSecuencia .modal {
-    font-family: 'Segoe UI', sans-serif;
-  }
-  
-  #modalSecuencia h2 {
-    font-size: 1.6rem;
-    margin-bottom: 20px;
-  }
-  
-  #modalSecuencia h3 {
-    margin-top: 30px;
-    font-size: 1.3rem;
-    color: #333;
-    border-left: 5px solid #2196f3;
-    padding-left: 10px;
-  }
-  
-  #modalSecuencia form {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  
-  /* Inputs y selects */
-  #modalSecuencia input[type="text"],
-  #modalSecuencia select {
-    width: 100%;
-    padding: 8px 10px;
-    margin-top: 4px;
-    margin-bottom: 10px;
-    font-size: 1rem;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    box-sizing: border-box;
-  }
-  
-  /* Fieldsets */
-  #modalSecuencia fieldset {
-    border: 1px solid #e0e0e0;
-    border-left: 4px solid #2196f3;
-    border-radius: 4px;
-    padding: 10px 15px;
-    margin-bottom: 15px;
-    background: #f9f9f9;
-  }
-  
-  #modalSecuencia legend {
-    font-weight: bold;
-    font-size: 1rem;
-    padding: 0 5px;
-    color: #333;
-  }
-  
-  /* Etiquetas */
-  #modalSecuencia label {
-    display: block;
-    margin-top: 5px;
-    font-weight: 500;
-    font-size: 0.95rem;
-    color: #444;
-  }
-  
-  /* Botón de guardar */
-  #modalSecuencia button[type="submit"] {
-    background-color: #2196f3;
-    color: #fff;
-    font-size: 1rem;
-    padding: 10px 20px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    margin-top: 20px;
-    align-self: flex-start;
-    transition: background-color 0.2s;
-  }
-  
-  #modalSecuencia button[type="submit"]:hover {
-    background-color: #1976d2;
-  }
-  
-  /* Cierre del modal */
-  #cerrarModalSecuencia {
-    font-size: 24px;
-    color: #444;
-  }
-  
-  @media screen and (max-width: 600px) {
-    #modalSecuencia .modal-content {
-      padding: 15px;
-    }
-  
-    #modalSecuencia h2, #modalSecuencia h3 {
-      font-size: 1.2rem;
-    }
-  }
-  
-
-.sya {
-    background: #fff;
-    margin: 5% auto;
-    padding: 20px;
-    width: 90%;
-    max-width: 800px;
-    border-radius: 10px;
-    position: relative;
-    font-family: sans-serif;
-    overflow-y: auto;
-    max-height: 80%;
-    z-index: 9999;
+/* Modal base */
+.modal {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.45);
+  display: none; align-items: center; justify-content: center;
+}
+.modal-contenido {
+  background: #fff; border-radius: 12px; width: min(1100px, 96vw);
+  max-height: 90vh; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.15);
 }
 
-.form-grid-doble {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
+/* Lista */
+.sya-lista { padding: 0; }
+.sya-lista__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #eee;
 }
+.sya-lista__actions { display: flex; gap: 8px; align-items: center; }
+.sya-lista__body { padding: 16px; max-height: calc(90vh - 70px); overflow: auto; }
 
-.form-grid-doble label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: 500;
+.sya-lista__search { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e5e5e5; border-radius: 999px; padding: 6px 10px; }
+.sya-lista__search input { border: 0; outline: 0; min-width: 220px; }
+
+/* Editor */
+.sya-editor { padding: 0; }
+.sya-editor__header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding: 14px 18px; border-bottom: 1px solid #eee;
 }
-
-.form-grid-doble select {
-  width: 100%;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  font-size: 1rem;
+.sya-editor__form { padding: 16px; max-height: calc(90vh - 70px); overflow: auto; display: grid; gap: 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.field { display: grid; gap: 6px; }
+.field span { font-size: 12px; color: #6b7280; }
+.field input, .field select {
+  border: 1px solid #e5e7eb; border-radius: 10px; padding: 9px 10px; font-size: 14px; outline: none;
 }
+.area summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.area { border-top: 1px dashed #eee; padding-top: 8px; }
 
+.sya-editor__actions { display: flex; gap: 10px; justify-content: flex-end; }
 
-#modalSecuencia {
-  z-index: 99999 !important;
+/* Tabla */
+.sya-table { width:100%; border-collapse: collapse; }
+.sya-table thead th {
+  text-align:left; font-weight:600; font-size:13px; color:#6b7280; padding:8px 10px; border-bottom:1px solid #eee;
 }
+.sya-table tbody td { padding:10px; border-bottom:1px solid #f1f1f1; font-size:14px; }
+.col-actions { width: 160px; }
+.actions { white-space: nowrap; }
+.action { border: 1px solid #e5e7eb; background:#fff; border-radius: 8px; padding:6px 8px; margin-right:6px; cursor:pointer; }
+.action i { pointer-events: none; }
+
+/* Botones */
+.btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.btn.icon { padding: 8px; width: 36px; height: 36px; display: inline-grid; place-items: center; }
+.btn.slim { padding: 6px 10px; border-radius: 999px; }
+.btn.primary { background: #111827; color: #fff; border-color: #111827; }
+.btn.ghost { background: #fff; color: #111827; }
+
+/* Pill del botón lanzador (opcional) */
+.pill-btn { border-radius: 999px; }

@@ -59,7 +59,7 @@
 
 
   const firebaseConfig = {
-    apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+    apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
     authDomain: "charly-brown.firebaseapp.com",
     projectId: "charly-brown",
     storageBucket: "charly-brown.appspot.com",
@@ -74,14 +74,12 @@
 
   signInAnonymously(auth)
   .then(() => {
-    console.log("✅ Sesión anónima iniciada correctamente.");
   })
   .catch((error) => {
-    console.error("❌ Error al iniciar sesión anónima:", error);
   });
 
 
-    const HF_TOKEN = "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";
+    const HF_TOKEN = "__HF_API_KEY_LOCAL__";
     const inference = new InferenceClient(HF_TOKEN);
 
     const promptInput = document.getElementById("prompt");
@@ -111,7 +109,7 @@
 
     async function generarMapaMentalGemini(textoLectura) {
       const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-      const apiKey = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw";
+      const apiKey = "__GEMINI_VISION_API_KEY_LOCAL__";
 
       const prompt = `
       You are a visual educational designer. Read the following text and extract 5 to 7 key concepts. 
@@ -143,7 +141,6 @@
         const json = JSON.parse(rawCleaned);
         return json;
       } catch (err) {
-        console.warn("❌ No se pudo parsear la respuesta:", raw);
         return null;
       }
     }
@@ -328,7 +325,6 @@
 
                 await new Promise(resolve => setTimeout(resolve, 1300));
               } catch (err) {
-                console.error(`❌ Error generando imagen para "${palabra}":`, err);
               }
             }
 
@@ -358,7 +354,6 @@
             alert("Respuesta inesperada. Revisa la consola.");
           }
         } catch (error) {
-          console.error("❌ Error:", error);
           alert("Hubo un error. Revisa la consola.");
         } finally {
           boton.disabled = false;
@@ -376,10 +371,8 @@
         const storageRef = ref(storage, `mindmap/${nombre}.png`);
         try {
           await uploadString(storageRef, dataURL, 'data_url');
-          console.log("✅ Imagen guardada en Firebase:", nombre);
           cargarImagenesGuardadas();
         } catch (err) {
-          console.error("❌ Error al guardar en Firebase:", err);
         }
       }
 
@@ -403,5 +396,25 @@
       cargarImagenesGuardadas(); // inicializar al cargar
 
   </script>
+<script>
+  (function(){
+    const load = async () => {
+      let v = '';
+      try {
+        const r = await fetch('version.json', { cache: 'no-store' });
+        const d = await r.json();
+        v = (d && d.version) ? String(d.version) : '';
+      } catch (_) {}
+      const s = document.createElement('script');
+      s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
+      document.body.appendChild(s);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', load);
+    } else {
+      load();
+    }
+  })();
+</script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { getFirestore, collection, collectionGroup, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
 
@@ -10,14 +10,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const messageInput = document.getElementById("message-input");
     const sendBtn = document.getElementById("send-btn");
     const messagesDiv = document.getElementById("messages");
+    const chatBox = document.getElementById("chat-box");
     const usersListDiv = document.getElementById("users-list");
     const chatPanel = document.getElementById("chat-panel");
+    const contactsPanel = document.getElementById("contacts-panel");
+    const toggleContactsPanelBtn = document.getElementById("toggleContactsPanel");
 
     let selectedUserId = null;
+    let unsubscribeMessages = null;
+    let unsubscribeFavorites = null;
+    let unsubscribeUnread = null;
+    let unreadMessagesCache = [];
+    let unreadByUserCache = {};
 
     // Configuración de Firebase
     const firebaseConfig = {
-        apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+        apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
         authDomain: "charly-brown.firebaseapp.com",
         projectId: "charly-brown",
         storageBucket: "charly-brown.appspot.com",
@@ -35,21 +43,172 @@ document.addEventListener("DOMContentLoaded", () => {
     // Solicita permiso para mostrar notificaciones
     if ("Notification" in window) {
         Notification.requestPermission().then(permission => {
-        console.log("Notificaciones:", permission);
         });
     }
 
 
-    async function getUserInfo() {
-        const user = auth.currentUser;
-        if (user) {
-            const userDocRef = doc(db, "users", user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists()) {
-                const data = userDoc.data();
-                if (userNameSpan) userNameSpan.textContent = `${data.firstName} ${data.lastName}`;
-                if (userRoleSpan) userRoleSpan.textContent = data.role;
+    function detachConversationListeners() {
+        if (typeof unsubscribeMessages === "function") unsubscribeMessages();
+        if (typeof unsubscribeFavorites === "function") unsubscribeFavorites();
+        unsubscribeMessages = null;
+        unsubscribeFavorites = null;
+    }
+
+    function getBadgeEl() {
+        const chatLink = document.getElementById("chatLink");
+        if (!chatLink) return null;
+        let badge = document.getElementById("chat-notification-badge");
+        if (!badge) {
+            badge = document.createElement("em");
+            badge.id = "chat-notification-badge";
+            badge.className = "sidebar-badge";
+            badge.hidden = true;
+            badge.textContent = "0";
+            chatLink.appendChild(badge);
+        }
+        return badge;
+    }
+
+    function upsertContactUnreadBadge(buttonEl, count) {
+        if (!buttonEl) return;
+        let badgeEl = buttonEl.querySelector(".contact-unread-badge");
+        if (count > 0) {
+            if (!badgeEl) {
+                badgeEl = document.createElement("small");
+                badgeEl.className = "contact-unread-badge";
+                const meta = buttonEl.querySelector(".contact-meta");
+                if (meta) meta.appendChild(badgeEl);
+                else buttonEl.appendChild(badgeEl);
             }
+            badgeEl.textContent = count > 99 ? "99+" : String(count);
+            return;
+        }
+        if (badgeEl) badgeEl.remove();
+    }
+
+    function syncContactBadgesInList() {
+        const buttons = usersListDiv?.querySelectorAll(".contact-button[data-user-id]") || [];
+        buttons.forEach((btn) => {
+            const uid = btn.getAttribute("data-user-id");
+            const count = Number(unreadByUserCache[uid] || 0);
+            upsertContactUnreadBadge(btn, count);
+        });
+    }
+
+    function updateSidebarUnreadBadge(totalUnread) {
+        const badge = getBadgeEl();
+        if (!badge) return;
+        if (totalUnread > 0) {
+            badge.textContent = totalUnread > 99 ? "99+" : String(totalUnread);
+            badge.hidden = false;
+            badge.classList.add("is-visible");
+            return;
+        }
+        badge.textContent = "0";
+        badge.classList.remove("is-visible");
+        badge.hidden = true;
+    }
+
+    function getLastReadStorageKey(conversationId) {
+        return `chat_last_read:${auth.currentUser?.uid || "anon"}:${conversationId}`;
+    }
+
+    function getLastReadTs(conversationId) {
+        const raw = localStorage.getItem(getLastReadStorageKey(conversationId));
+        const ts = Number(raw || 0);
+        return Number.isFinite(ts) ? ts : 0;
+    }
+
+    function markConversationAsRead(otherUserId) {
+        if (!auth.currentUser?.uid || !otherUserId) return;
+        const conversationId = getConversationId(auth.currentUser.uid, otherUserId);
+        localStorage.setItem(getLastReadStorageKey(conversationId), String(Date.now()));
+        recomputeUnreadBadge();
+    }
+
+    function getMessageTs(message) {
+        try {
+            if (message?.timestamp?.toMillis) return message.timestamp.toMillis();
+            if (message?.timestamp?.seconds) return Number(message.timestamp.seconds) * 1000;
+            const n = Number(message?.timestamp || 0);
+            return Number.isFinite(n) ? n : 0;
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    function recomputeUnreadBadge() {
+        if (!auth.currentUser?.uid) return;
+        const myUid = auth.currentUser.uid;
+        let total = 0;
+        const map = {};
+        unreadMessagesCache.forEach((msg) => {
+            if (!msg || msg.senderId === myUid || msg.receiverId !== myUid) return;
+            const otherUid = msg.senderId;
+            if (!otherUid) return;
+            const convId = getConversationId(myUid, otherUid);
+            const lastRead = getLastReadTs(convId);
+            const msgTs = getMessageTs(msg);
+            if (msgTs > lastRead) {
+                total += 1;
+                map[otherUid] = (map[otherUid] || 0) + 1;
+            }
+        });
+        unreadByUserCache = map;
+        updateSidebarUnreadBadge(total);
+        syncContactBadgesInList();
+    }
+
+    function startUnreadListener() {
+        if (typeof unsubscribeUnread === "function") unsubscribeUnread();
+        if (!auth.currentUser?.uid) return;
+        const unreadQuery = query(
+            collectionGroup(db, "chat"),
+            where("receiverId", "==", auth.currentUser.uid)
+        );
+        unsubscribeUnread = onSnapshot(
+            unreadQuery,
+            (snapshot) => {
+                unreadMessagesCache = snapshot.docs.map((d) => d.data());
+                recomputeUnreadBadge();
+            },
+            () => {
+                // Si falla collectionGroup por reglas/indices, no romper el chat.
+                unreadMessagesCache = [];
+                updateSidebarUnreadBadge(0);
+            }
+        );
+    }
+
+    function setActiveConversation(uid, displayName, buttonEl) {
+        selectedUserId = uid;
+        document.getElementById("chat-user-name").textContent = displayName;
+        chatPanel.style.display = "flex";
+        chatPanel.classList.add("is-open");
+        chatPanel.classList.remove("mobile-hidden");
+        localStorage.setItem("selectedUserId", uid);
+
+        document.querySelectorAll(".contact-button").forEach(btn => {
+            btn.classList.remove("selected");
+        });
+        if (buttonEl) buttonEl.classList.add("selected");
+
+        try {
+            loadMessages();
+        } catch (_) {
+            // No bloquear apertura por error secundario.
+        }
+
+        try {
+            markConversationAsRead(uid);
+        } catch (_) {
+            // Ignorar error de contador de no leidos.
+        }
+
+        if (isMobileView()) {
+            if (contactsList) contactsList.classList.add("mobile-hidden");
+            chatPanel.classList.remove("mobile-hidden");
+            if (backToContactsBtn) backToContactsBtn.style.display = "inline-block";
         }
     }
 
@@ -71,6 +230,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
     
             const storedId = localStorage.getItem("selectedUserId");
+            let foundStored = false;
 
             Object.keys(usersByRole).forEach((role, index) => {
                 const section = document.createElement("div");
@@ -82,8 +242,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 header.setAttribute("data-bs-toggle", "collapse");
                 header.setAttribute("data-bs-target", `#collapse-${index}`);
                 header.style.cursor = "pointer";
-                header.style.background = "linear-gradient(to right, #3a4c8e, #7c3b85)";
-                header.style.borderRadius = "6px 6px 0 0";
 
                 const collapse = document.createElement("div");
                 collapse.classList.add("accordion-collapse", "collapse");
@@ -96,20 +254,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 usersByRole[role].forEach((user) => {
                     const li = document.createElement("li");
-                    li.style.width = "100%";
 
                     const button = document.createElement("button");
                     button.classList.add("contact-button");
-                    button.style.width = "100%";
 
                     const isCurrentUser = auth.currentUser.uid === user.uid;
                     const displayName = `${user.firstName} ${user.lastName}` + (isCurrentUser ? " (Yo)" : "");
                     const roleTag = `<small class="text-muted ms-2">[${user.role || 'Sin rol'}]</small>`;
+                    const unread = Number(unreadByUserCache[user.uid] || 0);
+                    const unreadBadge = unread > 0 ? `<small class="contact-unread-badge">${unread > 99 ? "99+" : unread}</small>` : "";
 
                     button.innerHTML = `
                         <i class="fas fa-user me-2"></i>
-                        <span>${displayName} ${roleTag}</span>
+                        <span class="contact-meta">${displayName} ${roleTag} ${unreadBadge}</span>
                     `;
+                    button.setAttribute("data-user-id", user.uid);
 
                     // Marcar como seleccionado si es el guardado
                     if (storedId === user.uid) {
@@ -119,26 +278,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
 
                     button.addEventListener("click", () => {
-                        selectedUserId = user.uid;
-                        document.getElementById("chat-user-name").textContent = displayName;
-                        chatPanel.style.display = 'flex';
-                        loadMessages();
-
-                        // Guardar seleccionado
-                        localStorage.setItem("selectedUserId", user.uid);
-
-                        // Limpiar anteriores y aplicar clase
-                        document.querySelectorAll(".contact-button").forEach(btn => {
-                            btn.classList.remove("selected");
-                        });
-                        button.classList.add("selected");
-
-                        if (isMobileView()) {
-                            contactsList.classList.add("mobile-hidden");
-                            chatPanel.classList.remove("mobile-hidden");
-                            backToContactsBtn.style.display = "inline-block";
-                        }
+                        setActiveConversation(user.uid, displayName, button);
                     });
+
+                    if (storedId === user.uid) {
+                        selectedUserId = user.uid;
+                        foundStored = true;
+                    }
 
                     li.appendChild(button);
                     list.appendChild(li);
@@ -154,6 +300,21 @@ document.addEventListener("DOMContentLoaded", () => {
                 usersListDiv.appendChild(section);
             });
 
+            if (!foundStored && storedId) {
+                localStorage.removeItem("selectedUserId");
+                selectedUserId = null;
+                detachConversationListeners();
+                messagesDiv.innerHTML = "";
+                chatPanel.classList.remove("is-open");
+            } else if (foundStored) {
+                const selectedBtn = usersListDiv.querySelector(".contact-button.selected");
+                if (selectedBtn && selectedUserId) {
+                    chatPanel.style.display = "flex";
+                    chatPanel.classList.add("is-open");
+                    try { loadMessages(); } catch (_) {}
+                }
+            }
+
         });
     }
     
@@ -161,7 +322,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
 
     // Filtrado de contactos en tiempo real
-    document.getElementById("contactSearch").addEventListener("input", function () {
+    document.getElementById("contactSearch")?.addEventListener("input", function () {
         const filter = this.value.toLowerCase();
         const userButtons = document.querySelectorAll("#users-list li");
 
@@ -189,13 +350,32 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
     
                 loadUsersList();
+                startUnreadListener();
             }
         } else {
+            if (typeof unsubscribeUnread === "function") unsubscribeUnread();
+            updateSidebarUnreadBadge(0);
+            chatPanel.classList.remove("is-open");
             window.location.replace("login.html");
         }
     });
+
+    if (toggleContactsPanelBtn && contactsPanel) {
+        const key = "chat_contacts_panel_open";
+        const stored = localStorage.getItem(key);
+        const openDefault = stored === null ? false : stored === "1";
+        contactsPanel.classList.toggle("is-open", openDefault);
+
+        toggleContactsPanelBtn.addEventListener("click", () => {
+            const next = !contactsPanel.classList.contains("is-open");
+            contactsPanel.classList.toggle("is-open", next);
+            localStorage.setItem(key, next ? "1" : "0");
+        });
+    } else if (contactsPanel) {
+        contactsPanel.classList.add("is-open");
+    }
     
-    sendBtn.addEventListener("click", async () => {
+    sendBtn?.addEventListener("click", async () => {
         const message = messageInput.value.trim();
         if (message && selectedUserId) {
             const conversationId = getConversationId(auth.currentUser.uid, selectedUserId);
@@ -209,15 +389,45 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    messageInput?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            sendBtn?.click();
+        }
+    });
+
     function getConversationId(user1, user2) {
         return user1 < user2 ? `${user1}_${user2}` : `${user2}_${user1}`;
     }
 
+    function focusLastMessage() {
+        const lastMsg = messagesDiv?.lastElementChild;
+        if (!lastMsg) return;
+        try {
+            lastMsg.setAttribute("tabindex", "-1");
+            lastMsg.scrollIntoView({ block: "end", inline: "nearest", behavior: "auto" });
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } else {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        } catch (_) {
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } else if (messagesDiv) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+    }
+
     function loadMessages() {
+        if (!selectedUserId || !auth.currentUser) return;
+        detachConversationListeners();
+
         const conversationId = getConversationId(auth.currentUser.uid, selectedUserId);
         const messagesQuery = query(collection(db, "messages", conversationId, "chat"), orderBy("timestamp"));
     
-        onSnapshot(messagesQuery, (snapshot) => {
+        unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
             // 1) Notificaciones push y badge para nuevos mensajes
             snapshot.docChanges().forEach(change => {
               if (change.type === "added") {
@@ -230,11 +440,6 @@ document.addEventListener("DOMContentLoaded", () => {
                       body: msg.message || "📷 Imagen / 🎤 Audio recibido",
                       icon: "/logo-32x32.png"    // ajusta la ruta a tu icono
                     });
-                  }
-                  // incrementa el contador en el badge
-                  const badge = document.getElementById("chat-notification-badge");
-                  if (badge) {
-                    badge.textContent = (parseInt(badge.textContent) || 0) + 1;
                   }
                 }
               }
@@ -287,7 +492,8 @@ document.addEventListener("DOMContentLoaded", () => {
               messagesDiv.appendChild(div);
             });
           
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            focusLastMessage();
+            if (selectedUserId) markConversationAsRead(selectedUserId);
             // ✅ Cargar favoritos después de renderizar todos los mensajes
             loadFavorites();
           });
@@ -304,7 +510,7 @@ document.addEventListener("DOMContentLoaded", () => {
  
 
     // Al hacer clic en "← Volver"
-    backToContactsBtn.addEventListener("click", () => {
+    backToContactsBtn?.addEventListener("click", () => {
     contactsList.classList.remove("mobile-hidden");
     chatPanel.classList.add("mobile-hidden");
     });
@@ -318,9 +524,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let mediaRecorder;
     let audioChunks = [];
 
-    attachBtn.addEventListener("click", () => imageInput.click());
+    attachBtn?.addEventListener("click", () => imageInput.click());
 
-    imageInput.addEventListener("change", async (e) => {
+    imageInput?.addEventListener("change", async (e) => {
         const file = e.target.files[0];
         if (!file || !selectedUserId) return;
     
@@ -339,12 +545,12 @@ document.addEventListener("DOMContentLoaded", () => {
             });
     
         } catch (error) {
-            console.error("Error al subir la imagen:", error);
         }
     });
     
 
-    voiceBtn.addEventListener("click", async () => {
+    voiceBtn?.addEventListener("click", async () => {
+        if (!selectedUserId) return;
         if (!navigator.mediaDevices.getUserMedia) {
             alert("Tu navegador no soporta grabación de audio.");
             return;
@@ -411,6 +617,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     function loadFavorites() {
+        if (!selectedUserId || !auth.currentUser) return;
+        if (typeof unsubscribeFavorites === "function") unsubscribeFavorites();
         const conversationId = getConversationId(auth.currentUser.uid, selectedUserId);
         const filePanel = document.querySelector(".file-list");
     
@@ -419,7 +627,7 @@ document.addEventListener("DOMContentLoaded", () => {
             orderBy("timestamp")
         );
     
-        onSnapshot(favQuery, (snapshot) => {
+        unsubscribeFavorites = onSnapshot(favQuery, (snapshot) => {
             filePanel.innerHTML = ''; // Limpia antes de renderizar
     
             let hasFavorites = false;

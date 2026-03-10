@@ -1,22 +1,12 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getFirestore, collection, getDocs, query, where, doc, getDoc, updateDoc, addDoc } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-
-// Configuración de Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
-  authDomain: "charly-brown.firebaseapp.com",
-  projectId: "charly-brown",
-  storageBucket: "charly-brown.firebasestorage.app",
-  messagingSenderId: "128488238449",
-  appId: "1:128488238449:web:2b99ef5c2f0272e9871ad0",
-  measurementId: "G-RL0BMDZKE6"
-};
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-app.js';
+import { getFirestore, collection, getDocs, query, where, doc, getDoc, updateDoc, addDoc } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-auth.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 
 // Inicialización de Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth();
-const db = getFirestore();
+const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+const auth = getAuth(app);
+const db = getFirestore(app);
 
 let table; // Definir la variable de la tabla
 
@@ -44,7 +34,6 @@ onAuthStateChanged(auth, async (user) => {
     loadUsers();
 
   } else {
-    console.log("No hay usuario autenticado.");
     window.location.href = "login.html";
   }
 });
@@ -82,7 +71,6 @@ document.getElementById("newUserForm").addEventListener("submit", async (e) => {
     bootstrap.Modal.getInstance(document.getElementById("newUserModal")).hide();
     loadUsers();
   } catch (error) {
-    console.error("Error al crear usuario:", error);
     alert("Error al crear el usuario. Intenta de nuevo.");
   }
 });
@@ -159,18 +147,32 @@ function renderUserTable(userList) {
 
   userList.forEach(user => {
     const row = document.createElement('tr');
-    
-    row.innerHTML = `
-      <td>${user.firstName} ${user.lastName}</td>
-      <td>${user.email}</td>
-      <td>${user.area}</td>
-      <td>${user.role}</td>
-      <td>
-        <i class="fas fa-edit" onclick="openEditModal('${user.id}')"></i>
-        <i class="fas fa-trash-alt" onclick="deleteUser('${user.id}')"></i>
-      </td>
-    `;
-    
+
+    const fullName = `${String(user.firstName || "").trim()} ${String(user.lastName || "").trim()}`.trim();
+    const tdName = document.createElement("td");
+    tdName.textContent = fullName;
+    const tdEmail = document.createElement("td");
+    tdEmail.textContent = String(user.email || "");
+    const tdArea = document.createElement("td");
+    tdArea.textContent = String(user.area || "");
+    const tdRole = document.createElement("td");
+    tdRole.textContent = String(user.role || "");
+    const tdActions = document.createElement("td");
+
+    const editIcon = document.createElement("i");
+    editIcon.className = "fas fa-edit";
+    editIcon.addEventListener("click", () => openEditModal(String(user.id || "")));
+    const deleteIcon = document.createElement("i");
+    deleteIcon.className = "fas fa-trash-alt";
+    deleteIcon.addEventListener("click", () => deleteUser(String(user.id || "")));
+
+    tdActions.appendChild(editIcon);
+    tdActions.appendChild(deleteIcon);
+    row.appendChild(tdName);
+    row.appendChild(tdEmail);
+    row.appendChild(tdArea);
+    row.appendChild(tdRole);
+    row.appendChild(tdActions);
     tbody.appendChild(row);
   });
 

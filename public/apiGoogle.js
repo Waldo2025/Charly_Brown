@@ -1,6 +1,6 @@
 
 // 🔹 **API Key interna para Google Gemini (No se muestra en la interfaz)**
-const googleAPIKey = "AIzaSyA-Al10Diw6CkowW0F3EePEBD6D1h3jwxw";
+const googleAPIKey = "__GEMINI_API_KEY_LOCAL__";
 const googleAPIEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 const fetch = require("node-fetch");

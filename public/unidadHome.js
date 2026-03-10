@@ -5,7 +5,7 @@ import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/van
 
 // Configuración de Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyBu4b4jV_k-UeU2E-QytrFiI6l59S9Ug-0",
+  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
   authDomain: "charly-brown.firebaseapp.com",
   projectId: "charly-brown",
   storageBucket: "charly-brown.firebasestorage.app",
@@ -44,7 +44,6 @@ onAuthStateChanged(auth, async (user) => {
     if (storedUser) {
       // Modo offline, manejar el flujo sin conexión
     } else {
-      console.warn("🚫 No se pudo autenticar. Redirigiendo a index...");
       // Redirigir a la página de inicio después de 1.5 segundos
       setTimeout(() => {
         window.location.href = "index.html";
@@ -57,11 +56,9 @@ onAuthStateChanged(auth, async (user) => {
 
 // Función para filtrar unidades basadas en la búsqueda
 const filterUnidades = (query) => {
-  console.log("Ejecutando filtro con:", query);
   const unidadItems = document.querySelectorAll(".unidad-item");
 
   if (!unidadItems.length) {
-      console.warn("No se encontraron elementos .unidad-item");
       return;
   }
 
@@ -70,7 +67,6 @@ const filterUnidades = (query) => {
 
   unidadItems.forEach(item => {
       const text = item.textContent.toLowerCase();  // Obtiene el texto de la tarjeta
-      console.log("Texto extraído de la tarjeta:", text);  // Log para ver qué texto tiene
 
       const matches = searchTerms.length === 0 || 
                      searchTerms.some(term => text.includes(term));
@@ -98,7 +94,6 @@ const filterUnidades = (query) => {
 
 // Escuchar evento global de búsqueda
 window.addEventListener("globalSearch", (e) => {
-  console.log("Evento globalSearch recibido:", e.detail.query);
   loadUnidades(currentUserId, e.detail.query); // <--- Aquí usas currentUserId
 });
 
@@ -213,7 +208,6 @@ const loadUnidades = async (userId, searchQuery = '') => {
     });
     
   } catch (error) {
-    console.error("Error al cargar las unidades:", error);
   }
 };
 
@@ -243,12 +237,10 @@ async function eliminarUnidad(unidadId) {
       // Eliminar cada lectura asociada a la unidad
       lecturasSnapshot.forEach(async (doc) => {
         await deleteDoc(doc.ref);
-        console.log(`Lectura ${doc.id} eliminada.`);
       });
 
       // Eliminar la unidad de Firestore
       await deleteDoc(doc(db, "Unidades", unidadId));
-      console.log(`Unidad ${unidadId} eliminada de Firestore.`);
 
       // Eliminar la unidad de la interfaz
       const unidadElement = document.getElementById(`unidad-${unidadId}`);
@@ -258,7 +250,6 @@ async function eliminarUnidad(unidadId) {
 
       alert("Unidad y todas sus lecturas eliminadas correctamente.");
     } catch (error) {
-      console.error("Error al eliminar la unidad y las lecturas de Firebase:", error);
       alert("Hubo un error al eliminar la unidad y las lecturas.");
     }
   }
@@ -276,7 +267,6 @@ document.addEventListener("DOMContentLoaded", () => {
       currentUserId = user.uid;
       loadUnidades(currentUserId);
     } else {
-      console.log("No hay usuario autenticado.");
       window.location.href = "login.html";
     }
   });

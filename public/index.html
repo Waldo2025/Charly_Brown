@@ -102,5 +102,25 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script type="module" src="index.js"></script>
+<script>
+  (function(){
+    const load = async () => {
+      let v = '';
+      try {
+        const r = await fetch('version.json', { cache: 'no-store' });
+        const d = await r.json();
+        v = (d && d.version) ? String(d.version) : '';
+      } catch (_) {}
+      const s = document.createElement('script');
+      s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
+      document.body.appendChild(s);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', load);
+    } else {
+      load();
+    }
+  })();
+</script>
 </body>
 </html>

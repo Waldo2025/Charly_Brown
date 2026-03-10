@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aprende Author/Builder</title>
+
+  <!-- TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- CSS Personalizado con soporte para temas -->
+  <link rel="stylesheet" href="moodleCourse.css?v=1.0.1">
+
+    <link rel="stylesheet" href="header.css?v=1.0.1">
+    <link rel="stylesheet" href="sidebar.css?v=1.0.1">
+
+  <!-- Configuración de Tailwind para temas -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            border: 'hsl(var(--border))',
+            input: 'hsl(var(--input))',
+            ring: 'hsl(var(--ring))',
+            background: 'hsl(var(--background))',
+            foreground: 'hsl(var(--foreground))',
+            primary: {
+              DEFAULT: 'hsl(var(--primary))',
+              foreground: 'hsl(var(--primary-foreground))',
+            },
+            secondary: {
+              DEFAULT: 'hsl(var(--secondary))',
+              foreground: 'hsl(var(--secondary-foreground))',
+            },
+            destructive: {
+              DEFAULT: 'hsl(var(--destructive))',
+              foreground: 'hsl(var(--destructive-foreground))',
+            },
+            muted: {
+              DEFAULT: 'hsl(var(--muted))',
+              foreground: 'hsl(var(--muted-foreground))',
+            },
+            accent: {
+              DEFAULT: 'hsl(var(--accent))',
+              foreground: 'hsl(var(--accent-foreground))',
+            },
+            card: {
+              DEFAULT: 'hsl(var(--card))',
+              foreground: 'hsl(var(--card-foreground))',
+            },
+          },
+        },
+      },
+    }
+  </script>
+
+</head>
+
+<body class="bg-background text-foreground transition-colors duration-200">
+<header class="main-header">
+    <div class="header-content">
+      <!-- header-content loaded from chromeLayout.js -->
+    </div>
+</header> 
+
+<div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="sidebar-menu">
+      <!-- sidebar-menu loaded from chromeLayout.js -->
+    </div>
+</div>
+
+
+
+  <!-- Layout general -->
+  <div id="moodleLayout" class="flex h-screen overflow-hidden">
+
+    <!-- ▓▓▓ SIDEBAR PRINCIPAL (Cursos) ▓▓▓ -->
+    <aside id="sidebar2" class="w-64 border-r border-border bg-card flex flex-col transition-colors duration-200">
+
+      <!-- Acciones -->
+      <div class="px-5 py-4 flex justify-end border-b border-border">
+        <button id="btnNuevoCurso"
+          class="icon-btn p-2 text-sm"
+          title="Crear curso"
+          aria-label="Crear curso">
+          <i class="fas fa-plus"></i>
+        </button>
+      </div>
+
+      <!-- Lista de cursos -->
+      <div class="px-5 pt-4 flex-1 overflow-y-auto border-b border-border">
+        <p class="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Cursos</p>
+        <ul id="listaCursos" class="space-y-1 text-xs"></ul>
+      </div>
+
+      <!-- Configuración modelo IA -->
+<div class="p-5">
+  <p class="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Modelo IA</p>
+  <select id="selectGeminiEndpoint"
+    class="w-full border border-input bg-background text-foreground text-xs px-2 py-1 rounded-md focus:ring-1 focus:ring-primary">
+    <option value="gemini-3-pro-preview">Gemini 3 Pro (Preview)</option> 
+    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option> 
+    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option> 
+    <option value="gemini-2.5-flash-lite" selected>gemini 2.5 Flash Lite</option>
+    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option> 
+    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option> 
+  </select>
+</div>
+
+      <div class="p-5">
+        <span class="text-[11px] tracking-wide text-muted-foreground mb-2">Charly Brown Aprende Versión 0.0.1</span>
+      </div>
+
+    </aside>
+
+    <div id="resizeSidebar2" class="pane-resizer" title="Redimensionar panel de cursos" aria-hidden="true"></div>
+
+    <!-- ▓▓▓ SIDEBAR DE TEMAS ▓▓▓ -->
+    <aside id="sidebarTemas"
+      class="w-74 border-r border-border bg-card flex flex-col hidden transition-colors duration-200">
+
+      <div class="px-5 py-4 border-b border-border">
+        <p class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Temas del curso</p>
+        <div id="cursoSeleccionadoNombre"
+          class="font-medium text-foreground p-2 rounded-md bg-accent/30">
+          <b>Selecciona un curso</b>
+        </div>
+      </div>
+
+      <div class="px-5 py-4 flex-1 overflow-y-auto">
+        <button id="btnAddTema" disabled
+          class="icon-btn p-2 text-sm mb-3"
+          title="Nuevo tema"
+          aria-label="Nuevo tema">
+          <i class="fas fa-layer-group"></i>
+        </button>
+        <ul id="listaTemasSidebar" class="space-y-1 text-xs"></ul>
+      </div>
+
+    </aside>
+
+    <div id="resizeSidebarTemas" class="pane-resizer" title="Redimensionar panel de temas" aria-hidden="true"></div>
+
+    <!-- ▓▓▓ CONTENIDO PRINCIPAL (Editor) ▓▓▓ -->
+    <main class="flex-1 overflow-y-auto bg-background transition-colors duration-200">
+      
+      <!-- Encabezado -->
+<div class="bg-card border-b border-border px-8 py-4 flex justify-between items-center transition-colors duration-200">
+  <h1 class="header-title text-foreground">Editor de contenido</h1>
+
+  <div class="flex gap-3 items-center">
+    <button class="icon-btn" 
+            id="btnToggleArchivados" title="Mostrar/Ocultar módulos archivados">
+      <i class="fas fa-box-archive text-lg"></i>
+      <span id="labelToggleArchivados" class="ml-1 text-xs">Archivados: Ocultos</span>
+    </button>
+    <button class="icon-btn" 
+            id="btnDescargarWord" title="Descargar Word">
+      <i class="fas fa-file-word text-lg"></i>
+    </button>
+  </div>
+</div>
+      <!-- Área de contenido -->
+      <div class="p-8">
+        <div id="editorResizeWrap" class="editor-resize-wrap">
+          <div id="contenidoEditor" class="content-card bg-card border-border">
+            <div class="empty-state text-muted-foreground">
+              <i class="fas fa-layer-group"></i>
+              <p class="text-sm">Selecciona un subtema para comenzar</p>
+            </div>
+          </div>
+          <div id="resizeContenidoEditor" class="pane-resizer pane-resizer-editor" title="Redimensionar editor" aria-hidden="true"></div>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- Modal para añadir subtema -->
+<div id="modalAddSubtema" class="modal fixed inset-0 bg-black/50 z-50 hidden items-center justify-center">
+    <div class="bg-card border-border rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-lg font-semibold mb-4 text-foreground">Nuevo Subtema</h3>
+        <input 
+            type="text" 
+            id="inputNombreSubtema" 
+            placeholder="Nombre del subtema"
+            class="w-full p-2 border border-input bg-background text-foreground rounded mb-4 focus:ring-1 focus:ring-primary"
+        >
+        <div class="flex justify-end gap-2">
+            <button 
+                id="btnCancelarSubtema"
+                class="px-4 py-2 text-muted-foreground hover:bg-accent rounded transition-colors"
+            >
+                Cancelar
+            </button>
+            <button 
+                id="btnConfirmarSubtema"
+                class="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+            >
+                Crear
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL PARA INSTRUCCIONES GEMINI -->
+<div id="modalInstruccionesGemini" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-foreground">Instrucciones para Gemini</h3>
+                <button id="btnCerrarInstruccionesGemini" type="button" class="btn-close-modal text-muted-foreground hover:text-foreground" aria-label="Cerrar modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-foreground mb-2">
+                    Instrucciones para generar referencias metodológicas
+                </label>
+                
+                <!-- CAMBIAR: Reemplazar textarea con div contenteditable -->
+                <div id="txtModalInstruccionesGemini" 
+                     class="w-full p-3 border border-input text-foreground rounded-md focus:ring-2 focus:ring-primary min-h-[200px] overflow-y-auto cb-prewrap-break"
+                     contenteditable="true"
+                     placeholder="Ej: Analiza este documento y genera referencias metodológicas para enseñanza de matemáticas...">
+                </div>
+                
+                <!-- Añadir barra de herramientas para formato -->
+                <div id="toolbarInstruccionesGemini" class="flex flex-wrap gap-1 mb-2 p-1 bg-accent border border-border rounded-md">
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="formatText('bold')" title="Negrita">
+                        <i class="fas fa-bold"></i>
+                    </button>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="formatText('italic')" title="Cursiva">
+                        <i class="fas fa-italic"></i>
+                    </button>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="formatText('underline')" title="Subrayado">
+                        <i class="fas fa-underline"></i>
+                    </button>
+                    <div class="border-l border-border mx-1"></div>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="insertTable()" title="Insertar tabla">
+                        <i class="fas fa-table"></i>
+                    </button>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="insertGeminiImage()" title="Insertar imagen">
+                        <i class="fas fa-image"></i> Imagen
+                    </button>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="clearFormat()" title="Limpiar formato">
+                        <i class="fas fa-eraser"></i>
+                    </button>
+                    <div class="border-l border-border mx-1"></div>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="pasteAsPlainText()" title="Pegar como texto plano">
+                        <i class="fas fa-paste"></i> Texto
+                    </button>
+                    <button type="button" class="px-2 py-1 text-xs bg-background text-foreground border border-input rounded hover:bg-accent" onclick="pasteWithFormat()" title="Pegar con formato">
+                        <i class="fas fa-paste"></i> HTML
+                    </button>
+                </div>
+                
+                <!-- Añadir indicador de formato -->
+                <div id="formatInfo" class="text-xs text-muted-foreground mb-2 hidden">
+                    <span id="formatStatus">Listo para pegar tablas</span>
+                </div>
+
+                <input
+                    type="file"
+                    id="inputImagenGemini"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    class="hidden"
+                >
+            </div>
+            
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="btnGuardarInstruccionesGemini"
+                    class="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                    Guardar Instrucciones
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Seleccionar Tipo de Módulo -->
+<div id="modalSelectorModulo"
+     class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-[9999]">
+
+  <div class="bg-card border-border w-[90%] max-w-sm rounded-xl shadow-2xl p-6">
+
+      <h3 class="text-lg font-semibold mb-4 text-foreground">Seleccionar tipo de módulo</h3>
+
+      <div id="listaOpcionesModulo" class="space-y-2">
+        <!-- Se llena dinámicamente -->
+      </div>
+
+      <div class="flex justify-end mt-4">
+          <button id="btnCancelarSelectorModulo"
+                  class="px-3 py-1 text-sm bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors">
+              Cancelar
+          </button>
+      </div>
+
+  </div>
+</div>
+
+<!-- MODAL: Crear Curso -->
+<div id="modalCrearCurso"
+     class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-[9999]">
+
+  <div class="bg-card border-border w-[90%] max-w-md rounded-xl shadow-2xl p-6">
+
+      <h3 class="text-lg font-semibold mb-4 text-foreground">Crear nuevo curso</h3>
+
+      <label class="text-xs text-muted-foreground">Nombre del curso</label>
+      <input id="inputNombreCurso"
+             type="text"
+             class="w-full mt-1 px-3 py-2 border border-input bg-background text-foreground rounded-md text-sm focus:ring-2 focus:ring-primary"
+             placeholder="Ejemplo: Matemáticas 1°"/>
+
+      <div class="flex justify-end gap-3 mt-6">
+          <button id="btnCancelarCrearCurso"
+                  class="px-3 py-1 text-sm bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors">
+              Cancelar
+          </button>
+
+          <button id="btnConfirmarCrearCurso"
+                  class="px-4 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors">
+              Crear
+          </button>
+      </div>
+
+  </div>
+</div>
+
+<!-- MODAL: Editar Curso -->
+<div id="modalEditarCurso"
+     class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-[9999]">
+
+  <div class="bg-card border-border w-[90%] max-w-md rounded-xl shadow-2xl p-6">
+      <h3 class="text-lg font-semibold mb-4 text-foreground">Editar curso</h3>
+
+      <label class="text-xs text-muted-foreground">Nombre del curso</label>
+      <input id="inputEditarNombreCurso"
+             type="text"
+             class="w-full mt-1 px-3 py-2 border border-input bg-background text-foreground rounded-md text-sm focus:ring-2 focus:ring-primary"/>
+
+      <div class="flex justify-end gap-3 mt-6">
+          <button id="btnCancelarEditarCurso"
+                  class="px-3 py-1 text-sm bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors">
+              Cancelar
+          </button>
+
+          <button id="btnConfirmarEditarCurso"
+                  class="px-4 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors">
+              Guardar
+          </button>
+      </div>
+  </div>
+</div>
+
+<!-- Modal para seleccionar categorías de referencias -->
+<div id="modalSeleccionarCategorias" class="modal-overlay hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="modal-content bg-card border-border rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div class="modal-header p-4 border-b border-border flex justify-between items-center">
+            <h3 class="text-lg font-semibold text-foreground">Seleccionar categorías para análisis</h3>
+            <button id="btnCerrarSeleccionCategorias" class="text-muted-foreground hover:text-foreground">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="modal-body p-4 overflow-y-auto flex-1">
+            <div class="mb-4">
+                <p class="text-sm text-muted-foreground mb-3">
+                    La colección tiene <span id="totalReferenciasCount" class="text-foreground font-semibold">0</span> referencias. 
+                    Selecciona máximo 5 categorías para analizar:
+                </p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2" id="categoriasContainer">
+                    <!-- Las categorías se cargarán aquí dinámicamente -->
+                </div>
+                
+                <div class="mt-4 text-xs text-muted-foreground">
+                    <p><i class="fas fa-info-circle mr-1"></i> Analizar todas las referencias consumiría demasiados tokens.</p>
+                    <p><i class="fas fa-lightbulb mr-1"></i> Selecciona solo las categorías más relevantes para tu curso.</p>
+                </div>
+            </div>
+            
+            <div class="mt-6 border-t border-border pt-4">
+                <h4 class="font-medium text-foreground mb-2">Método de análisis:</h4>
+                <div class="space-y-2">
+                    <label class="flex items-center">
+                        <input type="radio" name="metodoAnalisis" value="categorias" checked class="mr-2">
+                        <span class="text-sm text-foreground">Analizar por categorías seleccionadas</span>
+                    </label>
+                    <label class="flex items-center">
+                        <input type="radio" name="metodoAnalisis" value="palabrasClave" class="mr-2">
+                        <span class="text-sm text-foreground">Búsqueda por palabras clave (máx. 3)</span>
+                    </label>
+                    <div id="palabrasClaveContainer" class="ml-6 mt-2 hidden">
+                        <div class="flex flex-wrap gap-2 mb-2">
+                            <input type="text" id="inputPalabraClave" placeholder="Ej: pedagogía, evaluación" 
+                                   class="flex-1 min-w-[150px] text-sm p-2 border border-input bg-background text-foreground rounded">
+                            <button id="btnAgregarPalabraClave" class="px-3 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 transition-colors">
+                                Agregar
+                            </button>
+                        </div>
+                        <div id="palabrasClaveList" class="flex flex-wrap gap-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal-footer p-4 border-t border-border flex justify-end gap-3">
+            <button id="btnCancelarSeleccionCategorias" 
+                    class="px-4 py-2 border border-input text-foreground rounded hover:bg-accent transition-colors">
+                Cancelar
+            </button>
+            <button id="btnContinuarAnalisis" 
+                    class="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors">
+                <i class="fas fa-magic mr-2"></i>
+                Generar referencias
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Análisis -->
+<div id="modalAnalisisModulo" 
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50">
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        
+        <div class="flex justify-between items-center mb-3">
+            <h2 class="text-lg font-semibold text-foreground">Análisis del Módulo</h2>
+            <button type="button" class="btn-close-modal text-muted-foreground hover:text-foreground" onclick="cerrarModalAnalisis()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div id="contenidoAnalisisModulo" class="text-sm leading-relaxed text-foreground">
+            <!-- contenido dinámico -->
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL TRADUCCIÓN -->
+<div id="modalTraduccionModulo" 
+     class="modal fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center">
+
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-foreground">Traducciones del módulo</h3>
+            <button type="button" class="btn-close-modal" onclick="cerrarModalTraduccion()" aria-label="Cerrar modal">
+                &#x2715;
+            </button>
+        </div>
+
+        <!-- NUEVA TRADUCCIÓN -->
+        <h4 class="font-semibold mb-2 text-foreground">Crear nueva traducción</h4>
+
+        <label class="text-sm text-muted-foreground">Selecciona el idioma:</label>
+        <select id="selectIdiomaTraduccion"
+                class="w-full border border-input bg-background text-foreground p-2 rounded mt-1 mb-3">
+            <option value="">-- Seleccionar idioma --</option>
+            <option value="Inglés">Inglés</option>
+            <option value="Francés">Francés</option>
+            <option value="Japonés">Japonés</option>
+            <option value="Alemán">Alemán</option>
+            <option value="Portugués">Portugués</option>
+            <option value="Italiano">Italiano</option>
+        </select>
+
+        <button id="btnGenerarTraduccion"
+                class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition-colors">
+            Generar traducción
+        </button>
+
+        <hr class="my-4 border-border">
+
+        <!-- CONTENIDO TRADUCIDO -->
+        <h4 class="font-semibold mb-2 text-foreground">Vista previa / Traducción cargada</h4>
+
+        <div id="contenidoTraduccionModulo" 
+             class="p-4 bg-accent border border-border rounded text-sm min-h-[100px] text-foreground cb-scroll-pane-50vh">
+        </div>
+
+        <hr class="my-4 border-border">
+
+        <!-- LISTA DE TRADUCCIONES -->
+        <h4 class="font-semibold mb-2 text-foreground">Traducciones guardadas</h4>
+        <div id="listaTraduccionesExistentes" class="mb-6"></div>
+
+    </div>
+
+</div>
+
+<!-- 🌐 MODAL: Traducir contenido del subtema -->
+<div id="modalTraducirSubtema"
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50">
+
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-foreground">Traducción del subtema</h2>
+            <button type="button" class="btn-close-modal text-muted-foreground hover:text-foreground" onclick="cerrarModalTraducirSubtema()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- LISTA DE TRADUCCIONES -->
+        <h4 class="font-semibold mb-2 text-foreground">Traducciones existentes</h4>
+
+        <div id="listaTraduccionesSubtema" class="mb-6"></div>
+
+        <hr class="my-4 border-border">
+
+        <!-- SELECCIÓN DE IDIOMA -->
+        <label class="text-sm font-medium text-foreground">Selecciona idioma:</label>
+        <select id="selectIdiomaSubtema"
+            class="w-full mt-2 mb-4 p-2 border border-input bg-background text-foreground rounded">
+            <option value="">-- Seleccionar --</option>
+            <option value="Inglés">Inglés</option>
+            <option value="Francés">Francés</option>
+            <option value="Alemán">Alemán</option>
+            <option value="Italiano">Italiano</option>
+            <option value="Portugués">Portugués</option>
+            <option value="Japonés">Japonés</option>
+        </select>
+
+        <div class="flex justify-end gap-3 mt-2 mb-4">
+            <button id="btnAceptarTraduccionSubtema"
+                class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition-colors">
+                Traducir
+            </button>
+        </div>
+
+        <hr class="my-4 border-border">
+
+        <!-- CONTENIDO TRADUCIDO (SOLO VISTA PREVIA) -->
+        <h4 class="font-semibold mb-2 text-foreground">Vista previa de la traducción</h4>
+        <div id="contenidoTraduccionSubtema"
+             class="p-4 border border-border rounded text-sm min-h-[100px] text-foreground cb-scroll-pane-50vh">
+            <p class="text-muted-foreground text-sm">Aquí aparecerá la traducción del contenido generado.</p>
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL: CREAR TABLA DESDE CONTENIDO DEL MÓDULO -->
+<div id="modalCrearTablaModulo"
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+  <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-4 md:p-6">
+
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-sm md:text-base font-semibold text-foreground">
+        Organizar contenido en tabla
+      </h2>
+      <button class="btn-close-modal text-muted-foreground hover:text-foreground"
+              onclick="cerrarModalCrearTabla()">
+        <i class="fas fa-times text-sm"></i>
+      </button>
+    </div>
+
+    <p class="text-xs text-muted-foreground mb-4">
+      Se convertirá el contenido actual del módulo en una tabla.  
+      Los textos con formato <strong class="text-foreground">"Etiqueta: contenido"</strong>
+      se organizarán automáticamente en dos columnas.
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <!-- ORIGEN -->
+      <div>
+        <h3 class="text-xs font-semibold text-foreground mb-1">Contenido original</h3>
+        <div id="tablaPreviewOrigen"
+             class="border border-input rounded p-2 bg-accent h-48 overflow-auto text-xs text-foreground"></div>
+      </div>
+
+      <!-- PREVIEW TABLA -->
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-xs font-semibold text-foreground">Vista previa tabla</h3>
+          <button type="button" class="icon-btn p-1" title="Copiar tabla" aria-label="Copiar tabla" onclick="copiarTablaPreview()">
+            <i class="fas fa-copy"></i>
+          </button>
+        </div>
+        <div id="tablaPreviewResultado"
+             class="border border-input rounded p-2 bg-background h-48 overflow-auto text-xs text-foreground"></div>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2">
+      <button class="px-3 py-1.5 text-xs rounded border border-primary text-primary hover:bg-primary/10 transition-colors"
+              onclick="previsualizarTablaModulo()">
+        Generar vista previa
+      </button>
+
+      <button class="px-3 py-1.5 text-xs rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              onclick="aplicarTablaModulo()">
+        Aplicar al módulo
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- MODAL CAMBIAR TONO -->
+<div id="modalCambiarTono" class="modal fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-foreground">Cambiar tono del contenido</h3>
+            <button type="button" class="btn-close-modal text-muted-foreground hover:text-foreground" onclick="cerrarModalTono()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <!-- Contenedor principal con dos columnas -->
+        <div class="flex flex-col md:flex-row gap-4 flex-1 overflow-hidden">
+            
+            <!-- Columna izquierda: Controles -->
+            <div class="md:w-1/3 flex flex-col gap-4">
+                <!-- Selector de tono -->
+                <div>
+                    <label class="block text-sm font-medium text-foreground mb-2">Seleccionar tono:</label>
+                    <select id="selectTono" class="w-full p-2 border border-input bg-background text-foreground rounded">
+                        <option value="">Selecciona un tono</option>
+                        <optgroup label="Estilo Formal" class="text-foreground">
+                            <option value="academico">Académico</option>
+                            <option value="cientifico">Científico</option>
+                        </optgroup>
+                        <optgroup label="Estilo Informativo">
+                            <option value="periodistico">Periodístico</option>
+                            <option value="informativo">Informativo</option>
+                        </optgroup>
+                        <optgroup label="Estilo Literario">
+                            <option value="literario">Literario</option>
+                            <option value="narrativo">Narrativo</option>
+                            <option value="poetico">Poético</option>
+                        </optgroup>
+                        <optgroup label="Estilo Conversacional">
+                            <option value="amigable">Amigable</option>
+                            <option value="coloquial">Coloquial</option>
+                        </optgroup>
+                        <optgroup label="Estilo Educativo">
+                            <option value="infantil">Infantil</option>
+                            <option value="simple">Simple</option>
+                            <option value="didactico">Didáctico</option>
+                        </optgroup>
+                        <optgroup label="Estilo Especializado">
+                            <option value="tecnico">Técnico</option>
+                            <option value="formal">Formal</option>
+                            <option value="profesional">Profesional</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <!-- Descripción del tono seleccionado -->
+                <div id="descripcionTono" class="hidden bg-blue-50 border border-blue-200 rounded p-3 dark:bg-blue-900/20 dark:border-blue-800">
+                    <h4 class="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">Descripción:</h4>
+                    <p id="textoDescripcion" class="text-xs text-blue-700 dark:text-blue-400"></p>
+                </div>
+
+                <!-- Spinner y botones -->
+                <div id="spinnerTono" class="hidden text-primary text-sm">
+                    <i class="fas fa-spinner fa-spin"></i> Generando contenido en el nuevo tono...
+                </div>
+
+                <div class="space-y-2">
+                    <button id="btnGenerarTono" 
+                            class="w-full px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-magic mr-2"></i> Generar Vista Previa
+                    </button>
+                    
+                    <div class="text-xs text-muted-foreground">
+                        Se generará una vista previa aquí mismo. Revísala antes de aplicar.
+                    </div>
+                </div>
+
+                <!-- Contenido original (solo para referencia) -->
+                <div class="mt-4">
+                    <h4 class="text-sm font-medium text-foreground mb-2">Contenido original:</h4>
+                    <div id="contenidoOriginalTono" class="text-xs text-muted-foreground bg-accent p-3 rounded border border-input max-h-32 overflow-y-auto">
+                        <!-- Se llenará dinámicamente -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Columna derecha: Vista previa -->
+            <div class="md:w-2/3 flex flex-col h-full">
+                <h4 class="text-sm font-medium text-foreground mb-2">Vista previa del nuevo contenido:</h4>
+                <div id="contenidoGeneradoTono" 
+                     class="flex-1 bg-accent border border-input rounded p-4 overflow-y-auto max-h-[400px] text-foreground">
+                    <p class="text-muted-foreground text-sm">Selecciona un tono y haz clic en "Generar Vista Previa"</p>
+                </div>
+
+                <!-- Contador de palabras -->
+                <div id="contadorPalabras" class="text-xs text-muted-foreground mt-2 hidden">
+                    <span id="palabrasOriginal" class="text-foreground">0</span> palabras originales → 
+                    <span id="palabrasNuevo" class="text-foreground">0</span> palabras nuevas
+                </div>
+            </div>
+        </div>
+
+        <!-- Botones de acción -->
+        <div class="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+            <button id="btnAplicarTono" 
+                    class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled>
+                <i class="fas fa-check mr-2"></i> Aplicar al módulo
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Compartir Curso -->
+<div id="modalCompartirCurso"
+     class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden items-center justify-center z-[9999]">
+
+  <div class="bg-card border-border w-[90%] max-w-md rounded-xl shadow-2xl p-6">
+
+      <h3 class="text-lg font-semibold mb-4 text-foreground">Compartir curso</h3>
+      
+      <div class="mb-4">
+          <p class="text-sm text-muted-foreground mb-2">
+              Curso: <span id="cursoCompartirNombre" class="text-foreground font-semibold"></span>
+          </p>
+          
+          <!-- 🔥 NUEVO: Opciones de compartir -->
+          <div class="mb-4 p-3 bg-accent rounded-md border border-border">
+              <p class="text-sm font-medium text-foreground mb-2">Modo de compartir:</p>
+              
+              <div class="space-y-2">
+                  <label class="flex items-start gap-2">
+                      <input type="radio" 
+                             name="modoCompartir" 
+                             value="copia" 
+                             checked 
+                             class="mt-1"
+                             id="radioCopia">
+                      <div>
+                          <span class="text-sm font-medium text-foreground">Crear una copia nueva</span>
+                          <p class="text-xs text-muted-foreground">
+                              El usuario destino recibirá una copia completa e independiente del curso.
+                          </p>
+                      </div>
+                  </label>
+                  
+                  <label class="flex items-start gap-2">
+                      <input type="radio" 
+                             name="modoCompartir" 
+                             value="colaboracion" 
+                             class="mt-1"
+                             id="radioColaboracion">
+                      <div>
+                          <span class="text-sm font-medium text-foreground">Colaborar en el mismo curso</span>
+                          <p class="text-xs text-muted-foreground">
+                              El usuario destino tendrá acceso a tu curso original para colaborar contigo.
+                          </p>
+                      </div>
+                  </label>
+              </div>
+          </div>
+      </div>
+
+      <div class="mb-3">
+          <p class="text-xs text-muted-foreground mb-2">
+              Selecciona uno o varios usuarios registrados:
+          </p>
+          <div id="listaUsuariosCompartirCurso"
+              class="max-h-48 overflow-y-auto border border-input rounded p-2 text-sm">
+              <!-- Lista generada dinámicamente -->
+          </div>
+      </div>
+
+      <!-- 🔥 Estos permisos ahora solo se muestran para modo colaboración -->
+      <div id="permisosColaboracion" class="space-y-2 mt-3 mb-4 hidden">
+          <label class="text-xs font-medium text-foreground">Permisos de colaboración</label>
+          <div class="space-y-2">
+              <label class="flex items-center">
+                  <input type="checkbox" id="checkPermisoEditar" checked class="mr-2">
+                  <span class="text-sm text-foreground">Permitir edición</span>
+              </label>
+              <label class="flex items-center">
+                  <input type="checkbox" id="checkPermisoCompartir" class="mr-2">
+                  <span class="text-sm text-foreground">Permitir compartir con otros</span>
+              </label>
+          </div>
+      </div>
+
+      <div class="flex justify-end gap-3 mt-6">
+          <button id="btnCancelarCompartirCurso"
+                  class="px-3 py-1 text-sm bg-accent text-accent-foreground rounded hover:bg-accent/80 transition-colors">
+              Cancelar
+          </button>
+
+          <button id="btnConfirmarCompartirCurso"
+                  class="px-4 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+              <i class="fas fa-share-alt mr-1"></i> Compartir
+          </button>
+      </div>
+
+  </div>
+</div>
+
+<!-- Modal para Notas del Maestro -->
+<div id="modalNotasMaestro" class="modal fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-card border border-border text-foreground rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto flex flex-col">
+        <!-- Encabezado -->
+        <div class="p-4 border-b flex justify-between items-center">
+            <h3 class="text-lg font-semibold text-foreground">Notas para el Maestro</h3>
+            <button onclick="cerrarModalNotasMaestro()" class="btn-close-modal text-muted-foreground hover:text-foreground">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <!-- Contenido -->
+        <div id="contenidoNotasMaestro" class="flex-1 overflow-y-auto p-4"></div>
+        
+        <!-- Pie del modal con botones -->
+        <div class="p-4 border-t flex justify-between items-center">
+            <div>
+                <button id="btnRegenerarNotasMaestro"
+                        onclick="regenerarNotasMaestro()"
+                        class="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 hidden">
+                    <i class="fas fa-sync-alt mr-2"></i> Regenerar Notas
+                </button>
+            </div>
+            <div class="flex gap-2">
+                <button id="btnAplicarNotasMaestro"
+                        onclick="aplicarNotasMaestro()"
+                        class="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled>
+                    <i class="fas fa-file-import mr-2"></i> Aplicar al módulo
+                </button>
+                <button id="btnGuardarNotasMaestro"
+                        onclick="guardarNotasMaestro()"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-save mr-2"></i> Guardar Notas
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 🔧 MENU FLOTANTE DE FORMATO DE TEXTO -->
+<div id="textFormatMenu" class="hidden fixed z-[10000] bg-white border border-gray-300 rounded-lg shadow-lg p-2">
+    <div class="flex flex-col gap-1">
+        <button data-action="bold" class="px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2">
+            <strong class="w-6 text-center">B</strong>
+            <span>Negrita</span>
+        </button>
+        <button data-action="italic" class="px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2">
+            <em class="w-6 text-center">I</em>
+            <span>Cursiva</span>
+        </button>
+        <button data-action="clear" class="px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2">
+            <i class="fas fa-eraser w-6"></i>
+            <span>Limpiar</span>
+        </button>
+        
+        <div class="border-t border-gray-200 my-1"></div>
+        
+        <button data-action="reformular" class="px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2 text-purple-600">
+            <i class="fas fa-wand-magic-sparkles w-6"></i>
+            <span>Reformular...</span>
+        </button>
+        
+        <div class="border-t border-gray-200 my-1"></div>
+        
+        <button data-action="delete" class="px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center gap-2 text-red-600">
+            <i class="fas fa-trash w-6"></i>
+            <span>Eliminar</span>
+        </button>
+    </div>
+</div>
+
+
+<!-- Modal para especificar cómo reformular -->
+<div id="modalReformular" class="modal hidden fixed inset-0 bg-black bg-opacity-50 z-[10000] items-center justify-center">
+    <div class="bg-white rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-lg font-semibold mb-4">Reformular texto con IA</h3>
+        
+        <div class="mb-4">
+            <p class="text-sm text-gray-600 mb-2">Texto seleccionado:</p>
+            <div id="textoSeleccionadoPreview" class="p-3 bg-gray-50 border border-gray-200 rounded text-sm max-h-32 overflow-y-auto mb-4"></div>
+            
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                ¿Cómo quieres reformular el texto?
+            </label>
+            <div class="mb-3 space-y-2">
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="mejorar" class="mr-2" checked>
+                    <span class="text-sm">Mejorar redacción</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="simplificar" class="mr-2">
+                    <span class="text-sm">Simplificar lenguaje</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="formal" class="mr-2">
+                    <span class="text-sm">Hacer más formal</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="coloquial" class="mr-2">
+                    <span class="text-sm">Hacer más coloquial</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="extender" class="mr-2">
+                    <span class="text-sm">Extender/ampliar</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="resumir" class="mr-2">
+                    <span class="text-sm">Resumir/acortar</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="tipoReformulacion" value="personalizado" class="mr-2">
+                    <span class="text-sm">Personalizado</span>
+                </label>
+            </div>
+            
+            <div id="inputPersonalizadoContainer" class="hidden">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Instrucciones específicas:
+                </label>
+                <textarea 
+                    id="instruccionesPersonalizadas" 
+                    class="w-full p-3 border border-gray-300 rounded text-sm"
+                    rows="3"
+                    placeholder="Ej: Convertir a lenguaje académico, hacer más persuasivo, cambiar a tono optimista..."
+                ></textarea>
+            </div>
+        </div>
+        
+        <div class="flex justify-end gap-3">
+            <button 
+                id="btnCancelarReformular"
+                class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm"
+            >
+                Cancelar
+            </button>
+            <button 
+                id="btnConfirmarReformular"
+                class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+            >
+                <i class="fas fa-wand-magic-sparkles mr-2"></i> Reformular
+            </button>
+        </div>
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/html-docx-js-version-updated@0.4.0/dist/html-docx.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+
+
+<script src="chromeLayout.js"></script>
+  <script type="module" src="sidebar.js"></script>
+<script type="module" src="moodleCourse.js"></script>
+<script type="module" src="moodleCourse-Theme.js"></script>
+
+<script>
+  (function(){
+    const load = async () => {
+      let v = '';
+      try {
+        const r = await fetch('version.json', { cache: 'no-store' });
+        const d = await r.json();
+        v = (d && d.version) ? String(d.version) : '';
+      } catch (_) {}
+      const s = document.createElement('script');
+      s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
+      document.body.appendChild(s);
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', load);
+    } else {
+      load();
+    }
+  })();
+</script>
+</body>
+</html>
