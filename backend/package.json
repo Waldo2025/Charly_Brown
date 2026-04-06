@@ -1,0 +1,19 @@
+{
+  "name": "charly-brown-gemini-backend",
+  "private": true,
+  "version": "1.0.0",
+  "main": "server.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.44.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "firebase-admin": "^12.6.0",
+    "node-fetch": "^3.3.2"
+  }
+}

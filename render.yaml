@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: charly-brown-gemini-backend
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: node backend/server.js
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: FIREBASE_PROJECT_ID
+        value: charly-brown
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://charly-brown.web.app,https://charly-brown.firebaseapp.com
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false

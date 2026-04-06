@@ -1,17 +1,19 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // generarUnidad.js
-import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
-import { initializeFirestore, getFirestore, addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
-import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { initializeFirestore, getFirestore, addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getStorage, ref as storageRef, uploadString, getDownloadURL, listAll } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { createUnidadAgentController } from "./unidadAgentController.js";
 import { buildApiUrl } from "./api-client.js";
-import { escapeHtml, sanitizeHtml } from "./security-utils.js";
+import { sanitizeHtml } from "./security-utils.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 
 // Configuración Firebase
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 let db;
 try {
   db = initializeFirestore(app, {
@@ -26,15 +28,36 @@ const storage = getStorage(app);
 
 let runtimeConfigLoadPromise = null;
 let geminiBackendUnavailable = false;
+let geminiBackendUnavailableAt = 0;
+const GEMINI_BACKEND_UNAVAILABLE_TTL_MS = 45000;
 
 function markGeminiBackendUnavailable(reason = "") {
+  geminiBackendUnavailableAt = Date.now();
   if (geminiBackendUnavailable) return;
   geminiBackendUnavailable = true;
   logVisual(`⚠️ Backend Gemini deshabilitado en sesión (${reason || "sin detalle"}).`);
 }
 
+function shouldShortCircuitGeminiBackendFetch() {
+  if (!geminiBackendUnavailable) return false;
+  if (!geminiBackendUnavailableAt) return false;
+  return (Date.now() - geminiBackendUnavailableAt) <= GEMINI_BACKEND_UNAVAILABLE_TTL_MS;
+}
+
+function mergeRuntimeConfig(base = {}, incoming = {}) {
+  const a = (base && typeof base === "object") ? base : {};
+  const b = (incoming && typeof incoming === "object") ? incoming : {};
+  return {
+    ...a,
+    ...b,
+    firebase: {
+      ...(a.firebase && typeof a.firebase === "object" ? a.firebase : {}),
+      ...(b.firebase && typeof b.firebase === "object" ? b.firebase : {})
+    }
+  };
+}
+
 async function ensureRuntimeConfigLoaded() {
-  if (window.__CHARLY_CONFIG__) return;
   if (runtimeConfigLoadPromise) {
     await runtimeConfigLoadPromise;
     return;
@@ -42,24 +65,31 @@ async function ensureRuntimeConfigLoaded() {
   runtimeConfigLoadPromise = new Promise((resolve) => {
     (async () => {
       try {
+        const host = String(window.location.hostname || "").toLowerCase();
+        const isLocalHost = host === "127.0.0.1" || host === "localhost";
+        const allowRuntimeConfig = isLocalHost || window.__CHARLY_ENABLE_RUNTIME_CONFIG__ === true;
+        if (!allowRuntimeConfig) {
+          resolve();
+          return;
+        }
         const stamp = Date.now();
         const candidates = [
           `./config.local.js?v=${stamp}`,   // when server root is /public
           `../config.local.js?v=${stamp}`,  // when server root is project root
-          `/config.local.js?v=${stamp}`,
-          `/public/config.local.js?v=${stamp}`
+          `/config.local.js?v=${stamp}`
         ];
         const canUseJsMime = (contentType = "") => {
           const ct = String(contentType || "").toLowerCase();
           if (!ct) return true;
           return ct.includes("javascript") || ct.includes("text/plain") || ct.includes("application/octet-stream");
         };
+        let mergedConfig = mergeRuntimeConfig({}, window.__CHARLY_CONFIG__ || {});
         for (const url of candidates) {
-          if (window.__CHARLY_CONFIG__) break;
           try {
             const probe = await fetch(url, { method: "GET", cache: "no-store" });
             if (!probe.ok) continue;
             if (!canUseJsMime(probe.headers.get("content-type"))) continue;
+            const before = mergeRuntimeConfig({}, window.__CHARLY_CONFIG__ || {});
             await new Promise((done) => {
               const s = document.createElement("script");
               s.src = url;
@@ -69,10 +99,19 @@ async function ensureRuntimeConfigLoaded() {
               document.head.appendChild(s);
               setTimeout(done, 1200);
             });
+            const after = mergeRuntimeConfig({}, window.__CHARLY_CONFIG__ || {});
+            const changed = JSON.stringify(before) !== JSON.stringify(after);
+            if (changed) {
+              mergedConfig = mergeRuntimeConfig(mergedConfig, after);
+              window.__CHARLY_CONFIG__ = mergedConfig;
+            } else {
+              window.__CHARLY_CONFIG__ = mergeRuntimeConfig(mergedConfig, window.__CHARLY_CONFIG__ || {});
+            }
           } catch (_) {
             // try next
           }
         }
+        window.__CHARLY_CONFIG__ = mergeRuntimeConfig(mergedConfig, window.__CHARLY_CONFIG__ || {});
       } catch (_) {
         // noop
       } finally {
@@ -84,79 +123,173 @@ async function ensureRuntimeConfigLoaded() {
 }
 
 function getRuntimeGeminiApiKey() {
-  const fromConfig = String(window.__CHARLY_CONFIG__?.geminiApiKey || "").trim();
-  if (fromConfig) return fromConfig;
-  const fromStorage = String(localStorage.getItem("cb_gemini_api_key") || "").trim();
-  return fromStorage;
+  return "";
 }
 
 function hasRuntimeGeminiApiKey() {
-  const key = getRuntimeGeminiApiKey();
-  return !!(key && !key.includes("__GEMINI_API_KEY_LOCAL__"));
+  return false;
 }
 
 function isStaticLocalDev() {
   const host = String(window.location.hostname || "").toLowerCase();
   const port = String(window.location.port || "");
   const isLocalHost = host === "127.0.0.1" || host === "localhost";
-  const staticPorts = new Set(["5500", "5501", "5502", "5503"]);
-  return isLocalHost && staticPorts.has(port);
+  if (!isLocalHost) return false;
+  // Treat any localhost static server as local-dev, except Firebase emulator ports.
+  return port !== "5000" && port !== "5001";
 }
 
 function canUseDirectGeminiLocal() {
-  if (window.__CHARLY_CONFIG__?.forceDirectGemini === true) return true;
-  if (window.__CHARLY_CONFIG__?.allowDirectGemini === true) return true;
-  if (!isStaticLocalDev()) return false;
-  const cfg = window.__CHARLY_CONFIG__ || {};
-  return !!(cfg?.allowDirectGemini === true || cfg?.forceDirectGemini === true);
-}
-
-function shouldUseGeminiBackend() {
-  if (window.__CHARLY_CONFIG__?.forceBackendGemini === true) return true;
+  // Seguridad: no usar llamadas directas a Gemini desde frontend.
   return false;
 }
 
-async function geminiGenerateDirect(model, payload, signal = null) {
-  const apiKey = getRuntimeGeminiApiKey();
-  if (!apiKey || apiKey.includes("__GEMINI_API_KEY_LOCAL__")) {
-    throw new Error("No hay GEMINI_API_KEY válida en runtime.");
+function shouldUseGeminiBackend() {
+  return true;
+}
+
+function _geminiGenerateLocalFallbackUrl() {
+  const current = String(buildApiUrl("/api/gemini/generate") || "").trim();
+  if (!current) return "";
+  const host = String(window.location.hostname || "").toLowerCase();
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  if (!isLocalHost) return "";
+  if (current.startsWith("http://127.0.0.1:8787/") || current.startsWith("http://localhost:8787/")) {
+    return "";
   }
-  const cleanModel = normalizeGeminiModel(model || getSelectedModel());
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {}),
-    ...(signal ? { signal } : {})
-  });
-  const data = await response.json().catch(() => ({}));
-  return { response, data };
+  return "http://127.0.0.1:8787/api/gemini/generate";
+}
+
+async function geminiGenerateDirect(model, payload, signal = null) {
+  void model;
+  void payload;
+  void signal;
+  throw new Error("Gemini directo en frontend está deshabilitado.");
 }
 
 async function geminiGenerateViaApi(model, payload, signal = null) {
   await ensureRuntimeConfigLoaded();
-  const canUseDirect = canUseDirectGeminiLocal() && hasRuntimeGeminiApiKey();
-  if (!canUseDirect) {
-    throw new Error("GEMINI_API_KEY no disponible en runtime para modo directo.");
+  if (shouldShortCircuitGeminiBackendFetch()) {
+    throw new Error("BACKEND_GEMINI_OFFLINE");
   }
-  return geminiGenerateDirect(model, payload, signal);
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : "";
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const requestInit = {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: normalizeGeminiModel(model || getSelectedModel()),
+      payload: payload || {}
+    }),
+    ...(signal ? { signal } : {})
+  };
+  const primaryUrl = buildApiUrl("/api/gemini/generate");
+  if (!primaryUrl) {
+    throw new Error("API_UNAVAILABLE");
+  }
+  let response = null;
+  try {
+    response = await fetch(primaryUrl, requestInit);
+  } catch (err) {
+    const msg = String(err?.message || "").toLowerCase();
+    const host = String(window.location.hostname || "").toLowerCase();
+    const isLocalHost = host === "127.0.0.1" || host === "localhost";
+    const isReachabilityError = msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("err_connection_refused");
+    if (isLocalHost && isReachabilityError) {
+      const fallbackUrl = _geminiGenerateLocalFallbackUrl();
+      if (fallbackUrl) {
+        try {
+          response = await fetch(fallbackUrl, requestInit);
+        } catch (_) {
+          markGeminiBackendUnavailable("api_unreachable");
+          throw new Error("BACKEND_GEMINI_OFFLINE");
+        }
+      } else {
+        markGeminiBackendUnavailable("api_unreachable");
+        throw new Error("BACKEND_GEMINI_OFFLINE");
+      }
+    } else {
+      markGeminiBackendUnavailable("api_unreachable");
+      throw err;
+    }
+  }
+  if (response && response.status === 503) {
+    const fallbackUrl = _geminiGenerateLocalFallbackUrl();
+    if (fallbackUrl) {
+      try {
+        const fallbackResponse = await fetch(fallbackUrl, requestInit);
+        if (fallbackResponse.ok) {
+          const fallbackData = await fallbackResponse.json().catch(() => ({}));
+          return { response: fallbackResponse, data: fallbackData };
+        }
+        response = fallbackResponse;
+      } catch (_) {
+        // Keep original 503 path below.
+      }
+    }
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok && (response.status === 404 || response.status === 405 || response.status >= 500)) {
+    markGeminiBackendUnavailable(`api_http_${response.status}`);
+  }
+  return { response, data };
 }
 
 async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = "") {
   await ensureRuntimeConfigLoaded();
-  const canUseDirect = canUseDirectGeminiLocal() && hasRuntimeGeminiApiKey();
-  if (!canUseDirect) {
-    throw new Error("GEMINI_API_KEY no disponible en runtime para Live.");
+  if (shouldShortCircuitGeminiBackendFetch()) {
+    throw new Error("BACKEND_GEMINI_OFFLINE");
   }
-  return requestGeminiLiveTokenDirect(modelLive, systemInstruction);
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : "";
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const liveTokenUrl = buildApiUrl("/api/gemini/live-token");
+  if (!liveTokenUrl) {
+    throw new Error("API_UNAVAILABLE");
+  }
+  let response = null;
+  try {
+    response = await fetch(liveTokenUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: normalizeGeminiModel(modelLive || GEMINI_LIVE_MODEL_DEFAULT),
+        systemInstruction: String(systemInstruction || "").trim()
+      })
+    });
+  } catch (err) {
+    markGeminiBackendUnavailable("live_token_unreachable");
+    const msg = String(err?.message || "").toLowerCase();
+    const host = String(window.location.hostname || "").toLowerCase();
+    const isLocalHost = host === "127.0.0.1" || host === "localhost";
+    if (isLocalHost && (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("err_connection_refused"))) {
+      throw new Error("BACKEND_GEMINI_OFFLINE");
+    }
+    throw err;
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 404) {
+      geminiLiveDisableEphemeralToken = true;
+      try { sessionStorage.setItem("cb_disable_gemini_ephemeral_token", "1"); } catch (_) {}
+      throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
+    }
+    throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
+  }
+  return data;
 }
 
 async function requestGeminiLiveTokenDirect(modelLive = "", systemInstruction = "") {
-  const apiKey = getRuntimeGeminiApiKey();
-  if (!apiKey || apiKey.includes("__GEMINI_API_KEY_LOCAL__")) {
-    throw new Error("No hay GEMINI_API_KEY válida en runtime para fallback live-token.");
-  }
-  return { token: apiKey, tokenType: "api-key-local" };
+  void modelLive;
+  void systemInstruction;
+  throw new Error("Gemini directo en frontend está deshabilitado.");
 }
 
 function logVisual(msg) {
@@ -195,7 +328,6 @@ const UNIDAD_PERSIST_FIELD_IDS = [
   ...UNIDAD_TEXT_FIELD_IDS
 ];
 const GEMINI_MODELOS_HABILITADOS = [
-  "gemini-3.1-flash-lite-preview",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3-pro-preview",
@@ -209,7 +341,6 @@ const GEMINI_MODELOS_PRIORIDAD_ESTABLE = [
   "gemini-2.5-pro"
 ];
 const GEMINI_MODELOS_PREVIEW_SECUNDARIOS = [
-  "gemini-3.1-flash-lite-preview",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3-pro-preview"
@@ -1783,6 +1914,9 @@ const GEMINI_TTS_MODEL_DEFAULT = "gemini-2.5-pro-preview-tts";
 const THEME_SETTINGS_STORAGE_KEY = "cb_theme_settings_v1";
 const VOICE_COMMANDS_STORAGE_KEY = "cb_voice_command_settings_v1";
 const VOICE_COMMANDS_DEFAULT_STORAGE_KEY = "cb_voice_command_defaults_v1";
+const CHARLY_GLOBAL_MIC_CHANNEL = "charly-global-mic-control";
+const CHARLY_GLOBAL_MIC_STORAGE_KEY = "cb_global_mic_control_v1";
+const CHARLY_GLOBAL_MIC_OWNER_GAME = "lecturas-game";
 const VOICE_HARDCODED_COMMANDS_ENABLED = true;
 const CHARLY_TTS_VOICE_NAME_DEFAULT = "Charon";
 const CHARLY_TTS_MALE_FALLBACKS = [
@@ -1840,6 +1974,7 @@ let geminiLiveProcessorNode = null;
 let geminiLiveWorkletUrl = "";
 let geminiLiveAllowOutputUntil = 0;
 let geminiLiveMicUploadPaused = false;
+let unidadGlobalMicControlChannel = null;
 let vozUnidadPreferida = null;
 let ultimaTranscripcionComando = "";
 let ultimaTranscripcionAt = 0;
@@ -1853,6 +1988,52 @@ let charlyAwake = true;
 const charlyWakeWordAlwaysOn = true;
 const GEMINI_LIVE_VOICE_ONLY = true;
 const CHARLY_BREVITY_POLICY = "Responde en español con máximo 1 frase corta (ideal 6-16 palabras). Evita relleno y explicaciones largas. Solo amplía si el usuario pide detalle explícitamente.";
+
+function _releaseUnidadMicrophoneForExternalOwner(reason = "external_request") {
+  unidadVoiceShouldRun = false;
+  voiceCopilotoPendiente = false;
+  voiceCopilotoActivo = false;
+  clearTimeout(unidadVoiceRestartTimer);
+  if (unidadVoiceRecognition && unidadVoiceIsListening) {
+    try { unidadVoiceRecognition.stop(); } catch (_) { }
+  }
+  detenerGeminiLiveUnidad().catch(() => { });
+  unidadVoiceIsListening = false;
+  actualizarEstadoBotonVozUnidad();
+  logVisual(`🎤 Micrófono liberado por otra página (${String(reason || "external_request")}).`);
+}
+
+function _handleGlobalMicReleaseSignal(payload = null) {
+  if (!payload || typeof payload !== "object") return;
+  if (String(payload.type || "") !== "release_mic") return;
+  const owner = String(payload.owner || "").trim();
+  if (owner !== CHARLY_GLOBAL_MIC_OWNER_GAME) return;
+  _releaseUnidadMicrophoneForExternalOwner(String(payload.reason || "lecturas-game"));
+}
+
+function _setupGlobalMicReleaseListeners() {
+  window.addEventListener("storage", (event) => {
+    if (!event || event.key !== CHARLY_GLOBAL_MIC_STORAGE_KEY || !event.newValue) return;
+    try {
+      const payload = JSON.parse(String(event.newValue || "{}"));
+      _handleGlobalMicReleaseSignal(payload);
+    } catch (_) {
+      // no-op
+    }
+  });
+  if (typeof BroadcastChannel === "function") {
+    try {
+      unidadGlobalMicControlChannel = new BroadcastChannel(CHARLY_GLOBAL_MIC_CHANNEL);
+      unidadGlobalMicControlChannel.onmessage = (event) => {
+        _handleGlobalMicReleaseSignal(event?.data || null);
+      };
+    } catch (_) {
+      unidadGlobalMicControlChannel = null;
+    }
+  }
+}
+
+_setupGlobalMicReleaseListeners();
 const CHARLY_EMOTION_TAGS = ["[angry]", "[excited]", "[worried]", "[sarcastic]", "[hysterical]", "[confident]", "[scornful]", "[empathetic]"];
 const CHARLY_STYLE_TAGS = ["[shouting]", "[whispering]", "[laughing]", "[sighing]", "[clears throat]", "[speaking slowly]", "[short pause]", "[newscast-formal]"];
 let ultimaFraseHabladaUnidad = "";
@@ -1927,6 +2108,7 @@ let charlyLecturaAccionPendiente = null;
 let charlyLecturaConfirmacionRecienteUntil = 0;
 let charlyLecturasPreviewCache = Object.create(null);
 let charlyLecturaWorkflowCommandKey = "buscar_lecturas_charly";
+const LECTURAS_AGENT_PREVIEW_MAX_ITEMS = 200;
 let charlyLecturaContextoConversacion = null;
 let charlyLecturaAnalisisState = null;
 let charlyLecturaPreguntasPendientes = null;
@@ -3523,10 +3705,14 @@ function _normalizarNumeroOrdinarioTexto(raw = "") {
     nueve: "9", noveno: "9", novena: "9",
     diez: "10", decimo: "10", decima: "10",
     once: "11",
-    doce: "12"
+    doce: "12",
+    trece: "13", decimotercero: "13",
+    catorce: "14", decimocuarto: "14",
+    quince: "15", decimoquinto: "15",
+    dieciseis: "16", diecisiete: "17", dieciocho: "18", diecinueve: "19", veinte: "20"
   };
   if (mapa[norm]) return mapa[norm];
-  const m = norm.match(/\b(1[0-2]|[1-9])\b/);
+  const m = norm.match(/\b([1-9][0-9]{0,2})\b/);
   return m?.[1] ? String(Number(m[1])) : "";
 }
 
@@ -3695,7 +3881,7 @@ function _resolverLecturaCachePorTexto(texto = "", lista = []) {
   if (!items.length) return null;
   const norm = _normalizarTexto(texto);
   if (!norm) return null;
-  const num = norm.match(/\b([1-9]|10)\b/);
+  const num = norm.match(/\b([1-9][0-9]{0,2})\b/);
   if (num?.[1]) {
     const idx = Number(num[1]) - 1;
     if (idx >= 0 && idx < items.length) return items[idx];
@@ -3837,7 +4023,7 @@ function _mapearLecturaCandidataVisual(item = {}, coleccionFallback = "", idx = 
 function _extraerLecturasPreviewDesdePool(coleccion = "", maxItems = 6) {
   const col = String(coleccion || "").trim();
   if (!col) return [];
-  const safeMax = Math.max(1, Math.min(10, Number(maxItems || 6)));
+  const safeMax = Math.max(1, Math.min(LECTURAS_AGENT_PREVIEW_MAX_ITEMS, Number(maxItems || 6)));
   const pool = [
     ...(Array.isArray(window.todasLasLecturas) ? window.todasLasLecturas : []),
     ...(Array.isArray(window.lecturasNuevas) ? window.lecturasNuevas : []),
@@ -3868,7 +4054,7 @@ function _extraerLecturasPreviewDesdePool(coleccion = "", maxItems = 6) {
 async function _obtenerLecturasPreviewPorColeccion(coleccion = "", opciones = {}) {
   const col = String(coleccion || "").trim();
   if (!col) return [];
-  const maxItems = Math.max(1, Math.min(10, Number(opciones?.maxItems || 6)));
+  const maxItems = Math.max(1, Math.min(LECTURAS_AGENT_PREVIEW_MAX_ITEMS, Number(opciones?.maxItems || 6)));
   const forceRefresh = opciones?.forceRefresh === true;
   const now = Date.now();
   const cacheEntry = charlyLecturasPreviewCache[col];
@@ -3907,18 +4093,75 @@ async function _obtenerLecturasPreviewPorColeccion(coleccion = "", opciones = {}
   }
 }
 
-function _resolverLecturaCandidataPorEntrada(raw = "", lista = []) {
+function _esTituloLecturaRuido(raw = "") {
+  const norm = _normalizarTexto(String(raw || ""));
+  if (!norm) return true;
+  if (/^(si|sí|no|ok|vale|continuar|continua|continúa|siguiente|cancelar)$/.test(norm)) return true;
+  if (/\b(listo|estoy|elige|dicta|numero|número|opcion|opción|comando|acciones|actualice|actualicé|titulo|título|dime|ahora|despues|después)\b/.test(norm)) return true;
+  if (/\b(asc|ask|asq)\b/.test(norm)) return true;
+  if (/^(?:lectura|lecturas)\b/.test(norm)) return true;
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.length > 12) return true;
+  return false;
+}
+
+function _extraerTituloLecturaExplicito(raw = "") {
+  const source = String(raw || "").trim();
+  if (!source) return "";
+  const quoted = source.match(/["“]([^"”]{2,160})["”]/);
+  if (quoted?.[1]) {
+    const maybe = String(quoted[1] || "").trim();
+    if (maybe && !_esTituloLecturaRuido(maybe)) return maybe;
+  }
+  const patterns = [
+    /(?:titulo|título|nombre)\s+(?:de\s+la\s+lectura\s+)?(.+)$/i,
+    /(?:elige|escoge|selecciona|usa|usar)\s+(?:la\s+)?(?:lectura\s+)?(.+)$/i,
+    /(?:buscar|busca|encuentra|localiza|ver|abre|leer|lee)\s+(?:la\s+)?(?:lectura\s+)?(.+)$/i
+  ];
+  for (const rx of patterns) {
+    const m = source.match(rx);
+    if (!m?.[1]) continue;
+    const cleaned = _limpiarConsultaLectura(m[1]) || String(m[1] || "").trim();
+    const value = String(cleaned || "").replace(/^["“'`]+|["”'`]+$/g, "").trim();
+    if (value.length >= 2 && !_esTituloLecturaRuido(value)) return value;
+  }
+  return "";
+}
+
+function _pareceTituloLibreLectura(raw = "") {
+  const source = String(raw || "").trim();
+  const norm = _normalizarTexto(source);
+  if (!norm) return false;
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.length > 12) return false;
+  if (_esTituloLecturaRuido(source)) return false;
+  return tokens.some((tk) => tk.length >= 3);
+}
+
+function _resolverLecturaCandidataPorEntrada(raw = "", lista = [], opciones = {}) {
+  const strict = opciones?.strict === true;
   const items = Array.isArray(lista) ? lista.filter(Boolean) : [];
   if (!items.length) return null;
   const norm = _normalizarTexto(raw);
   if (!norm) return null;
-  const ordinal = _normalizarNumeroOrdinarioTexto(norm);
   const regexNum = norm.match(/\b(?:lectura|opcion|opción|numero|número)\s+([a-z0-9º°]+)\b/i);
   const explicitToken = _normalizarNumeroOrdinarioTexto(String(regexNum?.[1] || "").trim());
-  const plainNum = norm.match(/\b([1-9]|10)\b/);
-  const selectedNumber = Number(explicitToken || ordinal || plainNum?.[1] || 0);
+  const ordinal = _normalizarNumeroOrdinarioTexto(norm);
+  const plainNum = norm.match(/\b([1-9][0-9]{0,2})\b/);
+  const explicitNumericOnly = /^([1-9][0-9]{0,2}|[a-z0-9º°]+)$/i.test(norm) && !!ordinal;
+  const selectedNumber = Number(explicitToken || (!strict ? ordinal : "") || plainNum?.[1] || 0);
   if (Number.isFinite(selectedNumber) && selectedNumber >= 1 && selectedNumber <= items.length) {
+    if (strict && !explicitToken && !explicitNumericOnly && !/^[1-9][0-9]{0,2}$/.test(norm)) {
+      // En modo estricto evita captar números embebidos en frases largas/noise.
+      return null;
+    }
     return items[selectedNumber - 1];
+  }
+  if (strict) {
+    const explicitTitle = _extraerTituloLecturaExplicito(raw);
+    if (explicitTitle) return _resolverLecturaCachePorTexto(explicitTitle, items);
+    if (_pareceTituloLibreLectura(raw)) return _resolverLecturaCachePorTexto(raw, items);
+    return null;
   }
   return _resolverLecturaCachePorTexto(raw, items);
 }
@@ -4039,7 +4282,7 @@ async function _resolverPendientesLecturaPorVoz(transcripcion = "") {
         _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "¿La buscas en lecturas ASC o en lecturas nuevas con Charly?", { cancelarPrevio: true, preferLive: true });
         return true;
       }
-      const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(prefCol, { maxItems: 6 });
+      const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(prefCol, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
       charlyLecturaBusquedaPendiente = {
         ...pendingSearch,
         step: pendingSearch.titulo ? "done" : "title",
@@ -4068,7 +4311,7 @@ async function _resolverPendientesLecturaPorVoz(transcripcion = "") {
     }
     if (pendingSearch.step === "title") {
       const suggested = Array.isArray(pendingSearch?.suggestedCandidates) ? pendingSearch.suggestedCandidates : [];
-      const selectedSuggested = _resolverLecturaCandidataPorEntrada(raw, suggested);
+      const selectedSuggested = _resolverLecturaCandidataPorEntrada(raw, suggested, { strict: true });
       if (selectedSuggested?.titulo) {
         const selectedTitle = String(selectedSuggested.titulo || "").trim();
         charlyLecturaBusquedaPendiente = {
@@ -4084,9 +4327,10 @@ async function _resolverPendientesLecturaPorVoz(transcripcion = "") {
         );
         return true;
       }
-      const title = _extraerTituloLecturaDesdeComando(raw, raw);
+      const title = _extraerTituloLecturaExplicito(raw)
+        || (_pareceTituloLibreLectura(raw) ? String(raw || "").trim().replace(/^["“'`]+|["”'`]+$/g, "") : "");
       if (!title) {
-        _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "No capté el título. Dímelo otra vez, o elige una lectura por número.", { cancelarPrevio: true, preferLive: true });
+        _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "No capté un comando válido. Dime el título exacto, o indica el número de la lectura.", { cancelarPrevio: true, preferLive: true });
         return true;
       }
       charlyLecturaBusquedaPendiente = {
@@ -4117,10 +4361,12 @@ async function _resolverPendientesLecturaPorVoz(transcripcion = "") {
           _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "Perfecto, dime nuevamente el título.", { cancelarPrevio: true, preferLive: true });
           return true;
         }
-        const replacementByList = _resolverLecturaCandidataPorEntrada(raw, pendingSearch?.suggestedCandidates || []);
-        const replacementTitle = String(replacementByList?.titulo || "").trim() || _extraerTituloLecturaDesdeComando(raw, raw);
+        const replacementByList = _resolverLecturaCandidataPorEntrada(raw, pendingSearch?.suggestedCandidates || [], { strict: true });
+        const replacementTitle = String(replacementByList?.titulo || "").trim()
+          || _extraerTituloLecturaExplicito(raw)
+          || (_pareceTituloLibreLectura(raw) ? String(raw || "").trim().replace(/^["“'`]+|["”'`]+$/g, "") : "");
         if (!replacementTitle) {
-          _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "Di continuar para buscar o dicta el título completo de nuevo.", { cancelarPrevio: true, preferLive: true });
+          _hablarSiFuncionaRespuestaVoz("_buscarLecturaPorVoz", "Di continuar para buscar o indica de nuevo el título/número.", { cancelarPrevio: true, preferLive: true });
           return true;
         }
         charlyLecturaBusquedaPendiente = {
@@ -4224,7 +4470,7 @@ async function _resolverPendientesLecturaPorVoz(transcripcion = "") {
         charlyLecturaSeleccionPendiente = null;
         const prefPend = String(pendingSelection.preferCollection || charlyColeccionActiva || "").trim();
         if (prefPend) {
-          const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(prefPend, { maxItems: 6 });
+          const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(prefPend, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
           charlyLecturaBusquedaPendiente = {
             step: "title",
             titulo: "",
@@ -4462,7 +4708,6 @@ function _estadoPendientesLecturaParaAgente() {
     ? pendingSelection.candidates
     : (Array.isArray(pendingSearch?.suggestedCandidates) ? pendingSearch.suggestedCandidates : []);
   const candidates = (Array.isArray(rawCandidates) ? rawCandidates : [])
-    .slice(0, 6)
     .map((it, idx) => _mapearLecturaCandidataVisual(it, it?.sourceCollection || pendingSearch?.preferCollection || "", idx))
     .filter(Boolean);
   return {
@@ -4581,7 +4826,7 @@ async function _wfBuscarLecturaIniciarTarget(target = "", valor = "", textoNorm 
     _hablarPasoWorkflowLectura("Vamos a buscar una lectura. ¿La quieres de ASC o de nuevas con Charly?");
     return _resultadoWorkflowAwaitLectura("Esperando confirmación de colección.");
   }
-  const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: 6 });
+  const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
   charlyColeccionActiva = preferCollection;
   charlyLecturaBusquedaPendiente = {
     step: "title",
@@ -4627,7 +4872,7 @@ async function _wfBuscarLecturaIdentificarColeccionTarget(target = "", valor = "
     return { ok: true, code: "executed", message: "Colección identificada." };
   }
 
-  const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: 6 });
+  const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
   charlyLecturaBusquedaPendiente = {
     step: "title",
     titulo: "",
@@ -4679,7 +4924,7 @@ async function _wfBuscarLecturaConfirmarLecturaTarget(target = "", valor = "", t
     return _resultadoWorkflowAwaitLectura("Esperando colección.");
   }
   if (!titulo) {
-    const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: 6 });
+    const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
     charlyLecturaBusquedaPendiente = {
       step: "title",
       titulo: "",
@@ -4790,7 +5035,7 @@ async function _buscarLecturaPorVozTarget(_target = "", valor = "", textoNorm = 
     return true;
   }
   if (!titulo) {
-    const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: 6 });
+    const suggestedCandidates = await _obtenerLecturasPreviewPorColeccion(preferCollection, { maxItems: LECTURAS_AGENT_PREVIEW_MAX_ITEMS });
     charlyLecturaBusquedaPendiente = {
       step: "title",
       titulo: "",
@@ -5098,7 +5343,21 @@ function _payloadViewerLecturaDesdeDoc(docLectura = {}, fallbackRef = {}) {
       || docLectura?.texto
       || ""
     ).trim() || "<p>(Sin contenido)</p>",
-    preguntas: Array.isArray(docLectura?.preguntas) ? docLectura.preguntas : [],
+    preguntas: _normalizarPreguntasLectura(docLectura),
+    bibliografia: _serializarValorFirestore(
+      docLectura?.bibliografia
+      || docLectura?.fuentes
+      || docLectura?.referencias
+      || docLectura?.referenciasBibliograficas
+      || null
+    ),
+    sinonimos: _serializarValorFirestore(
+      docLectura?.tablaSinonimos
+      || docLectura?.tabla_sinonimos
+      || docLectura?.sinonimos
+      || docLectura?.sinónimos
+      || null
+    ),
     metadatos: {
       nivel: String(docLectura?.nivel || "").trim(),
       grado: String(docLectura?.grado || "").trim(),
@@ -5219,26 +5478,34 @@ async function _accionLecturaTablaPorVozTarget(_target = "", valor = "", textoNo
 }
 
 async function _verLecturaPorVozTarget(target = "", valor = "", textoNorm = "") {
+  const _abrirVisorAgenteDesdeResolved = (resolved = null) => {
+    if (!resolved?.docLectura?.id) return false;
+    if (typeof window.cbOpenLecturasAgentViewer !== "function") return false;
+    try {
+      const modalLegacy = document.getElementById("modalResultadoLectura");
+      if (modalLegacy) modalLegacy.style.display = "none";
+    } catch (_) {}
+    window.cbOpenLecturasAgentViewer(_payloadViewerLecturaDesdeDoc(resolved.docLectura, resolved.ref));
+    return true;
+  };
   if (_agenteUnidadEnModoExclusivo()) {
     const cooldownKey = "cmd_accion_lectura_ver_exclusive";
     if (_debeOmitirPorCooldownComando(cooldownKey, 1400)) return true;
     const resolved = await _resolverLecturaParaVerExclusivo(target, valor, textoNorm);
+    if (_abrirVisorAgenteDesdeResolved(resolved)) return true;
     if (!resolved?.docLectura?.id) return false;
-    if (typeof window.cbOpenLecturasAgentViewer === "function") {
-      window.cbOpenLecturasAgentViewer(_payloadViewerLecturaDesdeDoc(resolved.docLectura, resolved.ref));
-      return true;
-    }
     _hablarPasoWorkflowLectura("El visor del agente no está disponible ahora mismo.");
     return false;
   }
+  const resolvedDirect = await _resolverLecturaParaVerExclusivo(target, valor, textoNorm);
+  if (_abrirVisorAgenteDesdeResolved(resolvedDirect)) return true;
   // Prioridad explícita: "ver lectura" debe accionar vista previa (ascView / btn-ver).
   const openedView = await _accionLecturaTablaPorVozTarget(target, valor, textoNorm, "ver");
   if (openedView) {
-    // En modo agente exclusivo el visor dedicado se abre sobre el stage y no debe
-    // forzar el modal tradicional de resultado.
-    if (!_agenteUnidadEnModoExclusivo()) {
-      try { window.cbUnidadDock?.openSection?.("modalResultadoLectura"); } catch (_) {}
-    }
+    const resolvedAfterOpen = resolvedDirect?.docLectura?.id
+      ? resolvedDirect
+      : await _resolverLecturaParaVerExclusivo(target, valor, textoNorm);
+    if (_abrirVisorAgenteDesdeResolved(resolvedAfterOpen)) return true;
     return true;
   }
   // Fallback de compatibilidad: si no existe vista, intenta editor.
@@ -6625,7 +6892,7 @@ function _limpiarTimerCierreStageLive() {
 }
 
 function _cerrarHablaAgenteSiListo(source = "") {
-  if (!geminiLivePendingStageCompletion || !_agenteUnidadEnModoExclusivo()) return false;
+  if (!geminiLivePendingStageCompletion) return false;
   const pendingMs = _geminiLivePendingPlaybackMs();
   const hasActiveSources = (geminiLiveActivePcmSources?.size || 0) > 0;
   const sinceLastChunkMs = Date.now() - Number(geminiLiveLastPcmChunkAt || 0);
@@ -6640,12 +6907,13 @@ function _cerrarHablaAgenteSiListo(source = "") {
     return true;
   }
   _notifyAgentSpeechPlaybackEnd(agentSpeechPlaybackToken, `live-${source || "audio-ended"}`);
-  _asegurarControladorAgenteUnidad().completeSpeechPlayback?.(`live-${source || "audio-ended"}`);
+  if (_agenteUnidadEnModoExclusivo()) {
+    _asegurarControladorAgenteUnidad().completeSpeechPlayback?.(`live-${source || "audio-ended"}`);
+  }
   return true;
 }
 
 function _programarCierreHablaAgenteLive(source = "") {
-  if (!_agenteUnidadEnModoExclusivo()) return;
   geminiLivePendingStageCompletion = true;
   if (_cerrarHablaAgenteSiListo(source)) return;
   _limpiarTimerCierreStageLive();
@@ -6654,7 +6922,7 @@ function _programarCierreHablaAgenteLive(source = "") {
   geminiLiveStageCompletionTimer = setTimeout(() => {
     if (_cerrarHablaAgenteSiListo(`${source || "turn-complete"}-timer`)) return;
     // Fallback para no dejar el stage trabado en "Hablando" si Live no entrega más audio.
-    if (geminiLivePendingStageCompletion && _agenteUnidadEnModoExclusivo()) {
+    if (geminiLivePendingStageCompletion) {
       const sinceLastChunkMs = Date.now() - Number(geminiLiveLastPcmChunkAt || 0);
       if (sinceLastChunkMs < 720) {
         _programarCierreHablaAgenteLive(`${source || "turn-complete"}-grace`);
@@ -6662,7 +6930,9 @@ function _programarCierreHablaAgenteLive(source = "") {
       }
       geminiLivePendingStageCompletion = false;
       _notifyAgentSpeechPlaybackEnd(agentSpeechPlaybackToken, "live-turn-complete-fallback");
-      _asegurarControladorAgenteUnidad().completeSpeechPlayback?.("live-turn-complete-fallback");
+      if (_agenteUnidadEnModoExclusivo()) {
+        _asegurarControladorAgenteUnidad().completeSpeechPlayback?.("live-turn-complete-fallback");
+      }
     }
     _limpiarTimerCierreStageLive();
   }, waitMs);
@@ -6861,9 +7131,7 @@ async function _generarPromptWorkflowPlayConGemini(nodeLabel = "", options = [])
 }
 
 async function _loadGoogleGenAiLiveModule() {
-  if (googleGenAiLiveModule) return googleGenAiLiveModule;
-  googleGenAiLiveModule = await import("https://esm.sh/@google/genai@latest");
-  return googleGenAiLiveModule;
+  throw new Error("Gemini directo en frontend está deshabilitado. Usa solo el backend.");
 }
 
 function _resolverVozNaturalUnidad() {
@@ -6937,12 +7205,14 @@ async function hablarAgenteUnidad(texto = "", opciones = {}) {
   if (!textoPlano) return false;
   const {
     cancelarPrevio = true,
+    withMic = null,
+    forceRestart = null,
     onPlaybackStart = null,
     onPlaybackEnd = null,
     onPlaybackError = null
   } = opciones || {};
   const persona = activeUnidadAgentPersona;
-  if (!persona) return false;
+  const personaNombre = String(persona?.nombre || "Charly").trim() || "Charly";
   const playbackToken = ++agentSpeechPlaybackToken;
   agentSpeechPlaybackOnEnd = typeof onPlaybackEnd === "function" ? onPlaybackEnd : null;
   agentSpeechPlaybackOnError = typeof onPlaybackError === "function" ? onPlaybackError : null;
@@ -6951,6 +7221,10 @@ async function hablarAgenteUnidad(texto = "", opciones = {}) {
   _actualizarVozCharlyDesdeThemeSettings();
   unidadVoiceShouldRun = true;
   const agenteExclusivo = _agenteUnidadEnModoExclusivo();
+  const shouldUseMic = typeof withMic === "boolean" ? withMic : !agenteExclusivo;
+  const shouldForceRestart = typeof forceRestart === "boolean"
+    ? forceRestart
+    : (!agenteExclusivo && shouldUseMic);
   const modelLive = _resolverModeloGeminiFlashLive();
   const desiredConfigKey = _buildGeminiLiveSessionConfigKey(modelLive);
 
@@ -6958,7 +7232,7 @@ async function hablarAgenteUnidad(texto = "", opciones = {}) {
   // antes de enviar el texto para que respete la voz configurada del agente activo.
   if (geminiLiveSessionUnidad && geminiLiveIsOpen && geminiLiveSessionConfigKey !== desiredConfigKey) {
     try {
-      await iniciarGeminiLiveUnidad({ withMic: !agenteExclusivo, forceRestart: true });
+      await iniciarGeminiLiveUnidad({ withMic: shouldUseMic, forceRestart: true });
     } catch (err) {
       logVisual(`⚠️ No se pudo reconfigurar Live con la voz del agente: ${err?.message || "sin detalle"}`);
     }
@@ -6977,16 +7251,19 @@ async function hablarAgenteUnidad(texto = "", opciones = {}) {
     }
     _encolarHablaLive(textoPlano, { cancelarPrevio });
     iniciarGeminiLiveUnidad({
-      withMic: !agenteExclusivo,
-      forceRestart: !agenteExclusivo
+      withMic: shouldUseMic,
+      forceRestart: shouldForceRestart
     }).catch((err) => {
+      if (String(err?.message || "").includes("LIVE_TOKEN_ENDPOINT_NOT_FOUND")) {
+        _hablarUnidadLocalRapida(textoPlano, { cancelarPrevio });
+      }
       _notifyAgentSpeechPlaybackError(playbackToken, err);
-      logVisual(`⚠️ No se pudo iniciar Live para ${persona.nombre}: ${err?.message || "sin detalle"}`);
+      logVisual(`⚠️ No se pudo iniciar Live para ${personaNombre}: ${err?.message || "sin detalle"}`);
     });
     return true;
   } catch (err) {
     _notifyAgentSpeechPlaybackError(playbackToken, err);
-    logVisual(`⚠️ No se pudo hablar como ${persona.nombre}: ${err?.message || "sin detalle"}`);
+    logVisual(`⚠️ No se pudo hablar como ${personaNombre}: ${err?.message || "sin detalle"}`);
     return false;
   }
 }
@@ -7048,14 +7325,19 @@ function _agenteUnidadEnModoExclusivo() {
 }
 
 const LECTURAS_AGENT_VIEWER_CACHE_KEY = "cb_lecturas_agent_images_v2";
+const LECTURAS_AGENT_MUSIC_FORM_STORAGE_KEY = "cb_lecturas_agent_music_form_v1";
 const lecturasAgentViewerState = {
   token: 0,
   payload: null,
   slides: [],
+  sections: { preguntas: "", bibliografia: "", sinonimos: "" },
+  visibleSections: { preguntas: false, bibliografia: false, sinonimos: false },
+  menuOpen: false,
   currentIndex: 0,
   refs: null,
   keyHandler: null,
   memCache: new Map(),
+  inlineImageCache: new Map(),
   storeLoaded: false,
   storageUrlCache: new Map(),
   autoReadActive: false,
@@ -7064,13 +7346,53 @@ const lecturasAgentViewerState = {
   autoReadRunId: 0,
   autoReadAdvanceTimer: null,
   autoReadSpeaking: false,
-  autoReadSpeakSeq: 0
+  autoReadSpeakSeq: 0,
+  manualReadSpeaking: false,
+  manualNavToken: 0,
+  fullscreenHandler: null,
+  musicPanelOpen: false,
+  regenerateMenuOpen: false,
+  regenerateMenuIndex: -1,
+  downloadMenuOpen: false,
+  downloadMenuIndex: -1,
+  music: {
+    readingUrl: "",
+    gameUrl: "",
+    readingPath: "",
+    gamePath: "",
+    settings: null,
+    uploadReadingFile: null,
+    uploadGameFile: null,
+    uploading: false,
+    generating: false,
+    error: ""
+  }
+};
+
+const LECTURAS_AGENT_SECTION_META = [
+  { key: "preguntas", label: "Preguntas comprensión", icon: "fa-circle-question" },
+  { key: "bibliografia", label: "Bibliografía", icon: "fa-book" },
+  { key: "sinonimos", label: "Tabla de sinónimos", icon: "fa-language" }
+];
+
+const LECTURAS_AGENT_SECTION_HEADING_REGEX = {
+  preguntas: /^(preguntas?(?: de)?(?: comprension)?|cuestionario|actividades?(?: de)?(?: comprension)?)$/i,
+  bibliografia: /^(bibliografia|fuentes consultadas|referencias(?: bibliograficas)?)$/i,
+  sinonimos: /^(tabla de sinonimos|sinonimos|glosario|vocabulario)$/i
 };
 
 function _lecturasAgentIsAutoReadSpeaking() {
   const refs = lecturasAgentViewerState.refs;
   const open = refs?.modal?.getAttribute?.("aria-hidden") === "false";
-  return open && lecturasAgentViewerState.autoReadActive === true && lecturasAgentViewerState.autoReadSpeaking === true;
+  return open && (
+    (lecturasAgentViewerState.autoReadActive === true && lecturasAgentViewerState.autoReadSpeaking === true)
+    || lecturasAgentViewerState.manualReadSpeaking === true
+  );
+}
+
+function _lecturasAgentViewerIsOpen() {
+  const refs = lecturasAgentViewerState.refs;
+  return refs?.modal?.getAttribute?.("aria-hidden") === "false";
 }
 
 function _lecturasAgentSafeHtml(text = "") {
@@ -7101,6 +7423,52 @@ function _lecturasAgentBuildStoragePath(payload = {}, slide = {}) {
   const lecturaId = _lecturasAgentSafePathPart(payload?.id || "sin_id");
   const paragraphHash = _lecturasAgentSafePathPart(slide?.paragraphHash || _lecturasAgentHash(slide?.text || "s"));
   return `lecturas-agent/${uid}/${sourceCollection}/${lecturaId}/${paragraphHash}.png`;
+}
+
+function _lecturasAgentParseStoragePath(path = "") {
+  const clean = String(path || "").replace(/^\/+/, "").trim();
+  const match = clean.match(/^lecturas-agent\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/i);
+  if (!match) return null;
+  return {
+    uid: String(match[1] || "").trim(),
+    sourceCollection: String(match[2] || "").trim(),
+    lecturaId: String(match[3] || "").trim(),
+    fileName: String(match[4] || "").trim()
+  };
+}
+
+async function _lecturasAgentResolveStoredImageByDocAndFile(path = "") {
+  const parsed = _lecturasAgentParseStoragePath(path);
+  if (!parsed?.sourceCollection || !parsed?.lecturaId) return "";
+  const fileName = String(parsed.fileName || "").trim();
+  const uid = String(parsed.uid || "").trim();
+  const prefixes = [
+    `lecturas-agent/${uid}/${parsed.sourceCollection}/${parsed.lecturaId}`,
+    `lecturas-agent/${parsed.sourceCollection}/${parsed.lecturaId}`,
+    `${parsed.sourceCollection}/${parsed.lecturaId}`
+  ].filter(Boolean);
+
+  for (const prefix of prefixes) {
+    try {
+      const folder = storageRef(storage, prefix);
+      const listed = await listAll(folder);
+      const items = Array.isArray(listed?.items) ? listed.items : [];
+      if (!items.length) continue;
+
+      let picked = items.find((it) => String(it?.name || "") === fileName) || null;
+      if (!picked) {
+        // Fallback robusto: si no existe portada o hash exacto, usa la primera imagen disponible.
+        picked = items.find((it) => /\.(png|jpe?g|webp)$/i.test(String(it?.name || ""))) || items[0];
+      }
+      if (!picked) continue;
+
+      const url = await getDownloadURL(picked);
+      if (url) return url;
+    } catch (_) {
+      // try next prefix
+    }
+  }
+  return "";
 }
 
 function _lecturasAgentLoadCacheStore() {
@@ -7137,6 +7505,8 @@ function _lecturasAgentNormalizeParagraphHtml(html = "") {
   blocks.forEach((node) => {
     const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
     if (!text || text.length < 24) return;
+    const sectionKey = _lecturasAgentSectionKeyFromText(text);
+    if (sectionKey && text.length <= 220) return;
     out.push({
       html: node.outerHTML,
       text
@@ -7152,6 +7522,795 @@ function _lecturasAgentNormalizeParagraphHtml(html = "") {
     .map((chunk) => ({ html: `<p>${_lecturasAgentSafeHtml(chunk)}</p>`, text: chunk }));
 }
 
+function _lecturasAgentNormalizeKey(text = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  if (typeof _normalizarTexto === "function") return _normalizarTexto(raw);
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _lecturasAgentSectionKeyFromText(text = "") {
+  const norm = _lecturasAgentNormalizeKey(text);
+  if (!norm) return "";
+  if (/\b(preguntas|cuestionario|actividades)\b/.test(norm) && /\b(comprension|reflexion)\b/.test(norm)) return "preguntas";
+  if (/\b(bibliografia|fuentes consultadas|referencias bibliograficas)\b/.test(norm)) return "bibliografia";
+  if (/\b(tabla de sinonimos|sinonimos|glosario|vocabulario)\b/.test(norm)) return "sinonimos";
+  return "";
+}
+
+function _lecturasAgentSectionKeyFromElement(el) {
+  if (!el) return "";
+  const text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const key = _lecturasAgentSectionKeyFromText(text);
+  if (!key) return "";
+  const tag = String(el.tagName || "").toUpperCase();
+  if (/^H[1-6]$/.test(tag)) return key;
+  if (text.length <= 150 && /^(P|DIV|SPAN|STRONG|B)$/.test(tag)) return key;
+  return "";
+}
+
+function _lecturasAgentBuildPreguntasHtml(items = []) {
+  const arr = Array.isArray(items) ? items : [];
+  const normalized = arr
+    .map((item) => {
+      if (typeof item === "string") {
+        const tx = String(item || "").trim();
+        return tx ? { texto: tx, respuesta: "" } : null;
+      }
+      const texto = String(item?.texto || item?.pregunta || "").trim();
+      if (!texto) return null;
+      return { texto, respuesta: String(item?.respuesta || "").trim() };
+    })
+    .filter(Boolean);
+  if (!normalized.length) return "";
+  const list = normalized.map((item, idx) =>
+    `<li><strong>${idx + 1}.</strong> ${_lecturasAgentSafeHtml(item.texto)}${item.respuesta ? `<br><em>${_lecturasAgentSafeHtml(item.respuesta)}</em>` : ""}</li>`
+  ).join("");
+  return `<ol class="lecturas-asc-agent-section-list">${list}</ol>`;
+}
+
+function _lecturasAgentBuildBibliografiaHtml(value = null) {
+  if (value == null) return "";
+  if (typeof value === "string") {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
+    return `<p>${_lecturasAgentSafeHtml(raw)}</p>`;
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => {
+        if (typeof item === "string") return String(item || "").trim();
+        if (item && typeof item === "object") return String(item?.texto || item?.referencia || item?.fuente || "").trim();
+        return "";
+      })
+      .filter(Boolean);
+    if (!items.length) return "";
+    return `<ul class="lecturas-asc-agent-section-list">${items.map((it) => `<li>${_lecturasAgentSafeHtml(it)}</li>`).join("")}</ul>`;
+  }
+  if (typeof value === "object") {
+    const items = Object.values(value)
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    if (!items.length) return "";
+    return `<ul class="lecturas-asc-agent-section-list">${items.map((it) => `<li>${_lecturasAgentSafeHtml(it)}</li>`).join("")}</ul>`;
+  }
+  return "";
+}
+
+function _lecturasAgentBuildSinonimosHtml(value = null) {
+  if (value == null) return "";
+  if (typeof value === "string") {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
+    return `<p>${_lecturasAgentSafeHtml(raw)}</p>`;
+  }
+  if (!Array.isArray(value)) return "";
+  const rows = value
+    .map((item) => {
+      if (typeof item === "string") return null;
+      const palabra = String(item?.palabra || item?.termino || item?.término || "").trim();
+      const sinon = Array.isArray(item?.sinonimos)
+        ? item.sinonimos.join(", ")
+        : String(item?.sinonimos || item?.sinónimos || item?.equivalente || "").trim();
+      if (!palabra && !sinon) return null;
+      return `<tr><td>${_lecturasAgentSafeHtml(palabra || "—")}</td><td>${_lecturasAgentSafeHtml(sinon || "—")}</td></tr>`;
+    })
+    .filter(Boolean);
+  if (!rows.length) return "";
+  return `
+    <table class="lecturas-asc-agent-section-table">
+      <thead><tr><th>Palabra</th><th>Sinónimos</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  `;
+}
+
+function _lecturasAgentSanitizeRichHtml(html = "") {
+  const raw = String(html || "").trim();
+  if (!raw) return "";
+  if (typeof sanitizeHtml === "function") {
+    try { return sanitizeHtml(raw); } catch (_) {}
+  }
+  return raw.replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+
+function _lecturasAgentIsSectionHeadingDuplicate(text = "", key = "") {
+  const sectionKey = String(key || "").trim();
+  if (!sectionKey) return false;
+  const pattern = LECTURAS_AGENT_SECTION_HEADING_REGEX[sectionKey];
+  if (!pattern) return false;
+  const normalized = _lecturasAgentNormalizeKey(text).replace(/^[\s:;,.¡!¿?\-]+|[\s:;,.¡!¿?\-]+$/g, "").trim();
+  if (!normalized) return false;
+  return pattern.test(normalized);
+}
+
+function _lecturasAgentStripLeadingSectionHeading(html = "", key = "") {
+  const raw = String(html || "").trim();
+  if (!raw) return "";
+  const wrap = document.createElement("div");
+  wrap.innerHTML = raw;
+  let removedAny = false;
+  for (let i = 0; i < 4; i++) {
+    while (wrap.firstChild && (
+      (wrap.firstChild.nodeType === 3 && !String(wrap.firstChild.textContent || "").trim())
+      || wrap.firstChild.nodeType === 8
+    )) {
+      wrap.removeChild(wrap.firstChild);
+      removedAny = true;
+    }
+    const first = wrap.firstElementChild;
+    if (!first) break;
+    const tag = String(first.tagName || "").toUpperCase();
+    const canBeHeading = /^H[1-6]$/.test(tag) || /^(P|DIV|SPAN|STRONG|B)$/.test(tag);
+    const text = String(first.textContent || "").replace(/\s+/g, " ").trim();
+    if (!canBeHeading || !_lecturasAgentIsSectionHeadingDuplicate(text, key)) break;
+    first.remove();
+    removedAny = true;
+  }
+  return removedAny ? String(wrap.innerHTML || "").trim() : raw;
+}
+
+function _lecturasAgentPrepareSectionHtml(key = "", html = "") {
+  const sectionKey = String(key || "").trim();
+  const cleaned = _lecturasAgentStripLeadingSectionHeading(html, sectionKey);
+  if (!cleaned) return "";
+  if (sectionKey !== "sinonimos") return cleaned;
+
+  const wrap = document.createElement("div");
+  wrap.innerHTML = cleaned;
+  const tables = Array.from(wrap.querySelectorAll("table"));
+  tables.forEach((table) => {
+    table.classList.add("lecturas-asc-agent-section-table");
+    const caption = table.querySelector("caption");
+    if (caption && _lecturasAgentIsSectionHeadingDuplicate(caption.textContent || "", sectionKey)) {
+      caption.remove();
+    }
+  });
+  return String(wrap.innerHTML || "").trim();
+}
+
+function _lecturasAgentExtractOptionalSections(html = "") {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = String(html || "").trim();
+  const sections = { preguntas: "", bibliografia: "", sinonimos: "" };
+
+  const pullBySelector = (selector, key) => {
+    const nodes = Array.from(wrap.querySelectorAll(selector));
+    if (!nodes.length) return;
+    sections[key] += nodes.map((node) => node.outerHTML).join("");
+    nodes.forEach((node) => node.remove());
+  };
+
+  pullBySelector("table.lectura-tabla-sinonimos", "sinonimos");
+  pullBySelector(".lectura-bibliografia-lista", "bibliografia");
+
+  const children = Array.from(wrap.children);
+  let idx = 0;
+  while (idx < children.length) {
+    const node = children[idx];
+    if (!node || node.parentElement !== wrap) {
+      idx += 1;
+      continue;
+    }
+    const key = _lecturasAgentSectionKeyFromElement(node);
+    if (!key) {
+      idx += 1;
+      continue;
+    }
+    const chunk = [];
+    while (idx < children.length) {
+      const current = children[idx];
+      if (!current || current.parentElement !== wrap) {
+        idx += 1;
+        continue;
+      }
+      const currentKey = _lecturasAgentSectionKeyFromElement(current);
+      const isHeading = /^H[1-6]$/.test(String(current.tagName || "").toUpperCase());
+      if (current !== node && (currentKey || isHeading)) break;
+      chunk.push(current.outerHTML);
+      current.remove();
+      idx += 1;
+    }
+    sections[key] += chunk.join("");
+  }
+
+  return {
+    narrativeHtml: String(wrap.innerHTML || "").trim(),
+    sections
+  };
+}
+
+function _lecturasAgentBuildViewerContent(rawHtml = "", payload = {}) {
+  const extracted = _lecturasAgentExtractOptionalSections(rawHtml);
+  const payloadQuestions = _lecturasAgentBuildPreguntasHtml(payload?.preguntas || payload?.preguntasComprension || []);
+  const payloadBibliografia = _lecturasAgentBuildBibliografiaHtml(payload?.bibliografia || null);
+  const payloadSinonimos = _lecturasAgentBuildSinonimosHtml(payload?.sinonimos || null);
+  const sections = {
+    preguntas: String(extracted.sections.preguntas || "").trim() || payloadQuestions,
+    bibliografia: String(extracted.sections.bibliografia || "").trim() || payloadBibliografia,
+    sinonimos: String(extracted.sections.sinonimos || "").trim() || payloadSinonimos
+  };
+  const hasSectionContent = Object.values(sections).some((v) => String(v || "").trim().length > 0);
+  const narrativeHtml = String(extracted.narrativeHtml || "").trim();
+  return {
+    narrativeHtml: narrativeHtml || (hasSectionContent ? "<p>(Sin contenido narrativo en esta vista.)</p>" : (String(rawHtml || "").trim() || "<p>(Sin contenido)</p>")),
+    sections
+  };
+}
+
+function _lecturasAgentRenderSectionsUi() {
+  const refs = lecturasAgentViewerState.refs;
+  if (!refs?.sectionsMenu || !refs?.sectionsPanel) return;
+
+  const sections = lecturasAgentViewerState.sections || {};
+  const visible = lecturasAgentViewerState.visibleSections || {};
+  const preparedByKey = {};
+  const menuItems = LECTURAS_AGENT_SECTION_META.map((meta) => {
+    preparedByKey[meta.key] = _lecturasAgentPrepareSectionHtml(meta.key, sections[meta.key]);
+    const hasContent = String(preparedByKey[meta.key] || "").trim().length > 0;
+    const isActive = visible[meta.key] === true;
+    return `
+      <button type="button" class="lecturas-asc-agent-section-menu-btn${isActive ? " is-active" : ""}" data-action="toggle-section" data-section="${meta.key}" ${hasContent ? "" : "disabled"}>
+        <i class="fas ${meta.icon}" aria-hidden="true"></i>
+        <span>${meta.label}</span>
+      </button>
+    `;
+  }).join("");
+  refs.sectionsMenu.innerHTML = menuItems || `<p class="lecturas-asc-agent-section-empty">Sin opciones disponibles.</p>`;
+
+  const visibleCards = LECTURAS_AGENT_SECTION_META
+    .filter((meta) => visible[meta.key] === true && String(preparedByKey[meta.key] || "").trim().length > 0)
+    .map((meta) => `
+      <section class="lecturas-asc-agent-section-card" data-section-key="${meta.key}">
+        ${meta.key === "sinonimos" ? "" : `<h4 class="lecturas-asc-agent-section-title">${meta.label}</h4>`}
+        <div class="lecturas-asc-agent-section-body">${_lecturasAgentSanitizeRichHtml(preparedByKey[meta.key])}</div>
+      </section>
+    `);
+  refs.sectionsMenu.hidden = lecturasAgentViewerState.menuOpen !== true || visibleCards.length > 0;
+
+  if (!visibleCards.length) {
+    refs.sectionsPanel.innerHTML = "";
+    refs.sectionsPanel.hidden = true;
+    return;
+  }
+  refs.sectionsPanel.innerHTML = `
+    <button type="button" class="lecturas-asc-agent-sections-panel-close" data-action="close-sections-panel" aria-label="Cerrar panel de secciones">&times;</button>
+    ${visibleCards.join("")}
+  `;
+  refs.sectionsPanel.hidden = false;
+}
+
+function _lecturasAgentHasMusicAssets() {
+  return !!(
+    String(lecturasAgentViewerState?.music?.readingUrl || "").trim() &&
+    String(lecturasAgentViewerState?.music?.gameUrl || "").trim()
+  );
+}
+
+function _lecturasAgentDefaultMusicSettings() {
+  return {
+    reading: {
+      prompt: "",
+      genre: "",
+      vocalMode: "instrumental",
+      tone: ""
+    },
+    game: {
+      prompt: "",
+      genre: "",
+      vocalMode: "instrumental",
+      tone: ""
+    }
+  };
+}
+
+function _lecturasAgentLoadMusicSettingsFromStorage() {
+  try {
+    const raw = String(localStorage.getItem(LECTURAS_AGENT_MUSIC_FORM_STORAGE_KEY) || "").trim();
+    if (!raw) return _lecturasAgentDefaultMusicSettings();
+    const parsed = JSON.parse(raw);
+    return _lecturasAgentNormalizeMusicSettings(parsed || {});
+  } catch (_) {
+    return _lecturasAgentDefaultMusicSettings();
+  }
+}
+
+function _lecturasAgentSaveMusicSettingsToStorage(settings = null) {
+  try {
+    const normalized = _lecturasAgentNormalizeMusicSettings(settings || {});
+    localStorage.setItem(LECTURAS_AGENT_MUSIC_FORM_STORAGE_KEY, JSON.stringify(normalized));
+  } catch (_) {}
+}
+
+function _lecturasAgentNormalizeMusicSettings(input = null) {
+  const src = (input && typeof input === "object") ? input : {};
+  const base = _lecturasAgentDefaultMusicSettings();
+  const normSide = (sideKey = "reading") => {
+    const side = (src[sideKey] && typeof src[sideKey] === "object") ? src[sideKey] : {};
+    return {
+      prompt: String(side.prompt || "").trim(),
+      genre: String(side.genre || "").trim(),
+      vocalMode: String(side.vocalMode || base[sideKey].vocalMode || "instrumental").trim() || "instrumental",
+      tone: String(side.tone || "").trim(),
+    };
+  };
+  return {
+    reading: normSide("reading"),
+    game: normSide("game")
+  };
+}
+
+function _lecturasAgentBuildMusicConfigFromState() {
+  return _lecturasAgentNormalizeMusicSettings(lecturasAgentViewerState?.music?.settings || null);
+}
+
+function _lecturasAgentBuildPromptFromMusicSettings(side = {}) {
+  const s = (side && typeof side === "object") ? side : {};
+  const out = [];
+  if (s.prompt) out.push(`Prompt: ${s.prompt}`);
+  if (s.genre) out.push(`Genre: ${s.genre}`);
+  if (s.vocalMode) out.push(`Voice mode: ${s.vocalMode}`);
+  if (s.tone) out.push(`Tone: ${s.tone}`);
+  return out.join("\n").trim();
+}
+
+function _lecturasAgentBuildMusicPromptInputsFromState() {
+  const cfg = _lecturasAgentBuildMusicConfigFromState();
+  return {
+    promptReading: _lecturasAgentBuildPromptFromMusicSettings(cfg.reading),
+    promptGame: _lecturasAgentBuildPromptFromMusicSettings(cfg.game),
+    musicConfig: cfg
+  };
+}
+
+function _lecturasAgentMusicSettingsAreComplete(settings = null) {
+  const cfg = _lecturasAgentNormalizeMusicSettings(settings);
+  const ok = (side = {}) => !!(
+    String(side.prompt || "").trim() &&
+    String(side.genre || "").trim() &&
+    String(side.vocalMode || "").trim() &&
+    String(side.tone || "").trim()
+  );
+  return ok(cfg.reading) && ok(cfg.game);
+}
+
+function _lecturasAgentApplyMusicSettingField(path = "", value = "") {
+  const key = String(path || "").trim();
+  if (!key.includes(".")) return;
+  const [side, field] = key.split(".");
+  if (!["reading", "game"].includes(side)) return;
+  if (!["prompt", "genre", "vocalMode", "tone"].includes(field)) return;
+  const next = _lecturasAgentBuildMusicConfigFromState();
+  next[side][field] = String(value || "").trim();
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    settings: next
+  };
+  _lecturasAgentSaveMusicSettingsToStorage(next);
+}
+
+function _lecturasAgentApplyMusicUploadFile(mode = "", file = null) {
+  const key = String(mode || "").trim().toLowerCase();
+  if (!["reading", "game"].includes(key)) return;
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    uploadReadingFile: key === "reading" ? (file || null) : (lecturasAgentViewerState.music?.uploadReadingFile || null),
+    uploadGameFile: key === "game" ? (file || null) : (lecturasAgentViewerState.music?.uploadGameFile || null),
+  };
+}
+
+function _lecturasAgentRenderMusicPlayersHtml() {
+  const musicState = lecturasAgentViewerState.music || {};
+  const readingUrl = String(musicState.readingUrl || "").trim();
+  const gameUrl = String(musicState.gameUrl || "").trim();
+  const musicSettings = _lecturasAgentNormalizeMusicSettings(musicState.settings || null);
+  const settingsReady = _lecturasAgentMusicSettingsAreComplete(musicSettings);
+  const canGenerateMusic = lecturasAgentViewerState?.payload?.allowMusicGeneration === true;
+  const isGenerating = musicState.generating === true;
+  const isDeleting = musicState.deleting === true;
+  const isUploading = musicState.uploading === true;
+  const uploadReadingFile = musicState.uploadReadingFile || null;
+  const uploadGameFile = musicState.uploadGameFile || null;
+  const canUploadReading = !!uploadReadingFile;
+  const canUploadGame = !!uploadGameFile;
+  const canUploadManual = canUploadReading || canUploadGame;
+  const versionTag = String(musicState.generatedAt || musicState.variationNonce || "").trim();
+  const withVersion = (url = "") => {
+    const raw = String(url || "").trim();
+    if (!raw || !versionTag) return raw;
+    return `${raw}${raw.includes("?") ? "&" : "?"}v=${encodeURIComponent(versionTag)}`;
+  };
+  const regenBtn = canGenerateMusic ? `
+    <div class="lecturas-asc-agent-music-toolbar">
+      <button type="button" class="lecturas-asc-agent-music-regenerate" data-action="regenerate-reading-music" ${(!settingsReady || isGenerating) ? "disabled" : ""}>
+        <i class="fas ${isGenerating ? "fa-spinner fa-spin" : "fa-rotate-right"}" aria-hidden="true"></i>
+        <span>${isGenerating ? "Re-generando..." : "Re-generar música"}</span>
+      </button>
+      <button type="button" class="lecturas-asc-agent-music-delete" data-action="delete-reading-music" ${(isDeleting || !readingUrl && !gameUrl) ? "disabled" : ""}>
+        <i class="fas ${isDeleting ? "fa-spinner fa-spin" : "fa-trash"}" aria-hidden="true"></i>
+        <span>${isDeleting ? "Eliminando..." : "Eliminar música"}</span>
+      </button>
+      <button type="button" class="lecturas-asc-agent-music-regenerate" data-action="upload-reading-music-only" ${(!canUploadReading || isUploading) ? "disabled" : ""}>
+        <i class="fas ${isUploading ? "fa-spinner fa-spin" : "fa-upload"}" aria-hidden="true"></i>
+        <span>${isUploading ? "Subiendo..." : "Subir lectura"}</span>
+      </button>
+      <button type="button" class="lecturas-asc-agent-music-regenerate" data-action="upload-game-music-only" ${(!canUploadGame || isUploading) ? "disabled" : ""}>
+        <i class="fas ${isUploading ? "fa-spinner fa-spin" : "fa-upload"}" aria-hidden="true"></i>
+        <span>${isUploading ? "Subiendo..." : "Subir game"}</span>
+      </button>
+    </div>
+  ` : "";
+  const settingsForm = canGenerateMusic ? `
+    <div class="lecturas-asc-agent-music-form">
+      <div class="lecturas-asc-agent-music-form-grid">
+        <section class="lecturas-asc-agent-music-form-side">
+          <h5>Música lectura</h5>
+          <label>Prompt
+            <textarea data-music-field="reading.prompt" rows="3" placeholder="Describe la música de lectura">${_lecturasAgentSafeHtml(musicSettings.reading.prompt)}</textarea>
+          </label>
+          <label>Género musical
+            <input type="text" data-music-field="reading.genre" placeholder="clásica orquestal, barroca, romántica..." value="${_lecturasAgentSafeHtml(musicSettings.reading.genre)}">
+          </label>
+          <label>Voz / Instrumental
+            <select data-music-field="reading.vocalMode">
+              <option value="instrumental" ${musicSettings.reading.vocalMode === "instrumental" ? "selected" : ""}>Instrumental</option>
+              <option value="con voz" ${musicSettings.reading.vocalMode === "con voz" ? "selected" : ""}>Con voz</option>
+            </select>
+          </label>
+          <label>Tono
+            <select data-music-field="reading.tone">
+              <option value="" ${!musicSettings.reading.tone ? "selected" : ""}>Selecciona tono</option>
+              <option value="emotivo" ${musicSettings.reading.tone === "emotivo" ? "selected" : ""}>Emotivo</option>
+              <option value="alegre" ${musicSettings.reading.tone === "alegre" ? "selected" : ""}>Alegre</option>
+              <option value="triste" ${musicSettings.reading.tone === "triste" ? "selected" : ""}>Triste</option>
+              <option value="epico" ${musicSettings.reading.tone === "epico" ? "selected" : ""}>Épico</option>
+              <option value="tenso" ${musicSettings.reading.tone === "tenso" ? "selected" : ""}>Tenso</option>
+              <option value="relajado" ${musicSettings.reading.tone === "relajado" ? "selected" : ""}>Relajado</option>
+            </select>
+          </label>
+        </section>
+        <section class="lecturas-asc-agent-music-form-side">
+          <h5>Música game</h5>
+          <label>Prompt
+            <textarea data-music-field="game.prompt" rows="3" placeholder="Describe la música game">${_lecturasAgentSafeHtml(musicSettings.game.prompt)}</textarea>
+          </label>
+          <label>Género musical
+            <input type="text" data-music-field="game.genre" placeholder="electrónica, synthwave, rhythm game..." value="${_lecturasAgentSafeHtml(musicSettings.game.genre)}">
+          </label>
+          <label>Voz / Instrumental
+            <select data-music-field="game.vocalMode">
+              <option value="instrumental" ${musicSettings.game.vocalMode === "instrumental" ? "selected" : ""}>Instrumental</option>
+              <option value="con voz" ${musicSettings.game.vocalMode === "con voz" ? "selected" : ""}>Con voz</option>
+            </select>
+          </label>
+          <label>Tono
+            <select data-music-field="game.tone">
+              <option value="" ${!musicSettings.game.tone ? "selected" : ""}>Selecciona tono</option>
+              <option value="emotivo" ${musicSettings.game.tone === "emotivo" ? "selected" : ""}>Emotivo</option>
+              <option value="alegre" ${musicSettings.game.tone === "alegre" ? "selected" : ""}>Alegre</option>
+              <option value="triste" ${musicSettings.game.tone === "triste" ? "selected" : ""}>Triste</option>
+              <option value="epico" ${musicSettings.game.tone === "epico" ? "selected" : ""}>Épico</option>
+              <option value="tenso" ${musicSettings.game.tone === "tenso" ? "selected" : ""}>Tenso</option>
+              <option value="relajado" ${musicSettings.game.tone === "relajado" ? "selected" : ""}>Relajado</option>
+            </select>
+          </label>
+        </section>
+      </div>
+      <p class="lecturas-asc-agent-music-hint ${settingsReady ? "is-ready" : ""}">
+        ${settingsReady ? "Configuración completa. Puedes generar/re-generar música." : "Completa prompt, género, voz/instrumental y tono para lectura y game."}
+      </p>
+      <div class="lecturas-asc-agent-music-upload-row">
+        <label>Audio lectura (wav/mp3/ogg/m4a)
+          <input type="file" data-music-upload="reading" accept="audio/*,.wav,.mp3,.ogg,.m4a,.aac,.flac,.webm">
+        </label>
+        <label>Audio game (wav/mp3/ogg/m4a)
+          <input type="file" data-music-upload="game" accept="audio/*,.wav,.mp3,.ogg,.m4a,.aac,.flac,.webm">
+        </label>
+      </div>
+      <p class="lecturas-asc-agent-music-hint ${canUploadManual ? "is-ready" : ""}">
+        ${canUploadManual
+          ? `Listo para subir: ${canUploadReading ? `lectura "${_lecturasAgentSafeHtml(uploadReadingFile?.name || "")}"` : ""}${(canUploadReading && canUploadGame) ? " y " : ""}${canUploadGame ? `game "${_lecturasAgentSafeHtml(uploadGameFile?.name || "")}"` : ""}.`
+          : "Selecciona archivo de lectura o de game para subir individualmente."}
+      </p>
+    </div>
+  ` : "";
+  if (!readingUrl && !gameUrl) return `${settingsForm}${regenBtn}
+    <div class="lecturas-asc-agent-music-empty">Genera música para ver los reproductores.</div>
+  `;
+  const slides = Array.isArray(lecturasAgentViewerState.slides) ? lecturasAgentViewerState.slides : [];
+  const current = slides[Math.max(0, Math.min(Number(lecturasAgentViewerState.currentIndex || 0), Math.max(0, slides.length - 1)))] || null;
+  const readyImages = slides
+    .map((s) => String(s?.imageUrl || "").trim())
+    .filter(Boolean);
+  const readingCover = String(current?.imageUrl || "").trim() || readyImages[0] || "";
+  const gameCover = readyImages.find((url) => url !== readingCover) || readingCover;
+  return `${settingsForm}${regenBtn}
+    <div class="lecturas-asc-agent-music-wrap">
+      <div class="lecturas-asc-agent-music-item">
+        ${readingCover ? `<img class="lecturas-asc-agent-music-cover" src="${_lecturasAgentSafeHtml(readingCover)}" alt="Portada música lectura">` : ""}
+        <span class="lecturas-asc-agent-music-label">Música lectura</span>
+        <audio controls preload="none" src="${_lecturasAgentSafeHtml(withVersion(readingUrl))}"></audio>
+      </div>
+      <div class="lecturas-asc-agent-music-item">
+        ${gameCover ? `<img class="lecturas-asc-agent-music-cover" src="${_lecturasAgentSafeHtml(gameCover)}" alt="Portada música game">` : ""}
+        <span class="lecturas-asc-agent-music-label">Música game</span>
+        <audio controls preload="none" src="${_lecturasAgentSafeHtml(withVersion(gameUrl))}"></audio>
+      </div>
+    </div>
+  `;
+}
+
+function _lecturasAgentRenderMusicPanel() {
+  const refs = lecturasAgentViewerState.refs;
+  if (!refs?.musicModal || !refs?.musicBody) return;
+  const open = lecturasAgentViewerState.musicPanelOpen === true;
+  refs.musicModal.hidden = !open;
+  refs.musicModal.setAttribute("aria-hidden", open ? "false" : "true");
+  if (!open) return;
+  refs.musicBody.innerHTML = _lecturasAgentRenderMusicPlayersHtml();
+}
+
+function _lecturasAgentRunMusicGeneration(force = false, openPanelOnSuccess = true) {
+  if (lecturasAgentViewerState.music?.generating) return;
+  const settings = _lecturasAgentBuildMusicConfigFromState();
+  if (!_lecturasAgentMusicSettingsAreComplete(settings)) {
+    alert("❌ Completa los campos de música (prompt, género, voz/instrumental y tono) para lectura y game.");
+    lecturasAgentViewerState.musicPanelOpen = true;
+    _lecturasAgentRenderMusicPanel();
+    return;
+  }
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    generating: true,
+    error: ""
+  };
+  if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+  _lecturasAgentGenerateMusicAssets(force === true)
+    .then(() => {
+      if (openPanelOnSuccess) {
+        lecturasAgentViewerState.musicPanelOpen = true;
+        _lecturasAgentRenderMusicPanel();
+      }
+    })
+    .catch((err) => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        error: String(err?.message || "No se pudo generar música.")
+      };
+      alert(`❌ ${lecturasAgentViewerState.music.error}`);
+    })
+    .finally(() => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        generating: false
+      };
+      if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+      if (lecturasAgentViewerState.musicPanelOpen) _lecturasAgentRenderMusicPanel();
+    });
+}
+
+function _lecturasAgentRunMusicDelete() {
+  const deleter = window.cbDeleteLecturaMusicAssets;
+  if (typeof deleter !== "function") {
+    alert("❌ Eliminador de música no disponible.");
+    return;
+  }
+  if (lecturasAgentViewerState.music?.deleting) return;
+  const hasAssets = _lecturasAgentHasMusicAssets();
+  if (!hasAssets) return;
+  if (!confirm("¿Eliminar música de esta lectura? Se borrará también de Storage.")) return;
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    deleting: true,
+    error: ""
+  };
+  _lecturasAgentRenderMusicPanel();
+  const payload = {
+    ...(lecturasAgentViewerState.payload || {})
+  };
+  deleter(payload)
+    .then(() => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        readingUrl: "",
+        gameUrl: "",
+        readingPath: "",
+        gamePath: "",
+        generatedAt: "",
+        variationNonce: "",
+        error: ""
+      };
+      lecturasAgentViewerState.payload = {
+        ...(lecturasAgentViewerState.payload || {}),
+        musicAssets: {}
+      };
+      _lecturasAgentRenderMusicPanel();
+      if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+    })
+    .catch((err) => {
+      const msg = String(err?.message || "No se pudo eliminar la música.");
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        error: msg
+      };
+      alert(`❌ ${msg}`);
+    })
+    .finally(() => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        deleting: false
+      };
+      _lecturasAgentRenderMusicPanel();
+    });
+}
+
+function _lecturasAgentRunMusicUpload(mode = "both") {
+  const uploader = window.cbUploadLecturaMusicAssets;
+  if (typeof uploader !== "function") {
+    alert("❌ Subida de música no disponible.");
+    return;
+  }
+  if (lecturasAgentViewerState.music?.uploading) return;
+  const modeNorm = String(mode || "both").trim().toLowerCase();
+  const readingCandidate = lecturasAgentViewerState.music?.uploadReadingFile || null;
+  const gameCandidate = lecturasAgentViewerState.music?.uploadGameFile || null;
+  const readingFile = (modeNorm === "reading" || modeNorm === "both") ? readingCandidate : null;
+  const gameFile = (modeNorm === "game" || modeNorm === "both") ? gameCandidate : null;
+  if (!readingFile && !gameFile) {
+    alert("❌ Selecciona al menos un archivo para subir.");
+    return;
+  }
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    uploading: true,
+    error: ""
+  };
+  _lecturasAgentRenderMusicPanel();
+  const payload = {
+    ...(lecturasAgentViewerState.payload || {}),
+    readingFile,
+    gameFile,
+    musicConfig: _lecturasAgentBuildMusicConfigFromState()
+  };
+  uploader(payload)
+    .then((result) => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        readingUrl: String(result?.readingUrl || lecturasAgentViewerState.music.readingUrl || "").trim(),
+        gameUrl: String(result?.gameUrl || lecturasAgentViewerState.music.gameUrl || "").trim(),
+        readingPath: String(result?.readingPath || lecturasAgentViewerState.music.readingPath || "").trim(),
+        gamePath: String(result?.gamePath || lecturasAgentViewerState.music.gamePath || "").trim(),
+        generatedAt: String(result?.generatedAt || new Date().toISOString()).trim(),
+        variationNonce: String(result?.variationNonce || "").trim(),
+        uploadReadingFile: readingFile ? null : (lecturasAgentViewerState.music?.uploadReadingFile || null),
+        uploadGameFile: gameFile ? null : (lecturasAgentViewerState.music?.uploadGameFile || null),
+        settings: _lecturasAgentNormalizeMusicSettings(result?.musicConfig || lecturasAgentViewerState.music.settings || _lecturasAgentBuildMusicConfigFromState()),
+        error: ""
+      };
+      lecturasAgentViewerState.payload = {
+        ...(lecturasAgentViewerState.payload || {}),
+        musicConfig: _lecturasAgentBuildMusicConfigFromState(),
+        musicAssets: {
+          readingUrl: lecturasAgentViewerState.music.readingUrl,
+          gameUrl: lecturasAgentViewerState.music.gameUrl,
+          readingPath: lecturasAgentViewerState.music.readingPath,
+          gamePath: lecturasAgentViewerState.music.gamePath,
+          generatedAt: lecturasAgentViewerState.music.generatedAt,
+          variationNonce: lecturasAgentViewerState.music.variationNonce,
+          musicConfig: _lecturasAgentBuildMusicConfigFromState()
+        }
+      };
+      if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+      _lecturasAgentRenderMusicPanel();
+    })
+    .catch((err) => {
+      const msg = String(err?.message || "No se pudo subir la música.");
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        error: msg
+      };
+      alert(`❌ ${msg}`);
+    })
+    .finally(() => {
+      lecturasAgentViewerState.music = {
+        ...(lecturasAgentViewerState.music || {}),
+        uploading: false
+      };
+      _lecturasAgentRenderMusicPanel();
+    });
+}
+
+async function _lecturasAgentGenerateMusicAssets(force = false) {
+  const generator = window.cbGenerateLecturaMusicAssets;
+  if (typeof generator !== "function") {
+    throw new Error("Generador de música no disponible.");
+  }
+  const promptInputs = _lecturasAgentBuildMusicPromptInputsFromState();
+  const payload = {
+    ...(lecturasAgentViewerState.payload || {}),
+    force: force === true || _lecturasAgentHasMusicAssets(),
+    promptReading: promptInputs.promptReading,
+    promptGame: promptInputs.promptGame,
+    musicConfig: promptInputs.musicConfig
+  };
+  const result = await generator(payload);
+  lecturasAgentViewerState.music = {
+    ...(lecturasAgentViewerState.music || {}),
+    readingUrl: String(result?.readingUrl || lecturasAgentViewerState.music.readingUrl || "").trim(),
+    gameUrl: String(result?.gameUrl || lecturasAgentViewerState.music.gameUrl || "").trim(),
+    readingPath: String(result?.readingPath || lecturasAgentViewerState.music.readingPath || "").trim(),
+    gamePath: String(result?.gamePath || lecturasAgentViewerState.music.gamePath || "").trim(),
+    generatedAt: String(result?.generatedAt || new Date().toISOString()).trim(),
+    variationNonce: String(result?.variationNonce || "").trim(),
+    settings: _lecturasAgentNormalizeMusicSettings(result?.musicConfig || lecturasAgentViewerState.music.settings || promptInputs.musicConfig),
+    error: ""
+  };
+  lecturasAgentViewerState.payload = {
+    ...(lecturasAgentViewerState.payload || {}),
+    musicConfig: _lecturasAgentBuildMusicConfigFromState(),
+    musicAssets: {
+      readingUrl: lecturasAgentViewerState.music.readingUrl,
+      gameUrl: lecturasAgentViewerState.music.gameUrl,
+      readingPath: lecturasAgentViewerState.music.readingPath,
+      gamePath: lecturasAgentViewerState.music.gamePath,
+      generatedAt: lecturasAgentViewerState.music.generatedAt,
+      variationNonce: lecturasAgentViewerState.music.variationNonce,
+      musicConfig: _lecturasAgentBuildMusicConfigFromState()
+    }
+  };
+}
+
+function _lecturasAgentSetVisibleSection(nextKey = "") {
+  const key = String(nextKey || "").trim();
+  const map = lecturasAgentViewerState.visibleSections || {};
+  const keys = Object.keys(map);
+  if (!keys.length) return false;
+
+  let changed = false;
+  const currentActive = keys.find((k) => map[k] === true) || "";
+  const targetIsValid = key && Object.prototype.hasOwnProperty.call(map, key);
+  const openTarget = targetIsValid && currentActive !== key;
+
+  for (const sectionKey of keys) {
+    const nextValue = openTarget && sectionKey === key;
+    if (map[sectionKey] !== nextValue) {
+      map[sectionKey] = nextValue;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
 function _lecturasAgentExtractDataUrlInfo(dataUrl = "") {
   const raw = String(dataUrl || "").trim();
   const match = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
@@ -7162,84 +8321,191 @@ function _lecturasAgentExtractDataUrlInfo(dataUrl = "") {
   };
 }
 
+function _lecturasAgentCanFetchInlineImage(url = "") {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  if (/^data:image\//i.test(src)) return true;
+  if (/^blob:/i.test(src)) return true;
+  try {
+    const parsed = new URL(src, window.location.href);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") return false;
+    // Evita errores CORS al intentar leer imágenes remotas (p.ej. Firebase Storage).
+    // Solo se convierten imágenes same-origin o data URLs.
+    return parsed.origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function _lecturasAgentUrlToInlinePart(url = "") {
   const src = String(url || "").trim();
   if (!src) return null;
+  const options = arguments.length > 1 && arguments[1] && typeof arguments[1] === "object" ? arguments[1] : {};
+  const compactForReference = options.compactForReference === true;
+  const maxSide = Math.max(128, Number(options.maxSide || 448) || 448);
+  const jpegQuality = Math.max(0.35, Math.min(0.95, Number(options.jpegQuality || 0.66) || 0.66));
+
+  async function blobToInlinePart(blob = null, forceCompact = false) {
+    if (!blob || !String(blob.type || "").startsWith("image/")) return null;
+    const compact = forceCompact === true;
+    if (!compact) {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const info = _lecturasAgentExtractDataUrlInfo(String(reader.result || ""));
+          if (info?.base64) resolve(info.base64);
+          else reject(new Error("invalid_data_url"));
+        };
+        reader.onerror = () => reject(reader.error || new Error("reader_error"));
+        reader.readAsDataURL(blob);
+      });
+      return { inlineData: { mimeType: String(blob.type || "image/png"), data: base64 } };
+    }
+
+    try {
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const image = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("image_decode_failed"));
+          img.src = objectUrl;
+        });
+        const width = Number(image.naturalWidth || image.width || 0);
+        const height = Number(image.naturalHeight || image.height || 0);
+        if (!width || !height) throw new Error("invalid_image_size");
+        const scale = Math.min(1, maxSide / Math.max(width, height));
+        const targetW = Math.max(1, Math.round(width * scale));
+        const targetH = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas_ctx_unavailable");
+        ctx.drawImage(image, 0, 0, targetW, targetH);
+        const dataUrl = canvas.toDataURL("image/jpeg", jpegQuality);
+        const compactInfo = _lecturasAgentExtractDataUrlInfo(dataUrl);
+        if (!compactInfo?.base64) throw new Error("compact_encode_failed");
+        return { inlineData: { mimeType: "image/jpeg", data: compactInfo.base64 } };
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (_) {
+      // Fallback al blob original si falla la compactación
+      return blobToInlinePart(blob, false);
+    }
+  }
+
   const inline = _lecturasAgentExtractDataUrlInfo(src);
   if (inline?.base64 && inline?.mimeType) {
-    return { inlineData: { mimeType: inline.mimeType, data: inline.base64 } };
+    if (!compactForReference) {
+      return { inlineData: { mimeType: inline.mimeType, data: inline.base64 } };
+    }
+    try {
+      const res = await fetch(src);
+      if (!res.ok) return { inlineData: { mimeType: inline.mimeType, data: inline.base64 } };
+      const blob = await res.blob();
+      const compactPart = await blobToInlinePart(blob, true);
+      return compactPart || { inlineData: { mimeType: inline.mimeType, data: inline.base64 } };
+    } catch (_) {
+      return { inlineData: { mimeType: inline.mimeType, data: inline.base64 } };
+    }
   }
+  if (!_lecturasAgentCanFetchInlineImage(src)) return null;
   try {
-    const res = await fetch(src, { cache: "force-cache" });
+    const res = await fetch(src, { cache: "force-cache", mode: "same-origin" });
     if (!res.ok) return null;
     const blob = await res.blob();
-    if (!blob || !String(blob.type || "").startsWith("image/")) return null;
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const info = _lecturasAgentExtractDataUrlInfo(String(reader.result || ""));
-        if (info?.base64) resolve(info.base64);
-        else reject(new Error("invalid_data_url"));
-      };
-      reader.onerror = () => reject(reader.error || new Error("reader_error"));
-      reader.readAsDataURL(blob);
-    });
-    return { inlineData: { mimeType: blob.type, data: base64 } };
+    return blobToInlinePart(blob, compactForReference);
   } catch (_) {
     return null;
   }
 }
 
-async function _lecturasAgentCollectStyleReferenceParts(index = 0, token = 0) {
+async function _lecturasAgentCollectStyleReferenceParts(index = 0, token = 0, options = {}) {
   const out = [];
   const slides = Array.isArray(lecturasAgentViewerState.slides) ? lecturasAgentViewerState.slides : [];
-  for (let i = index - 1; i >= 0; i--) {
+  const seen = new Set();
+  const compactForReference = options?.compactForReference !== false;
+  const maxSide = Math.max(128, Number(options?.maxSide || 448) || 448);
+  const jpegQuality = Math.max(0.35, Math.min(0.95, Number(options?.jpegQuality || 0.66) || 0.66));
+  const addRefFromSlide = async (slide = null) => {
+    if (token !== lecturasAgentViewerState.token) return;
+    const src = String(slide?.imageDataUrl || slide?.imageUrl || "").trim();
+    if (!src || seen.has(src)) return;
+    const part = await _lecturasAgentUrlToInlinePart(src, {
+      compactForReference,
+      maxSide,
+      jpegQuality
+    });
+    if (!part) return;
+    seen.add(src);
+    out.push(part);
+  };
+
+  // Referencias acumulativas y ordenadas por párrafo:
+  // P2 <- P1, P3 <- P1+P2, P4 <- P1+P2+P3, ...
+  for (let i = 0; i < index; i++) {
     if (token !== lecturasAgentViewerState.token) break;
-    const s = slides[i];
-    const src = String(s?.imageUrl || "").trim();
-    if (!src) continue;
-    const part = await _lecturasAgentUrlToInlinePart(src);
-    if (part) out.push(part);
-    if (out.length >= 2) break;
+    const candidate = slides[i];
+    if (String(candidate?.kind || "paragraph").trim() !== "paragraph") continue;
+    await addRefFromSlide(candidate);
   }
   return out;
 }
 
-function _lecturasAgentBuildImagePrompt(payload = {}, slide = {}, index = 0, referenceCount = 0) {
-  const titulo = String(payload?.titulo || "Lectura").trim();
-  const coleccion = String(payload?.sourceCollection || payload?.coleccion || "").trim();
-  const etiqueta = coleccion === "lecturasASC" ? "Lecturas ASC" : "Lecturas nuevas";
-  const estiloBase = "Ilustración editorial narrativa, moderna, elegante, coherente entre páginas, luz cinematográfica, sin texto impreso.";
-  const coherenceLine = referenceCount > 0
-    ? `Coherencia visual: mantén paleta, composición y tratamiento similares a las ${referenceCount} imágenes de referencia adjuntas.`
-    : "Coherencia visual: define un estilo consistente para reutilizar en los siguientes párrafos.";
-  return [
-    "Genera una imagen 16:9 para ilustrar un párrafo de lectura escolar en español.",
-    `Título de la lectura: ${titulo}.`,
-    `Colección: ${etiqueta}.`,
-    `Párrafo ${index + 1}: ${String(slide?.text || "").slice(0, 1600)}.`,
-    `Estilo visual: ${estiloBase}`,
-    coherenceLine,
-    "Evita letras, marcas de agua, firmas y texto incrustado dentro de la imagen."
-  ].join("\n");
+async function _lecturasAgentCollectCoverReferenceParts(token = 0, options = {}) {
+  const out = [];
+  const slides = Array.isArray(lecturasAgentViewerState.slides) ? lecturasAgentViewerState.slides : [];
+  const compactForReference = options?.compactForReference !== false;
+  const maxSide = Math.max(128, Number(options?.maxSide || 448) || 448);
+  const jpegQuality = Math.max(0.35, Math.min(0.95, Number(options?.jpegQuality || 0.66) || 0.66));
+  const seen = new Set();
+  for (const slide of slides) {
+    if (token !== lecturasAgentViewerState.token) break;
+    if (String(slide?.kind || "").trim() !== "paragraph") continue;
+    const src = String(slide?.imageDataUrl || slide?.imageUrl || "").trim();
+    if (!src || seen.has(src)) continue;
+    const part = await _lecturasAgentUrlToInlinePart(src, {
+      compactForReference,
+      maxSide,
+      jpegQuality
+    });
+    if (!part) continue;
+    seen.add(src);
+    out.push(part);
+  }
+  return out;
 }
 
-async function _lecturasAgentGenerateImage(payload = {}, slide = {}, index = 0, token = 0) {
-  const referenceParts = await _lecturasAgentCollectStyleReferenceParts(index, token);
-  const prompt = _lecturasAgentBuildImagePrompt(payload, slide, index, referenceParts.length);
-  const parts = [{ text: prompt }, ...referenceParts];
-  const {response: res, data} = await geminiGenerateViaApi("gemini-3-pro-image-preview", {
-    contents: [{ role: "user", parts }],
-    generationConfig: {
-      responseModalities: ["TEXT", "IMAGE"],
-      temperature: 0.78
-    }
-  });
-  if (!res.ok) {
-    const detail = String(data?.error?.message || data?.error || "");
-    throw new Error(`Gemini image HTTP ${res.status}: ${detail || res.statusText}`);
+function _lecturasAgentApproxInlinePartBytes(part = null) {
+  const b64 = String(part?.inlineData?.data || "").trim();
+  if (!b64) return 0;
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function _lecturasAgentLimitReferenceParts(parts = [], options = {}) {
+  const list = Array.isArray(parts) ? parts : [];
+  const maxRefsRaw = options?.maxRefs;
+  const maxRefs = maxRefsRaw == null ? Number.MAX_SAFE_INTEGER : Math.max(0, Number(maxRefsRaw) || 0);
+  const maxBytes = Math.max(128 * 1024, Number(options?.maxBytes ?? (2200 * 1024)) || (2200 * 1024));
+  if (!list.length || maxRefs <= 0) return [];
+  const out = [];
+  let total = 0;
+  for (const part of list) {
+    if (!part) continue;
+    const bytes = _lecturasAgentApproxInlinePartBytes(part);
+    if (bytes <= 0) continue;
+    if (out.length >= maxRefs) break;
+    if (total + bytes > maxBytes) continue;
+    out.push(part);
+    total += bytes;
   }
-  if (token !== lecturasAgentViewerState.token) throw new Error("cancelled");
+  return out;
+}
+
+function _lecturasAgentExtractImageInlineFromGenerateData(data = null) {
   const outParts = data?.candidates?.[0]?.content?.parts || [];
   for (const part of outParts) {
     const inline = part?.inlineData || part?.inline_data;
@@ -7248,7 +8514,209 @@ async function _lecturasAgentGenerateImage(payload = {}, slide = {}, index = 0, 
     if (!b64 || !/^image\//i.test(mime)) continue;
     return { dataUrl: `data:${mime};base64,${b64}`, mimeType: mime };
   }
-  throw new Error("No se recibió imagen en la respuesta.");
+  return null;
+}
+
+function _lecturasAgentShouldRetryImageHttp(status = 0) {
+  const code = Number(status || 0);
+  return code === 429 || (code >= 500 && code < 600);
+}
+
+function _lecturasAgentSleep(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function _lecturasAgentBuildVisualStoryGuide(slides = []) {
+  const text = (Array.isArray(slides) ? slides : [])
+    .map((s) => String(s?.text || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+  if (!text) return "";
+  const preview = text.slice(0, 1200);
+  const nameMatches = preview.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})?\b/g) || [];
+  const counts = new Map();
+  for (const raw of nameMatches) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const lower = value.toLowerCase();
+    if (["lectura", "cuento", "escuela", "martes", "lunes", "viernes", "enero"].includes(lower)) continue;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  const characters = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name]) => name);
+  const parts = [];
+  if (characters.length) {
+    parts.push(`Personajes recurrentes del cuento: ${characters.join(", ")}.`);
+  }
+  parts.push(`Resumen del cuento para continuidad visual: ${preview}.`);
+  return parts.join(" ");
+}
+
+function _lecturasAgentBuildImagePrompt(payload = {}, slide = {}, index = 0, referenceCount = 0, options = {}) {
+  const titulo = String(payload?.titulo || "Lectura").trim();
+  const isCover = String(slide?.kind || "").trim() === "cover";
+  const coleccion = String(payload?.sourceCollection || payload?.coleccion || "").trim();
+  const etiqueta = coleccion === "lecturasASC" ? "Lecturas ASC" : "Lecturas nuevas";
+  const visualGuideMax = Math.max(120, Number(options?.visualGuideMax || 640) || 640);
+  const paragraphMax = Math.max(260, Number(options?.paragraphMax || 1200) || 1200);
+  const visualGuide = String(payload?.visualStoryGuide || "").trim().slice(0, visualGuideMax);
+  const estiloBase = "Ilustración editorial narrativa, moderna, elegante, coherente entre páginas, luz cinematográfica, sin texto impreso.";
+  const coherenceLine = referenceCount > 0
+    ? `Coherencia visual obligatoria: mantén paleta, composición, trazo y diseño de personajes iguales a las ${referenceCount} imágenes de referencia adjuntas (especialmente la primera).`
+    : "Coherencia visual obligatoria: define un estilo único y reutilízalo sin cambios en todas las páginas siguientes.";
+  return [
+    isCover
+      ? "Genera una portada tipo póster 16:9 para la lectura escolar en español."
+      : "Genera una imagen 16:9 para ilustrar un párrafo de lectura escolar en español.",
+    `Título de la lectura: ${titulo}.`,
+    isCover ? "" : `Colección: ${etiqueta}.`,
+    visualGuide ? `Biblia visual del cuento: ${visualGuide}` : "",
+    isCover
+      ? `Historia base para portada: ${String(slide?.text || "").slice(0, paragraphMax)}.`
+      : `Párrafo ${index + 1}: ${String(slide?.text || "").slice(0, paragraphMax)}.`,
+    `Estilo visual: ${estiloBase}`,
+    "Continuidad de personajes: si aparece un personaje en varios párrafos, debe conservar los mismos rasgos faciales, peinado, vestuario y proporciones.",
+    isCover
+      ? "Portada creativa: composición central tipo póster, atmósfera cinematográfica, elementos narrativos de la historia y título legible integrado: " + titulo + "."
+      : "",
+    coherenceLine,
+    isCover
+      ? "Evita marcas de agua y firmas."
+      : "Evita letras, marcas de agua, firmas y texto incrustado dentro de la imagen."
+  ].filter(Boolean).join("\n");
+}
+
+async function _lecturasAgentGenerateImage(payload = {}, slide = {}, index = 0, token = 0) {
+  if (window.__geminiImageGenerationBlocked === true) {
+    throw new Error(String(window.__geminiImageGenerationBlockedReason || "Generación de imágenes Gemini bloqueada."));
+  }
+  const isCover = String(slide?.kind || "").trim() === "cover";
+  const modelCandidates = [
+    "gemini-3-pro-image-preview",
+    "gemini-2.5-flash-image",
+    "gemini-2.0-flash-preview-image-generation"
+  ];
+  const attemptConfigs = [
+    { useReferences: true, maxRefs: null, maxBytes: 2200 * 1024, refMaxSide: 448, refQuality: 0.66, temperature: 0.58, visualGuideMax: 640, paragraphMax: 1200 },
+    { useReferences: true, maxRefs: null, maxBytes: 1600 * 1024, refMaxSide: 352, refQuality: 0.6, temperature: 0.52, visualGuideMax: 420, paragraphMax: 900 },
+    { useReferences: true, maxRefs: null, maxBytes: 1100 * 1024, refMaxSide: 288, refQuality: 0.55, temperature: 0.46, visualGuideMax: 280, paragraphMax: 700 }
+  ];
+  let lastErr = null;
+  const generationConfigVariants = (temperature = 0.58) => ([
+    {
+      responseModalities: ["TEXT", "IMAGE"],
+      temperature,
+      imageConfig: {
+        aspectRatio: "16:9",
+        imageSize: "2K",
+        mimeType: "image/png"
+      }
+    },
+    {
+      responseModalities: ["TEXT", "IMAGE"],
+      temperature,
+      imageConfig: {
+        aspectRatio: "16:9",
+        imageSize: "2K"
+      }
+    },
+    {
+      responseModalities: ["TEXT", "IMAGE"],
+      temperature
+    }
+  ]);
+
+  for (let attempt = 0; attempt < attemptConfigs.length; attempt++) {
+    if (token !== lecturasAgentViewerState.token) throw new Error("cancelled");
+    const cfg = attemptConfigs[attempt];
+    const allReferenceParts = cfg.useReferences
+      ? (isCover
+        ? await _lecturasAgentCollectCoverReferenceParts(token, {
+          compactForReference: true,
+          maxSide: cfg.refMaxSide,
+          jpegQuality: cfg.refQuality
+        })
+        : await _lecturasAgentCollectStyleReferenceParts(index, token, {
+          compactForReference: true,
+          maxSide: cfg.refMaxSide,
+          jpegQuality: cfg.refQuality
+        }))
+      : [];
+    const referenceParts = cfg.useReferences
+      ? _lecturasAgentLimitReferenceParts(allReferenceParts, { maxRefs: cfg.maxRefs, maxBytes: cfg.maxBytes })
+      : [];
+    const prompt = _lecturasAgentBuildImagePrompt(payload, slide, index, referenceParts.length, {
+      visualGuideMax: cfg.visualGuideMax,
+      paragraphMax: cfg.paragraphMax
+    });
+    const parts = referenceParts.length ? [{ text: prompt }, ...referenceParts] : [{ text: prompt }];
+    try {
+      const genVariants = generationConfigVariants(cfg.temperature);
+      let variantOk = false;
+      for (let v = 0; v < genVariants.length; v++) {
+        let continueToNextVariant = false;
+        for (let m = 0; m < modelCandidates.length; m++) {
+          const modelName = modelCandidates[m];
+          const {response: res, data} = await geminiGenerateViaApi(modelName, {
+            contents: [{ role: "user", parts }],
+            generationConfig: genVariants[v]
+          });
+          if (token !== lecturasAgentViewerState.token) throw new Error("cancelled");
+          if (!res.ok) {
+            const detail = String(data?.error?.message || data?.error || "").trim();
+            const msg = `Gemini image HTTP ${res.status} (${modelName}): ${detail || res.statusText || "error"}`;
+            lastErr = new Error(msg);
+            if (res.status === 403 && /reported as leaked|permission_denied/i.test(detail || msg)) {
+              window.__geminiImageGenerationBlocked = true;
+              window.__geminiImageGenerationBlockedReason = "La API key de Gemini fue bloqueada por seguridad (reported as leaked). Actualiza la key del backend.";
+              if (!window.__geminiImageGenerationBlockedAlerted) {
+                window.__geminiImageGenerationBlockedAlerted = true;
+                alert("Gemini bloqueó la API key por seguridad (leaked key). Actualiza GEMINI_API_KEY/GOOGLE_API_KEY en backend y reinicia el servidor.");
+              }
+              throw new Error(window.__geminiImageGenerationBlockedReason);
+            }
+            // Algunos modelos de imagen devuelven 400/401/403/404 según cuenta/cuota/modelo.
+            // No debemos abortar; intentamos el siguiente modelo candidato.
+            if ((res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) && m < modelCandidates.length - 1) {
+              continue;
+            }
+            if ((res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) && v < genVariants.length - 1) {
+              continueToNextVariant = true;
+              break;
+            }
+            if ((res.status === 413 || _lecturasAgentShouldRetryImageHttp(res.status)) && attempt < attemptConfigs.length - 1) {
+              await _lecturasAgentSleep(220 * (attempt + 1));
+              variantOk = false;
+              continueToNextVariant = false;
+              break;
+            }
+            throw lastErr;
+          }
+          const image = _lecturasAgentExtractImageInlineFromGenerateData(data);
+          if (image) return image;
+          lastErr = new Error("No se recibió imagen en la respuesta.");
+          if (m < modelCandidates.length - 1) continue;
+        }
+        if (continueToNextVariant) continue;
+        if (v < genVariants.length - 1) continue;
+      }
+      if (!variantOk && attempt < attemptConfigs.length - 1) {
+        await _lecturasAgentSleep(180 * (attempt + 1));
+        continue;
+      }
+    } catch (err) {
+      if (String(err?.message || "") === "cancelled") throw err;
+      lastErr = err instanceof Error ? err : new Error(String(err || "image_generation_failed"));
+      if (attempt < attemptConfigs.length - 1) {
+        await _lecturasAgentSleep(260 * (attempt + 1));
+        continue;
+      }
+    }
+  }
+
+  throw lastErr || new Error("No se pudo generar imagen.");
 }
 
 async function _lecturasAgentTryReadStorageUrl(slide = {}) {
@@ -7256,6 +8724,17 @@ async function _lecturasAgentTryReadStorageUrl(slide = {}) {
   if (!path) return "";
   const cached = lecturasAgentViewerState.storageUrlCache.get(path);
   if (cached) return cached;
+  const parsed = _lecturasAgentParseStoragePath(path);
+  if (parsed?.sourceCollection && parsed?.lecturaId) {
+    const resolved = await _lecturasAgentResolveStoredImageByDocAndFile(path);
+    if (resolved) {
+      lecturasAgentViewerState.storageUrlCache.set(path, resolved);
+      return resolved;
+    }
+    // Evita getDownloadURL directo con fileName stale (genera 404 ruidoso).
+    lecturasAgentViewerState.storageUrlCache.set(path, "");
+    return "";
+  }
   try {
     const url = await getDownloadURL(storageRef(storage, path));
     if (url) {
@@ -7284,11 +8763,108 @@ async function _lecturasAgentPersistImageToStorage(slide = {}, dataUrl = "") {
 function _lecturasAgentRenderDots() {
   const refs = lecturasAgentViewerState.refs;
   if (!refs?.dots) return;
-  const dots = lecturasAgentViewerState.slides.map((_, idx) => {
+  const dots = lecturasAgentViewerState.slides.map((slide, idx) => {
     const active = idx === lecturasAgentViewerState.currentIndex ? " is-active" : "";
-    return `<button type="button" class="lecturas-asc-agent-dot${active}" data-dot-index="${idx}" aria-label="Ir al párrafo ${idx + 1}"></button>`;
+    const isCover = String(slide?.kind || "").trim() === "cover";
+    const aria = isCover ? "Ir a portada" : `Ir al párrafo ${idx}`;
+    return `<button type="button" class="lecturas-asc-agent-dot${active}" data-dot-index="${idx}" aria-label="${aria}"></button>`;
   }).join("");
   refs.dots.innerHTML = dots;
+}
+
+function _lecturasAgentCssUrl(url = "") {
+  return String(url || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, "");
+}
+
+function _lecturasAgentResolveBubbleSizeClass(text = "") {
+  const cleaned = String(text || "").replace(/\s+/g, " ").trim();
+  const words = cleaned ? cleaned.split(" ").length : 0;
+  const chars = cleaned.length;
+  if (words <= 22 && chars <= 160) return "is-short";
+  if (words >= 70 || chars >= 420) return "is-long";
+  return "is-medium";
+}
+
+function _lecturasAgentResolveBubbleVariant(index = 0, text = "") {
+  const seed = parseInt(_lecturasAgentHash(`${Number(index) || 0}:${text}`), 36) || 0;
+  const tones = ["is-tone-1", "is-tone-2", "is-tone-3", "is-tone-4", "is-tone-5", "is-tone-6"];
+  const shapes = [
+    "is-shape-rounded",
+    "is-shape-square",
+    "is-shape-cloud",
+    "is-shape-star",
+    "is-shape-organic",
+    "is-shape-pill"
+  ];
+  const accents = ["is-accent-1", "is-accent-2", "is-accent-3"];
+  const tone = tones[seed % tones.length];
+  return {
+    tone,
+    shape: shapes[(seed >> 2) % shapes.length],
+    accent: accents[(seed >> 4) % accents.length],
+    contrast: tone === "is-tone-3" ? "is-light-bubble" : "is-dark-bubble"
+  };
+}
+
+function _lecturasAgentResolveTextMode(text = "", index = 0, partIndex = 0, totalParts = 1) {
+  const cleaned = String(text || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "bubble";
+  const seed = parseInt(_lecturasAgentHash(`mode:${index}:${partIndex}:${cleaned}`), 36) || 0;
+  if (cleaned.length <= 90 && /[¡!¿?]/.test(cleaned)) return "highlight";
+  if (totalParts > 1 && partIndex === 0 && cleaned.length >= 110) return "plain";
+  if (totalParts === 1 && cleaned.length >= 210 && (seed % 3 === 0)) return "plain";
+  if (cleaned.length >= 80 && (seed % 5 === 0)) return "plain";
+  return "bubble";
+}
+
+function _lecturasAgentSplitBubbleText(text = "") {
+  const cleaned = String(text || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+  const sentences = (cleaned.match(/[^.!?]+(?:[.!?]+|$)/g) || [])
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (sentences.length < 2) return [cleaned];
+  if (cleaned.length < 110) return [cleaned];
+
+  const total = sentences.reduce((acc, item) => acc + item.length, 0);
+  let splitAt = 1;
+  let running = 0;
+  for (let i = 1; i < sentences.length; i++) {
+    running += sentences[i - 1].length;
+    splitAt = i;
+    if (running >= total * 0.46) break;
+  }
+  const left = sentences.slice(0, splitAt).join(" ").trim();
+  const right = sentences.slice(splitAt).join(" ").trim();
+  if (!left || !right) return [cleaned];
+  if (left.length < 26 || right.length < 26) return [cleaned];
+  return [left, right];
+}
+
+function _lecturasAgentIsFullscreenActive() {
+  const refs = lecturasAgentViewerState.refs;
+  const fsElement = document.fullscreenElement;
+  if (!refs?.modal || !fsElement) return false;
+  return fsElement === refs.modal || refs.modal.contains(fsElement);
+}
+
+async function _lecturasAgentToggleFullscreen() {
+  const refs = lecturasAgentViewerState.refs;
+  const target = refs?.panel || refs?.modal || null;
+  if (!target || !document.fullscreenEnabled) return false;
+  try {
+    if (_lecturasAgentIsFullscreenActive()) {
+      await document.exitFullscreen();
+    } else {
+      await target.requestFullscreen();
+    }
+  } catch (_) {
+    return false;
+  }
+  return true;
 }
 
 function _lecturasAgentRenderCurrentSlide() {
@@ -7297,37 +8873,142 @@ function _lecturasAgentRenderCurrentSlide() {
   const slide = lecturasAgentViewerState.slides[lecturasAgentViewerState.currentIndex];
   if (!slide) return;
   refs.counter.textContent = `${lecturasAgentViewerState.currentIndex + 1} / ${lecturasAgentViewerState.slides.length}`;
-  refs.pageText.innerHTML = slide.html || `<p>${_lecturasAgentSafeHtml(slide.text || "")}</p>`;
+  const isCover = String(slide?.kind || "").trim() === "cover";
+  const bubbleParts = _lecturasAgentSplitBubbleText(slide.text || "");
+  const fallbackParts = bubbleParts.length ? bubbleParts : [String(slide.text || "").trim() || "(Sin contenido)"];
+  refs.pageText.className = `lecturas-asc-agent-page-text ${fallbackParts.length > 1 ? "is-multi" : "is-single"}`;
+  const storyTextHtml = fallbackParts.map((partText, partIdx) => {
+    const _idx = partIdx; // conserva firma por compatibilidad
+    void _idx;
+    const classes = [
+      "lecturas-asc-agent-story-text-block",
+      "is-side-left",
+      "is-accent-3",
+      "is-text-plain"
+    ];
+    return `
+      <section class="${classes.join(" ")}">
+        <p>${_lecturasAgentSafeHtml(partText)}</p>
+      </section>
+    `;
+  }).join("");
+  refs.pageText.innerHTML = isCover
+    ? `<section class="lecturas-asc-agent-story-text-block is-side-left is-accent-3 is-text-plain"><p><strong>${_lecturasAgentSafeHtml(String(lecturasAgentViewerState.payload?.titulo || "Portada"))}</strong></p></section>`
+    : `${storyTextHtml}`;
   refs.prev.disabled = lecturasAgentViewerState.currentIndex <= 0;
   refs.next.disabled = lecturasAgentViewerState.currentIndex >= lecturasAgentViewerState.slides.length - 1;
   const status = String(slide.imageStatus || "idle");
+  const canvas = refs.storyCanvas;
   if (status === "ready" && slide.imageUrl) {
-    refs.imageWrap.innerHTML = `<img src="${slide.imageUrl}" alt="Ilustración del párrafo ${lecturasAgentViewerState.currentIndex + 1}" class="lecturas-asc-agent-image" loading="lazy">`;
+    if (canvas) {
+      canvas.style.setProperty("--lecturas-asc-agent-story-image", `url("${_lecturasAgentCssUrl(slide.imageUrl)}")`);
+      canvas.classList.remove("is-loading", "is-error");
+    }
+    refs.imageWrap.innerHTML = "";
   } else if (status === "error") {
-    refs.imageWrap.innerHTML = `<div class="lecturas-asc-agent-image-state is-error"><p>No pude generar esta imagen.</p></div>`;
+    if (canvas) {
+      canvas.style.setProperty("--lecturas-asc-agent-story-image", "none");
+      canvas.classList.remove("is-loading");
+      canvas.classList.add("is-error");
+    }
+    refs.imageWrap.innerHTML = `<div class="lecturas-asc-agent-image-state is-error"><p>Imagen no disponible en storage para este párrafo.</p></div>`;
   } else {
-    refs.imageWrap.innerHTML = `<div class="lecturas-asc-agent-image-state"><span class="lecturas-asc-agent-spinner"></span><p>Generando imagen del párrafo...</p></div>`;
+    if (canvas) {
+      canvas.style.setProperty("--lecturas-asc-agent-story-image", "none");
+      canvas.classList.remove("is-error");
+      canvas.classList.add("is-loading");
+    }
+    const loadingLabel = status === "loading" ? "Generando imagen..." : "Buscando imagen en storage...";
+    refs.imageWrap.innerHTML = `<div class="lecturas-asc-agent-image-state"><span class="lecturas-asc-agent-spinner"></span><p>${loadingLabel}</p></div>`;
   }
   const disabled = status === "loading" ? "disabled" : "";
   const autoReadActive = lecturasAgentViewerState.autoReadActive === true;
+  const fullscreenActive = _lecturasAgentIsFullscreenActive();
+  const fullscreenSupported = document.fullscreenEnabled && typeof refs?.panel?.requestFullscreen === "function";
+  const menuExpanded = lecturasAgentViewerState.menuOpen === true;
+  const canGenerateMusic = lecturasAgentViewerState?.payload?.allowMusicGeneration === true;
+  const hasMusic = _lecturasAgentHasMusicAssets();
+  const isMusicGenerating = lecturasAgentViewerState.music?.generating === true;
+  const musicLabel = hasMusic ? "Abrir música" : "Generar música";
+  const musicIcon = isMusicGenerating ? "fa-spinner fa-spin" : (hasMusic ? "fa-headphones" : "fa-music");
+  const musicAction = hasMusic ? "open-reading-music" : "generate-reading-music";
+  const musicBtn = canGenerateMusic ? `
+    <button type="button" class="lecturas-asc-agent-music" data-action="${musicAction}" aria-label="${musicLabel}" title="${musicLabel}" ${isMusicGenerating ? "disabled" : ""}>
+      <i class="fas ${musicIcon}" aria-hidden="true"></i>
+    </button>
+  ` : "";
+  const canDownloadImage = status === "ready" && !!String(slide?.imageUrl || "").trim();
+  const downloadMenuOpen = lecturasAgentViewerState.downloadMenuOpen === true
+    && Number(lecturasAgentViewerState.downloadMenuIndex) === Number(lecturasAgentViewerState.currentIndex);
+  const downloadMenu = downloadMenuOpen ? `
+    <div class="lecturas-asc-agent-download-menu" data-download-menu style="position:absolute; top:calc(100% + 6px); left:0; min-width:190px; background:#0f172a; border:1px solid rgba(148,163,184,.35); border-radius:10px; box-shadow:0 12px 28px rgba(2,6,23,.45); padding:6px; z-index:25;">
+      <button type="button" data-action="download-current-image" style="width:100%; text-align:left; border:none; background:transparent; color:#e2e8f0; padding:8px 10px; border-radius:8px; cursor:pointer;">Descargar párrafo</button>
+      <button type="button" data-action="download-all-images" style="width:100%; text-align:left; border:none; background:transparent; color:#e2e8f0; padding:8px 10px; border-radius:8px; cursor:pointer;">Descargar todas las imágenes</button>
+    </div>
+  ` : "";
+  const regenerateMenuOpen = lecturasAgentViewerState.regenerateMenuOpen === true
+    && Number(lecturasAgentViewerState.regenerateMenuIndex) === Number(lecturasAgentViewerState.currentIndex);
+  const regenerateMenu = regenerateMenuOpen ? `
+    <div class="lecturas-asc-agent-regenerate-menu" data-regenerate-menu style="position:absolute; top:calc(100% + 6px); left:0; min-width:180px; background:#0f172a; border:1px solid rgba(148,163,184,.35); border-radius:10px; box-shadow:0 12px 28px rgba(2,6,23,.45); padding:6px; z-index:25;">
+      <button type="button" data-action="regenerate-current-image" data-retry-index="${lecturasAgentViewerState.currentIndex}" style="width:100%; text-align:left; border:none; background:transparent; color:#e2e8f0; padding:8px 10px; border-radius:8px; cursor:pointer;">Re-generar párrafo</button>
+      <button type="button" data-action="regenerate-all-images" style="width:100%; text-align:left; border:none; background:transparent; color:#e2e8f0; padding:8px 10px; border-radius:8px; cursor:pointer;">Regenerar todo</button>
+    </div>
+  ` : "";
   refs.imageActions.innerHTML = `
     <button type="button" class="lecturas-asc-agent-read ${autoReadActive ? "is-active" : ""}" data-action="auto-read" aria-label="${autoReadActive ? "Pausar lectura automática" : "Leer automáticamente"}">
-      <i class="fas ${autoReadActive ? "fa-pause-circle" : "fa-book-open"}" aria-hidden="true"></i>
-      <span>${autoReadActive ? "Pausar lectura" : "Leer lectura"}</span>
+      <i class="fas ${autoReadActive ? "fa-pause" : "fa-play"}" aria-hidden="true"></i>
     </button>
-    <button type="button" class="lecturas-asc-agent-regenerate" data-retry-index="${lecturasAgentViewerState.currentIndex}" ${disabled}>Volver a generar imagen</button>
+    <span class="lecturas-asc-agent-regenerate-wrap" style="position:relative; display:inline-flex;">
+      <button type="button" class="lecturas-asc-agent-regenerate" data-action="toggle-regenerate-menu" data-retry-index="${lecturasAgentViewerState.currentIndex}" aria-label="${isCover ? "Opciones de regenerar portada" : "Opciones de regenerar imagen"}" ${disabled}>
+        <i class="fas fa-redo-alt" aria-hidden="true"></i>
+      </button>
+      ${regenerateMenu}
+    </span>
+    <span class="lecturas-asc-agent-download-wrap" style="position:relative; display:inline-flex;">
+      <button type="button" class="lecturas-asc-agent-download" data-action="toggle-download-menu" data-download-index="${lecturasAgentViewerState.currentIndex}" aria-label="Opciones de descarga" ${canDownloadImage ? "" : "disabled"}>
+        <i class="fas fa-download" aria-hidden="true"></i>
+      </button>
+      ${downloadMenu}
+    </span>
+    <button type="button" class="lecturas-asc-agent-fullscreen" data-action="toggle-fullscreen" aria-label="${fullscreenActive ? "Salir de pantalla completa" : "Pantalla completa"}" ${fullscreenSupported ? "" : "disabled"}>
+      <i class="fas ${fullscreenActive ? "fa-compress" : "fa-expand"}" aria-hidden="true"></i>
+    </button>
+    <button type="button" class="lecturas-asc-agent-sections-toggle" data-action="toggle-sections-menu" aria-label="Mostrar menú de secciones" aria-expanded="${menuExpanded ? "true" : "false"}">
+      <i class="fas fa-layer-group" aria-hidden="true"></i>
+    </button>
+    ${musicBtn}
   `;
   _lecturasAgentRenderDots();
+  _lecturasAgentRenderSectionsUi();
+  _lecturasAgentRenderMusicPanel();
 }
 
 function _lecturasAgentSetSlide(index = 0, options = {}) {
   const total = lecturasAgentViewerState.slides.length;
   if (!total) return;
+  const manualChange = options?.manual === true;
+  const shouldRestartLiveAndSpeak = manualChange && lecturasAgentViewerState.autoReadActive === true;
+  if (options?.manual === true) {
+    _lecturasAgentInterruptPlaybackForManualNavigation();
+  }
   const next = Math.max(0, Math.min(Number(index) || 0, total - 1));
   lecturasAgentViewerState.currentIndex = next;
+  lecturasAgentViewerState.regenerateMenuOpen = false;
+  lecturasAgentViewerState.regenerateMenuIndex = -1;
+  lecturasAgentViewerState.downloadMenuOpen = false;
+  lecturasAgentViewerState.downloadMenuIndex = -1;
   _lecturasAgentRenderCurrentSlide();
-  if (lecturasAgentViewerState.autoReadActive && options?.manual === true) {
-    _lecturasAgentSpeakCurrentSlide({ restart: true });
+  if (shouldRestartLiveAndSpeak) {
+    const navToken = Number((lecturasAgentViewerState.manualNavToken || 0) + 1);
+    const expectedIndex = next;
+    lecturasAgentViewerState.manualNavToken = navToken;
+    _lecturasAgentRestartLiveForManualNavigation(navToken).finally(() => {
+      if (Number(navToken || 0) !== Number(lecturasAgentViewerState.manualNavToken || 0)) return;
+      if (!_lecturasAgentViewerIsOpen()) return;
+      if (Number(lecturasAgentViewerState.currentIndex || 0) !== Number(expectedIndex || 0)) return;
+      if (lecturasAgentViewerState.autoReadActive !== true) return;
+      _lecturasAgentSpeakCurrentSlide({ restart: true });
+    });
   }
 }
 
@@ -7336,14 +9017,40 @@ function _lecturasAgentClearAutoReadTimer() {
   lecturasAgentViewerState.autoReadAdvanceTimer = null;
 }
 
+function _lecturasAgentInterruptPlaybackForManualNavigation() {
+  lecturasAgentViewerState.manualReadSpeaking = false;
+  lecturasAgentViewerState.autoReadSpeaking = false;
+  lecturasAgentViewerState.autoReadSpeakSeq += 1;
+  lecturasAgentViewerState.autoReadLockedUntil = 0;
+  _lecturasAgentClearAutoReadTimer();
+  _clearAgentSpeechPlaybackTimer();
+  _resetAgentSpeechPlaybackCallbacks();
+  try { _detenerAudioWorkflowPlay(); } catch (_) {}
+}
+
+async function _lecturasAgentRestartLiveForManualNavigation(expectedToken = 0) {
+  if (!_lecturasAgentViewerIsOpen()) return false;
+  if (lecturasAgentViewerState.autoReadActive !== true) return false;
+  try {
+    await iniciarGeminiLiveUnidad({ withMic: false, forceRestart: true });
+  } catch (_) {
+    return false;
+  }
+  return Number(expectedToken || 0) === Number(lecturasAgentViewerState.manualNavToken || 0);
+}
+
 function _lecturasAgentStopAutoRead(options = {}) {
   const silent = options?.silent === true;
   lecturasAgentViewerState.autoReadActive = false;
   lecturasAgentViewerState.autoReadRunId += 1;
   lecturasAgentViewerState.autoReadSpeaking = false;
+  lecturasAgentViewerState.manualReadSpeaking = false;
   lecturasAgentViewerState.autoReadSpeakSeq += 1;
   lecturasAgentViewerState.autoReadLockedUntil = 0;
   _lecturasAgentClearAutoReadTimer();
+  // Corta inmediatamente cualquier audio en curso (Gemini Live/TTS local)
+  // para que el botón pause detenga la lectura al instante.
+  try { _detenerAudioWorkflowPlay(); } catch (_) {}
   const utter = lecturasAgentViewerState.autoReadUtterance;
   lecturasAgentViewerState.autoReadUtterance = null;
   try { if (utter) utter.onend = utter.onerror = utter.onstart = null; } catch (_) {}
@@ -7353,6 +9060,119 @@ function _lecturasAgentStopAutoRead(options = {}) {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   } catch (_) {}
   if (!silent) _lecturasAgentRenderCurrentSlide();
+}
+
+function _lecturasAgentSpeakViewerText(text = "", options = {}) {
+  const textoPlano = String(text || "").replace(/\s+/g, " ").trim();
+  if (!textoPlano) return false;
+  const {
+    cancelarPrevio = true,
+    onPlaybackStart = null,
+    onPlaybackEnd = null,
+    onPlaybackError = null
+  } = options || {};
+  let finished = false;
+  let safetyTimer = null;
+  const clearSafety = () => {
+    if (!safetyTimer) return;
+    clearTimeout(safetyTimer);
+    safetyTimer = null;
+  };
+  const finishOk = () => {
+    if (finished) return;
+    finished = true;
+    clearSafety();
+    if (typeof onPlaybackEnd === "function") {
+      try { onPlaybackEnd(); } catch (_) {}
+    }
+  };
+  const finishError = (err = null) => {
+    if (finished) return;
+    finished = true;
+    clearSafety();
+    if (typeof onPlaybackError === "function") {
+      try { onPlaybackError(err); } catch (_) {}
+    }
+  };
+  // Safety net amplio: no decide fin por longitud de párrafo, solo evita bloqueo infinito.
+  safetyTimer = setTimeout(() => {
+    finishError(new Error("gemini_live_turn_timeout"));
+  }, 120000);
+  const handled = hablarAgenteUnidad(textoPlano, {
+    cancelarPrevio,
+    withMic: false,
+    forceRestart: false,
+    onPlaybackStart: () => {
+      if (typeof onPlaybackStart === "function") {
+        try { onPlaybackStart(); } catch (_) {}
+      }
+    },
+    onPlaybackEnd: () => finishOk(),
+    onPlaybackError: (err) => finishError(err)
+  });
+  if (handled === false) {
+    finishError(new Error("gemini_live_unavailable"));
+    return false;
+  }
+  return true;
+}
+
+function _lecturasAgentSpeakSlideOnce() {
+  if (!_lecturasAgentViewerIsOpen()) return false;
+  const slide = lecturasAgentViewerState.slides[lecturasAgentViewerState.currentIndex];
+  const text = String(slide?.text || "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  lecturasAgentViewerState.manualReadSpeaking = true;
+  const handled = _lecturasAgentSpeakViewerText(text, {
+    cancelarPrevio: true,
+    onPlaybackStart: () => {
+      lecturasAgentViewerState.manualReadSpeaking = true;
+    },
+    onPlaybackEnd: () => {
+      lecturasAgentViewerState.manualReadSpeaking = false;
+    },
+    onPlaybackError: () => {
+      lecturasAgentViewerState.manualReadSpeaking = false;
+    }
+  });
+  if (handled === false) {
+    lecturasAgentViewerState.manualReadSpeaking = false;
+    return false;
+  }
+  return true;
+}
+
+function _lecturasAgentHandleViewerVoiceCommand(transcripcion = "") {
+  if (!_lecturasAgentViewerIsOpen()) return false;
+  const norm = _normalizarTexto(transcripcion);
+  if (!norm) return false;
+
+  if (/\b(cerrar|cierra|salir|terminar)\b/.test(norm) && /\b(visor|lectura|modal|pantalla|agente)?\b/.test(norm)) {
+    window.cbCloseLecturasAgentViewer?.();
+    return true;
+  }
+  if (/\b(pausa|pausar|deten|detener|alto|stop)\b/.test(norm)) {
+    _lecturasAgentStopAutoRead();
+    return true;
+  }
+  if (/\b(anterior|previo|atras|atrás|retrocede|regresa)\b/.test(norm)) {
+    _lecturasAgentSetSlide(lecturasAgentViewerState.currentIndex - 1, { manual: true });
+    return true;
+  }
+  if (/\b(siguiente|avanza|adelante)\b/.test(norm)) {
+    _lecturasAgentSetSlide(lecturasAgentViewerState.currentIndex + 1, { manual: true });
+    return true;
+  }
+  if (/\b(releer|repite|repetir)\b/.test(norm) || (/^(leer|lee)$/.test(norm) && !/\blectura\b/.test(norm))) {
+    return true;
+  }
+  if (/\b(leer|lee)\b/.test(norm) && /\b(parrafo|párrafo|actual)\b/.test(norm)) {
+    return true;
+  }
+  if ((/\b(lectura|lectura completa)\b/.test(norm) && /\b(lee|leer|inicia|iniciar)\b/.test(norm)) || /\blectura automatica\b/.test(norm)) {
+    return true;
+  }
+  return false;
 }
 
 function _lecturasAgentAdvanceAfterPlayback(runId = 0) {
@@ -7387,7 +9207,7 @@ function _lecturasAgentSpeakCurrentSlide(options = {}) {
     return;
   }
   lecturasAgentViewerState.autoReadSpeaking = true;
-  const handled = hablarAgenteUnidad(text, {
+  const handled = _lecturasAgentSpeakViewerText(text, {
     cancelarPrevio: true,
     onPlaybackStart: () => {
       if (!lecturasAgentViewerState.autoReadActive) return;
@@ -7435,6 +9255,7 @@ function _lecturasAgentUpdateSlideFromCached(slide = {}, cachedUrl = "") {
   const url = String(cachedUrl || "").trim();
   if (!url) return false;
   slide.imageUrl = url;
+  slide.imageDataUrl = /^data:image\//i.test(url) ? url : "";
   slide.imageStatus = "ready";
   return true;
 }
@@ -7442,6 +9263,8 @@ function _lecturasAgentUpdateSlideFromCached(slide = {}, cachedUrl = "") {
 async function _lecturasAgentEnsureSlideImage(slide = {}, idx = 0, token = 0, options = {}) {
   const forceRegenerate = options?.forceRegenerate === true;
   const cacheKey = String(slide?.cacheKey || "").trim();
+  const inlineFromRun = cacheKey ? String(lecturasAgentViewerState.inlineImageCache.get(cacheKey) || "").trim() : "";
+  if (inlineFromRun) slide.imageDataUrl = inlineFromRun;
   if (!forceRegenerate && cacheKey) {
     const fromCache = String(lecturasAgentViewerState.memCache.get(cacheKey) || "").trim();
     if (_lecturasAgentUpdateSlideFromCached(slide, fromCache)) return true;
@@ -7450,6 +9273,7 @@ async function _lecturasAgentEnsureSlideImage(slide = {}, idx = 0, token = 0, op
     const storageUrl = await _lecturasAgentTryReadStorageUrl(slide);
     if (storageUrl) {
       slide.imageUrl = storageUrl;
+      slide.imageDataUrl = "";
       slide.imageStatus = "ready";
       if (cacheKey) {
         lecturasAgentViewerState.memCache.set(cacheKey, storageUrl);
@@ -7457,6 +9281,12 @@ async function _lecturasAgentEnsureSlideImage(slide = {}, idx = 0, token = 0, op
       }
       return true;
     }
+  }
+
+  if (!auth?.currentUser) {
+    slide.imageStatus = "error";
+    if (idx === lecturasAgentViewerState.currentIndex) _lecturasAgentRenderCurrentSlide();
+    return false;
   }
 
   slide.imageStatus = "loading";
@@ -7469,24 +9299,156 @@ async function _lecturasAgentEnsureSlideImage(slide = {}, idx = 0, token = 0, op
     ? `${persistentUrl}${persistentUrl.includes("?") ? "&" : "?"}v=${Date.now()}`
     : generated.dataUrl;
   slide.imageUrl = finalUrl;
+  slide.imageDataUrl = generated.dataUrl;
   slide.imageStatus = "ready";
   if (cacheKey) {
+    lecturasAgentViewerState.inlineImageCache.set(cacheKey, generated.dataUrl);
     lecturasAgentViewerState.memCache.set(cacheKey, slide.imageUrl);
     _lecturasAgentPersistCacheStore();
   }
   return true;
 }
 
+function _lecturasAgentClearSlideImageCaches(slide = {}) {
+  const cacheKey = String(slide?.cacheKey || "").trim();
+  if (cacheKey) {
+    lecturasAgentViewerState.memCache.delete(cacheKey);
+    lecturasAgentViewerState.inlineImageCache.delete(cacheKey);
+  }
+  const storagePath = String(slide?.storagePath || "").trim();
+  if (storagePath) {
+    lecturasAgentViewerState.storageUrlCache.delete(storagePath);
+  }
+}
+
+function _lecturasAgentResetAllSlidesForRegeneration() {
+  const slides = Array.isArray(lecturasAgentViewerState.slides) ? lecturasAgentViewerState.slides : [];
+  for (const slide of slides) {
+    slide.imageStatus = "idle";
+    slide.imageUrl = "";
+    slide.imageDataUrl = "";
+    _lecturasAgentClearSlideImageCaches(slide);
+  }
+  _lecturasAgentPersistCacheStore();
+}
+
+function _lecturasAgentQueueRegenerateCurrentImage(index = -1) {
+  const idx = Number(index);
+  if (!Number.isFinite(idx) || idx < 0) return;
+  const slide = lecturasAgentViewerState.slides[idx];
+  if (!slide) return;
+  slide.imageStatus = "idle";
+  slide.imageUrl = "";
+  slide.imageDataUrl = "";
+  _lecturasAgentClearSlideImageCaches(slide);
+  _lecturasAgentRenderCurrentSlide();
+  _lecturasAgentGenerateQueue(lecturasAgentViewerState.token, {
+    onlyIndex: idx,
+    forceRegenerate: true
+  }).catch(() => {});
+}
+
+function _lecturasAgentQueueRegenerateAllImages() {
+  lecturasAgentViewerState.regenerateMenuOpen = false;
+  lecturasAgentViewerState.regenerateMenuIndex = -1;
+  _lecturasAgentResetAllSlidesForRegeneration();
+  _lecturasAgentRenderCurrentSlide();
+  _lecturasAgentGenerateQueue(lecturasAgentViewerState.token, {
+    forceRegenerate: true
+  }).catch(() => {});
+}
+
+function _lecturasAgentBuildDownloadName(slide = {}, index = 0) {
+  const title = _lecturasAgentSafePathPart(String(lecturasAgentViewerState.payload?.titulo || "lectura")).slice(0, 48);
+  const kind = String(slide?.kind || "").trim() === "cover" ? "portada" : `parrafo_${Math.max(1, Number(index || 0))}`;
+  return `${title}_${kind}.png`;
+}
+
+async function _lecturasAgentDownloadByUrl(url = "", fileName = "imagen.png") {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  const name = String(fileName || "imagen.png").trim() || "imagen.png";
+  const tryDownloadBlob = async (targetUrl = "") => {
+    const res = await fetch(targetUrl, { method: "GET", mode: "cors", credentials: "omit", cache: "no-store" });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    if (!blob || !String(blob.type || "").startsWith("image/")) return false;
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = name;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return true;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  try {
+    if (await tryDownloadBlob(src)) return true;
+  } catch (_) {}
+  try {
+    const proxyUrl = buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(src)}`);
+    if (await tryDownloadBlob(proxyUrl)) return true;
+  } catch (_) {}
+  return false;
+}
+
+async function _lecturasAgentDownloadCurrentSlideImage() {
+  const idx = Math.max(0, Number(lecturasAgentViewerState.currentIndex || 0));
+  const slide = lecturasAgentViewerState.slides[idx];
+  const src = String(slide?.imageUrl || "").trim();
+  if (!src) return;
+  const ok = await _lecturasAgentDownloadByUrl(src, _lecturasAgentBuildDownloadName(slide, idx));
+  if (!ok) {
+    alert("No se pudo descargar la imagen en este momento.");
+  }
+}
+
+async function _lecturasAgentDownloadAllSlideImages() {
+  const slides = Array.isArray(lecturasAgentViewerState.slides) ? lecturasAgentViewerState.slides : [];
+  const queue = slides
+    .map((slide, idx) => ({ slide, idx }))
+    .filter((it) => String(it.slide?.imageUrl || "").trim());
+  if (!queue.length) {
+    alert("No hay imágenes disponibles para descargar.");
+    return;
+  }
+  let okCount = 0;
+  for (const item of queue) {
+    const src = String(item.slide?.imageUrl || "").trim();
+    const name = _lecturasAgentBuildDownloadName(item.slide, item.idx);
+    const ok = await _lecturasAgentDownloadByUrl(src, name);
+    if (ok) okCount += 1;
+    await _lecturasAgentSleep(140);
+  }
+  if (!okCount) {
+    alert("No se pudieron descargar las imágenes.");
+  }
+}
+
 async function _lecturasAgentGenerateQueue(token = 0, options = {}) {
   const slides = lecturasAgentViewerState.slides;
   if (!Array.isArray(slides) || !slides.length) return;
-  const pending = slides
+  let pending = slides
     .map((slide, idx) => ({ slide, idx }))
     .filter((it) => options?.onlyIndex == null
       ? !it.slide.imageUrl || options?.forceRegenerate === true
       : it.idx === Number(options.onlyIndex));
+  if (options?.onlyIndex == null) {
+    pending = pending.sort((a, b) => {
+      const aCover = String(a.slide?.kind || "").trim() === "cover" ? 1 : 0;
+      const bCover = String(b.slide?.kind || "").trim() === "cover" ? 1 : 0;
+      return aCover - bCover;
+    });
+  }
   if (!pending.length) return;
-  const concurrency = options?.onlyIndex != null ? 1 : 2;
+  // Secuencial para priorizar continuidad visual y de personajes entre párrafos.
+  const concurrency = 1;
   let cursor = 0;
   const workers = Array.from({ length: Math.min(concurrency, pending.length) }).map(async () => {
     while (cursor < pending.length) {
@@ -7520,38 +9482,49 @@ function _lecturasAgentEnsureModal() {
       <section class="lecturas-asc-agent-panel" role="dialog" aria-modal="true" aria-label="Lector de lecturas del agente">
         <header class="lecturas-asc-agent-head">
           <div class="lecturas-asc-agent-head-meta">
-            <span id="lecturasASCAgentCollection" class="lecturas-asc-agent-collection">Lectura</span>
+            <h3 id="lecturasASCAgentTitle" class="lecturas-asc-agent-title">Lectura</h3>
           </div>
-          <button type="button" class="lecturas-asc-agent-close" data-action="close" aria-label="Cerrar visor">&times;</button>
+          <button type="button" class="lecturas-asc-agent-close" data-action="close" aria-label="Cerrar modal">&times;</button>
         </header>
-        <div class="lecturas-asc-agent-book">
-          <button type="button" id="lecturasASCAgentPrev" class="lecturas-asc-agent-nav is-prev" aria-label="Párrafo anterior">‹</button>
-          <div class="lecturas-asc-agent-page">
-            <div class="lecturas-asc-agent-media-wrap">
-              <h3 id="lecturasASCAgentTitle" class="lecturas-asc-agent-title">Lectura</h3>
-              <div id="lecturasASCAgentImageWrap" class="lecturas-asc-agent-media"></div>
+        <div class="lecturas-asc-agent-story-shell">
+          <div id="lecturasASCAgentStoryCanvas" class="lecturas-asc-agent-story-canvas">
+            <div class="lecturas-asc-agent-story-scrim" aria-hidden="true"></div>
+            <div id="lecturasASCAgentImageWrap" class="lecturas-asc-agent-story-image-state" aria-live="polite"></div>
+            <div class="lecturas-asc-agent-story-hud lecturas-asc-agent-story-hud-top">
+              <span id="lecturasASCAgentCounter" class="lecturas-asc-agent-counter"></span>
               <div id="lecturasASCAgentImageActions" class="lecturas-asc-agent-image-actions"></div>
             </div>
-            <article class="lecturas-asc-agent-text-wrap">
-              <div class="lecturas-asc-agent-text-head">
-                <span id="lecturasASCAgentCounter" class="lecturas-asc-agent-counter"></span>
-              </div>
+            <div id="lecturasASCAgentSectionsMenu" class="lecturas-asc-agent-sections-menu" hidden></div>
+            <aside id="lecturasASCAgentSectionsPanel" class="lecturas-asc-agent-sections-panel" hidden></aside>
+            <article class="lecturas-asc-agent-story-content">
               <div id="lecturasASCAgentPageText" class="lecturas-asc-agent-page-text"></div>
             </article>
+            <footer class="lecturas-asc-agent-foot">
+              <div id="lecturasASCAgentDots" class="lecturas-asc-agent-dots"></div>
+            </footer>
           </div>
-          <button type="button" id="lecturasASCAgentNext" class="lecturas-asc-agent-nav is-next" aria-label="Párrafo siguiente">›</button>
+          <button type="button" id="lecturasASCAgentPrev" class="lecturas-asc-agent-nav is-prev" aria-label="Párrafo anterior"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+          <button type="button" id="lecturasASCAgentNext" class="lecturas-asc-agent-nav is-next" aria-label="Párrafo siguiente"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
         </div>
-        <footer class="lecturas-asc-agent-foot">
-          <div id="lecturasASCAgentDots" class="lecturas-asc-agent-dots"></div>
-        </footer>
+        <div id="lecturasASCAgentMusicModal" class="lecturas-asc-agent-music-modal" aria-hidden="true" hidden>
+          <div class="lecturas-asc-agent-music-modal-backdrop" data-action="music-close"></div>
+          <section class="lecturas-asc-agent-music-panel" role="dialog" aria-modal="true" aria-label="Música de la lectura">
+            <header class="lecturas-asc-agent-music-head">
+              <h4>Música de la lectura</h4>
+              <button type="button" class="lecturas-asc-agent-music-close" data-action="music-close" aria-label="Cerrar reproductores">&times;</button>
+            </header>
+            <div id="lecturasASCAgentMusicBody" class="lecturas-asc-agent-music-body"></div>
+          </section>
+        </div>
       </section>
     `;
     document.body.appendChild(modal);
   }
   const refs = {
     modal,
-    collection: modal.querySelector("#lecturasASCAgentCollection"),
+    panel: modal.querySelector(".lecturas-asc-agent-panel"),
     title: modal.querySelector("#lecturasASCAgentTitle"),
+    storyCanvas: modal.querySelector("#lecturasASCAgentStoryCanvas"),
     close: modal.querySelector(".lecturas-asc-agent-close"),
     prev: modal.querySelector("#lecturasASCAgentPrev"),
     next: modal.querySelector("#lecturasASCAgentNext"),
@@ -7559,9 +9532,21 @@ function _lecturasAgentEnsureModal() {
     imageActions: modal.querySelector("#lecturasASCAgentImageActions"),
     counter: modal.querySelector("#lecturasASCAgentCounter"),
     pageText: modal.querySelector("#lecturasASCAgentPageText"),
-    dots: modal.querySelector("#lecturasASCAgentDots")
+    dots: modal.querySelector("#lecturasASCAgentDots"),
+    sectionsMenu: modal.querySelector("#lecturasASCAgentSectionsMenu"),
+    sectionsPanel: modal.querySelector("#lecturasASCAgentSectionsPanel"),
+    musicModal: modal.querySelector("#lecturasASCAgentMusicModal"),
+    musicBody: modal.querySelector("#lecturasASCAgentMusicBody")
   };
+  if (refs.prev) refs.prev.innerHTML = `<i class="fas fa-chevron-left" aria-hidden="true"></i>`;
+  if (refs.next) refs.next.innerHTML = `<i class="fas fa-chevron-right" aria-hidden="true"></i>`;
   modal.addEventListener("click", (e) => {
+    const closeMusic = e.target?.closest?.("[data-action='music-close']");
+    if (closeMusic) {
+      lecturasAgentViewerState.musicPanelOpen = false;
+      _lecturasAgentRenderMusicPanel();
+      return;
+    }
     const closeAction = e.target?.closest?.("[data-action='close']");
     if (closeAction) {
       window.cbCloseLecturasAgentViewer?.();
@@ -7572,25 +9557,165 @@ function _lecturasAgentEnsureModal() {
       _lecturasAgentSetSlide(Number(dot.dataset.dotIndex || 0), { manual: true });
       return;
     }
-    const retry = e.target?.closest?.("[data-retry-index]");
-    if (retry) {
-      const idx = Number(retry.dataset.retryIndex || -1);
-      const slide = lecturasAgentViewerState.slides[idx];
-      if (!slide) return;
-      slide.imageStatus = "idle";
-      slide.imageUrl = "";
-      if (slide.cacheKey) lecturasAgentViewerState.memCache.delete(slide.cacheKey);
+    const toggleRegenerateMenuBtn = e.target?.closest?.("[data-action='toggle-regenerate-menu']");
+    if (toggleRegenerateMenuBtn) {
+      const idx = Number(toggleRegenerateMenuBtn.dataset.retryIndex || lecturasAgentViewerState.currentIndex || 0);
+      const same = lecturasAgentViewerState.regenerateMenuOpen === true
+        && Number(lecturasAgentViewerState.regenerateMenuIndex) === Number(idx);
+      lecturasAgentViewerState.regenerateMenuOpen = !same;
+      lecturasAgentViewerState.regenerateMenuIndex = !same ? idx : -1;
       _lecturasAgentRenderCurrentSlide();
-      _lecturasAgentGenerateQueue(lecturasAgentViewerState.token, {
-        onlyIndex: idx,
-        forceRegenerate: true
-      }).catch(() => {});
+      return;
+    }
+    const toggleDownloadMenuBtn = e.target?.closest?.("[data-action='toggle-download-menu']");
+    if (toggleDownloadMenuBtn) {
+      const idx = Number(toggleDownloadMenuBtn.dataset.downloadIndex || lecturasAgentViewerState.currentIndex || 0);
+      const same = lecturasAgentViewerState.downloadMenuOpen === true
+        && Number(lecturasAgentViewerState.downloadMenuIndex) === Number(idx);
+      lecturasAgentViewerState.downloadMenuOpen = !same;
+      lecturasAgentViewerState.downloadMenuIndex = !same ? idx : -1;
+      _lecturasAgentRenderCurrentSlide();
+      return;
+    }
+    const regenerateCurrentImageBtn = e.target?.closest?.("[data-action='regenerate-current-image']");
+    if (regenerateCurrentImageBtn) {
+      lecturasAgentViewerState.regenerateMenuOpen = false;
+      lecturasAgentViewerState.regenerateMenuIndex = -1;
+      const idx = Number(regenerateCurrentImageBtn.dataset.retryIndex || -1);
+      _lecturasAgentQueueRegenerateCurrentImage(idx);
+      return;
+    }
+    const regenerateAllImagesBtn = e.target?.closest?.("[data-action='regenerate-all-images']");
+    if (regenerateAllImagesBtn) {
+      _lecturasAgentQueueRegenerateAllImages();
+      return;
+    }
+    const downloadCurrentImageBtn = e.target?.closest?.("[data-action='download-current-image']");
+    if (downloadCurrentImageBtn) {
+      lecturasAgentViewerState.downloadMenuOpen = false;
+      lecturasAgentViewerState.downloadMenuIndex = -1;
+      _lecturasAgentDownloadCurrentSlideImage();
+      return;
+    }
+    const downloadAllImagesBtn = e.target?.closest?.("[data-action='download-all-images']");
+    if (downloadAllImagesBtn) {
+      lecturasAgentViewerState.downloadMenuOpen = false;
+      lecturasAgentViewerState.downloadMenuIndex = -1;
+      _lecturasAgentDownloadAllSlideImages();
       return;
     }
     const autoReadBtn = e.target?.closest?.("[data-action='auto-read']");
     if (autoReadBtn) {
       _lecturasAgentToggleAutoRead();
+      return;
     }
+    const fullscreenBtn = e.target?.closest?.("[data-action='toggle-fullscreen']");
+    if (fullscreenBtn) {
+      _lecturasAgentToggleFullscreen().then(() => {
+        if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+      }).catch(() => {});
+      return;
+    }
+    const musicBtn = e.target?.closest?.("[data-action='generate-reading-music']");
+    if (musicBtn) {
+      _lecturasAgentRunMusicGeneration(false, true);
+      return;
+    }
+    const openMusicBtn = e.target?.closest?.("[data-action='open-reading-music']");
+    if (openMusicBtn) {
+      lecturasAgentViewerState.musicPanelOpen = true;
+      _lecturasAgentRenderMusicPanel();
+      return;
+    }
+    const regenerateMusicBtn = e.target?.closest?.("[data-action='regenerate-reading-music']");
+    if (regenerateMusicBtn) {
+      _lecturasAgentRunMusicGeneration(true, true);
+      return;
+    }
+    const deleteMusicBtn = e.target?.closest?.("[data-action='delete-reading-music']");
+    if (deleteMusicBtn) {
+      _lecturasAgentRunMusicDelete();
+      return;
+    }
+    const uploadReadingMusicBtn = e.target?.closest?.("[data-action='upload-reading-music-only']");
+    if (uploadReadingMusicBtn) {
+      _lecturasAgentRunMusicUpload("reading");
+      return;
+    }
+    const uploadGameMusicBtn = e.target?.closest?.("[data-action='upload-game-music-only']");
+    if (uploadGameMusicBtn) {
+      _lecturasAgentRunMusicUpload("game");
+      return;
+    }
+    const menuBtn = e.target?.closest?.("[data-action='toggle-sections-menu']");
+    if (menuBtn) {
+      const nextOpen = lecturasAgentViewerState.menuOpen !== true;
+      lecturasAgentViewerState.menuOpen = nextOpen;
+      _lecturasAgentSetVisibleSection("");
+      _lecturasAgentRenderCurrentSlide();
+      return;
+    }
+    const closeSectionsPanelBtn = e.target?.closest?.("[data-action='close-sections-panel']");
+    if (closeSectionsPanelBtn) {
+      _lecturasAgentSetVisibleSection("");
+      _lecturasAgentRenderCurrentSlide();
+      return;
+    }
+    const sectionBtn = e.target?.closest?.("[data-action='toggle-section']");
+    if (sectionBtn) {
+      const key = String(sectionBtn.dataset.section || "").trim();
+      if (key && Object.prototype.hasOwnProperty.call(lecturasAgentViewerState.visibleSections, key)) {
+        const hasContent = String(lecturasAgentViewerState.sections?.[key] || "").trim().length > 0;
+        if (hasContent) {
+          _lecturasAgentSetVisibleSection(key);
+          lecturasAgentViewerState.menuOpen = false;
+          _lecturasAgentRenderCurrentSlide();
+        }
+      }
+      return;
+    }
+    if (lecturasAgentViewerState.menuOpen) {
+      const insideMenu = e.target?.closest?.("#lecturasASCAgentSectionsMenu, [data-action='toggle-sections-menu'], #lecturasASCAgentSectionsPanel");
+      if (!insideMenu) {
+        lecturasAgentViewerState.menuOpen = false;
+        _lecturasAgentRenderCurrentSlide();
+      }
+    }
+    if (lecturasAgentViewerState.regenerateMenuOpen) {
+      const insideRegenMenu = e.target?.closest?.("[data-regenerate-menu], [data-action='toggle-regenerate-menu']");
+      if (!insideRegenMenu) {
+        lecturasAgentViewerState.regenerateMenuOpen = false;
+        lecturasAgentViewerState.regenerateMenuIndex = -1;
+        _lecturasAgentRenderCurrentSlide();
+      }
+    }
+    if (lecturasAgentViewerState.downloadMenuOpen) {
+      const insideDownloadMenu = e.target?.closest?.("[data-download-menu], [data-action='toggle-download-menu']");
+      if (!insideDownloadMenu) {
+        lecturasAgentViewerState.downloadMenuOpen = false;
+        lecturasAgentViewerState.downloadMenuIndex = -1;
+        _lecturasAgentRenderCurrentSlide();
+      }
+    }
+  });
+  modal.addEventListener("input", (e) => {
+    const fieldEl = e.target?.closest?.("[data-music-field]");
+    if (!fieldEl) return;
+    _lecturasAgentApplyMusicSettingField(String(fieldEl.dataset.musicField || ""), fieldEl.value);
+  });
+  modal.addEventListener("change", (e) => {
+    const fieldEl = e.target?.closest?.("[data-music-field]");
+    if (!fieldEl) return;
+    _lecturasAgentApplyMusicSettingField(String(fieldEl.dataset.musicField || ""), fieldEl.value);
+    if (lecturasAgentViewerState.musicPanelOpen) _lecturasAgentRenderMusicPanel();
+  });
+  modal.addEventListener("change", (e) => {
+    const uploadEl = e.target?.closest?.("[data-music-upload]");
+    if (!uploadEl) return;
+    const mode = String(uploadEl.dataset.musicUpload || "").trim().toLowerCase();
+    const file = uploadEl.files?.[0] || null;
+    _lecturasAgentApplyMusicUploadFile(mode, file);
+    if (lecturasAgentViewerState.musicPanelOpen) _lecturasAgentRenderMusicPanel();
   });
   refs.prev?.addEventListener("click", () => _lecturasAgentSetSlide(lecturasAgentViewerState.currentIndex - 1, { manual: true }));
   refs.next?.addEventListener("click", () => _lecturasAgentSetSlide(lecturasAgentViewerState.currentIndex + 1, { manual: true }));
@@ -7612,6 +9737,12 @@ function _lecturasAgentEnsureModal() {
     };
     document.addEventListener("keydown", lecturasAgentViewerState.keyHandler);
   }
+  if (!lecturasAgentViewerState.fullscreenHandler) {
+    lecturasAgentViewerState.fullscreenHandler = () => {
+      if (_lecturasAgentViewerIsOpen()) _lecturasAgentRenderCurrentSlide();
+    };
+    document.addEventListener("fullscreenchange", lecturasAgentViewerState.fullscreenHandler);
+  }
   lecturasAgentViewerState.refs = refs;
   return refs;
 }
@@ -7624,7 +9755,8 @@ window.cbOpenLecturasAgentViewer = function cbOpenLecturasAgentViewer(payload = 
   const refs = _lecturasAgentEnsureModal();
   _lecturasAgentLoadCacheStore();
   const rawHtml = String(payload?.htmlLectura || payload?.contenidoHTML || "").trim() || "<p>(Sin contenido)</p>";
-  const normalized = _lecturasAgentNormalizeParagraphHtml(rawHtml);
+  const prepared = _lecturasAgentBuildViewerContent(rawHtml, payload || {});
+  const normalized = _lecturasAgentNormalizeParagraphHtml(prepared.narrativeHtml || rawHtml);
   const sourceCollection = String(payload?.sourceCollection || payload?.coleccion || "").trim() || "lecturasNuevas";
   const title = String(payload?.titulo || payload?.tema || "Lectura sin título").trim();
   lecturasAgentViewerState.token += 1;
@@ -7632,37 +9764,100 @@ window.cbOpenLecturasAgentViewer = function cbOpenLecturasAgentViewer(payload = 
   lecturasAgentViewerState.payload = {
     id: String(payload?.id || "").trim(),
     sourceCollection,
-    titulo: title
+    titulo: title,
+    allowMusicGeneration: payload?.allowMusicGeneration === true,
+    musicAssets: payload?.musicAssets || {},
+    musicConfig: payload?.musicConfig || payload?.musicAssets?.musicConfig || {}
   };
-  lecturasAgentViewerState.slides = normalized.length
+  const incomingMusic = payload?.musicAssets || {};
+  const incomingMusicSettings = _lecturasAgentNormalizeMusicSettings(
+    payload?.musicConfig || incomingMusic?.musicConfig || _lecturasAgentLoadMusicSettingsFromStorage()
+  );
+  _lecturasAgentSaveMusicSettingsToStorage(incomingMusicSettings);
+  lecturasAgentViewerState.music = {
+    readingUrl: String(incomingMusic?.readingUrl || "").trim(),
+    gameUrl: String(incomingMusic?.gameUrl || "").trim(),
+    readingPath: String(incomingMusic?.readingPath || "").trim(),
+    gamePath: String(incomingMusic?.gamePath || "").trim(),
+    generatedAt: String(incomingMusic?.generatedAt || "").trim(),
+    variationNonce: String(incomingMusic?.variationNonce || "").trim(),
+    settings: incomingMusicSettings,
+    uploadReadingFile: null,
+    uploadGameFile: null,
+    uploading: false,
+    generating: false,
+    deleting: false,
+    error: ""
+  };
+  const paragraphSlides = normalized.length
     ? normalized.map((item, idx) => {
       const paragraphHash = _lecturasAgentHash(item.text);
       const cacheKey = `${sourceCollection}:${lecturasAgentViewerState.payload.id}:${paragraphHash}`;
       const cached = String(lecturasAgentViewerState.memCache.get(cacheKey) || "").trim();
+      const inlineCached = String(lecturasAgentViewerState.inlineImageCache.get(cacheKey) || "").trim();
       return {
         id: `${idx + 1}`,
+        kind: "paragraph",
         html: item.html,
         text: item.text,
         paragraphHash,
         cacheKey,
         storagePath: _lecturasAgentBuildStoragePath(lecturasAgentViewerState.payload, { paragraphHash, text: item.text }),
         imageUrl: cached,
+        imageDataUrl: inlineCached || (/^data:image\//i.test(cached) ? cached : ""),
         imageStatus: cached ? "ready" : "idle"
       };
     })
     : [{
       id: "1",
+      kind: "paragraph",
       html: "<p>(Sin contenido)</p>",
       text: "",
       paragraphHash: "sin_parrafo",
       cacheKey: "",
       storagePath: "",
       imageUrl: "",
+      imageDataUrl: "",
       imageStatus: "error"
     }];
+  const storyGuide = _lecturasAgentBuildVisualStoryGuide(paragraphSlides);
+  lecturasAgentViewerState.payload.visualStoryGuide = storyGuide;
+  const coverParagraphHash = "portada";
+  const coverCacheKey = `${sourceCollection}:${lecturasAgentViewerState.payload.id}:${coverParagraphHash}`;
+  const coverCached = String(lecturasAgentViewerState.memCache.get(coverCacheKey) || "").trim();
+  const coverInlineCached = String(lecturasAgentViewerState.inlineImageCache.get(coverCacheKey) || "").trim();
+  const coverSlide = {
+    id: "cover",
+    kind: "cover",
+    html: "<p>Portada</p>",
+    text: storyGuide || String(payload?.resumen || "").trim() || String(payload?.sinopsis || "").trim(),
+    paragraphHash: coverParagraphHash,
+    cacheKey: coverCacheKey,
+    storagePath: _lecturasAgentBuildStoragePath(lecturasAgentViewerState.payload, { paragraphHash: coverParagraphHash, text: storyGuide || "portada" }),
+    imageUrl: coverCached,
+    imageDataUrl: coverInlineCached || (/^data:image\//i.test(coverCached) ? coverCached : ""),
+    imageStatus: coverCached ? "ready" : "idle"
+  };
+  lecturasAgentViewerState.slides = [coverSlide, ...paragraphSlides];
+  lecturasAgentViewerState.sections = {
+    preguntas: String(prepared.sections?.preguntas || "").trim(),
+    bibliografia: String(prepared.sections?.bibliografia || "").trim(),
+    sinonimos: String(prepared.sections?.sinonimos || "").trim()
+  };
+  lecturasAgentViewerState.visibleSections = { preguntas: false, bibliografia: false, sinonimos: false };
+  lecturasAgentViewerState.menuOpen = false;
+  lecturasAgentViewerState.regenerateMenuOpen = false;
+  lecturasAgentViewerState.regenerateMenuIndex = -1;
+  lecturasAgentViewerState.downloadMenuOpen = false;
+  lecturasAgentViewerState.downloadMenuIndex = -1;
+  lecturasAgentViewerState.musicPanelOpen = false;
   lecturasAgentViewerState.currentIndex = 0;
+  if (refs.sectionsPanel) {
+    refs.sectionsPanel.hidden = true;
+    refs.sectionsPanel.innerHTML = "";
+  }
+  if (refs.sectionsMenu) refs.sectionsMenu.hidden = true;
   _lecturasAgentStopAutoRead({ silent: true });
-  refs.collection.textContent = sourceCollection === "lecturasASC" ? "Lecturas ASC" : "Lecturas nuevas";
   refs.title.textContent = title;
   refs.modal.classList.add("is-open");
   refs.modal.setAttribute("aria-hidden", "false");
@@ -7675,6 +9870,29 @@ window.cbCloseLecturasAgentViewer = function cbCloseLecturasAgentViewer() {
   const refs = _lecturasAgentEnsureModal();
   lecturasAgentViewerState.token += 1;
   _lecturasAgentStopAutoRead({ silent: true });
+  lecturasAgentViewerState.menuOpen = false;
+  lecturasAgentViewerState.regenerateMenuOpen = false;
+  lecturasAgentViewerState.regenerateMenuIndex = -1;
+  lecturasAgentViewerState.downloadMenuOpen = false;
+  lecturasAgentViewerState.downloadMenuIndex = -1;
+  lecturasAgentViewerState.visibleSections = { preguntas: false, bibliografia: false, sinonimos: false };
+  lecturasAgentViewerState.musicPanelOpen = false;
+  lecturasAgentViewerState.music = {
+    readingUrl: "",
+    gameUrl: "",
+    readingPath: "",
+    gamePath: "",
+    generating: false,
+    error: ""
+  };
+  if (refs.sectionsPanel) {
+    refs.sectionsPanel.hidden = true;
+    refs.sectionsPanel.innerHTML = "";
+  }
+  if (refs.sectionsMenu) refs.sectionsMenu.hidden = true;
+  if (_lecturasAgentIsFullscreenActive()) {
+    document.exitFullscreen().catch(() => {});
+  }
   refs.modal.classList.remove("is-open");
   refs.modal.setAttribute("aria-hidden", "true");
   return true;
@@ -7706,6 +9924,98 @@ function _setEstadoUIAgentMaster(enabled = true) {
   if (toggle && toggle.checked !== value) toggle.checked = value;
 }
 
+function _normalizarRolUnidad(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function _aplicarVisibilidadAdminUnidad(isAdmin = false) {
+  const allow = isAdmin === true;
+  const footer = document.querySelector(".unidad-global-agents-footer");
+  const mainStack = document.querySelector(".studio-shell .studio-main-stack");
+  if (footer) {
+    footer.hidden = !allow;
+    footer.setAttribute("aria-hidden", allow ? "false" : "true");
+  }
+  if (mainStack) {
+    mainStack.classList.toggle("no-agents-footer", !allow);
+  }
+  const commandBtn = document.getElementById("themeCommandSettingsBtn");
+  if (commandBtn) {
+    commandBtn.classList.toggle("d-none", !allow);
+    commandBtn.setAttribute("aria-hidden", allow ? "false" : "true");
+    if (!allow) commandBtn.setAttribute("tabindex", "-1");
+    else commandBtn.removeAttribute("tabindex");
+  }
+}
+
+function _forzarEstadoAgenteVozNoAdmin(disabled = false) {
+  const mustDisable = disabled === true;
+  const applyMeta = (raw = null) => {
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    const payload = (parsed && typeof parsed === "object") ? parsed : {};
+    const hasEnvelope = Object.prototype.hasOwnProperty.call(payload, "commands") || Object.prototype.hasOwnProperty.call(payload, "meta");
+    const commands = hasEnvelope ? (payload.commands && typeof payload.commands === "object" ? payload.commands : {}) : payload;
+    const metaBase = hasEnvelope ? (payload.meta && typeof payload.meta === "object" ? payload.meta : {}) : {};
+    const nextMeta = { ...metaBase, agentEnabled: mustDisable ? false : (metaBase.agentEnabled !== false) };
+    return hasEnvelope ? { ...payload, commands, meta: nextMeta } : { commands, meta: nextMeta };
+  };
+  try {
+    const rawCurrent = localStorage.getItem(VOICE_COMMANDS_STORAGE_KEY);
+    const parsedCurrent = rawCurrent ? JSON.parse(rawCurrent) : null;
+    localStorage.setItem(VOICE_COMMANDS_STORAGE_KEY, JSON.stringify(applyMeta(parsedCurrent)));
+  } catch (_) {
+    try {
+      localStorage.setItem(VOICE_COMMANDS_STORAGE_KEY, JSON.stringify({ commands: {}, meta: { agentEnabled: !mustDisable } }));
+    } catch (_) {}
+  }
+  try {
+    const rawDefaults = localStorage.getItem(VOICE_COMMANDS_DEFAULT_STORAGE_KEY);
+    const parsedDefaults = rawDefaults ? JSON.parse(rawDefaults) : null;
+    localStorage.setItem(VOICE_COMMANDS_DEFAULT_STORAGE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      ...applyMeta(parsedDefaults)
+    }));
+  } catch (_) {}
+  voiceCommandMetaCache = {
+    ...(_leerMetaComandosVoz() || {}),
+    agentEnabled: mustDisable ? false : true
+  };
+  const toggle = document.getElementById("voiceAgentEnabledToggle");
+  if (toggle instanceof HTMLInputElement) {
+    toggle.checked = !mustDisable;
+    toggle.disabled = mustDisable;
+  }
+  if (mustDisable) {
+    detenerEscuchaVozUnidad();
+  } else {
+    actualizarEstadoBotonVozUnidad();
+  }
+  try {
+    window.dispatchEvent(new CustomEvent("cb-voice-commands-updated"));
+  } catch (_) {}
+}
+
+async function _resolverRolUsuarioUnidad(user = null) {
+  const uid = String(user?.uid || "").trim();
+  if (!uid) return "";
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    if (snap?.exists?.()) {
+      const data = snap.data() || {};
+      const role = _normalizarRolUnidad(data?.role || data?.rol || data?.userRole || "");
+      if (role) return role;
+    }
+  } catch (_) {
+    // noop
+  }
+  try {
+    const token = await user.getIdTokenResult();
+    return _normalizarRolUnidad(token?.claims?.role || "");
+  } catch (_) {
+    return "";
+  }
+}
+
 function _esAgenteMasterHabilitado() {
   return unidadAgentMasterEnabled === true;
 }
@@ -7717,6 +10027,17 @@ function _aplicarEstadoMasterAgente(enabled = true, options = {}) {
   _setEstadoUIAgentMaster(next);
   if (persist) _guardarEstadoMasterAgenteStorage(next);
   if (next) return;
+  try { _detenerAudioWorkflowPlay(); } catch (_) {}
+  try { _detenerLecturaCompletaCharly({ clearResume: true, restoreVoice: false }); } catch (_) {}
+  try { _clearAgentSpeechPlaybackTimer(); } catch (_) {}
+  try { _resetAgentSpeechPlaybackCallbacks(); } catch (_) {}
+  try { geminiLivePendingSpeechQueue = []; } catch (_) {}
+  try { _setIndicadorHablandoCharly(false); } catch (_) {}
+  try {
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  } catch (_) {}
+  try { window.cbCloseLecturasAgentViewer?.(); } catch (_) {}
+  detenerGeminiLiveUnidad().catch(() => {});
   try {
     const ctrl = _asegurarControladorAgenteUnidad();
     if (ctrl?.isExclusive?.()) ctrl.close();
@@ -7825,7 +10146,7 @@ function hablarUnidad(texto = "", opciones = {}) {
     _hablarUnidadLocalRapida(textoPlano, { cancelarPrevio });
     return;
   }
-  if (GEMINI_LIVE_VOICE_ONLY && hasRuntimeGeminiApiKey()) {
+  if (GEMINI_LIVE_VOICE_ONLY) {
     if (preferLive) {
       _hablarCentralizadoLive(textoPlano, { cancelarPrevio });
       return;
@@ -8151,7 +10472,7 @@ async function _solicitarAudioTtsGemini(ai, Modality, texto, voiceName) {
 async function _obtenerClienteGeminiTtsUnidad() {
   if (geminiTtsAiClientUnidad) return geminiTtsAiClientUnidad;
   const apiKey = getRuntimeGeminiApiKey();
-  if (!apiKey || apiKey.includes("__GEMINI_API_KEY_LOCAL__")) {
+  if (!apiKey) {
     throw new Error("GEMINI_API_KEY no disponible para TTS.");
   }
   const { GoogleGenAI } = await _loadGoogleGenAiLiveModule();
@@ -10156,6 +12477,13 @@ function _segmentarComandosVoz(transcripcion = "") {
 }
 
 async function procesarComandoVozUnidad(transcripcion = "", opciones = {}) {
+  if (_lecturasAgentViewerIsOpen()) {
+    const handledViewer = _lecturasAgentHandleViewerVoiceCommand(transcripcion);
+    if (handledViewer) return;
+    // Mientras el visor está abierto, ignora ruido/plática suelta para que no
+    // se cuele al flujo del agente y responda con errores de comando.
+    return;
+  }
   if (_lecturasAgentIsAutoReadSpeaking()) {
     return;
   }
@@ -10677,7 +13005,11 @@ async function iniciarGeminiLiveUnidad(options = {}) {
   const desiredConfigKey = _buildGeminiLiveSessionConfigKey(modelLive);
 
   if (!forceRestart && geminiLiveSessionUnidad && geminiLiveIsOpen && geminiLiveSessionConfigKey === desiredConfigKey) {
-    if (withMic) await _asegurarCapturaMicGeminiLive(geminiLiveActiveSessionEpoch);
+    if (withMic) {
+      await _asegurarCapturaMicGeminiLive(geminiLiveActiveSessionEpoch);
+    } else {
+      geminiLiveMicUploadPaused = true;
+    }
     return geminiLiveSessionUnidad;
   }
 
@@ -10691,6 +13023,14 @@ async function iniciarGeminiLiveUnidad(options = {}) {
 
     let liveApiKey = "";
     try {
+      if (!_debeIntentarTokenEfimeroUnidad()) {
+        geminiLiveDisableEphemeralToken = true;
+        try { sessionStorage.setItem("cb_disable_gemini_ephemeral_token", "1"); } catch (_) {}
+        throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
+      }
+      if (geminiLiveDisableEphemeralToken) {
+        throw new Error("LIVE_TOKEN_ENDPOINT_NOT_FOUND");
+      }
       const tokenJson = await requestGeminiLiveTokenViaApi(
         modelLive,
         _buildLiveSystemInstructionActual()
@@ -10777,7 +13117,7 @@ async function iniciarGeminiLiveUnidad(options = {}) {
               if (permitirAudioSalida) _reproducirPcmGemini(data);
             }
           });
-          if (_agenteUnidadEnModoExclusivo() && message?.serverContent?.turnComplete === true) {
+          if (message?.serverContent?.turnComplete === true) {
             _programarCierreHablaAgenteLive("turn-complete");
           }
           if (charlyLecturaEnCurso && message?.serverContent?.turnComplete === true) {
@@ -11403,15 +13743,24 @@ function _aplicarPerfilesAgente(map = null, options = {}) {
 function _inicializarSincronizacionPerfilesAgentePorAuth() {
   if (unidadAgentProfilesAuthWatcherReady) return;
   unidadAgentProfilesAuthWatcherReady = true;
+  _aplicarVisibilidadAdminUnidad(false);
   try {
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
       const uid = String(user?.uid || "").trim();
       unidadUserPersonaCache = { ts: 0, uid: "", name: "", gender: "neutral" };
       unidadAgentProfilesCache = null;
       unidadAgentProfilesCacheUid = "";
       unidadAgentProfilesSyncState = { uid: "", loaded: false, loadingPromise: null };
       _aplicarPerfilesAgente(_obtenerPerfilesAgente(), { persist: false, syncRemote: false });
-      if (!uid) return;
+      if (!uid) {
+        _aplicarVisibilidadAdminUnidad(false);
+        _forzarEstadoAgenteVozNoAdmin(true);
+        return;
+      }
+      const role = await _resolverRolUsuarioUnidad(user);
+      const isAdmin = role === "admin";
+      _aplicarVisibilidadAdminUnidad(isAdmin);
+      _forzarEstadoAgenteVozNoAdmin(!isAdmin);
       _cargarPerfilesAgenteFirebase({ force: true }).catch(() => {});
     });
   } catch (_) {}
@@ -11972,16 +14321,45 @@ async function _resolverLecturaPorId(idLectura = "") {
   let lectura = pool.find(l => l.id === idLectura) || null;
   if (lectura) return lectura;
 
-  // Fallback: leer documento directo por ID en ambas colecciones.
+  // Fallback: leer documento directo por ID en colecciones principales y ASC.
+  try {
+    const refLegacy = doc(db, "lecturas", idLectura);
+    const snapLegacy = await getDoc(refLegacy);
+    if (snapLegacy.exists()) {
+      return {
+        id: snapLegacy.id,
+        sourceCollection: "lecturas",
+        coleccion: "lecturas",
+        ...snapLegacy.data(),
+        tipo: "principal"
+      };
+    }
+  } catch (_) { }
   try {
     const refNueva = doc(db, "lecturasNuevas", idLectura);
     const snapNueva = await getDoc(refNueva);
-    if (snapNueva.exists()) return { id: snapNueva.id, ...snapNueva.data(), tipo: "principal" };
+    if (snapNueva.exists()) {
+      return {
+        id: snapNueva.id,
+        sourceCollection: "lecturasNuevas",
+        coleccion: "lecturasNuevas",
+        ...snapNueva.data(),
+        tipo: "principal"
+      };
+    }
   } catch (_) { }
   try {
     const refASC = doc(db, "lecturasASC", idLectura);
     const snapASC = await getDoc(refASC);
-    if (snapASC.exists()) return { id: snapASC.id, ...snapASC.data(), tipo: "asc" };
+    if (snapASC.exists()) {
+      return {
+        id: snapASC.id,
+        sourceCollection: "lecturasASC",
+        coleccion: "lecturasASC",
+        ...snapASC.data(),
+        tipo: "asc"
+      };
+    }
   } catch (_) { }
   return null;
 }
@@ -12137,8 +14515,8 @@ async function actualizarLecturasASC() {
       ...doc.data()
     }));
 
-    // ✅ IMPORTANTE: Guardar también en variable global
-    window.lecturasASC = lecturasASC;
+    // Mantén la lista global completa para el modal/buscador; esta vista usa solo la filtrada.
+    window.lecturasASCFiltradas = lecturasASC;
 
     selectTemaASC.innerHTML = "<option value=''>Selecciona lectura ASC</option>";
     lecturasASC.forEach(l => {
@@ -12403,11 +14781,13 @@ document.head.appendChild(estiloInstrucciones);
 function crearModalInstrucciones() {
   const modal = document.createElement('div');
   modal.id = 'modalInstruccionesGemini';
+  modal.className = 'cb-modal-runtime-overlay';
+  modal.style.display = 'none';
   modal.innerHTML = `
-    <div class="modal-contenido-instrucciones">
-        <div class="modal-header-instrucciones">
-            <h3><i class="fas fa-comment-alt" style="color: #9c27b0; margin-right: 8px;"></i>Instrucciones para Gemini</h3>
-            <button id="cerrarModalInstrucciones" style="background:none;border:none;font-size:20px;cursor:pointer;color:#666;">&times;</button>
+    <div class="modal-contenido-instrucciones cb-modal-runtime-panel">
+        <div class="modal-header-instrucciones cb-modal-head">
+            <h3 class="cb-modal-title"><i class="fas fa-comment-alt" style="color: #9c27b0; margin-right: 8px;"></i>Instrucciones para Gemini</h3>
+            <button type="button" id="cerrarModalInstrucciones" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
         </div>
         <div>
             <p><strong><i class="fas fa-folder" style="color: #2c5aa0;"></i> Categoría:</strong> <span id="categoriaInstrucciones" style="color: #2c5aa0; font-weight: bold;"></span></p>
@@ -12425,7 +14805,7 @@ function crearModalInstrucciones() {
 • Añadir actividades prácticas..."
             ></textarea>
             
-            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;">
+            <div class="cb-modal-foot" style="margin-top: 20px;">
                 <button id="btnBorrarInstrucciones" style="padding: 8px 16px; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
                     <i class="fas fa-trash-alt"></i> Borrar
                 </button>
@@ -13526,7 +15906,7 @@ async function verificarSecuencia() {
         tooltip.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <strong style="color: #9c27b0;">${categoria}</strong>
-                <button onclick="this.parentElement.parentElement.remove()" 
+                <button type="button" class="unidad-tooltip-close"
                         style="background: none; border: none; color: #666; cursor: pointer; font-size: 16px;">
                     ×
                 </button>
@@ -13546,6 +15926,9 @@ async function verificarSecuencia() {
         }
 
         document.body.appendChild(tooltip);
+        tooltip.querySelector(".unidad-tooltip-close")?.addEventListener("click", () => {
+          tooltip.remove();
+        });
 
         // Auto-remover después de 5 segundos
         setTimeout(() => {
@@ -16673,6 +19056,14 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
     }
 
     const apiMsg = String(data?.error?.message || "");
+    const isAuthConfigError = (
+      response.status === 401 ||
+      response.status === 403 ||
+      /permission_denied|api key|reported as leaked|unauthorized/i.test(apiMsg)
+    );
+    if (isAuthConfigError) {
+      throw new Error(`GEMINI_BACKEND_FORBIDDEN:${apiMsg || `HTTP ${response.status}`}`);
+    }
     if (response.status === 429 || response.status === 503 || /high demand/i.test(apiMsg)) {
       marcarModeloEnAltaDemanda(modeloActual, apiMsg || "alta demanda", response.status);
     } else if (response.status === 404) {
@@ -16702,6 +19093,26 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
     clearTimeout(timeoutId);
     window.abortControllersGemini.delete(controller);
 
+    const errText = String(err?.message || "");
+    if (errText.startsWith("GEMINI_BACKEND_FORBIDDEN:")) {
+      const detail = errText.replace("GEMINI_BACKEND_FORBIDDEN:", "").trim();
+      if (typeof window.onGeminiStatus === "function") {
+        window.onGeminiStatus("Gemini rechazó la API key del backend");
+      }
+      throw new Error(`Gemini rechazó la API key del backend: ${detail}`);
+    }
+    if (String(err?.message || "") === "API_UNAVAILABLE") {
+      if (typeof window.onGeminiStatus === "function") {
+        window.onGeminiStatus("Backend Gemini no configurado en producción");
+      }
+      throw new Error("Backend Gemini no configurado en producción. Define `apiBaseUrl` en runtime-config.js.");
+    }
+    if (String(err?.message || "") === "BACKEND_GEMINI_OFFLINE") {
+      if (typeof window.onGeminiStatus === "function") {
+        window.onGeminiStatus("Backend Gemini local offline (puerto 8787)");
+      }
+      throw new Error("Backend Gemini local offline. Inicia `npm run api:dev`.");
+    }
     if (err?.message === "CANCELADO_PROYECTOS" || (err?.name === "AbortError" && window.cancelarProyectos)) {
       throw new Error("CANCELADO_PROYECTOS");
     }
@@ -18263,6 +20674,7 @@ function abrirModalModificarTexto() {
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'modal-modificar-texto';
+    modal.className = 'cb-runtime-inline-modal';
     modal.style.cssText = `
             position: fixed;
             top: 50%;
@@ -18284,9 +20696,12 @@ function abrirModalModificarTexto() {
 
     modal.innerHTML = `
             <div style="margin-bottom: 12px;">
-                <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                    <i class="fas fa-edit" style="color: #4CAF50; font-size: 13px; margin-right: 5px;"></i>
-                    <h3 style="margin: 0; font-size: 13px; font-weight: 600;">Editar texto seleccionado</h3>
+                <div class="cb-modal-head" style="margin-bottom: 8px;">
+                    <h3 class="cb-modal-title" style="font-size: 13px;">
+                      <i class="fas fa-edit" style="color: #4CAF50; font-size: 13px; margin-right: 5px;"></i>
+                      Editar texto seleccionado
+                    </h3>
+                    <button type="button" id="cerrar-modal-modificar-texto" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
                 </div>
                 
                 <div style="margin-bottom: 8px;">
@@ -18310,7 +20725,7 @@ function abrirModalModificarTexto() {
                     <div id="texto-modificado-preview" style="background: #e8f5e9; padding: 6px; border-radius: 3px; border: 1px solid #c3e6cb; font-size: 11px; max-height: 100px; overflow-y: auto; line-height: 1.3;"></div>
                 </div>
                 
-                <div style="display: flex; gap: 6px; justify-content: flex-end; padding-top: 8px; border-top: 1px solid #eee;">
+                <div class="cb-modal-foot" style="gap: 6px;">
                     <button id="btn-cancelar-modificacion" style="background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">
                         <i class="fas fa-times"></i> Cancelar
                     </button>
@@ -18330,6 +20745,9 @@ function abrirModalModificarTexto() {
     document.getElementById('btn-generar-modificacion').addEventListener('click', generarTextoModificado);
     document.getElementById('btn-aplicar-modificacion').addEventListener('click', aplicarCambiosTexto);
     document.getElementById('btn-cancelar-modificacion').addEventListener('click', () => {
+      modal.style.display = 'none';
+    });
+    document.getElementById('cerrar-modal-modificar-texto')?.addEventListener('click', () => {
       modal.style.display = 'none';
     });
 
@@ -18676,10 +21094,10 @@ document.addEventListener('DOMContentLoaded', function () {
   cargarInstruccionesGuardadas();
 
   // Asegurar que FontAwesome esté disponible para los íconos
-  if (!document.querySelector('link[href*="font-awesome"]')) {
+  if (!document.querySelector('link[href*="fontawesome"]')) {
     const faLink = document.createElement('link');
     faLink.rel = 'stylesheet';
-    faLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
+    faLink.href = 'vendor/fontawesome/all.min.css';
     document.head.appendChild(faLink);
   }
 
@@ -19032,6 +21450,94 @@ async function abrirModalLecturas() {
 // 3. CARGAR LECTURAS
 // ============================================
 
+function _mezclarDocsLecturasPorId(...snaps) {
+  const merged = new Map();
+  snaps.flat().forEach((snap) => {
+    if (!snap?.docs) return;
+    snap.docs.forEach((docSnap) => {
+      merged.set(docSnap.id, docSnap);
+    });
+  });
+  return Array.from(merged.values());
+}
+
+function _mezclarLecturasPorKey(...groups) {
+  const merged = new Map();
+  groups.flat().forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const id = String(item.id || "").trim();
+    const sourceCollection = String(item.sourceCollection || item.coleccion || "").trim();
+    if (!id || !sourceCollection) return;
+    const key = `${sourceCollection}:${id}`;
+    if (merged.has(key)) return;
+    merged.set(key, item);
+  });
+  return Array.from(merged.values());
+}
+
+async function _usuarioPuedeLeerTodasLasLecturasUnidad() {
+  const user = auth.currentUser;
+  if (!user) return false;
+  try {
+    const role = String(await _resolverRolUsuarioUnidad(user) || "").trim().toLowerCase();
+    return role === "admin" || role === "superadmin" || role === "author" || role === "developer";
+  } catch (_) {
+    return false;
+  }
+}
+
+async function _cargarLecturasPermitidasUnidad(collectionName, tipo = "principal") {
+  const colRef = collection(db, collectionName);
+  const uid = String(auth.currentUser?.uid || "").trim();
+  const email = String(auth.currentUser?.email || "").trim().toLowerCase();
+  const format = (docs = []) => docs.map((docSnap) => ({
+    id: docSnap.id,
+    sourceCollection: collectionName,
+    coleccion: collectionName,
+    ...docSnap.data(),
+    tipo
+  }));
+
+  if (await _usuarioPuedeLeerTodasLasLecturasUnidad()) {
+    try {
+      const snap = await getDocs(query(colRef));
+      return format(snap.docs);
+    } catch (_) {
+      // fallback to published-only queries below
+    }
+  }
+
+  const candidateQueries = [
+    query(colRef, where("published", "==", true)),
+    query(colRef, where("estatusLectura", "==", "Compartido"))
+  ];
+
+  if (uid) {
+    candidateQueries.push(
+      query(colRef, where("userId", "==", uid)),
+      query(colRef, where("ownerId", "==", uid)),
+      query(colRef, where("uid", "==", uid)),
+      query(colRef, where("createdBy", "==", uid)),
+      query(colRef, where("sharewith", "array-contains", uid)),
+      query(colRef, where("sharedWithIds", "array-contains", uid))
+    );
+  }
+
+  if (email) {
+    candidateQueries.push(query(colRef, where("sharedWith", "array-contains", email)));
+  }
+
+  const settled = await Promise.allSettled(candidateQueries.map((candidate) => getDocs(candidate)));
+
+  const merged = _mezclarDocsLecturasPorId(
+    ...settled
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value)
+  );
+
+  return format(merged);
+}
+
 async function cargarTodasLasLecturas(opts = {}) {
   const forceRefresh = !!opts.forceRefresh;
 
@@ -19039,24 +21545,11 @@ async function cargarTodasLasLecturas(opts = {}) {
     // Comprobar si ya tenemos lecturas en cache
     if (!forceRefresh && window.lecturasNuevas && window.lecturasASC) {
     } else {
-
-      // Cargar lecturas principales
-      const qPrincipales = query(collection(db, "lecturasNuevas"));
-      const snapPrincipales = await getDocs(qPrincipales);
-      window.lecturasNuevas = snapPrincipales.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        tipo: 'principal'
-      }));
-
-      // Cargar lecturas ASC
-      const qASC = query(collection(db, "lecturasASC"));
-      const snapASC = await getDocs(qASC);
-      window.lecturasASC = snapASC.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        tipo: 'asc'
-      }));
+      const lecturasLegacy = await _cargarLecturasPermitidasUnidad("lecturas", "principal");
+      const lecturasNuevas = await _cargarLecturasPermitidasUnidad("lecturasNuevas", "principal");
+      window.lecturasNuevas = _mezclarLecturasPorKey(lecturasLegacy, lecturasNuevas);
+      window.lecturasASC = await _cargarLecturasPermitidasUnidad("lecturasASC", "asc");
+      lecturasASC = Array.isArray(window.lecturasASC) ? [...window.lecturasASC] : [];
 
     }
 
@@ -19325,13 +21818,41 @@ function abrirVistaLecturaDesdeSeleccion(lectura) {
 
   vistaTitulo.textContent = titulo;
   vistaTexto.innerHTML = sanitizeHtml(contenido);
-  vistaPreguntas.innerHTML = Array.isArray(preguntas) && preguntas.length
-    ? preguntas.map((p, i) => {
-      const pregunta = typeof p === "string" ? p : (p.texto || p.pregunta || "");
-      const respuesta = typeof p === "object" ? (p.respuesta || "") : "";
-      return `<li><strong>${i + 1}.</strong> ${escapeHtml(pregunta)}${respuesta ? `<br><span style="color:mediumvioletred;">${escapeHtml(respuesta)}</span>` : ""}</li>`;
-    }).join("")
-    : "<li><em>Sin preguntas de comprensión.</em></li>";
+  vistaPreguntas.replaceChildren();
+  if (Array.isArray(preguntas) && preguntas.length) {
+    const fragment = document.createDocumentFragment();
+    preguntas.forEach((preguntaEntrada, indice) => {
+      const item = document.createElement("li");
+      const numero = document.createElement("strong");
+      numero.textContent = `${indice + 1}. `;
+      item.appendChild(numero);
+
+      const pregunta = typeof preguntaEntrada === "string"
+        ? preguntaEntrada
+        : (preguntaEntrada?.texto || preguntaEntrada?.pregunta || "");
+      item.appendChild(document.createTextNode(String(pregunta || "")));
+
+      const respuesta = typeof preguntaEntrada === "object" && preguntaEntrada
+        ? String(preguntaEntrada.respuesta || "").trim()
+        : "";
+      if (respuesta) {
+        item.appendChild(document.createElement("br"));
+        const respuestaSpan = document.createElement("span");
+        respuestaSpan.style.color = "mediumvioletred";
+        respuestaSpan.textContent = respuesta;
+        item.appendChild(respuestaSpan);
+      }
+
+      fragment.appendChild(item);
+    });
+    vistaPreguntas.appendChild(fragment);
+  } else {
+    const item = document.createElement("li");
+    const empty = document.createElement("em");
+    empty.textContent = "Sin preguntas de comprensión.";
+    item.appendChild(empty);
+    vistaPreguntas.appendChild(item);
+  }
 
   modalVistaLectura.style.display = "block";
 

@@ -1,0 +1,526 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function roleFromToken() {
+      return isSignedIn() && request.auth.token.role != null
+        ? request.auth.token.role
+        : "";
+    }
+
+    function roleFromUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role != null
+            ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+            : (
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol != null
+                ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol
+                : (
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole != null
+                    ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole
+                    : ""
+                )
+            )
+        )
+        : "";
+    }
+
+    function isAudioSessionOwner(sessionId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/audioTranslate/$(sessionId)) &&
+        get(/databases/$(database)/documents/audioTranslate/$(sessionId)).data.userId == request.auth.uid;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && (
+        roleFromToken() == role ||
+        roleFromUserDoc() == role
+      );
+    }
+
+    function isAdmin() {
+      return hasRole("admin") || hasRole("superAdmin");
+    }
+
+    function isEditor() {
+      return isAdmin() || hasRole("author") || hasRole("developer");
+    }
+
+    function isGameDeveloper() {
+      return isAdmin() || hasRole("developer");
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && uid == request.auth.uid;
+    }
+
+    function isDocOwner(data) {
+      return isSignedIn() && (
+        data.userId == request.auth.uid ||
+        data.uid == request.auth.uid ||
+        data.ownerUid == request.auth.uid ||
+        data.createdBy == request.auth.uid
+      );
+    }
+
+    function isConversationParticipant(conversationId) {
+      return isSignedIn() && conversationId.matches("^" + request.auth.uid + "_.+$|^.+_" + request.auth.uid + "$");
+    }
+
+    function isMinebloxTeacher(roomId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/mineblox_rooms/$(roomId)) &&
+        get(/databases/$(database)/documents/mineblox_rooms/$(roomId)).data.teacherId == request.auth.uid;
+    }
+
+    function isMinebloxParticipant(roomId) {
+      return isSignedIn() && (
+        isMinebloxTeacher(roomId) ||
+        exists(/databases/$(database)/documents/mineblox_rooms/$(roomId)/players/$(request.auth.uid))
+      );
+    }
+
+    function isStringField(data, key, minLen, maxLen) {
+      return !(key in data) || (
+        data[key] is string &&
+        data[key].size() >= minLen &&
+        data[key].size() <= maxLen
+      );
+    }
+
+    function isOptionalBool(data, key) {
+      return !(key in data) || data[key] is bool;
+    }
+
+    function isOptionalNumber(data, key) {
+      return !(key in data) || data[key] is number;
+    }
+
+    function isCommentShape(data) {
+      return data.uid == request.auth.uid &&
+        isStringField(data, "lecturaId", 1, 200) &&
+        isStringField(data, "seccion", 1, 5000) &&
+        isStringField(data, "comentario", 1, 3000) &&
+        isStringField(data, "autor", 1, 200) &&
+        isOptionalNumber(data, "posicion") &&
+        isOptionalNumber(data, "longitud") &&
+        (!("seleccionadoPor" in data) || data.seleccionadoPor is list);
+    }
+
+    function isImageShareShape(data) {
+      return data.uid == request.auth.uid &&
+        isStringField(data, "nombre", 1, 240) &&
+        isStringField(data, "url", 1, 4000) &&
+        isOptionalBool(data, "share") &&
+        isOptionalBool(data, "archivado") &&
+        isStringField(data, "nivel", 0, 120) &&
+        isStringField(data, "grado", 0, 120) &&
+        isStringField(data, "trimestre", 0, 120) &&
+        isStringField(data, "unidad", 0, 120);
+    }
+
+    function isChatParticipant(data) {
+      return isSignedIn() && (
+        data.senderId == request.auth.uid ||
+        data.receiverId == request.auth.uid
+      );
+    }
+
+    function isChatMessageShape(data) {
+      return data.senderId == request.auth.uid &&
+        isStringField(data, "receiverId", 1, 200) &&
+        isStringField(data, "message", 0, 5000) &&
+        isStringField(data, "imageURL", 0, 4000) &&
+        isStringField(data, "audioData", 0, 15000000) &&
+        isOptionalBool(data, "favorite");
+    }
+
+    function isPublished(data) {
+      return data.published == true || data.estatusLectura == "Compartido";
+    }
+
+    function isLecturaSharedWithUser(data) {
+      return isSignedIn() && (
+        (data.sharewith is list && data.sharewith.hasAny([request.auth.uid])) ||
+        (data.sharedWithIds is list && data.sharedWithIds.hasAny([request.auth.uid])) ||
+        (
+          request.auth.token.email is string &&
+          data.sharedWith is list &&
+          data.sharedWith.hasAny([request.auth.token.email])
+        )
+      );
+    }
+
+    function isPodcasterSharedWithUser(data) {
+      return isSignedIn() &&
+        data.sharedWithIds is list &&
+        data.sharedWithIds.hasAny([request.auth.uid]);
+    }
+
+    function isPodcasterSessionShape(data, sessionId) {
+      return data.ownerId == request.auth.uid &&
+        isStringField(data, "title", 0, 240) &&
+        isOptionalBool(data, "archived") &&
+        isStringField(data, "sessionUpdatedAt", 0, 80) &&
+        data.session is map &&
+        data.session.id is string &&
+        data.session.id == sessionId &&
+        (!("sharedWithIds" in data) || data.sharedWithIds is list) &&
+        (!("sharedWith" in data) || data.sharedWith is list);
+    }
+
+    // Lecturas compartidas y privadas de edición.
+    match /lecturas/{lecturaId} {
+      allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data);
+      allow create: if isEditor() || isDocOwner(request.resource.data);
+      allow update, delete: if isEditor() || isDocOwner(resource.data);
+    }
+
+    // Sesiones de Podcaster: owner o compartidos por UID.
+    match /podcaster_sessions/{sessionId} {
+      allow read: if isAdmin() || isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data);
+      allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
+      allow update, delete: if isAdmin() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        isPodcasterSessionShape(request.resource.data, sessionId)
+      );
+    }
+
+    // Fuentes de lecturas para juego/editor.
+    match /lecturasASC/{docId} {
+      allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data) || isLecturaSharedWithUser(resource.data);
+      allow write: if isEditor();
+    }
+
+    match /lecturasNuevas/{docId} {
+      allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data) || isLecturaSharedWithUser(resource.data);
+      allow write: if isEditor();
+    }
+
+    // Lecturas game: lectura pública para ranking; escritura sólo owner autenticado o admin.
+    match /lecturasGame/{playerId} {
+      allow read: if true;
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == playerId &&
+        request.resource.data.uidOwner == request.auth.uid
+      );
+      allow update, delete: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == playerId &&
+        (resource.data.uidOwner == request.auth.uid || !("uidOwner" in resource.data))
+      );
+
+      match /stats/{docId} {
+        allow read: if true;
+        allow write: if isAdmin() || (isSignedIn() && request.auth.uid == playerId);
+      }
+
+      match /history/{docId} {
+        allow read: if true;
+        allow write: if isAdmin() || (isSignedIn() && request.auth.uid == playerId);
+      }
+
+      match /mineblox_inventory/{docId} {
+        allow read, write: if isGameDeveloper() || (isSignedIn() && request.auth.uid == playerId);
+      }
+
+      match /{document=**} {
+        allow read, write: if isGameDeveloper();
+      }
+    }
+
+    // Mineblox: sala visible para usuarios autenticados; control de escritura por maestro/roles.
+    match /mineblox_rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow create: if isGameDeveloper() || (
+        isSignedIn() &&
+        request.resource.data.teacherId == request.auth.uid
+      );
+      allow update, delete: if isGameDeveloper() || isMinebloxTeacher(roomId);
+
+      match /players/{playerId} {
+        allow read: if isSignedIn();
+        allow create: if isGameDeveloper() || isMinebloxTeacher(roomId) || (
+          isSignedIn() &&
+          playerId == request.auth.uid
+        );
+        allow update, delete: if isGameDeveloper() || isMinebloxTeacher(roomId) || (
+          isSignedIn() &&
+          playerId == request.auth.uid
+        );
+      }
+
+      match /chat/{docId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update, delete: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /student_progress/{playerId}/answers/{docId} {
+        allow read: if isGameDeveloper() || isMinebloxTeacher(roomId) || (
+          isSignedIn() &&
+          playerId == request.auth.uid
+        );
+        allow create: if isGameDeveloper() || isMinebloxTeacher(roomId) || (
+          isSignedIn() &&
+          playerId == request.auth.uid
+        );
+        allow update, delete: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /items/{docId} {
+        allow read: if isSignedIn();
+        allow write: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /events/{docId} {
+        allow read: if isSignedIn();
+        allow write: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /quizzes/{docId} {
+        allow read: if isSignedIn();
+        allow write: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /screenshots/{docId} {
+        allow read: if isGameDeveloper() || isMinebloxTeacher(roomId);
+        allow write: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+
+      match /{document=**} {
+        allow read: if isGameDeveloper() || isMinebloxParticipant(roomId);
+        allow write: if isGameDeveloper() || isMinebloxTeacher(roomId);
+      }
+    }
+
+    // Unidades por dueño.
+    match /Unidades/{unidadId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow write: if isSignedIn() && request.auth.uid == request.resource.data.userId;
+    }
+
+    // audioTranslate por dueño o admin.
+    match /audioTranslate/{sessionId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // Users explícito.
+    match /users/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+
+      allow create: if isOwner(uid) &&
+        (
+          !("role" in request.resource.data) || request.resource.data.role == "pending"
+        ) &&
+        (
+          !("rol" in request.resource.data) || request.resource.data.rol == "pending"
+        ) &&
+        (
+          !("userRole" in request.resource.data) || request.resource.data.userRole == "pending"
+        ) &&
+        (
+          !("approvalStatus" in request.resource.data) || request.resource.data.approvalStatus == "pending"
+        );
+
+      allow update: if isAdmin() || (
+        isOwner(uid) &&
+        (
+          !("role" in request.resource.data) || request.resource.data.role == resource.data.role
+        ) &&
+        (
+          !("rol" in request.resource.data) || request.resource.data.rol == resource.data.rol
+        ) &&
+        (
+          !("userRole" in request.resource.data) || request.resource.data.userRole == resource.data.userRole
+        ) &&
+        (
+          !("approvalStatus" in request.resource.data) || request.resource.data.approvalStatus == resource.data.approvalStatus
+        )
+      );
+
+      allow delete: if isAdmin() || isOwner(uid);
+    }
+
+    // Chat/messages.
+    match /messages/{conversationId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /chat/{msgId} {
+        allow read: if isChatParticipant(resource.data);
+        allow create: if isSignedIn() && isChatMessageShape(request.resource.data);
+        allow update, delete: if isAdmin() || isChatParticipant(resource.data);
+      }
+    }
+
+    // Colecciones operativas (sin wildcard global).
+    match /unidadesGeneradas/{docId} {
+      allow read: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+      allow create: if isSignedIn();
+      allow update, delete: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+    }
+
+    match /analisisLecturas/{docId} {
+      allow read: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+      allow create: if isSignedIn() && isDocOwner(request.resource.data);
+      allow update, delete: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+    }
+
+    match /secuenciaAlcance/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isEditor();
+    }
+
+    match /metodologiaASC/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isEditor();
+    }
+
+    match /moodleCourses/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isEditor();
+    }
+
+    match /autoresEjemplo/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isEditor();
+    }
+
+    match /conversacionIA/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /audioTranslateContextNotes/{sessionId} {
+      allow read, write: if isAdmin() || isAudioSessionOwner(sessionId);
+    }
+
+    match /audioTranslateAnalyses/{docId} {
+      allow read: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.sessionId is string &&
+        isAudioSessionOwner(resource.data.sessionId)
+      );
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.sessionId is string &&
+        isAudioSessionOwner(request.resource.data.sessionId)
+      );
+      allow update, delete: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.sessionId is string &&
+        isAudioSessionOwner(resource.data.sessionId)
+      );
+    }
+
+    match /audioTranslateSegments/{sessionId} {
+      allow read, write: if isAdmin() || isAudioSessionOwner(sessionId);
+    }
+
+    match /audioTranslateSummaries/{docId} {
+      allow read: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.sessionId is string &&
+        isAudioSessionOwner(resource.data.sessionId)
+      );
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.sessionId is string &&
+        isAudioSessionOwner(request.resource.data.sessionId)
+      );
+      allow update, delete: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.sessionId is string &&
+        isAudioSessionOwner(resource.data.sessionId)
+      );
+    }
+
+    match /comentarios/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isCommentShape(request.resource.data);
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.lecturaId == resource.data.lecturaId &&
+        request.resource.data.seccion == resource.data.seccion &&
+        request.resource.data.autor == resource.data.autor &&
+        request.resource.data.posicion == resource.data.posicion &&
+        request.resource.data.longitud == resource.data.longitud &&
+        isCommentShape(request.resource.data)
+      ) || (
+        isSignedIn() &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.lecturaId == resource.data.lecturaId &&
+        request.resource.data.seccion == resource.data.seccion &&
+        request.resource.data.comentario == resource.data.comentario &&
+        request.resource.data.autor == resource.data.autor &&
+        request.resource.data.posicion == resource.data.posicion &&
+        request.resource.data.longitud == resource.data.longitud &&
+        request.resource.data.seleccionadoPor is list
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    match /imagenesCompartidas/{docId} {
+      allow read: if resource.data.share == true || isEditor() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && isImageShareShape(request.resource.data);
+      allow update, delete: if isEditor() || (
+        isSignedIn() &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == resource.data.uid &&
+        isImageShareShape(request.resource.data)
+      );
+    }
+
+    match /mindmaps/{docId} {
+      allow read: if isAdmin() || (isSignedIn() && isDocOwner(resource.data));
+      allow create: if isSignedIn() && isDocOwner(request.resource.data);
+      allow update, delete: if isAdmin() || (isSignedIn() && isDocOwner(resource.data) && isDocOwner(request.resource.data));
+    }
+
+    match /compartidos/{docId} {
+      allow read: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.usuarioOrigenId == request.auth.uid ||
+          resource.data.usuarioDestinoId == request.auth.uid
+        )
+      );
+      allow create: if isSignedIn() &&
+        request.resource.data.usuarioOrigenId == request.auth.uid &&
+        isStringField(request.resource.data, "cursoId", 1, 200) &&
+        isStringField(request.resource.data, "usuarioDestinoId", 1, 200) &&
+        isStringField(request.resource.data, "tipo", 1, 40);
+      allow update, delete: if isAdmin() || (
+        isSignedIn() && resource.data.usuarioOrigenId == request.auth.uid
+      );
+    }
+
+    match /camposFormativos/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isEditor();
+    }
+
+    match /lecturas_game_profiles_caps/{profileId} {
+      allow read, write: if isAdmin() || (
+        isSignedIn() &&
+        profileId.matches("^" + request.auth.uid + "(:.*)?$")
+      );
+    }
+
+    // Deny-by-default: todo lo no declarado queda bloqueado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
