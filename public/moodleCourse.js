@@ -1,6 +1,6 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // Firebase imports
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
     getFirestore,
     doc,
@@ -13,16 +13,17 @@ import {
     getDocs,
     deleteDoc,
     onSnapshot,
-} from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 
 import {
     getAuth,
     onAuthStateChanged
-} from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 
 
 import { 
     generarContenidoGemini, 
+    geminiGenerateRequest,
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
@@ -33,12 +34,16 @@ import {
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
 } from './moodleClurse-extraFunctions.js';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
+import { authFetchJson } from "./api-client.js";
 
 
 /* CONFIGURACIÓN FIREBASE */
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
@@ -78,6 +83,102 @@ let tourAccionesModuloActivo = false;
 let tourAccionesModuloPaso = 0;
 let tourAccionesModuloTarget = null;
 let tourAccionesModuloMostradoEnSesion = false;
+const escapeHtml = (value = "") => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+document.addEventListener("click", (event) => {
+    const actionEl = event.target.closest("[data-mc-action]");
+    if (!actionEl) return;
+
+    const action = String(actionEl.dataset.mcAction || "").trim();
+    if (!action) return;
+
+    const directHandlers = {
+        "insert-table": () => insertTable(),
+        "insert-gemini-image": () => insertGeminiImage(),
+        "clear-format": () => clearFormat(),
+        "paste-plain": () => pasteAsPlainText(),
+        "paste-html": () => pasteWithFormat(),
+        "cerrar-modal-analisis": () => window.cerrarModalAnalisis?.(),
+        "cerrar-modal-traduccion": () => window.cerrarModalTraduccion?.(),
+        "cerrar-modal-traducir-subtema": () => window.cerrarModalTraducirSubtema?.(),
+        "cerrar-modal-crear-tabla": () => window.cerrarModalCrearTabla?.(),
+        "copiar-tabla-preview": () => window.copiarTablaPreview?.(),
+        "previsualizar-tabla-modulo": () => window.previsualizarTablaModulo?.(),
+        "aplicar-tabla-modulo": () => window.aplicarTablaModulo?.(),
+        "cerrar-modal-tono": () => window.cerrarModalTono?.(),
+        "cerrar-modal-notas-maestro": () => window.cerrarModalNotasMaestro?.(),
+        "regenerar-notas-maestro": () => window.regenerarNotasMaestro?.(),
+        "aplicar-notas-maestro": () => window.aplicarNotasMaestro?.(),
+        "guardar-notas-maestro": () => window.guardarNotasMaestro?.(),
+        "cerrar-modal-instrucciones-subtema": () => document.getElementById("modalInstruccionesSubtema")?.classList.add("hidden"),
+        "abrir-modal-notas-maestro": () => window.abrirModalNotasMaestro?.(actionEl.dataset.mcModuloId || ""),
+        "analizar-modulo": () => window.analizarModulo?.(actionEl.dataset.mcModuloId || ""),
+        "abrir-instrucciones-gemini": () => window.abrirInstruccionesGemini?.(actionEl.dataset.mcModuloId || ""),
+        "ejecutar-generacion-modulo-gemini": () => window.ejecutarGeneracionModuloGemini?.(actionEl.dataset.mcModuloId || ""),
+        "abrir-modal-tono": () => window.abrirModalTono?.(actionEl.dataset.mcModuloId || ""),
+        "abrir-modal-crear-tabla": () => window.abrirModalCrearTabla?.(actionEl.dataset.mcModuloId || ""),
+        "traducir-modulo": () => window.traducirModulo?.(actionEl.dataset.mcModuloId || ""),
+        "reintentar-notas-maestro": () => window.regenerarNotasMaestro?.(),
+        "abrir-traduccion-subtema": () => window.abrirTraduccionSubtema?.(actionEl.dataset.mcTranslationId || ""),
+        "eliminar-traduccion-subtema": () => window.eliminarTraduccionSubtema?.(actionEl.dataset.mcTranslationId || ""),
+        "abrir-traduccion": () => window.abrirTraduccion?.(actionEl.dataset.mcTranslationId || "", actionEl.dataset.mcModuloId || ""),
+        "eliminar-traduccion": () => window.eliminarTraduccion?.(actionEl.dataset.mcTranslationId || "", actionEl.dataset.mcModuloId || ""),
+        "generar-vista-previa-tono": () => window.generarVistaPreviaTono?.(),
+    };
+
+    if (action === "eliminar-modulo") {
+        event.preventDefault();
+        const moduloId = actionEl.dataset.mcModuloId || "";
+        if (moduloId && window.confirm("¿Eliminar módulo?")) {
+            window.eliminarModulo?.(moduloId);
+        }
+        return;
+    }
+
+    if (action === "format-text") {
+        event.preventDefault();
+        formatText(actionEl.dataset.mcCommand || "");
+        return;
+    }
+
+    const handler = directHandlers[action];
+    if (!handler) return;
+
+    event.preventDefault();
+    handler();
+});
+
+document.addEventListener("change", (event) => {
+    const actionEl = event.target.closest("[data-mc-action='toggle-archivo-modulo']");
+    if (!actionEl) return;
+    window.toggleArchivoModulo?.(actionEl.dataset.mcModuloId || "", !!actionEl.checked);
+});
+
+function withTimeout(promise, ms = 30000, message = "La operación tardó demasiado.") {
+    let timerId = null;
+    const timeoutPromise = new Promise((_, reject) => {
+        timerId = window.setTimeout(() => {
+            reject(new Error(message));
+        }, Math.max(1000, Number(ms) || 30000));
+    });
+    return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
+        if (timerId != null) window.clearTimeout(timerId);
+    });
+}
+
+function sanitizarHtmlEditorial(value = "") {
+    return sanitizeHtml(String(value || "")).trim();
+}
+
+function sanitizarHtmlEditorialOMensajeVacio(value = "", emptyHtml = "") {
+    const limpio = sanitizarHtmlEditorial(value);
+    return limpio || emptyHtml;
+}
 
 function construirDocIdModulo(moduloId, cursoIdRef = null) {
     const cursoId = cursoIdRef || (curso ? curso.id : null);
@@ -965,9 +1066,17 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
         for (const usuario of usuariosParaCompartir) {
             try {
                 if (modoCopia) {
-                    await compartirComoCopia(curso, usuario);
+                    await withTimeout(
+                        compartirComoCopia(curso, usuario),
+                        45000,
+                        `La copia para ${usuario.userName} tardó demasiado.`
+                    );
                 } else {
-                    await compartirComoColaboracion(curso, usuario, permisosEditar, permisosCompartir);
+                    await withTimeout(
+                        compartirComoColaboracion(curso, usuario, permisosEditar, permisosCompartir),
+                        20000,
+                        `La colaboración para ${usuario.userName} tardó demasiado.`
+                    );
                 }
                 usuariosProcesados++;
             } catch (error) {
@@ -998,142 +1107,24 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
         
     } catch (error) {
         mostrarNotificacion(`❌ Error: ${error.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 });
 
 // Función para compartir como copia
 async function compartirComoCopia(cursoOriginal, usuarioDestino) {
     try {
-        // 🔥 CORRECCIÓN: Verificar si ya existe una copia para este usuario
-        const nombreCopia = `${cursoOriginal.nombre} (Copia para ${usuarioDestino.userName})`;
-        
-        // Buscar si ya existe una copia
-        const copiaExistente = cursosUsuario.find(c => 
-            c.nombre === nombreCopia && 
-            c.userId === usuarioDestino.userId
-        );
-        
-        if (copiaExistente) {
-            return; // No crear duplicado
-        }
-        
-
-        // 1. Crear nuevo ID para la copia
-        const nuevoId = crypto.randomUUID();
-        
-        // 2. Obtener datos completos del curso original
-        const cursoRef = doc(db, "moodleCourses", cursoOriginal.id);
-        const cursoSnap = await getDoc(cursoRef);
-        
-        if (!cursoSnap.exists()) {
-            throw new Error("El curso original no existe");
-        }
-        
-        const cursoData = cursoSnap.data();
-        
-        // 3. Crear objeto del nuevo curso (copia)
-        const nuevoCurso = {
-            ...cursoData,
-            id: nuevoId,
-            cursoId: nuevoId,
-            nombre: cursoData.nombre + " (Copia para " + usuarioDestino.userName + ")",
-            userId: usuarioDestino.userId,
-            esPropio: true,
-            creado: new Date(),
-            compartidoCon: [],
-            compartidoConDetalles: [],
-            // Información sobre el origen de la copia
-            copiaDe: {
-                cursoId: cursoOriginal.id,
-                nombre: cursoOriginal.nombre,
-                propietarioOriginal: cursoOriginal.userId,
-                fechaCopia: new Date()
+        await authFetchJson("/api/moodle/share-course", {
+            method: "POST",
+            body: {
+                courseId: cursoOriginal.id,
+                mode: "copy",
+                targetUid: usuarioDestino.userId,
+                targetEmail: usuarioDestino.email || ""
             }
-        };
-        
-        // 4. Limpiar datos de compartir (es una nueva copia independiente)
-        delete nuevoCurso.compartidoCon;
-        delete nuevoCurso.compartidoConDetalles;
-        delete nuevoCurso.propietarioNombre;
-        
-        // 5. Regenerar IDs internos
-        if (Array.isArray(nuevoCurso.temas)) {
-            nuevoCurso.temas = nuevoCurso.temas.map(t => {
-                const nuevoTema = { 
-                    ...t, 
-                    id: crypto.randomUUID(),
-                    subtemas: []
-                };
-                
-                if (Array.isArray(t.subtemas)) {
-                    nuevoTema.subtemas = t.subtemas.map(st => {
-                        const nuevoSubtema = { 
-                            ...st, 
-                            id: crypto.randomUUID(),
-                            modulosIds: [...(st.modulosIds || [])]
-                        };
-                        return nuevoSubtema;
-                    });
-                }
-                
-                return nuevoTema;
-            });
-        }
-        
-        // 6. Guardar el nuevo curso
-        await setDoc(doc(db, "moodleCourses", nuevoId), nuevoCurso);
-        
-        // 7. Copiar módulos individuales
-        const modulosExistentes = [];
-        if (Array.isArray(nuevoCurso.temas)) {
-            nuevoCurso.temas.forEach(tema => {
-                if (Array.isArray(tema.subtemas)) {
-                    tema.subtemas.forEach(subtema => {
-                        if (Array.isArray(subtema.modulosIds)) {
-                            subtema.modulosIds.forEach(moduloId => {
-                                modulosExistentes.push(moduloId);
-                            });
-                        }
-                    });
-                }
-            });
-        }
-        
-        for (const moduloId of modulosExistentes) {
-            try {
-                const moduloOriginal = await obtenerModulo(moduloId, cursoOriginal.id);
-                if (moduloOriginal) {
-                    const nuevoModuloId = crypto.randomUUID();
-                    const nuevoModulo = {
-                        ...moduloOriginal,
-                        id: nuevoModuloId,
-                        cursoId: nuevoId,
-                        creado: new Date(),
-                        actualizado: new Date()
-                    };
-                    
-                    // Actualizar referencia en el subtema
-                    nuevoCurso.temas.forEach(tema => {
-                        tema.subtemas.forEach(subtema => {
-                            if (Array.isArray(subtema.modulosIds)) {
-                                const index = subtema.modulosIds.indexOf(moduloId);
-                                if (index !== -1) {
-                                    subtema.modulosIds[index] = nuevoModuloId;
-                                }
-                            }
-                        });
-                    });
-                    
-                    await setDoc(doc(db, "moodleCourses", `${nuevoId}_${nuevoModuloId}`), nuevoModulo);
-                }
-            } catch (moduloError) {
-            }
-        }
-        
-        // 8. Actualizar curso con nuevas referencias de módulos
-        await setDoc(doc(db, "moodleCourses", nuevoId), nuevoCurso);
-        
-        
+        });
     } catch (error) {
         throw new Error(`No se pudo crear copia para ${usuarioDestino.userName}: ${error.message}`);
     }
@@ -1142,73 +1133,19 @@ async function compartirComoCopia(cursoOriginal, usuarioDestino) {
 // Función para compartir como colaboración
 async function compartirComoColaboracion(curso, usuarioDestino, permisosEditar, permisosCompartir) {
     try {
-        const cursoRef = doc(db, "moodleCourses", curso.id);
-        const cursoSnap = await getDoc(cursoRef);
-        
-        if (!cursoSnap.exists()) {
-            throw new Error("El curso no existe");
-        }
-        
-        const cursoData = cursoSnap.data();
-        
-        // Inicializar arrays si no existen
-        const compartidoCon = cursoData.compartidoCon || [];
-        const compartidoConDetalles = cursoData.compartidoConDetalles || [];
-        
-        // Verificar si ya está compartido
-        const yaCompartido = compartidoCon.includes(usuarioDestino.userId);
-        
-        if (yaCompartido) {
-            // Actualizar permisos si ya está compartido
-            const nuevosDetalles = compartidoConDetalles.map(detalle => {
-                if (detalle.userId === usuarioDestino.userId) {
-                    return {
-                        ...detalle,
-                        permisos: {
-                            editar: permisosEditar,
-                            compartir: permisosCompartir
-                        },
-                        fechaModificacion: new Date(),
-                        modificadoPor: currentUserId
-                    };
+        await authFetchJson("/api/moodle/share-course", {
+            method: "POST",
+            body: {
+                courseId: curso.id,
+                mode: "collaboration",
+                targetUid: usuarioDestino.userId,
+                targetEmail: usuarioDestino.email || "",
+                permissions: {
+                    editar: permisosEditar === true,
+                    compartir: permisosCompartir === true
                 }
-                return detalle;
-            });
-            
-            await updateDoc(cursoRef, {
-                compartidoConDetalles: nuevosDetalles,
-                actualizado: new Date()
-            });
-            
-            mostrarNotificacion(`✅ Permisos actualizados para ${usuarioDestino.userName}`, 'info');
-            return;
-        }
-        
-        // Si no está compartido, agregar nuevo
-        const nuevoCompartidoCon = [...compartidoCon, usuarioDestino.userId];
-        const nuevoCompartidoConDetalles = [
-            ...compartidoConDetalles,
-            {
-                userId: usuarioDestino.userId,
-                userName: usuarioDestino.userName,
-                userEmail: usuarioDestino.email || '',
-                fechaCompartido: new Date(),
-                compartidoPor: currentUserId,
-                permisos: {
-                    editar: permisosEditar,
-                    compartir: permisosCompartir
-                },
-                modo: "colaboracion"
             }
-        ];
-        
-        await updateDoc(cursoRef, {
-            compartidoCon: nuevoCompartidoCon,
-            compartidoConDetalles: nuevoCompartidoConDetalles,
-            actualizado: new Date()
         });
-        
-        
     } catch (error) {
         throw new Error(`No se pudo compartir con ${usuarioDestino.userName}: ${error.message}`);
     }
@@ -1227,11 +1164,12 @@ async function cargarUsuariosParaCompartirCurso() {
             </div>
         `;
 
-        // Obtener todos los usuarios del sistema
-        const usuariosRef = collection(db, "users");
-        const usuariosSnap = await getDocs(usuariosRef);
-        
-        if (usuariosSnap.empty) {
+        const response = await authFetchJson("/api/moodle/share-users", {
+            method: "GET"
+        });
+        const users = Array.isArray(response?.users) ? response.users : [];
+
+        if (!users.length) {
             listaUsuarios.innerHTML = `
                 <div class="text-center py-4 text-gray-500 text-sm">
                     No hay usuarios registrados
@@ -1254,21 +1192,17 @@ async function cargarUsuariosParaCompartirCurso() {
 
         // Filtrar usuarios (excluir al usuario actual)
         const usuarios = [];
-        usuariosSnap.forEach(doc => {
-            const userData = doc.data();
-            if (userData.uid !== currentUserId) {
-                // Verificar si ya está compartido con este usuario
-                const yaCompartido = usuariosYaCompartidos.find(u => u.userId === userData.uid);
-                
-                usuarios.push({
-                    id: doc.id,
-                    uid: userData.uid,
-                    nombre: userData.displayName || userData.email || "Usuario",
-                    email: userData.email || "",
-                    yaCompartido: !!yaCompartido,
-                    permisos: yaCompartido ? yaCompartido.permisos : null
-                });
-            }
+        users.forEach(userData => {
+            if (userData.uid === currentUserId) return;
+            const yaCompartido = usuariosYaCompartidos.find(u => u.userId === userData.uid);
+            usuarios.push({
+                id: userData.uid,
+                uid: userData.uid,
+                nombre: userData.displayName || userData.email || "Usuario",
+                email: userData.email || "",
+                yaCompartido: !!yaCompartido,
+                permisos: yaCompartido ? yaCompartido.permisos : null
+            });
         });
 
         // Renderizar lista
@@ -4556,7 +4490,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 <div id="resultadoGenerado" 
                     class="p-4 bg-card rounded-md border border-border text-foreground generated-content ${esModoLectura ? 'readonly-content' : 'contenido-editable'}" 
                     contenteditable="${!esModoLectura}">
-                    ${subtema.contenidoGenerado || '<span class="text-muted-foreground text-xs">Sin contenido generado</span>'}
+                    ${sanitizarHtmlEditorialOMensajeVacio(subtema.contenidoGenerado, '<span class="text-muted-foreground text-xs">Sin contenido generado</span>')}
                 </div>
             </div>
 
@@ -4585,7 +4519,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 if (contenido.includes('Sin instrucciones - haz clic para editar')) {
                     subtema.instrucciones = "";
                 } else {
-                    subtema.instrucciones = contenido;
+                    subtema.instrucciones = sanitizarHtmlEditorial(contenido);
                 }
                 await guardarCursoFirebase();
             });
@@ -4595,7 +4529,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 if (e.key === "Enter" && e.ctrlKey) {
                     e.preventDefault();
                     const contenido = instruccionesDiv.innerHTML;
-                    subtema.instrucciones = contenido;
+                    subtema.instrucciones = sanitizarHtmlEditorial(contenido);
                     await guardarCursoFirebase();
                     instruccionesDiv.blur();
                 }
@@ -4606,14 +4540,14 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
         const resultadoDiv = document.getElementById("resultadoGenerado");
         if (resultadoDiv) {
             resultadoDiv.addEventListener("blur", async (e) => {
-                subtema.contenidoGenerado = e.target.innerHTML;
+                subtema.contenidoGenerado = sanitizarHtmlEditorial(e.target.innerHTML);
                 await guardarCursoFirebase();
             });
             
             resultadoDiv.addEventListener("keydown", async (e) => {
                 if (e.key === "Enter" && e.ctrlKey) {
                     e.preventDefault();
-                    subtema.contenidoGenerado = resultadoDiv.innerHTML;
+                    subtema.contenidoGenerado = sanitizarHtmlEditorial(resultadoDiv.innerHTML);
                     await guardarCursoFirebase();
                     resultadoDiv.blur();
                 }
@@ -4669,13 +4603,14 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                             const modId = contenedor.dataset.moduloId;
                             if (!modId) return;
 
-                            const html = contenedor.innerHTML;
+                            const html = sanitizeRichText(contenedor.innerHTML);
                             const ultimo = contenedor.dataset.lastSavedHtml || "";
                             if (!forzar && html === ultimo) return;
 
                             try {
                                 await guardarModulo(modId, { contenido: html });
                                 contenedor.dataset.lastSavedHtml = html;
+                                contenedor.innerHTML = html;
 
                                 const spinner = document.getElementById(`spinner-${modId}`);
                                 if (spinner) {
@@ -4862,8 +4797,10 @@ async function abrirModalInstruccionesSubtema(subtema) {
     tituloModal.textContent = `Instrucciones: ${subtema.nombre}`;
     
     // Cargar instrucciones actuales
-    instruccionesDiv.innerHTML = subtema.instrucciones || 
-        '<p class="text-muted-foreground text-sm">Escribe las instrucciones para este subtema aquí...</p>';
+    instruccionesDiv.innerHTML = sanitizarHtmlEditorialOMensajeVacio(
+        subtema.instrucciones,
+        '<p class="text-muted-foreground text-sm">Escribe las instrucciones para este subtema aquí...</p>'
+    );
     
     // Mostrar modal
     modal.classList.remove("hidden");
@@ -4884,13 +4821,13 @@ async function abrirModalInstruccionesSubtema(subtema) {
     
     // Configurar evento para guardar
     const guardarInstrucciones = async () => {
-        const contenido = instruccionesDiv.innerHTML;
+        const contenido = sanitizeRichText(instruccionesDiv.innerHTML);
         
         // Evitar guardar si es el placeholder
         if (contenido.includes("Escribe las instrucciones")) {
             subtema.instrucciones = "";
         } else {
-            subtema.instrucciones = contenido;
+            subtema.instrucciones = sanitizarHtmlEditorial(contenido);
         }
         
         await guardarCursoFirebase();
@@ -4931,7 +4868,7 @@ function crearModalInstruccionesSubtema() {
                 <!-- Encabezado -->
                 <div class="flex items-center justify-between mb-4">
                     <h3 id="tituloInstruccionesSubtema" class="text-lg font-semibold"></h3>
-                    <button class="text-muted-foreground hover:text-foreground" onclick="document.getElementById('modalInstruccionesSubtema').classList.add('hidden')">
+                    <button class="text-muted-foreground hover:text-foreground" data-mc-action="cerrar-modal-instrucciones-subtema">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -5025,7 +4962,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
             <label class="modulo-archive-switch" title="Archivar módulo" aria-label="Archivar módulo" data-tour="archivar">
                 <input type="checkbox" class="cb-switch-archivar-modulo cb-switch-archivar-modulo-hidden"
                        ${mod.archivado ? "checked" : ""}
-                       onchange="window.toggleArchivoModulo('${mod.id}', this.checked)">
+                       data-mc-action="toggle-archivo-modulo"
+                       data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <span class="modulo-archive-switch__track" aria-hidden="true">
                     <span class="modulo-archive-switch__thumb"></span>
                 </span>
@@ -5037,7 +4975,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Notas del maestro"
                     aria-label="Notas del maestro"
                     data-tour="notas-maestro"
-                    onclick="abrirModalNotasMaestro('${mod.id}')">
+                    data-mc-action="abrir-modal-notas-maestro"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-chalkboard-teacher text-green-600"></i>
             </button>
             
@@ -5046,7 +4985,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Analizar módulo"
                     aria-label="Analizar módulo"
                     data-tour="analizar-modulo"
-                    onclick="analizarModulo('${mod.id}')">
+                    data-mc-action="analizar-modulo"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-search text-orange-500"></i>
             </button>
 
@@ -5055,7 +4995,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Instrucciones IA"
                     aria-label="Instrucciones IA"
                     data-tour="instrucciones-ia"
-                    onclick="abrirInstruccionesGemini('${mod.id}')">
+                    data-mc-action="abrir-instrucciones-gemini"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-comment-dots text-purple-600"></i>
             </button>
 
@@ -5064,7 +5005,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Generar con IA"
                     aria-label="Generar con IA"
                     data-tour="generar-ia"
-                    onclick="ejecutarGeneracionModuloGemini('${mod.id}')">
+                    data-mc-action="ejecutar-generacion-modulo-gemini"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-magic text-blue-600"></i>
             </button>
             
@@ -5073,7 +5015,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Cambiar tono del contenido"
                     aria-label="Cambiar tono del contenido"
                     data-tour="cambiar-tono"
-                    onclick="abrirModalTono('${mod.id}')">
+                    data-mc-action="abrir-modal-tono"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-adjust text-pink-600"></i>
             </button>
             
@@ -5082,7 +5025,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Crear tabla a partir del contenido"
                     aria-label="Crear tabla a partir del contenido"
                     data-tour="crear-tabla"
-                    onclick="abrirModalCrearTabla('${mod.id}')">
+                    data-mc-action="abrir-modal-crear-tabla"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-table text-indigo-500"></i>
             </button>
 
@@ -5091,7 +5035,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Traducir módulo"
                     aria-label="Traducir módulo"
                     data-tour="traducir-modulo"
-                    onclick="traducirModulo('${mod.id}')">
+                    data-mc-action="traducir-modulo"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-language text-teal-600"></i>
             </button>
 
@@ -5100,7 +5045,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     title="Eliminar módulo"
                     aria-label="Eliminar módulo"
                     data-tour="eliminar-modulo"
-                    onclick="if (confirm('¿Eliminar módulo?')) { window.eliminarModulo('${mod.id}'); }">
+                    data-mc-action="eliminar-modulo"
+                    data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-trash text-red-600"></i>
             </button>
         </div>
@@ -5524,14 +5470,17 @@ function mostrarNotasGuardadas(modulo) {
     if (!contenidoModal) return;
     
     // Mostrar las notas guardadas
-    contenidoModal.innerHTML = modulo.notasMaestro;
+    contenidoModal.innerHTML = sanitizarHtmlEditorial(modulo.notasMaestro);
     
     // Mostrar fecha de generación si existe
     if (modulo.notasMaestroGenerado) {
         const fecha = new Date(modulo.notasMaestroGenerado).toLocaleString();
         const fechaDiv = document.createElement('div');
         fechaDiv.className = "text-xs text-gray-500 mt-4 text-center";
-        fechaDiv.innerHTML = `<i class="fas fa-clock mr-1"></i> Generado: ${fecha}`;
+        const icono = document.createElement("i");
+        icono.className = "fas fa-clock mr-1";
+        fechaDiv.appendChild(icono);
+        fechaDiv.appendChild(document.createTextNode(` Generado: ${fecha}`));
         contenidoModal.appendChild(fechaDiv);
     }
     
@@ -5678,19 +5627,14 @@ async function generarNotasMaestroConIA(moduloId, contenidoModulo) {
 
         prompt = aplicarReglaIdiomaEnPromptNotas(prompt, idiomaDetectado);
 
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
 
         if (!response.ok) {
-            throw new Error(`Error HTTP: ${response.status}`);
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${response.status}`));
         }
 
-        const data = await response.json();
         const notasTexto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No se pudieron generar las notas.";
         const contenidoNotasHTML = renderizarContenidoNotasMaestro(notasTexto);
 
@@ -5751,8 +5695,8 @@ async function generarNotasMaestroConIA(moduloId, contenidoModulo) {
         contenidoModal.innerHTML = `
             <div class="cb-notes-error p-4">
                 <p class="font-semibold cb-notes-error-title">Error al generar las notas</p>
-                <p class="text-sm mt-2 cb-notes-error-message">${error.message}</p>
-                <button onclick="regenerarNotasMaestro()" 
+                <p class="text-sm mt-2 cb-notes-error-message">${escapeHtml(error.message)}</p>
+                <button data-mc-action="reintentar-notas-maestro"
                         class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cb-notes-error-button">
                     <i class="fas fa-sync-alt mr-2"></i> Reintentar
                 </button>
@@ -6102,11 +6046,11 @@ function renderizarContenidoModulo(contenido) {
     }
 
     if (contieneHtmlRenderizable(contenidoNormalizado)) {
-        return contenidoNormalizado;
+        return sanitizarHtmlEditorial(contenidoNormalizado);
     }
 
     if (contieneMarkdownEstructurado(contenidoNormalizado)) {
-        return convertirMarkdownBasicoAHtml(contenidoNormalizado);
+        return sanitizarHtmlEditorial(convertirMarkdownBasicoAHtml(contenidoNormalizado));
     }
 
     const parrafos = normalizarTextoNotas(contenidoNormalizado)
@@ -6115,7 +6059,7 @@ function renderizarContenidoModulo(contenido) {
         .filter(Boolean)
         .map(p => `<p>${formatearInlineMarkdown(p).replace(/\n/g, '<br>')}</p>`);
 
-    return parrafos.join('') || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
+    return sanitizarHtmlEditorial(parrafos.join('')) || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
 }
 
 window.renderizarContenidoModulo = renderizarContenidoModulo;
@@ -6465,7 +6409,7 @@ window.guardarNotasMaestro = async function() {
         
         // Guardar las notas en el módulo
         await guardarModulo(moduloNotasMaestroId, {
-            notasMaestro: contenidoModal.innerHTML,
+            notasMaestro: sanitizarHtmlEditorial(contenidoModal.innerHTML),
             notasMaestroGenerado: new Date().toISOString()
         });
         
@@ -6511,7 +6455,7 @@ window.aplicarNotasMaestro = async function() {
     }
 
     const bloqueNotas = contenidoModal.querySelector(".notas-maestro-simple");
-    const htmlAplicable = (bloqueNotas ? bloqueNotas.outerHTML : contenidoModal.innerHTML).trim();
+    const htmlAplicable = sanitizarHtmlEditorial((bloqueNotas ? bloqueNotas.outerHTML : contenidoModal.innerHTML).trim());
     if (!htmlAplicable) {
         alert("No hay contenido generado para aplicar");
         return;
@@ -6864,7 +6808,7 @@ function sanitizarTraducciones(traducciones) {
     if (!Array.isArray(traducciones)) return [];
     return traducciones.slice(0, 12).map((t) => ({
         ...t,
-        contenido: recortarTextoSeguro(t?.contenido || "", 120000)
+        contenido: recortarTextoSeguro(sanitizarHtmlEditorial(t?.contenido || ""), 120000)
     }));
 }
 
@@ -6887,16 +6831,16 @@ async function reintentarGuardadoModuloReduciendoTamano({
     const cambiosBase = { ...(cambios || {}) };
 
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "instrucciones")) {
-        cambiosBase.instrucciones = recortarTextoSeguro(cambiosBase.instrucciones, 160000);
+        cambiosBase.instrucciones = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.instrucciones), 160000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "contenido")) {
-        cambiosBase.contenido = recortarTextoSeguro(cambiosBase.contenido, 280000);
+        cambiosBase.contenido = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.contenido), 280000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "notasMaestro")) {
-        cambiosBase.notasMaestro = recortarTextoSeguro(cambiosBase.notasMaestro, 180000);
+        cambiosBase.notasMaestro = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.notasMaestro), 180000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "contenidoGenerado")) {
-        cambiosBase.contenidoGenerado = recortarTextoSeguro(cambiosBase.contenidoGenerado, 180000);
+        cambiosBase.contenidoGenerado = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.contenidoGenerado), 180000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "traducciones")) {
         cambiosBase.traducciones = sanitizarTraducciones(cambiosBase.traducciones);
@@ -6905,19 +6849,19 @@ async function reintentarGuardadoModuloReduciendoTamano({
     const payloadRescate = quitarUndefinedPlano({
         ...cambiosBase,
         instrucciones: recortarTextoSeguro(
-            cambiosBase.instrucciones ?? actual.instrucciones ?? "",
+            sanitizarHtmlEditorial(cambiosBase.instrucciones ?? actual.instrucciones ?? ""),
             160000
         ),
         contenido: recortarTextoSeguro(
-            cambiosBase.contenido ?? actual.contenido ?? "",
+            sanitizarHtmlEditorial(cambiosBase.contenido ?? actual.contenido ?? ""),
             280000
         ),
         notasMaestro: recortarTextoSeguro(
-            cambiosBase.notasMaestro ?? actual.notasMaestro ?? "",
+            sanitizarHtmlEditorial(cambiosBase.notasMaestro ?? actual.notasMaestro ?? ""),
             180000
         ),
         contenidoGenerado: recortarTextoSeguro(
-            cambiosBase.contenidoGenerado ?? actual.contenidoGenerado ?? "",
+            sanitizarHtmlEditorial(cambiosBase.contenidoGenerado ?? actual.contenidoGenerado ?? ""),
             180000
         ),
         traducciones: sanitizarTraducciones(
@@ -6960,8 +6904,25 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
         // Primero verificar si existe
         const snap = await getDoc(docRef);
         
+        const cambiosSanitizados = { ...(cambios || {}) };
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "instrucciones")) {
+            cambiosSanitizados.instrucciones = sanitizarHtmlEditorial(cambiosSanitizados.instrucciones);
+        }
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "contenido")) {
+            cambiosSanitizados.contenido = sanitizarHtmlEditorial(cambiosSanitizados.contenido);
+        }
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "notasMaestro")) {
+            cambiosSanitizados.notasMaestro = sanitizarHtmlEditorial(cambiosSanitizados.notasMaestro);
+        }
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "contenidoGenerado")) {
+            cambiosSanitizados.contenidoGenerado = sanitizarHtmlEditorial(cambiosSanitizados.contenidoGenerado);
+        }
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "traducciones")) {
+            cambiosSanitizados.traducciones = sanitizarTraducciones(cambiosSanitizados.traducciones);
+        }
+
         const datosActualizados = {
-            ...cambios,
+            ...cambiosSanitizados,
             actualizado: Date.now(),
             cursoId: cursoIdParaGuardar,
             // 🔥 Añadir timestamp para sincronización
@@ -7197,13 +7158,10 @@ ${modulo.contenido || "(Vacío)"}
             ]
         };
 
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-        });
-
-        const data = await res.json();
+        const { response: res, data } = await geminiGenerateRequest(body);
+        if (!res.ok) {
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${res.status}`));
+        }
         const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta";
 
         mostrarModalAnalisis(txt);
@@ -7266,15 +7224,12 @@ ${subtema.contenidoGenerado}
 ###########################################
         `;
 
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response: res, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
-
-        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${res.status}`));
+        }
         let texto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta";
 
         texto = texto.replace(/```html/gi, "").replace(/```/g, "");
@@ -7295,17 +7250,21 @@ ${subtema.contenidoGenerado}
         // =============================
         // ✔ MOSTRAR EN EL MODAL
         // =============================
-        contPrev.innerHTML = texto;
+        contPrev.innerHTML = sanitizarHtmlEditorial(texto);
 
         // activar menú contextual
         setTimeout(() => activarAccionesEnParrafos(), 50);
         
 
     } catch (err) {
-        contPrev.innerHTML = `
-            <div class="text-red-600">Error al traducir</div>
-            <pre class="text-xs">${err}</pre>
-        `;
+        contPrev.replaceChildren();
+        const errorTitle = document.createElement("div");
+        errorTitle.className = "text-red-600";
+        errorTitle.textContent = "Error al traducir";
+        const errorBody = document.createElement("pre");
+        errorBody.className = "text-xs";
+        errorBody.textContent = String(err?.stack || err?.message || err || "");
+        contPrev.append(errorTitle, errorBody);
     }
 };
 
@@ -7376,10 +7335,12 @@ window.renderListadoTraduccionesSubtema = function (subtema) {
 
             <div class="flex gap-3 text-sm">
                 <span class="text-primary cursor-pointer"
-                    onclick="abrirTraduccionSubtema('${t.id}')">Ver</span>
+                    data-mc-action="abrir-traduccion-subtema"
+                    data-mc-translation-id="${escapeHtml(t.id)}">Ver</span>
 
                 <span class="text-destructive cursor-pointer"
-                    onclick="eliminarTraduccionSubtema('${t.id}')">Eliminar</span>
+                    data-mc-action="eliminar-traduccion-subtema"
+                    data-mc-translation-id="${escapeHtml(t.id)}">Eliminar</span>
             </div>
         </div>
     `).join("");
@@ -7462,15 +7423,12 @@ ${modulo.contenido || "(Vacío)"}
 #############################################
         `;
 
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response: res, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
-
-        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${res.status}`));
+        }
         let texto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta";
 
         // LIMPIAR ```html ``` Y ``` CUALQUIER BLOQUE
@@ -7497,13 +7455,19 @@ ${modulo.contenido || "(Vacío)"}
         renderListadoTraducciones(modulo);
 
         // mostrar traducción
-        document.getElementById("contenidoTraduccionModulo").innerHTML = texto;
+        document.getElementById("contenidoTraduccionModulo").innerHTML = sanitizarHtmlEditorial(texto);
 
     } catch (err) {
-        document.getElementById("contenidoTraduccionModulo").innerHTML = `
-            <div class="text-red-600">Error al traducir</div>
-            <pre>${err.message}</pre>
-        `;
+        const contenedorTraduccion = document.getElementById("contenidoTraduccionModulo");
+        if (contenedorTraduccion) {
+            contenedorTraduccion.replaceChildren();
+            const errorTitle = document.createElement("div");
+            errorTitle.className = "text-red-600";
+            errorTitle.textContent = "Error al traducir";
+            const errorBody = document.createElement("pre");
+            errorBody.textContent = String(err?.stack || err?.message || err || "");
+            contenedorTraduccion.append(errorTitle, errorBody);
+        }
     }
 };
 
@@ -7517,7 +7481,7 @@ window.abrirTraduccionSubtema = function (idTraduccion) {
     const cont = document.getElementById("contenidoTraduccionSubtema");
     if (!cont) return;
 
-    cont.innerHTML = t.contenido;
+        cont.innerHTML = sanitizarHtmlEditorial(t.contenido);
     cont.dataset.traduccionId = idTraduccion;
 
 
@@ -7580,9 +7544,13 @@ window.renderListadoTraducciones = function(modulo) {
             </div>
             <div class="flex gap-3 text-sm">
                 <span class="text-blue-600 cursor-pointer hover:text-blue-800"
-                    onclick="window.abrirTraduccion('${t.id}', '${modulo.id}')">Ver</span>
+                    data-mc-action="abrir-traduccion"
+                    data-mc-translation-id="${escapeHtml(t.id)}"
+                    data-mc-modulo-id="${escapeHtml(modulo.id)}">Ver</span>
                 <span class="text-red-600 cursor-pointer hover:text-red-800"
-                    onclick="window.eliminarTraduccion('${t.id}', '${modulo.id}')">Eliminar</span>
+                    data-mc-action="eliminar-traduccion"
+                    data-mc-translation-id="${escapeHtml(t.id)}"
+                    data-mc-modulo-id="${escapeHtml(modulo.id)}">Eliminar</span>
             </div>
         </div>
     `).join("");
@@ -7630,7 +7598,7 @@ window.abrirTraduccion = async function (idTraduccion, moduloId = null) {
     // Insertar contenido en el modal
     const cont = document.getElementById("contenidoTraduccionModulo");
     if (cont) {
-        cont.innerHTML = traduccion.contenido;
+        cont.innerHTML = sanitizarHtmlEditorial(traduccion.contenido);
         cont.dataset.traduccionId = idTraduccion;
         cont.dataset.moduloId = modulo.id;
     }
@@ -7965,19 +7933,14 @@ Devuelve SOLO el contenido reescrito en HTML.
 NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
 `;
 
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response: res, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
 
         if (!res.ok) {
-            throw new Error(`Error HTTP: ${res.status} - ${res.statusText}`);
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${res.status}`));
         }
 
-        const data = await res.json();
         const textoRespuesta = data?.candidates?.[0]?.content?.parts?.[0]?.text || contenidoOriginal;
 
         // Limpiar respuesta
@@ -7992,7 +7955,7 @@ NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
 
         // Mostrar en el modal
         if (contenidoGeneradoDiv) {
-            contenidoGeneradoDiv.innerHTML = nuevoContenido;
+            contenidoGeneradoDiv.innerHTML = sanitizarHtmlEditorial(nuevoContenido);
             
             // Contar palabras del nuevo contenido
             const textoLimpio = nuevoContenido.replace(/<[^>]*>/g, ' ').trim();
@@ -8020,8 +7983,8 @@ NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
             contenidoGeneradoDiv.innerHTML = `
                 <div class="text-red-600 text-sm">
                     <p>Error al generar el contenido:</p>
-                    <p class="text-xs mt-2">${err.message}</p>
-                    <button onclick="generarVistaPreviaTono()" 
+                    <p class="text-xs mt-2">${escapeHtml(err.message)}</p>
+                    <button data-mc-action="generar-vista-previa-tono"
                             class="mt-3 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
                         Reintentar
                     </button>
@@ -8074,7 +8037,7 @@ window.aplicarCambioTono = async function() {
 
     try {
         // Actualizar en la página
-        contElement.innerHTML = contenidoGeneradoTono;
+        contElement.innerHTML = sanitizarHtmlEditorial(contenidoGeneradoTono);
 
         // Guardar en Firebase
         await guardarModulo(moduloTonoActual, { contenido: contenidoGeneradoTono });
@@ -8239,20 +8202,17 @@ ${htmlOriginalModuloTabla}
     `;
 
     try {
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
-
-        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${response.status}`));
+        }
 
         let tablaHTML = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
         // ❗ SIN limpiar nada. SIN alterar lo que Gemini devuelve.
-        previewTabla.innerHTML = tablaHTML;
+        previewTabla.innerHTML = sanitizarHtmlEditorial(tablaHTML);
 
     } catch (error) {
         previewTabla.innerHTML = `
@@ -8284,7 +8244,7 @@ window.aplicarTablaModulo = async function () {
 
     // Reemplazar contenido en pantalla
     const cont = document.getElementById(`contenido-${moduloCrearTablaId}`);
-    if (cont) cont.innerHTML = tablaHTML;
+    if (cont) cont.innerHTML = sanitizarHtmlEditorial(tablaHTML);
 
     try {
         // Guardar EXACTAMENTE lo que devolvió Gemini
@@ -8397,7 +8357,7 @@ async function guardarContenidoDeTodosLosModulos() {
     // guardar contenido generado del subtema
     const gen = document.getElementById("resultadoGenerado");
     if (gen) {
-        subtemaActivo.contenidoGenerado = gen.innerHTML;
+        subtemaActivo.contenidoGenerado = sanitizarHtmlEditorial(gen.innerHTML);
     }
 
     await guardarCursoFirebase();
@@ -8438,7 +8398,7 @@ function guardarContenidoGenerado() {
     const cont = document.getElementById("resultadoGenerado");
     if (!cont) return;
 
-    subtemaActivo.contenidoGenerado = cont.innerHTML;
+    subtemaActivo.contenidoGenerado = sanitizarHtmlEditorial(cont.innerHTML);
     guardarCursoFirebase();
 }
 
@@ -8897,19 +8857,14 @@ REGLAS IMPORTANTES:
 - Mantén la misma longitud aproximada (a menos que sea extender o resumir)
         `;
         
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
         
         if (!response.ok) {
-            throw new Error(`Error HTTP: ${response.status}`);
+            throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${response.status}`));
         }
         
-        const data = await response.json();
         let textoReformulado = data?.candidates?.[0]?.content?.parts?.[0]?.text || textoOriginal;
         
         // Limpiar respuesta
@@ -9023,7 +8978,7 @@ function guardarContenidoEditado() {
     if (contSubtema && contSubtema.contains(currentSelection.startContainer)) {
 
         if (!window.subtemaActivo) return;
-        window.subtemaActivo.contenidoGenerado = contSubtema.innerHTML;
+        window.subtemaActivo.contenidoGenerado = sanitizarHtmlEditorial(contSubtema.innerHTML);
 
         guardarCursoFirebase();
         return;
@@ -9534,7 +9489,7 @@ function inicializarToolbarInstruccionesGemini() {
     editor.addEventListener('keyup', guardarSeleccionGemini);
     editor.addEventListener('input', guardarSeleccionGemini);
 
-    // Exponer handlers en window porque el HTML usa onclick inline.
+    // Mantener handlers globales mientras existan vistas legacy generadas dinámicamente.
     window.formatText = formatText;
     window.insertTable = insertTable;
     window.insertGeminiImage = insertGeminiImage;
@@ -9802,11 +9757,11 @@ window.abrirInstruccionesGemini = async function(moduloId) {
     if (modulo.instrucciones) {
         // Si contiene HTML, usarlo directamente
         if (modulo.instrucciones.includes('<') && modulo.instrucciones.includes('>')) {
-            editor.innerHTML = modulo.instrucciones;
+            editor.innerHTML = sanitizarHtmlEditorial(modulo.instrucciones);
         } else {
             // Si es texto plano, convertirlo manteniendo saltos de línea
             const textWithBreaks = modulo.instrucciones.replace(/\n/g, '<br>');
-            editor.innerHTML = textWithBreaks;
+            editor.innerHTML = sanitizarHtmlEditorial(textWithBreaks);
         }
     } else {
         editor.innerHTML = '';
@@ -9839,7 +9794,7 @@ function inicializarEventosModalInstruccionesGemini() {
         const editor = obtenerEditorGemini();
         if (!editor) return;
         
-        const contenidoHTML = editor.innerHTML.trim();
+        const contenidoHTML = sanitizarHtmlEditorial(sanitizeRichText(editor.innerHTML.trim()));
         const moduloId = window.__moduloEditandoInstruccionesId;
 
         if (!moduloId) return;

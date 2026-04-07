@@ -724,6 +724,190 @@ async function listShareableMoodleUsers(currentUid = "") {
   return users;
 }
 
+function canManageMoodleCourseShare(courseData = {}, uid = "") {
+  const currentUid = clampText(uid, 140);
+  if (!currentUid) return false;
+  if (String(courseData?.userId || courseData?.uid || courseData?.ownerUid || "").trim() === currentUid) return true;
+  const details = Array.isArray(courseData?.compartidoConDetalles) ? courseData.compartidoConDetalles : [];
+  return details.some((detail) => (
+    String(detail?.userId || "").trim() === currentUid &&
+    detail?.permisos &&
+    detail.permisos.compartir === true
+  ));
+}
+
+function deepClone(value) {
+  return typeof structuredClone === "function"
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+
+async function createMoodleCourseCopy({
+  courseId = "",
+  requesterUid = "",
+  targetUser = null,
+}) {
+  const cleanCourseId = clampText(courseId, 140);
+  const sourceRef = db.collection("moodleCourses").doc(cleanCourseId);
+  const sourceSnap = await sourceRef.get();
+  if (!sourceSnap.exists) {
+    const err = new Error("El curso original no existe.");
+    err.status = 404;
+    throw err;
+  }
+  const sourceData = sourceSnap.data() || {};
+  if (!canManageMoodleCourseShare(sourceData, requesterUid)) {
+    const err = new Error("No tienes permisos para compartir este curso.");
+    err.status = 403;
+    throw err;
+  }
+
+  const targetUid = clampText(targetUser?.uid || "", 140);
+  const targetName = clampText(targetUser?.displayName || targetUser?.email || targetUid, 180) || targetUid;
+  const duplicateName = `${String(sourceData?.nombre || "Curso").trim()} (Copia para ${targetName})`;
+  const existingCopiesSnap = await db.collection("moodleCourses").where("userId", "==", targetUid).limit(100).get();
+  const duplicate = existingCopiesSnap.docs.find((docSnap) => {
+    const data = docSnap.data() || {};
+    return String(data?.nombre || "").trim() === duplicateName &&
+      String(data?.copiaDe?.cursoId || "").trim() === cleanCourseId;
+  });
+  if (duplicate) {
+    return {
+      alreadyExisted: true,
+      courseId: String(duplicate.id || "").trim(),
+    };
+  }
+
+  const newCourseId = randomUUID();
+  const copiedCourse = deepClone(sourceData);
+  copiedCourse.id = newCourseId;
+  copiedCourse.cursoId = newCourseId;
+  copiedCourse.nombre = duplicateName;
+  copiedCourse.userId = targetUid;
+  copiedCourse.uid = targetUid;
+  copiedCourse.ownerUid = targetUid;
+  copiedCourse.esPropio = true;
+  copiedCourse.creado = admin.firestore.FieldValue.serverTimestamp();
+  copiedCourse.actualizado = admin.firestore.FieldValue.serverTimestamp();
+  copiedCourse.copiaDe = {
+    cursoId: cleanCourseId,
+    nombre: String(sourceData?.nombre || "").trim() || "Curso",
+    propietarioOriginal: String(sourceData?.userId || sourceData?.uid || sourceData?.ownerUid || "").trim() || requesterUid,
+    fechaCopia: new Date().toISOString(),
+  };
+  delete copiedCourse.compartidoCon;
+  delete copiedCourse.compartidoConDetalles;
+  delete copiedCourse.propietarioNombre;
+
+  const moduleIdMap = new Map();
+  if (Array.isArray(copiedCourse.temas)) {
+    copiedCourse.temas = copiedCourse.temas.map((tema) => {
+      const nextTema = deepClone(tema || {});
+      nextTema.id = randomUUID();
+      if (Array.isArray(nextTema.subtemas)) {
+        nextTema.subtemas = nextTema.subtemas.map((subtema) => {
+          const nextSubtema = deepClone(subtema || {});
+          nextSubtema.id = randomUUID();
+          const sourceModuleIds = Array.isArray(nextSubtema.modulosIds) ? nextSubtema.modulosIds : [];
+          nextSubtema.modulosIds = sourceModuleIds.map((oldId) => {
+            const sourceId = String(oldId || "").trim();
+            if (!sourceId) return sourceId;
+            const newId = randomUUID();
+            moduleIdMap.set(sourceId, newId);
+            return newId;
+          });
+          return nextSubtema;
+        });
+      }
+      return nextTema;
+    });
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection("moodleCourses").doc(newCourseId), copiedCourse);
+
+  for (const [sourceModuleId, newModuleId] of moduleIdMap.entries()) {
+    const sourceModuleDocId = `${cleanCourseId}_${sourceModuleId}`;
+    const sourceModuleSnap = await db.collection("moodleCourses").doc(sourceModuleDocId).get();
+    if (!sourceModuleSnap.exists) continue;
+    const sourceModuleData = deepClone(sourceModuleSnap.data() || {});
+    sourceModuleData.id = newModuleId;
+    sourceModuleData.cursoId = newCourseId;
+    sourceModuleData.userId = targetUid;
+    sourceModuleData.uid = targetUid;
+    sourceModuleData.ownerUid = targetUid;
+    sourceModuleData.creado = admin.firestore.FieldValue.serverTimestamp();
+    sourceModuleData.actualizado = admin.firestore.FieldValue.serverTimestamp();
+    const newModuleDocId = `${newCourseId}_${newModuleId}`;
+    batch.set(db.collection("moodleCourses").doc(newModuleDocId), sourceModuleData);
+  }
+
+  await batch.commit();
+  return {
+    alreadyExisted: false,
+    courseId: newCourseId,
+  };
+}
+
+async function shareMoodleCourseCollaboration({
+  courseId = "",
+  requesterUid = "",
+  targetUser = null,
+  permisosEditar = false,
+  permisosCompartir = false,
+}) {
+  const cleanCourseId = clampText(courseId, 140);
+  const courseRef = db.collection("moodleCourses").doc(cleanCourseId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(courseRef);
+    if (!snap.exists) {
+      const err = new Error("El curso no existe.");
+      err.status = 404;
+      throw err;
+    }
+    const courseData = snap.data() || {};
+    if (!canManageMoodleCourseShare(courseData, requesterUid)) {
+      const err = new Error("No tienes permisos para compartir este curso.");
+      err.status = 403;
+      throw err;
+    }
+    const compartidoCon = Array.isArray(courseData.compartidoCon) ? [...courseData.compartidoCon] : [];
+    const compartidoConDetalles = Array.isArray(courseData.compartidoConDetalles) ? [...courseData.compartidoConDetalles] : [];
+    const targetUid = clampText(targetUser?.uid || "", 140);
+    const targetName = clampText(targetUser?.displayName || targetUser?.email || targetUid, 180) || targetUid;
+    const targetEmail = clampText(targetUser?.email || "", 180).toLowerCase();
+    const existingIndex = compartidoConDetalles.findIndex((detail) => String(detail?.userId || "").trim() === targetUid);
+    const detailPayload = {
+      userId: targetUid,
+      userName: targetName,
+      userEmail: targetEmail,
+      fechaCompartido: new Date(),
+      compartidoPor: requesterUid,
+      permisos: {
+        editar: permisosEditar === true,
+        compartir: permisosCompartir === true,
+      },
+      modo: "colaboracion",
+    };
+    if (existingIndex >= 0) {
+      compartidoConDetalles[existingIndex] = {
+        ...compartidoConDetalles[existingIndex],
+        ...detailPayload,
+        fechaModificacion: new Date(),
+        modificadoPor: requesterUid,
+      };
+    } else {
+      compartidoConDetalles.push(detailPayload);
+    }
+    if (!compartidoCon.includes(targetUid)) compartidoCon.push(targetUid);
+    tx.update(courseRef, {
+      compartidoCon,
+      compartidoConDetalles,
+      actualizado: new Date(),
+    });
+  });
+}
+
 async function safeJson(response) {
   try {
     return await response.json();
@@ -1078,6 +1262,47 @@ app.get("/api/moodle/share-users", async (req, res) => {
     return res.status(200).json({ ok: true, users });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo cargar usuarios para compartir.") });
+  }
+});
+
+app.post("/api/moodle/share-course", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const courseId = clampText(req.body?.courseId || "", 140);
+    const mode = String(req.body?.mode || "").trim().toLowerCase();
+    const target = await resolveShareTarget({
+      targetUid: req.body?.targetUid || "",
+      targetEmail: req.body?.targetEmail || ""
+    });
+    if (!courseId) {
+      return res.status(400).json({ error: "Falta courseId." });
+    }
+    if (!["copy", "collaboration"].includes(mode)) {
+      return res.status(400).json({ error: "Modo de compartición inválido." });
+    }
+    if (target.uid === uid) {
+      return res.status(400).json({ error: "No puedes compartir contigo mismo." });
+    }
+
+    if (mode === "copy") {
+      const result = await createMoodleCourseCopy({
+        courseId,
+        requesterUid: uid,
+        targetUser: target,
+      });
+      return res.status(200).json({ ok: true, mode, result, target });
+    }
+
+    await shareMoodleCourseCollaboration({
+      courseId,
+      requesterUid: uid,
+      targetUser: target,
+      permisosEditar: req.body?.permissions?.editar === true,
+      permisosCompartir: req.body?.permissions?.compartir === true,
+    });
+    return res.status(200).json({ ok: true, mode, target });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo compartir el curso.") });
   }
 });
 

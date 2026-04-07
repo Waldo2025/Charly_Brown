@@ -1,15 +1,36 @@
 import { obtenerModulo, guardarModulo } from "./moodleCourse.js";
-
-
-const API_KEY = "__GEMINI_API_KEY_LOCAL__"; // ¡Recuerda proteger tu clave!
+import { buildApiUrl, getAuthHeaders } from "./api-client.js";
 
 function getGeminiEndpoint() {
-  // Asegúrate de que el valor del select sea un nombre de modelo válido
-  const modelo = document.getElementById("selectGeminiEndpoint")?.value 
-      || "gemini-1.5-flash"; // Nombre de modelo por defecto válido
+  return buildApiUrl("/api/gemini/generate");
+}
 
-  // La URL del endpoint es correcta para la API REST de Google GenAI
-  return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${API_KEY}`;
+function getSelectedGeminiModel() {
+  return String(document.getElementById("selectGeminiEndpoint")?.value || "gemini-2.5-flash-lite")
+    .replace(/^models\//i, "")
+    .replace(/:generateContent$/i, "")
+    .trim() || "gemini-2.5-flash-lite";
+}
+
+async function geminiGenerateRequest(payload = {}, options = {}) {
+  const model = String(options?.model || getSelectedGeminiModel())
+    .replace(/^models\//i, "")
+    .replace(/:generateContent$/i, "")
+    .trim() || "gemini-2.5-flash-lite";
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" }).catch(() => ({
+    "Content-Type": "application/json"
+  }));
+  const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      payload: payload && typeof payload === "object" ? payload : {}
+    }),
+    ...(options?.signal ? { signal: options.signal } : {})
+  });
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
 }
 
 function extraerPartesMultimodalesDesdeInstrucciones(instruccionesHtml = "") {
@@ -42,6 +63,34 @@ function extraerPartesMultimodalesDesdeInstrucciones(instruccionesHtml = "") {
     .trim();
 
   return { textOnly, images };
+}
+
+function stripHtmlToText(value = "") {
+    return String(value || "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n")
+        .replace(/<\/div>/gi, "\n")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\u00a0/g, " ")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+}
+
+function truncateText(value = "", maxChars = 2000) {
+    const clean = String(value || "").trim();
+    const limit = Math.max(0, Number(maxChars) || 0);
+    if (!clean || clean.length <= limit) return clean;
+    return `${clean.slice(0, Math.max(0, limit - 24)).trim()}\n...[recortado]`;
+}
+
+function estimatePayloadBytes(payload = {}) {
+    try {
+        return new TextEncoder().encode(JSON.stringify(payload || {})).length;
+    } catch (_) {
+        return Number.POSITIVE_INFINITY;
+    }
 }
 
 
@@ -191,8 +240,6 @@ async function generarContenidoGemini(options = {}) {
     `;
 
     try {
-        const endpoint = getGeminiEndpoint();
-
         const prompt = `
 # RESET — Nueva sesión
 Olvida toda memoria anterior. No conserves contexto previo.  
@@ -251,13 +298,8 @@ Estructura recomendada:
 let lastError;
 for (let intento = 0; intento < 3; intento++) {
     try {
-        // 🔥 AGREGAR ESTA LÍNEA QUE FALTA:
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
 
         if (!response.ok) {
@@ -276,10 +318,9 @@ for (let intento = 0; intento < 3; intento++) {
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                         continue;
                     }
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(String(data?.error?.message || data?.error || `HTTP ${response.status}: ${response.statusText}`));
                 }
 
-                const data = await response.json();
                 const texto = data?.candidates?.[0]?.content?.parts?.[0]?.text ||
                     "<p>No se recibió respuesta válida.</p>";
 
@@ -315,12 +356,14 @@ for (let intento = 0; intento < 3; intento++) {
                     <li>Verifica tu conexión a internet</li>
                     <li>Usa un modelo diferente (gemini-1.5-flash-latest)</li>
                 </ul>
-                <button class="mt-3 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                        onclick="generarContenidoGemini()">
+                <button type="button" class="mt-3 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 cb-retry-generar-contenido">
                     Reintentar
                 </button>
             </div>
         `;
+        resultadoElement.querySelector(".cb-retry-generar-contenido")?.addEventListener("click", () => {
+            generarContenidoGemini();
+        });
     }
 
 }
@@ -421,12 +464,27 @@ export async function generarModuloGemini(moduloId) {
         ` : "";
 
         // **🔵 AQUÍ YA ESTÁ CORREGIDO — Usa window.curso**
+        const contextoCursoCompacto = obtenerContextoCompactoDelCurso(window.curso, 12000);
+        const contextoSubtemaCompacto = obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
+        const imagenesLimitadas = [];
+        let totalInlineChars = 0;
+        imagenesInstrucciones.slice(0, 2).forEach((img) => {
+            const data = String(img?.data || "").trim();
+            if (!data) return;
+            if ((totalInlineChars + data.length) > 70000) return;
+            totalInlineChars += data.length;
+            imagenesLimitadas.push({
+                mimeType: img.mimeType,
+                data
+            });
+        });
+
         const prompt = `
         # CONTEXTO GLOBAL DEL CURSO
-        ${obtenerContextoCompletoDelCurso(window.curso)}
+        ${contextoCursoCompacto}
 
         # CONTEXTO DEL SUBTEMA ESPECÍFICO
-        ${obtenerContextoCompletoDelSubtema(window.subtemaActivo)}
+        ${contextoSubtemaCompacto}
 
         # GENERAR NUEVO MÓDULO
         Tipo: ${modulo.tipo}
@@ -457,42 +515,81 @@ export async function generarModuloGemini(moduloId) {
         NO hagas explicaciones.
         `;
 
-        // Llamar a Gemini
-        const endpoint = getGeminiEndpoint();
-
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [
-                        { text: prompt },
-                        ...imagenesInstrucciones.map((img, index) => ({
-                            text: `Imagen de referencia ${index + 1}: analiza su contenido visual y úsalo para generar el módulo.`
-                        })),
-                        ...imagenesInstrucciones.map((img) => ({
-                            inline_data: {
-                                mime_type: img.mimeType,
-                                data: img.data
-                            }
-                        }))
-                    ]
-                }]
-            })
+        const buildModulePayload = ({ promptText = "", includeImages = true, minimalMode = false } = {}) => ({
+            contents: [{
+                parts: [
+                    { text: promptText },
+                    ...(includeImages ? imagenesLimitadas.map((img, index) => ({
+                        text: `Imagen de referencia ${index + 1}: analiza su contenido visual y úsalo para generar el módulo.`
+                    })) : []),
+                    ...(includeImages ? imagenesLimitadas.map((img) => ({
+                        inline_data: {
+                            mime_type: img.mimeType,
+                            data: img.data
+                        }
+                    })) : [])
+                ]
+            }],
+            ...(minimalMode ? {
+                generationConfig: {
+                    temperature: 0.6
+                }
+            } : {})
         });
+
+        let payload = buildModulePayload({
+            promptText: prompt,
+            includeImages: imagenesLimitadas.length > 0
+        });
+        let estimatedBytes = estimatePayloadBytes(payload);
+        if (estimatedBytes > 100 * 1024) {
+            payload = buildModulePayload({
+                promptText: prompt,
+                includeImages: false
+            });
+            estimatedBytes = estimatePayloadBytes(payload);
+        }
+
+        let { response: res, data } = await geminiGenerateRequest(payload);
+
+        if (res.status === 413) {
+            const promptMinimo = `
+            # CONTEXTO MÍNIMO
+            Tema: ${truncateText(window.temaActivo?.nombre || "Tema general", 180)}
+            Subtema: ${truncateText(window.subtemaActivo?.nombre || "Subtema sin nombre", 180)}
+            Tipo de módulo: ${truncateText(modulo.tipo || "Recurso", 40)}
+            Nombre del módulo: ${truncateText(modulo.nombre || "Sin nombre", 180)}
+
+            # INSTRUCCIONES DEL AUTOR
+            ${truncateText(instruccionesSoloTexto || "(Sin instrucciones textuales)", 5000)}
+
+            # REGLAS PEDAGÓGICAS
+            ${promptExtraPorTipo(modulo.tipo)}
+
+            # FORMATO DE SALIDA
+            ${BLOQUE_FORMATO_MARKDOWN}
+
+            # IDIOMA
+            Devuelve todo en ${idiomaDetectadoModulo.label} (${idiomaDetectadoModulo.code}).
+            No repitas contenido existente. Devuelve solo el markdown final.
+            `;
+            ({ response: res, data } = await geminiGenerateRequest(buildModulePayload({
+                promptText: promptMinimo,
+                includeImages: false,
+                minimalMode: true
+            })));
+        }
 
         if (!res.ok) {
             let detalle = "";
             try {
-                const errJson = await res.json();
-                detalle = errJson?.error?.message || JSON.stringify(errJson);
+                detalle = data?.error?.message || data?.error || JSON.stringify(data);
             } catch (_) {
                 detalle = res.statusText || "Error desconocido del servidor";
             }
             throw new Error(`Gemini HTTP ${res.status}: ${detalle}`);
         }
 
-        const data = await res.json();
         let texto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
         texto = limpiarBloquesCode(texto);
@@ -530,7 +627,6 @@ export async function generarModuloGemini(moduloId) {
  * - Pega todas las partes en un solo HTML
  */
 async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
-    const endpoint = getGeminiEndpoint();
     let acumulado = "";
     let promptActual = promptInicial;
 
@@ -541,13 +637,9 @@ async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
         // INTENTAR MÁXIMO 3 VECES POR FRAGMENTO
         for (let intento = 0; intento < 3; intento++) {
             try {
-                response = await fetch(endpoint, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: promptActual }] }]
-                    })
-                });
+                ({ response, data } = await geminiGenerateRequest({
+                    contents: [{ parts: [{ text: promptActual }] }]
+                }));
 
                 // Si es 503, esperar y reintentar
                 if (response.status === 503) {
@@ -557,10 +649,9 @@ async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
 
                 // Si es otro error, lanzar excepción
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(String(data?.error?.message || data?.error || `HTTP ${response.status}: ${response.statusText}`));
                 }
 
-                data = await response.json();
                 break; // Salir del bucle de reintentos si tuvo éxito
                 
             } catch (error) {
@@ -603,8 +694,6 @@ async function generarContenidoLargoConGemini(promptInicial, maxIter = 5) {
 
 async function reformularParrafoConIA(textoOriginal) {
     try {
-        const endpoint = getGeminiEndpoint();
-
         const prompt = `
 Reformula el siguiente párrafo con un estilo claro, profesional y fluido.
 Sin comentarios, sin explicaciones.
@@ -614,16 +703,11 @@ Devuelve SOLO el texto reformulado, sin HTML adicional.
 ${textoOriginal}
         `;
 
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: [{ text: prompt }] }]
         });
+        if (!response.ok) return textoOriginal;
 
-        const data = await response.json();
-        
         // Extraer texto seguro
         const nuevo = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || textoOriginal;
 
@@ -808,6 +892,36 @@ function obtenerContextoCompletoDelCurso(curso) {
     return texto;
 }
 
+function obtenerContextoCompactoDelCurso(curso, limiteTotal = 12000) {
+    if (!curso || !Array.isArray(curso.temas)) return "";
+
+    const bloques = ["=== CONTEXTO RESUMIDO DEL CURSO ==="];
+    for (const tema of curso.temas.slice(0, 8)) {
+        bloques.push(`[Tema] ${truncateText(tema?.nombre || "Sin nombre", 160)}`);
+        const subtemas = Array.isArray(tema?.subtemas) ? tema.subtemas.slice(0, 8) : [];
+        for (const sub of subtemas) {
+            bloques.push(`- Subtema: ${truncateText(sub?.nombre || "Sin nombre", 180)}`);
+            const subInstrucciones = truncateText(stripHtmlToText(sub?.instrucciones || ""), 500);
+            if (subInstrucciones) bloques.push(`  Instrucciones: ${subInstrucciones}`);
+            const intro = truncateText(stripHtmlToText(sub?.contenidoGenerado || ""), 700);
+            if (intro) bloques.push(`  Introducción existente: ${intro}`);
+            const modulos = Array.isArray(sub?.modulos) ? sub.modulos.slice(0, 4) : [];
+            if (modulos.length) {
+                bloques.push("  Módulos previos:");
+                modulos.forEach((mod) => {
+                    const nombre = truncateText(mod?.nombre || "Sin nombre", 140);
+                    const tipo = truncateText(mod?.tipo || "Sin tipo", 40);
+                    const contenido = truncateText(stripHtmlToText(mod?.contenido || ""), 280);
+                    bloques.push(`    - [${tipo}] ${nombre}${contenido ? ` :: ${contenido}` : ""}`);
+                });
+            }
+        }
+        const provisional = bloques.join("\n");
+        if (provisional.length >= limiteTotal) break;
+    }
+    return truncateText(`${bloques.join("\n")}\n=== FIN DEL CONTEXTO RESUMIDO ===`, limiteTotal);
+}
+
 
 
 function obtenerContextoCompletoDelSubtema(subtema) {
@@ -848,6 +962,39 @@ ${mod.contenido || "<sin contenido>"}
     });
 
     return contexto;
+}
+
+function obtenerContextoCompactoDelSubtema(subtema, limiteTotal = 9000) {
+    if (!subtema) return "";
+
+    const bloques = [
+        "=== CONTEXTO RESUMIDO DEL SUBTEMA ===",
+        `Subtema: ${truncateText(subtema?.nombre || "Sin nombre", 200)}`,
+    ];
+
+    const instrucciones = truncateText(stripHtmlToText(subtema?.instrucciones || ""), 1200);
+    if (instrucciones) bloques.push(`Instrucciones del subtema: ${instrucciones}`);
+
+    const contenidoGeneral = truncateText(stripHtmlToText(subtema?.contenidoGenerado || ""), 1800);
+    if (contenidoGeneral) bloques.push(`Contenido general existente: ${contenidoGeneral}`);
+
+    const modulosSubtema = Array.isArray(subtema?.modulos) ? subtema.modulos.slice(0, 6) : [];
+    if (modulosSubtema.length) {
+        bloques.push("Módulos existentes:");
+        modulosSubtema.forEach((mod) => {
+            const nombre = truncateText(mod?.nombre || "Sin nombre", 160);
+            const tipo = truncateText(mod?.tipo || "Sin tipo", 40);
+            const instruccionesModulo = truncateText(stripHtmlToText(mod?.instrucciones || ""), 450);
+            const contenidoModulo = truncateText(stripHtmlToText(mod?.contenido || ""), 700);
+            bloques.push(`- [${tipo}] ${nombre}`);
+            if (instruccionesModulo) bloques.push(`  Instrucciones: ${instruccionesModulo}`);
+            if (contenidoModulo) bloques.push(`  Contenido: ${contenidoModulo}`);
+        });
+    } else if (Array.isArray(subtema?.modulosIds) && subtema.modulosIds.length) {
+        bloques.push(`IDs de módulos: ${truncateText(subtema.modulosIds.join(", "), 500)}`);
+    }
+
+    return truncateText(`${bloques.join("\n")}\n=== FIN DEL CONTEXTO RESUMIDO DEL SUBTEMA ===`, limiteTotal);
 }
 
 
@@ -935,6 +1082,7 @@ function esRespuestaCortadaPorTokens(texto = "") {
 // Exporta las funciones
 export { 
     generarContenidoGemini, 
+    geminiGenerateRequest,
     getGeminiEndpoint,
     reformularParrafoConIA,
     promptExtraPorTipo,
@@ -945,3 +1093,7 @@ export {
     esRespuestaCortadaPorTokens,
     generarContenidoLargoConGemini,
 };
+
+if (typeof window !== "undefined") {
+    window.generarContenidoGemini = generarContenidoGemini;
+}
