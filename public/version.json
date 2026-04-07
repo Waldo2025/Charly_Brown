@@ -1,5 +1,5 @@
 {
-  "version": "2026-1.0.0.12",
+  "version": "2026-1.0.0.15",
   "title": "Nuevas actualizaciones",
   "message": "Se actualizo la generacion con modelos IA: reintento por categoria fallida, mejor manejo de alta demanda en Gemini y mejoras de estabilidad. Da click aqui para actualizar.",
   "forceClearCache": true,

@@ -12,6 +12,10 @@ function getSelectedGeminiModel() {
     .trim() || "gemini-2.5-flash-lite";
 }
 
+function isGeminiRegionUnsupportedMessage(message = "") {
+  return String(message || "").toLowerCase().includes("user location is not supported for the api use");
+}
+
 async function geminiGenerateRequest(payload = {}, options = {}) {
   const model = String(options?.model || getSelectedGeminiModel())
     .replace(/^models\//i, "")
@@ -91,6 +95,39 @@ function estimatePayloadBytes(payload = {}) {
     } catch (_) {
         return Number.POSITIVE_INFINITY;
     }
+}
+
+function inferirCantidadSolicitadaParaQuizz(texto = "") {
+    const normalized = String(texto || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    const directMatch = normalized.match(/(?:genera|generar|crea|crear|convierte|haz|elabora|redacta)?\s*(?:exactamente\s+)?(\d{1,2})\s+(?:preguntas|reactivos|actividades)/i);
+    if (directMatch) {
+        const cantidad = Number(directMatch[1]);
+        return Number.isFinite(cantidad) && cantidad > 0 ? cantidad : null;
+    }
+
+    const mapping = new Map([
+        ["una", 1], ["un", 1],
+        ["dos", 2],
+        ["tres", 3],
+        ["cuatro", 4],
+        ["cinco", 5],
+        ["seis", 6],
+        ["siete", 7],
+        ["ocho", 8],
+        ["nueve", 9],
+        ["diez", 10]
+    ]);
+
+    for (const [word, value] of mapping.entries()) {
+        const rx = new RegExp(`(?:genera|generar|crea|crear|convierte|haz|elabora|redacta)?\\s*(?:exactamente\\s+)?${word}\\s+(?:preguntas|reactivos|actividades)`, "i");
+        if (rx.test(normalized)) return value;
+    }
+
+    return null;
 }
 
 
@@ -416,11 +453,14 @@ export async function generarModuloGemini(moduloId) {
 
     try {
         const instruccionesRaw = modulo.instrucciones || "";
+        const cursoIdModulo = String(modulo.cursoId || window.curso?.id || "").trim() || null;
+        const incluirInstruccionOriginalEnPropuesta = modulo.incluirInstruccionOriginalEnPropuesta === true;
         const { textOnly: instruccionesSoloTexto, images: imagenesInstrucciones } =
             extraerPartesMultimodalesDesdeInstrucciones(instruccionesRaw);
         const idiomaDetectadoModulo = detectarIdiomaPrincipal(
             `${modulo?.nombre || ""}\n${instruccionesSoloTexto || ""}`
         );
+        const cantidadSolicitadaQuizz = inferirCantidadSolicitadaParaQuizz(instruccionesSoloTexto);
 
         // Detectar si autor pidió tabla
         const instrucciones = instruccionesSoloTexto.toLowerCase();
@@ -463,6 +503,43 @@ export async function generarModuloGemini(moduloId) {
         =========================================================
         ` : "";
 
+        const bloqueInstruccionOriginalEnSalida = incluirInstruccionOriginalEnPropuesta ? `
+        ===== FORMATO ESPECIAL REQUERIDO =====
+        Debes estructurar la salida por pares, una actividad a la vez.
+
+        Si existe una sola actividad, usa:
+        ## Actividad original
+        ## Propuesta actividad
+
+        Si existen varias actividades, DEBES usar este patrón exacto y repetirlo:
+        ## Actividad 1 original
+        [texto original de la Actividad 1]
+
+        ## Propuesta Actividad 1
+        [propuesta nueva derivada de la Actividad 1]
+
+        ## Actividad 2 original
+        [texto original de la Actividad 2]
+
+        ## Propuesta Actividad 2
+        [propuesta nueva derivada de la Actividad 2]
+
+        Y así sucesivamente para todas las actividades detectadas.
+
+        Reglas obligatorias:
+        - No agrupes todas las actividades originales en un solo bloque.
+        - Cada actividad original debe ir inmediatamente seguida por su propuesta correspondiente.
+        - Conserva el número y el orden de las actividades originales.
+        - No resumas ni reescribas la instrucción original; solo límpiala lo mínimo para presentarla.
+        - Si el tipo es Quizz, transforma cada propuesta en reactivos claros y bien estructurados.
+
+        Regla crítica:
+        - Primero va la actividad original correspondiente.
+        - Después va la propuesta de esa misma actividad.
+        - No mezcles actividades entre sí.
+        ======================================
+        ` : "";
+
         // **🔵 AQUÍ YA ESTÁ CORREGIDO — Usa window.curso**
         const contextoCursoCompacto = obtenerContextoCompactoDelCurso(window.curso, 12000);
         const contextoSubtemaCompacto = obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
@@ -494,9 +571,11 @@ export async function generarModuloGemini(moduloId) {
         ${instruccionesSoloTexto || "(Sin instrucciones textuales. Usa la imagen adjunta como referencia principal.)"}
 
         ${permisoTablas}
+        ${bloqueContenidoProtegido}
+        ${bloqueInstruccionOriginalEnSalida}
 
         ===== REGLAS PEDAGÓGICAS =====
-        ${promptExtraPorTipo(modulo.tipo)}
+        ${promptExtraPorTipo(modulo.tipo, { cantidadSolicitadaQuizz })}
 
         ===== FORMATO DE SALIDA =====
         ${BLOQUE_FORMATO_MARKDOWN}
@@ -511,6 +590,7 @@ export async function generarModuloGemini(moduloId) {
         Si alguna instrucción previa incluye ejemplos en HTML, conviértelos a markdown equivalente.
         NO menciones que eres IA.
         ${tieneLecturaProtegida ? "⚠️ ADVERTENCIA CRÍTICA: Si el autor incluyó una lectura, NO la modifiques si el autor lo indica. Transcríbela exactamente como está." : ""}
+        ${incluirInstruccionOriginalEnPropuesta ? "Debes incluir siempre pares por actividad: 'Actividad N original' y luego 'Propuesta Actividad N'." : ""}
         NO repitas contenido existente.
         NO hagas explicaciones.
         `;
@@ -564,7 +644,18 @@ export async function generarModuloGemini(moduloId) {
             ${truncateText(instruccionesSoloTexto || "(Sin instrucciones textuales)", 5000)}
 
             # REGLAS PEDAGÓGICAS
-            ${promptExtraPorTipo(modulo.tipo)}
+            ${promptExtraPorTipo(modulo.tipo, { cantidadSolicitadaQuizz })}
+
+            ${incluirInstruccionOriginalEnPropuesta ? `
+            # FORMATO ESPECIAL
+            Si detectas varias actividades, devuelve obligatoriamente pares por actividad:
+            ## Actividad 1 original
+            ## Propuesta Actividad 1
+            ## Actividad 2 original
+            ## Propuesta Actividad 2
+            etc.
+            No agrupes todas las originales en una sola sección.
+            ` : ""}
 
             # FORMATO DE SALIDA
             ${BLOQUE_FORMATO_MARKDOWN}
@@ -587,6 +678,9 @@ export async function generarModuloGemini(moduloId) {
             } catch (_) {
                 detalle = res.statusText || "Error desconocido del servidor";
             }
+            if (res.status === 400 && isGeminiRegionUnsupportedMessage(detalle)) {
+                throw new Error("Gemini rechazó la región o IP del backend. La solicitud sí llegó al servidor, pero Google no permite ese origen para la Gemini Developer API.");
+            }
             throw new Error(`Gemini HTTP ${res.status}: ${detalle}`);
         }
 
@@ -595,17 +689,24 @@ export async function generarModuloGemini(moduloId) {
         texto = limpiarBloquesCode(texto);
         texto = limpiarRespuestaGemini(texto);
 
-        // Guardar
-        await guardarModulo(moduloId, { contenido: texto });
+        const contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
+            ? window.normalizarContenidoModuloPersistible(texto)
+            : typeof window.renderizarContenidoModulo === "function"
+                ? window.renderizarContenidoModulo(texto)
+            : texto;
+
+        // Guardar el HTML decorado para que el estilo persista tras recargar.
+        await guardarModulo(moduloId, { contenido: contenidoParaGuardar }, cursoIdModulo);
+        const moduloGuardado = await obtenerModulo(moduloId, cursoIdModulo);
+        const contenidoPersistido = String(moduloGuardado?.contenido || "").trim();
+        if (!contenidoPersistido) {
+            throw new Error("El contenido generado no quedó persistido en el módulo.");
+        }
 
         // Pintar en UI
         const cont = document.getElementById(`contenido-${moduloId}`);
         if (cont) {
-            if (typeof window.renderizarContenidoModulo === "function") {
-                cont.innerHTML = window.renderizarContenidoModulo(texto);
-            } else {
-                cont.innerHTML = texto;
-            }
+            cont.innerHTML = contenidoParaGuardar;
         }
 
         const sp = card?.querySelector(".modulo-contenido");
@@ -720,14 +821,19 @@ ${textoOriginal}
 
 
 
-function promptExtraPorTipo(tipo) {
+function promptExtraPorTipo(tipo, options = {}) {
+    const cantidadSolicitada = Number(options?.cantidadSolicitadaQuizz || 0) || null;
     switch (tipo) {
 case "Quizz": return `
 Genera un CUESTIONARIO (Quizz) en markdown estructurado.
 
 REGLAS:
 - Usa secciones por pregunta con encabezado "## Pregunta X — Tipo".
-- Incluye al menos 5 preguntas y mezcla tipos (opción múltiple, verdadero/falso, respuesta corta y una de aplicación).
+- Respeta EXACTAMENTE la cantidad de preguntas/actividades/reactivos solicitada por el autor si la instrucción la especifica.
+- ${cantidadSolicitada
+    ? `En este módulo, debes generar EXACTAMENTE ${cantidadSolicitada} preguntas porque el autor sí indicó esa cantidad.`
+    : `Si el autor NO indicó una cantidad exacta, no inventes más preguntas de las necesarias. Genera solo las mínimas y razonables según la instrucción.`}
+- Solo mezcla tipos si el autor lo pide o si eso ayuda a convertir fielmente las actividades originales, sin aumentar la cantidad total.
 - Cada pregunta debe tener:
   - **Pregunta**
   - **Opciones** (si aplica)
@@ -735,8 +841,27 @@ REGLAS:
   - **Retroalimentación correcta**
   - **Retroalimentación incorrecta**
   - **Retroalimentación global**
+- Cada uno de esos elementos debe ir en su PROPIA línea o párrafo.
+- Deja una línea en blanco entre:
+  - el título de la pregunta
+  - la línea "Pregunta:"
+  - el bloque "Opciones:"
+  - la línea "Respuesta correcta:"
+  - cada retroalimentación
+- Formato obligatorio para opción múltiple:
+  Pregunta: ...
+  Opciones:
+  A) ...
+  B) ...
+  C) ...
+  D) ...
+- No pongas guiones, bullets, asteriscos ni numeración delante de A), B), C), D).
+- Si usas "Verdadero" y "Falso", escríbelos en líneas simples, sin bullets.
 - No uses HTML.
 - No uses texto plano corrido; usa listas y encabezados.
+- Si el módulo incluye "Actividad N original" y "Propuesta Actividad N", el encabezado de propuesta debe salir como:
+  ## Propuesta Actividad N — Tipo
+  y NO debes repetir después otro encabezado separado tipo "## Pregunta N — Tipo".
 `;
 
 

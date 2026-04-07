@@ -213,8 +213,7 @@ async function geminiGenerateViaApi(model, payload, signal = null) {
         throw new Error("BACKEND_GEMINI_OFFLINE");
       }
     } else {
-      markGeminiBackendUnavailable("api_unreachable");
-      throw err;
+      throw new Error("REMOTE_API_BLOCKED");
     }
   }
   if (response && response.status === 503) {
@@ -19013,6 +19012,10 @@ function buildModeloFallbackChain() {
   return chain.length ? chain : ["gemini-2.5-flash-lite"];
 }
 
+function isGeminiRegionUnsupportedMessage(message = "") {
+  return String(message || "").toLowerCase().includes("user location is not supported for the api use");
+}
+
 async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = null) {
   if (window.cancelarProyectos) {
     throw new Error("CANCELADO_PROYECTOS");
@@ -19064,6 +19067,9 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
     if (isAuthConfigError) {
       throw new Error(`GEMINI_BACKEND_FORBIDDEN:${apiMsg || `HTTP ${response.status}`}`);
     }
+    if (isGeminiRegionUnsupportedMessage(apiMsg)) {
+      throw new Error("GEMINI_REGION_UNSUPPORTED");
+    }
     if (response.status === 429 || response.status === 503 || /high demand/i.test(apiMsg)) {
       marcarModeloEnAltaDemanda(modeloActual, apiMsg || "alta demanda", response.status);
     } else if (response.status === 404) {
@@ -19106,6 +19112,18 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
         window.onGeminiStatus("Backend Gemini no configurado en producción");
       }
       throw new Error("Backend Gemini no configurado en producción. Define `apiBaseUrl` en runtime-config.js.");
+    }
+    if (String(err?.message || "") === "REMOTE_API_BLOCKED") {
+      if (typeof window.onGeminiStatus === "function") {
+        window.onGeminiStatus("Conexión al backend Gemini bloqueada por CSP o red");
+      }
+      throw new Error("La conexión al backend Gemini fue bloqueada por CSP o por la red.");
+    }
+    if (String(err?.message || "") === "GEMINI_REGION_UNSUPPORTED") {
+      if (typeof window.onGeminiStatus === "function") {
+        window.onGeminiStatus("Gemini rechazó la región o IP del backend");
+      }
+      throw new Error("Gemini rechazó la región o IP del backend. La solicitud sí llegó al servidor, pero Google no permite ese origen para la Gemini Developer API.");
     }
     if (String(err?.message || "") === "BACKEND_GEMINI_OFFLINE") {
       if (typeof window.onGeminiStatus === "function") {

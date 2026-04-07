@@ -229,6 +229,19 @@ onAuthStateChanged(auth, async (user) => {
   currentUserRole = "user";
 
   await cargarCursosUsuario();
+
+  const cursoIdGuardado = localStorage.getItem("cursoSeleccionado");
+  if (cursoIdGuardado) {
+    const cursoGuardadoExiste = cursosUsuario.some(c => c.id === cursoIdGuardado);
+    if (cursoGuardadoExiste) {
+      await seleccionarCurso(cursoIdGuardado);
+    } else {
+      localStorage.removeItem("cursoSeleccionado");
+      localStorage.removeItem("temaAbierto");
+      localStorage.removeItem("subtemaAbierto");
+      localStorage.removeItem("moduloActivo");
+    }
+  }
   
   // 🔥 CORRECCIÓN: NO abrir automáticamente el modal
   // En lugar de eso, puedes mostrar un mensaje o botón para crear el primer curso
@@ -1793,8 +1806,10 @@ async function seleccionarCurso(id) {
         return;
     }
     
-    // 🔥 Si ya es el curso activo, no hacer nada
-    if (cursoDocId === id) {
+    // 🔥 Si ya es el curso activo, solo salir si el editor ya quedó cargado
+    const editorActual = document.getElementById('contenidoEditor');
+    const editorSigueVacio = !!editorActual?.querySelector('.empty-state');
+    if (cursoDocId === id && !editorSigueVacio) {
         return;
     }
     
@@ -1979,8 +1994,19 @@ async function seleccionarCurso(id) {
         
         // Configurar editor según permisos
         const contenidoEditor = document.getElementById('contenidoEditor');
+        let seleccionRestaurada = false;
         if (contenidoEditor) {
-            if (!tienePermisoEditar) {
+            seleccionRestaurada = await restaurarSeleccionEditorDesdeStorage({
+                puedeEditar: tienePermisoEditar
+            });
+
+            if (seleccionRestaurada) {
+                if (!tienePermisoEditar) {
+                    contenidoEditor.classList.add('readonly-mode');
+                } else {
+                    contenidoEditor.classList.remove('readonly-mode');
+                }
+            } else if (!tienePermisoEditar) {
                 contenidoEditor.innerHTML = `
                     <div class="empty-state text-center py-10">
                         <i class="fas fa-eye text-3xl text-yellow-500 mb-2"></i>
@@ -2171,6 +2197,44 @@ function limpiarUIError() {
         const indicador = document.getElementById("modoLecturaIndicator");
         if (indicador) indicador.remove();
     }
+}
+
+async function restaurarSeleccionEditorDesdeStorage({ puedeEditar = true } = {}) {
+    const subtemaId = localStorage.getItem("subtemaAbierto");
+    if (!subtemaId || !curso?.temas?.length) return false;
+
+    let temaEncontrado = null;
+    let subtemaEncontrado = null;
+
+    for (const tema of curso.temas) {
+        const match = tema?.subtemas?.find((sub) => sub?.id === subtemaId);
+        if (match) {
+            temaEncontrado = tema;
+            subtemaEncontrado = match;
+            break;
+        }
+    }
+
+    if (!subtemaEncontrado) return false;
+
+    temaActivo = temaEncontrado;
+    subtemaActivo = subtemaEncontrado;
+    window.temaActivo = temaEncontrado;
+    window.subtemaActivo = subtemaEncontrado;
+
+    const moduloId = localStorage.getItem("moduloActivo");
+    const moduloPerteneceASubtema = moduloId && Array.isArray(subtemaEncontrado.modulosIds)
+        ? subtemaEncontrado.modulosIds.includes(moduloId)
+            || subtemaEncontrado.modulosIds.includes(String(moduloId).split('_').pop())
+        : false;
+
+    await cargarSubtema(
+        subtemaEncontrado,
+        moduloPerteneceASubtema ? moduloId : null,
+        !puedeEditar
+    );
+
+    return true;
 }
 
 // Función para suscribirse a cambios en tiempo real (si no la tienes)
@@ -2646,8 +2710,8 @@ function inicializarResizersPaneles() {
     });
 
     habilitarResizeHorizontal(resizeSidebarTemasEl, sidebarTemasEl, {
-        min: 240,
-        max: 560,
+        min: 320,
+        max: 680,
         storageKey: "cb_sidebarTemas_width"
     });
 
@@ -2928,7 +2992,7 @@ function renderTemas() {
                 </div>
             `;
 
-            temaWrapper.querySelector(".btn-export-tema").onclick = e => {
+            temaWrapper.querySelector(".btn-export-tema").onclick = async e => {
                 e.stopPropagation();
                 exportarTemaWord(tema);
             };
@@ -3482,7 +3546,7 @@ function renderTemas() {
                         const esModuloActivo = moduloActivoExiste && modId === moduloActivo;
 
                         const li = document.createElement("div");
-                        li.className = `pl-8 py-1 text-xs hover:bg-gray-50 flex items-center justify-between cursor-pointer draggable-modulo module-draggable ${
+                        li.className = `py-1 text-xs hover:bg-gray-50 flex items-center justify-between cursor-pointer draggable-modulo module-draggable ${
                             esModuloActivo ? 'modulo-activo highlight-pulse' : ''
                         }`;
                         li.dataset.moduloId = modId;
@@ -3493,8 +3557,10 @@ function renderTemas() {
                             <div class="flex items-center gap-2 flex-1 modulo-select">
                                 <i class="fas fa-grip-vertical cb-node-icon cb-module-grip mr-1 cursor-grab handle-drag" title="Arrastrar para reordenar"></i>
                                 <i class="fas ${getModuloIcon(mod?.tipo)} cb-node-icon cb-module-kind-icon ${esModuloActivo ? 'is-active' : ''}"></i>
+                                <span class="modulo-nombre-wrap">
                                 <span class="modulo-nombre ${esModuloActivo ? 'font-semibold' : ''}">
                                     ${mod?.nombre || "Módulo"}
+                                </span>
                                 </span>
                                 ${mod?.archivado ? '<span class="text-[10px] text-amber-600 ml-2">(archivado)</span>' : ''}
                                 <span class="text-gray-400 text-[10px] ml-2"></span>
@@ -3613,21 +3679,17 @@ function renderTemas() {
                             nuevoModulo.actualizado = Date.now();
 
                             // IMPORTANTE: Guardar con ID compuesto
-                            await setDoc(
-                                doc(db, "moodleCourses", `${curso.id}_${nuevoId}`),
-                                nuevoModulo
-                            );
+                            await guardarModulo(nuevoId, nuevoModulo, curso.id);
 
                             if (!sub.modulosIds) sub.modulosIds = [];
                             // Guardar solo el ID interno en el array
                             sub.modulosIds.push(nuevoId);
 
                             await guardarCursoFirebase();
+                            localStorage.setItem("moduloActivo", nuevoId);
                             renderTemas();
-
-                            setTimeout(() => {
-                                cargarSubtema(sub, nuevoId);
-                            }, 200);
+                            const subtemaActual = obtenerSubtemaActualDesdeCurso(sub.id) || sub;
+                            await cargarSubtema(subtemaActual, nuevoId);
                         };
 
 
@@ -4428,6 +4490,7 @@ async function duplicarTema(temaOriginal) {
 /* EDITAR SUBTEMA EN EL EDITOR */
 async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = false) {
     // HACER SUBTEMA GLOBAL PARA OTROS ARCHIVOS
+    subtemaActivo = subtema;
     window.subtemaActivo = subtema;
     // Guardar en localStorage
     localStorage.setItem("subtemaAbierto", subtema.id);
@@ -4438,6 +4501,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
     );
 
     if (temaPadre) {
+        temaActivo = temaPadre;
         localStorage.setItem("temaAbierto", temaPadre.id);
         window.temaActivo = temaPadre;
     }
@@ -4603,7 +4667,8 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                             const modId = contenedor.dataset.moduloId;
                             if (!modId) return;
 
-                            const html = sanitizeRichText(contenedor.innerHTML);
+                            const htmlCrudo = sanitizeRichText(contenedor.innerHTML);
+                            const html = normalizarContenidoModuloPersistible(htmlCrudo);
                             const ultimo = contenedor.dataset.lastSavedHtml || "";
                             if (!forzar && html === ultimo) return;
 
@@ -4671,17 +4736,35 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
             String(moduloIdToScroll).includes('_') ? String(moduloIdToScroll).split('_').pop() : null
         ].filter(Boolean);
 
+        const desplazarModuloEnPanelEditor = (moduloDiv) => {
+            const scrollHost = contenidoEditor.closest('main') || contenidoEditor.parentElement;
+            if (!scrollHost || typeof scrollHost.scrollTo !== "function") {
+                moduloDiv.scrollIntoView({
+                    behavior: 'auto',
+                    block: 'nearest',
+                    inline: 'nearest'
+                });
+                return;
+            }
+
+            const hostRect = scrollHost.getBoundingClientRect();
+            const moduloRect = moduloDiv.getBoundingClientRect();
+            const margenSuperior = 16;
+            const nextTop = scrollHost.scrollTop + (moduloRect.top - hostRect.top) - margenSuperior;
+
+            scrollHost.scrollTo({
+                top: Math.max(0, nextTop),
+                behavior: 'auto'
+            });
+        };
+
         const buscarYScroll = () => {
             for (const id of scrollIds) {
                 const moduloDiv = document.getElementById(`modulo-${id}`);
                 if (!moduloDiv) continue;
 
                 localStorage.setItem("moduloActivo", id);
-                moduloDiv.scrollIntoView({
-                    behavior: 'auto',
-                    block: 'start',
-                    inline: 'nearest'
-                });
+                desplazarModuloEnPanelEditor(moduloDiv);
                 moduloDiv.classList.add('highlight-pulse');
                 setTimeout(() => moduloDiv.classList.remove('highlight-pulse'), 900);
                 return true;
@@ -4907,7 +4990,7 @@ function crearModalInstruccionesSubtema() {
 window.ejecutarGeneracionModuloGemini = async function (moduloId) {
     try {
         await generarModuloGemini(moduloId);   // ← SOLO 1 parámetro
-        cargarSubtema(subtemaActivo);          // refrescar UI
+        await cargarSubtema(subtemaActivo, moduloId);          // refrescar UI con el mismo módulo activo
     } catch (err) {
         alert("Error al generar contenido con IA.");
     }
@@ -6046,11 +6129,11 @@ function renderizarContenidoModulo(contenido) {
     }
 
     if (contieneHtmlRenderizable(contenidoNormalizado)) {
-        return sanitizarHtmlEditorial(contenidoNormalizado);
+        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(contenidoNormalizado));
     }
 
     if (contieneMarkdownEstructurado(contenidoNormalizado)) {
-        return sanitizarHtmlEditorial(convertirMarkdownBasicoAHtml(contenidoNormalizado));
+        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(convertirMarkdownBasicoAHtml(contenidoNormalizado)));
     }
 
     const parrafos = normalizarTextoNotas(contenidoNormalizado)
@@ -6059,10 +6142,195 @@ function renderizarContenidoModulo(contenido) {
         .filter(Boolean)
         .map(p => `<p>${formatearInlineMarkdown(p).replace(/\n/g, '<br>')}</p>`);
 
-    return sanitizarHtmlEditorial(parrafos.join('')) || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
+    return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(parrafos.join(''))) || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
 }
 
 window.renderizarContenidoModulo = renderizarContenidoModulo;
+
+function normalizarContenidoModuloPersistible(contenido = "") {
+    const raw = String(contenido || "").trim();
+    if (!raw) return "";
+    return sanitizarHtmlEditorial(renderizarContenidoModulo(raw));
+}
+
+window.normalizarContenidoModuloPersistible = normalizarContenidoModuloPersistible;
+
+function decorarContenidoModuloRenderizado(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw || typeof document === "undefined") return raw;
+
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+    expandirBloquesEstructuradosModulo(root);
+
+    root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote").forEach((node) => {
+        const text = String(node.textContent || "").trim();
+        if (!text) return;
+        const normalized = text.toLowerCase();
+
+        if (/^actividad\s+\d+\s+original\b/i.test(text) || normalized === "actividad original") {
+            node.classList.add("cb-module-block-title", "is-original");
+            return;
+        }
+        if (/^propuesta\s+actividad\s+\d+\b/i.test(text) || /^propuesta\b/i.test(text)) {
+            node.classList.add("cb-module-block-title", "is-proposal");
+            return;
+        }
+        if (/^t[ií]tulo:\s*/i.test(text)) {
+            node.classList.add("cb-module-meta-line", "is-title");
+            return;
+        }
+        if (/^pregunta\s+\d+\b/i.test(text)) {
+            node.classList.add("cb-module-question-heading");
+            return;
+        }
+        if (/^pregunta:\s*/i.test(text)) {
+            node.classList.add("cb-module-meta-line", "is-question");
+            return;
+        }
+        if (/^opciones:\s*/i.test(text)) {
+            node.classList.add("cb-module-meta-line", "is-options");
+            return;
+        }
+        if (/^respuesta correcta:\s*/i.test(text)) {
+            node.classList.add("cb-module-feedback-line", "is-answer");
+            return;
+        }
+        if (/^retroalimentaci[oó]n correcta:\s*/i.test(text)) {
+            node.classList.add("cb-module-feedback-line", "is-correct");
+            return;
+        }
+        if (/^retroalimentaci[oó]n incorrecta:\s*/i.test(text)) {
+            node.classList.add("cb-module-feedback-line", "is-incorrect");
+            return;
+        }
+        if (/^retroalimentaci[oó]n global:\s*/i.test(text)) {
+            node.classList.add("cb-module-feedback-line", "is-global");
+        }
+    });
+
+    const headings = Array.from(root.querySelectorAll(".cb-module-block-title.is-original, .cb-module-block-title.is-proposal"));
+    headings.forEach((heading) => {
+        const nextBlock = heading.nextElementSibling;
+        if (!nextBlock) return;
+
+        if (heading.classList.contains("is-original")) {
+            nextBlock.classList.add("cb-module-original-body");
+            return;
+        }
+
+        if (heading.classList.contains("is-proposal")) {
+            const maybeQuestionHeading = nextBlock;
+            if (maybeQuestionHeading.classList.contains("cb-module-question-heading")) {
+                const questionText = String(maybeQuestionHeading.textContent || "").trim();
+                const match = questionText.match(/^pregunta\s+\d+\s+[—-]\s+(.+)$/i);
+                const suffix = match ? match[1].trim() : questionText.replace(/^pregunta\s+\d+\s*[—-]?\s*/i, "").trim();
+                if (suffix) {
+                    const headingText = String(heading.textContent || "").trim();
+                    const headingTail = headingText.split(/[—-]/).pop()?.trim().toLowerCase() || "";
+                    const suffixNormalized = suffix.toLowerCase();
+                    if (headingTail !== suffixNormalized) {
+                        heading.textContent = `${headingText} — ${suffix}`;
+                    } else {
+                        heading.textContent = headingText;
+                    }
+                }
+                maybeQuestionHeading.remove();
+            }
+        }
+    });
+
+    root.querySelectorAll(".cb-module-section-separator").forEach((node) => node.remove());
+    root.querySelectorAll(".cb-module-feedback-line.is-global").forEach((node) => {
+        const next = node.nextElementSibling;
+        if (!next) return;
+        if (next.classList.contains("cb-module-section-separator")) return;
+        const separator = document.createElement("p");
+        separator.className = "cb-module-section-separator";
+        separator.setAttribute("aria-hidden", "true");
+        separator.innerHTML = "&nbsp;";
+        node.insertAdjacentElement("afterend", separator);
+    });
+
+    root.querySelectorAll("ul, ol").forEach((listEl) => {
+        const items = Array.from(listEl.querySelectorAll(":scope > li"));
+        if (!items.length) return;
+        const allAlphaOptions = items.every((item) => /^[A-Z]\)\s+/.test(String(item.textContent || "").trim()));
+        if (allAlphaOptions) {
+            listEl.classList.add("cb-module-alpha-options");
+        }
+    });
+
+    return root.innerHTML;
+}
+
+function expandirBloquesEstructuradosModulo(root) {
+    if (!root) return;
+
+    const candidates = Array.from(root.querySelectorAll("p"));
+    candidates.forEach((node) => {
+        const html = String(node.innerHTML || "").trim();
+        if (!html || !/<br\s*\/?>/i.test(html)) return;
+
+        const normalizedHtml = html
+            .replace(/\r\n/g, "\n")
+            .replace(/<br\s*\/?>/gi, "\n");
+
+        const lines = normalizedHtml
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        if (lines.length < 2) return;
+
+        const looksStructured = lines.some((line) =>
+            /^(pregunta:|opciones:|respuesta correcta:|retroalimentaci[oó]n correcta:|retroalimentaci[oó]n incorrecta:|retroalimentaci[oó]n global:|[A-Z]\)\s+|verdadero$|falso$)/i.test(
+                stripHtmlTags(line)
+            )
+        );
+        if (!looksStructured) return;
+
+        const fragment = document.createDocumentFragment();
+        let optionItems = [];
+
+        const flushOptions = () => {
+            if (!optionItems.length) return;
+            const ul = document.createElement("ul");
+            ul.className = "cb-module-alpha-options";
+            optionItems.forEach((itemHtml) => {
+                const li = document.createElement("li");
+                li.innerHTML = itemHtml;
+                ul.appendChild(li);
+            });
+            fragment.appendChild(ul);
+            optionItems = [];
+        };
+
+        lines.forEach((lineHtml) => {
+            const lineText = stripHtmlTags(lineHtml);
+            if (/^[A-Z]\)\s+/i.test(lineText) || /^(verdadero|falso)$/i.test(lineText)) {
+                optionItems.push(lineHtml);
+                return;
+            }
+
+            flushOptions();
+            const p = document.createElement("p");
+            p.innerHTML = lineHtml;
+            fragment.appendChild(p);
+        });
+
+        flushOptions();
+
+        if (!fragment.childNodes.length) return;
+        node.replaceWith(fragment);
+    });
+}
+
+function stripHtmlTags(value = "") {
+    const temp = document.createElement("div");
+    temp.innerHTML = String(value || "");
+    return String(temp.textContent || "").trim();
+}
 
 function contieneMarkdownEstructurado(texto) {
     if (!texto) return false;
@@ -6543,33 +6811,6 @@ window.eliminarModulo = eliminarModulo;
 
 
 
-// Al inicio de tu archivo, después de las variables globales
-document.addEventListener('DOMContentLoaded', async () => {
-    // Restaurar estado del curso seleccionado
-    const cursoId = localStorage.getItem("cursoSeleccionado");
-    if (cursoId) {
-        // Esperar a que el usuario esté autenticado
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                currentUserId = user.uid;
-                await cargarCursosUsuario();
-                
-                // Verificar que el curso aún existe
-                const cursoExiste = cursosUsuario.some(c => c.id === cursoId);
-                if (cursoExiste) {
-                    // Pequeño delay para asegurar que todo esté cargado
-                    setTimeout(() => {
-                        seleccionarCurso(cursoId);
-                    }, 500);
-                }
-            }
-        });
-    }
-});
-
-
-
-
 
 
 /* SELECTOR PARA AÑADIR NUEVO MÓDULO */
@@ -6603,6 +6844,15 @@ function construirInstruccionesInicialesModulo(tipo) {
 3. Monitoree el avance con preguntas de apoyo y retroalimentación puntual.
 4. Cierre con socialización de respuestas y criterios de evaluación.
 `.trim();
+}
+
+function obtenerSubtemaActualDesdeCurso(subtemaId) {
+    if (!curso?.temas || !subtemaId) return null;
+    for (const tema of curso.temas) {
+        const encontrado = tema?.subtemas?.find((sub) => sub?.id === subtemaId);
+        if (encontrado) return encontrado;
+    }
+    return null;
 }
 
 function mostrarSelectorModulo(subtema) {
@@ -6642,22 +6892,25 @@ function mostrarSelectorModulo(subtema) {
                 nombre: tipo,
                 contenido: construirContenidoInicialModulo(tipo),
                 instrucciones: construirInstruccionesInicialesModulo(tipo),
+                incluirInstruccionOriginalEnPropuesta: false,
                 traducciones: [],
                 creado: Date.now(),
                 actualizado: Date.now()
             };
 
-            // 📌 GUARDAR MÓDULO CON ID COMPUESTO
-            await setDoc(doc(db, "moodleCourses", `${curso.id}_${nuevoModuloId}`), nuevoModulo);
+            await guardarModulo(nuevoModuloId, nuevoModulo, curso.id);
 
             // 📌 GUARDAR SOLO EL ID INTERNO EN EL SUBTEMA
             if (!subtema.modulosIds) subtema.modulosIds = [];
             subtema.modulosIds.push(nuevoModuloId);  // Solo el ID interno
 
             await guardarCursoFirebase();
+            localStorage.setItem("moduloActivo", nuevoModuloId);
             renderTemas();
-            setTimeout(() => cargarSubtema(subtema), 100);
+            const subtemaActual = obtenerSubtemaActualDesdeCurso(subtema.id) || subtema;
+            await cargarSubtema(subtemaActual, nuevoModuloId);
             modal.classList.add("hidden");
+            modal.classList.remove("flex");
         });
 
 
@@ -6834,7 +7087,7 @@ async function reintentarGuardadoModuloReduciendoTamano({
         cambiosBase.instrucciones = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.instrucciones), 160000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "contenido")) {
-        cambiosBase.contenido = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.contenido), 280000);
+        cambiosBase.contenido = recortarTextoSeguro(normalizarContenidoModuloPersistible(cambiosBase.contenido), 280000);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "notasMaestro")) {
         cambiosBase.notasMaestro = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.notasMaestro), 180000);
@@ -6853,7 +7106,7 @@ async function reintentarGuardadoModuloReduciendoTamano({
             160000
         ),
         contenido: recortarTextoSeguro(
-            sanitizarHtmlEditorial(cambiosBase.contenido ?? actual.contenido ?? ""),
+            normalizarContenidoModuloPersistible(cambiosBase.contenido ?? actual.contenido ?? ""),
             280000
         ),
         notasMaestro: recortarTextoSeguro(
@@ -6909,7 +7162,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
             cambiosSanitizados.instrucciones = sanitizarHtmlEditorial(cambiosSanitizados.instrucciones);
         }
         if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "contenido")) {
-            cambiosSanitizados.contenido = sanitizarHtmlEditorial(cambiosSanitizados.contenido);
+            cambiosSanitizados.contenido = normalizarContenidoModuloPersistible(cambiosSanitizados.contenido);
         }
         if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "notasMaestro")) {
             cambiosSanitizados.notasMaestro = sanitizarHtmlEditorial(cambiosSanitizados.notasMaestro);
@@ -8350,7 +8603,7 @@ async function guardarContenidoDeTodosLosModulos() {
         if (!moduloId) continue;
 
         await guardarModulo(moduloId, {
-            contenido: div.innerHTML
+            contenido: normalizarContenidoModuloPersistible(div.innerHTML)
         });
     }
 
@@ -8993,7 +9246,7 @@ function guardarContenidoEditado() {
 
         const modId = localStorage.getItem("moduloActivo");
         if (modId) {
-            guardarModulo(modId, { contenido: contModulo.innerHTML });
+            guardarModulo(modId, { contenido: normalizarContenidoModuloPersistible(contModulo.innerHTML) });
         }
 
         return;
@@ -9033,7 +9286,7 @@ function guardarContenidoEditado() {
             const contModulo = document.querySelector(`#modulo-${modId} .modulo-contenido`);
 
             if (contModulo && contModulo.contains(currentSelection.startContainer)) {
-                guardarModulo(modId, { contenido: contModulo.innerHTML });
+                guardarModulo(modId, { contenido: normalizarContenidoModuloPersistible(contModulo.innerHTML) });
                 return;
             }
         }
@@ -9146,73 +9399,146 @@ if (btnGuardarFirebase) {
 
 /* BOTÓN: DESCARGAR WORD */
 /* BOTÓN: DESCARGAR WORD */
-const btnDescargarWord = document.getElementById("btnDescargarWord");
-if (btnDescargarWord) {
-    btnDescargarWord.addEventListener("click", () => {
-
-    const cont = document.getElementById("contenidoEditor");
-    if (!cont) {
-        alert("No se encontró contenido para exportar.");
-        return;
+function convertirInstruccionesOriginalesAHtmlWord(value = "") {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (raw.includes("<") && raw.includes(">")) {
+        return sanitizarHtmlEditorial(sanitizeRichText(raw));
     }
+    return `<p>${escapeHtml(raw).replace(/\n/g, "<br>")}</p>`;
+}
 
-    // 1. Clonar el div para eliminar botones, íconos y basura visual
-    const clone = cont.cloneNode(true);
+function construirContenidoHtmlWord(value = "") {
+    const raw = String(value || "").trim();
+    if (!raw) return "<p>(Sin contenido)</p>";
+    if (typeof renderizarContenidoModulo === "function") {
+        return renderizarContenidoModulo(raw);
+    }
+    if (raw.includes("<") && raw.includes(">")) {
+        return sanitizarHtmlEditorial(sanitizeRichText(raw));
+    }
+    return `<p>${escapeHtml(raw).replace(/\n/g, "<br>")}</p>`;
+}
 
-    // Limpieza visual para Word
-    clone.querySelectorAll(".icon-btn, .fa-trash, .fa-pen, .fa-copy, .btn-edit-tema, .btn-delete-tema, .btn-edit-modulo, .btn-delete-modulo").forEach(el => el.remove());
-    clone.querySelectorAll(".parrafo-actions").forEach(el => el.remove());
-    clone.querySelectorAll("label.section-title").forEach(el => el.remove());
+function construirContenidoModuloWord(modulo = {}) {
+    const contenidoLimpio = construirContenidoHtmlWord(modulo.contenido || "<p>(Sin contenido)</p>")
+        .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-background[^"]*shadow-sm[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-muted\/40[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*class="[^"]*text-xs[^"]*text-gray-500[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<p[^>]*>\s*M[oó]dulo analizado:[\s\S]*?<\/p>/gi, "")
+        .replace(/<label[^>]*class="[^"]*section-title[^"]*"[^>]*>[\s\S]*?<\/label>/gi, "")
+        .replace(/<h1[^>]*class="[^"]*font-semibold[^"]*text-slate-900[^"]*mt-3[^"]*mb-2[^"]*"[^>]*>([\s\S]*?)<\/h1>/gi, '<h2 class="word-titulo2">$1</h2>');
 
-    // Quitar bloques de notas pedagógicas/metadatos que no deben exportarse
-    clone.querySelectorAll("div.rounded-lg.border.bg-background.p-4.shadow-sm, div.rounded-lg.border.bg-muted\\/40.p-4, div.text-xs.text-gray-500").forEach(el => el.remove());
-    clone.querySelectorAll('[data-modulo-archivado="true"]').forEach(el => el.remove());
-    clone.querySelectorAll("*").forEach(el => {
-        const txt = (el.textContent || "").trim();
-        if (txt === "Notas pedagógicas para el docente" || txt.startsWith("Módulo analizado:") || txt.startsWith("Generado:") || txt.startsWith("Guardado:")) {
-            el.remove();
-        }
-    });
+    const instruccionOriginal = modulo.incluirInstruccionOriginalEnPropuesta === true && String(modulo.instrucciones || "").trim()
+        ? `
+            <div class="word-instruccion-original">
+                <h4>Instrucción original</h4>
+                ${convertirInstruccionesOriginalesAHtmlWord(modulo.instrucciones || "")}
+            </div>
+        `
+        : "";
 
-    // Ocultar tipo del módulo y agrandar el nombre del módulo en export
-    clone.querySelectorAll("[id^='modulo-'] > div:first-child > div > p.text-xs.text-gray-500").forEach(el => el.remove());
-    clone.querySelectorAll("[id^='modulo-'] > div:first-child > div > p.font-semibold").forEach(el => {
-        el.classList.add("modulo-nombre-word");
-    });
-    clone.querySelectorAll("h1.font-semibold.text-slate-900.mt-3.mb-2").forEach(el => {
-        const h2 = document.createElement("h2");
-        h2.className = "word-titulo2";
-        h2.innerHTML = el.innerHTML;
-        el.replaceWith(h2);
-    });
+    return `
+        <div class="modulo">
+            <h3 class="modulo-nombre-word">${escapeHtml(modulo.nombre || "Módulo sin nombre")}</h3>
+            ${instruccionOriginal}
+            <div class="word-propuesta-generada">
+                ${contenidoLimpio || "<p>(Sin contenido)</p>"}
+            </div>
+        </div>
+    `;
+}
 
-    // 2. Obtener el HTML limpio del editor
-    const html = `
+function crearEstilosWordCurso() {
+    return `
+    body { font-family: Arial, sans-serif; font-size: 11pt; color: #0f172a; line-height: 1.6; margin: 24px; }
+    h1, h2, h3, h4 { font-weight: bold; color: #0f172a; }
+    p { margin: 0 0 14px 0; }
+    ul, ol { margin: 10px 0 18px 24px; padding-left: 14px; }
+    li { margin: 0 0 8px 0; }
+    table { border-collapse: collapse; width: 94%; margin: 12px auto 24px auto; font-size: 10.5pt; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: top; }
+    th { background: transparent; text-align: center; }
+    .word-doc-title { font-size: 24pt; line-height: 1.15; margin: 0 0 16px 0; font-weight: 700; }
+    .word-subtema-title { font-size: 18pt; margin: 22px 0 14px 0; font-weight: 700; }
+    .word-section-title { font-size: 13pt; margin: 18px 0 12px 0; font-weight: 700; color: #334155; }
+    .modulo { margin: 0 0 24px 0; padding: 0; border: 0; background: transparent; page-break-inside: avoid; }
+    .modulo-nombre-word { font-size: 16pt !important; line-height: 1.2 !important; font-weight: 700 !important; margin: 0 0 14px 0 !important; }
+    .word-titulo2, .cb-module-block-title { font-size: 14pt !important; font-weight: 700 !important; margin: 18px 0 12px 0 !important; padding-bottom: 0; border-bottom: 0; }
+    .word-instruccion-original { margin: 12px 0 18px 0; padding: 0; border: 0; background: transparent; }
+    .word-instruccion-original h4 { font-size: 12pt !important; margin: 0 0 8px 0 !important; font-weight: 700 !important; }
+    .word-propuesta-generada { margin-top: 0; padding: 0; border: 0; }
+    .cb-module-original-body { margin-bottom: 18px; padding-bottom: 0; border-bottom: 0; }
+    .cb-module-meta-line.is-question { font-weight: 700; margin-bottom: 16px; }
+    .cb-module-meta-line.is-options { font-weight: 700; margin-bottom: 14px; }
+    .cb-module-feedback-line { margin: 12px 0 18px 0; padding: 0; border-left: 0; }
+    .cb-module-feedback-line.is-answer { font-weight: 700; }
+    .cb-module-feedback-line.is-correct { }
+    .cb-module-feedback-line.is-incorrect { }
+    .cb-module-feedback-line.is-global { }
+    .cb-module-section-separator { display: none; height: 0; margin: 0; border: 0; }
+    .cb-module-alpha-options { list-style: none; margin-left: 0; padding-left: 0; }
+    .cb-module-alpha-options li { margin: 0 0 10px 0; }
+    `;
+}
+
+async function construirDocumentoWordSubtema(subtema) {
+    const tituloSubtema = escapeHtml(subtema?.nombre || "Subtema");
+    let html = `
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8" />
-<title>${temaActivo?.nombre || "Documento"}</title>
+<title>${tituloSubtema}</title>
 <style>
-    body { font-family: Arial, sans-serif; font-size: 11pt; }
-    h1, h2, h3, h4 { font-weight: bold; }
-    .modulo-nombre-word { font-size: 24pt !important; line-height: 1.15 !important; font-weight: 700 !important; margin: 12px 0 8px 0 !important; }
-    .word-titulo2 { font-size: 18pt !important; font-weight: 700 !important; margin: 10px 0 6px 0 !important; }
+    ${crearEstilosWordCurso()}
 </style>
 </head>
 <body>
-${clone.innerHTML}
-</body>
-</html>
+<h1 class="word-doc-title">${tituloSubtema}</h1>
 `;
 
-    // 3. Convertir a Word con html-docx-js
+    const contenidoGenerado = String(subtema?.contenidoGenerado || "").trim();
+    if (contenidoGenerado) {
+        html += `
+        <section>
+            <h2 class="word-section-title">Introducción</h2>
+            ${construirContenidoHtmlWord(contenidoGenerado)}
+        </section>
+        `;
+    }
+
+    html += `<section><h2 class="word-section-title">Módulos</h2>`;
+
+    if (!subtema?.modulosIds?.length) {
+        html += `<p>(Sin módulos)</p>`;
+    } else {
+        for (const modId of subtema.modulosIds) {
+            const modulo = await obtenerModulo(modId);
+            if (!modulo || modulo.archivado) continue;
+            html += construirContenidoModuloWord(modulo);
+        }
+    }
+
+    html += `</section></body></html>`;
+    return html;
+}
+
+const btnDescargarWord = document.getElementById("btnDescargarWord");
+if (btnDescargarWord) {
+    btnDescargarWord.addEventListener("click", async () => {
+    if (!window.subtemaActivo) {
+        alert("No hay un subtema activo para exportar.");
+        return;
+    }
+
     try {
+        const html = await construirDocumentoWordSubtema(window.subtemaActivo);
         const blob = window.htmlDocx.asBlob(html);
 
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `${temaActivo?.nombre || "Documento"}.docx`;
+        a.download = `${window.subtemaActivo?.nombre || temaActivo?.nombre || "Documento"}.docx`;
         a.click();
     } catch (e) {
         alert("Error generando Word.");
@@ -9230,17 +9556,14 @@ async function exportarTemaWord(tema) {
 <meta charset="UTF-8">
 <title>${tema.nombre}</title>
 <style>
-    body { font-family: Arial, sans-serif; font-size: 11pt; }
-    h1, h2, h3, h4 { font-weight: bold; }
-    .modulo-nombre-word { font-size: 24pt; line-height: 1.15; margin: 14px 0 8px 0; font-weight: 700; }
-    .word-titulo2 { font-size: 18pt; margin: 10px 0 6px 0; font-weight: 700; }
+    ${crearEstilosWordCurso()}
     .subtema { margin-top: 25px; }
     .modulo { margin-top: 15px; }
 </style>
 </head>
 <body>
 
-<h1>${tema.nombre}</h1>
+<h1 class="word-doc-title">${tema.nombre}</h1>
 `;
 
     // Recorrer todos los subtemas del tema
@@ -9248,12 +9571,12 @@ async function exportarTemaWord(tema) {
 
         html += `
         <div class="subtema">
-            <h2>${sub.nombre}</h2>
+            <h2 class="word-subtema-title">${sub.nombre}</h2>
 
-            <h3>Introducción</h3>
-            ${sub.contenidoGenerado || "<p>(Sin contenido)</p>"}
+            <h3 class="word-section-title">Introducción</h3>
+            ${construirContenidoHtmlWord(sub.contenidoGenerado || "<p>(Sin contenido)</p>")}
 
-            <h3>Módulos</h3>
+            <h3 class="word-section-title">Módulos</h3>
         `;
 
         // SI NO TIENE MODULOS
@@ -9274,20 +9597,7 @@ async function exportarTemaWord(tema) {
                     continue;
                 }
 
-                const contenidoLimpio = String(modulo.contenido || "<p>(Sin contenido)</p>")
-                    .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-background[^"]*shadow-sm[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
-                    .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-muted\/40[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
-                    .replace(/<div[^>]*class="[^"]*text-xs[^"]*text-gray-500[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
-                    .replace(/<p[^>]*>\s*M[oó]dulo analizado:[\s\S]*?<\/p>/gi, "")
-                    .replace(/<label[^>]*class="[^"]*section-title[^"]*"[^>]*>[\s\S]*?<\/label>/gi, "")
-                    .replace(/<h1[^>]*class="[^"]*font-semibold[^"]*text-slate-900[^"]*mt-3[^"]*mb-2[^"]*"[^>]*>([\s\S]*?)<\/h1>/gi, '<h2 class="word-titulo2">$1</h2>');
-
-                html += `
-                <div class="modulo">
-                    <h3 class="modulo-nombre-word">${modulo.nombre || "Módulo sin nombre"}</h3>
-                    ${contenidoLimpio || "<p>(Sin contenido)</p>"}
-                </div>
-                `;
+                html += construirContenidoModuloWord(modulo);
             }
         }
 
@@ -9749,6 +10059,7 @@ window.abrirInstruccionesGemini = async function(moduloId) {
 
     // Obtener el editor
     const editor = document.getElementById('txtModalInstruccionesGemini');
+    const checkIncluirOriginal = document.getElementById('checkIncluirInstruccionOriginalModulo');
     if (!editor) {
         return;
     }
@@ -9767,6 +10078,10 @@ window.abrirInstruccionesGemini = async function(moduloId) {
         editor.innerHTML = '';
     }
 
+    if (checkIncluirOriginal) {
+        checkIncluirOriginal.checked = modulo.incluirInstruccionOriginalEnPropuesta === true;
+    }
+
     // Mostrar modal
     document.getElementById("modalInstruccionesGemini").classList.remove("hidden");
     document.getElementById("modalInstruccionesGemini").classList.add("flex");
@@ -9782,6 +10097,7 @@ function inicializarEventosModalInstruccionesGemini() {
     const btnCerrar = document.getElementById("btnCerrarInstruccionesGemini");
     const btnGuardar = document.getElementById("btnGuardarInstruccionesGemini");
     const modal = document.getElementById("modalInstruccionesGemini");
+    const checkIncluirOriginal = document.getElementById("checkIncluirInstruccionOriginalModulo");
     if (!btnCerrar || !btnGuardar || !modal) return;
     if (btnGuardar.dataset.cbBound === "1") return;
 
@@ -9800,7 +10116,10 @@ function inicializarEventosModalInstruccionesGemini() {
         if (!moduloId) return;
 
         // Guardar el HTML completo (puede contener tablas)
-        await guardarModulo(moduloId, { instrucciones: contenidoHTML });
+        await guardarModulo(moduloId, {
+            instrucciones: contenidoHTML,
+            incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true
+        });
 
         // Cerrar modal
         modal.classList.add("hidden");
