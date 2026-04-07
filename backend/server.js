@@ -57,6 +57,7 @@ const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
 const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
+  "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
   "gemini-2.5-flash-image",
   "gemini-2.0-flash-preview-image-generation"
@@ -97,13 +98,28 @@ function parseAllowedOrigins() {
 
 const ALLOWED_ORIGINS = parseAllowedOrigins();
 
+function matchesAllowedOrigin(origin = "", rule = "") {
+  const candidate = String(origin || "").trim();
+  const allowed = String(rule || "").trim();
+  if (!candidate || !allowed) return false;
+  if (allowed === "*") return true;
+  if (allowed === candidate) return true;
+  if (!allowed.includes("*")) return false;
+
+  const escaped = allowed
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  const pattern = new RegExp(`^${escaped}$`, "i");
+  return pattern.test(candidate);
+}
+
 const corsOptions = {
   origin(origin, callback) {
     if (!origin) {
       callback(null, true);
       return;
     }
-    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.includes(origin)) {
+    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.some((rule) => matchesAllowedOrigin(origin, rule))) {
       callback(null, true);
       return;
     }
@@ -121,7 +137,9 @@ app.get("/api/health", (_req, res) => {
     service: "gemini-backend",
     port: PORT,
     geminiConfigured: hasGeminiKey(),
+    moodleShareUsersRoute: true,
     podcasterDialogueAudioRoute: true,
+    podcasterMusicGenerateRoute: true,
     startupSignature: BACKEND_BOOT_SIGNATURE,
   });
 });
@@ -204,6 +222,169 @@ function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY, fallback = 
   return Math.max(min, Math.min(max, parsed));
 }
 
+function normalizePodcasterSpeakerSlotIndex(speakerLabel = "") {
+  const key = String(speakerLabel || "").trim();
+  const match = key.match(/(\d+)/);
+  if (match) return Math.max(0, Number(match[1]) - 1);
+  if (/host\s*b/i.test(key)) return 1;
+  if (/host\s*c/i.test(key)) return 2;
+  if (/host\s*d/i.test(key)) return 3;
+  return 0;
+}
+
+function buildBackendPodcasterCharacterPrompt({
+  speakerLabel = "",
+  speakerName = "",
+  voiceName = "",
+  genderGroup = "",
+  expression = "Neutral",
+  counterpartSpeakerName = "",
+}) {
+  return [
+    `Retrato consistente del locutor ${speakerName || speakerLabel || "principal"}.`,
+    voiceName ? `Voz asociada: ${voiceName}.` : "",
+    genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : "",
+    `Expresión predominante: ${expression}.`,
+    "Definir identidad consistente: facciones memorables, proporciones faciales estables, peinado reconocible, mirada segura, vestuario sobrio de locución premium.",
+    "Evitar ambigüedad de género y evitar cambios de edad, etnia o complexión entre generaciones.",
+    counterpartSpeakerName ? `${speakerName} es un personaje distinto de ${counterpartSpeakerName}; no mezclar sus rostros, peinados, siluetas ni rasgos.` : "",
+    "La imagen debe corresponder exactamente al locutor activo y no a otro host del podcast.",
+    "No caricatura, no ilustración, no anime: retrato fotorealista de estudio."
+  ].filter(Boolean).join(" ");
+}
+
+function buildBackendPodcasterStudioScenePrompt({
+  speakerLabel = "",
+  speakerName = "",
+  counterpartSpeakerName = "",
+  scenarioPrompt = "",
+  expression = "Neutral",
+  singleSubjectOnly = false,
+}) {
+  const speakerIndex = normalizePodcasterSpeakerSlotIndex(speakerLabel);
+  const stageZones = [
+    "zona izquierda del escenario, cerca del micrófono principal izquierdo",
+    "zona derecha del escenario, cerca del micrófono principal derecho",
+    "zona central ligeramente al fondo, junto a la consola o mesa principal",
+    "zona lateral secundaria con un ángulo alterno del mismo set",
+  ];
+  const eyelineDirections = [
+    {
+      bodyAngle: "cuerpo en tres cuartos orientado hacia la derecha del set",
+      gaze: "mirada dirigida lateralmente hacia la derecha del set",
+      cameraAngle: "cámara desde su lado izquierdo para evitar frontalidad total",
+    },
+    {
+      bodyAngle: "cuerpo en tres cuartos orientado hacia la izquierda del set",
+      gaze: "mirada dirigida lateralmente hacia la izquierda del set",
+      cameraAngle: "cámara desde su lado derecho para evitar frontalidad total",
+    },
+    {
+      bodyAngle: "cuerpo en tres cuartos orientado hacia el interlocutor principal",
+      gaze: "mirada desviada hacia un punto fuera de cámara, nunca al lente",
+      cameraAngle: "ángulo lateral suave para mantener una conversación creíble",
+    },
+    {
+      bodyAngle: "cuerpo en tres cuartos con leve giro hacia el centro del set",
+      gaze: "mirada hacia el centro conversacional del estudio, sin mirar al lente",
+      cameraAngle: "ángulo alterno lateral para reforzar continuidad entre locutores",
+    },
+  ];
+  const zoneLabel = stageZones[speakerIndex % stageZones.length];
+  const eyelineDirection = eyelineDirections[speakerIndex % eyelineDirections.length];
+  const cleanScenario = String(scenarioPrompt || "Cabina de radio premium").replace(/\s+/g, " ").trim() || "Cabina de radio premium";
+  const lines = [
+    `Escenario de locución consistente para ${speakerName || speakerLabel || "el locutor"}.`,
+    `Escenario obligatorio: ${cleanScenario}.`,
+    "Convertir ese escenario en un set fotorealista de locución con tratamiento acústico visible, micrófono broadcast en brazo articulado, consola discreta y luz cinematográfica suave.",
+    `Posición fija obligatoria dentro del set para ${speakerName || speakerLabel || "el locutor"}: ${zoneLabel}.`,
+    "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
+    "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
+    `Bloqueo corporal obligatorio: ${eyelineDirection.bodyAngle}.`,
+    `Eyeline obligatorio: ${eyelineDirection.gaze}.`,
+    `Ángulo de cámara sugerido: ${eyelineDirection.cameraAngle}.`,
+    "Evitar pose frontal de presentador y evitar contacto visual directo con la cámara.",
+    "Mostrar un solo locutor claramente identificable en cuadro.",
+    "Composición obligatoria de sujeto único: foreground y background limpios de personas.",
+    "La cámara nunca debe convertirse en el interlocutor principal; mantener la atención del locutor en la conversación.",
+    "Encuadre medio corto, cámara a la altura de los ojos, fondo elegante, profundidad de campo ligera.",
+    `La puesta en escena debe acompañar una actitud ${expression}.`,
+    "Mantener continuidad visual entre escenas: misma cabina, mismo set, misma dirección de luz, mismo estilo de vestuario.",
+  ];
+  if (singleSubjectOnly) {
+    lines.push(
+      "Retrato de sujeto único estricto: no agregar ninguna otra persona en el escenario.",
+      "Prohibido segunda figura humana visible o parcial: no espalda, no hombro, no cabeza desenfocada, no perfil, no reflejo, no sombra humana.",
+      "La imagen debe parecer un retrato editorial limpio del locutor activo dentro del set."
+    );
+  } else {
+    lines.push(
+      "La escena debe sentirse como conversación entre locutores; el personaje atiende al interlocutor, no al espectador.",
+      counterpartSpeakerName ? `La mirada debe sugerir escucha activa hacia ${counterpartSpeakerName}, pero siempre con el interlocutor completamente fuera de cuadro.` : "",
+      "Priorizar miradas laterales, reacción conversacional y microgestos que indiquen escucha activa entre locutores."
+    );
+  }
+  return lines.filter(Boolean).join(" ");
+}
+
+async function loadOptionalImageReference({ storagePath = "", url = "" }) {
+  const cleanStoragePath = clampText(storagePath || "", 700);
+  const rawUrl = clampText(url || "", 3200);
+  const cleanUrl = rawUrl.includes("%25") ? clampText(decodeURIComponent(rawUrl), 3200) : rawUrl;
+  let buffer = null;
+  let mimeType = "image/png";
+  if (cleanStoragePath) {
+    try {
+      const file = storageBucket.file(cleanStoragePath);
+      const [meta] = await file.getMetadata().catch(() => [{}]);
+      const [downloaded] = await file.download();
+      buffer = Buffer.from(downloaded);
+      mimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
+    } catch (_) {
+      buffer = null;
+    }
+  }
+  if (!buffer && cleanUrl) {
+    const response = await fetchCompat(cleanUrl, { method: "GET" }).catch(() => null);
+    if (response?.ok) {
+      mimeType = String(response.headers.get("content-type") || "image/png").trim().toLowerCase();
+      buffer = Buffer.from(await response.arrayBuffer());
+    }
+  }
+  if (!buffer || !buffer.length || !String(mimeType || "").startsWith("image/")) return null;
+  return { buffer, mimeType };
+}
+
+async function loadScenarioReferenceFromSession({ uid = "", sessionId = "", scenarioId = "" }) {
+  const cleanSessionId = clampText(sessionId || "", 140);
+  const cleanScenarioId = clampText(scenarioId || "", 80);
+  if (!cleanSessionId) return null;
+  try {
+    const snap = await db.collection("podcaster_sessions").doc(cleanSessionId).get();
+    if (!snap.exists) return null;
+    const data = snap.data() || {};
+    const ownerId = String(data.ownerId || "").trim();
+    const sharedWithIds = Array.isArray(data.sharedWithIds) ? data.sharedWithIds.map((item) => String(item || "").trim()) : [];
+    if (uid && ownerId && ownerId !== uid && !sharedWithIds.includes(uid)) return null;
+    const session = data.session && typeof data.session === "object" ? data.session : null;
+    const deck = session?.globalScenarioDeck && typeof session.globalScenarioDeck === "object" ? session.globalScenarioDeck : null;
+    const items = Array.isArray(deck?.items) ? deck.items : [];
+    const activeId = clampText(deck?.activeId || "", 80);
+    const match = items.find((item) => {
+      const itemId = clampText(item?.id || "", 80);
+      if (cleanScenarioId) return itemId === cleanScenarioId;
+      return itemId === activeId;
+    }) || null;
+    if (!match) return null;
+    return loadOptionalImageReference({
+      storagePath: clampText(match?.storagePath || "", 700),
+      url: clampText(match?.downloadUrl || "", 3200)
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 function parseWavDurationSeconds(buffer = null) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 44) return 0;
   const riff = buffer.toString("ascii", 0, 4);
@@ -267,6 +448,7 @@ function sanitizePodcasterSession(raw = {}) {
     mediaCue: clampText(row?.mediaCue || "Sin media", 80) || "Sin media",
     text: clampText(row?.text || "", 12000),
     notes: clampText(row?.notes || "", 5000),
+    videoDirective: clampText(row?.videoDirective || "", 1400),
     disfluencyConfig: normalizeDisfluency(row?.disfluencyConfig || {})
   }));
   const hosts = Array.isArray(raw?.script?.hosts)
@@ -293,6 +475,10 @@ function sanitizePodcasterSession(raw = {}) {
       speaker: key,
       downloadUrl,
       storagePath,
+      scenarioPrompt: clampText(portrait?.scenarioPrompt || "", 2400),
+      scenarioId: clampText(portrait?.scenarioId || "", 80),
+      scenarioImageUrl: clampText(portrait?.scenarioImageUrl || "", 3200),
+      scenarioImageStoragePath: clampText(portrait?.scenarioImageStoragePath || "", 700),
       mimeType: clampText(portrait?.mimeType || "image/png", 120) || "image/png",
       updatedAt: clampText(portrait?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
       model: clampText(portrait?.model || DEFAULT_PODCASTER_IMAGE_MODEL, 140) || DEFAULT_PODCASTER_IMAGE_MODEL,
@@ -331,6 +517,7 @@ function sanitizePodcasterSession(raw = {}) {
       mimeType: clampText(clip?.mimeType || "video/mp4", 120) || "video/mp4",
       model: clampText(clip?.model || DEFAULT_PODCASTER_VIDEO_MODEL, 140) || DEFAULT_PODCASTER_VIDEO_MODEL,
       promptVersion: clampText(clip?.promptVersion || "podcaster_veo_v1", 80) || "podcaster_veo_v1",
+      videoDirective: clampText(clip?.videoDirective || "", 1400),
       durationSec: clampNumber(clip?.durationSec, 0, 240, 0),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
       segments,
@@ -511,6 +698,32 @@ async function resolveShareTarget({ targetUid = "", targetEmail = "" }) {
   };
 }
 
+async function listShareableMoodleUsers(currentUid = "") {
+  const uid = clampText(currentUid, 140);
+  const snap = await db.collection("users").limit(300).get();
+  const users = snap.docs.map((docSnap) => {
+    const data = docSnap.data() || {};
+    const userUid = String(data.uid || docSnap.id || "").trim();
+    if (!userUid || userUid === uid) return null;
+    const email = clampText(data.email || "", 180).toLowerCase();
+    const displayName = clampText(
+      data.displayName || data.name || data.nombre || data.fullName || email || userUid,
+      180
+    );
+    return {
+      uid: userUid,
+      email: email || "",
+      displayName: displayName || userUid
+    };
+  }).filter(Boolean);
+  users.sort((a, b) => {
+    const left = String(a.displayName || a.email || a.uid || "").toLowerCase();
+    const right = String(b.displayName || b.email || b.uid || "").toLowerCase();
+    return left.localeCompare(right, "es");
+  });
+  return users;
+}
+
 async function safeJson(response) {
   try {
     return await response.json();
@@ -594,6 +807,48 @@ function getAudioExtension(mimeType = "audio/mpeg") {
   if (mimeType === "audio/mp4" || mimeType === "audio/aac") return "m4a";
   if (mimeType === "audio/flac" || mimeType === "audio/x-flac") return "flac";
   return "bin";
+}
+
+function sleep(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function sanitizePodcasterMusicModel(value = "") {
+  const clean = String(value || "").trim();
+  return clean === "lyria-3-pro-preview" ? "lyria-3-pro-preview" : "lyria-3-clip-preview";
+}
+
+function buildPodcasterMusicPrompt(prompt = "", preset = "ambient") {
+  const cleanPrompt = String(prompt || "").replace(/\s+/g, " ").trim().slice(0, 1200);
+  const cleanPreset = String(preset || "ambient").trim().toLowerCase();
+  const styleHint = cleanPreset === "pulse"
+    ? "Light electronic pulse, energetic but clean, modern rhythm section."
+    : cleanPreset === "focus"
+      ? "Focused instrumental groove, subtle lo-fi textures, light piano and percussion."
+      : "Ambient cinematic background, warm pads, soft piano, airy textures.";
+  return [
+    cleanPrompt,
+    styleHint,
+    "Instrumental only.",
+    "No vocals, no spoken words, no choir, no narration.",
+    "Suitable as background music under podcast dialogue.",
+    "Keep transients controlled and avoid harsh peaks.",
+    "Loop-friendly and non-intrusive."
+  ].filter(Boolean).join(" ");
+}
+
+function readLyriaAudioParts(response = {}) {
+  const parts = Array.isArray(response?.candidates?.[0]?.content?.parts)
+    ? response.candidates[0].content.parts
+    : Array.isArray(response?.parts)
+      ? response.parts
+      : [];
+  return parts
+    .map((part) => ({
+      data: String(part?.inlineData?.data || part?.inline_data?.data || "").trim(),
+      mimeType: String(part?.inlineData?.mimeType || part?.inline_data?.mimeType || "audio/mpeg").trim() || "audio/mpeg"
+    }))
+    .filter((part) => part.data);
 }
 
 function readGeminiAudioParts(responseBody = {}) {
@@ -806,6 +1061,26 @@ app.use("/api/podcaster", async (req, res, next) => {
   }
 });
 
+app.use("/api/moodle", async (req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  try {
+    req.authContext = await verifyFirebaseBearer(req);
+    return next();
+  } catch (error) {
+    return res.status(Number(error?.status || 401)).json({ error: String(error?.message || "AUTH_REQUIRED") });
+  }
+});
+
+app.get("/api/moodle/share-users", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const users = await listShareableMoodleUsers(uid);
+    return res.status(200).json({ ok: true, users });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo cargar usuarios para compartir.") });
+  }
+});
+
 app.post("/api/podcaster/sessions/save", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -944,10 +1219,12 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
-    const characterPrompt = clampText(req.body?.characterPrompt || "", 2400);
-    const studioScenePrompt = clampText(req.body?.studioScenePrompt || "", 2400);
+    const scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+    const scenarioId = clampText(req.body?.scenarioId || "", 80);
+    const scenarioImageUrl = clampText(req.body?.scenarioImageUrl || "", 3200);
+    const scenarioImageStoragePath = clampText(req.body?.scenarioImageStoragePath || "", 700);
     const regenerate = req.body?.regenerate === true;
-    const previousStoragePath = clampText(req.body?.previousStoragePath || "", 600);
+    const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
     const imageModels = Array.from(new Set([
       normalizeModel(req.body?.model || DEFAULT_PODCASTER_IMAGE_MODEL),
@@ -972,11 +1249,38 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       : normalizedGenderGroup.startsWith("masc")
         ? "Prohibido: rasgos femeninos dominantes, apariencia andrógina, maquillaje glamoroso o presentación femenina."
         : "";
+    const characterPrompt = buildBackendPodcasterCharacterPrompt({
+      speakerLabel,
+      speakerName,
+      voiceName,
+      genderGroup,
+      expression,
+    });
+    const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
+      speakerLabel,
+      speakerName,
+      scenarioPrompt,
+      expression,
+      singleSubjectOnly: true,
+    });
+    const scenarioReference = await loadOptionalImageReference({
+      storagePath: scenarioImageStoragePath,
+      url: scenarioImageUrl,
+    });
+    const resolvedScenarioReference = scenarioReference || await loadScenarioReferenceFromSession({
+      uid,
+      sessionId,
+      scenarioId
+    });
 
     const prompt = [
-      "Genera un retrato fotorealista para un locutor de podcast.",
+      "Edita la imagen de referencia para convertirla en un retrato fotorealista de un solo locutor dentro del mismo set.",
+      resolvedScenarioReference ? "La imagen adjunta define el escenario real y tiene prioridad absoluta sobre cualquier otra instrucción." : "No hay imagen de referencia disponible; recrear el escenario solo a partir del prompt textual seleccionado.",
+      resolvedScenarioReference ? "Conservar exactamente la arquitectura, fondo, materiales, distribución, iluminación base y ángulo del escenario de la imagen adjunta." : "Recrear de forma consistente la arquitectura, fondo, materiales, distribución e iluminación del escenario descrito.",
+      "No inventar ni sustituir otra cabina, fondo o composición global.",
       `Nombre del locutor: ${speakerName}.`,
       `Etiqueta de locutor: ${speakerLabel}.`,
+      scenarioId ? `Escenario seleccionado: ${scenarioId}.` : "",
       voiceName ? `Voz de referencia: ${voiceName}.` : "",
       genderGroup ? `Presentación de género objetivo: ${genderGroup}.` : "",
       genderMustLine,
@@ -984,8 +1288,9 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       `Expresion: ${expression}.`,
       characterPrompt ? `Prompt de personaje obligatorio: ${characterPrompt}` : "",
       studioScenePrompt ? `Escenario de locución obligatorio: ${studioScenePrompt}` : "",
-      "Misma cabina profesional de podcast/radio: fondo consistente, acústica visible, micrófono de estudio, iluminación cinematográfica neutra.",
+      "Insertar solo al locutor activo dentro del set ya existente.",
       "Plano medio corto, enfoque en rostro, sin texto, sin logotipos, sin marcas de agua.",
+      "Retrato en tres cuartos o semi perfil natural, evitando frontalidad total y evitando contacto visual directo con la cámara.",
       "Estilo hiperrealista, piel natural, alta definición."
     ].filter(Boolean).join("\n");
 
@@ -995,23 +1300,37 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     let mimeType = "image/png";
     let resolvedModel = imageModels[0] || DEFAULT_PODCASTER_IMAGE_MODEL;
     for (const imageModel of imageModels) {
-      const upstream = await fetchCompat(
-        `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-        {
+      const requestUrl = `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+      const requestWithOptionalReference = async (includeScenarioReference) => {
+        const upstream = await fetchCompat(requestUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{
               role: "user",
-              parts: [{ text: prompt }]
+              parts: [
+                { text: prompt },
+                ...(includeScenarioReference && resolvedScenarioReference ? [{
+                  inlineData: {
+                    mimeType: resolvedScenarioReference.mimeType,
+                    data: resolvedScenarioReference.buffer.toString("base64")
+                  }
+                }] : [])
+              ]
             }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"]
             }
           })
-        }
-      );
-      const data = await safeJson(upstream);
+        });
+        const data = await safeJson(upstream);
+        return { upstream, data };
+      };
+
+      let { upstream, data } = await requestWithOptionalReference(true);
+      if (!upstream.ok && upstream.status === 400 && resolvedScenarioReference) {
+        ({ upstream, data } = await requestWithOptionalReference(false));
+      }
       if (!upstream.ok) {
         const detail = String(data?.error?.message || data?.error || `HTTP ${upstream.status}`).trim();
         lastStatus = Number(upstream.status || 502);
@@ -1058,6 +1377,9 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
         voiceName,
         genderGroup,
         expression,
+        scenarioId,
+        scenarioImageUrl,
+        scenarioImageStoragePath,
         model: resolvedModel
       }
     });
@@ -1075,6 +1397,10 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
         voiceName,
         genderGroup,
         expression,
+        scenarioPrompt,
+        scenarioId,
+        scenarioImageUrl,
+        scenarioImageStoragePath,
         mimeType,
         model: resolvedModel,
         promptVersion: "podcaster_v1",
@@ -1224,11 +1550,14 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const rowId = clampText(req.body?.rowId || "", 120);
     const speakerLabel = clampText(req.body?.speakerLabel || "", 80);
     const speakerName = clampText(req.body?.speakerName || "", 120) || speakerLabel || "Locutor";
+    const counterpartSpeakerLabel = clampText(req.body?.counterpartSpeakerLabel || "", 80);
+    const counterpartSpeakerName = clampText(req.body?.counterpartSpeakerName || "", 120) || counterpartSpeakerLabel;
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
-    const characterPrompt = clampText(req.body?.characterPrompt || "", 2400);
-    const studioScenePrompt = clampText(req.body?.studioScenePrompt || "", 2400);
+    const scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+    const videoDirective = clampText(req.body?.videoDirective || "", 1400);
+    const performanceDirective = clampText(req.body?.performanceDirective || "", 1800);
     const originalText = clampText(req.body?.originalText || "", 1600);
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
     const text = targetSpeechLine || clampText(req.body?.text || "", 1600);
@@ -1324,9 +1653,26 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       : (inferredAudioDurationSec > 0
         ? Math.round(clampNumber(inferredAudioDurationSec, 5, 8, 8))
         : 8));
+    const characterPrompt = buildBackendPodcasterCharacterPrompt({
+      speakerLabel,
+      speakerName,
+      voiceName,
+      genderGroup,
+      expression,
+      counterpartSpeakerName
+    });
+    const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
+      speakerLabel,
+      speakerName,
+      counterpartSpeakerName,
+      scenarioPrompt,
+      expression
+    });
 
     const prompt = [
       "Genera un video cinematográfico corto y realista para podcast.",
+      videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario sin romper identidad, sincronía labial ni continuidad del set: ${videoDirective}` : "",
+      performanceDirective ? `Prioridad máxima de actuación visual: ejecuta estas acciones físicas o expresivas de forma visible en pantalla, sin convertirlas en texto en pantalla ni alterar el diálogo hablado: ${performanceDirective}` : "",
       `Locutor: ${speakerName} (${speakerLabel}).`,
       voiceName ? `Voz de referencia: ${voiceName}.` : "",
       genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : "",
@@ -1352,14 +1698,22 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje.",
       "Escena en cabina profesional de podcast con micrófono de estudio.",
       "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
-      "No coloques a distintos locutores en el mismo lugar del escenario; cambia su posición dentro de la misma cabina.",
-      "Mantén continuidad del set, pero varía la ubicación del locutor y el ángulo de cámara según su zona asignada.",
+      "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
+      "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
+      "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
+      "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
+      "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
+      "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
+      "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
+      "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
       "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
       dialogueAudioStoragePath || dialogueAudioUrl
         ? `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`
         : "",
+      "Las acotaciones escénicas o instrucciones de actuación son visuales; no deben aparecer como texto en pantalla ni modificar literalmente el diálogo hablado.",
       originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
-      "Sin texto, sin subtítulos, sin logos, sin marcas de agua.",
+      "Sin texto, sin subtítulos, sin captions, sin closed captions, sin lower thirds, sin burned-in text, sin karaoke text, sin overlays de UI, sin logos, sin marcas de agua.",
+      "Prohibido cualquier texto incrustado en imagen o video: no titulos, no nombres, no etiquetas, no transcripcion en pantalla, no texto decorativo.",
       `Diálogo objetivo: "${String(text).replace(/"/g, '\\"')}"`
     ].filter(Boolean).join("\n");
 
@@ -1663,6 +2017,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         model: resolvedModel,
         variant: resolvedVariant || null,
         promptVersion: "podcaster_veo_v1",
+        videoDirective,
         durationSec: inferredTargetDurationSec,
         targetSpeechLine: text,
         updatedAt: new Date().toISOString(),
@@ -1712,6 +2067,7 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
       `Expresión: ${expression}.`,
       voiceName ? `Usa exactamente la voz ${voiceName}.` : "",
       disfluencyInstruction || "No agregues metacomentarios.",
+      "Nunca leas acotaciones escénicas, texto entre paréntesis o instrucciones de actuación; interpreta solo la línea objetivo limpia.",
       "Habla natural, humana y clara.",
       notes ? `Notas de interpretación: ${notes}.` : "",
       originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
@@ -1860,12 +2216,80 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
   }
 });
 
+app.post("/api/podcaster/music/generate", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.body?.sessionId || "", 140);
+    const preset = clampText(req.body?.preset || "ambient", 40) || "ambient";
+    const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
+    const prompt = buildPodcasterMusicPrompt(req.body?.prompt || "", preset);
+    const model = sanitizePodcasterMusicModel(req.body?.model || "lyria-3-clip-preview");
+    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
+    if (!hasGeminiKey()) return res.status(500).json({ error: "Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend." });
+
+    const client = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY
+    });
+    const response = await client.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseModalities: ["AUDIO", "TEXT"]
+      }
+    });
+    const audioParts = readLyriaAudioParts(response);
+    const firstAudio = audioParts[0] || null;
+    if (!firstAudio?.data) {
+      return res.status(502).json({ error: "Lyria no devolvió audio." });
+    }
+    const mimeType = String(firstAudio.mimeType || "audio/mpeg").trim() || "audio/mpeg";
+    const buffer = Buffer.from(firstAudio.data, "base64");
+    if (!buffer.length) {
+      return res.status(502).json({ error: "Lyria devolvió audio vacío." });
+    }
+    const ext = getAudioExtension(mimeType);
+    const sessionSlug = normalizeStorageSegment(sessionId, "session");
+    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/music/ai-${randomUUID()}.${ext}`;
+    const asset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer,
+      mimeType,
+      metadata: {
+        uid,
+        sessionId,
+        kind: "panel_music_ai",
+        model
+      }
+    });
+    if (previousStoragePath && previousStoragePath !== storagePath) {
+      await deleteStoragePath(previousStoragePath).catch(() => {});
+    }
+    await sleep(120);
+    return res.status(200).json({
+      ok: true,
+      track: {
+        name: `AI Music ${preset}`,
+        mimeType,
+        size: buffer.length,
+        downloadUrl: asset.downloadUrl,
+        storagePath: asset.path,
+        updatedAt: new Date().toISOString(),
+        model
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar música con IA.") });
+  }
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "gemini-backend",
     hasGeminiKey: hasGeminiKey(),
+    moodleShareUsersRoute: true,
     podcasterDialogueAudioRoute: true,
+    podcasterMusicGenerateRoute: true,
     startupSignature: BACKEND_BOOT_SIGNATURE,
   });
 });
@@ -2004,12 +2428,13 @@ app.post("/api/gemini/live-token", async (req, res) => {
 app.get("/api/assets/proxy-image", async (req, res) => {
   try {
     const rawUrl = String(req.query?.url || "").trim();
-    if (!rawUrl) {
+    const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
+    if (!normalizedUrl) {
       return res.status(400).json({ error: "Falta parámetro url." });
     }
     let parsed = null;
     try {
-      parsed = new URL(rawUrl);
+      parsed = new URL(normalizedUrl);
     } catch (_) {
       return res.status(400).json({ error: "URL inválida." });
     }
@@ -2023,7 +2448,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
 
-    const upstream = await fetchCompat(rawUrl, { method: "GET" });
+    const upstream = await fetchCompat(normalizedUrl, { method: "GET" });
     if (!upstream.ok) {
       const body = await safeJson(upstream);
       return res.status(upstream.status).json(body);
@@ -2040,13 +2465,44 @@ app.get("/api/assets/proxy-image", async (req, res) => {
 
 app.get("/api/assets/proxy-media", async (req, res) => {
   try {
+    const storagePath = clampText(req.query?.storagePath || "", 700);
     const rawUrl = String(req.query?.url || "").trim();
-    if (!rawUrl) {
-      return res.status(400).json({ error: "Falta parámetro url." });
+    const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
+    const rangeHeader = String(req.headers.range || "").trim();
+
+    if (storagePath) {
+      const file = storageBucket.file(storagePath);
+      const [exists] = await file.exists().catch(() => [false]);
+      if (!exists) {
+        return res.status(404).json({ error: "Archivo no encontrado en Storage." });
+      }
+      const [meta] = await file.getMetadata().catch(() => [{}]);
+      const [buffer] = await file.download();
+      const mime = String(meta?.contentType || "application/octet-stream");
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Content-Length", String(buffer.length));
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "private, max-age=120");
+      if (rangeHeader) {
+        const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
+        if (match) {
+          const start = Math.max(0, Number(match[1] || 0));
+          const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
+          const chunk = buffer.subarray(start, end + 1);
+          res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
+          res.setHeader("Content-Length", String(chunk.length));
+          return res.status(206).send(chunk);
+        }
+      }
+      return res.status(200).send(buffer);
+    }
+
+    if (!normalizedUrl) {
+      return res.status(400).json({ error: "Falta parámetro url o storagePath." });
     }
     let parsed = null;
     try {
-      parsed = new URL(rawUrl);
+      parsed = new URL(normalizedUrl);
     } catch (_) {
       return res.status(400).json({ error: "URL inválida." });
     }
@@ -2059,9 +2515,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     if (!allowedHost) {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
-
-    const rangeHeader = String(req.headers.range || "").trim();
-    const upstream = await fetchCompat(rawUrl, {
+    const upstream = await fetchCompat(normalizedUrl, {
       method: "GET",
       headers: rangeHeader ? { Range: rangeHeader } : undefined
     });
