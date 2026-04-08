@@ -22,7 +22,7 @@ export async function bootstrapFirebaseAppCheck(app) {
   appCheckBootstrapPromise = (async () => {
     const cfg = resolveAppCheckConfig();
     if (!cfg.enabled) {
-      console.info("[app-check] Omitido: falta site key o appCheck.enabled=false.");
+      console.debug("[app-check] Omitido: falta site key o appCheck.enabled=false.");
       return null;
     }
 

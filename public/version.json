@@ -1,15 +1,11 @@
 {
-  "version": "2026-1.0.0.16",
+  "version": "2026-1.0.0.19",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo la generacion con modelos IA: reintento por categoria fallida, mejor manejo de alta demanda en Gemini y mejoras de estabilidad. Da click aqui para actualizar.",
+  "message": "Se actualizo el editor de cursos y scripts del frontend para corregir estilos y evitar caché vieja en produccion. Da click aqui para actualizar.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion de scripts de generacion IA (fallback, timeouts, alta demanda y reintento por categoria).",
+  "forceClearCacheReason": "Actualizacion de moodleCourse con cache-busting de CSS y JS para corregir estilos viejos en produccion.",
   "updates": [
-    "Nuevo: el boton Regenerar ahora reintenta solo la categoria en curso/fallida en lugar de regenerar toda la unidad.",
-    "Mejora: seguimiento interno de categoria en proceso, ultima categoria intentada y categoria fallida para reintentos precisos.",
-    "Mejora IA: manejo de alta demanda en Gemini con enfriamiento por modelo y etiquetas visibles en el selector.",
-    "Mejora IA: ajustes de timeout y cadena de fallback para evitar bloqueos prolongados en modelos Pro.",
-    "Corregido: recursos visuales de estrategia matematica ahora usan imagen embebida y evita errores 404 de archivos faltantes.",
-    "Corregido: se agrego favicon local para evitar el 404 de favicon.ico en entorno local."
+    "Corregido: moodleCourse ahora fuerza recarga de CSS y JS del editor para evitar que produccion use archivos viejos en cache.",
+    "Corregido: mejoras de estilos del contenido estructurado del modulo ya deben reflejarse correctamente en produccion."
   ]
 }
