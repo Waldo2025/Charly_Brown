@@ -1,0 +1,56 @@
+[
+  {
+    "t": 1773459729315,
+    "label": "Listo",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  },
+  {
+    "t": 1773459730659,
+    "label": "Listo",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  },
+  {
+    "t": 1773459732035,
+    "label": "3",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  },
+  {
+    "t": 1773459733508,
+    "label": "1",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  },
+  {
+    "t": 1773459735074,
+    "label": "Reintenta micrófono",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  },
+  {
+    "t": 1773459736442,
+    "label": "Reintenta micrófono",
+    "line": "Tiene una casa redonda.",
+    "wordCount": 4,
+    "activeCount": 0,
+    "correctCount": 0,
+    "wrongCount": 0
+  }
+]

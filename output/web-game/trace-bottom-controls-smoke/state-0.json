@@ -1,0 +1,12 @@
+{
+  "buttonLabels": [
+    "Iniciar",
+    "Reiniciar",
+    "Siguiente"
+  ],
+  "controlsDisplay": "grid",
+  "controlsCols": "168px 168px 168px",
+  "videoWidth": "1px",
+  "videoOpacity": "0",
+  "videoLeft": "-9999px"
+}

@@ -4,8 +4,8 @@
   const FORCE_ACK_KEY_PREFIX = 'force_update_ack_';
   const BANNER_ID = 'updateBanner';
   const LAUNCHER_ID = 'updateBannerLauncher';
-  const DEFAULT_TITLE = 'Nuevas actualizaciones';
-  const DEFAULT_MESSAGE = 'Hay nuevas actualizaciones en el sistema, por favor da click aqui para actualizar';
+  const DEFAULT_TITLE = 'Actualización disponible de Charly Brown';
+  const DEFAULT_MESSAGE = 'Hay cambios nuevos en la aplicación. Revisa el resumen y recarga cuando estés listo.';
 
   function escapeHtml(value) {
     return String(value || '')
@@ -209,7 +209,7 @@
         <div class="update-banner-title">${escapeHtml(title)}</div>
       </div>
       <div class="update-banner-msg">${escapeHtml(message)}</div>
-      <div class="update-banner-cta">Acción: haz clic para actualizar ahora.</div>
+      <div class="update-banner-cta">Acción: abrir aviso y recargar la app.</div>
       ${listHtml}
     `;
   }
@@ -243,8 +243,8 @@
       btn.id = LAUNCHER_ID;
       btn.type = 'button';
       btn.className = 'update-banner-launcher';
-      btn.textContent = 'Update';
-      btn.setAttribute('aria-label', 'Ver actualización disponible');
+      btn.textContent = 'Ver cambios';
+      btn.setAttribute('aria-label', 'Ver cambios disponibles en Charly Brown');
     }
 
     if (btn.parentElement !== headerContent) {
@@ -292,11 +292,14 @@
     try {
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
+        await Promise.all(keys.map((k) => {
+          if (String(k || '').startsWith('cb-lecturas-game-')) return Promise.resolve(false);
+          return caches.delete(k);
+        }));
       }
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(r => r.unregister()));
+      // Importante: no desregistrar SW globalmente, rompe el modo offline.
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'CB_SKIP_WAITING' });
       }
     } catch (_) {
       // ignore cache delete errors

@@ -1,0 +1,289 @@
+{
+  "mode": "countdown",
+  "playMode": "solo",
+  "challengeType": "synonyms",
+  "coordinate_system": "origin top-left, +x right, +y down",
+  "targetWord": "RAPIDO",
+  "correctWord": "LIGERO",
+  "wrongRemaining": 19,
+  "touchedCorrect": false,
+  "fireModeActive": false,
+  "fireModeMsLeft": 0,
+  "cameraReady": true,
+  "pose": {
+    "confidence": 1,
+    "joints": [
+      {
+        "kind": "head",
+        "x": 480,
+        "y": 311,
+        "r": 14
+      },
+      {
+        "kind": "leftWrist",
+        "x": 414,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "rightWrist",
+        "x": 546,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "torso",
+        "x": 480,
+        "y": 367,
+        "r": 18
+      }
+    ],
+    "segments": [
+      {
+        "kind": "leftArm",
+        "ax": 464,
+        "ay": 337,
+        "bx": 408,
+        "by": 365
+      },
+      {
+        "kind": "rightArm",
+        "ax": 496,
+        "ay": 337,
+        "bx": 552,
+        "by": 365
+      },
+      {
+        "kind": "shoulders",
+        "ax": 454,
+        "ay": 331,
+        "bx": 506,
+        "by": 331
+      },
+      {
+        "kind": "torso",
+        "ax": 480,
+        "ay": 329,
+        "bx": 480,
+        "by": 403
+      }
+    ]
+  },
+  "hands": {
+    "left": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    },
+    "right": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    }
+  },
+  "progress": {
+    "level": 2,
+    "score": 30,
+    "seeds": 1,
+    "waters": 0,
+    "harvests": 0,
+    "knowledge": 0,
+    "alivePlants": 1
+  },
+  "background": {
+    "url": "logoCharly1.png",
+    "ready": false,
+    "transitionActive": false
+  },
+  "effects": {
+    "levelTransitionActive": true,
+    "levelTransitionMsLeft": 823.3333333333334
+  },
+  "silhouette": {
+    "enabled": true,
+    "preferReal": true,
+    "hasRecentMask": {
+      "solo": false,
+      "left": false,
+      "right": false
+    }
+  },
+  "powerup": null,
+  "fireballs": [],
+  "players": {
+    "left": {
+      "wrongRemaining": 16,
+      "fireModeActive": false,
+      "powerupActive": false,
+      "fireballsCount": 0
+    },
+    "right": {
+      "wrongRemaining": 3,
+      "fireModeActive": false,
+      "powerupActive": false,
+      "fireballsCount": 0
+    }
+  },
+  "activeWords": [
+    {
+      "text": "PRONTO",
+      "isCorrect": false,
+      "x": 486,
+      "y": -169,
+      "width": 454,
+      "height": 136
+    },
+    {
+      "text": "LENTO",
+      "isCorrect": false,
+      "x": 173,
+      "y": -307,
+      "width": 397,
+      "height": 119
+    },
+    {
+      "text": "TORPE",
+      "isCorrect": false,
+      "x": 620,
+      "y": -395,
+      "width": 387,
+      "height": 116
+    },
+    {
+      "text": "ANTIGUO",
+      "isCorrect": false,
+      "x": 101,
+      "y": -521,
+      "width": 490,
+      "height": 147
+    },
+    {
+      "text": "IDEA",
+      "isCorrect": false,
+      "x": 706,
+      "y": -458,
+      "width": 313,
+      "height": 104
+    },
+    {
+      "text": "LISTO",
+      "isCorrect": false,
+      "x": 460,
+      "y": -675,
+      "width": 366,
+      "height": 110
+    },
+    {
+      "text": "MAESTRO",
+      "isCorrect": false,
+      "x": 311,
+      "y": -665,
+      "width": 530,
+      "height": 159
+    },
+    {
+      "text": "LIGERO",
+      "isCorrect": true,
+      "x": 144,
+      "y": -842,
+      "width": 416,
+      "height": 125
+    },
+    {
+      "text": "BARCOS",
+      "isCorrect": false,
+      "x": 505,
+      "y": -953,
+      "width": 468,
+      "height": 140
+    },
+    {
+      "text": "PENSAMIENTO",
+      "isCorrect": false,
+      "x": 267,
+      "y": -922,
+      "width": 744,
+      "height": 223
+    },
+    {
+      "text": "APRESURARSE",
+      "isCorrect": false,
+      "x": 288,
+      "y": -1056,
+      "width": 748,
+      "height": 224
+    },
+    {
+      "text": "SOMBRIO",
+      "isCorrect": false,
+      "x": 151,
+      "y": -1239,
+      "width": 507,
+      "height": 152
+    },
+    {
+      "text": "MANCHADO",
+      "isCorrect": false,
+      "x": 215,
+      "y": -1197,
+      "width": 609,
+      "height": 183
+    },
+    {
+      "text": "ARDIENTE",
+      "isCorrect": false,
+      "x": 482,
+      "y": -1259,
+      "width": 541,
+      "height": 162
+    },
+    {
+      "text": "ENEMIGO",
+      "isCorrect": false,
+      "x": 67,
+      "y": -1462,
+      "width": 503,
+      "height": 151
+    },
+    {
+      "text": "GRANDE",
+      "isCorrect": false,
+      "x": 68,
+      "y": -1532,
+      "width": 463,
+      "height": 139
+    },
+    {
+      "text": "VIVIENDA",
+      "isCorrect": false,
+      "x": 438,
+      "y": -1571,
+      "width": 514,
+      "height": 154
+    },
+    {
+      "text": "HABLAR",
+      "isCorrect": false,
+      "x": 399,
+      "y": -1621,
+      "width": 464,
+      "height": 139
+    },
+    {
+      "text": "LIMPIDO",
+      "isCorrect": false,
+      "x": 421,
+      "y": -1780,
+      "width": 464,
+      "height": 139
+    },
+    {
+      "text": "NINO",
+      "isCorrect": false,
+      "x": 579,
+      "y": -1891,
+      "width": 323,
+      "height": 104
+    }
+  ]
+}

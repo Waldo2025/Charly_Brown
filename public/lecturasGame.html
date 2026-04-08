@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <script src="runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1e3a8a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Lecturas Game</title>
+  <link href="vendor/boxicons/boxicons.min.css" rel="stylesheet">
+  <link href="vendor/fontawesome/all.min.css" rel="stylesheet">
+  <link rel="manifest" href="/lecturasGame.webmanifest">
+
+  <script src="vendor/peerjs/peerjs.min.js" type="module"></script>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="lecturasGame.css?v=20260313a">
+  <script src="lecturasGame-mode-flags.js" defer></script>
+</head>
+<body>
+  <main class="lecturas-game-main stream-layout">
+    <section id="gameHero" class="game-hero">
+      <div class="game-hero-copy">
+        <h1>LECTURAS GAME</h1>
+        <p class="game-subtitle">
+          Selecciona lectura y modo desde la sección del juego.
+        </p>
+      </div>
+    </section>
+
+    <section id="lecturaScene" class="game-scene lectura-scene-card">
+      <h2 class="scene-title">Actividades por grado</h2>
+      <div id="lecturaCards" class="lectura-grade-groups" role="list"></div>
+      <p id="lecturaEmpty" class="scene-empty" hidden>No hay lecturas publicadas para los filtros actuales.</p>
+    </section>
+  </main>
+
+  <div id="gameLoadingOverlay" class="game-loading-overlay">
+    <div class="game-loading-spinner"></div>
+    <p>Cargando juego...</p>
+  </div>
+
+  <section id="lecturasGameModeModal" class="lecturas-game-mode-section" aria-hidden="true">
+    <section class="lecturas-game-mode-panel" aria-label="Modo game">
+      <div class="lecturas-game-mode-body" id="lecturasGameModeBody"></div>
+    </section>
+  </section>
+
+  <script type="module" src="lecturasGame.js?v=20260319b"></script>
+</body>
+</html>

@@ -1,7 +1,5 @@
 // crearAudio.js
 
-const HF_TOKEN = "__HF_API_KEY_LOCAL__";
-
 document.addEventListener("DOMContentLoaded", () => {
   const modalEl = document.getElementById("modalGenerarAudio");
   const btnAudio = document.getElementById("btnAbrirModalAudio");
@@ -32,33 +30,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    let modificado = aplicarTonoYVelocidad(texto, tono, velocidad);
-
-    try {
-      const response = await fetch("https://api-inference.huggingface.co/models/suno/bark", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ inputs: modificado })
-      });
-
-      if (!response.ok) {
-        alert("Error generando el audio. Intenta más tarde.");
-        return;
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-
-      const audio = document.getElementById("audioGenerado");
-      audio.src = url;
-      document.getElementById("audioPreview").style.display = "block";
-
-    } catch (error) {
-      alert("Error al generar el audio.");
-    }
+    aplicarTonoYVelocidad(texto, tono, velocidad);
+    alert("La generación de audio desde crearAudio.js fue deshabilitada por seguridad. Usa el flujo integrado que ya corre sin exponer APIs en el cliente.");
   });
 });
 

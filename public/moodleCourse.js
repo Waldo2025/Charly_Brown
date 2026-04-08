@@ -78,6 +78,118 @@ const USE_SORTABLE_SIDEBAR = typeof window !== 'undefined' && !!window.Sortable;
 let sortableTemasInstance = null;
 let sortableSubtemasInstances = [];
 const modulosCache = new Map();
+let geminiModelsSyncPromise = null;
+
+function normalizeGeminiModelName(model = "") {
+    return String(model || "")
+        .trim()
+        .replace(/^models\//i, "")
+        .replace(/:generateContent$/i, "");
+}
+
+function isMoodleSupportedGeminiTextModelName(model = "") {
+    const name = normalizeGeminiModelName(model);
+    if (!name) return false;
+    if (!/^gemini-(2\.5|3(?:\.1)?)/i.test(name)) return false;
+    if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
+    if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
+    return true;
+}
+
+function isTextGeminiGenerationModel(modelInfo = {}) {
+    const name = normalizeGeminiModelName(modelInfo?.name || "");
+    if (!name) return false;
+    if (!isMoodleSupportedGeminiTextModelName(name)) return false;
+
+    const methods = Array.isArray(modelInfo?.supportedGenerationMethods)
+        ? modelInfo.supportedGenerationMethods.map((method) => String(method || "").trim())
+        : [];
+
+    return methods.length === 0 || methods.includes("generateContent");
+}
+
+function formatGeminiModelOptionLabel(model = "") {
+    const normalized = normalizeGeminiModelName(model);
+    const directMap = {
+        "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+        "gemini-2.5-flash": "Gemini 2.5 Flash",
+        "gemini-2.5-pro": "Gemini 2.5 Pro",
+        "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
+        "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
+        "gemini-3.1-pro-preview": "Gemini 3.1 Pro (Preview)",
+        "gemini-3.1-flash-preview": "Gemini 3.1 Flash (Preview)",
+        "gemini-3.1-flash-lite-preview": "Gemini 3.1 Flash Lite (Preview)"
+    };
+    if (directMap[normalized]) return directMap[normalized];
+
+    return normalized
+        .replace(/^gemini-/i, "Gemini ")
+        .replace(/-/g, " ")
+        .replace(/\bpreview\b/gi, "(Preview)")
+        .replace(/\bflash lite\b/gi, "Flash Lite")
+        .replace(/\bflash\b/gi, "Flash")
+        .replace(/\bpro\b/gi, "Pro")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+async function syncGeminiModelOptionsForMoodle() {
+    const select = document.getElementById("selectGeminiEndpoint");
+    if (!select || geminiModelsSyncPromise) return geminiModelsSyncPromise;
+
+    const currentValue = normalizeGeminiModelName(select.value || "gemini-2.5-flash-lite") || "gemini-2.5-flash-lite";
+    const fallbackModels = Array.from(select.options || [])
+        .map((opt) => normalizeGeminiModelName(opt.value || ""))
+        .filter(isMoodleSupportedGeminiTextModelName);
+
+    geminiModelsSyncPromise = (async () => {
+        try {
+            const data = await authFetchJson("/api/gemini/models", { method: "GET" });
+            const backendModels = Array.isArray(data?.models) ? data.models : [];
+            const filteredBackendModels = backendModels
+                .filter(isTextGeminiGenerationModel)
+                .map((modelInfo) => normalizeGeminiModelName(modelInfo?.name || ""))
+                .filter(isMoodleSupportedGeminiTextModelName);
+
+            const mergedModels = Array.from(new Set([
+                ...filteredBackendModels,
+                ...fallbackModels
+            ]));
+
+            mergedModels.sort((a, b) => {
+                const aPreview = /\bpreview\b/i.test(a);
+                const bPreview = /\bpreview\b/i.test(b);
+                if (aPreview !== bPreview) return aPreview ? 1 : -1;
+                return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+            });
+
+            select.innerHTML = "";
+            mergedModels.forEach((modelName) => {
+                const option = document.createElement("option");
+                option.value = modelName;
+                option.textContent = formatGeminiModelOptionLabel(modelName);
+                if (modelName === "gemini-2.5-flash-lite") {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+
+            const preferredValue = mergedModels.includes(currentValue)
+                ? currentValue
+                : (mergedModels.includes("gemini-2.5-flash-lite") ? "gemini-2.5-flash-lite" : (mergedModels[0] || currentValue));
+
+            if (preferredValue) {
+                select.value = preferredValue;
+            }
+        } catch (_) {
+            // Mantener catálogo hardcodeado actual si el backend no responde.
+        } finally {
+            geminiModelsSyncPromise = null;
+        }
+    })();
+
+    return geminiModelsSyncPromise;
+}
 const TOUR_MODULOS_STORAGE_KEY = "cb_tour_acciones_modulo_v1";
 let tourAccionesModuloActivo = false;
 let tourAccionesModuloPaso = 0;
@@ -187,9 +299,12 @@ function construirDocIdModulo(moduloId, cursoIdRef = null) {
 }
 
 function actualizarBotonToggleArchivados() {
-    const lbl = document.getElementById("labelToggleArchivados");
-    if (!lbl) return;
-    lbl.textContent = mostrarModulosArchivados ? "Archivados: Visibles" : "Archivados: Ocultos";
+    const btn = document.getElementById("btnToggleArchivados");
+    if (!btn) return;
+    btn.classList.toggle("archivados-visibles", !!mostrarModulosArchivados);
+    btn.classList.toggle("archivados-ocultos", !mostrarModulosArchivados);
+    btn.title = mostrarModulosArchivados ? "Archivados visibles" : "Archivados ocultos";
+    btn.setAttribute("aria-label", btn.title);
 }
 
 function inicializarToggleArchivadosUI() {
@@ -228,6 +343,7 @@ onAuthStateChanged(auth, async (user) => {
   window.currentUserId = user.uid;
   currentUserRole = "user";
 
+  await syncGeminiModelOptionsForMoodle();
   await cargarCursosUsuario();
 
   const cursoIdGuardado = localStorage.getItem("cursoSeleccionado");
@@ -294,10 +410,24 @@ async function cargarCursosUsuario() {
         // 🔥 USAR MAP PARA EVITAR DUPLICADOS
         const cursosMap = new Map();
         
+        const esDocumentoCursoRaiz = (docId, data = {}) => {
+            const cleanDocId = String(docId || "").trim();
+            const cleanCursoId = String(data?.cursoId || "").trim();
+            const docType = String(data?.docType || "").trim().toLowerCase();
+            if (docType === "module") return false;
+            if (docType === "course") return true;
+            if (cleanCursoId && cleanCursoId !== cleanDocId) return false;
+            if (cleanDocId.includes("_")) return false;
+            return Array.isArray(data?.temas);
+        };
+
         // 1. Procesar cursos propios (userId === currentUserId)
         snapPropios.docs.forEach(d => {
             const data = d.data();
             const cursoId = d.id;
+            if (!esDocumentoCursoRaiz(cursoId, data)) {
+                return;
+            }
             
             const curso = {
                 id: cursoId,
@@ -325,6 +455,9 @@ async function cargarCursosUsuario() {
         snapCompartidos.docs.forEach(d => {
             const data = d.data();
             const cursoId = d.id;
+            if (!esDocumentoCursoRaiz(cursoId, data)) {
+                return;
+            }
             
             // 🔥 VERIFICACIÓN CRÍTICA: Si ya está en el mapa (es curso propio), IGNORAR
             if (cursosMap.has(cursoId)) {
@@ -1689,6 +1822,11 @@ btnCrearCurso.addEventListener("click", async () => {
         const nuevoId = crypto.randomUUID();
         
 
+        const temaInicialId = crypto.randomUUID();
+        const subtemaInicialId = crypto.randomUUID();
+        const moduloTemarioInicialId = crypto.randomUUID();
+        const moduloLecturaInicialId = crypto.randomUUID();
+
         const nuevoCurso = {
             cursoId: nuevoId,
             id: nuevoId,
@@ -1696,7 +1834,19 @@ btnCrearCurso.addEventListener("click", async () => {
             descripcion: "",
             userId: currentUserId,
             creado: new Date(),
-            temas: [],
+            temas: [{
+                id: temaInicialId,
+                nombre: "Tema 1",
+                subtemas: [{
+                    id: subtemaInicialId,
+                    nombre: "Subtema 1",
+                    instrucciones: "",
+                    contenidoGenerado: "",
+                    modulos: [],
+                    modulosIds: [moduloTemarioInicialId, moduloLecturaInicialId],
+                    traducciones: []
+                }]
+            }],
             actualizado: new Date(),
             compartidoCon: [],
             compartidoConDetalles: []
@@ -1712,6 +1862,35 @@ btnCrearCurso.addEventListener("click", async () => {
 
         // 1. Guardar en Firebase
         await setDoc(cursoRef, nuevoCurso);
+        await guardarModulo(moduloTemarioInicialId, {
+            id: moduloTemarioInicialId,
+            cursoId: nuevoId,
+            subtemaId: subtemaInicialId,
+            tipo: "Temario",
+            nombre: "Temario",
+            contenido: construirContenidoInicialModulo("Temario"),
+            instrucciones: construirInstruccionesInicialesModulo("Temario"),
+            incluirInstruccionOriginalEnPropuesta: false,
+            traducciones: [],
+            creado: Date.now(),
+            actualizado: Date.now()
+        }, nuevoId);
+        await guardarModulo(moduloLecturaInicialId, {
+            id: moduloLecturaInicialId,
+            cursoId: nuevoId,
+            subtemaId: subtemaInicialId,
+            tipo: "Lectura",
+            nombre: "Lectura",
+            contenido: construirContenidoInicialModulo("Lectura"),
+            instrucciones: construirInstruccionesInicialesModulo("Lectura"),
+            incluirInstruccionOriginalEnPropuesta: false,
+            traducciones: [],
+            creado: Date.now(),
+            actualizado: Date.now()
+        }, nuevoId);
+        localStorage.setItem("temaAbierto", temaInicialId);
+        localStorage.setItem("subtemaAbierto", subtemaInicialId);
+        localStorage.setItem("moduloActivo", moduloTemarioInicialId);
         
         // 2. Cerrar modal inmediatamente
         modalCrearCurso.classList.add("hidden");
@@ -1988,6 +2167,13 @@ async function seleccionarCurso(id) {
                 btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
             }
         }
+
+        const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
+        if (btnDescargarCursoWord) {
+            btnDescargarCursoWord.disabled = false;
+            btnDescargarCursoWord.title = "Descargar curso completo en Word";
+            btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
         
         // Renderizar temas
         renderTemas();
@@ -2176,6 +2362,11 @@ function limpiarUIError() {
     if (btnAddTema) {
         btnAddTema.disabled = true;
         btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+    const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
+    if (btnDescargarCursoWord) {
+        btnDescargarCursoWord.disabled = true;
+        btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     
     // Limpiar variables globales
@@ -2372,7 +2563,7 @@ function actualizarUIParaModoLectura() {
         
         // Deshabilitar todos los botones de edición
         contenidoEditor.querySelectorAll('button, .icon-btn').forEach(btn => {
-            if (btn.id !== 'btnDescargarWord') {
+            if (btn.id !== 'btnDescargarCursoWord') {
                 btn.disabled = true;
                 btn.classList.add('opacity-50', 'cursor-not-allowed');
             }
@@ -2392,6 +2583,13 @@ function actualizarUIParaModoEdicion() {
         btnAddTema.disabled = false;
         btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
         btnAddTema.title = "Añadir nuevo tema";
+    }
+
+    const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
+    if (btnDescargarCursoWord) {
+        btnDescargarCursoWord.disabled = false;
+        btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
+        btnDescargarCursoWord.title = "Descargar curso completo en Word";
     }
     
     // Actualizar sidebar
@@ -2832,15 +3030,59 @@ btnAddTema.addEventListener("click", async () => {
 
     if (!nombre) return;
 
+    const temaId = crypto.randomUUID();
+    const subtemaId = crypto.randomUUID();
+    const moduloTemarioId = crypto.randomUUID();
+    const moduloLecturaId = crypto.randomUUID();
+
     const tema = {
-        id: crypto.randomUUID(),
+        id: temaId,
         nombre: nombre.trim(),
-        subtemas: []
+        subtemas: [{
+            id: subtemaId,
+            nombre: "Subtema 1",
+            instrucciones: "",
+            contenidoGenerado: "",
+            modulos: [],
+            modulosIds: [moduloTemarioId, moduloLecturaId],
+            traducciones: []
+        }]
     };
 
     curso.temas.push(tema);
 
+    await guardarModulo(moduloTemarioId, {
+        id: moduloTemarioId,
+        cursoId: curso.id,
+        subtemaId,
+        tipo: "Temario",
+        nombre: "Temario",
+        contenido: construirContenidoInicialModulo("Temario"),
+        instrucciones: construirInstruccionesInicialesModulo("Temario"),
+        incluirInstruccionOriginalEnPropuesta: false,
+        traducciones: [],
+        creado: Date.now(),
+        actualizado: Date.now()
+    });
+
+    await guardarModulo(moduloLecturaId, {
+        id: moduloLecturaId,
+        cursoId: curso.id,
+        subtemaId,
+        tipo: "Lectura",
+        nombre: "Lectura",
+        contenido: construirContenidoInicialModulo("Lectura"),
+        instrucciones: construirInstruccionesInicialesModulo("Lectura"),
+        incluirInstruccionOriginalEnPropuesta: false,
+        traducciones: [],
+        creado: Date.now(),
+        actualizado: Date.now()
+    });
+
     await guardarCursoFirebase();
+    localStorage.setItem("temaAbierto", temaId);
+    localStorage.setItem("subtemaAbierto", subtemaId);
+    localStorage.setItem("moduloActivo", moduloTemarioId);
     renderTemas();
 });
 
@@ -2848,6 +3090,8 @@ function getModuloIcon(tipo) {
     const icons = {
         "Quizz": "fa-square-check",
         "Página": "fa-file-lines",
+        "Temario": "fa-list-check",
+        "Lectura": "fa-book-open-reader",
         "Archivo": "fa-file-arrow-down",
         "Libro": "fa-book",
         "Lección": "fa-person-chalkboard",
@@ -4530,16 +4774,6 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 <button class="icon-btn" id="btnAddModulo" title="Añadir módulo">
                     <i class="fas fa-plus"></i>
                 </button>
-                <!-- NUEVO ICONO: INSTRUCCIONES GEMINI -->
-                <button class="icon-btn" id="btnInstruccionesSubtema" title="Ver instrucciones del subtema">
-                    <i class="fas fa-comment-dots text-purple-600"></i>
-                </button>
-                <button class="icon-btn" id="btnGenerar" title="Generar contenido con IA">
-                    <i class="fas fa-magic"></i>
-                </button>
-                <button class="icon-btn" id="btnTraducirSubtema" title="Traducir contenido generado">
-                    <i class="fas fa-language"></i>
-                </button>
             ` : `
                 <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
                     <i class="fas fa-eye mr-1"></i>Solo lectura
@@ -4547,16 +4781,6 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
             `}
         </div>
     </div>
-
-            <!-- Contenido generado -->
-            <div class="mb-8">
-                <label class="section-title">Contenido generado</label>
-                <div id="resultadoGenerado" 
-                    class="p-4 bg-card rounded-md border border-border text-foreground generated-content ${esModoLectura ? 'readonly-content' : 'contenido-editable'}" 
-                    contenteditable="${!esModoLectura}">
-                    ${sanitizarHtmlEditorialOMensajeVacio(subtema.contenidoGenerado, '<span class="text-muted-foreground text-xs">Sin contenido generado</span>')}
-                </div>
-            </div>
 
             <!-- Módulos -->
             <div class="mt-4">
@@ -4615,6 +4839,16 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                     await guardarCursoFirebase();
                     resultadoDiv.blur();
                 }
+            });
+        }
+
+        const btnEliminarResultadoGenerado = document.getElementById("btnEliminarResultadoGenerado");
+        if (btnEliminarResultadoGenerado && resultadoDiv) {
+            btnEliminarResultadoGenerado.addEventListener("click", async () => {
+                subtema.contenidoGenerado = "";
+                resultadoDiv.innerHTML = '<span class="text-muted-foreground text-xs">Sin contenido generado</span>';
+                await guardarCursoFirebase();
+                mostrarNotificacion("Contenido generado eliminado", "success");
             });
         }
 
@@ -5414,6 +5648,8 @@ function normalizarTipoModulo(tipo) {
   if (t.includes("notas del maestro")) return "notas_maestro";
   if (t.includes("lección") || t.includes("leccion")) return "leccion";
   if (t.includes("página") || t.includes("pagina")) return "pagina";
+  if (t.includes("temario")) return "temario";
+  if (t.includes("lectura")) return "lectura";
   if (t.includes("libro")) return "libro";
 
   return "contenido";
@@ -6103,9 +6339,10 @@ function decodificarSecuenciasEscapadas(texto) {
     // Secuencias JSON comunes que llegan como texto literal
     salida = salida
         .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-        .replace(/\\n/g, '\n')
-        .replace(/\\r/g, '\r')
-        .replace(/\\t/g, '\t')
+        // No romper comandos TeX como \neq, \right, \text, etc.
+        .replace(/\\n(?![A-Za-z])/g, '\n')
+        .replace(/\\r(?![A-Za-z])/g, '\r')
+        .replace(/\\t(?![A-Za-z])/g, '\t')
         .replace(/\\"/g, '"')
         .replace(/\\\\/g, '\\');
 
@@ -6118,6 +6355,36 @@ function decodificarSecuenciasEscapadas(texto) {
 function contieneHtmlRenderizable(texto) {
     if (!texto) return false;
     return /<\/?[a-z][\s\S]*>/i.test(texto);
+}
+
+function contieneSintaxisStemRenderizable(texto = "") {
+    const value = String(texto || "");
+    if (!value) return false;
+    return /(\${1,2}[\s\S]+?\${1,2}|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\\ce\{[\s\S]+?\}|\\pu\{[\s\S]+?\}|\\frac\{[\s\S]+?\}\{[\s\S]+?\}|\\[a-zA-Z]+(?:\{|\s))/m.test(value);
+}
+
+function renderizarStemEnElemento(root) {
+    if (!root || typeof window === "undefined") return;
+    if (!contieneSintaxisStemRenderizable(root.textContent || root.innerHTML || "")) return;
+    const renderMath = window.renderMathInElement;
+    if (typeof renderMath !== "function") return;
+
+    try {
+        renderMath(root, {
+            delimiters: [
+                { left: "$$", right: "$$", display: true },
+                { left: "\\[", right: "\\]", display: true },
+                { left: "$", right: "$", display: false },
+                { left: "\\(", right: "\\)", display: false }
+            ],
+            throwOnError: false,
+            strict: "ignore",
+            trust: true,
+            ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"]
+        });
+    } catch (_) {
+        // noop
+    }
 }
 
 function renderizarContenidoModulo(contenido) {
@@ -6162,6 +6429,7 @@ function decorarContenidoModuloRenderizado(html = "") {
     const root = document.createElement("div");
     root.innerHTML = raw;
     expandirBloquesEstructuradosModulo(root);
+    renderizarStemEnElemento(root);
 
     root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote").forEach((node) => {
         const text = String(node.textContent || "").trim();
@@ -6258,6 +6526,42 @@ function decorarContenidoModuloRenderizado(html = "") {
         const allAlphaOptions = items.every((item) => /^[A-Z]\)\s+/.test(String(item.textContent || "").trim()));
         if (allAlphaOptions) {
             listEl.classList.add("cb-module-alpha-options");
+            const isCompactOptionSet = items.length >= 4 && items.every((item) => {
+                const text = String(item.textContent || "").replace(/\s+/g, " ").trim();
+                return text.length <= 36;
+            });
+            if (isCompactOptionSet) {
+                listEl.classList.add("cb-module-alpha-options--compact");
+            }
+        }
+    });
+
+    const blockChildren = Array.from(root.children);
+    let currentQuestionBlock = null;
+
+    blockChildren.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+
+        const startsNewQuestion =
+            node.classList.contains("cb-module-question-heading") ||
+            node.classList.contains("cb-module-block-title") ||
+            node.classList.contains("cb-module-original-body");
+
+        if (node.classList.contains("cb-module-question-heading")) {
+            currentQuestionBlock = document.createElement("section");
+            currentQuestionBlock.className = "cb-module-question-block";
+            node.parentNode?.insertBefore(currentQuestionBlock, node);
+            currentQuestionBlock.appendChild(node);
+            return;
+        }
+
+        if (startsNewQuestion) {
+            currentQuestionBlock = null;
+            return;
+        }
+
+        if (currentQuestionBlock) {
+            currentQuestionBlock.appendChild(node);
         }
     });
 
@@ -6417,12 +6721,12 @@ function convertirMarkdownBasicoAHtml(markdown) {
     const parsearCeldasTabla = (lineaTabla) =>
         lineaTabla
             .trim()
-            .replace(/^\|/, '')
-            .replace(/\|$/, '')
+            .replace(/^\|?/, '')
+            .replace(/\|?$/, '')
             .split('|')
             .map(celda => formatearInlineMarkdown(celda.trim()));
 
-    const esLineaTabla = (lineaTabla) => /^\s*\|(.+)\|\s*$/.test(lineaTabla);
+    const esLineaTabla = (lineaTabla) => /^\s*\|?.+\|.+\|?\s*$/.test(lineaTabla);
     const esSeparadorTabla = (lineaTabla) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lineaTabla);
 
     const cerrarTabla = () => {
@@ -6819,7 +7123,22 @@ window.eliminarModulo = eliminarModulo;
 ====================================================== */
 
 function construirContenidoInicialModulo(tipo) {
-    if (normalizarTipoModulo(tipo) !== "notas_maestro") return "";
+    const tipoNormalizado = normalizarTipoModulo(tipo);
+    if (tipoNormalizado === "temario") {
+        return `
+<h2>Temario</h2>
+<p>Presenta aquí el recorrido general del subtema, los puntos clave y el orden sugerido de trabajo.</p>
+`.trim();
+    }
+
+    if (tipoNormalizado === "lectura") {
+        return `
+<h2>Lectura</h2>
+<p>Pega en instrucciones el texto completo de la lectura para transcribirlo y estructurarlo sin modificar su contenido.</p>
+`.trim();
+    }
+
+    if (tipoNormalizado !== "notas_maestro") return "";
 
     return `
 <h3>Ejercicio guiado: Aplicación del contenido</h3>
@@ -6836,7 +7155,25 @@ function construirContenidoInicialModulo(tipo) {
 }
 
 function construirInstruccionesInicialesModulo(tipo) {
-    if (normalizarTipoModulo(tipo) !== "notas_maestro") return "";
+    const tipoNormalizado = normalizarTipoModulo(tipo);
+    if (tipoNormalizado === "temario") {
+        return `
+Genera un temario breve y claro para este subtema.
+Debe funcionar como guía inicial y mapa de ruta.
+Incluye título, breve introducción, puntos principales y orden sugerido de los contenidos.
+No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.
+`.trim();
+    }
+
+    if (tipoNormalizado === "lectura") {
+        return `
+Transcribe exactamente la lectura que voy a pegar.
+No cambies palabras, no resumas, no parafrasees y no agregues ejercicios.
+Solo organiza el contenido con buena estructura: título, subtítulos, párrafos, listas o tablas si ya existen en el texto base.
+`.trim();
+    }
+
+    if (tipoNormalizado !== "notas_maestro") return "";
 
     return `
 1. Presente el objetivo del ejercicio y el tiempo total estimado.
@@ -6859,6 +7196,8 @@ function mostrarSelectorModulo(subtema) {
     const tipos = [
         "Quizz",
         "Página",
+        "Temario",
+        "Lectura",
         "Archivo",
         "Libro",
         "Lección",
@@ -9524,29 +9863,6 @@ async function construirDocumentoWordSubtema(subtema) {
     return html;
 }
 
-const btnDescargarWord = document.getElementById("btnDescargarWord");
-if (btnDescargarWord) {
-    btnDescargarWord.addEventListener("click", async () => {
-    if (!window.subtemaActivo) {
-        alert("No hay un subtema activo para exportar.");
-        return;
-    }
-
-    try {
-        const html = await construirDocumentoWordSubtema(window.subtemaActivo);
-        const blob = window.htmlDocx.asBlob(html);
-
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${window.subtemaActivo?.nombre || temaActivo?.nombre || "Documento"}.docx`;
-        a.click();
-    } catch (e) {
-        alert("Error generando Word.");
-    }
-    });
-}
-
-
 async function exportarTemaWord(tema) {
 
     let html = `
@@ -9621,6 +9937,87 @@ async function exportarTemaWord(tema) {
     }
 }
 
+async function exportarCursoCompletoWord(cursoActual) {
+    if (!cursoActual?.temas?.length) {
+        alert("No hay un curso cargado para exportar.");
+        return;
+    }
+
+    let html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(cursoActual.nombre || "Curso")}</title>
+<style>
+    ${crearEstilosWordCurso()}
+    .tema { margin-top: 30px; page-break-inside: avoid; }
+    .subtema { margin-top: 22px; }
+</style>
+</head>
+<body>
+<h1 class="word-doc-title">${escapeHtml(cursoActual.nombre || "Curso")}</h1>
+`;
+
+    for (const tema of (cursoActual.temas || [])) {
+        html += `
+        <section class="tema">
+            <h2 class="word-subtema-title">${escapeHtml(tema?.nombre || "Tema")}</h2>
+        `;
+
+        if (!tema?.subtemas?.length) {
+            html += `<p>(Sin subtemas)</p>`;
+        } else {
+            for (const sub of tema.subtemas) {
+                html += `
+                <div class="subtema">
+                    <h3 class="word-section-title">${escapeHtml(sub?.nombre || "Subtema")}</h3>
+                `;
+
+                if (!sub?.modulosIds?.length) {
+                    html += `<p>(Sin módulos)</p>`;
+                } else {
+                    for (const modId of sub.modulosIds) {
+                        const modulo = await obtenerModulo(modId);
+                        if (!modulo || modulo.archivado) continue;
+                        html += construirContenidoModuloWord(modulo);
+                    }
+                }
+
+                html += `</div>`;
+            }
+        }
+
+        html += `</section>`;
+    }
+
+    html += `
+</body>
+</html>
+`;
+
+    try {
+        const blob = window.htmlDocx.asBlob(html);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${cursoActual.nombre || "Curso"}.docx`;
+        a.click();
+    } catch (e) {
+        alert("Error exportando el curso a Word");
+    }
+}
+
+const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
+if (btnDescargarCursoWord) {
+    btnDescargarCursoWord.addEventListener("click", async () => {
+        if (!window.curso) {
+            alert("No hay un curso activo para exportar.");
+            return;
+        }
+        await exportarCursoCompletoWord(window.curso);
+    });
+}
+
 
 /* ======================================================
    FUNCIONES PARA MANEJAR CONTENIDO ENRIQUECIDO EN MODAL GEMINI
@@ -9629,9 +10026,161 @@ async function exportarTemaWord(tema) {
 // Variable global para almacenar selección actual
 let currentGeminiSelection = null;
 let geminiToolbarInicializado = false;
+const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function obtenerEditorGemini() {
     return document.getElementById('txtModalInstruccionesGemini');
+}
+
+function leerCacheImagenesGemini() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(GEMINI_INSTRUCTION_IMAGE_CACHE_KEY) || "{}");
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function guardarCacheImagenesGemini(cache = {}) {
+    try {
+        localStorage.setItem(GEMINI_INSTRUCTION_IMAGE_CACHE_KEY, JSON.stringify(cache));
+    } catch (_) {
+        // noop
+    }
+}
+
+function obtenerImagenesGeminiPorModulo(moduloId = "") {
+    const key = String(moduloId || "").trim();
+    if (!key) return {};
+    const cache = leerCacheImagenesGemini();
+    const scoped = cache[key];
+    return scoped && typeof scoped === "object" ? scoped : {};
+}
+
+function guardarImagenesGeminiPorModulo(moduloId = "", imageMap = {}) {
+    const key = String(moduloId || "").trim();
+    if (!key) return;
+    const cache = leerCacheImagenesGemini();
+    cache[key] = imageMap && typeof imageMap === "object" ? imageMap : {};
+    guardarCacheImagenesGemini(cache);
+}
+
+function crearGeminiImageId() {
+    return `gemimg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function construirPlaceholderImagenGemini(imageId = "") {
+    const safeId = encodeURIComponent(String(imageId || "").trim());
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+            <rect width="640" height="360" fill="#eef2ff"/>
+            <rect x="24" y="24" width="592" height="312" rx="24" fill="#dbe4ff" stroke="#9aa8d6" stroke-width="2"/>
+            <text x="320" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" fill="#334155">
+                Imagen de referencia
+            </text>
+            <text x="320" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#64748b">
+                ${safeId}
+            </text>
+        </svg>`
+    )}`;
+}
+
+function normalizarHtmlLegacyImagenGemini(html = "") {
+    const raw = String(html || "");
+    if (!raw.includes("https://gemini.local/reference-image/")) return raw;
+    return raw.replace(
+        /<img\b([^>]*?)src=["']https:\/\/gemini\.local\/reference-image\/([^"']+)["']([^>]*?)>/gi,
+        (match, before = "", encodedId = "", after = "") => {
+            const imageId = decodeURIComponent(String(encodedId || "").trim());
+            const mergedAttrs = `${before || ""} ${after || ""}`;
+            const hasImageIdAttr = /\bdata-gemini-image-id\s*=\s*["'][^"']+["']/i.test(mergedAttrs);
+            const imageIdAttr = hasImageIdAttr ? "" : ` data-gemini-image-id="${sanitizeAttrGemini(imageId)}"`;
+            return `<img${before || ""} src="${construirPlaceholderImagenGemini(imageId)}"${imageIdAttr}${after || ""}>`;
+        }
+    );
+}
+
+function hidratarHtmlInstruccionesGemini(html = "", moduloId = "") {
+    const raw = normalizarHtmlLegacyImagenGemini(html);
+    if (!raw.trim()) return "";
+    const cache = obtenerImagenesGeminiPorModulo(moduloId);
+    const container = document.createElement("div");
+    container.innerHTML = raw;
+    container.querySelectorAll("img[data-gemini-image-id]").forEach((img) => {
+        const imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
+        if (imageId) {
+            img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
+        }
+        const dataUrl = String(cache?.[imageId]?.dataUrl || "").trim();
+        if (dataUrl.startsWith("data:image/")) {
+            img.setAttribute("src", dataUrl);
+            return;
+        }
+        img.remove();
+    });
+    container.querySelectorAll('img[src^="https://gemini.local/reference-image/"]').forEach((img) => {
+        const existingId = String(img.getAttribute("data-gemini-image-id") || "").trim();
+        const fallbackId = existingId || decodeURIComponent(
+            String(img.getAttribute("src") || "").trim().split("/").pop() || ""
+        );
+        if (fallbackId) {
+            img.setAttribute("data-gemini-image-id", fallbackId);
+            img.setAttribute("src", construirPlaceholderImagenGemini(fallbackId));
+            const dataUrl = String(cache?.[fallbackId]?.dataUrl || "").trim();
+            if (dataUrl.startsWith("data:image/")) {
+                img.setAttribute("src", dataUrl);
+                return;
+            }
+        }
+        img.remove();
+    });
+    return container.innerHTML;
+}
+
+function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "") {
+    const key = String(moduloId || "").trim();
+    if (!key) return sanitizarHtmlEditorial(sanitizeRichText(normalizarHtmlLegacyImagenGemini(html)));
+    const container = document.createElement("div");
+    container.innerHTML = sanitizeRichText(normalizarHtmlLegacyImagenGemini(String(html || "").trim()));
+    const nextCache = { ...obtenerImagenesGeminiPorModulo(key) };
+    const usedIds = new Set();
+
+    container.querySelectorAll("img").forEach((img, index) => {
+        const src = String(img.getAttribute("src") || "").trim();
+        let imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
+        if (!imageId && src.startsWith("https://gemini.local/reference-image/")) {
+            imageId = decodeURIComponent(src.split("/").pop() || "");
+        }
+        if (!imageId) imageId = crearGeminiImageId();
+        const alt = String(img.getAttribute("alt") || `imagen_${index + 1}`).trim() || `imagen_${index + 1}`;
+
+        if (src.startsWith("data:image/")) {
+            nextCache[imageId] = {
+                name: alt,
+                mimeType: String(src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/png").trim(),
+                dataUrl: src,
+                updatedAt: new Date().toISOString()
+            };
+        }
+
+        if (!nextCache[imageId]?.dataUrl) {
+            img.remove();
+            return;
+        }
+
+        usedIds.add(imageId);
+        img.setAttribute("data-gemini-image-id", imageId);
+        img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
+        img.setAttribute("alt", alt);
+        img.setAttribute("title", alt);
+    });
+
+    const trimmedCache = {};
+    usedIds.forEach((imageId) => {
+        if (nextCache[imageId]) trimmedCache[imageId] = nextCache[imageId];
+    });
+    guardarImagenesGeminiPorModulo(key, trimmedCache);
+    return sanitizarHtmlEditorial(container.innerHTML.trim());
 }
 
 function escapeHtmlGemini(texto = "") {
@@ -9699,6 +10248,62 @@ function fileToDataUrlGemini(file) {
     });
 }
 
+function loadImageElementFromDataUrlGemini(dataUrl = "") {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("No se pudo decodificar la imagen."));
+        img.src = String(dataUrl || "");
+    });
+}
+
+function canvasToDataUrlGemini(canvas, mimeType = "image/webp", quality = 0.72) {
+    try {
+        return canvas.toDataURL(mimeType, quality);
+    } catch (_) {
+        if (mimeType !== "image/jpeg") {
+            return canvas.toDataURL("image/jpeg", Math.max(0.65, quality));
+        }
+        throw new Error("No se pudo exportar la imagen optimizada.");
+    }
+}
+
+async function optimizarImagenGemini(file) {
+    const originalDataUrl = await fileToDataUrlGemini(file);
+    const image = await loadImageElementFromDataUrlGemini(originalDataUrl);
+    const maxSide = 1280;
+    const width = Math.max(1, Number(image.naturalWidth || image.width || 1));
+    const height = Math.max(1, Number(image.naturalHeight || image.height || 1));
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) throw new Error("No se pudo preparar la compresión de imagen.");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, targetWidth, targetHeight);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    let optimizedDataUrl = canvasToDataUrlGemini(canvas, "image/webp", 0.72);
+    if (optimizedDataUrl.length > 700000) {
+        optimizedDataUrl = canvasToDataUrlGemini(canvas, "image/webp", 0.62);
+    }
+    if (optimizedDataUrl.length > 900000) {
+        optimizedDataUrl = canvasToDataUrlGemini(canvas, "image/jpeg", 0.72);
+    }
+
+    return {
+        dataUrl: optimizedDataUrl,
+        width: targetWidth,
+        height: targetHeight,
+        mimeType: String(optimizedDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/webp").trim()
+    };
+}
+
 function sanitizeAttrGemini(value = "") {
     return String(value)
         .replace(/&/g, "&amp;")
@@ -9735,7 +10340,8 @@ async function manejarCambioImagenGemini(event) {
             return;
         }
 
-        const dataUrl = await fileToDataUrlGemini(file);
+        const optimized = await optimizarImagenGemini(file);
+        const dataUrl = String(optimized?.dataUrl || "");
         if (!dataUrl.startsWith("data:image/")) {
             alert("No se pudo procesar la imagen.");
             return;
@@ -9752,6 +10358,32 @@ async function manejarCambioImagenGemini(event) {
     } finally {
         if (input) input.value = "";
     }
+}
+
+async function manejarPegadoImagenGemini(file = null) {
+    if (!(file instanceof File)) return false;
+    if (!file.type.startsWith("image/")) return false;
+
+    const maxMB = 4;
+    if (file.size > maxMB * 1024 * 1024) {
+        alert(`La imagen pegada supera ${maxMB}MB. Usa una imagen más ligera.`);
+        return true;
+    }
+
+    const editor = obtenerEditorGemini();
+    if (!editor) return false;
+
+        const optimized = await optimizarImagenGemini(file);
+        const dataUrl = String(optimized?.dataUrl || "");
+        if (!dataUrl.startsWith("data:image/")) {
+            throw new Error("No se pudo procesar la imagen pegada.");
+        }
+
+    editor.focus();
+    restaurarSeleccionGemini();
+    insertarImagenEnEditorGemini(dataUrl, file.name || "imagen pegada");
+    updateFormatInfo("Imagen pegada. Gemini la usará al generar.");
+    return true;
 }
 
 function insertGeminiImage() {
@@ -9996,9 +10628,52 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (editor) {
         // Manejar evento de pegado
-        editor.addEventListener('paste', function(e) {
+        editor.addEventListener('paste', async function(e) {
             const clipboardData = e.clipboardData || window.clipboardData;
             if (!clipboardData) return;
+
+            const items = Array.from(clipboardData.items || []);
+            const imageItems = items.filter((item) => String(item?.type || "").startsWith("image/"));
+            if (imageItems.length > 0) {
+                e.preventDefault();
+                try {
+                    editor.focus();
+                    restaurarSeleccionGemini();
+
+                    const html = clipboardData.getData('text/html') || "";
+                    const text = clipboardData.getData('text/plain') || "";
+
+                    if (html && !/<img\b/i.test(html)) {
+                        if (contieneTablaEnHtml(html)) {
+                            let htmlContent = html;
+                            const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+                            if (bodyMatch) htmlContent = bodyMatch[1];
+                            htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                            htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+                            insertarHtmlEnEditorGemini(htmlContent);
+                        } else {
+                            document.execCommand('insertHTML', false, html);
+                            guardarSeleccionGemini();
+                        }
+                    } else if (text && !esTextoTabular(text)) {
+                        document.execCommand('insertText', false, text);
+                        guardarSeleccionGemini();
+                    } else if (text && esTextoTabular(text)) {
+                        const tableHTML = convertirTextoTabularATablaHTML(text);
+                        if (tableHTML) insertarHtmlEnEditorGemini(tableHTML);
+                    }
+
+                    for (const item of imageItems) {
+                        const file = item.getAsFile?.() || null;
+                        // eslint-disable-next-line no-await-in-loop
+                        await manejarPegadoImagenGemini(file);
+                    }
+                    updateFormatInfo("Contenido multimodal pegado");
+                } catch (_) {
+                    alert("No se pudo procesar la imagen pegada.");
+                }
+                return;
+            }
 
             const html = clipboardData.getData('text/html') || "";
             const text = clipboardData.getData('text/plain') || "";
@@ -10066,12 +10741,13 @@ window.abrirInstruccionesGemini = async function(moduloId) {
 
     // Cargar instrucciones (pueden contener HTML)
     if (modulo.instrucciones) {
+        const htmlHidratado = hidratarHtmlInstruccionesGemini(modulo.instrucciones, moduloId);
         // Si contiene HTML, usarlo directamente
         if (modulo.instrucciones.includes('<') && modulo.instrucciones.includes('>')) {
-            editor.innerHTML = sanitizarHtmlEditorial(modulo.instrucciones);
+            editor.innerHTML = sanitizarHtmlEditorial(htmlHidratado);
         } else {
             // Si es texto plano, convertirlo manteniendo saltos de línea
-            const textWithBreaks = modulo.instrucciones.replace(/\n/g, '<br>');
+            const textWithBreaks = htmlHidratado.replace(/\n/g, '<br>');
             editor.innerHTML = sanitizarHtmlEditorial(textWithBreaks);
         }
     } else {
@@ -10109,11 +10785,13 @@ function inicializarEventosModalInstruccionesGemini() {
     btnGuardar.addEventListener("click", async () => {
         const editor = obtenerEditorGemini();
         if (!editor) return;
-        
-        const contenidoHTML = sanitizarHtmlEditorial(sanitizeRichText(editor.innerHTML.trim()));
         const moduloId = window.__moduloEditandoInstruccionesId;
-
         if (!moduloId) return;
+        const htmlNormalizado = normalizarHtmlLegacyImagenGemini(editor.innerHTML.trim());
+        if (htmlNormalizado !== editor.innerHTML.trim()) {
+            editor.innerHTML = sanitizarHtmlEditorial(htmlNormalizado);
+        }
+        const contenidoHTML = prepararHtmlInstruccionesGeminiParaGuardar(htmlNormalizado, moduloId);
 
         // Guardar el HTML completo (puede contener tablas)
         await guardarModulo(moduloId, {

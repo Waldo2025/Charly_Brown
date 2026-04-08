@@ -1,25 +1,16 @@
-import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@3.7.1/+esm';
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-import { deleteObject } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js'; // Asegúrate de tener esta importación
-import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, deleteDoc, doc, setDoc } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getStorage, ref, uploadString, listAll, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { deleteObject } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js'; // Asegúrate de tener esta importación
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, deleteDoc, doc, setDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { buildApiUrl } from './api-client.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
+import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
+import { escapeHtml } from './security-utils.js';
 
-const googleAPIKey = "__GEMINI_VISION_API_KEY_LOCAL__";
-const googleAPIEndpoint = "https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent";
 
-
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
-
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+void bootstrapFirebaseAppCheck(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
 
@@ -35,9 +26,6 @@ onAuthStateChanged(auth, (user) => {
   });
 
 
-
-const HF_TOKEN = "__HF_API_KEY_LOCAL__";
-const inference = new InferenceClient(HF_TOKEN);
 
 const falModels = new Set([
   "HiDream-ai/HiDream-I1-Full",
@@ -408,7 +396,7 @@ async function cargarGaleriaImagenesGeneradas(panel, forceUpdate = false) {
     renderizarImagenes(panel, imagenes);
 
   } catch (error) {
-    panel.innerHTML = `<p class="error-message">Error al cargar imágenes: ${error.message}</p>`;
+    panel.innerHTML = `<p class="error-message">Error al cargar imágenes: ${escapeHtml(error?.message || "Error desconocido")}</p>`;
   }
 }
 
@@ -419,11 +407,17 @@ async function cargarGaleriaImagenesGeneradas(panel, forceUpdate = false) {
 async function generarMapaMentalGemini(texto) {
 
   const prompt = `Devuelve un JSON con conceptos clave y emojis para representar el texto: """${texto}"""`;
-
-  const res = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : "";
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(buildApiUrl("/api/gemini/generate"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    headers,
+    body: JSON.stringify({
+      model: "gemini-2.5-flash",
+      payload: { contents: [{ parts: [{ text: prompt }] }] }
+    })
   });
 
   const raw = await res.json();
@@ -502,14 +496,17 @@ async function cargarImagenesGuardadas(panel) {
   const compartidas = {};
   snapshot.forEach(doc => {
     const data = doc.data();
-    compartidas[data.nombre] = data.share;
+    compartidas[data.nombre] = {
+      share: data.share === true,
+      docId: doc.id
+    };
   });
 
   // ✅ Añade la propiedad `share` a cada imagen si aplica
   imagenes.forEach(img => {
-    if (compartidas[img.name] === true) {
-      img.share = true;
-    }
+    const sharedState = compartidas[img.name];
+    img.share = sharedState?.share === true;
+    img.sharedDocId = sharedState?.docId || buildSharedImageDocId(user.uid, img.name);
   });
 
   renderizarImagenes(panel, imagenes);
@@ -550,7 +547,7 @@ function renderizarImagenes(panel, imagenes) {
       cursor: pointer;
     `;
     imgElement.title = img.name;
-    imgElement.onclick = () => window.open(img.url, '_blank');
+    imgElement.onclick = () => window.open(img.url, '_blank', 'noopener,noreferrer');
 
     const name = document.createElement('span');
     name.textContent = img.name.length > 15 ? 
@@ -603,6 +600,9 @@ function renderizarImagenes(panel, imagenes) {
     
     shareBtn.onclick = async (e) => {
       e.stopPropagation();
+      if (!auth.currentUser?.uid) return;
+      const sharedDocId = img.sharedDocId || buildSharedImageDocId(auth.currentUser.uid, img.name);
+      img.sharedDocId = sharedDocId;
     
       if (!img.share && !img.shared) {
         // Mostrar modal de compartir
@@ -619,7 +619,7 @@ function renderizarImagenes(panel, imagenes) {
           }
       
           const db = getFirestore(app);
-          const imgRef = doc(db, "imagenesCompartidas", img.name);
+          const imgRef = doc(db, "imagenesCompartidas", sharedDocId);
       
           await setDoc(imgRef, {
             uid: auth.currentUser.uid,
@@ -646,7 +646,7 @@ function renderizarImagenes(panel, imagenes) {
       } else {
         // Descompartir directamente
         const db = getFirestore(app);
-        await setDoc(doc(db, "imagenesCompartidas", img.name), {
+        await setDoc(doc(db, "imagenesCompartidas", sharedDocId), {
           uid: auth.currentUser.uid,
           nombre: img.name,
           url: img.url,
@@ -724,6 +724,15 @@ function renderizarImagenes(panel, imagenes) {
   });
 }
 
+function buildSharedImageDocId(uid = "", imageName = "") {
+  const owner = String(uid || "").trim();
+  const name = String(imageName || "")
+    .trim()
+    .replace(/[^\w.-]+/g, "_")
+    .slice(0, 120) || "imagen";
+  return `${owner}__${name}`;
+}
+
 
 function abrirEditorImagenIA(img) {
   imagenSeleccionadaIA = img;
@@ -735,40 +744,20 @@ document.getElementById("cancelarEdicionIA").addEventListener("click", () => {
   document.getElementById("modalEditarIA").style.display = "none";
 });
 
+document.getElementById("cerrarModalEditarIA")?.addEventListener("click", () => {
+  document.getElementById("modalEditarIA").style.display = "none";
+});
+
+document.getElementById("cerrarModalCompartirImagenFirebase")?.addEventListener("click", () => {
+  document.getElementById("modalCompartirImagenFirebase").style.display = "none";
+});
+
 document.getElementById("confirmarEdicionIA").addEventListener("click", async () => {
   const prompt = document.getElementById("promptEdicionIA").value.trim();
   if (!prompt || !imagenSeleccionadaIA) return;
 
   document.getElementById("modalEditarIA").style.display = "none";
-
-  const originalUrl = imagenSeleccionadaIA.url;
-  const nombreOriginal = imagenSeleccionadaIA.name;
-
-  const blob = await fetch(originalUrl).then(res => res.blob());
-
-  const arrayBuffer = await blob.arrayBuffer();
-
-  const result = await inference.imageToImage(
-    "black-forest-labs/FLUX.1-dev",
-    new Uint8Array(arrayBuffer),
-    {
-      prompt,
-      strength: 0.75,
-      guidance_scale: 8
-    }
-  );
-  
-
-
-  if (result instanceof Blob) {
-    const nuevaURL = URL.createObjectURL(result);
-    const nuevoNombre = nombreOriginal + "_edit_" + Date.now();
-    await guardarImagenGeneradaEnFirebase(nuevoNombre, nuevaURL);
-    alert("✅ Imagen editada y guardada como " + nuevoNombre);
-    cargarGaleriaImagenesGeneradas(document.getElementById("contenedorGuardadasManual"), true);
-  } else {
-    alert("❌ No se pudo editar la imagen.");
-  }
+  alert(`La edición IA imagen-a-imagen fue deshabilitada por seguridad hasta migrarla al backend.\n\nPrompt capturado: ${prompt}`);
 });
 
 
@@ -1207,6 +1196,7 @@ function obtenerFilasDesdeInputs() {
   const nombreInput = document.getElementById("nombreImagenInput");
   const confirmarBtn = document.getElementById("confirmarNombreImagen");
   const cancelarBtn = document.getElementById("cancelarNombreImagen");
+  const cerrarNombreBtn = document.getElementById("cerrarModalNombreImagen");
 
 
   inputMultiple.addEventListener("change", async (e) => {
@@ -1259,6 +1249,11 @@ function obtenerFilasDesdeInputs() {
 
   // Cancelar subida
   cancelarBtn.addEventListener("click", () => {
+    modal.style.display = "none";
+    imagenSeleccionada = null;
+  });
+
+  cerrarNombreBtn?.addEventListener("click", () => {
     modal.style.display = "none";
     imagenSeleccionada = null;
   });

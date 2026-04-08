@@ -1,5 +1,6 @@
 import { metodologiaASC } from './metodologiaASC.js';
 import { authFetchJson } from "./api-client.js";
+import { sanitizeHtml, escapeHtml } from "./security-utils.js";
 
 let historialConversacion = [];
 
@@ -78,8 +79,8 @@ async function obtenerRespuestaChatbot(mensaje) {
                 mensaje.toLowerCase().includes(herramienta.nombre.toLowerCase()) ||
                 mensaje.toLowerCase().includes(herramienta.descripcion.toLowerCase())
             ) {
-                sugerencias.push(`📌 <b>${herramienta.nombre}</b> - ${herramienta.descripcion} 
-                <br> 👉 <button onclick="mostrarHerramienta('${herramienta.id}')">Abrir</button>`);
+                sugerencias.push(`📌 <b>${escapeHtml(herramienta.nombre)}</b> - ${escapeHtml(herramienta.descripcion)} 
+                <br> 👉 <button type="button" class="chatbot-tool-action" data-tool-id="${escapeHtml(herramienta.id)}">Abrir</button>`);
             }
         });
 
@@ -146,15 +147,21 @@ function agregarMensajeChatbot(remitente, mensaje, clase) {
 
     const mensajeElemento = document.createElement("div");
     mensajeElemento.classList.add("chatbot-message", clase);
-    const strong = document.createElement("strong");
-    strong.textContent = `${String(remitente || "")}:`;
-    const text = document.createElement("span");
-    text.textContent = ` ${String(mensaje || "").replace(/<[^>]*>/g, "")}`;
-    mensajeElemento.appendChild(strong);
-    mensajeElemento.appendChild(text);
+    const safeHtml = sanitizeHtml(String(mensaje || ""));
+    mensajeElemento.innerHTML = `<strong>${escapeHtml(String(remitente || ""))}:</strong> ${safeHtml}`;
     chatboxMensajes.appendChild(mensajeElemento);
     chatboxMensajes.scrollTop = chatboxMensajes.scrollHeight;
 }
+
+document.addEventListener("click", (event) => {
+    const toolBtn = event.target.closest(".chatbot-tool-action[data-tool-id]");
+    if (!toolBtn) return;
+    const toolId = String(toolBtn.dataset.toolId || "").trim();
+    if (!toolId) return;
+    if (typeof window.mostrarHerramienta === "function") {
+        window.mostrarHerramienta(toolId);
+    }
+});
 
 // 📌 Función para manejar el envío de mensajes en el chat
 async function manejarEnvioMensaje() {

@@ -1,0 +1,149 @@
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300;
+  src: url('./vendor/fonts/inter/inter-latin-300-normal.woff2') format('woff2'),
+       url('./vendor/fonts/inter/inter-latin-300-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./vendor/fonts/inter/inter-latin-400-normal.woff2') format('woff2'),
+       url('./vendor/fonts/inter/inter-latin-400-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./vendor/fonts/inter/inter-latin-500-normal.woff2') format('woff2'),
+       url('./vendor/fonts/inter/inter-latin-500-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('./vendor/fonts/inter/inter-latin-600-normal.woff2') format('woff2'),
+       url('./vendor/fonts/inter/inter-latin-600-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('./vendor/fonts/inter/inter-latin-700-normal.woff2') format('woff2'),
+       url('./vendor/fonts/inter/inter-latin-700-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300;
+  src: url('./vendor/fonts/roboto/roboto-latin-300-normal.woff2') format('woff2'),
+       url('./vendor/fonts/roboto/roboto-latin-300-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./vendor/fonts/roboto/roboto-latin-400-normal.woff2') format('woff2'),
+       url('./vendor/fonts/roboto/roboto-latin-400-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./vendor/fonts/roboto/roboto-latin-500-normal.woff2') format('woff2'),
+       url('./vendor/fonts/roboto/roboto-latin-500-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('./vendor/fonts/roboto/roboto-latin-700-normal.woff2') format('woff2'),
+       url('./vendor/fonts/roboto/roboto-latin-700-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./vendor/fonts/nunito/nunito-latin-400-normal.woff2') format('woff2'),
+       url('./vendor/fonts/nunito/nunito-latin-400-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('./vendor/fonts/nunito/nunito-latin-600-normal.woff2') format('woff2'),
+       url('./vendor/fonts/nunito/nunito-latin-600-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('./vendor/fonts/nunito/nunito-latin-700-normal.woff2') format('woff2'),
+       url('./vendor/fonts/nunito/nunito-latin-700-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url('./vendor/fonts/nunito/nunito-latin-800-normal.woff2') format('woff2'),
+       url('./vendor/fonts/nunito/nunito-latin-800-normal.woff') format('woff');
+}
+
+@font-face {
+  font-family: 'AvantGardeLocal';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./lecturasGame-mineblox/runtime/avantgarde/AVGARDN_2.TTF') format('truetype');
+}
+
+@font-face {
+  font-family: 'AvantGardeLocal';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('./lecturasGame-mineblox/runtime/avantgarde/AVGARDD_2.TTF') format('truetype');
+}
+
+@font-face {
+  font-family: 'AvantGardeLocal';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 700;
+  src: url('./lecturasGame-mineblox/runtime/avantgarde/AVGARDDO_2.TTF') format('truetype');
+}
+
+@font-face {
+  font-family: 'Bungee';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./vendor/fonts/bungee/bungee-latin-400-normal.woff2') format('woff2'),
+       url('./vendor/fonts/bungee/bungee-latin-400-normal.woff') format('woff');
+}

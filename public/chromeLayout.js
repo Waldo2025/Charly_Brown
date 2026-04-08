@@ -9,6 +9,8 @@
     'contenidounidad.html': { title: 'Contenido', header: 'filters' },
     'contenidounidad-.html': { title: 'Contenido', header: 'filters' },
     'generarlectura.html': { title: 'Charly Studio', header: 'simple' },
+    'podcaster.html': { title: 'Podcaster Studio', header: 'simple' },
+    'lecturasgame.html': { title: 'Lecturas Game', header: 'simple' },
     'moodlecourse.html': { title: 'Charly Brown Gestion de cursos Aprende', header: 'simple' },
     'voicetranscribe.html': { title: 'Charly Brown Session Recorder', header: 'simple' },
     'gestionusuarios.html': { title: 'Gestion de usuarios', header: 'simple' },
@@ -135,25 +137,30 @@
 
   function renderSidebar(currentPage, showFavoritesToggle) {
     const links = [
-      { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink' },
+      { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,developer' },
+      { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
+      { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
       { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
-      { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink' },
+      { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' },
       { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
       { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' },
-      { href: '#', icon: 'fas fa-head-side-cough', label: 'Comandos de voz', id: 'themeCommandSettingsBtn' }
+      { href: '#', icon: 'fas fa-head-side-cough', label: 'Comandos de voz', id: 'themeCommandSettingsBtn', roleVisibility: 'admin' }
     ];
 
     const sidebarLinks = links.map((link) => {
       const isAction = link.href === '#';
       const isActive = !isAction && link.href.toLowerCase() === currentPage;
+      const classes = ['sidebar-link'];
+      if (link.roleVisibility) classes.push('d-none');
       const attrs = [
         `href="${link.href}"`,
-        'class="sidebar-link"',
+        `class="${classes.join(' ')}"`,
         isActive ? 'aria-current="page"' : ''
       ];
       if (link.id) attrs.push(`id="${link.id}"`);
+      if (link.roleVisibility) attrs.push(`data-role-visibility="${link.roleVisibility}"`, 'hidden', 'aria-hidden="true"', 'tabindex="-1"');
       const badgeHtml = link.id === 'chatLink'
         ? '<em id="chat-notification-badge" class="sidebar-badge" hidden aria-live="polite">0</em>'
         : '';

@@ -1,7 +1,9 @@
-import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getFirestore, collection, collectionGroup, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
+import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getFirestore, collection, collectionGroup, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
+import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
 
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -15,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const chatPanel = document.getElementById("chat-panel");
     const contactsPanel = document.getElementById("contacts-panel");
     const toggleContactsPanelBtn = document.getElementById("toggleContactsPanel");
+    const chatHeader = document.getElementById("chat-header");
 
     let selectedUserId = null;
     let unsubscribeMessages = null;
@@ -23,27 +26,45 @@ document.addEventListener("DOMContentLoaded", () => {
     let unreadMessagesCache = [];
     let unreadByUserCache = {};
 
-    // Configuración de Firebase
-    const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
-
-    // ✅ Inicializar solo si no existe
-    const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
+    const app = !getApps().length ? initializeApp(assertFirebaseWebConfig(firebaseWebConfig)) : getApps()[0];
+    void bootstrapFirebaseAppCheck(app);
     const auth = getAuth();
     const db = getFirestore(app);
     const storage = getStorage(app);
 
-    // Solicita permiso para mostrar notificaciones
-    if ("Notification" in window) {
-        Notification.requestPermission().then(permission => {
+    function ensureNotificationToggle() {
+        if (!chatHeader || !("Notification" in window)) return null;
+        let button = document.getElementById("enable-chat-notifications");
+        if (button) return button;
+        button = document.createElement("button");
+        button.id = "enable-chat-notifications";
+        button.type = "button";
+        button.className = "btn btn-sm btn-outline-secondary";
+        button.textContent = "Activar notificaciones";
+        button.title = "Permitir notificaciones del chat";
+        button.addEventListener("click", async () => {
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission === "granted") {
+                    button.textContent = "Notificaciones activas";
+                    button.disabled = true;
+                } else {
+                    button.textContent = "Notificaciones bloqueadas";
+                }
+            } catch (_) {
+                button.textContent = "No disponible";
+            }
         });
+        chatHeader.appendChild(button);
+        return button;
+    }
+
+    if ("Notification" in window) {
+        const button = ensureNotificationToggle();
+        if (button && Notification.permission === "granted") {
+            button.textContent = "Notificaciones activas";
+            button.disabled = true;
+        }
     }
 
 
@@ -259,15 +280,33 @@ document.addEventListener("DOMContentLoaded", () => {
                     button.classList.add("contact-button");
 
                     const isCurrentUser = auth.currentUser.uid === user.uid;
-                    const displayName = `${user.firstName} ${user.lastName}` + (isCurrentUser ? " (Yo)" : "");
-                    const roleTag = `<small class="text-muted ms-2">[${user.role || 'Sin rol'}]</small>`;
+                    const firstName = String(user.firstName || "").trim();
+                    const lastName = String(user.lastName || "").trim();
+                    const fullName = `${firstName} ${lastName}`.trim() || "Usuario";
+                    const displayName = fullName + (isCurrentUser ? " (Yo)" : "");
+                    const roleLabel = String(user.role || "Sin rol");
                     const unread = Number(unreadByUserCache[user.uid] || 0);
-                    const unreadBadge = unread > 0 ? `<small class="contact-unread-badge">${unread > 99 ? "99+" : unread}</small>` : "";
+                    const icon = document.createElement("i");
+                    icon.className = "fas fa-user me-2";
 
-                    button.innerHTML = `
-                        <i class="fas fa-user me-2"></i>
-                        <span class="contact-meta">${displayName} ${roleTag} ${unreadBadge}</span>
-                    `;
+                    const meta = document.createElement("span");
+                    meta.className = "contact-meta";
+                    meta.append(document.createTextNode(displayName));
+
+                    const roleTag = document.createElement("small");
+                    roleTag.className = "text-muted ms-2";
+                    roleTag.textContent = `[${roleLabel}]`;
+                    meta.append(roleTag);
+
+                    if (unread > 0) {
+                        const badge = document.createElement("small");
+                        badge.className = "contact-unread-badge";
+                        badge.textContent = unread > 99 ? "99+" : String(unread);
+                        meta.append(document.createTextNode(" "));
+                        meta.append(badge);
+                    }
+
+                    button.append(icon, meta);
                     button.setAttribute("data-user-id", user.uid);
 
                     // Marcar como seleccionado si es el guardado
@@ -383,6 +422,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 senderId: auth.currentUser.uid,
                 receiverId: selectedUserId,
                 message: message,
+                favorite: false,
                 timestamp: serverTimestamp()
             });
             messageInput.value = '';
@@ -541,6 +581,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 senderId: auth.currentUser.uid,
                 receiverId: selectedUserId,
                 imageURL: downloadURL,
+                favorite: false,
                 timestamp: serverTimestamp()
             });
     
@@ -578,6 +619,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     senderId: auth.currentUser.uid,
                     receiverId: selectedUserId,
                     audioData: base64Audio,
+                    favorite: false,
                     timestamp: serverTimestamp()
                 });
             };

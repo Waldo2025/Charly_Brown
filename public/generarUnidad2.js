@@ -1,6 +1,7 @@
 // generarUnidad.js
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
-import { getFirestore, addDoc, collection, doc, getDoc, getDocs, updateDoc, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getFirestore, addDoc, collection, doc, getDoc, getDocs, updateDoc, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { sanitizeRichText, escapeHtml } from "./security-utils.js";
 
 // Configuración Firebase
 const firebaseConfig = {
@@ -13,7 +14,7 @@ const firebaseConfig = {
   measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
 };
 
-const app = initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 
@@ -66,27 +67,27 @@ btnVerUnidades?.addEventListener("click", async () => {
     
       return `
         <tr>
-          <td>${data.nivel}</td>
-          <td>${data.grado}</td>
-          <td>${data.trimestre}</td>
-          <td>${data.unidad}</td>
-          <td contenteditable="true" class="titulo-editable" data-id="${docId}">
-            ${tituloUnidad}
+          <td>${escapeHtml(data.nivel || "")}</td>
+          <td>${escapeHtml(data.grado || "")}</td>
+          <td>${escapeHtml(data.trimestre || "")}</td>
+          <td>${escapeHtml(data.unidad || "")}</td>
+          <td contenteditable="true" class="titulo-editable" data-id="${escapeHtml(docId)}">
+            ${escapeHtml(tituloUnidad)}
           </td>
 
-          <td>${fechaCreacion}</td>
-          <td>${fechaEdicion}</td>
+          <td>${escapeHtml(fechaCreacion)}</td>
+          <td>${escapeHtml(fechaEdicion)}</td>
           <td>
-            <button class="btn-editar" data-id="${docId}" data-html="${encodeURIComponent(data.contenido)}" title="Editar">
+            <button class="btn-editar" data-id="${escapeHtml(docId)}" data-html="${encodeURIComponent(data.contenido || "")}" title="Editar">
               <i class="fas fa-edit"></i>
             </button>
-            <button class="btn-eliminar" data-id="${docId}" title="Eliminar">
+            <button class="btn-eliminar" data-id="${escapeHtml(docId)}" title="Eliminar">
               <i class="fas fa-trash-alt"></i>
             </button>
-            <button class="btn-compartir" data-id="${docId}" title="Compartir" style="color:${compartido ? '#28a745' : '#888'};">
+            <button class="btn-compartir" data-id="${escapeHtml(docId)}" title="Compartir" style="color:${compartido ? '#28a745' : '#888'};">
               <i class="fas fa-share-alt"></i>
             </button>
-            <button class="btn-copiar" data-html="${encodeURIComponent(data.contenido)}" title="Copiar contenido">
+            <button class="btn-copiar" data-html="${encodeURIComponent(data.contenido || "")}" title="Copiar contenido">
               <i class="fas fa-copy" style="color:#007bff;"></i>
             </button>
           </td>
@@ -100,7 +101,7 @@ btnVerUnidades?.addEventListener("click", async () => {
     }
     $('#tablaUnidades').DataTable({
       language: {
-        url: "https://cdn.datatables.net/plug-ins/1.13.4/i18n/es-ES.json"
+        url: "vendor/datatables/i18n/es-ES.json"
       }
     });
 
@@ -109,7 +110,7 @@ btnVerUnidades?.addEventListener("click", async () => {
       btn.addEventListener("click", () => {
         const html = decodeURIComponent(btn.dataset.html);
         unidadEditandoId = btn.dataset.id;
-        const htmlLimpio = html.replace(/<style[\s\S]*?<\/style>/gi, "");
+        const htmlLimpio = sanitizeRichText(html.replace(/<style[\s\S]*?<\/style>/gi, ""));
         editorUnidad.innerHTML = htmlLimpio;
         modalEditar.style.display = "block";
       });
@@ -229,8 +230,8 @@ btnVerUnidades?.addEventListener("click", async () => {
     
             contenido += `
               <div class="usuario-item">
-                <input type="checkbox" value="${userId}" ${checked}>
-                <span>${nombre}</span>
+                <input type="checkbox" value="${escapeHtml(userId)}" ${checked}>
+                <span>${escapeHtml(nombre)}</span>
               </div>
             `;
           });
@@ -274,7 +275,7 @@ btnVerUnidades?.addEventListener("click", async () => {
         const html = decodeURIComponent(btn.dataset.html);
     
         const tempDiv = document.createElement("div");
-        tempDiv.innerHTML = html;
+        tempDiv.innerHTML = sanitizeRichText(html);
     
         const selection = window.getSelection();
         const range = document.createRange();

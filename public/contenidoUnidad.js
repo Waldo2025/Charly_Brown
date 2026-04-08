@@ -1,12 +1,11 @@
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc  } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc  } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { metodologiaASC } from './metodologiaASC.js';
 import { insertarGeneradorImagenes } from './generarImagenes.js';
 import { estacionesPorNivelYMateria } from './metodologiaASC.js';
-import { escapeHtml } from './security-utils.js';
-import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/vanilla-tilt.es2015.min.js';
-import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@3.7.1/+esm';
+import { escapeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js';
+import VanillaTilt from './vendor/vanilla-tilt/vanilla-tilt.es2015.js';
 
 
 // Configuración Firebase
@@ -185,6 +184,153 @@ document.getElementById("btnReiniciarFiltros")?.addEventListener("click", () => 
 
 configurarBuscador();
 
+function createFieldLabel(labelText = "") {
+    const strong = document.createElement("strong");
+    strong.textContent = `${labelText}:`;
+    return strong;
+}
+
+function createLabeledControl(labelText, control) {
+    const label = document.createElement("label");
+    label.append(createFieldLabel(labelText), document.createTextNode(" "), control);
+    return label;
+}
+
+function renderUnidadHeaderEditable(container, data = {}) {
+    if (!container) return;
+    container.replaceChildren();
+
+    const titulo = document.createElement("h2");
+    titulo.id = "tituloUnidad";
+    titulo.contentEditable = "true";
+    titulo.textContent = `${data.nivel || "-"} - ${data.grado || "-"} - Unidad ${data.unidad || "-"}`;
+
+    const trimestreInput = document.createElement("input");
+    trimestreInput.type = "number";
+    trimestreInput.id = "trimestreInput";
+    trimestreInput.min = "1";
+    trimestreInput.max = "3";
+    trimestreInput.value = String(data.trimestre ?? "");
+
+    const privacidadSelect = document.createElement("select");
+    privacidadSelect.id = "privacidadSelect";
+    ["Privado", "Público"].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.selected = data.privacidad === value;
+        option.textContent = value;
+        privacidadSelect.appendChild(option);
+    });
+
+    const createdParagraph = document.createElement("p");
+    createdParagraph.append(createFieldLabel("Creado el"), document.createTextNode(` ${data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : "Desconocido"}`));
+
+    container.append(
+        titulo,
+        createLabeledControl("Trimestre", trimestreInput),
+        createLabeledControl("Privacidad", privacidadSelect),
+        createdParagraph
+    );
+}
+
+function createEditableInfoBlock({labelText, id, value}) {
+    const block = document.createElement("div");
+    block.className = "info-block";
+
+    const label = document.createElement("label");
+    label.textContent = labelText;
+
+    const editable = document.createElement("div");
+    editable.contentEditable = "true";
+    editable.id = id;
+    editable.className = "editable";
+    editable.textContent = String(value ?? "");
+
+    block.append(label, editable);
+    return block;
+}
+
+function createNumberInfoBlock({labelText, id, value}) {
+    const block = document.createElement("div");
+    block.className = "info-block";
+
+    const label = document.createElement("label");
+    label.textContent = labelText;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.id = id;
+    input.className = "input-numero";
+    input.value = String(value ?? "");
+
+    block.append(label, input);
+    return block;
+}
+
+function renderUnidadInfoModalContent(container, u = {}) {
+    if (!container) return;
+    container.replaceChildren();
+
+    const grid = document.createElement("div");
+    grid.className = "unidad-info-grid";
+
+    grid.appendChild(createEditableInfoBlock({
+        labelText: "Nombre de la unidad:",
+        id: "mod-nombreUnidad",
+        value: u.nombreUnidad || ""
+    }));
+
+    grid.appendChild(createEditableInfoBlock({
+        labelText: "Materia:",
+        id: "mod-materia",
+        value: u.materia || ""
+    }));
+
+    const infoRowMain = document.createElement("div");
+    infoRowMain.className = "info-row";
+    infoRowMain.append(
+        createEditableInfoBlock({ labelText: "Nivel:", id: "mod-nivel", value: u.nivel || "-" }),
+        createEditableInfoBlock({ labelText: "Grado:", id: "mod-grado", value: u.grado || "-" }),
+        createNumberInfoBlock({ labelText: "Unidad:", id: "mod-unidad", value: u.unidad || "" })
+    );
+
+    const infoRowSecondary = document.createElement("div");
+    infoRowSecondary.className = "info-row";
+    infoRowSecondary.appendChild(createNumberInfoBlock({
+        labelText: "Trimestre:",
+        id: "mod-trimestre",
+        value: u.trimestre || ""
+    }));
+
+    const privacidadBlock = document.createElement("div");
+    privacidadBlock.className = "info-block";
+    const privacidadLabel = document.createElement("label");
+    privacidadLabel.textContent = "Privacidad:";
+    const privacidadSelect = document.createElement("select");
+    privacidadSelect.id = "mod-privacidad";
+    privacidadSelect.className = "input-select";
+    ["Privado", "Público"].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.selected = u.privacidad === value;
+        option.textContent = value;
+        privacidadSelect.appendChild(option);
+    });
+    privacidadBlock.append(privacidadLabel, privacidadSelect);
+    infoRowSecondary.appendChild(privacidadBlock);
+
+    const createdBlock = document.createElement("div");
+    createdBlock.className = "info-block";
+    const createdLabel = document.createElement("label");
+    createdLabel.textContent = "Creado el:";
+    const createdText = document.createElement("p");
+    createdText.textContent = u.createdAt?.toDate().toLocaleDateString() || "-";
+    createdBlock.append(createdLabel, createdText);
+
+    grid.append(infoRowMain, infoRowSecondary, createdBlock);
+    container.appendChild(grid);
+}
+
 
 const cargarUnidad = async (userId) => {
     try {
@@ -206,23 +352,8 @@ const cargarUnidad = async (userId) => {
         
         nivel = data.nivel;
 
-        // Mostrar campos editables
-        unidadContenido.innerHTML = `
-        <h2 contenteditable="true" id="tituloUnidad">${data.nivel} - ${data.grado} - Unidad ${data.unidad}</h2>
-
-        <label><strong>Trimestre:</strong>
-            <input type="number" id="trimestreInput" value="${data.trimestre}" min="1" max="3" />
-        </label>
-
-        <label><strong>Privacidad:</strong>
-            <select id="privacidadSelect">
-            <option value="Privado" ${data.privacidad === 'Privado' ? 'selected' : ''}>Privado</option>
-            <option value="Público" ${data.privacidad === 'Público' ? 'selected' : ''}>Público</option>
-            </select>
-        </label>
-
-        <p><strong>Creado el:</strong> ${data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : "Desconocido"}</p>
-        `;
+        // Mostrar campos editables con DOM seguro.
+        renderUnidadHeaderEditable(unidadContenido, data);
 
         // Eventos para guardar automáticamente
         document.getElementById("trimestreInput").addEventListener("change", async (e) => {
@@ -437,6 +568,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnTodos = document.getElementById("btnCompartirTodos");
     const btnUsuario = document.getElementById("btnCompartirUsuario");
     const modal = document.getElementById("modalCompartirLectura");
+    const exportarLecturaTaggedBtn = document.getElementById("exportarLecturaTaggedBtn");
+    const cerrarPanelLecturasGuardadasBtn = document.getElementById("cerrarPanelLecturasGuardadasBtn");
     
     if (btnTodos && modal) {
         btnTodos.addEventListener("click", async () => {
@@ -477,12 +610,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
 
-    const cerrar = document.querySelector("#modalCompartirLectura .close");
+    const cerrar = document.getElementById("cerrarModalCompartirLecturaBtn");
     if (cerrar) {
         cerrar.addEventListener("click", () => {
         document.getElementById("modalCompartirLectura").style.display = "none";
         });
     }
+
+    exportarLecturaTaggedBtn?.addEventListener("click", () => {
+        if (typeof window.exportarLecturaComoTaggedText === "function") {
+            window.exportarLecturaComoTaggedText();
+        }
+    });
+
+    cerrarPanelLecturasGuardadasBtn?.addEventListener("click", () => {
+        const panel = document.getElementById("panelLecturasGuardadas");
+        if (panel) panel.style.display = "none";
+    });
             
     });
 
@@ -521,7 +665,7 @@ async function mostrarLecturaCompleta(docId) {
             // Inicializar el editor si no está activado aún
             if (!$('#modalEditor').hasClass('trumbowyg-editor')) {
                 $('#modalEditor').trumbowyg({
-                    svgPath: 'https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/icons.svg',
+                    svgPath: 'vendor/trumbowyg/icons.svg',
                     lang: 'es',
                     autogrow: true,
                     btns: [
@@ -542,7 +686,7 @@ async function mostrarLecturaCompleta(docId) {
             }
             
             // Establecer el contenido HTML
-            $('#modalEditor').trumbowyg('html', data.texto || '');
+            $('#modalEditor').trumbowyg('html', sanitizeRichText(data.texto || ''));
             $('#modalEditor').data('docId', docId); // Guardar ID
             
             modal.style.display = 'block';
@@ -578,7 +722,7 @@ document.addEventListener('click', async (e) => {
 
     const editor = document.getElementById('modalEditor');
     const docId = $('#modalEditor').data('docId');
-    const nuevoTexto = $('#modalEditor').trumbowyg('html').trim();
+    const nuevoTexto = sanitizeRichText($('#modalEditor').trumbowyg('html').trim());
 
     if (!docId || !nuevoTexto) {
         mostrarError("No se puede guardar el texto vacío");
@@ -604,7 +748,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const guardarBtn = document.getElementById("guardarLecturaBtn");
   if (guardarBtn) {
     guardarBtn.addEventListener("click", async () => {
-      const textoFinal = $('#textoLectura').trumbowyg('html');
+      const textoFinal = sanitizeRichText($('#textoLectura').trumbowyg('html'));
       // 🔍 Obtener datos del usuario desde la colección "users"
       const userDocRef = doc(db, "users", currentUserId);
       const userDocSnap = await getDoc(userDocRef);
@@ -635,7 +779,7 @@ document.addEventListener("DOMContentLoaded", () => {
           userId: currentUserId,
           unidadId: unidadId,
           texto: textoFinal,
-          tema: seleccionTema,
+          tema: sanitizeTextInput(seleccionTema, {maxLength: 240}),
           formato: 'html',
           createdAt: new Date(),
           autorNombre: autorNombre,
@@ -665,7 +809,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 document.getElementById("modalTitulo").addEventListener("blur", async (e) => {
-    const nuevoTitulo = e.target.textContent.trim();
+    const nuevoTitulo = sanitizeTextInput(e.target.textContent, {maxLength: 240});
+    e.target.textContent = nuevoTitulo;
     const docId = $('#modalEditor').data('docId');
 
     if (!docId || !nuevoTitulo) return;
@@ -760,7 +905,7 @@ document.getElementById("exportarModalInDesignBtn").addEventListener("click", ()
     }
 
     const div = document.createElement("div");
-    div.innerHTML = contenidoHTML;
+    div.innerHTML = sanitizeRichText(contenidoHTML);
 
     let taggedText = "<ASCII-MAC>\r" + eliminarEmojis(convertirNodo(div));
 
@@ -782,7 +927,7 @@ document.getElementById("exportarModalInDesignBtn").addEventListener("click", ()
 
 $(document).ready(function() {
     $('#textoLectura').trumbowyg({
-        svgPath: 'https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/icons.svg',
+        svgPath: 'vendor/trumbowyg/icons.svg',
         lang: 'es',
         autogrow: true,
         removeformatPasted: false,
@@ -838,56 +983,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
   
         const u = snap.data();
-        cont.innerHTML = `
-        <div class="unidad-info-grid">
-          <div class="info-block">
-            <label>Nombre de la unidad:</label>
-            <div contenteditable="true" id="mod-nombreUnidad" class="editable">${u.nombreUnidad || ''}</div>
-          </div>
-      
-          <div class="info-block">
-            <label>Materia:</label>
-            <div contenteditable="true" id="mod-materia" class="editable">${u.materia || ''}</div>
-          </div>
-      
-          <div class="info-row">
-            <div class="info-block">
-              <label>Nivel:</label>
-              <div contenteditable="true" id="mod-nivel" class="editable">${u.nivel || '-'}</div>
-            </div>
-      
-            <div class="info-block">
-              <label>Grado:</label>
-              <div contenteditable="true" id="mod-grado" class="editable">${u.grado || '-'}</div>
-            </div>
-      
-            <div class="info-block">
-              <label>Unidad:</label>
-              <input type="number" id="mod-unidad" class="input-numero" value="${u.unidad || ''}" />
-            </div>
-          </div>
-      
-          <div class="info-row">
-            <div class="info-block">
-              <label>Trimestre:</label>
-              <input type="number" id="mod-trimestre" class="input-numero" value="${u.trimestre || ''}" />
-            </div>
-      
-            <div class="info-block">
-              <label>Privacidad:</label>
-              <select id="mod-privacidad" class="input-select">
-                <option value="Privado" ${u.privacidad === "Privado" ? "selected" : ""}>Privado</option>
-                <option value="Público" ${u.privacidad === "Público" ? "selected" : ""}>Público</option>
-              </select>
-            </div>
-          </div>
-      
-          <div class="info-block">
-            <label>Creado el:</label>
-            <p>${u.createdAt?.toDate().toLocaleDateString() || "-"}</p>
-          </div>
-        </div>
-      `;
+        renderUnidadInfoModalContent(cont, u);
                       
         // Guardar nombreUnidad
         document.getElementById("mod-nombreUnidad").addEventListener("blur", async e => {

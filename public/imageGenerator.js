@@ -1,51 +1,33 @@
-import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
+import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { auth } from './generarLectura.js';
-import { listAll } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
+import { listAll } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { buildApiUrl, getAuthHeaders } from './api-client.js';
 
-const HF_TOKEN = "__HF_API_KEY_LOCAL__";
-
-// 🧠 FUNCIÓN: Generar imagen desde Hugging Face
 async function generarImagenDesdePrompt(prompt, negative_prompt, modelId, steps, guidance, width, height) {
-  const endpoint = `https://api-inference.huggingface.co/models/${modelId}`;
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${HF_TOKEN}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      inputs: prompt,
-      parameters: {
-        negative_prompt: negative_prompt || "",
-        num_inference_steps: steps,
-        guidance_scale: guidance,
-        width: width,
-        height: height
-      }
-    })
-  });
-
-  const contentType = response.headers.get("content-type");
-
-  if (!response.ok) {
-    if (contentType && contentType.includes("application/json")) {
-      const errorJson = await response.json();
-      throw new Error(`Error desde Hugging Face para el modelo "${modelId}": ${errorJson.error}`);
-    } else {
-        const errorText = await response.text();
-        const shortMessage = errorText.split("\n")[0]; // primera línea
-        throw new Error(`Error ${response.status}: ${shortMessage}`);
-    }
-  }
-
-  return await response.blob();
+  void prompt;
+  void negative_prompt;
+  void modelId;
+  void steps;
+  void guidance;
+  void width;
+  void height;
+  throw new Error("La generación directa de imágenes fue retirada de esta interfaz.");
 }
 
 // 🚀 FUNCIÓN PRINCIPAL
 function setupImageGenerator(storage) {
   const modal = document.getElementById("modalGeneradorIlustracion");
   const openBtn = document.getElementById("btnAbrirGeneradorImagenes");
+  if (openBtn) {
+    openBtn.hidden = true;
+    openBtn.setAttribute("aria-hidden", "true");
+  }
+  if (modal) {
+    modal.style.display = "none";
+  }
+  if (!modal) {
+    return;
+  }
   const closeBtn = modal.querySelector("[data-action='close']");
   const form = document.getElementById("formGeneradorImagenes");
   const resultDiv = document.getElementById("gen_results");

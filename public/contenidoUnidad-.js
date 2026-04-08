@@ -1,26 +1,21 @@
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc  } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc  } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { metodologiaASC } from './metodologiaASC.js';
 import { insertarGeneradorImagenes } from './generarImagenes.js';
 import { estacionesPorNivelYMateria } from './metodologiaASC.js';
-import { sanitizeHtml } from './security-utils.js';
-import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/vanilla-tilt.es2015.min.js';
-import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@3.7.1/+esm';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput, escapeHtml } from './security-utils.js';
+import { buildApiUrl, getAuthHeaders } from './api-client.js';
+import VanillaTilt from './vendor/vanilla-tilt/vanilla-tilt.es2015.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
+import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
 
 
 // Configuración Firebase
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
+const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
@@ -259,10 +254,38 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
+async function llamarGeminiBackend(payload, model = "gemini-2.0-flash") {
+    const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+    const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model, payload })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(String(data?.error || `Error HTTP: ${response.status}`));
+    }
+    return data;
+}
 
+function extraerTextoGemini(data) {
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+}
 
-const googleAPIKey = "__GEMINI_VISION_API_KEY_LOCAL__";
-const googleAPIEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+async function generarTextoGemini(payload, model = "gemini-2.0-flash") {
+    const data = await llamarGeminiBackend(payload, model);
+    const text = extraerTextoGemini(data);
+    if (!text) {
+        throw new Error("La respuesta no contiene texto válido");
+    }
+    return text;
+}
+
+async function generarImagenHfViaBackend(prompt, model = "stabilityai/stable-diffusion-3.5-large") {
+    void prompt;
+    void model;
+    throw new Error("La generación de imágenes por IA fue retirada de esta pantalla.");
+}
 
 
 const cargarUnidad = async (userId) => {
@@ -287,10 +310,10 @@ const cargarUnidad = async (userId) => {
 
         // Mostrar campos editables
         unidadContenido.innerHTML = `
-        <h2 contenteditable="true" id="tituloUnidad">${data.nivel} - ${data.grado} - Unidad ${data.unidad}</h2>
+        <h2 contenteditable="true" id="tituloUnidad">${escapeHtml(data.nivel || '')} - ${escapeHtml(data.grado || '')} - Unidad ${escapeHtml(data.unidad || '')}</h2>
 
         <label><strong>Trimestre:</strong>
-            <input type="number" id="trimestreInput" value="${data.trimestre}" min="1" max="3" />
+            <input type="number" id="trimestreInput" value="${escapeHtml(String(data.trimestre ?? ''))}" min="1" max="3" />
         </label>
 
         <label><strong>Privacidad:</strong>
@@ -383,7 +406,7 @@ function procesarImagen(file) {
     const reader = new FileReader();
     reader.onload = () => {
     imagenBase64 = reader.result.split(",")[1]; // ⚠️ Asegura que esto quede asignado
-    dropArea.innerHTML = `<p>✅ Imagen cargada: ${file.name}</p>`;
+    dropArea.innerHTML = `<p>✅ Imagen cargada: ${escapeHtml(file.name || "")}</p>`;
     };
     reader.readAsDataURL(file);
 }
@@ -400,7 +423,7 @@ function procesarPDF(file) {
         
         try {
             // Asegúrate de especificar la ruta del worker
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
         
             const pdf = await pdfjsLib.getDocument(pdfData).promise;
             let pdfText = "";
@@ -417,7 +440,7 @@ function procesarPDF(file) {
             if (pdfText.trim() === "") {
                 pdfText = "No se pudo extraer texto del PDF.";
             }
-    
+
             // Asignamos el texto extraído del PDF a la variable correspondiente
             textoImagen = pdfText.trim(); // Guardamos el texto extraído
 
@@ -505,18 +528,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             }
         };
 
-        const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Error en la API: ${response.status}`);
-        }
-
-        const data = await response.json();
-        let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        let rawText = await generarTextoGemini(body);
 
         if (!rawText) {
             throw new Error("La respuesta de la API no contiene texto válido");
@@ -629,7 +641,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     
             // Limpiar sección de sugerencias en el HTML para evitar duplicación
             const contieneHTML = /<\/?(html|head|body|div|h\d|p|ul|ol|li|span)[^>]*>/i.test(rawText);
-            let htmlAnalisis = contieneHTML ? rawText : formatearTextoConHTML(rawText);
+            let htmlAnalisis = contieneHTML ? sanitizeRichText(rawText, { fallback: "<p></p>" }) : formatearTextoConHTML(rawText);
     
             if (contieneHTML) {
                 const tempDiv = document.createElement("div");
@@ -646,13 +658,21 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                     }
                 }
     
-                htmlAnalisis = tempDiv.innerHTML;
+                htmlAnalisis = sanitizeRichText(tempDiv.innerHTML, { fallback: "<p></p>" });
             }
     
             if (esContinuacion) {
-                analisisContenido.innerHTML += htmlAnalisis;
+                const fragment = document.createElement("div");
+                fragment.innerHTML = htmlAnalisis;
+                while (fragment.firstChild) {
+                    analisisContenido.appendChild(fragment.firstChild);
+                }
             } else {
-                analisisContenido.innerHTML = `<div class="analisis-wrapper">${htmlAnalisis}</div>`;
+                analisisContenido.innerHTML = "";
+                const wrapper = document.createElement("div");
+                wrapper.className = "analisis-wrapper";
+                wrapper.innerHTML = htmlAnalisis;
+                analisisContenido.appendChild(wrapper);
             }
     
             document.getElementById("analisisResultado").style.display = "block";
@@ -689,14 +709,21 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             return;
         }
     
-        sugerenciasContenedor.innerHTML = `
-            <div class="sugerencias-header">
-                <h3 class="sugerencias-titulo">Selecciona un tema para generar lectura</h3>
-                <p class="sugerencias-subtitulo">Basado en el análisis de tu contenido</p>
-            </div>
-            <div class="sugerencias-grid" id="sugerenciasGrid"></div>`;
-    
-        const grid = document.getElementById("sugerenciasGrid");
+        sugerenciasContenedor.innerHTML = "";
+        const header = document.createElement("div");
+        header.className = "sugerencias-header";
+        const title = document.createElement("h3");
+        title.className = "sugerencias-titulo";
+        title.textContent = "Selecciona un tema para generar lectura";
+        const subtitle = document.createElement("p");
+        subtitle.className = "sugerencias-subtitulo";
+        subtitle.textContent = "Basado en el análisis de tu contenido";
+        header.append(title, subtitle);
+
+        const grid = document.createElement("div");
+        grid.className = "sugerencias-grid";
+        grid.id = "sugerenciasGrid";
+        sugerenciasContenedor.append(header, grid);
     
         sugerencias.forEach((sug, i) => {
             if (!sug || typeof sug !== 'string') return;  // ⛔ Evita procesar sugerencias inválidas
@@ -709,13 +736,20 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 [sug.split(":")[0].trim(), sug.split(":")[1].trim()] : 
                 [`Sugerencia ${i+1}`, sug];
             
-            card.innerHTML = `
-                <div class="sugerencia-contenido">
-                    <h5>${titulo}</h5>
-                    ${descripcion ? `<p>${descripcion}</p>` : ''}
-                </div>
-                <button class="seleccionar-tema">Seleccionar</button>
-            `;
+            const content = document.createElement("div");
+            content.className = "sugerencia-contenido";
+            const heading = document.createElement("h5");
+            heading.textContent = titulo;
+            content.appendChild(heading);
+            if (descripcion) {
+                const descriptionEl = document.createElement("p");
+                descriptionEl.textContent = descripcion;
+                content.appendChild(descriptionEl);
+            }
+            const button = document.createElement("button");
+            button.className = "seleccionar-tema";
+            button.textContent = "Seleccionar";
+            card.append(content, button);
         
             card.querySelector(".seleccionar-tema").addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -748,13 +782,20 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 ? [sug.split(":")[0].trim(), sug.split(":")[1].trim()]
                 : [`Sugerencia ${i + 1}`, sug];
     
-            card.innerHTML = `
-                <div class="sugerencia-card">
-                    <h5>${titulo}</h5>
-                    ${descripcion ? `<p>${descripcion}</p>` : ""}
-                </div>
-                <button class="seleccionar-tema">Seleccionar</button>
-            `;
+            const content = document.createElement("div");
+            content.className = "sugerencia-contenido";
+            const heading = document.createElement("h5");
+            heading.textContent = titulo;
+            content.appendChild(heading);
+            if (descripcion) {
+                const descriptionEl = document.createElement("p");
+                descriptionEl.textContent = descripcion;
+                content.appendChild(descriptionEl);
+            }
+            const button = document.createElement("button");
+            button.className = "seleccionar-tema";
+            button.textContent = "Seleccionar";
+            card.append(content, button);
     
             card.querySelector(".seleccionar-tema").addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -864,7 +905,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             <i class='bx bx-error'></i>
             <div>
                 <strong>Error:</strong>
-                <p>${mensaje}</p>
+                <p>${escapeHtml(mensaje || "")}</p>
             </div>
         `;
         
@@ -901,12 +942,6 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         if (nombreLower.includes("inglés") || nombreLower.includes("english")) return "Inglés";
         return nombre.trim();
     }
-    
-    
-    const HF_TOKEN = "__HF_API_KEY_LOCAL__"; // << tu token ya está aquí
-    const inference = new InferenceClient(HF_TOKEN);
-
-
     // 🔵 Extraer los SPECs de la lectura
     function extraerSpecsDeLectura(html) {
         const tempDiv = document.createElement('div');
@@ -927,22 +962,8 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
     
     // 🔵 Generar imagen usando stabilityai/stable-diffusion-3.5-large
     async function generarImagenDesdeSpec(promptIngles) {
-        try {
-            const result = await inference.textToImage({
-                model: "stabilityai/stable-diffusion-3.5-large",
-                inputs: promptIngles,
-                parameters: { width: 768, height: 768 } // 🔥 BAJAR de 1024x1024 a 768x768
-            });
-    
-            if (result instanceof Blob) {
-                const blobURL = URL.createObjectURL(result);
-                return blobURL;
-            } else {
-                throw new Error("Respuesta inválida generando imagen desde Hugging Face");
-            }
-        } catch (error) {
-            throw error; // Lo relanzamos para que procesarSpecsYGenerarImagenes() lo maneje
-        }
+        void promptIngles;
+        throw new Error("La generación automática de imágenes ya no está disponible.");
     }
     
     
@@ -1205,23 +1226,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 }
             };
 
-            const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-
-            if (!response.ok) {
-                throw new Error(`Error HTTP: ${response.status}`);
-            }
-
-            const data = await response.json();
-            
-            if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                throw new Error("La respuesta no contiene texto válido");
-            }
-
-            lecturaGenerada = data.candidates[0].content.parts[0].text;
+            lecturaGenerada = await generarTextoGemini(body);
             
             // Eliminar ```html y ```   
             lecturaGenerada = lecturaGenerada.replace(/```(?:html)?/gi, '').trim();
@@ -1328,23 +1333,16 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         };
     
         try {
-            const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-    
-            if (!response.ok) {
-                if (response.status === 503 && intento < 3) {
+            let textoNuevo = "";
+            try {
+                textoNuevo = await generarTextoGemini(body);
+            } catch (error) {
+                if (String(error?.message || "").includes("503") && intento < 3) {
                     await new Promise(res => setTimeout(res, 3000));
                     return forzarContinuacionAutomatica(textoBase, intento + 1);
-                } else {
-                    throw new Error(`Error HTTP ${response.status}`);
                 }
+                throw error;
             }
-    
-            const data = await response.json();
-            const textoNuevo = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     
             if (!textoNuevo || textoNuevo.length < 20) {
                 return;
@@ -1468,18 +1466,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 }
             };
     
-            const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-    
-            if (!response.ok) {
-                throw new Error(`Error HTTP: ${response.status}`);
-            }
-    
-            const data = await response.json();
-            const textoNuevo = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            const textoNuevo = await generarTextoGemini(body);
     
             if (!textoNuevo) throw new Error("Respuesta vacía al continuar generación");
     
@@ -1508,7 +1495,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
     // GUARDAR LECTURA EN FIRESTORE
     document.getElementById("guardarLecturaBtn").addEventListener("click", async () => {
-        const textoFinal = $('#textoLectura').trumbowyg('html');
+        const textoFinal = sanitizeRichText($('#textoLectura').trumbowyg('html'));
         // 🔍 Obtener datos del usuario desde la colección "users"
         const userDocRef = doc(db, "users", currentUserId);
         const userDocSnap = await getDoc(userDocRef);
@@ -1540,7 +1527,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 userId: currentUserId,
                 unidadId: unidadId,
                 texto: textoFinal,
-                tema: seleccionTema,
+                tema: sanitizeTextInput(seleccionTema, {maxLength: 240}),
                 formato: 'html',
                 createdAt: new Date(),
                 autorNombre: autorNombre,
@@ -1560,7 +1547,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
 
     document.getElementById("exportarModalInDesignBtn").addEventListener("click", () => {
-        const contenidoHTML = $('#modalEditor').trumbowyg('html');
+        const contenidoHTML = sanitizeRichText($('#modalEditor').trumbowyg('html'));
 
         if (!contenidoHTML || contenidoHTML.trim() === "") {
             alert("No hay contenido para exportar.");
@@ -1649,36 +1636,59 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 div.dataset.trimestre = (datosUnidad?.trimestre || "").toString();
                 div.dataset.unidad = (datosUnidad?.unidad || "").toString();
               
-                const encabezadoUnidad = datosUnidad ? `
-                  <div class="lectura-encabezado">
-                    <strong>${datosUnidad.materia || 'Materia no definida'}</strong> – 
-                    ${datosUnidad.nombreUnidad || 'Sin nombre'}
-                    <br>
-                    <small>
-                      Nivel: ${datosUnidad.nivel || '-'} | 
-                      Grado: ${datosUnidad.grado || '-'} | 
-                      Trimestre ${datosUnidad.trimestre || '-'}, Unidad ${datosUnidad.unidad || '-'}
-                    </small>
-                  </div>
-                ` : '';
-              
-                div.innerHTML = `
-                  ${encabezadoUnidad}
-                  <h4>${data.tema || 'Sin título'}</h4>
-                  <p class="lectura-preview">
-                    ${stripHTML(data.texto).slice(0, 120)}${stripHTML(data.texto).length > 120 ? '...' : ''}
-                  </p>
-                  <div class="lectura-meta">
-                    <small>${data.createdAt?.toDate()?.toLocaleDateString() || 'Fecha no disponible'}</small>
-                    <div class="lectura-acciones">
-                      <button class="editar-lectura" data-id="${doc.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                      <button class="eliminar-lectura" data-id="${doc.id}" title="Eliminar"><i class="fas fa-trash-alt"></i></button>
-                      <button class="toggle-estatus" data-id="${doc.id}" title="Compartir lectura">
-                        <i class="fas fa-share-alt" style="color: ${data.estatusLectura === 'Compartido' ? 'green' : 'gray'}"></i>
-                      </button>
-                    </div>
-                  </div>
-                `;
+                const previewText = stripHTML(data.texto || '');
+                const createdAtLabel = data.createdAt?.toDate?.()?.toLocaleDateString() || 'Fecha no disponible';
+
+                if (datosUnidad) {
+                  const header = document.createElement("div");
+                  header.className = "lectura-encabezado";
+                  const strong = document.createElement("strong");
+                  strong.textContent = datosUnidad.materia || "Materia no definida";
+                  header.appendChild(strong);
+                  header.append(` - ${datosUnidad.nombreUnidad || "Sin nombre"}`);
+                  header.appendChild(document.createElement("br"));
+                  const small = document.createElement("small");
+                  small.textContent = `Nivel: ${datosUnidad.nivel || "-"} | Grado: ${datosUnidad.grado || "-"} | Trimestre ${datosUnidad.trimestre || "-"}, Unidad ${datosUnidad.unidad || "-"}`;
+                  header.appendChild(small);
+                  div.appendChild(header);
+                }
+
+                const title = document.createElement("h4");
+                title.textContent = data.tema || "Sin título";
+
+                const preview = document.createElement("p");
+                preview.className = "lectura-preview";
+                preview.textContent = `${previewText.slice(0, 120)}${previewText.length > 120 ? "..." : ""}`;
+
+                const meta = document.createElement("div");
+                meta.className = "lectura-meta";
+                const date = document.createElement("small");
+                date.textContent = createdAtLabel;
+
+                const actions = document.createElement("div");
+                actions.className = "lectura-acciones";
+
+                const editBtn = document.createElement("button");
+                editBtn.className = "editar-lectura";
+                editBtn.dataset.id = doc.id;
+                editBtn.title = "Editar";
+                editBtn.innerHTML = '<i class="fas fa-pen"></i>';
+
+                const deleteBtn = document.createElement("button");
+                deleteBtn.className = "eliminar-lectura";
+                deleteBtn.dataset.id = doc.id;
+                deleteBtn.title = "Eliminar";
+                deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+
+                const shareBtn = document.createElement("button");
+                shareBtn.className = "toggle-estatus";
+                shareBtn.dataset.id = doc.id;
+                shareBtn.title = "Compartir lectura";
+                shareBtn.innerHTML = `<i class="fas fa-share-alt" style="color: ${data.estatusLectura === 'Compartido' ? 'green' : 'gray'}"></i>`;
+
+                actions.append(editBtn, deleteBtn, shareBtn);
+                meta.append(date, actions);
+                div.append(title, preview, meta);
               
                 // 🎯 Tilt effect
                 VanillaTilt.init(div, {
@@ -1794,6 +1804,8 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         const btnTodos = document.getElementById("btnCompartirTodos");
         const btnUsuario = document.getElementById("btnCompartirUsuario");
         const modal = document.getElementById("modalCompartirLectura");
+        const exportarLecturaTaggedBtn = document.getElementById("exportarLecturaTaggedBtn");
+        const cerrarPanelLecturasGuardadasBtn = document.getElementById("cerrarPanelLecturasGuardadasBtn");
       
         if (btnTodos && modal) {
           btnTodos.addEventListener("click", async () => {
@@ -1834,12 +1846,18 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         }
 
 
-        const cerrar = document.querySelector("#modalCompartirLectura .close");
+        const cerrar = document.getElementById("cerrarModalCompartirLecturaBtn");
         if (cerrar) {
           cerrar.addEventListener("click", () => {
             document.getElementById("modalCompartirLectura").style.display = "none";
           });
         }
+
+        exportarLecturaTaggedBtn?.addEventListener("click", exportarLecturaComoTaggedText);
+        cerrarPanelLecturasGuardadasBtn?.addEventListener("click", () => {
+          const panel = document.getElementById("panelLecturasGuardadas");
+          if (panel) panel.style.display = "none";
+        });
                 
       });
 
@@ -1880,7 +1898,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 // Inicializar el editor si no está activado aún
                 if (!$('#modalEditor').hasClass('trumbowyg-editor')) {
                     $('#modalEditor').trumbowyg({
-                        svgPath: 'https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/icons.svg',
+                        svgPath: 'vendor/trumbowyg/icons.svg',
                         lang: 'es',
                         autogrow: true,
                         btns: [
@@ -1901,7 +1919,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
                 }
                 
                 // Establecer el contenido HTML
-                $('#modalEditor').trumbowyg('html', data.texto || '');
+                $('#modalEditor').trumbowyg('html', sanitizeRichText(data.texto || ''));
                 $('#modalEditor').data('docId', docId); // Guardar ID
                 
                 modal.style.display = 'block';
@@ -1939,7 +1957,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
         const editor = document.getElementById('modalEditor');
         const docId = $('#modalEditor').data('docId');
-        const nuevoTexto = $('#modalEditor').trumbowyg('html').trim();
+        const nuevoTexto = sanitizeRichText($('#modalEditor').trumbowyg('html').trim());
 
         if (!docId || !nuevoTexto) {
             mostrarError("No se puede guardar el texto vacío");
@@ -1964,7 +1982,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
     $(document).ready(function() {
         $('#textoLectura').trumbowyg({
-            svgPath: 'https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/icons.svg',
+            svgPath: 'vendor/trumbowyg/icons.svg',
             lang: 'es',
             autogrow: true,
             removeformatPasted: false,
@@ -2098,7 +2116,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
 
     function verificarContenidoAntesExportar() {
-        const contenido = $('#textoLectura').trumbowyg('html');
+        const contenido = sanitizeRichText($('#textoLectura').trumbowyg('html'));
         const divPrueba = document.createElement("div");
         divPrueba.innerHTML = contenido;
         
@@ -2119,7 +2137,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
     // Modificar la función de exportación para incluir la verificación
     function exportarLecturaComoTaggedText() {
-        const contenidoHTML = $('#textoLectura').trumbowyg('html');
+        const contenidoHTML = sanitizeRichText($('#textoLectura').trumbowyg('html'));
         if (!contenidoHTML || contenidoHTML.trim() === "") {
             alert("No hay contenido para exportar.");
             return;
@@ -2155,7 +2173,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
 
     function exportarLecturaComoWord() {
-        let contenido = $('#textoLectura').trumbowyg('html').trim();
+        let contenido = sanitizeRichText($('#textoLectura').trumbowyg('html').trim());
 
         if (!contenido || contenido === "<p><br></p>") {
             alert("No hay contenido válido para exportar.");
@@ -2261,7 +2279,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
             anexos: document.getElementById("checkAnexos").checked,
             recortables: document.getElementById("checkRecortables").checked,
             analisisHTML: document.getElementById("analisisContenido").innerHTML,
-            lecturaHTML: $('#textoLectura').trumbowyg('html') || "",
+            lecturaHTML: sanitizeRichText($('#textoLectura').trumbowyg('html') || ""),
             lecturaGenerada: lecturaGenerada,
             sugerencias: Array.from(document.querySelectorAll(".sugerencia-card")).map(card => card.dataset.tema)
         };
@@ -2312,7 +2330,7 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
         
     
         if (data.lecturaHTML) {
-            $('#textoLectura').trumbowyg('html', data.lecturaHTML);
+            $('#textoLectura').trumbowyg('html', sanitizeRichText(data.lecturaHTML));
             document.getElementById("editorLectura").style.display = "block";
         }
     
@@ -2530,7 +2548,8 @@ document.getElementById("analizarBtn").addEventListener("click", async () => {
 
 
     document.getElementById("modalTitulo").addEventListener("blur", async (e) => {
-        const nuevoTitulo = e.target.textContent.trim();
+        const nuevoTitulo = sanitizeTextInput(e.target.textContent, {maxLength: 240});
+        e.target.textContent = nuevoTitulo;
         const docId = $('#modalEditor').data('docId');
 
         if (!docId || !nuevoTitulo) return;
@@ -2714,14 +2733,7 @@ IMPORTANTE añadir esta nota con dentro de un div con el estilo class="alertaIA"
             }
         };
 
-        const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-        });
-
-        const data = await response.json();
-        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        const rawText = await generarTextoGemini(body);
 
         if (!rawText) {
             mostrarError("La respuesta fue demasiado corta. Intenta de nuevo.");
@@ -2815,14 +2827,7 @@ ${textoAcumuladoGlobal}
             }
         };
 
-        const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-        });
-
-        const data = await response.json();
-        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        const rawText = await generarTextoGemini(body);
 
         if (!rawText) {
             mostrarError("No se generaron sugerencias.");
@@ -2883,14 +2888,7 @@ ${textoAcumuladoGlobal}
         };
     
         try {
-            const response = await fetch(`${googleAPIEndpoint}?key=${googleAPIKey}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-    
-            const data = await response.json();
-            const nuevoTexto = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            const nuevoTexto = await generarTextoGemini(body);
     
             if (!nuevoTexto) {
                 return;
@@ -3007,30 +3005,12 @@ const cerrarGenerador = document.getElementById("cerrarGeneradorImagenes");
 const containerInterno = document.getElementById("generadorImagenesContainer");
 
 botonAbrirGenerador.addEventListener("click", async () => {
-  if (containerInterno.innerHTML.trim() === "") {
-    // Cargar contenido del archivo generarImagen.html
-    try {
-      const res = await fetch("generarImagen.html");
-      const html = await res.text();
-      // Insertar solo el contenido del <body>, no el <head>
-      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      containerInterno.innerHTML = bodyMatch ? bodyMatch[1] : html;
-      // Ejecutar scripts manualmente si es necesario
-      const scripts = containerInterno.querySelectorAll("script");
-      for (let script of scripts) {
-        const newScript = document.createElement("script");
-        newScript.type = script.type || "text/javascript";
-        if (script.src) {
-          newScript.src = script.src;
-        } else {
-          newScript.textContent = script.textContent;
-        }
-        document.body.appendChild(newScript);
-      }
-    } catch (e) {
-    }
-  }
-
+  containerInterno.innerHTML = `
+    <div class="p-3">
+      <h3>Generador retirado</h3>
+      <p>La generación de imágenes con servicios externos ya no forma parte de esta interfaz.</p>
+    </div>
+  `;
   contenedor.style.display = "block";
 });
 

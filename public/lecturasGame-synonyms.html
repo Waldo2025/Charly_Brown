@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <script src="runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lecturas Game - Protege al sinónimo</title>
+
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="local-fonts.css">
+
+  <link rel="stylesheet" href="lecturasGame.css?v=20260313a">
+</head>
+<body>
+  <main class="lecturas-game-main stream-layout">
+    <section id="gameHero" class="game-hero">
+      <div class="game-hero-copy">
+        <h1>PROTEGE AL SINÓNIMO</h1>
+        <p class="game-subtitle">
+          Vista independiente del juego de defensa de sinónimos.
+        </p>
+      </div>
+    </section>
+
+    <section id="lecturaScene" class="game-scene lectura-scene-card">
+      <h2 class="scene-title">Actividades por grado</h2>
+      <div id="lecturaCards" class="lectura-grade-groups" role="list"></div>
+      <p id="lecturaEmpty" class="scene-empty" hidden>No hay lecturas publicadas para los filtros actuales.</p>
+    </section>
+  </main>
+
+  <div id="lecturasGameModeModal" class="lecturas-game-mode-modal" aria-hidden="true">
+    <div class="lecturas-game-mode-backdrop" data-action="close-game-mode"></div>
+    <section class="lecturas-game-mode-panel" role="dialog" aria-modal="true" aria-labelledby="lecturasGameModeTitle">
+      <header class="lecturas-game-mode-head">
+        <h3 id="lecturasGameModeTitle">Modo game</h3>
+        <button type="button" class="lecturas-game-mode-close" data-action="close-game-mode" aria-label="Cerrar">&times;</button>
+      </header>
+      <div class="lecturas-game-mode-body" id="lecturasGameModeBody"></div>
+      <footer class="lecturas-game-mode-foot">
+        <button type="button" class="lecturas-game-btn is-ghost" data-action="close-game-mode">Cerrar</button>
+      </footer>
+    </section>
+  </div>
+
+  <script type="module" src="lecturasGame-synonyms.app.js?v=20260314e"></script>
+</body>
+</html>

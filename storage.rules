@@ -1,0 +1,118 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function normalizedContentType() {
+      return request.resource != null && request.resource.contentType != null
+        ? request.resource.contentType
+        : "";
+    }
+
+    function hasBlockedPublicExtension(fileName) {
+      return fileName.matches('.*\\.(html|htm|js|mjs|cjs|svg|svgz|xml|xhtml|php|exe|dll|sh|bat|cmd|ps1|jar|msi|apk|ipa)$');
+    }
+
+    function hasAllowedPublicContentType() {
+      let ct = normalizedContentType();
+      return ct.matches('image/.*')
+        || ct.matches('audio/.*')
+        || ct == 'application/pdf'
+        || ct == 'text/plain'
+        || ct == 'application/json';
+    }
+
+    function isSafePublicAsset(fileName) {
+      return !hasBlockedPublicExtension(fileName) && hasAllowedPublicContentType();
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function roleFromToken() {
+      return isSignedIn() && request.auth.token.role != null
+        ? request.auth.token.role
+        : "";
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && roleFromToken() == role;
+    }
+
+    function isAdmin() {
+      return hasRole("admin") || hasRole("superAdmin");
+    }
+
+    function isEditor() {
+      return isAdmin() || hasRole("author") || hasRole("developer");
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return isSignedIn() && conversationId.matches("^" + request.auth.uid + "_.+$|^.+_" + request.auth.uid + "$");
+    }
+
+    // Imagenes generadas para lecturas game/editor.
+    match /lecturas-agent/{uid}/{sourceCollection}/{lecturaId}/{fileName} {
+      allow read: if true;
+      allow write: if (isEditor() || isOwner(uid)) && isSafePublicAsset(fileName);
+    }
+
+    // Assets de lecturas publicadas (públicos de lectura para runtime game).
+    match /lecturasASC/{allPaths=**} {
+      allow read: if true;
+      allow write: if isEditor() && hasAllowedPublicContentType();
+    }
+
+    match /lecturasNuevas/{allPaths=**} {
+      allow read: if true;
+      allow write: if isEditor() && hasAllowedPublicContentType();
+    }
+
+    // Música generada/manual para lecturas.
+    match /lecturas_music/{sourceCollection}/{lecturaId}/{fileName} {
+      allow read: if true;
+      allow write: if isEditor() && isSafePublicAsset(fileName);
+    }
+
+    // Galería personal del generador de imágenes.
+    match /images/{uid}/{allPaths=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Biblioteca compartida de mindmaps.
+    match /mindmap/{allPaths=**} {
+      allow read: if true;
+      allow write: if isSignedIn() && hasAllowedPublicContentType();
+    }
+
+    // Adjuntos de chat.
+    match /chat_images/{conversationId}/{fileName} {
+      allow read, write: if isConversationParticipant(conversationId) && isSafePublicAsset(fileName);
+    }
+
+    // Archivos grandes de análisis/síntesis por sesión de audioTranslate.
+    match /analyses/{sessionId}/{fileName} {
+      allow read, write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
+    match /syntheses/{sessionId}/{fileName} {
+      allow read, write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
+    match /sessions/{sessionId}/{fileName} {
+      allow read, write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
+    match /audiolibros/{sessionId}/{fileName} {
+      allow read, write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
+    // Deny-by-default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

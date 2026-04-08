@@ -1,8 +1,8 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
   getFirestore, collection, doc, addDoc, getDocs, getDoc, updateDoc, deleteDoc
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
 /* Firebase */
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
@@ -546,7 +546,7 @@ async function ensureXLSX() {
   if (window.XLSX) return;
   await new Promise((res, rej) => {
     const s = document.createElement("script");
-    s.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+    s.src = "vendor/xlsx/xlsx.full.min.js";
     s.onload = res; s.onerror = rej; document.head.appendChild(s);
   });
 }

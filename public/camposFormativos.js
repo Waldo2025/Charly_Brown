@@ -1,11 +1,11 @@
 // ===== Campos Formativos (lista + editor, estilo Tailwind) =====
 
 // Firebase
-import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
   getFirestore, collection, doc, addDoc, getDocs, getDoc, updateDoc, deleteDoc
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 
 // Config
 const firebaseConfig = {
@@ -27,7 +27,7 @@ const $$ = (q, ctx=document)=>Array.from(ctx.querySelectorAll(q));
 const esc = s => String(s ?? "").replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 function openModal(m){ if(!m) return; m.classList?.remove("hidden"); m.style.display="block"; document.body.style.overflow="hidden"; }
 function closeModal(m){ if(!m) return; m.classList?.add("hidden"); m.style.display="none"; document.body.style.overflow="auto"; }
-function ensureXLSX(){ return window.XLSX ? Promise.resolve() : new Promise((res, rej)=>{ const s=document.createElement("script"); s.src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+function ensureXLSX(){ return window.XLSX ? Promise.resolve() : new Promise((res, rej)=>{ const s=document.createElement("script"); s.src="vendor/xlsx/xlsx.full.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 
 // Campos/headers soportados (formato XLSX)
 const CF_FIELDS = [

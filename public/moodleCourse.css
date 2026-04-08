@@ -66,6 +66,8 @@
   --theme-toggle-bg: 210 40% 96.1%;
   --theme-toggle-text: 222.2 47.4% 11.2%;
   --theme-toggle-border: 214.3 31.8% 91.4%;
+  --archived-visible: 142 71% 45%;
+  --archived-hidden: 221 83% 53%;
 }
 
 /* ============================================
@@ -97,6 +99,31 @@
   --sidebar-accent-foreground: 210 40% 98%;
 }
 
+#btnToggleArchivados.archivados-visibles,
+#btnToggleArchivados.archivados-visibles i {
+  color: hsl(var(--archived-visible)) !important;
+}
+
+#btnToggleArchivados.archivados-visibles {
+  background-color: hsl(var(--archived-visible) / 0.12) !important;
+  border-color: hsl(var(--archived-visible) / 0.28) !important;
+}
+
+#btnToggleArchivados.archivados-ocultos,
+#btnToggleArchivados.archivados-ocultos i {
+  color: hsl(var(--archived-hidden)) !important;
+}
+
+#btnToggleArchivados.archivados-ocultos {
+  background-color: hsl(var(--archived-hidden) / 0.12) !important;
+  border-color: hsl(var(--archived-hidden) / 0.28) !important;
+}
+
+#btnToggleArchivados:hover,
+#btnToggleArchivados:hover i {
+  color: inherit !important;
+}
+
 /* ============================================
    3. RESET Y ESTILOS BASE
 ============================================ */
@@ -124,6 +151,20 @@ body {
   transition: background-color var(--transition-base), color var(--transition-base);
 }
 
+.modulo-contenido .katex,
+#txtModalInstruccionesGemini .katex {
+  font-size: 1.3em;
+}
+
+.modulo-contenido .katex-display,
+#txtModalInstruccionesGemini .katex-display {
+  margin: 0.9rem 0;
+  font-size: 1.3em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.15rem;
+}
+
 
 /* Contenedor principal que se desplaza */
 .flex.h-screen.overflow-hidden {
@@ -132,6 +173,7 @@ body {
     left: var(--cb-sidebar-collapsed-width, 64px);
     width: calc(100% - var(--cb-sidebar-collapsed-width, 64px));
     height: calc(100vh - var(--cb-header-height, 64px));
+    min-height: 0;
 }
 
 /* Cuando el sidebar está expandido */
@@ -404,6 +446,8 @@ body {
   border-radius: calc(var(--radius) + 0.25rem);
   padding: var(--spacing-6);
   min-height: 400px;
+  min-width: 0;
+  overflow-x: hidden;
   transition: all var(--transition-base);
 }
 
@@ -1728,6 +1772,34 @@ body, body * {
               box-shadow 300ms ease-in-out;
 }
 
+body #sidebar > #menuToggle {
+  background: transparent !important;
+  color: #ffffff !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+body #sidebar > #menuToggle:hover,
+body #sidebar > #menuToggle:focus,
+body #sidebar > #menuToggle:focus-visible,
+body #sidebar > #menuToggle:active {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+body #sidebar > #menuToggle:focus-visible {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.32) !important;
+}
+
+body #sidebar > #menuToggle i {
+  color: inherit !important;
+}
+
 /* Asegurar que los inputs y textareas tengan buen contraste en modo oscuro */
 .dark input,
 .dark textarea,
@@ -2239,8 +2311,7 @@ body[data-page="moodlecourse.html"] #contenidoEditor > .flex.items-center.justif
   font-style: normal;
   font-weight: 900;
   font-display: block;
-  src: url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2") format("woff2"),
-       url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.ttf") format("truetype");
+  src: url("vendor/fontawesome/webfonts/fa-solid-900.woff2") format("woff2");
 }
 
 /* Asegurar que todos los íconos tengan el tamaño correcto */
@@ -2843,6 +2914,75 @@ input[type="radio"]:checked {
     border-color: hsl(var(--border)) !important;
 }
 
+/* Jerarquia visual clara: Tema -> Subtema -> Modulo */
+#sidebarTemas #listaTemasSidebar > .accordion {
+    margin-left: 0;
+}
+
+#sidebarTemas {
+    width: 22rem;
+    min-width: 22rem;
+}
+
+#sidebarTemas #listaTemasSidebar .subtema-draggable {
+    margin-left: 0.9rem;
+}
+
+#sidebarTemas #listaTemasSidebar .subtema-draggable > .accordion-trigger {
+    padding-left: 0.65rem !important;
+}
+
+#sidebarTemas #listaTemasSidebar .subtema-draggable > .accordion-content {
+    margin-left: 0.35rem;
+}
+
+#sidebarTemas #listaTemasSidebar .modulos-container,
+#sidebarTemas #listaTemasSidebar .modulos-container-dnd {
+    margin-left: 0.15rem;
+    padding-left: 0.25rem;
+    border-left: 1px dashed hsl(var(--border));
+    overflow: visible;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable {
+    margin-left: 0;
+    padding-left: 0 !important;
+    padding-right: 0.7rem !important;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable .modulo-select {
+    padding-left: 0;
+    min-width: 0;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable .modulo-nombre-wrap {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    margin-left: 0.1rem;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable .modulo-actions {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-right: 0.1rem;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable .cb-module-grip,
+#sidebarTemas #listaTemasSidebar .module-draggable .cb-module-kind-icon {
+    flex-shrink: 0;
+}
+
+#sidebarTemas #listaTemasSidebar .module-draggable .modulo-nombre,
+#sidebarTemas #listaTemasSidebar .subtema-draggable .accordion-trigger span,
+#sidebarTemas #listaTemasSidebar > .accordion > .accordion-trigger span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 #sidebarTemas #listaTemasSidebar .accordion-trigger.bg-blue-50,
 #sidebarTemas #listaTemasSidebar .accordion-trigger.subtema-activo,
 #sidebarTemas #listaTemasSidebar .subtema-activo {
@@ -3144,12 +3284,14 @@ body.theme-dark {
     align-items: stretch;
     width: 100%;
     min-width: 0;
+    min-height: 0;
 }
 
 #contenidoEditor {
     width: 100%;
     min-width: 420px;
     max-width: 100%;
+    min-height: 0;
 }
 
 .pane-resizer-editor {
@@ -3160,6 +3302,37 @@ body.theme-dark {
 body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido,
 body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido * {
     color: var(--app-text-color, hsl(var(--foreground))) !important;
+}
+
+body[data-page="moodlecourse.html"] #moodleLayout,
+body[data-page="moodlecourse.html"] #moodleLayout > aside,
+body[data-page="moodlecourse.html"] #moodleLayout > main {
+    min-height: 0;
+}
+
+body[data-page="moodlecourse.html"] #moodleLayout > main,
+body[data-page="moodlecourse.html"] #contenidoEditor,
+body[data-page="moodlecourse.html"] .content-card,
+body[data-page="moodlecourse.html"] .editor-resize-wrap {
+    min-width: 0;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor > div[id^="modulo-"] {
+    min-width: 0;
+    overflow: hidden;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido :is(pre, code, table, img, iframe) {
+    max-width: 100%;
 }
 
 body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido,
@@ -3177,6 +3350,212 @@ body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido td {
 
 body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido th {
     background-color: hsl(var(--accent) / 0.22) !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title {
+    position: relative;
+    margin: 1.65rem 0 1.15rem;
+    padding: 0 0 1rem;
+    border-bottom: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(
+        90deg,
+        hsl(var(--border) / 0.98) 0%,
+        hsl(var(--border) / 0.92) 68%,
+        hsl(var(--border) / 0.2) 100%
+    );
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title.is-original {
+    color: hsl(var(--foreground)) !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title.is-original::after {
+    display: none;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title.is-proposal {
+    margin-top: 1.1rem;
+    color: color-mix(in srgb, hsl(var(--foreground)) 88%, hsl(var(--primary)) 12%) !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-block-title.is-proposal::after {
+    display: none;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-original-body {
+    margin-bottom: 1.3rem;
+    padding-bottom: 1rem;
+    position: relative;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-original-body::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(
+        90deg,
+        hsl(var(--border) / 0.98) 0%,
+        hsl(var(--border) / 0.9) 70%,
+        hsl(var(--border) / 0.18) 100%
+    );
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-question-heading {
+    position: relative;
+    margin: 1.1rem 0 1rem;
+    padding: 0 0 0.8rem;
+    border-bottom: 0;
+    font-size: 0.98rem;
+    font-weight: 750;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-question-heading::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(
+        90deg,
+        hsl(var(--border) / 0.95) 0%,
+        hsl(var(--border) / 0.88) 68%,
+        hsl(var(--border) / 0.16) 100%
+    );
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line,
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line {
+    margin: 0.55rem 0;
+    line-height: 1.72;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line.is-title {
+    font-weight: 750;
+    font-size: 0.98rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line.is-question,
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line.is-options {
+    font-weight: 650;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line.is-question {
+    margin-bottom: 1rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-meta-line.is-options {
+    margin-bottom: 0.9rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line {
+    padding-left: 0.9rem;
+    border-left: 3px solid hsl(var(--border));
+    margin-bottom: 0.95rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line.is-answer {
+    border-left-color: hsl(var(--primary));
+    font-weight: 700;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line.is-correct {
+    border-left-color: hsl(142 71% 45%);
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line.is-incorrect {
+    border-left-color: hsl(24 95% 53%);
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-feedback-line.is-global {
+    border-left-color: hsl(221 83% 53%);
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-section-separator {
+    display: block;
+    height: 0;
+    margin: 1.15rem 0 1.35rem;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
+    border: 0;
+    border-bottom: 2px solid hsl(var(--border) / 0.95);
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-alpha-options {
+    list-style: none;
+    padding-left: 0;
+    margin-left: 0;
+    margin-bottom: 1.25rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.6rem 1.8rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-alpha-options > li::marker {
+    content: "";
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-alpha-options > li {
+    margin: 0;
+    line-height: 1.45;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-alpha-options.cb-module-alpha-options--compact {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    align-items: start;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-question-block {
+    margin: 0 0 1.6rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-question-block .cb-module-alpha-options {
+    margin-bottom: 1.1rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-question-block .cb-module-feedback-line {
+    margin-top: 0.85rem;
+}
+
+@media (max-width: 820px) {
+  body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .cb-module-alpha-options.cb-module-alpha-options--compact {
+    grid-template-columns: 1fr;
+  }
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido ol {
+    margin: 0.5rem 0 1.15rem;
+    padding-left: 2rem;
+    list-style-position: outside;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido ol > li {
+    padding-left: 0.25rem;
+    margin-bottom: 0.45rem;
+}
+
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido ul {
+    margin: 0.5rem 0 1rem;
+    padding-left: 1.5rem;
 }
 
 body[data-page="moodlecourse.html"] #resultadoGenerado,

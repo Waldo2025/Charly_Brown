@@ -1,0 +1,28 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Imagenes generadas para lecturas: lectura publica, escritura solo del owner.
+    match /lecturas-agent/{uid}/{sourceCollection}/{lecturaId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Assets de lecturas publicadas (colecciones lecturasASC y lecturasNuevas).
+    match /lecturasASC/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    match /lecturasNuevas/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Resto de objetos: lectura publica para que Lecturas Game pueda resolver
+    // assets legacy en cualquier prefijo de Storage sin autenticación.
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}

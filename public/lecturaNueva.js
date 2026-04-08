@@ -1,25 +1,21 @@
 
 // ---------------------- Imports Firebase ----------------------
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
   getFirestore, doc, getDoc, updateDoc, collection, addDoc,
   query, where, getDocs, deleteDoc, orderBy, onSnapshot, limit
-} from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-import { getStorage } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getStorage } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { buildApiUrl } from './api-client.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
+import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
 
 // ---------------------- Firebase ----------------------
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
+const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
@@ -33,6 +29,13 @@ async function ensureRuntimeConfigLoaded() {
   runtimeConfigLoadPromise = new Promise((resolve) => {
     (async () => {
       try {
+        const host = String(window.location.hostname || "").toLowerCase();
+        const isLocalHost = host === "127.0.0.1" || host === "localhost";
+        const allowRuntimeConfig = isLocalHost || window.__CHARLY_ENABLE_RUNTIME_CONFIG__ === true;
+        if (!allowRuntimeConfig) {
+          resolve();
+          return;
+        }
         const stamp = Date.now();
         const candidates = [
           `./config.local.js?v=${stamp}`,   // when server root is /public
@@ -72,13 +75,6 @@ async function ensureRuntimeConfigLoaded() {
     })();
   });
   return runtimeConfigLoadPromise;
-}
-
-function getRuntimeGeminiApiKey() {
-  const fromConfig = String(window.__CHARLY_CONFIG__?.geminiApiKey || "").trim();
-  if (fromConfig) return fromConfig;
-  const fromStorage = String(localStorage.getItem("cb_gemini_api_key") || "").trim();
-  return fromStorage;
 }
 
 function normalizeGeminiModel(model = "") {
@@ -187,21 +183,22 @@ async function enviarPrompt(mensajes, intentos = 0, options = {}) {
   }
 
   await ensureRuntimeConfigLoaded();
-  const apiKey = getRuntimeGeminiApiKey();
-  if (!apiKey || apiKey.includes("__GEMINI_API_KEY_LOCAL__")) {
-    throw new Error("GEMINI_API_KEY no disponible en runtime.");
-  }
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modeloSeleccionado)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(endpoint, {
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : "";
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(buildApiUrl("/api/gemini/generate"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
-      contents: mensajes.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      })),
-      generationConfig: finalGenerationConfig
+      model: modeloSeleccionado,
+      payload: {
+        contents: mensajes.map(m => ({
+          role: m.role,
+          parts: [{ text: m.text }]
+        })),
+        generationConfig: finalGenerationConfig
+      }
     })
   });
 
@@ -222,31 +219,6 @@ async function enviarPrompt(mensajes, intentos = 0, options = {}) {
   }
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
-
-async function fetchWikipediaAuthorContext(authorName = '') {
-  const term = String(authorName || '').trim();
-  if (!term) return '';
-
-  try {
-    const searchUrl = `https://es.wikipedia.org/w/api.php?origin=*&action=opensearch&search=${encodeURIComponent(term)}&limit=1&namespace=0&format=json`;
-    const searchRes = await fetch(searchUrl);
-    const searchData = await searchRes.json();
-    const title = searchData?.[1]?.[0];
-    if (!title) return '';
-
-    const extractUrl = `https://es.wikipedia.org/w/api.php?origin=*&action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json`;
-    const extractRes = await fetch(extractUrl);
-    const extractData = await extractRes.json();
-    const pages = extractData?.query?.pages || {};
-    const firstKey = Object.keys(pages)[0];
-    const extract = (firstKey && pages[firstKey]?.extract) ? pages[firstKey].extract.trim() : '';
-    return extract ? `${title}: ${extract}` : '';
-  } catch (err) {
-    console.warn('No se pudo obtener contexto del autor desde internet:', err);
-    return '';
-  }
-}
-
 
 // ---------------------- Utilidades ----------------------
 const $  = (sel) => document.querySelector(sel);
@@ -526,6 +498,28 @@ function sanitizeHTML(html = '') {
   }
 
   return tmp.innerHTML;
+}
+
+function buildQuestionListItem(pregunta = {}, index = 0) {
+  const li = document.createElement("li");
+  const strong = document.createElement("strong");
+  strong.textContent = `${index + 1}.`;
+  li.appendChild(strong);
+  li.append(` ${String(pregunta?.texto || "Pregunta sin texto")}`);
+
+  const details = document.createElement("div");
+  details.style.marginLeft = "1em";
+
+  const nivel = document.createElement("small");
+  nivel.innerHTML = `<strong>Nivel:</strong> ${escapeHTML(pregunta?.nivel || "—")}`;
+  const criterio = document.createElement("small");
+  criterio.innerHTML = `<strong>Criterio:</strong> ${escapeHTML(pregunta?.criterio || "—")}`;
+  const respuesta = document.createElement("small");
+  respuesta.innerHTML = `<strong>Respuesta esperada:</strong> ${escapeHTML(pregunta?.respuesta || "—")}`;
+
+  details.append(nivel, document.createElement("br"), criterio, document.createElement("br"), respuesta);
+  li.appendChild(details);
+  return li;
 }
 
 // 🧮 Contar PALABRAS de la lectura (ignora etiquetas)
@@ -839,33 +833,6 @@ function construirAnchorBibliografico(url = '') {
   return `<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(href)}</a>`;
 }
 
-function construirRefGoogleBooks(item) {
-  const v = item?.volumeInfo || {};
-  const title = limpiarTituloRef(v.title);
-  const subtitle = limpiarTituloRef(v.subtitle);
-  const titulo = [title, subtitle].filter(Boolean).join(': ');
-  const authors = formatearAutoresAPA(v.authors || []);
-  const authorsSafe = escapeHTML(authors);
-  const year = extraerAnio(v.publishedDate);
-  const publisher = limpiarTituloRef(v.publisher || 'Google Books');
-  const url = v.infoLink || item?.selfLink || '';
-  if (!titulo || !url) return null;
-  const link = construirAnchorBibliografico(url);
-  if (!link) return null;
-  const apa = `${authorsSafe} (${year}). <em>${escapeHTML(titulo)}</em>. ${escapeHTML(publisher)}. ${link}`;
-
-  return {
-    tipo: 'book',
-    score: 2,
-    source: 'Google Books',
-    titulo,
-    url,
-    apa,
-    sortKey: slugRef(authors),
-    key: `${slugRef(titulo)}|${slugRef(url)}`
-  };
-}
-
 function construirRefCrossref(item) {
   const titulo = limpiarTituloRef(item?.title?.[0] || '');
   if (!titulo) return null;
@@ -907,18 +874,6 @@ function construirRefCrossref(item) {
   };
 }
 
-async function buscarFuentesGoogleBooks({ tema = '', nivel = '', grado = '', limite = 4 } = {}) {
-  const qBase = [tema, 'educación', nivel && `nivel ${nivel}`, grado && `grado ${grado}`]
-    .filter(Boolean)
-    .join(' ');
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(qBase)}&langRestrict=es&printType=books&maxResults=${Math.min(10, Math.max(2, limite + 2))}`;
-  const data = await fetchJSONConTimeout(url, { timeoutMs: 9000 });
-  return (data?.items || [])
-    .map(construirRefGoogleBooks)
-    .filter(Boolean)
-    .slice(0, limite);
-}
-
 async function buscarFuentesCrossref({ tema = '', limite = 4 } = {}) {
   const params = new URLSearchParams({
     rows: String(Math.min(10, Math.max(2, limite + 2))),
@@ -933,13 +888,9 @@ async function buscarFuentesCrossref({ tema = '', limite = 4 } = {}) {
 }
 
 async function obtenerFuentesBibliograficasVerificadas({ tema = '', nivel = '', grado = '', limite = 5 } = {}) {
-  const tareas = [
-    buscarFuentesGoogleBooks({ tema, nivel, grado, limite }).catch(() => []),
-    buscarFuentesCrossref({ tema, limite }).catch(() => [])
-  ];
-
-  const [books, crossref] = await Promise.all(tareas);
-  const merged = [...books, ...crossref];
+  void nivel;
+  void grado;
+  const merged = await buscarFuentesCrossref({ tema, limite }).catch(() => []);
   const seen = new Set();
   const unicos = [];
   for (const ref of merged) {
@@ -949,12 +900,10 @@ async function obtenerFuentesBibliograficasVerificadas({ tema = '', nivel = '', 
     unicos.push(ref);
   }
 
-  // Priorizamos libros (más útiles en contexto escolar) y luego artículos.
   const seleccionadas = unicos
     .sort((a, b) => (b.score || 0) - (a.score || 0))
     .slice(0, Math.max(3, Math.min(5, limite)));
 
-  // Presentación en APA: orden alfabético por autor (o fallback por título).
   return seleccionadas.sort((a, b) => {
     const ka = (a?.sortKey || slugRef(a?.titulo || '') || '');
     const kb = (b?.sortKey || slugRef(b?.titulo || '') || '');
@@ -2031,7 +1980,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (preguntasVistaGuardadas) {
-      preguntasVistaGuardadas.innerHTML = String(snapshot.preguntasVistaGuardadasHTML || '');
+      preguntasVistaGuardadas.innerHTML = sanitizeHTML(String(snapshot.preguntasVistaGuardadasHTML || ''));
     }
 
     if (resultadoFooter) {
@@ -2178,26 +2127,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ideasModal) {
       ideasModal = document.createElement('div');
       ideasModal.id = 'modalIdeasLecturaIA';
-      ideasModal.style.cssText = [
-        'display:none',
-        'position:fixed',
-        'inset:0',
-        'z-index:10020',
-        'background:rgba(0,0,0,.45)',
-        'backdrop-filter:blur(2px)',
-        'padding:18px'
-      ].join(';');
+      ideasModal.className = 'cb-modal-runtime-overlay';
+      ideasModal.style.display = 'none';
       ideasModal.innerHTML = `
-        <div role="dialog" aria-modal="true" aria-labelledby="tituloModalIdeasLecturaIA"
-             style="max-width:900px; width:min(96vw,900px); max-height:86vh; margin:2vh auto; background:#fff; border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.2); display:flex; flex-direction:column; overflow:hidden;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#fff;">
+        <div role="dialog" aria-modal="true" aria-labelledby="tituloModalIdeasLecturaIA" class="cb-modal-runtime-panel">
+          <div class="cb-modal-head">
             <div>
-              <h4 id="tituloModalIdeasLecturaIA" style="margin:0; font-size:15px; font-weight:700;">Ideas para la lectura</h4>
+              <h4 id="tituloModalIdeasLecturaIA" class="cb-modal-title">Ideas para la lectura</h4>
               <small style="color:#6b7280;">Selecciona una idea para aplicarla al formulario.</small>
             </div>
-            <button type="button" id="cerrarModalIdeasLecturaIA" class="result-ghost-btn" style="margin:0;">Cerrar</button>
+            <button type="button" id="cerrarModalIdeasLecturaIA" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
           </div>
-          <div style="position:relative; overflow:auto; background:#fafafa;">
+          <div class="cb-modal-runtime-body">
             <div id="listaIdeasLecturaIA" style="padding:12px; overflow:auto; min-height:180px;"></div>
             <div id="spinnerIdeasLecturaIA" style="display:none; position:absolute; inset:0; background:rgba(250,250,250,.9); backdrop-filter:blur(1px); align-items:center; justify-content:center;">
               <div style="display:flex; flex-direction:column; align-items:center; gap:8px; color:#374151;">
@@ -2651,8 +2592,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const qLect = query(collection(db, 'lecturasNuevas'), orderBy('timestamp', 'desc'));
 
+    const normalizarTextoHuella = (value = '') => String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const deduplicarLecturasNuevas = (rows = []) => {
+      const source = Array.isArray(rows) ? rows : [];
+      const byId = new Map();
+      // Paso 1: dedupe estricto por id.
+      source.forEach((item) => {
+        const id = String(item?.id || '').trim();
+        if (!id || byId.has(id)) return;
+        byId.set(id, item);
+      });
+
+      // Paso 2: dedupe por huella de contenido para ocultar clonados accidentales.
+      const seenFingerprint = new Set();
+      const out = [];
+      for (const item of byId.values()) {
+        const fp = [
+          normalizarTextoHuella(item?.titulo || ''),
+          normalizarTextoHuella(item?.tema || ''),
+          normalizarTextoHuella(item?.nivel || ''),
+          normalizarTextoHuella(item?.grado || ''),
+          normalizarTextoHuella(item?.trimestre || ''),
+          normalizarTextoHuella(resolverUnidadLectura(item) || ''),
+          normalizarTextoHuella(String(item?.contenidoPlano || item?.contenidoHTML || '').slice(0, 240))
+        ].join('|');
+        if (seenFingerprint.has(fp)) continue;
+        seenFingerprint.add(fp);
+        out.push(item);
+      }
+      return out;
+    };
+
     const handle = (snap) => {
-      cacheLecturas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      cacheLecturas = deduplicarLecturasNuevas(docs);
       poblarFiltrosLecturasNuevas(cacheLecturas);
       renderLista(cacheLecturas);
     };
@@ -2691,6 +2670,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const trimestre = escapeHTML(it.trimestre || '—');
       const unidad = escapeHTML(resolverUnidadLectura(it));
       const id = escapeHTML(it.id || '');
+      const published = it?.published === true;
+      const publishLabel = published ? 'Despublicar lectura' : 'Publicar lectura';
 
       return `
         <tr data-id="${id}">
@@ -2702,6 +2683,18 @@ document.addEventListener('DOMContentLoaded', () => {
           <td>${unidad}</td>
           <td>
             <div class="lectura-row-actions">
+              <label class="lectura-publish-switch" title="${publishLabel}" aria-label="${publishLabel}">
+                <input
+                  type="checkbox"
+                  class="lectura-publish-switch-input btn-toggle-published"
+                  data-id="${id}"
+                  ${published ? 'checked' : ''}
+                  aria-label="${publishLabel}"
+                >
+                <span class="lectura-publish-switch-track" aria-hidden="true">
+                  <span class="lectura-publish-switch-thumb"></span>
+                </span>
+              </label>
               <button class="lectura-action-btn action-ver btn-ver" data-id="${id}" title="Ver lectura" aria-label="Ver lectura">
                 <i class="far fa-eye"></i>
               </button>
@@ -2745,6 +2738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $$('.btn-ver').forEach(b => b.addEventListener('click', onVerLectura));
     $$('.btn-live-read').forEach(b => b.addEventListener('click', onLeerLecturaLive));
     $$('.btn-live-read').forEach(b => b.addEventListener('dblclick', onDetenerLecturaLive));
+    $$('.btn-toggle-published').forEach(b => b.addEventListener('change', onTogglePublishedLectura));
     $$('.btn-editar').forEach(b => b.addEventListener('click', onEditarLectura));
     $$('.btn-eliminar').forEach(b => b.addEventListener('click', onEliminarLectura));
     $$('.btn-descargar').forEach(b => b.addEventListener('click', async (e) => {
@@ -2897,18 +2891,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const snap = await getDoc(ref);
     if (!snap.exists()) return alert('No encontrada.');
     const d = snap.data();
+    const music = d?.music || d?.musica || {};
+    const musicAssets = {
+      readingUrl: String(music?.readingUrl || music?.lecturaUrl || d?.musicReadingUrl || "").trim(),
+      gameUrl: String(music?.gameUrl || music?.juegoUrl || d?.musicGameUrl || "").trim(),
+      readingPath: String(music?.readingPath || music?.lecturaPath || d?.musicReadingPath || "").trim(),
+      gamePath: String(music?.gamePath || music?.juegoPath || d?.musicGamePath || "").trim()
+    };
 
     const contenidoHTML = d.contenidoHTML || '<p>(Sin contenido)</p>';
-    const agentExclusive = typeof window.cbIsAgentExclusiveMode === "function"
-      ? window.cbIsAgentExclusiveMode() === true
-      : false;
-    if (agentExclusive && typeof window.cbOpenLecturasAgentViewer === "function") {
+    if (typeof window.cbOpenLecturasAgentViewer === "function") {
       window.cbOpenLecturasAgentViewer({
         id,
         coleccion: 'lecturasNuevas',
         sourceCollection: 'lecturasNuevas',
         titulo: d.titulo || d.tema || 'Lectura sin título',
         htmlLectura: contenidoHTML,
+        musicAssets,
+        allowMusicGeneration: true,
         preguntas: Array.isArray(d.preguntas) ? d.preguntas : [],
         metadatos: {
           nivel: d.nivel || '',
@@ -3052,6 +3052,33 @@ document.addEventListener('DOMContentLoaded', () => {
     await cargarLecturasNuevas();
   }
 
+  async function onTogglePublishedLectura(e) {
+    const input = e.currentTarget;
+    const id = input?.dataset?.id;
+    if (!id) return;
+    const nextPublished = input.checked === true;
+    input.disabled = true;
+    try {
+      await updateDoc(doc(db, 'lecturasNuevas', id), {
+        published: nextPublished
+      });
+      const label = input.closest('.lectura-publish-switch');
+      const nextLabel = nextPublished ? 'Despublicar lectura' : 'Publicar lectura';
+      if (label) {
+        label.setAttribute('title', nextLabel);
+        label.setAttribute('aria-label', nextLabel);
+      }
+      input.setAttribute('aria-label', nextLabel);
+      const idx = cacheLecturas.findIndex((it) => it?.id === id);
+      if (idx >= 0) cacheLecturas[idx].published = nextPublished;
+    } catch (err) {
+      input.checked = !nextPublished;
+      alert('❌ No se pudo actualizar el estado de publicación.');
+    } finally {
+      input.disabled = false;
+    }
+  }
+
   // EDITAR
   async function onEditarLectura(e) {
     const id = e.currentTarget.dataset.id;
@@ -3059,6 +3086,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const snap = await getDoc(ref);
     if (!snap.exists()) return alert('No encontrada.');
     const d = snap.data();
+    const contenidoLectura = d.contenidoHTML || d.textoLectura || d.lecturaHTML || d.htmlLectura || '';
+    const contenidoPlanoLectura = d.contenidoPlano || htmlToPlainText(contenidoLectura || '');
 
     if (typeof window.cbOpenLecturaEditorCompartido === 'function') {
       await window.cbOpenLecturaEditorCompartido({
@@ -3070,8 +3099,8 @@ document.addEventListener('DOMContentLoaded', () => {
         grado: d.grado || '',
         trimestre: d.trimestre || '',
         unidad: d.unidad || d.unidadNumero || d.unidad_numero || d.numeroUnidad || d.numUnidad || '',
-        contenidoHTML: d.contenidoHTML || '',
-        contenidoPlano: d.contenidoPlano || '',
+        contenidoHTML: contenidoLectura,
+        contenidoPlano: contenidoPlanoLectura,
         onSave: async (payload) => {
           const htmlSan = sanitizeHTML(cleanGeneratedHTML(payload.contenidoHTML || ''));
           await updateDoc(doc(db, 'lecturasNuevas', id), {
@@ -3094,23 +3123,14 @@ document.addEventListener('DOMContentLoaded', () => {
     editarDocId.value = id;
     editarTitulo.value = d.titulo || '';
     editarTema.value = d.tema || '';
-    editarPreview.innerHTML = d.contenidoHTML || '<p style="margin-bottom:20px;"><em>(Vacío)</em></p>';
+    editarPreview.innerHTML = sanitizeHTML(d.contenidoHTML || '<p style="margin-bottom:20px;"><em>(Vacío)</em></p>');
     // Mostrar preguntas en #vistaPreguntasEditar si existen
     const contenedorPreguntas = document.getElementById("vistaPreguntasEditar");
     if (contenedorPreguntas) {
       contenedorPreguntas.innerHTML = ""; // Limpiar
       if (d.preguntas?.length) {
         d.preguntas.forEach((preg, i) => {
-          const li = document.createElement("li");
-          li.innerHTML = `
-            <strong>${i + 1}.</strong> ${preg.texto || "Pregunta sin texto"}
-            <div style="margin-left:1em;">
-              <small><strong>Nivel:</strong> ${preg.nivel || "—"}</small><br>
-              <small><strong>Criterio:</strong> ${preg.criterio || "—"}</small><br>
-              <small><strong>Respuesta esperada:</strong> ${preg.respuesta || "—"}</small>
-            </div>
-          `;
-          contenedorPreguntas.appendChild(li);
+          contenedorPreguntas.appendChild(buildQuestionListItem(preg, i));
         });
       } else {
         contenedorPreguntas.innerHTML = "<em>Sin preguntas registradas.</em>";
@@ -3455,9 +3475,6 @@ Modo de escritura:
       const ejemplo = autorData?.ejemplo || '';
       const rasgosFirebase = [autorData?.rasgos, autorData?.notas].filter(Boolean).join(' | ');
       const rasgosInferidos = inferirRasgosDesdeMuestraAutor(ejemplo);
-      const terminoWeb = autorData?.wikipediaTitle || autorNombre;
-      const contextoWeb = await fetchWikipediaAuthorContext(terminoWeb);
-
       return {
         bloque: `
 Estilo literario de referencia:
@@ -3466,7 +3483,7 @@ Estilo literario de referencia:
 - Muestra interna disponible: sí (úsala solo para inferir rasgos, NO para copiar frases).
 ${rasgosInferidos.length ? `- Rasgos inferidos de la muestra: ${rasgosInferidos.join('; ')}` : ''}
 ${rasgosFirebase ? `- Rasgos en Firebase: ${rasgosFirebase}` : ''}
-${contextoWeb ? `- Contexto público (internet): ${contextoWeb}` : '- Contexto público (internet): no disponible, usar referencia de Firebase.'}
+- Contexto adicional externo: deshabilitado; usa solo la referencia interna y la muestra disponible.
 - Importante: imita voz, ritmo y sintaxis del autor sin copiar frases textuales ni secuencias de 5+ palabras de la muestra.
 `.trim(),
         etiquetaGuardado: autorNombre,
@@ -3811,6 +3828,7 @@ Devuelve únicamente HTML, sin bloques Markdown ni comentarios fuera del conteni
           contenidoPlano: htmlToPlainText(htmlFinal),
           analizadaASC: !!usarASC,
           preguntas: preguntasFinales,  // ✅ AÑADE ESTO
+          published: false,
           userId: user?.uid || 'anon',
           timestamp: new Date()
         };

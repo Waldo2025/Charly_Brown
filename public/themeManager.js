@@ -41,24 +41,24 @@
   const OPEN_LINK_ID = 'themeSettingsLink';
   const COMMAND_OPEN_LINK_ID = 'themeCommandSettingsBtn';
   const CYTOSCAPE_CDN_URLS = [
-    'https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js',
-    'https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js'
+    'vendor/cytoscape/cytoscape.min.js',
+    'vendor/cytoscape/cytoscape.min.js'
   ];
   const CYTOSCAPE_EDGEHANDLES_CDN_URLS = [
-    'https://unpkg.com/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.js',
-    'https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.js'
+    'vendor/cytoscape/cytoscape-edgehandles.js',
+    'vendor/cytoscape/cytoscape-edgehandles.js'
   ];
   const LODASH_CDN_URLS = [
-    'https://unpkg.com/lodash@4.17.21/lodash.min.js',
-    'https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js'
+    'vendor/lodash/lodash.min.js',
+    'vendor/lodash/lodash.min.js'
   ];
   const DAGRE_CDN_URLS = [
-    'https://unpkg.com/dagre@0.8.5/dist/dagre.min.js',
-    'https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js'
+    'vendor/cytoscape/dagre.min.js',
+    'vendor/cytoscape/dagre.min.js'
   ];
   const CYTOSCAPE_DAGRE_CDN_URLS = [
-    'https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js',
-    'https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js'
+    'vendor/cytoscape/cytoscape-dagre.js',
+    'vendor/cytoscape/cytoscape-dagre.js'
   ];
   const DEFAULT_PRESET_ID = 'classic_light';
   const DEFAULT_ALERT_PRESET_ID = 'warning_yellow';

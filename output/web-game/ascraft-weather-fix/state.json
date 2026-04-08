@@ -1,0 +1,724 @@
+{
+  "text": null,
+  "sky": null,
+  "movement": {
+    "currentRoomId": null,
+    "roomShellReady": false,
+    "outdoorReady": false,
+    "playerViewMode": "first",
+    "activeCelestialBody": "earth",
+    "playerPosition": {
+      "x": 0,
+      "y": 1.1,
+      "z": 4
+    },
+    "spawnPersistenceEnabled": false,
+    "lastSavedSpawn": null,
+    "collisionWorldStats": {
+      "cellSize": 6,
+      "colliderCount": 0,
+      "bucketCount": 0,
+      "dirty": true,
+      "counts": {
+        "structural": 0,
+        "itemSolid": 0,
+        "decor": 0,
+        "trigger": 0
+      }
+    },
+    "inputState": {
+      "forward": 0,
+      "backward": 0,
+      "left": 0,
+      "right": 0,
+      "jump": false,
+      "sprint": false
+    },
+    "movementState": {
+      "canJump": false,
+      "isMoving": false,
+      "interpolationAlpha": 0,
+      "insideRoomVolumeLatch": true,
+      "currentFace": "top",
+      "faceTransitionCount": 0,
+      "surfaceMode": "room",
+      "collisionFlags": {
+        "x": false,
+        "z": false,
+        "ceiling": false
+      },
+      "support": null,
+      "pressedKeys": [],
+      "velocity": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    "chunkQueueByFace": {}
+  },
+  "terrain": {
+    "samples": [
+      {
+        "id": "north",
+        "sample": {
+          "x": 0,
+          "z": -72,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.5297279605962892,
+            "z": -72
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.5297279605963,
+          "clearance": 0.5297279605962899
+        }
+      },
+      {
+        "id": "south",
+        "sample": {
+          "x": 0,
+          "z": 78,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": -0.3446834002652175,
+            "z": 78
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.6553165997348,
+          "clearance": -0.34468340026521105
+        }
+      },
+      {
+        "id": "east",
+        "sample": {
+          "x": 68,
+          "z": 0,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 68,
+            "y": -0.5795611765602251,
+            "z": 0
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.42043882343978,
+          "clearance": -0.5795611765602189
+        }
+      },
+      {
+        "id": "west",
+        "sample": {
+          "x": -68,
+          "z": 0,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": -68,
+            "y": 0.0027613302958121033,
+            "z": 0
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.0027613302958,
+          "clearance": 0.0027613302958116037
+        }
+      },
+      {
+        "id": "south_center",
+        "sample": {
+          "x": 0,
+          "z": 46,
+          "clamped": false,
+          "supportY": 1.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 1.1576209302534066,
+            "z": 46
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 133.15762093025342,
+          "clearance": 1.1576209302534153
+        }
+      },
+      {
+        "id": "south_mid",
+        "sample": {
+          "x": 0,
+          "z": 78,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": -0.3446834002652175,
+            "z": 78
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.6553165997348,
+          "clearance": -0.34468340026521105
+        }
+      }
+    ],
+    "southRoute": [
+      {
+        "id": "south_route_0",
+        "sample": {
+          "x": 0,
+          "z": 46,
+          "clamped": false,
+          "supportY": 1.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 1.1576209302534066,
+            "z": 46
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 133.15762093025342,
+          "clearance": 1.1576209302534153
+        }
+      },
+      {
+        "id": "south_route_1",
+        "sample": {
+          "x": 0,
+          "z": 47,
+          "clamped": false,
+          "supportY": 1.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 1.144506957736068,
+            "z": 47
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 133.14450695773607,
+          "clearance": 1.1445069577360698
+        }
+      },
+      {
+        "id": "south_route_2",
+        "sample": {
+          "x": 0,
+          "z": 49,
+          "clamped": false,
+          "supportY": 1.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 1.1191887394778597,
+            "z": 49
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 133.11918873947786,
+          "clearance": 1.1191887394778632
+        }
+      },
+      {
+        "id": "south_route_3",
+        "sample": {
+          "x": 0,
+          "z": 50,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.3857127851120685,
+            "z": 50
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.38571278511208,
+          "clearance": 0.3857127851120765
+        }
+      },
+      {
+        "id": "south_route_4",
+        "sample": {
+          "x": 0,
+          "z": 51,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.37405811574695874,
+            "z": 51
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.37405811574695,
+          "clearance": 0.3740581157469478
+        }
+      },
+      {
+        "id": "south_route_5",
+        "sample": {
+          "x": 0,
+          "z": 53,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.35227445739703,
+            "z": 53
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.35227445739702,
+          "clearance": 0.3522744573970158
+        }
+      },
+      {
+        "id": "south_route_6",
+        "sample": {
+          "x": 0,
+          "z": 54,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.3422388167656998,
+            "z": 54
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.3422388167657,
+          "clearance": 0.34223881676570045
+        }
+      },
+      {
+        "id": "south_route_7",
+        "sample": {
+          "x": 0,
+          "z": 55,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.3328325066612591,
+            "z": 55
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.33283250666125,
+          "clearance": 0.33283250666124786
+        }
+      },
+      {
+        "id": "south_route_8",
+        "sample": {
+          "x": 0,
+          "z": 57,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.3160685206640842,
+            "z": 57
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.3160685206641,
+          "clearance": 0.3160685206640892
+        }
+      },
+      {
+        "id": "south_route_9",
+        "sample": {
+          "x": 0,
+          "z": 58,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.308784280842035,
+            "z": 58
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.30878428084205,
+          "clearance": 0.30878428084204756
+        }
+      },
+      {
+        "id": "south_route_10",
+        "sample": {
+          "x": 0,
+          "z": 59,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.6006965151329585,
+            "z": 59
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.60069651513297,
+          "clearance": 0.6006965151329666
+        }
+      },
+      {
+        "id": "south_route_11",
+        "sample": {
+          "x": 0,
+          "z": 61,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.590120431231965,
+            "z": 61
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.59012043123195,
+          "clearance": 0.5901204312319521
+        }
+      },
+      {
+        "id": "south_route_12",
+        "sample": {
+          "x": 0,
+          "z": 62,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.5861008700954817,
+            "z": 62
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.5861008700955,
+          "clearance": 0.5861008700954926
+        }
+      },
+      {
+        "id": "south_route_13",
+        "sample": {
+          "x": 0,
+          "z": 63,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.5829532421263705,
+            "z": 63
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.58295324212637,
+          "clearance": 0.582953242126365
+        }
+      },
+      {
+        "id": "south_route_14",
+        "sample": {
+          "x": 0,
+          "z": 65,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.5793308967612978,
+            "z": 65
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.5793308967613,
+          "clearance": 0.5793308967612916
+        }
+      },
+      {
+        "id": "south_route_15",
+        "sample": {
+          "x": 0,
+          "z": 66,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.5788754331060502,
+            "z": 66
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.57887543310605,
+          "clearance": 0.5788754331060488
+        }
+      },
+      {
+        "id": "south_route_16",
+        "sample": {
+          "x": 0,
+          "z": 67,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.0708041062823675,
+            "z": 67
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.07080410628237,
+          "clearance": 0.07080410628236677
+        }
+      },
+      {
+        "id": "south_route_17",
+        "sample": {
+          "x": 0,
+          "z": 69,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.07444160156578317,
+            "z": 69
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.07444160156578,
+          "clearance": 0.0744416015657805
+        }
+      },
+      {
+        "id": "south_route_18",
+        "sample": {
+          "x": 0,
+          "z": 70,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.07761301827213363,
+            "z": 70
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.07761301827213,
+          "clearance": 0.07761301827213174
+        }
+      },
+      {
+        "id": "south_route_19",
+        "sample": {
+          "x": 0,
+          "z": 71,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.0816724165294167,
+            "z": 71
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.08167241652941,
+          "clearance": 0.0816724165294147
+        }
+      },
+      {
+        "id": "south_route_20",
+        "sample": {
+          "x": 0,
+          "z": 73,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.09239132297972175,
+            "z": 73
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.09239132297972,
+          "clearance": 0.09239132297972219
+        }
+      },
+      {
+        "id": "south_route_21",
+        "sample": {
+          "x": 0,
+          "z": 74,
+          "clamped": false,
+          "supportY": 0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": 0.09900978825670059,
+            "z": 74
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 132.0990097882567,
+          "clearance": 0.09900978825669426
+        }
+      },
+      {
+        "id": "south_route_22",
+        "sample": {
+          "x": 0,
+          "z": 75,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": -0.3714848686051584,
+            "z": 75
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.62851513139483,
+          "clearance": -0.3714848686051653
+        }
+      },
+      {
+        "id": "south_route_23",
+        "sample": {
+          "x": 0,
+          "z": 77,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": -0.35433779605437177,
+            "z": 77
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.64566220394562,
+          "clearance": -0.35433779605438076
+        }
+      },
+      {
+        "id": "south_route_24",
+        "sample": {
+          "x": 0,
+          "z": 78,
+          "clamped": false,
+          "supportY": -0.5,
+          "supportPoint": {
+            "x": 0,
+            "y": -0.3446834002652175,
+            "z": 78
+          },
+          "supportNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "radialDistance": 131.6553165997348,
+          "clearance": -0.34468340026521105
+        }
+      }
+    ],
+    "continuity": {
+      "maxClearanceJump": 0.7335,
+      "maxNormalAngleDeg": 0
+    },
+    "currentFace": "top",
+    "faceTransitionCount": 0,
+    "chunkQueueByFace": {}
+  }
+}

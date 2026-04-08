@@ -1,19 +1,21 @@
 import {
   initializeApp
-} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-app.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
   getFirestore, collection, query, where, getDocs, doc, 
   updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot
-} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-} from "https://www.gstatic.com/firebasejs/9.19.1/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
-import { escapeHtml, safeUrl } from "./security-utils.js";
+import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
@@ -224,7 +226,8 @@ function crearElementoComentario(comentarioData) {
   const contentEditable = comentarioElemento.querySelector('.comment-content');
   if (contentEditable && esPropietario) {
     contentEditable.addEventListener('blur', async (e) => {
-      const nuevoTexto = e.target.textContent || "";
+      const nuevoTexto = sanitizeTextInput(e.target.textContent || "", {maxLength: 3000, preserveNewlines: true});
+      e.target.textContent = nuevoTexto;
       if (nuevoTexto !== comentarioData.comentario) {
         await actualizarComentario(comentarioData.id, nuevoTexto);
       }
@@ -273,7 +276,7 @@ async function toggleSeleccionComentario(comentarioId, seleccionar) {
 async function actualizarComentario(comentarioId, nuevoTexto) {
   try {
     await updateDoc(doc(db, "comentarios", comentarioId), {
-      comentario: nuevoTexto,
+      comentario: sanitizeTextInput(nuevoTexto, {maxLength: 3000, preserveNewlines: true}),
       fecha: new Date() // Actualizar fecha de modificación
     });
   } catch (error) {
@@ -507,8 +510,9 @@ const renderLecturas = () => {
       const clave = `${String(unidad.nivel)}_${gradoTexto}_${String(unidad.trimestre)}_${String(unidad.unidad)}`.toLowerCase();
 
       const bgImage = window.imagenesRelacionadasPorClave?.[clave];
-      if (bgImage) {
-        item.style.backgroundImage = `url(${bgImage})`;
+      const bgImageSafe = safeUrl(bgImage, "");
+      if (bgImageSafe) {
+        item.style.backgroundImage = `url("${bgImageSafe}")`;
         item.style.backgroundSize = "cover";
         item.style.backgroundPosition = "center";
         item.style.backgroundRepeat = "no-repeat";
@@ -641,6 +645,43 @@ const renderLecturas = () => {
   };
 };
 
+function appendLecturaModalImage(container, imageUrl = "") {
+  const safeImageUrl = safeUrl(imageUrl, "");
+  if (!container || !safeImageUrl) return;
+
+  const imageBlock = document.createElement("div");
+  imageBlock.style.backgroundImage = `url("${safeImageUrl}")`;
+  imageBlock.style.backgroundPosition = "center";
+  imageBlock.style.backgroundSize = "cover";
+  imageBlock.style.backgroundRepeat = "no-repeat";
+  imageBlock.style.width = "100%";
+  imageBlock.style.height = "200px";
+  imageBlock.style.margin = "1rem 0";
+  imageBlock.style.borderRadius = "8px";
+  container.appendChild(imageBlock);
+}
+
+function renderLecturaModalContent(container, rawHtml = "", imageUrl = "") {
+  if (!container) return;
+  container.replaceChildren();
+
+  const sanitizedHtml = sanitizeRichText(rawHtml || "", { fallback: "<p></p>" });
+  const parser = new DOMParser();
+  const htmlDoc = parser.parseFromString(sanitizedHtml, "text/html");
+  const bloques = Array.from(htmlDoc.body.children);
+
+  let insertedImage = false;
+  bloques.forEach((block) => {
+    const clone = block.cloneNode(true);
+    const blockText = String(clone.textContent || "").toLowerCase();
+    container.appendChild(clone);
+    if (!insertedImage && (blockText.includes("análisis") || blockText.includes("competencia") || blockText.includes("estructura"))) {
+      appendLecturaModalImage(container, imageUrl);
+      insertedImage = true;
+    }
+  });
+}
+
 
 
 
@@ -654,10 +695,9 @@ const configurarEventos = () => {
     const user = auth.currentUser;
     if (!id || !user) return;
   
-    const contenedor = e.target.closest(".item-lectura");
-    const coleccion = contenedor?.dataset.coleccion || "lecturas";
+    const lecturaItem = e.target.closest(".item-lectura");
+    const coleccion = lecturaItem?.dataset.coleccion || "lecturas";
     const docRef = doc(db, coleccion, id);
-    const snapLectura = await getDoc(docRef);
     
     // APROBAR
     if (e.target.classList.contains("aprobar-icon")) {
@@ -724,50 +764,6 @@ const configurarEventos = () => {
         }
       }
     }
-
-
-
-
-  // Comentarios
-  if (e.target.tagName === "BUTTON" && e.target.textContent === "Enviar") {
-    const input = document.getElementById(`input-${id}`);
-    const texto = input.value.trim();
-    if (!texto) return;
-
-    // Capturamos la selección de texto
-    const seleccion = window.getSelection().toString().trim();
-    if (!seleccion) return;
-
-    try {
-      // Agregar comentario en Firestore
-      await agregarComentario(seleccion, texto); // Usamos la función para agregar comentario
-    } catch (err) {
-    }
-  }
-
-  // Mostrar/ocultar comentarios
-  if (e.target.classList.contains("bx-comment")) {
-    const section = document.getElementById(`comentarios-${id}`);
-    section.style.display = section.style.display === "none" ? "block" : "none";
-  }
-
-    // Toggle comentarios
-    if (e.target.classList.contains("bx-comment")) {
-      e.stopPropagation(); // Detener la propagación para evitar conflictos
-      const section = document.getElementById(`comentarios-${id}`);
-      
-      if (section) {
-        // Alternar visibilidad
-        section.style.display = section.style.display === "none" ? "block" : "none";
-        
-        // Si se está mostrando, cargar los comentarios
-        if (section.style.display === "block") {
-          await renderComentarios(id);
-        }
-      }
-      return; // Salir temprano para no procesar otros eventos
-    }
-
 
     // ARCHIVAR LECTURA
     if (e.target.classList.contains("archivar-lectura")) {
@@ -841,7 +837,6 @@ const configurarEventos = () => {
         }
       }
       
-      // 1) recuperar texto y doc
       let textoGuardado = localStorage.getItem(`lectura_${id}`) || "";
       let lecturaDoc = null;
       try {
@@ -857,13 +852,7 @@ const configurarEventos = () => {
         alert("❌ La lectura no se encontró en Firestore.");
         return;
       }
-    
-      // 2) parsear bloques
-      const parser  = new DOMParser();
-      const htmlDoc = parser.parseFromString(textoGuardado, "text/html");
-      const bloques = Array.from(htmlDoc.body.children);
-    
-      // 3) preparar imagen tras el análisis
+
       const unidadRaw = lecturaDoc.unidadData ?? {
         nivel: lecturaDoc.nivel, grado: lecturaDoc.grado,
         trimestre: lecturaDoc.trimestre, unidad: lecturaDoc.unidad
@@ -871,42 +860,15 @@ const configurarEventos = () => {
       const gradoTexto = mapaGradoTexto[String(unidadRaw.grado)] || unidadRaw.grado || "-";
       const clave      = `${unidadRaw.nivel}_${gradoTexto}_${unidadRaw.trimestre}_${unidadRaw.unidad}`.toLowerCase();
       const urlImagen  = window.imagenesRelacionadasPorClave?.[clave];
-    
-      // 4) volcar todo en un solo contenedor
+
       const contenedor = document.getElementById("modalTextoLectura");
-      contenedor.innerHTML = "";
-    
-      let pasoAnálisis = true;
-      for (let el of bloques) {
-        const html = el.outerHTML;
-        const low  = html.toLowerCase();
-    
-        if (pasoAnálisis && (low.includes("análisis") || low.includes("competencia") || low.includes("estructura"))) {
-          // primer bloque de análisis
-          contenedor.innerHTML += html;
-          // luego de ese primer bloque de análisis inyectamos la imagen
-          if (urlImagen) {
-            contenedor.innerHTML += `
-              <div style="
-                background: url(${urlImagen}) center/cover no-repeat;
-                width: 100%; height: 200px; margin: 1rem 0;
-                border-radius: 8px;
-              "></div>`;
-          }
-          pasoAnálisis = false;
-          continue;
-        }
-        // el resto: todo el contenido de la lectura (incluye título <h2>, párrafos, tabla de sinónimos, bibliografía…)
-        contenedor.innerHTML += html;
-      }
-    
-      // 5) mostrar modal y comentarios
+      renderLecturaModalContent(contenedor, textoGuardado, urlImagen);
+
       agregarMarcadoresDePosicion(contenedor);
       document.getElementById("modalLectura").style.display = "flex";
       lecturaIdActual = id;
       window.unsubscribeComentarios = await renderComentarios(id);
-    
-      // ajustar estilos inline para asegurar que no haya scroll interno
+
       contenedor.style.maxHeight = "none";
       contenedor.style.overflow  = "visible";
     }
@@ -936,7 +898,7 @@ const configurarEventos = () => {
   
   document.getElementById("btnGuardarLectura").addEventListener("click", async () => {
     const contenido = document.getElementById("modalTextoLectura");
-    const nuevoTexto = contenido.innerHTML.trim();
+    const nuevoTexto = sanitizeRichText(contenido.innerHTML.trim());
   
     if (lecturaIdActual && nuevoTexto) {
       try {
@@ -949,6 +911,7 @@ const configurarEventos = () => {
         }
   
         await updateDoc(lecturaRef, { texto: nuevoTexto });
+        contenido.innerHTML = nuevoTexto;
   
         alert("Lectura actualizada correctamente.");
         contenido.contentEditable = "false";
@@ -1013,24 +976,6 @@ function agregarMarcadoresDePosicion(elemento) {
     parent.insertBefore(wrapper, node);
     wrapper.appendChild(node);
   });
-}
-
-
-function obtenerNodosDeTexto(elemento) {
-  const nodos = [];
-  const walker = document.createTreeWalker(
-    elemento,
-    NodeFilter.SHOW_TEXT,
-    null,
-    false
-  );
-  
-  let nodo;
-  while (nodo = walker.nextNode()) {
-    nodos.push(nodo);
-  }
-  
-  return nodos;
 }
 
 
@@ -1294,8 +1239,9 @@ async function agregarComentario(seccion, comentario) {
     const comentarioRef = collection(db, "comentarios");
     const comentarioData = {
       lecturaId: lecturaIdActual,
+      uid: auth.currentUser?.uid || "",
       seccion: seccion,
-      comentario: comentario.trim(),
+      comentario: sanitizeTextInput(comentario, {maxLength: 3000, preserveNewlines: true}),
       autor: currentUserName,
       fecha: new Date(),
       posicion: posicion,
@@ -1615,11 +1561,15 @@ function stripHTML(html) {
     const q = query(collection(db, "imagenesCompartidas"), where("share", "==", true));
     onSnapshot(q, async (snap) => {
       const imagenes = [];
+      const seenImages = new Set();
       window.imagenesRelacionadasPorClave = {}; // Reinicia antes de actualizar
   
       snap.forEach(docSnap => {
         const data = docSnap.data();
         const id = docSnap.id;
+        const dedupeKey = `${String(data.uid || "")}::${String(data.nombre || id)}`;
+        if (seenImages.has(dedupeKey)) return;
+        seenImages.add(dedupeKey);
         const gradoTexto = mapaGradoTexto[String(data.grado)] || data.grado;
   
         const clave = `${data.nivel}_${gradoTexto}_${data.trimestre}_${data.unidad}`.toLowerCase();

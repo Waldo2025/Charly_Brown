@@ -2,33 +2,33 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-    <script src="config.local.js"></script>
+    <script src="runtime-config-loader.js" defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Contenido de la Unidad</title>
   <!-- jQuery primero -->
-  <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-  <link href="https://unpkg.com/boxicons/css/boxicons.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <script src="vendor/jquery/jquery.min.js"></script>
+  <link href="vendor/boxicons/boxicons.min.css" rel="stylesheet">
+  <script src="vendor/tesseract/tesseract.min.js"></script>
 
-  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+  <script src="vendor/interactjs/interact.min.js"></script>
 
     <!-- Trumbowyg CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/ui/trumbowyg.min.css">
+    <link rel="stylesheet" href="vendor/trumbowyg/trumbowyg.min.css">
 
     <!-- Plugins recomendados -->
      <!-- ✅ Prism.js (para que funcione el plugin highlight de Trumbowyg) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+    <link rel="stylesheet" href="vendor/prism/prism.min.css" />
 
     <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <!-- Bootstrap Select CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-select/bootstrap-select.min.css">
   
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script src="vendor/marked/marked.umd.js"></script>
+    <link rel="stylesheet" href="vendor/fontawesome/all.min.css" crossorigin="anonymous">
+    <script src="vendor/pdfjs/pdf.min.js"></script>
 
     <link rel="stylesheet" href="contenidoUnidad.css">
     <link rel="stylesheet" href="sidebar.css">
@@ -394,7 +394,7 @@
         <div class="btnstextoLectura">
           <button id="continuarGeneracionBtn" style="display:none;" class="btn btn-secondary">Continuar generando</button>
           <button id="guardarLecturaBtn" class="btn btn-success">Guardar lectura</button>
-          <button onclick="exportarLecturaComoTaggedText()" class="btn btn-outline-primary">Exportar txt</button>
+          <button id="exportarLecturaTaggedBtn" class="btn btn-outline-primary">Exportar txt</button>
           <button id="cerrarEditorLecturaBtn" class="btn btn-danger">Cerrar editor</button>
         </div>
         <div id="specsImagenContainer"></div>
@@ -456,7 +456,7 @@
   
   <div id="modalCompartirLectura" class="modal">
     <div class="modal-content">
-      <span class="close" onclick="cerrarModalCompartirLectura()">&times;</span>
+      <span class="close" id="cerrarModalCompartirLecturaBtn">&times;</span>
       <h4>¿Con quién deseas compartir esta lectura?</h4>
   
   
@@ -520,7 +520,7 @@
 <div id="panelLecturasGuardadas" class="panelLecturasGuardadas"  style="display: none; position: fixed; top: 80px; right: 20px; width: 30vh; background: white; border: 1px solid #ccc; padding: 1rem; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index: 99999; border-radius: 12px;">
   <h4 style="margin-bottom: 1rem;">🧠 MindMaps Guardados</h4>
   <div id="listaMindmaps"></div>
-  <button class="boton" onclick="document.getElementById('panelLecturasGuardadas').style.display='none'">Cerrar</button>
+  <button class="boton" id="cerrarPanelLecturasGuardadasBtn">Cerrar</button>
 </div>
 
 <div id="modalNombreMindmap" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:99999;">
@@ -798,40 +798,35 @@
 
 
 <!-- Trumbowyg JS -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/trumbowyg.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+<script src="vendor/trumbowyg/trumbowyg.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.cleanpaste.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 
 <!-- Bootstrap JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 
 <!-- Bootstrap Select JS -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+<script src="vendor/bootstrap-select/bootstrap-select.min.js"></script>
 
-<script>
-  // Inicializar los selectpickers
-  document.addEventListener('DOMContentLoaded', function () {
-    $('.selectpicker').selectpicker('render');
-  });
-</script>
+<script src="bootstrap-select-init.js" defer></script>
 
 <!-- Plugins opcionales (recomendados) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.cleanpaste.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 
-<script src="https://cdn.jsdelivr.net/gh/evidenceprime/html-docx-js@0.3.1/dist/html-docx.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.3/vanilla-tilt.min.js"></script>
+<script src="html-docx.js"></script>
+<script src="vendor/vanilla-tilt/vanilla-tilt.min.js"></script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>  
+<script src="vendor/prism/prism.js"></script>  
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/fontsize/trumbowyg.fontsize.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/highlight/trumbowyg.highlight.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/resizimg/trumbowyg.resizimg.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/pasteimage/trumbowyg.pasteimage.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/base64/trumbowyg.base64.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/table/trumbowyg.table.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/noembed/trumbowyg.noembed.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.fontsize.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.highlight.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.resizimg.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.pasteimage.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.base64.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.table.min.js"></script>
+<script src="vendor/trumbowyg/plugins/trumbowyg.noembed.min.js"></script>
 
 
 
@@ -842,25 +837,6 @@
 <script type="module" src="chatbot.js"></script>
 <script type="module" src="generarImagenes.js"></script>
 
-<script>
-  (function(){
-    const load = async () => {
-      let v = '';
-      try {
-        const r = await fetch('version.json', { cache: 'no-store' });
-        const d = await r.json();
-        v = (d && d.version) ? String(d.version) : '';
-      } catch (_) {}
-      const s = document.createElement('script');
-      s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
-      document.body.appendChild(s);
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', load);
-    } else {
-      load();
-    }
-  })();
-</script>
+<script src="update-banner-loader.js" defer></script>
 </body>
 </html>

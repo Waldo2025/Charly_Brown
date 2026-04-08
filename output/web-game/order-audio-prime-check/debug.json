@@ -1,0 +1,15 @@
+{
+  "d1": {
+    "score": 0,
+    "wordStates": [],
+    "orderWordIndex": 0,
+    "musicPlaying": false,
+    "trap": false
+  },
+  "d2": {
+    "score": 0,
+    "musicPlaying": false,
+    "trap": false,
+    "activeWords": []
+  }
+}

@@ -3,25 +3,25 @@
 
 <head>
   <meta charset="UTF-8">
-    <script src="config.local.js"></script>
+    <script src="runtime-config-loader.js" defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Contenido de la Unidad</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="local-fonts.css">
   <!-- Trumbowyg -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/dist/ui/trumbowyg.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"
+  <link rel="stylesheet" href="vendor/trumbowyg/trumbowyg.min.css">
+  <script src="html-docx.js"></script>
+  <script src="vendor/xlsx/xlsx.full.min.js"></script>
+  <link href="vendor/fontawesome/all.min.css" rel="stylesheet"
     crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="tailwind-lite.css?v=1.0.0">
 
   <script type="module" src="secuenciayalcance.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
 
-  <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+  <script src="vendor/jquery/jquery.min.js"></script>
 
   <!-- DataTables -->
-  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.5/css/jquery.dataTables.min.css">
-  <script src="https://cdn.datatables.net/1.13.5/js/jquery.dataTables.min.js"></script>
+  <link rel="stylesheet" href="vendor/datatables/jquery.dataTables.min.css">
+  <script src="vendor/datatables/jquery.dataTables.min.js"></script>
 
 
   <link rel="stylesheet" href="generarLectura.css">
@@ -740,9 +740,10 @@
     style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#00000080; z-index:9999;">
     <div class="sya"
       style="max-height:90%; overflow:auto; position:relative; background:white; padding:20px; width:80%; margin:auto; top:5%;">
-      <span id="cerrarModalVerSecuencias"
-        style="position:absolute; top:10px; right:20px; cursor:pointer; font-size:24px;">&times;</span>
-      <h2>📚 Secuencias Guardadas</h2>
+      <div class="cb-modal-head">
+        <h2 class="cb-modal-title">📚 Secuencias Guardadas</h2>
+        <button type="button" id="cerrarModalVerSecuencias" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
 
       <!-- Contenedor de lista -->
       <div id="listaSecuenciasGuardadas" style="margin-top:20px;">
@@ -758,11 +759,10 @@
     <div class="sya"
       style="background:#fff; padding:20px; border-radius:8px; width:80%; margin:50px auto; max-height:90%; overflow:auto; position:relative;">
 
-      <!-- Botón cerrar -->
-      <span id="cerrarModalEditarSecuencia"
-        style="position:absolute; top:10px; right:20px; cursor:pointer; font-size:24px;">&times;</span>
-
-      <h2>✏️ Editar Secuencia de Secundaria</h2>
+      <div class="cb-modal-head">
+        <h2 class="cb-modal-title">✏️ Editar Secuencia de Secundaria</h2>
+        <button type="button" id="cerrarModalEditarSecuencia" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
 
       <form id="formEditarSecuencia">
 
@@ -796,7 +796,7 @@
         <hr>
 
         <!-- ✅ BOTÓN GUARDAR CAMBIOS -->
-        <div style="text-align:right; margin-top:20px;">
+        <div class="cb-modal-foot">
           <button type="submit"
             style="padding:10px 20px; background:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer;">
             💾 Guardar Cambios
@@ -812,8 +812,10 @@
   <!-- ✅ NUEVO Modal Generar Unidad Secundaria -->
   <div id="modalGenerarUnidadSecundaria" class="modal" style="display:none;">
     <div class="modal-content">
-      <span id="cerrarModalUnidadSecundaria" class="close">&times;</span>
-      <h3>📘 Generar Unidad de Secundaria</h3>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title">📘 Generar Unidad de Secundaria</h3>
+        <button type="button" id="cerrarModalUnidadSecundaria" class="close cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
 
       <form id="formGenerarUnidadSecundaria">
         <!-- Fila de selección de grado, trimestre, unidad -->
@@ -880,13 +882,12 @@
         <div class="form-col">
           <label for="selectGeminiEndpointSecundaria">Modelo Gemini:</label>
           <select id="selectGeminiEndpointSecundaria">
-            <option value="gemini-3.1-flash-lite-preview:generateContent">Gemini 3.0/3.1 Flash Lite (preview)</option>
             <option value="gemini-3-flash-preview:generateContent">Gemini 3 Flash (preview)</option>
+            <option value="gemini-3.1-pro-preview:generateContent">Gemini 3.1 Pro (preview)</option>
+            <option value="gemini-3-pro-preview:generateContent">Gemini 3 Pro (preview)</option>
             <option value="gemini-2.5-pro:generateContent">Gemini 2.5 Pro</option>
             <option value="gemini-2.5-flash:generateContent">Gemini 2.5 Flash</option>
             <option value="gemini-2.5-flash-lite:generateContent" selected>Gemini 2.5 Flash Lite</option>
-            <option value="gemini-3.1-pro-preview:generateContent">Gemini 3.1 Pro (preview) - no estable (03-mar-2026)</option>
-            <option value="gemini-3-pro-preview:generateContent">Gemini 3.0 Pro (preview) - se depreca 09-mar-2026</option>
           </select>
         </div>
 
@@ -1063,10 +1064,9 @@
     <div
       style="padding:30px; background:white; width:90%; max-width:700px; height:90vh; margin:5vh auto; padding:0; border-radius:10px; position:relative; display:flex; flex-direction:column;">
 
-      <div
-        style="padding:1rem; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
-        <h3 id="vistaTema" style="margin:0;"></h3>
-        <span id="cerrarVistaPrevia" style="font-size:24px; cursor:pointer;">&times;</span>
+      <div class="cb-modal-head">
+        <h3 id="vistaTema" class="cb-modal-title" style="margin:0;"></h3>
+        <button type="button" id="cerrarVistaPrevia" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
       </div>
 
       <div id="contenidoVista">
@@ -1404,6 +1404,9 @@
                 <p>Selecciona un índice para editar la pregunta.</p>
               </div>
               <div class="asc-editor-panel-actions">
+                <button type="button" id="ascOpenSynonymsPanel" class="asc-editor-window-btn" title="Ver tablas de sinónimos">
+                  <i class="fas fa-book-open"></i>
+                </button>
                 <button type="button" id="ascToggleQuestions" class="asc-editor-window-btn asc-editor-panel-toggle" title="Colapsar preguntas">
                   <i class="fas fa-chevron-right"></i>
                 </button>
@@ -1595,6 +1598,26 @@
           </div>
         </div>
 
+        <div id="ascSynonymsPanel" class="asc-question-modal hidden" aria-hidden="true">
+          <div class="asc-question-modal-card asc-synonyms-modal-card">
+            <div class="asc-question-modal-head">
+              <div>
+                <h3>Tablas de Sinónimos</h3>
+                <p>Vista rápida de las tablas detectadas dentro de la lectura.</p>
+              </div>
+              <div class="asc-editor-panel-actions">
+                <button type="button" id="ascSynonymsClose" class="asc-editor-window-btn" title="Cerrar tablas de sinónimos">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </div>
+            <div id="ascSynonymsBody" class="asc-question-modal-body asc-synonyms-modal-body"></div>
+            <div class="asc-question-modal-actions">
+              <button type="button" id="ascSynonymsDone" class="asc-editor-footer-btn is-primary">Listo</button>
+            </div>
+          </div>
+        </div>
+
         <div class="asc-editor-footer">
           <div class="asc-editor-footer-side">
             <div class="asc-editor-toolbar-group asc-editor-toolbar-group--ribbon asc-editor-toolbar-group--selects asc-editor-toolbar-group--footer">
@@ -1657,10 +1680,9 @@
     <div
       style="padding:30px; background:white; width:90%; max-width:700px; height:90vh; margin:5vh auto; padding:0; border-radius:10px; position:relative; display:flex; flex-direction:column;">
 
-      <div
-        style="padding:1rem; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
-        <h3 id="vistaTituloLectura" style="margin:0;"></h3>
-        <span id="cerrarVistaLectura" style="font-size:24px; cursor:pointer;">&times;</span>
+      <div class="cb-modal-head">
+        <h3 id="vistaTituloLectura" class="cb-modal-title" style="margin:0;"></h3>
+        <button type="button" id="cerrarVistaLectura" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
       </div>
 
       <div id="contenidoVistaLectura">
@@ -1678,7 +1700,7 @@
       style="background:white; width:90%; max-width:95%; height:90vh; margin:5vh auto; border-radius:10px; position:relative; display:flex; flex-direction:column; overflow:hidden;">
 
       <!-- Header del modal con botón de análisis -->
-      <div class="modal-header"
+      <div class="modal-header cb-modal-head"
         style="padding: 15px 20px; background:#f0f0f0; display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0;">Lecturas concentradas</h3>
         <div class="modal-icons">
@@ -1695,7 +1717,7 @@
             style="border:none; background:none; font-size:1.2em; cursor:pointer; color:#4c83ff;">
             <i class="fas fa-robot"></i>
           </button>
-          <button id="cerrarModalLecturasConcentradas" title="Cerrar"
+          <button id="cerrarModalLecturasConcentradas" title="Cerrar" type="button" class="cb-modal-close"
             style="border:none; background:none; font-size:1.2em; cursor:pointer;">
             <i class="fas fa-times"></i>
           </button>
@@ -1745,7 +1767,7 @@
     style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999;">
     <div
       style="background:white; width:90%; max-width:800px; height:80vh; margin:5vh auto; border-radius:10px; padding:20px; overflow:auto; position:relative;">
-      <button id="cerrarVistaAnalisis"
+      <button id="cerrarVistaAnalisis" type="button" class="cb-modal-close"
         style="position:absolute; top:10px; right:10px; font-size:18px; border:none; background:none; cursor:pointer;">✖</button>
 
       <!-- Botón de imprimir -->
@@ -1768,14 +1790,14 @@
       style="height:min(88vh, 1200px);">
       <!-- Header -->
       <div
-        class="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 rounded-t-xl bg-white">
-        <h3 class="m-0 text-lg font-bold">Lecturas nuevas</h3>
+        class="cb-modal-head flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 rounded-t-xl bg-white">
+        <h3 class="cb-modal-title m-0 text-lg font-bold">Lecturas nuevas</h3>
         <div class="flex items-center gap-3">
           <button id="btnAbrirCrearLectura" class="btn-analisis btn-crear-lectura-icon" aria-label="Crear lectura nueva" title="Crear lectura nueva">
             <i class="fas fa-plus"></i>
           </button>
           <button id="cerrarModalLecturasNuevas"
-            class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none">&times;</button>
+            class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none cb-modal-close" type="button" aria-label="Cerrar modal">&times;</button>
         </div>
       </div>
 
@@ -1834,17 +1856,17 @@
               class="studio-model-selector studio-form-card studio-form-card--meta inline-flex items-center gap-2 text-xs">
               <span class="text-gray-600">Modelo</span>
               <select id="selectGeminiEndpoint2" class="px-2 py-1 border border-gray-300 rounded-md text-xs bg-white">
-                <option value="gemini-3.1-flash-lite-preview">Gemini 3.0/3.1 Flash Lite (preview)</option>
                 <option value="gemini-3-flash-preview">Gemini 3 Flash (preview)</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview)</option>
+                <option value="gemini-3-pro-preview">Gemini 3 Pro (preview)</option>
                 <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini-2.5-flash-lite" selected>Gemini 2.5 Flash Lite</option>
-                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview) - no estable (03-mar-2026)</option>
-                <option value="gemini-3-pro-preview">Gemini 3.0 Pro (preview) - se depreca 09-mar-2026</option>
               </select>
             </label>
           </div>
         </div>
+        <button id="cerrarModalNuevaLectura" type="button" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
       </div>
 
       <!-- Body -->
@@ -2015,10 +2037,10 @@
       class="modal-normal-content mx-auto my-[3%] w-[96%] max-w-[980px] bg-white rounded-xl shadow-lg flex flex-col max-h-[92vh]">
       <!-- Encabezado -->
       <div
-        class="modal-themed-header sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 rounded-t-xl bg-white">
-        <h3 class="m-0 text-lg font-bold">Editar lectura</h3>
+        class="modal-themed-header cb-modal-head sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 rounded-t-xl bg-white">
+        <h3 class="cb-modal-title m-0 text-lg font-bold">Editar lectura</h3>
         <button id="cerrarModalEditarLectura"
-          class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none">&times;</button>
+          class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none cb-modal-close" aria-label="Cerrar modal" type="button">&times;</button>
       </div>
 
       <!-- Cuerpo -->
@@ -2058,7 +2080,8 @@
 
           <!-- Botones -->
           <div
-            class="sticky bottom-0 z-10 flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-white rounded-b-xl">
+            class="cb-modal-foot sticky bottom-0 z-10 flex justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-white rounded-b-xl">
+            <button type="button" id="btnDescargarEditorLectura" class="btn-analisis"><i class="far fa-file-word"></i> Descargar Word</button>
             <button type="button" id="btnVistaLectura" class="btn-analisis"><i class="far fa-eye"></i> Abrir vista
               grande</button>
             <button type="submit" class="btn-analisis"><i class="fas fa-save"></i> Guardar cambios</button>
@@ -2077,9 +2100,9 @@
       class="modal-normal-content modal-resultado-shell studio-modal-reading-result__panel mx-auto my-[2%] w-[99%] max-w-[1760px] bg-white rounded-xl shadow-lg flex flex-col max-h-[94vh]">
       <div
         class="modal-resultado-header sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 rounded-t-xl bg-white">
-        <h3 class="m-0 text-lg font-bold">Análisis y resultado</h3>
+        <h3 class="cb-modal-title m-0 text-lg font-bold">Análisis y resultado</h3>
         <button id="cerrarModalResultado"
-          class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none">&times;</button>
+          class="text-gray-700 hover:bg-gray-100 rounded-md px-2 py-1 text-2xl leading-none cb-modal-close" type="button" aria-label="Cerrar modal">&times;</button>
       </div>
 
       <div class="modal-resultado-body relative px-4 py-4 overflow-auto flex-1">
@@ -2118,8 +2141,7 @@
     style="display: none; position: fixed; top: 80px; right: 20px; width: 30vh; background: white; border: 1px solid #ccc; padding: 1rem; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index: 99999; border-radius: 12px;">
     <h4 style="margin-bottom: 1rem;">🧠 MindMaps Guardados</h4>
     <div id="listaMindmaps"></div>
-    <button class="boton"
-      onclick="document.getElementById('panelLecturasGuardadas').style.display='none'">Cerrar</button>
+    <button class="boton" id="cerrarPanelLecturasGuardadasBtn">Cerrar</button>
   </div>
 
   <div id="modalNombreMindmap"
@@ -2142,7 +2164,7 @@
   <div id="contenedorPanelGuardadas" class="modal">
     <div class="panel-header">
       <h2>Genera tu MindMap</h2>
-      <button id="cerrarPanelGuardadas" class="btn-cerrar">&times;</button>
+      <button id="cerrarPanelGuardadas" class="btn-cerrar cb-modal-close" type="button" aria-label="Cerrar modal">&times;</button>
 
       <!-- Íconos de acción -->
       <div class="panel-actions">
@@ -2201,7 +2223,10 @@
   <!-- Modal de nombre para imagen -->
   <div id="modalNombreImagen" class="modal-imagen" style="display:none;">
     <div class="modal-contenido">
-      <h4>¿Qué palabra representa esta imagen?</h4>
+      <div class="cb-modal-head">
+        <h4 class="cb-modal-title">¿Qué palabra representa esta imagen?</h4>
+        <button id="cerrarModalNombreImagen" type="button" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <input type="text" id="nombreImagenInput" class="form-control" placeholder="Ej. Brave, Tree, Cloud" />
       <div class="modal-buttons">
         <button id="cancelarNombreImagen" class="btn btn-secondary">Cancelar</button>
@@ -2213,8 +2238,8 @@
 
   <div id="modalImagenes" class="modal-normal" style="display:none;">
     <div class="modal-normal-content" style="max-width:500px; margin:5% auto; padding:20px; position:relative;">
-      <span class="close-modal" onclick="document.getElementById('modalImagenes').style.display='none'"
-        style="position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer;">&times;</span>
+      <button type="button" class="close-modal cb-modal-close" id="cerrarModalImagenesBtn"
+        style="position:absolute; top:10px; right:15px;" aria-label="Cerrar modal">&times;</button>
       <!-- Reubicamos el contenido del panel original aquí -->
       <div class="panel-header">
         <input type="text" id="buscadorImagenes" placeholder="Buscar imagen..." class="buscador-imagenes" />
@@ -2238,10 +2263,13 @@
   <div class="modal" id="modalEditarIA"
     style="display:none; position:fixed; z-index:999999; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center;">
     <div style="background:white; padding:2rem; border-radius:10px; max-width:500px; width:90%;">
-      <h5>Editar Imagen con IA</h5>
+      <div class="cb-modal-head">
+        <h5 class="cb-modal-title">Editar Imagen con IA</h5>
+        <button id="cerrarModalEditarIA" type="button" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <p style="font-size:0.9rem;">Describe lo que deseas cambiar o mejorar:</p>
       <textarea id="promptEdicionIA" rows="4" style="width:100%; margin-bottom:1rem;"></textarea>
-      <div style="display:flex; justify-content: flex-end; gap:1rem;">
+      <div class="cb-modal-foot">
         <button id="cancelarEdicionIA">Cancelar</button>
         <button id="confirmarEdicionIA"
           style="background:#10b981; color:white; border:none; padding:0.5rem 1rem;">Generar</button>
@@ -2255,7 +2283,7 @@
       <div class="modal-content" style="background:#000;">
         <div class="modal-header">
           <h5 class="modal-title text-white">Vista con cajas de texto</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          <button type="button" class="cb-modal-close" data-bs-dismiss="modal" aria-label="Cerrar modal">&times;</button>
         </div>
         <div class="modal-body d-flex justify-content-center">
           <div id="contenidoVistaConTexto">
@@ -2273,7 +2301,7 @@
       <div class="modal-content">
         <div class="modal-header bg-dark text-white">
           <h5 class="modal-title" id="modalAudioLabel">🎤 Generador de Voz en Off</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          <button type="button" class="cb-modal-close" data-bs-dismiss="modal" aria-label="Cerrar modal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="mb-3">
@@ -2334,10 +2362,8 @@
 
       <!-- Panel izquierdo: Formulario -->
       <div style="width: 40%; padding: 20px; overflow-y:auto; border-right: 1px solid #ccc; position: relative;">
-        <span class="close-modal" data-action="close"
-          style="position:absolute; top:10px; right:15px; font-size:28px; font-weight:bold; cursor:pointer; color:#333;">
-          &times;
-        </span>
+        <button type="button" class="close-modal cb-modal-close" data-action="close"
+          style="position:absolute; top:10px; right:15px;" aria-label="Cerrar modal">&times;</button>
 
         <h3>🎨 Generar Ilustración</h3>
         <form id="formGeneradorImagenes" class="gen-form">
@@ -2411,7 +2437,10 @@
   <!-- ✅ Modal para compartir imagen -->
   <div id="modalCompartirImagenFirebase" class="modal-compartir-firebase" style="display: none;">
     <div class="modal-contenido">
-      <h4>Compartir Imagen</h4>
+      <div class="cb-modal-head">
+        <h4 class="cb-modal-title">Compartir Imagen</h4>
+        <button id="cerrarModalCompartirImagenFirebase" type="button" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
 
       <label for="compartirNivel"><strong>Nivel:</strong></label>
       <select id="compartirNivel">
@@ -2456,7 +2485,7 @@
       </select>
 
 
-      <div style="margin-top: 1rem; text-align: right;">
+      <div class="cb-modal-foot">
         <button id="cancelarCompartirBtn">Cancelar</button>
         <button id="confirmarCompartirBtn">Compartir</button>
       </div>
@@ -2468,9 +2497,10 @@
   <div id="modalListaLecturasNuevas" class="modal-normal" style="display:none;">
     <div class="modal-normal-content"
       style="background:#fff; width:90%; max-width:700px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
-      <span id="cerrarModalListaLecturas" class="close-modal"
-        style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
-      <h2>Lecturas Nuevas Guardadas</h2>
+      <div class="cb-modal-head">
+        <h2 class="cb-modal-title">Lecturas Nuevas Guardadas</h2>
+        <button type="button" id="cerrarModalListaLecturas" class="close-modal cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <div id="listaLecturasNuevas" class="lista-lecturas-container"></div>
     </div>
   </div>
@@ -2479,9 +2509,10 @@
   <div id="modalCompartirLectura" class="modal-normal" style="display:none;">
     <div class="modal-normal-content"
       style="background:#fff; width:90%; max-width:500px; margin:5% auto; border-radius:8px; padding:20px; position:relative;">
-      <span id="cerrarModalCompartirLectura" class="close-modal"
-        style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
-      <h3>Compartir lectura con usuarios</h3>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title">Compartir lectura con usuarios</h3>
+        <button type="button" id="cerrarModalCompartirLectura" class="close-modal cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <div id="listaUsuariosCompartir"></div>
 
       <div style="margin-top:20px;">
@@ -2507,7 +2538,9 @@
         </select>
       </div>
 
-      <button id="btnConfirmarCompartir" class="btn-analisis" style="margin-top:20px;">Confirmar</button>
+      <div class="cb-modal-foot">
+        <button id="btnConfirmarCompartir" class="btn-analisis" type="button">Confirmar</button>
+      </div>
     </div>
   </div>
 
@@ -2516,27 +2549,16 @@
   <div id="modalVerLecturaCompleta" class="modal-normal" style="display:none;">
     <div class="modal-normal-content"
       style="background:#fff; width:90%; max-width:800px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
-      <span id="cerrarModalLecturaCompleta" class="close-modal"
-        style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title">Lectura completa</h3>
+        <button type="button" id="cerrarModalLecturaCompleta" class="close-modal cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <div id="contenidoLecturaCompleta"></div>
 
       <!-- ✅ Botón para descargar en Word -->
-      <button id="btnDescargarLecturaWord" style="margin-top: 20px;">Descargar lectura en Word</button>
-    </div>
-  </div>
-
-  <!-- Modal: Editar lectura -->
-  <div id="modalEditarLectura" class="modal-normal" style="display:none;">
-    <div class="modal-normal-content"
-      style="background:#fff; width:90%; max-width:800px; margin:5% auto; border-radius:8px; padding:20px; position:relative; max-height:80vh; overflow-y:auto;">
-      <span id="cerrarModalEditarLectura" class="close-modal"
-        style="position:absolute; top:15px; right:20px; font-size:24px; cursor:pointer;">&times;</span>
-      <h2>Editar Lectura</h2>
-      <div id="editorLectura" contenteditable="true"
-        style="border:1px solid #ccc; padding:10px; border-radius:6px; min-height:200px;"></div>
-      <p style="font-size:12px; color:#888; margin-top:10px;">Los cambios se guardan automáticamente.</p>
-      <button id="btnDescargarEditorLectura" style="margin-top: 10px;">📄 Descargar en Word</button>
-
+      <div class="cb-modal-foot">
+        <button id="btnDescargarLecturaWord" type="button">Descargar lectura en Word</button>
+      </div>
     </div>
   </div>
 
@@ -2914,13 +2936,12 @@
               <div class="space-y-1 unidad-editor-field--full">
                 <label for="selectGeminiEndpoint" class="unidad-label">Modelo IA</label>
                 <select id="selectGeminiEndpoint" class="unidad-input">
-                  <option value="gemini-3.1-flash-lite-preview">Gemini 3.0/3.1 Flash Lite (preview)</option>
                   <option value="gemini-3-flash-preview">Gemini 3 Flash (preview)</option>
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview)</option>
+                  <option value="gemini-3-pro-preview">Gemini 3 Pro (preview)</option>
                   <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                   <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                   <option value="gemini-2.5-flash-lite" selected>Gemini 2.5 Flash Lite</option>
-                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview) - no estable (03-mar-2026)</option>
-                  <option value="gemini-3-pro-preview">Gemini 3.0 Pro (preview) - se depreca 09-mar-2026</option>
                 </select>
               </div>
             </div>
@@ -2957,7 +2978,7 @@
           </button>
           <button type="button" id="btnToggleTablaUnidad" class="unidad-btn unidad-btn-secondary unidad-action-btn"
             title="Ocultar o mostrar secuencia" aria-label="Ocultar o mostrar secuencia"
-            onclick="toggleTablaInicialUnidad()" data-tooltip="Mostrar secuencia">
+            data-tooltip="Mostrar secuencia">
             <i class="fa-regular fa-eye"></i><span class="unidad-btn-text">Mostrar secuencia</span>
           </button>
         </div>
@@ -3621,8 +3642,10 @@
   <!-- Modal Lista de Unidades -->
   <div id="modalUnidadesGuardadas" class="modal" style="display:none;">
     <div class="modal-content">
-      <span id="cerrarModalUnidades" class="close">&times;</span>
-      <h3><i class="fas fa-book"></i> Unidades generadas</h3>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title"><i class="fas fa-book"></i> Unidades generadas</h3>
+        <button type="button" id="cerrarModalUnidades" class="close cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <div class="lecturas-table-wrap" style="overflow-x:auto;">
         <table id="tablaUnidades" class="display lecturas-table lecturas-table--managed" style="width:100%;">
           <thead>
@@ -3650,8 +3673,10 @@
   <!-- Modal Editor en Tiempo Real -->
   <div id="modalEditarUnidad" class="modal" style="display:none;">
     <div class="modal-content">
-      <span id="cerrarModalEditarUnidad" class="close">&times;</span>
-      <h3>✏️ Editor de Unidad</h3>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title">✏️ Editor de Unidad</h3>
+        <button type="button" id="cerrarModalEditarUnidad" class="close cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
 
       <!-- Contenido editable -->
       <div id="editorUnidadContenido" contenteditable="true"
@@ -3662,7 +3687,7 @@
       </p>
 
       <!-- ✅ Botones iguales al modal de generación -->
-      <div style="margin-top:15px; text-align:right;">
+      <div class="cb-modal-foot">
         <button id="btnDescargarWordEditor" class="btn btn-primary">
           📄 Descargar Unidad del alumno
         </button>
@@ -3676,11 +3701,15 @@
   <!-- Modal para compartir unidad -->
   <div id="modalCompartirUnidad" class="modal" style="display:none;">
     <div class="modal-content">
-      <span id="cerrarModalCompartirUnidad" class="close">&times;</span>
-      <h3>👥 Compartir unidad</h3>
+      <div class="cb-modal-head">
+        <h3 class="cb-modal-title">👥 Compartir unidad</h3>
+        <button type="button" id="cerrarModalCompartirUnidad" class="close cb-modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
       <p>Selecciona uno o más usuarios:</p>
       <div id="listaUsuariosCompartirUnidad" class="lista-usuarios"></div>
-      <button id="btnConfirmarCompartir2" class="btn">✅ Compartir</button>
+      <div class="cb-modal-foot">
+        <button id="btnConfirmarCompartir2" class="btn" type="button">✅ Compartir</button>
+      </div>
 
     </div>
   </div>
@@ -3690,7 +3719,7 @@
     <div class="modal-lecturas-contenido">
       <div class="modal-lecturas-header">
         <h3><i class="fas fa-book"></i> Seleccionar lectura</h3>
-        <button class="cerrar-modal-lecturas">&times;</button>
+        <button type="button" class="cerrar-modal-lecturas cb-modal-close" aria-label="Cerrar modal">&times;</button>
       </div>
 
       <div class="modal-lecturas-body">
@@ -3792,17 +3821,17 @@
     }
   </style>
 
-  <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="vendor/jquery/jquery.min.js"></script>
+  <script src="vendor/chartjs/chart.umd.js"></script>
 
-  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/dist/trumbowyg.min.js"></script>
+  <script src="vendor/datatables/jquery.dataTables.min.js"></script>
+  <script src="vendor/trumbowyg/trumbowyg.min.js"></script>
   <!-- Plugin de botones adicionales -->
   <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/Trumbowyg/2.27.3/plugins/fontsize/trumbowyg.fontsize.min.js"></script>
+    src="vendor/trumbowyg/plugins/trumbowyg.fontsize.min.js"></script>
 
   <!-- Plugin foreColor -->
-  <script src="https://cdn.jsdelivr.net/npm/trumbowyg@2.27.3/plugins/colors/trumbowyg.colors.min.js"></script>
+  <script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 
 
   <script type="module" src="generarLectura.js"></script>
@@ -3810,37 +3839,18 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=20260310g"></script>
+  <script type="module" src="generarUnidad.js?v=20260316b"></script>
   <script type="module" src="generarUnidad2.js"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>
   <script type="module" src="estilosLiterarios.js"></script>
   <script type="module" src="camposFormativos.js"></script>
-  <script type="module" src="lecturasASC.js?v=20260306d"></script>
+  <script type="module" src="lecturasASC.js?v=20260311aw"></script>
   <script type="module" src="metodologia.js"></script>
-  <script type="module" src="lecturaNueva.js?v=20260310f"></script>
+  <script type="module" src="lecturaNueva.js?v=20260311a"></script>
 
 
-  <script>
-    (function () {
-      const load = async () => {
-        let v = '';
-        try {
-          const r = await fetch('version.json', { cache: 'no-store' });
-          const d = await r.json();
-          v = (d && d.version) ? String(d.version) : '';
-        } catch (_) { }
-        const s = document.createElement('script');
-        s.src = 'updateBanner.js?v=' + encodeURIComponent(v || Date.now().toString());
-        document.body.appendChild(s);
-      };
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', load);
-      } else {
-        load();
-      }
-    })();
-  </script>
+  <script src="update-banner-loader.js" defer></script>
 </body>
 
 </html>

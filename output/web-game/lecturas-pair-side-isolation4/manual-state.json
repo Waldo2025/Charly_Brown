@@ -1,0 +1,502 @@
+{
+  "mode": "instruction",
+  "playMode": "pair",
+  "challengeType": "synonyms",
+  "coordinate_system": "origin top-left, +x right, +y down",
+  "targetWord": "RAPIDO",
+  "correctWord": "LIGERO",
+  "wrongRemaining": 38,
+  "touchedCorrect": false,
+  "fireModeActive": false,
+  "fireModeMsLeft": 0,
+  "cameraReady": true,
+  "pose": {
+    "confidence": 1,
+    "joints": [
+      {
+        "kind": "head",
+        "x": 480,
+        "y": 311,
+        "r": 14
+      },
+      {
+        "kind": "leftWrist",
+        "x": 414,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "rightWrist",
+        "x": 546,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "torso",
+        "x": 480,
+        "y": 367,
+        "r": 18
+      },
+      {
+        "kind": "head",
+        "x": 598,
+        "y": 311,
+        "r": 14
+      },
+      {
+        "kind": "leftWrist",
+        "x": 532,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "rightWrist",
+        "x": 664,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "torso",
+        "x": 598,
+        "y": 367,
+        "r": 18
+      }
+    ],
+    "segments": [
+      {
+        "kind": "leftArm",
+        "ax": 464,
+        "ay": 337,
+        "bx": 408,
+        "by": 365
+      },
+      {
+        "kind": "rightArm",
+        "ax": 496,
+        "ay": 337,
+        "bx": 552,
+        "by": 365
+      },
+      {
+        "kind": "shoulders",
+        "ax": 454,
+        "ay": 331,
+        "bx": 506,
+        "by": 331
+      },
+      {
+        "kind": "torso",
+        "ax": 480,
+        "ay": 329,
+        "bx": 480,
+        "by": 403
+      },
+      {
+        "kind": "leftArm",
+        "ax": 582,
+        "ay": 337,
+        "bx": 526,
+        "by": 365
+      },
+      {
+        "kind": "rightArm",
+        "ax": 614,
+        "ay": 337,
+        "bx": 670,
+        "by": 365
+      },
+      {
+        "kind": "shoulders",
+        "ax": 572,
+        "ay": 331,
+        "bx": 624,
+        "by": 331
+      },
+      {
+        "kind": "torso",
+        "ax": 598,
+        "ay": 329,
+        "bx": 598,
+        "by": 403
+      }
+    ]
+  },
+  "hands": {
+    "left": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    },
+    "right": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    }
+  },
+  "progress": {
+    "level": 1,
+    "score": 0,
+    "seeds": 0,
+    "waters": 0,
+    "harvests": 0,
+    "knowledge": 0,
+    "alivePlants": 0
+  },
+  "background": {
+    "url": "logoCharly2.png",
+    "ready": true,
+    "transitionActive": false
+  },
+  "effects": {
+    "levelTransitionActive": false,
+    "levelTransitionMsLeft": 0
+  },
+  "silhouette": {
+    "enabled": false,
+    "preferReal": false,
+    "hasRecentMask": {
+      "solo": false,
+      "left": false,
+      "right": false
+    }
+  },
+  "powerup": null,
+  "powerups": [],
+  "fireballs": [],
+  "players": {
+    "left": {
+      "wrongRemaining": 19,
+      "fireModeActive": false,
+      "powerupActive": false,
+      "fireballsCount": 0
+    },
+    "right": {
+      "wrongRemaining": 19,
+      "fireModeActive": false,
+      "powerupActive": false,
+      "fireballsCount": 0
+    }
+  },
+  "activeWords": [
+    {
+      "text": "IDEA",
+      "isCorrect": false,
+      "x": 554,
+      "y": -219,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "TRISTE",
+      "isCorrect": false,
+      "x": 108,
+      "y": -341,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "CONVERSAR",
+      "isCorrect": false,
+      "x": 492,
+      "y": -327,
+      "width": 450,
+      "height": 135
+    },
+    {
+      "text": "HERMOSO",
+      "isCorrect": false,
+      "x": 78,
+      "y": -512,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "RUTA",
+      "isCorrect": false,
+      "x": 492,
+      "y": -508,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "AYUDA",
+      "isCorrect": false,
+      "x": 492,
+      "y": -690,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "COMPANERO",
+      "isCorrect": false,
+      "x": 18,
+      "y": -771,
+      "width": 450,
+      "height": 135
+    },
+    {
+      "text": "PEQUENO",
+      "isCorrect": false,
+      "x": 78,
+      "y": -757,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "DIALOGAR",
+      "isCorrect": false,
+      "x": 492,
+      "y": -834,
+      "width": 420,
+      "height": 126
+    },
+    {
+      "text": "IDEA",
+      "isCorrect": false,
+      "x": 72,
+      "y": -974,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "FLORES",
+      "isCorrect": false,
+      "x": 108,
+      "y": -1094,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "SUCIO",
+      "isCorrect": false,
+      "x": 138,
+      "y": -1078,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "MINIMO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -1303,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "CONVERSAR",
+      "isCorrect": false,
+      "x": 18,
+      "y": -1272,
+      "width": 450,
+      "height": 135
+    },
+    {
+      "text": "MELANCOLICO",
+      "isCorrect": false,
+      "x": 12,
+      "y": -1355,
+      "width": 510,
+      "height": 153
+    },
+    {
+      "text": "PEQUENO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -1599,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "SUBIDO",
+      "isCorrect": false,
+      "x": 108,
+      "y": -1669,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "FELIZ",
+      "isCorrect": false,
+      "x": 138,
+      "y": -1625,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "CUENTOS",
+      "isCorrect": false,
+      "x": 492,
+      "y": -1732,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "AYUDA",
+      "isCorrect": false,
+      "x": 138,
+      "y": -1818,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "LIGERO",
+      "isCorrect": true,
+      "x": 492,
+      "y": -1927,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "CUENTOS",
+      "isCorrect": false,
+      "x": 78,
+      "y": -1970,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "MINIMO",
+      "isCorrect": false,
+      "x": 108,
+      "y": -2075,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "FRIO",
+      "isCorrect": false,
+      "x": 168,
+      "y": -2271,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "PROTEGER",
+      "isCorrect": false,
+      "x": 48,
+      "y": -2386,
+      "width": 420,
+      "height": 126
+    },
+    {
+      "text": "FRIO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2484,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "DOCENTE",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2575,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "MELANCOLICO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2593,
+      "width": 510,
+      "height": 153
+    },
+    {
+      "text": "TRISTE",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2694,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "FLORES",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2712,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "LIGERO",
+      "isCorrect": true,
+      "x": 108,
+      "y": -2869,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "SUCIO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -2969,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "SUBIDO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -3002,
+      "width": 360,
+      "height": 108
+    },
+    {
+      "text": "PROTEGER",
+      "isCorrect": false,
+      "x": 492,
+      "y": -3198,
+      "width": 420,
+      "height": 126
+    },
+    {
+      "text": "DOCENTE",
+      "isCorrect": false,
+      "x": 78,
+      "y": -3255,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "FELIZ",
+      "isCorrect": false,
+      "x": 492,
+      "y": -3265,
+      "width": 330,
+      "height": 104
+    },
+    {
+      "text": "HERMOSO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -3456,
+      "width": 390,
+      "height": 117
+    },
+    {
+      "text": "DIALOGAR",
+      "isCorrect": false,
+      "x": 48,
+      "y": -3559,
+      "width": 420,
+      "height": 126
+    },
+    {
+      "text": "RUTA",
+      "isCorrect": false,
+      "x": 168,
+      "y": -3671,
+      "width": 300,
+      "height": 104
+    },
+    {
+      "text": "COMPANERO",
+      "isCorrect": false,
+      "x": 492,
+      "y": -3624,
+      "width": 450,
+      "height": 135
+    }
+  ]
+}

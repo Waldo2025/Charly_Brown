@@ -1,0 +1,1567 @@
+/* Mineblox Game Styles */
+.mineblox-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: #87CEEB; /* Sky blue */
+    font-family: 'Nunito', sans-serif;
+    overscroll-behavior: none;
+}
+
+#minebloxCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+}
+
+.mineblox-render-surface {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+}
+
+.mineblox-ui {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.mineblox-ui::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    opacity: 0;
+    transition: opacity 180ms ease;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.mineblox-ui--lobby::before {
+    background: rgba(0, 0, 0, 0.88);
+    opacity: 1;
+}
+
+.mineblox-ui * {
+    pointer-events: auto;
+}
+
+/* Lobby Overlay */
+.mineblox-lobby {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.95);
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    text-align: center;
+    width: 90%;
+    max-width: 400px;
+    z-index: 2;
+}
+
+.mineblox-lobby h2 {
+    color: #1e3a8a;
+    margin-bottom: 20px;
+}
+
+.mineblox-lobby input, .mineblox-input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 18px;
+    text-align: center;
+    letter-spacing: 2px;
+}
+
+.mineblox-lobby button {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+/* Crafting 3x3 Grid */
+.mineblox-craft-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 60px);
+    grid-template-rows: repeat(3, 60px);
+    gap: 4px;
+    background: rgba(0,0,0,0.1);
+    padding: 10px;
+    border-radius: 8px;
+    margin: 20px auto;
+    width: fit-content;
+}
+
+.mineblox-craft-slot {
+    width: 60px;
+    height: 60px;
+    background: white;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+.mineblox-craft-slot.active {
+    border-color: #fbbf24;
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+}
+
+.mineblox-craft-arrow {
+    font-size: 32px;
+    margin: 10px 0;
+    color: #fbbf24;
+}
+
+.mineblox-craft-result {
+    width: 80px;
+    height: 80px;
+    background: #fff;
+    border: 3px solid #fbbf24;
+    border-radius: 8px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+}
+
+/* In-game HUD */
+.mineblox-hud {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 40px 14px;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    font-size: 13px;
+    z-index: 4000;
+    box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.4);
+}
+
+.mineblox-action-stack {
+    position: fixed;
+    right: 16px;
+    top: 250px; /* Lower position */
+    width: 380px; /* Larger to support better button spreading */
+    height: 380px;
+    z-index: 4800;
+    pointer-events: none;
+}
+
+.mineblox-action-stack__toggle {
+    pointer-events: auto;
+    width: 72px;
+    height: 72px;
+    border: 2px solid rgba(255,255,255,0.18);
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: white;
+    font-family: inherit;
+    font-weight: 900;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    background: linear-gradient(135deg, #fbbf24, #d97706);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18);
+    backdrop-filter: blur(10px);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, rotate 0.18s ease;
+    position: absolute;
+    right: 0;
+    top: 0;
+    z-index: 3;
+}
+
+.mineblox-action-stack.is-expanded .mineblox-action-stack__toggle {
+    rotate: 45deg;
+}
+
+.mineblox-action-stack__toggle:hover,
+.mineblox-action-btn:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 14px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.24);
+}
+
+.mineblox-action-stack__toggle:active,
+.mineblox-action-btn:active {
+    transform: translateY(0) scale(0.98);
+    filter: brightness(1.05);
+}
+
+.mineblox-action-stack__actions {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.mineblox-action-stack.is-expanded .mineblox-action-stack__actions {
+    pointer-events: auto;
+}
+
+.mineblox-action-btn {
+    width: 52px;
+    min-height: 52px;
+    border: 2px solid rgba(255,255,255,0.16);
+    border-radius: 999px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    color: white;
+    font-family: inherit;
+    font-weight: 900;
+    font-size: 8px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.18);
+    backdrop-filter: blur(10px);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, opacity 0.18s ease;
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+    pointer-events: none;
+}
+
+.mineblox-action-stack.is-expanded .mineblox-action-btn {
+    opacity: 1;
+    transform: translate(var(--action-x, 0), var(--action-y, 0)) scale(1);
+    pointer-events: auto;
+}
+
+.mineblox-action-icon i {
+    font-size: 25px;
+    line-height: 1;
+}
+
+.mineblox-action-label {
+    text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+}
+
+.mineblox-action-btn--mic {
+    background: linear-gradient(135deg, #f97316, #dc2626);
+}
+
+.mineblox-action-btn--mic.active {
+    background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.mineblox-action-btn--inventory {
+    background: linear-gradient(135deg, #fbbf24, #d97706);
+}
+
+.mineblox-action-btn--chat {
+    background: linear-gradient(135deg, #8b5cf6, #4f46e5);
+}
+
+.mineblox-action-btn--board {
+    background: linear-gradient(135deg, #06b6d4, #2563eb);
+}
+
+.mineblox-action-btn--reward {
+    background: linear-gradient(135deg, #ec4899, #db2777);
+}
+
+.mineblox-badge-btn {
+    cursor: pointer;
+    font-size: 10px;
+    color: #93c5fd;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(147, 197, 253, 0.4);
+    text-align: center;
+    transition: all 0.2s;
+    font-family: inherit;
+    text-shadow: none;
+}
+
+.mineblox-badge-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+.mineblox-action-btn--map {
+    background: linear-gradient(135deg, #10b981, #059669);
+}
+
+/* Map HUD Styles */
+.mineblox-map-hud-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(1200px 800px at 50% 30%, rgba(18, 40, 70, 0.5) 0%, rgba(5, 8, 15, 0.9) 70%);
+    z-index: 10000;
+    pointer-events: auto;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+}
+
+.mineblox-map-frame {
+    background: linear-gradient(180deg, #0f2238 0%, #0a1726 100%);
+    border: 2px solid rgba(120, 197, 255, 0.55);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 26px 64px rgba(0, 0, 0, 0.75), inset 0 0 0 1px rgba(206, 234, 255, 0.12);
+    position: relative;
+    max-width: 95vw;
+}
+
+.mineblox-map-header {
+    margin: 2px 0 12px 0;
+    color: #e6f5ff;
+    font-size: 17px;
+    font-weight: 900;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+    text-shadow: 0 2px 12px rgba(36, 148, 255, 0.4);
+}
+
+.mineblox-map-canvas-container {
+    background: linear-gradient(180deg, #0a1b2f 0%, #060f1a 100%);
+    border: 2px solid rgba(108, 177, 236, 0.45);
+    border-radius: 10px;
+    line-height: 0;
+    padding: 8px;
+    box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(214, 239, 255, 0.08);
+}
+
+#minebloxMapCanvas {
+    cursor: crosshair;
+    image-rendering: pixelated;
+    width: min(78vw, 540px);
+    height: min(78vw, 540px);
+    max-height: 66vh;
+    border-radius: 8px;
+    display: block;
+}
+
+.mineblox-map-footer {
+    margin-top: 10px;
+    text-align: center;
+    width: 100%;
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+}
+
+.mineblox-map-footer p {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: #bddbff;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.mineblox-map-close-btn {
+    background: linear-gradient(180deg, #2a95e6 0%, #1f72c7 100%);
+    color: #eff8ff;
+    border: 1px solid rgba(204, 235, 255, 0.45);
+    padding: 9px 22px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+    transition: transform 0.12s ease, filter 0.12s ease;
+    box-shadow: 0 6px 16px rgba(29, 116, 205, 0.45);
+    letter-spacing: 0.08em;
+}
+
+.mineblox-map-close-btn:hover {
+    filter: brightness(1.06);
+}
+
+.mineblox-map-close-btn:active {
+    transform: translateY(1px);
+}
+
+/* Responsive Footer */
+@media (max-width: 768px) {
+    .mineblox-hud {
+        padding: 10px 15px;
+        gap: 10px;
+    }
+    #minebloxStatus {
+        display: none; /* Keep only the most important footer label visible */
+    }
+    #minebloxUserName {
+        display: inline-flex;
+        font-size: 10px !important;
+        margin-left: 8px !important;
+        padding-left: 8px !important;
+        max-width: 42vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    #footerLeft {
+        gap: 10px !important;
+    }
+
+    .mineblox-action-stack {
+        right: 10px;
+        top: 136px;
+        width: 230px;
+        height: 230px;
+    }
+
+    .mineblox-action-stack__toggle {
+        width: 64px;
+        height: 64px;
+        border-radius: 22px;
+    }
+
+    .mineblox-action-btn {
+        width: 48px;
+        min-height: 48px;
+        font-size: 8px;
+    }
+
+    .mineblox-action-icon i {
+        font-size: 22px;
+    }
+}
+
+@media (max-width: 480px) {
+    .mineblox-hud {
+        flex-direction: row; /* Keep row for footer feel */
+        justify-content: space-around;
+        padding: 5px 10px;
+    }
+    .mineblox-level-badge {
+        font-size: 10px !important;
+        padding: 2px 6px !important;
+    }
+    .mineblox-badge-btn {
+        padding: 4px 8px !important;
+        font-size: 9px !important;
+        min-width: auto !important;
+    }
+    #footerLeft {
+        flex-wrap: wrap; /* Allow wrapping if too many items */
+        line-height: 1;
+    }
+
+    .mineblox-action-stack {
+        right: 8px;
+        top: 76px;
+        width: 170px;
+        height: 170px;
+    }
+
+    .mineblox-action-stack__toggle {
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
+    }
+
+    .mineblox-action-btn {
+        width: 46px;
+        min-height: 46px;
+        font-size: 7px;
+        padding: 5px 3px;
+    }
+
+    .mineblox-action-icon i {
+        font-size: 20px;
+    }
+
+    .mineblox-inv-bar {
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 122px);
+        width: min(calc(100vw - 12px), 540px);
+        max-width: calc(100vw - 12px);
+        padding: 6px 8px;
+        border-radius: 10px;
+    }
+
+    #minebloxCraftOpenBtn {
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 174px) !important;
+    }
+
+    .mineblox-inv-slot {
+        width: 42px;
+        height: 42px;
+        font-size: 18px;
+    }
+
+    .mineblox-inv-slot-count {
+        min-width: 16px;
+        height: 16px;
+        line-height: 16px;
+        font-size: 10px;
+    }
+}
+
+.mineblox-level-badge {
+    background: linear-gradient(135deg, #fbbf24, #d97706);
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-weight: 800;
+    font-size: 12px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    margin-bottom: 4px;
+    display: inline-block;
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+/* ROBLOX STYLE CHAT */
+.mineblox-chat-container {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
+    left: 20px;
+    width: min(320px, calc(100vw - 40px));
+    height: 168px;
+    background: rgba(10,14,25,0.78);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+    backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 100;
+    pointer-events: auto;
+    transition: all 0.3s;
+}
+
+.mineblox-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mineblox-chat-msg {
+    color: white;
+    font-size: 13px;
+    text-shadow: 1px 1px 1px black;
+    word-wrap: break-word;
+}
+
+.mineblox-chat-msg b {
+    color: #93c5fd;
+}
+
+.mineblox-chat-input-area {
+    background: rgba(255,255,255,0.08);
+    padding: 6px;
+    display: flex;
+    gap: 5px;
+}
+
+.mineblox-chat-input {
+    flex: 1;
+    background: rgba(7,10,18,0.78);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: white;
+    padding: 7px 8px;
+    font-size: 13px;
+    outline: none;
+}
+
+.mineblox-mic-btn {
+    width: 40px;
+    height: 40px;
+    background: #ef4444;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    position: absolute;
+    bottom: 20px;
+    right: 320px; /* Aligned with others */
+    z-index: 60;
+}
+
+.mineblox-mic-btn.active {
+    background: #10b981;
+}
+
+.mineblox-teacher-toolbar {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    z-index: 500;
+}
+
+.mineblox-teacher-dropdown {
+    display: none;
+    flex-direction: column;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 10px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    min-width: 180px;
+    gap: 5px;
+}
+
+.mineblox-dropdown-item {
+    padding: 12px 15px;
+    color: #1e3a8a;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mineblox-dropdown-item:hover {
+    background: #eff6ff;
+}
+
+.mineblox-dd-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.14), rgba(168,85,247,0.18));
+    color: #1d4ed8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 28px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.75);
+}
+
+.mineblox-dd-icon i {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.mineblox-dropdown-item--mic .mineblox-dd-icon {
+    background: rgba(255,255,255,0.18);
+    color: white;
+}
+
+.mineblox-dd-label {
+    line-height: 1.15;
+}
+
+.mineblox-toolbar-btn {
+    background: white;
+    color: #1e3a8a;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: transform 0.2s;
+}
+
+.mineblox-toolbar-btn:hover {
+    transform: translateY(-2px);
+    background: #f3f4f6;
+}
+
+.mineblox-teacher-panel {
+    display: none !important; /* Force hide the old one */
+}
+
+.mineblox-teacher-panel h3 {
+    margin-top: 0;
+    font-size: 16px;
+    color: #1e3a8a;
+}
+
+.mineblox-student-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.mineblox-student-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+.mineblox-inv-bar {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 148px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    width: auto;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(6px);
+    padding: 6px 8px;
+    border: 2px solid rgba(255,255,255,0.18);
+    border-radius: 10px;
+    z-index: 4900;
+    overflow: hidden;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.3);
+}
+
+#minebloxCraftOpenBtn {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 216px) !important;
+    z-index: 4902 !important;
+}
+
+.mineblox-inv-bar-header {
+    display: none;
+}
+
+.mineblox-inv-bar-title {
+    font-weight: 900;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.95;
+}
+
+.mineblox-inv-bar-close {
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.14);
+    color: white;
+    font-size: 20px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mineblox-inv-bar-slots {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+}
+
+.mineblox-inv-empty {
+    color: rgba(255,255,255,0.8);
+    font-size: 12px;
+    padding: 8px 0;
+    text-align: center;
+    width: 100%;
+}
+
+.mineblox-inv-slot {
+    width: clamp(44px, 7.4vw, 54px);
+    height: clamp(44px, 7.4vw, 54px);
+    background: linear-gradient(180deg, rgba(196,196,196,0.95), rgba(128,128,128,0.94));
+    border: 2px solid rgba(20,20,20,0.9);
+    border-radius: 6px;
+    cursor: pointer;
+    display: grid;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    position: relative;
+    padding: 2px;
+    flex: 0 0 auto;
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.42), inset 0 -2px 0 rgba(0,0,0,0.18);
+}
+
+.mineblox-inv-slot.active {
+    border-color: #ffe08a;
+    background: linear-gradient(180deg, rgba(255,236,176,0.98), rgba(214,176,78,0.98));
+    box-shadow: 0 0 0 2px rgba(255,224,138,0.35), inset 0 1px 0 rgba(255,255,255,0.62);
+}
+
+.mineblox-inv-slot--empty::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.32);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.mineblox-inv-slot--utility {
+    background: linear-gradient(180deg, rgba(168,185,208,0.96), rgba(86,102,126,0.96));
+}
+
+.mineblox-inv-slot--utility .mineblox-item-fallback {
+    font-size: 24px;
+    transform: translateY(-1px);
+}
+
+.mineblox-inv-slot-icon {
+    pointer-events: none;
+}
+
+.mineblox-item-visual {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    justify-items: center;
+    align-items: center;
+}
+
+.mineblox-item-visual--slot {
+    width: 100%;
+    height: 100%;
+}
+
+.mineblox-item-visual--library {
+    width: 78px;
+    height: 78px;
+    margin: 0;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(248,250,252,0.96), rgba(226,232,240,0.92));
+    border: 1px solid rgba(148,163,184,0.25);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+}
+
+.mineblox-item-thumb {
+    width: 84%;
+    height: 84%;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.18));
+}
+
+.mineblox-item-visual--slot .mineblox-item-thumb {
+    width: 82%;
+    height: 82%;
+}
+
+.mineblox-item-fallback {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.mineblox-item-visual--fallback {
+    color: #1f2937;
+}
+
+.mineblox-item-visual-label {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    color: rgba(15, 23, 42, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 800;
+    background: rgba(255,255,255,0.72);
+    padding: 1px 5px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.mineblox-inv-slot-count {
+    position: absolute;
+    right: 2px;
+    bottom: 1px;
+    min-width: 18px;
+    height: auto;
+    padding: 0 1px;
+    border-radius: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+    text-shadow: 1px 1px 0 rgba(0,0,0,0.88);
+}
+
+.mineblox-mic-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    background: #ef4444;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    transition: background 0.3s;
+}
+
+.mineblox-mic-indicator.active {
+    background: #10b981;
+}
+
+.mineblox-crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    pointer-events: none;
+}
+
+.mineblox-crosshair::before,
+.mineblox-crosshair::after {
+    content: '';
+    position: absolute;
+    background: white;
+}
+
+.mineblox-crosshair::before {
+    width: 100%;
+    height: 2px;
+    top: 9px;
+    left: 0;
+}
+
+.mineblox-crosshair::after {
+    height: 100%;
+    width: 2px;
+    left: 9px;
+    top: 0;
+}
+
+body.ascraft-voxeljs #minebloxCraftModal,
+body.ascraft-voxeljs #minebloxLibModal,
+body.ascraft-voxeljs .mineblox-crosshair {
+    display: none !important;
+}
+
+body.ascraft-voxeljs .mineblox-voxeljs-fab {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 6000;
+    display: flex;
+    border-radius: 999px;
+    padding: 10px 16px;
+    gap: 8px;
+}
+
+body.ascraft-voxeljs .mineblox-voxeljs-fab--chat {
+    left: 120px;
+}
+
+#voxeljsMount canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
+
+/* Mineblox Overlay Overrides */
+.mineblox-container .lecturas-game-overlay {
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none; /* Let clicks pass to 3d if needed */
+}
+
+.mineblox-container .lecturas-game-overlay-content {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    text-align: center;
+    width: 90%;
+    max-width: 400px;
+    pointer-events: auto; /* Re-enable clicks for buttons */
+}
+
+.mineblox-container .lecturas-game-overlay h2,
+.mineblox-container .lecturas-game-overlay h4 {
+    color: #1e3a8a !important;
+    text-shadow: none !important;
+}
+
+.mineblox-container .lecturas-game-overlay p {
+    color: #4b5563 !important;
+    text-shadow: none !important;
+    font-size: 1.1rem;
+}
+
+/* Recent Rooms */
+.mineblox-recent-rooms {
+    margin-bottom: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.mineblox-recent-badge {
+    background: #e5e7eb;
+    border: none;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.mineblox-recent-badge:hover {
+    background: #d1d5db;
+}
+
+/* Library Modal */
+.mineblox-library-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.mineblox-lib-content {
+    background: white;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.mineblox-lib-content header {
+    padding: 15px 20px;
+    background: #1e3a8a;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.mineblox-close-lib {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.mineblox-lib-tabs {
+    display: flex;
+    border-bottom: 2px solid #eee;
+    background: #f9fafb;
+}
+
+.mineblox-lib-tabs button {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-weight: 600;
+    color: #6b7280;
+}
+
+.mineblox-lib-tabs button.active {
+    color: #1e3a8a;
+    border-bottom: 2px solid #1e3a8a;
+    background: white;
+}
+
+.mineblox-lib-grid {
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 14px;
+    overflow-y: auto;
+}
+
+.mineblox-lib-item {
+    background: linear-gradient(180deg, #f8fafc, #eef2f7);
+    border: 1px solid rgba(148,163,184,0.32);
+    border-radius: 14px;
+    padding: 12px 10px 10px;
+    min-height: 132px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+}
+
+.mineblox-lib-item:hover {
+    transform: translateY(-2px);
+    background: linear-gradient(180deg, #ffffff, #edf2f7);
+    box-shadow: 0 10px 18px rgba(15,23,42,0.08);
+}
+
+.mineblox-lib-item.selected {
+    outline: 3px solid #f59e0b;
+    background: #fffbeb !important;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+    transform: scale(1.02);
+}
+
+.mineblox-lib-icon {
+    font-size: 24px;
+    margin-bottom: 5px;
+}
+
+.mineblox-lib-name {
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: uppercase;
+    font-weight: bold;
+    color: #374151;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* New Modals & Pickers */
+.mineblox-modal {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.mineblox-modal-content {
+    background: white;
+    padding: 25px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    text-align: center;
+    color: #333; /* Color carbón para legibilidad */
+}
+
+.mineblox-config-modal-content {
+    width: min(96vw, 980px);
+    max-width: min(96vw, 980px);
+    max-height: min(86vh, 760px);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+
+.mineblox-modal-content h3 {
+    margin-top: 0;
+    color: #1e3a8a;
+}
+
+.mineblox-modal-content input, .mineblox-modal-content textarea, .mineblox-modal-content select {
+    width: 100%;
+    margin-bottom: 15px;
+    padding: 10px;
+    border: 2px solid #ddd;
+    color: #333;
+    background: #fff;
+    border-radius: 8px;
+    font-size: 16px;
+}
+
+.mineblox-rocket-modal {
+    z-index: 6200;
+}
+
+.mineblox-rocket-modal-content {
+    max-width: 420px;
+    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+    border: 2px solid rgba(15, 23, 42, 0.25);
+}
+
+.mineblox-rocket-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.mineblox-rocket-actions button {
+    width: 100%;
+}
+
+.mineblox-rocket-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 7000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at center, rgba(9, 15, 28, 0.85), rgba(2, 6, 23, 0.97));
+}
+
+.mineblox-rocket-overlay-window {
+    position: relative;
+    width: min(90vw, 920px);
+    height: min(72vh, 520px);
+    border-radius: 28px;
+    overflow: hidden;
+    border: 3px solid rgba(96, 165, 250, 0.4);
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55), inset 0 0 40px rgba(59, 130, 246, 0.2);
+    background:
+        radial-gradient(circle at 50% 50%, rgba(168, 230, 255, 0.12) 0, rgba(87, 155, 255, 0.08) 14%, rgba(2, 6, 23, 0) 28%),
+        radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.06) 0, rgba(12, 18, 34, 0.4) 18%, rgba(6, 10, 21, 0.96) 62%, rgba(2, 4, 12, 1) 100%),
+        linear-gradient(180deg, #0a1020 0%, #060a15 100%);
+}
+
+.mineblox-rocket-overlay-window::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 18% 28%, rgba(255,255,255,0.9) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 32% 64%, rgba(255,255,255,0.82) 0 1.1px, transparent 1.8px),
+        radial-gradient(circle at 48% 18%, rgba(201,233,255,0.78) 0 1px, transparent 1.7px),
+        radial-gradient(circle at 61% 44%, rgba(255,255,255,0.84) 0 1px, transparent 1.8px),
+        radial-gradient(circle at 74% 22%, rgba(186,229,255,0.76) 0 1px, transparent 1.7px),
+        radial-gradient(circle at 82% 58%, rgba(255,255,255,0.88) 0 1.2px, transparent 2px),
+        radial-gradient(circle at 26% 82%, rgba(195,239,255,0.8) 0 1.1px, transparent 1.9px),
+        radial-gradient(circle at 68% 79%, rgba(255,255,255,0.72) 0 1px, transparent 1.6px);
+    opacity: 0.46;
+    pointer-events: none;
+}
+
+.mineblox-rocket-warp-lines {
+    position: absolute;
+    inset: -18%;
+    border-radius: 50%;
+    background:
+        repeating-conic-gradient(
+            from 0deg at 50% 50%,
+            rgba(255, 255, 255, 0) 0deg 6deg,
+            rgba(196, 235, 255, 0.75) 6.2deg 6.6deg,
+            rgba(255, 255, 255, 0) 6.9deg 14deg
+        ),
+        repeating-conic-gradient(
+            from 3deg at 50% 50%,
+            rgba(255, 255, 255, 0) 0deg 10deg,
+            rgba(115, 203, 255, 0.7) 10.15deg 10.55deg,
+            rgba(255, 255, 255, 0) 10.8deg 18deg
+        ),
+        radial-gradient(circle at 50% 50%, rgba(255,255,255,0.92) 0, rgba(198,233,255,0.45) 4%, rgba(98,174,255,0.16) 11%, rgba(0,0,0,0) 30%);
+    transform: scale(0.18);
+    transform-origin: center center;
+    opacity: 0.3;
+    filter: blur(0.35px) saturate(1.08);
+    mix-blend-mode: screen;
+    transition: transform 0.45s ease, opacity 0.45s ease, filter 0.45s ease;
+    mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,0.98) 0 12%, rgba(0,0,0,0.82) 26%, rgba(0,0,0,0.42) 52%, rgba(0,0,0,0.12) 76%, rgba(0,0,0,0) 100%);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,0.98) 0 12%, rgba(0,0,0,0.82) 26%, rgba(0,0,0,0.42) 52%, rgba(0,0,0,0.12) 76%, rgba(0,0,0,0) 100%);
+    will-change: transform, opacity, filter;
+}
+
+.mineblox-rocket-warp-lines::before,
+.mineblox-rocket-warp-lines::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.mineblox-rocket-warp-lines::before {
+    background:
+        radial-gradient(circle at 50% 50%, rgba(255,255,255,0.98) 0 1.8%, rgba(255,255,255,0.18) 4.5%, rgba(255,255,255,0) 9%),
+        radial-gradient(circle at 50% 50%, rgba(125, 211, 252, 0.62) 0, rgba(59,130,246,0.18) 10%, rgba(0,0,0,0) 24%);
+    opacity: 0.68;
+    filter: blur(1.4px);
+}
+
+.mineblox-rocket-warp-lines::after {
+    background:
+        repeating-conic-gradient(
+            from 1deg at 50% 50%,
+            rgba(255,255,255,0) 0deg 12deg,
+            rgba(223,245,255,0.82) 12.1deg 12.35deg,
+            rgba(255,255,255,0) 12.55deg 20deg
+        ),
+        radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0) 0 24%, rgba(255,255,255,0.12) 34%, rgba(255,255,255,0) 56%);
+    opacity: 0.34;
+    transform: scale(0.76);
+    filter: blur(0.4px);
+}
+
+.mineblox-rocket-overlay.is-warp .mineblox-rocket-warp-lines {
+    transform: scale(0.34);
+    opacity: 0.92;
+    filter: blur(0.2px) saturate(1.2) brightness(1.08);
+    animation: minebloxWarpStreamA 0.72s linear infinite;
+}
+
+.mineblox-rocket-overlay.is-warp .mineblox-rocket-warp-lines::before {
+    animation: minebloxWarpStreamB 0.98s linear infinite;
+}
+
+.mineblox-rocket-overlay.is-warp .mineblox-rocket-warp-lines::after {
+    animation: minebloxWarpStreamC 1.18s linear infinite;
+}
+
+.mineblox-rocket-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(42px, 9vw, 120px);
+    font-weight: 900;
+    color: #e0f2fe;
+    text-shadow: 0 0 26px rgba(56, 189, 248, 0.75);
+    letter-spacing: 0.04em;
+}
+
+.mineblox-rocket-substatus {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 28px;
+    text-align: center;
+    color: #bfdbfe;
+    font-size: clamp(12px, 1.8vw, 19px);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+@keyframes minebloxWarpStreamA {
+    0% {
+        transform: scale(0.18) rotate(0deg);
+        opacity: 0.18;
+        filter: blur(0.45px) saturate(1.04) brightness(0.95);
+    }
+    14% {
+        opacity: 0.5;
+    }
+    100% {
+        transform: scale(2.55) rotate(1.8deg);
+        opacity: 0.98;
+        filter: blur(0.08px) saturate(1.32) brightness(1.18);
+    }
+}
+
+@keyframes minebloxWarpStreamB {
+    0% {
+        transform: scale(0.1);
+        opacity: 0;
+        filter: blur(1.8px);
+    }
+    12% {
+        opacity: 0.14;
+    }
+    100% {
+        transform: scale(2.9);
+        opacity: 0.82;
+        filter: blur(0.3px);
+    }
+}
+
+@keyframes minebloxWarpStreamC {
+    0% {
+        transform: scale(0.14) rotate(-2deg);
+        opacity: 0;
+        filter: blur(0.6px);
+    }
+    18% {
+        opacity: 0.18;
+    }
+    100% {
+        transform: scale(3.15) rotate(2.4deg);
+        opacity: 0.76;
+        filter: blur(0.15px);
+    }
+}
+
+.mineblox-avatar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    padding: 10px;
+}
+
+.mineblox-avatar-option {
+    background: #f3f4f6;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mineblox-avatar-option:hover {
+    background: #e5e7eb;
+}
+
+.mineblox-avatar-option.selected {
+    border-color: #3b82f6;
+    background: #eff6ff;
+}
+
+.mineblox-avatar-preview {
+    font-size: 40px;
+    margin-bottom: 5px;
+}
+
+.mineblox-name-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.mineblox-name-item {
+    padding: 10px;
+    background: #f3f4f6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background 0.2s;
+}
+
+.mineblox-name-item:hover:not(.disabled) {
+    background: #3b82f6;
+    color: white;
+}
+
+.mineblox-name-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #e5e7eb;
+}
+
+.mineblox-copy-container {
+    background: #f8fafc;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px dashed #cbd5e1;
+}
+.mineblox-config-btn {
+    background: #1e3a8a;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+/* Quiz Modal Specifics */
+.mineblox-quiz-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.mineblox-quiz-opt {
+    padding: 12px;
+    background: #f3f4f6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.mineblox-quiz-opt:hover {
+    background: #3b82f6;
+    color: white;
+}
+
+/* Crafting UI */
+.mineblox-crafting-grid {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    align-items: center;
+    margin: 20px 0;
+}
+
+.mineblox-crafting-slot {
+    width: 60px;
+    height: 60px;
+    background: #e5e7eb;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}

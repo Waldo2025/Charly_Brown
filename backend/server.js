@@ -327,12 +327,22 @@ function buildBackendPodcasterStudioScenePrompt({
   return lines.filter(Boolean).join(" ");
 }
 
-async function loadOptionalImageReference({ storagePath = "", url = "" }) {
+async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl = "" }) {
   const cleanStoragePath = clampText(storagePath || "", 700);
   const rawUrl = clampText(url || "", 3200);
   const cleanUrl = rawUrl.includes("%25") ? clampText(decodeURIComponent(rawUrl), 3200) : rawUrl;
+  const cleanDataUrl = String(dataUrl || "").trim();
   let buffer = null;
   let mimeType = "image/png";
+  if (cleanDataUrl.startsWith("data:image/")) {
+    try {
+      const decoded = decodeBase64DataUrl(cleanDataUrl, MAX_SPEAKER_PORTRAIT_BYTES);
+      buffer = Buffer.from(decoded.buffer);
+      mimeType = String(decoded.mimeType || "image/png").trim().toLowerCase();
+    } catch (_) {
+      buffer = null;
+    }
+  }
   if (cleanStoragePath) {
     try {
       const file = storageBucket.file(cleanStoragePath);
@@ -573,21 +583,71 @@ function sanitizePodcasterSession(raw = {}) {
   };
   const panelMusicConfigRaw = raw?.panelMusicConfig && typeof raw.panelMusicConfig === "object" ? raw.panelMusicConfig : {};
   const panelMusicTrackRaw = panelMusicConfigRaw?.track && typeof panelMusicConfigRaw.track === "object" ? panelMusicConfigRaw.track : null;
+  const panelMusicTrackLibraryRaw = panelMusicConfigRaw?.trackLibrary && typeof panelMusicConfigRaw.trackLibrary === "object"
+    ? panelMusicConfigRaw.trackLibrary
+    : {};
+  const sanitizePanelMusicTrack = (trackRaw = null, fallbackName = "Audio") => (
+    trackRaw && typeof trackRaw === "object"
+      ? {
+        libraryId: clampText(trackRaw?.libraryId || "", 140),
+        slotLabel: clampText(trackRaw?.slotLabel || "", 80),
+        enabledInSession: trackRaw?.enabledInSession !== false,
+        name: clampText(trackRaw?.name || fallbackName, 180) || fallbackName,
+        mimeType: clampText(trackRaw?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
+        size: Math.max(0, Number(trackRaw?.size) || 0),
+        durationSec: clampNumber(trackRaw?.durationSec, 0, 1800, 0),
+        startOffsetMs: clampNumber(trackRaw?.startOffsetMs, 0, 1800 * 1000, 0),
+        trimInMs: clampNumber(trackRaw?.trimInMs, 0, 1800 * 1000, 0),
+        trimOutMs: clampNumber(trackRaw?.trimOutMs, 0, 1800 * 1000, 0),
+        durationMeasuredWith: clampText(trackRaw?.durationMeasuredWith || "", 32).toLowerCase(),
+        downloadUrl: clampText(trackRaw?.downloadUrl || "", 3000),
+        storagePath: clampText(trackRaw?.storagePath || "", 700),
+        updatedAt: clampText(trackRaw?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
+        model: clampText(trackRaw?.model || "", 140),
+        prompt: clampText(trackRaw?.prompt || "", 4000),
+        loopSettings: Array.isArray(trackRaw?.loopSettings)
+          ? Array.from(new Map(
+            trackRaw.loopSettings
+              .filter((item) => item && typeof item === "object")
+              .map((item) => {
+                const loopIndex = Math.max(0, Math.floor(Number(item.loopIndex) || 0));
+                const trimInMs = clampNumber(item.trimInMs, 0, 1800 * 1000, 0);
+                const trimOutMs = clampNumber(item.trimOutMs, 0, 1800 * 1000, 0);
+                return [loopIndex, { loopIndex, trimInMs, trimOutMs }];
+              })
+          ).values()).sort((a, b) => a.loopIndex - b.loopIndex)
+          : [],
+        mutedLoopIndexes: Array.isArray(trackRaw?.mutedLoopIndexes)
+          ? Array.from(new Set(
+            trackRaw.mutedLoopIndexes
+              .map((item) => Math.max(0, Math.floor(Number(item) || 0)))
+              .filter((item) => Number.isFinite(item) && item >= 0 && item <= 999)
+          )).sort((a, b) => a - b)
+          : []
+      }
+      : null
+  );
   const panelMusicConfig = {
     preset: ["ambient", "focus", "pulse"].includes(String(panelMusicConfigRaw?.preset || "").trim()) ? String(panelMusicConfigRaw.preset).trim() : "ambient",
     volume: Math.max(0, Math.min(100, Number(panelMusicConfigRaw?.volume) || 22)),
+    montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfigRaw?.montageVolume ?? panelMusicConfigRaw?.volume ?? 22))),
+    stabilize: panelMusicConfigRaw?.stabilize === true || String(panelMusicConfigRaw?.stabilize || "").trim().toLowerCase() === "true",
     sourceType: String(panelMusicConfigRaw?.sourceType || "").trim() === "track" ? "track" : "preset",
-    track: panelMusicTrackRaw
-      ? {
-        name: clampText(panelMusicTrackRaw?.name || "Audio", 180) || "Audio",
-        mimeType: clampText(panelMusicTrackRaw?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
-        size: Math.max(0, Number(panelMusicTrackRaw?.size) || 0),
-        downloadUrl: clampText(panelMusicTrackRaw?.downloadUrl || "", 3000),
-        storagePath: clampText(panelMusicTrackRaw?.storagePath || "", 700),
-        updatedAt: clampText(panelMusicTrackRaw?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
-      }
-      : null
+    selectedTrackKind: String(panelMusicConfigRaw?.selectedTrackKind || "").trim() === "ai" ? "ai" : "uploaded",
+    trackLibrary: {
+      uploaded: sanitizePanelMusicTrack(panelMusicTrackLibraryRaw?.uploaded || null, "Audio"),
+      uploadedTracks: Array.isArray(panelMusicTrackLibraryRaw?.uploadedTracks)
+        ? panelMusicTrackLibraryRaw.uploadedTracks
+            .map((trackRaw, index) => sanitizePanelMusicTrack(trackRaw, `Audio ${index + 1}`))
+            .filter(Boolean)
+        : [],
+      ai: sanitizePanelMusicTrack(panelMusicTrackLibraryRaw?.ai || null, "Audio IA")
+    },
+    track: sanitizePanelMusicTrack(panelMusicTrackRaw, "Audio")
   };
+  if (!panelMusicConfig.trackLibrary.uploaded && panelMusicConfig.trackLibrary.uploadedTracks.length) {
+    panelMusicConfig.trackLibrary.uploaded = panelMusicConfig.trackLibrary.uploadedTracks[0];
+  }
   const globalScenarioDeckRaw = raw?.globalScenarioDeck && typeof raw.globalScenarioDeck === "object"
     ? raw.globalScenarioDeck
     : {};
@@ -786,6 +846,7 @@ async function createMoodleCourseCopy({
   copiedCourse.userId = targetUid;
   copiedCourse.uid = targetUid;
   copiedCourse.ownerUid = targetUid;
+  copiedCourse.docType = "course";
   copiedCourse.esPropio = true;
   copiedCourse.creado = admin.firestore.FieldValue.serverTimestamp();
   copiedCourse.actualizado = admin.firestore.FieldValue.serverTimestamp();
@@ -833,9 +894,10 @@ async function createMoodleCourseCopy({
     const sourceModuleData = deepClone(sourceModuleSnap.data() || {});
     sourceModuleData.id = newModuleId;
     sourceModuleData.cursoId = newCourseId;
-    sourceModuleData.userId = targetUid;
-    sourceModuleData.uid = targetUid;
-    sourceModuleData.ownerUid = targetUid;
+    sourceModuleData.docType = "module";
+    delete sourceModuleData.userId;
+    delete sourceModuleData.uid;
+    delete sourceModuleData.ownerUid;
     sourceModuleData.creado = admin.firestore.FieldValue.serverTimestamp();
     sourceModuleData.actualizado = admin.firestore.FieldValue.serverTimestamp();
     const newModuleDocId = `${newCourseId}_${newModuleId}`;
@@ -1434,6 +1496,29 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
   }
 });
 
+app.post("/api/podcaster/sessions/delete", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.body?.sessionId || "", 140);
+    if (!sessionId) {
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+    const sessionRef = db.collection("podcaster_sessions").doc(sessionId);
+    const snap = await sessionRef.get();
+    if (!snap.exists) {
+      return res.status(200).json({ ok: true, sessionId, deleted: false, reason: "not_found" });
+    }
+    const data = snap.data() || {};
+    if (String(data.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "Solo el propietario puede eliminar la sesión." });
+    }
+    await sessionRef.delete();
+    return res.status(200).json({ ok: true, sessionId, deleted: true });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar la sesión.") });
+  }
+});
+
 app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
@@ -1448,6 +1533,8 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     const scenarioId = clampText(req.body?.scenarioId || "", 80);
     const scenarioImageUrl = clampText(req.body?.scenarioImageUrl || "", 3200);
     const scenarioImageStoragePath = clampText(req.body?.scenarioImageStoragePath || "", 700);
+    const referenceImageDataUrl = String(req.body?.referenceImageDataUrl || "").trim();
+    const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
@@ -1492,6 +1579,9 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       storagePath: scenarioImageStoragePath,
       url: scenarioImageUrl,
     });
+    const speakerReference = await loadOptionalImageReference({
+      dataUrl: referenceImageDataUrl
+    });
     const resolvedScenarioReference = scenarioReference || await loadScenarioReferenceFromSession({
       uid,
       sessionId,
@@ -1499,9 +1589,11 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     });
 
     const prompt = [
+      speakerReference ? "PRIORIDAD 1: conservar la identidad del locutor a partir de la imagen adjunta del rostro. Deben mantenerse facciones, estructura facial, ojos, nariz, boca, peinado, línea del cabello y edad aparente." : "Genera un retrato coherente con la identidad textual del locutor.",
+      speakerReference ? "No reemplazar la cara por otra persona. No reinterpretar libremente el rostro. No cambiar género, edad aparente, rasgos centrales ni etnia percibida de la referencia del locutor." : "",
       "Edita la imagen de referencia para convertirla en un retrato fotorealista de un solo locutor dentro del mismo set.",
-      resolvedScenarioReference ? "La imagen adjunta define el escenario real y tiene prioridad absoluta sobre cualquier otra instrucción." : "No hay imagen de referencia disponible; recrear el escenario solo a partir del prompt textual seleccionado.",
-      resolvedScenarioReference ? "Conservar exactamente la arquitectura, fondo, materiales, distribución, iluminación base y ángulo del escenario de la imagen adjunta." : "Recrear de forma consistente la arquitectura, fondo, materiales, distribución e iluminación del escenario descrito.",
+      resolvedScenarioReference ? "PRIORIDAD 2: usar la imagen adjunta del escenario para conservar arquitectura, fondo, materiales, distribución, iluminación base y ángulo del set." : "No hay imagen de referencia disponible; recrear el escenario solo a partir del prompt textual seleccionado.",
+      resolvedScenarioReference ? "El escenario debe coincidir con la referencia del set sin alterar la identidad facial del locutor." : "Recrear de forma consistente la arquitectura, fondo, materiales, distribución e iluminación del escenario descrito.",
       "No inventar ni sustituir otra cabina, fondo o composición global.",
       `Nombre del locutor: ${speakerName}.`,
       `Etiqueta de locutor: ${speakerLabel}.`,
@@ -1527,21 +1619,34 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
     for (const imageModel of imageModels) {
       const requestUrl = `${GEMINI_BASE}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
       const requestWithOptionalReference = async (includeScenarioReference) => {
+        const parts = [
+          { text: prompt },
+          ...(speakerReference ? [
+            { text: `Imagen 1: referencia principal del locutor${referenceImageName ? ` (${referenceImageName})` : ""}. Usar esta imagen para identidad facial y apariencia del sujeto.` },
+            {
+              inlineData: {
+                mimeType: speakerReference.mimeType,
+                data: speakerReference.buffer.toString("base64")
+              }
+            }
+          ] : []),
+          ...(includeScenarioReference && resolvedScenarioReference ? [
+            { text: "Imagen 2: referencia del escenario. Usar esta imagen para el set, fondo, iluminación y composición general." },
+            {
+              inlineData: {
+                mimeType: resolvedScenarioReference.mimeType,
+                data: resolvedScenarioReference.buffer.toString("base64")
+              }
+            }
+          ] : [])
+        ];
         const upstream = await fetchCompat(requestUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{
               role: "user",
-              parts: [
-                { text: prompt },
-                ...(includeScenarioReference && resolvedScenarioReference ? [{
-                  inlineData: {
-                    mimeType: resolvedScenarioReference.mimeType,
-                    data: resolvedScenarioReference.buffer.toString("base64")
-                  }
-                }] : [])
-              ]
+              parts
             }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"]
@@ -1605,6 +1710,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
         scenarioId,
         scenarioImageUrl,
         scenarioImageStoragePath,
+        referenceImageName,
         model: resolvedModel
       }
     });
@@ -1645,6 +1751,8 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
     const scenarioId = clampText(req.body?.scenarioId || "", 80);
     const title = clampText(req.body?.title || "Escenario", 120) || "Escenario";
     const promptSource = clampText(req.body?.prompt || "", 4000);
+    const referenceImageDataUrl = String(req.body?.referenceImageDataUrl || "").trim();
+    const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
@@ -1664,8 +1772,12 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
       return res.status(400).json({ error: "Falta prompt del escenario." });
     }
 
+    const scenarioReference = await loadOptionalImageReference({
+      dataUrl: referenceImageDataUrl
+    });
     const prompt = [
       "Genera una imagen fotorealista de un escenario de podcast profesional.",
+      scenarioReference ? `La imagen adjunta es referencia visual del set y debe guiar arquitectura, composición, materiales y layout (${referenceImageName || "referencia del usuario"}).` : "",
       `Escenario: ${title}.`,
       `Prompt base obligatorio: ${promptSource}`,
       "Debe ser un set vacío, sin personas.",
@@ -1690,7 +1802,15 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
           body: JSON.stringify({
             contents: [{
               role: "user",
-              parts: [{ text: prompt }]
+              parts: [
+                { text: prompt },
+                ...(scenarioReference ? [{
+                  inlineData: {
+                    mimeType: scenarioReference.mimeType,
+                    data: scenarioReference.buffer.toString("base64")
+                  }
+                }] : [])
+              ]
             }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"]
@@ -2399,6 +2519,7 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
     const sessionId = clampText(req.body?.sessionId || "", 140);
     const fileName = clampText(req.body?.fileName || "podcast-music", 180) || "podcast-music";
     const mimeType = clampText(req.body?.mimeType || "audio/mpeg", 120) || "audio/mpeg";
+    const durationSec = clampNumber(req.body?.durationSec, 0, 1800, 0);
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const audioDataUrl = String(req.body?.audioDataUrl || "").trim();
     if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
@@ -2431,6 +2552,7 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
         name: fileName,
         mimeType: decoded.mimeType || mimeType,
         size: decoded.buffer.length,
+        durationSec,
         downloadUrl: asset.downloadUrl,
         storagePath: asset.path,
         updatedAt: new Date().toISOString()
@@ -2438,6 +2560,114 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir la canción.") });
+  }
+});
+
+app.get("/api/podcaster/music/library/list", async (req, res) => {
+  try {
+    const snap = await db.collection("podcaster_music_library").orderBy("updatedAt", "desc").limit(250).get();
+    const tracks = snap.docs.map((docSnap) => {
+      const data = docSnap.data() || {};
+      return {
+        libraryId: docSnap.id,
+        name: clampText(data.name || "Audio", 180) || "Audio",
+        mimeType: clampText(data.mimeType || "audio/mpeg", 120) || "audio/mpeg",
+        size: Math.max(0, Number(data.size || 0) || 0),
+        durationSec: clampNumber(data.durationSec, 0, 1800, 0),
+        downloadUrl: clampText(data.downloadUrl || "", 3000),
+        storagePath: clampText(data.storagePath || "", 700),
+        updatedAt: clampText(data.updatedAt || "", 64),
+        ownerId: clampText(data.ownerId || "", 140),
+        ownerEmail: clampText(data.ownerEmail || "", 180)
+      };
+    });
+    return res.status(200).json({ ok: true, tracks });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar la biblioteca de audios.") });
+  }
+});
+
+app.post("/api/podcaster/music/library/upload", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const userEmail = clampText(req.authContext?.email || "", 180);
+    const fileName = clampText(req.body?.fileName || "podcast-music", 180) || "podcast-music";
+    const mimeType = clampText(req.body?.mimeType || "audio/mpeg", 120) || "audio/mpeg";
+    const durationSec = clampNumber(req.body?.durationSec, 0, 1800, 0);
+    const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
+    const audioDataUrl = String(req.body?.audioDataUrl || "").trim();
+    if (!audioDataUrl) return res.status(400).json({ error: "Falta audioDataUrl." });
+    const decoded = decodeBase64DataUrl(audioDataUrl, MAX_PODCASTER_MUSIC_BYTES);
+    if (!String(decoded?.mimeType || mimeType).startsWith("audio/")) {
+      return res.status(400).json({ error: "El archivo seleccionado no es audio válido." });
+    }
+    const ext = getAudioExtension(decoded.mimeType || mimeType);
+    const fileSlug = normalizeStorageSegment(fileName, "track");
+    const libraryId = randomUUID();
+    const storagePath = `podcaster/library/music/${fileSlug}-${libraryId}.${ext}`;
+    const asset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer: decoded.buffer,
+      mimeType: decoded.mimeType || mimeType,
+      metadata: {
+        uid,
+        fileName,
+        kind: "panel_music_library"
+      }
+    });
+    if (previousStoragePath && previousStoragePath !== storagePath) {
+      await deleteStoragePath(previousStoragePath).catch(() => {});
+    }
+    const updatedAt = new Date().toISOString();
+    await db.collection("podcaster_music_library").doc(libraryId).set({
+      name: fileName,
+      mimeType: decoded.mimeType || mimeType,
+      size: decoded.buffer.length,
+      durationSec,
+      downloadUrl: asset.downloadUrl,
+      storagePath: asset.path,
+      updatedAt,
+      ownerId: uid,
+      ownerEmail: userEmail || null
+    });
+    return res.status(200).json({
+      ok: true,
+      track: {
+        libraryId,
+        name: fileName,
+        mimeType: decoded.mimeType || mimeType,
+        size: decoded.buffer.length,
+        durationSec,
+        downloadUrl: asset.downloadUrl,
+        storagePath: asset.path,
+        updatedAt,
+        ownerId: uid,
+        ownerEmail: userEmail || null
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir el audio a la biblioteca global.") });
+  }
+});
+
+app.post("/api/podcaster/music/library/delete", async (req, res) => {
+  try {
+    const libraryId = clampText(req.body?.libraryId || "", 140);
+    if (!libraryId) return res.status(400).json({ error: "Falta libraryId." });
+    const ref = db.collection("podcaster_music_library").doc(libraryId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "El audio global ya no existe." });
+    }
+    const data = snap.data() || {};
+    const storagePath = clampText(data.storagePath || req.body?.storagePath || "", 700);
+    await ref.delete();
+    if (storagePath) {
+      await deleteStoragePath(storagePath).catch(() => {});
+    }
+    return res.status(200).json({ ok: true, libraryId });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar el audio global.") });
   }
 });
 

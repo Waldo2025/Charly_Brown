@@ -1,27 +1,1521 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { buildApiUrl } from "./api-client.js";
 // lecturas-asc-unificado.js
 // ------------------------------------------------------------
-import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, getDoc, updateDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
-
-const ASC_EDITOR_GEMINI_API_KEY = "__GEMINI_API_KEY_LOCAL__";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, getDoc, updateDoc, deleteDoc, doc, deleteField } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 const app  = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 const db   = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
 // Utils
 const $ = (q, ctx=document)=>ctx.querySelector(q);
 const $$= (q, ctx=document)=>Array.from(ctx.querySelectorAll(q));
 const esc = s=>String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+
+function _ascStripHtmlToPlain(html = "") {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _ascExtractMusicAssets(row = {}) {
+  const music = row?.music || row?.musica || {};
+  return {
+    readingUrl: String(music?.readingUrl || music?.lecturaUrl || row?.musicReadingUrl || "").trim(),
+    gameUrl: String(music?.gameUrl || music?.juegoUrl || row?.musicGameUrl || "").trim(),
+    readingPath: String(music?.readingPath || music?.lecturaPath || row?.musicReadingPath || "").trim(),
+    gamePath: String(music?.gamePath || music?.juegoPath || row?.musicGamePath || "").trim(),
+    musicConfig: _ascNormalizeMusicProfile(music?.musicConfig || row?.musicConfig || {}),
+    promptReading: String(music?.promptReading || "").trim(),
+    promptGame: String(music?.promptGame || "").trim(),
+  };
+}
+
+function _ascStoragePathFromDownloadUrl(url = "") {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    const m = u.pathname.match(/\/o\/(.+)$/);
+    if (!m?.[1]) return "";
+    return decodeURIComponent(m[1]);
+  } catch (_) {
+    return "";
+  }
+}
+
+function _ascCollectMusicStoragePaths(row = {}) {
+  const assets = _ascExtractMusicAssets(row);
+  const out = [
+    String(assets.readingPath || "").trim(),
+    String(assets.gamePath || "").trim(),
+    _ascStoragePathFromDownloadUrl(assets.readingUrl),
+    _ascStoragePathFromDownloadUrl(assets.gameUrl)
+  ].filter(Boolean);
+  return [...new Set(out)];
+}
+
+function _ascHasMusicAssets(row = {}) {
+  const assets = _ascExtractMusicAssets(row);
+  return !!(assets.readingUrl && assets.gameUrl);
+}
+
+function _ascExtractStoredMusicConfig(row = {}) {
+  const m = row?.music || row?.musica || {};
+  const cfg = m?.musicConfig || row?.musicConfig || {};
+  return (cfg && typeof cfg === "object") ? cfg : {};
+}
+
+function _ascNormalizeMusicProfile(input = {}) {
+  const src = (input && typeof input === "object") ? input : {};
+  const build = (item = {}) => {
+    const v = (item && typeof item === "object") ? item : {};
+    return {
+      prompt: String(v.prompt || "").trim(),
+      genre: String(v.genre || "").trim(),
+      vocalMode: String(v.vocalMode || "").trim(),
+      tone: String(v.tone || "").trim(),
+    };
+  };
+  return {
+    reading: build(src.reading),
+    game: build(src.game),
+  };
+}
+
+function _ascBuildPromptFromMusicProfile(profile = {}, modeLabel = "") {
+  const p = (profile && typeof profile === "object") ? profile : {};
+  const out = [];
+  if (modeLabel) out.push(`Mode: ${modeLabel}`);
+  if (p.prompt) out.push(`Prompt: ${p.prompt}`);
+  if (p.genre) out.push(`Genre: ${p.genre}`);
+  if (p.vocalMode) out.push(`Voice mode: ${p.vocalMode}`);
+  if (p.tone) out.push(`Tone: ${p.tone}`);
+  return out.join("\n").trim();
+}
+
+function _ascResolveMusicPromptInputs(row = {}, options = {}) {
+  const musicConfig = _ascNormalizeMusicProfile(options?.musicConfig || _ascExtractStoredMusicConfig(row));
+  const promptReadingRaw = String(options?.promptReading || "").trim();
+  const promptGameRaw = String(options?.promptGame || "").trim();
+  const promptReading = promptReadingRaw || _ascBuildPromptFromMusicProfile(musicConfig.reading, "reading");
+  const promptGame = promptGameRaw || _ascBuildPromptFromMusicProfile(musicConfig.game, "game");
+  if (!promptReading || !promptGame) {
+    throw new Error("Configura los campos de música en el modal (prompt, género, voz/instrumental y tono) antes de generar.");
+  }
+  return { promptReading, promptGame, musicConfig };
+}
+
+function _ascBuildLyriaRuntimeConfig(row = {}) {
+  const modelPref = String(localStorage.getItem("cb_lyria_model") || "").trim();
+  const model = (modelPref === "lyria-002" || modelPref === "lyria-realtime-exp") ? modelPref : "lyria-realtime-exp";
+  const sampleRaw = Number(localStorage.getItem("cb_lyria_sample_count") || 2);
+  const sampleCount = Math.max(1, Math.min(4, Number.isFinite(sampleRaw) ? Math.floor(sampleRaw) : 1));
+  const seedTxt = String(localStorage.getItem("cb_lyria_seed") || "").trim();
+  const seedRaw = seedTxt ? Number(seedTxt) : NaN;
+  const useSeed = String(localStorage.getItem("cb_lyria_use_seed") || "").trim().toLowerCase() === "true";
+  const seed = (useSeed && Number.isFinite(seedRaw)) ? Math.max(0, Math.floor(seedRaw)) : null;
+  const negativePromptReading = String(
+      localStorage.getItem("cb_lyria_negative_prompt") ||
+      "Synth leads, EDM drums, electric guitar, trap beat, vocals, narration, choir, distortion, hiss, crackle, noisy texture.",
+  ).trim();
+  const negativePromptGame = String(
+      localStorage.getItem("cb_lyria_negative_prompt_game") ||
+      "Vocals, narration, choir, horror texture, harsh distortion, chaotic atonal noise, muddy mix, hiss, crackle.",
+  ).trim();
+  const guidanceRaw = Number(localStorage.getItem("cb_lyria_guidance") || 4);
+  const guidance = Number.isFinite(guidanceRaw) ? Math.max(0, Math.min(6, guidanceRaw)) : 4;
+  const bpmRaw = Number(localStorage.getItem("cb_lyria_bpm") || 76);
+  const bpm = Number.isFinite(bpmRaw) ? Math.max(60, Math.min(200, Math.round(bpmRaw))) : 76;
+  const gameBpmRaw = Number(localStorage.getItem("cb_lyria_game_bpm") || 156);
+  const gameBpm = Number.isFinite(gameBpmRaw) ? Math.max(60, Math.min(200, Math.round(gameBpmRaw))) : 156;
+  const densityRaw = Number(localStorage.getItem("cb_lyria_density") || 0.5);
+  const density = Number.isFinite(densityRaw) ? Math.max(0, Math.min(1, densityRaw)) : 0.5;
+  const brightnessRaw = Number(localStorage.getItem("cb_lyria_brightness") || 0.7);
+  const brightness = Number.isFinite(brightnessRaw) ? Math.max(0, Math.min(1, brightnessRaw)) : 0.7;
+  const temperatureRaw = Number(localStorage.getItem("cb_lyria_temperature") || 1.2);
+  const temperature = Number.isFinite(temperatureRaw) ? Math.max(0, Math.min(2.5, temperatureRaw)) : 1.2;
+  const durationRaw = Number(localStorage.getItem("cb_lyria_duration_ms") || 30000);
+  const durationMs = Number.isFinite(durationRaw) ? Math.max(12000, Math.min(70000, Math.round(durationRaw))) : 30000;
+  const scaleRaw = String(localStorage.getItem("cb_lyria_scale") || "C_MAJOR_A_MINOR").trim().toUpperCase();
+  const scale = _ascNormalizeLyriaScale(scaleRaw) || "C_MAJOR_A_MINOR";
+  return {
+    model,
+    sampleCount,
+    seed: sampleCount > 1 ? null : seed,
+    negativePrompt: negativePromptReading,
+    negativePromptReading,
+    negativePromptGame,
+    guidance,
+    bpm,
+    gameBpm,
+    density,
+    brightness,
+    temperature,
+    durationMs,
+    scale,
+    title: String(row?.titulo || "").trim(),
+  };
+}
+
+function _ascBuildSongSections(energetic = false, promptText = "", trackProfile = {}) {
+  const basePrompt = String(promptText || "").replace(/\s+/g, " ").trim().slice(0, 260);
+  const genre = String(trackProfile?.genre || "").trim();
+  const tone = String(trackProfile?.tone || "").trim();
+  const voice = String(trackProfile?.vocalMode || "").trim();
+  const common = [
+    genre ? `Genre: ${genre}` : "",
+    tone ? `Tone: ${tone}` : "",
+    voice ? `Voice mode: ${voice}` : "",
+    basePrompt,
+  ].filter(Boolean).join(" | ");
+  if (energetic) {
+    return [
+      {
+        atMs: 0,
+        prompts: [
+          { text: `${common} | Intro: drums+bass establish groove, lead restrained.`, weight: 1.2 },
+          { text: "Instrument roles: drums tight, bass short pulse, lead sparse motifs.", weight: 1.1 },
+        ]
+      },
+      {
+        atMs: 6000,
+        prompts: [
+          { text: `${common} | Section A: hook enters, lead phrasing opens, chords support.`, weight: 1.25 },
+          { text: "Instrument roles: lead gains articulation, drums keep steady backbeat.", weight: 1.12 },
+        ]
+      },
+      {
+        atMs: 12000,
+        prompts: [
+          { text: `${common} | Section B: chorus lift, brighter lead and wider harmony.`, weight: 1.28 },
+          { text: "Instrument roles: bass broader motion, drums accent transitions, lead peaks.", weight: 1.12 },
+        ]
+      },
+      {
+        atMs: 17000,
+        prompts: [
+          { text: `${common} | Outro: reduce lead intensity, cadence with drums+bass release.`, weight: 1.1 },
+        ]
+      },
+    ];
+  }
+  return [
+    {
+      atMs: 0,
+      prompts: [
+        { text: `${common} | Intro: strings set texture, winds answer softly, piano minimal guidance.`, weight: 1.2 },
+      ]
+    },
+    {
+      atMs: 7000,
+      prompts: [
+        { text: `${common} | Section A: melody in strings/piano, woodwinds counterline, brass restrained.`, weight: 1.24 },
+      ]
+    },
+    {
+      atMs: 14000,
+      prompts: [
+        { text: `${common} | Section B: brass and low strings intensify harmony, winds articulate transitions.`, weight: 1.22 },
+      ]
+    },
+    {
+      atMs: 19000,
+      prompts: [
+        { text: `${common} | Outro: reduce brass, strings and piano resolve with clear cadence.`, weight: 1.08 },
+      ]
+    },
+  ];
+}
+
+function _ascBuildAdvancedStyleHints(trackProfile = {}, energetic = false) {
+  const genre = String(trackProfile?.genre || "").toLowerCase();
+  const prompt = String(trackProfile?.prompt || "").toLowerCase();
+  const mix = `${genre} ${prompt}`;
+  const wantsBaroque = /(barroc|baroque|bach|vivaldi|handel|haendel)/.test(mix);
+  const wantsMozart = /(mozart|clasico|clasicismo|classical era|viennese)/.test(mix);
+  const wantsOrchestra = /(orquest|orchestra|symphon|sinfon|ensemble|camerata)/.test(mix);
+  const wantsInstrumental = String(trackProfile?.vocalMode || "").toLowerCase().includes("instrumental");
+  if (energetic) {
+    return [
+      { text: "Song-like structure: intro, verse, chorus, bridge, outro.", weight: 1.18 },
+      { text: "Strong rhythmic identity, memorable hook, layered arrangement (drums+bass+lead+counter-melody).", weight: 1.16 },
+      { text: "Avoid static loops. Evolve harmony and instrumentation every section.", weight: 1.14 },
+      { text: "High-fidelity production, punchy modern mix, avoid cheap toy timbre.", weight: 1.12 },
+      { text: "No cheap GM MIDI/soundfont character, no thin toy keyboard lead.", weight: 1.15 },
+      wantsInstrumental ? { text: "Instrumental only, no vocals.", weight: 1.1 } : null,
+    ].filter(Boolean);
+  }
+  const hints = [
+    { text: "Song-like composition with clear sections and thematic development.", weight: 1.18 },
+    { text: "Avoid static ambient pad or solo sketch. Use multi-instrument arrangement.", weight: 1.16 },
+    { text: "Realistic instrument timbre and human performance nuance.", weight: 1.2 },
+    { text: "Natural room ambience, dynamic articulation, expressive phrasing.", weight: 1.15 },
+    { text: "No cheap GM MIDI/soundfont or toy keyboard tone.", weight: 1.2 },
+    wantsInstrumental ? { text: "Instrumental only, no vocals.", weight: 1.1 } : null,
+  ];
+  if (wantsBaroque) {
+    hints.push(
+      { text: "Baroque orchestral writing: strings choir + woodwinds + basso continuo + harpsichord.", weight: 1.24 },
+      { text: "Counterpoint, sequence development, ornamental melodic turns, dance-like pulse.", weight: 1.2 },
+      { text: "Not solo piano. Full ensemble texture is required.", weight: 1.22 }
+    );
+  } else if (wantsMozart) {
+    hints.push(
+      { text: "Classical-era orchestration in Mozart-like balance: strings, woodwinds, horns, basses.", weight: 1.24 },
+      { text: "Elegant periodic phrasing, motivic development, transparent but rich orchestration.", weight: 1.2 },
+      { text: "Not solo piano. Full orchestral support required.", weight: 1.22 }
+    );
+  } else if (wantsOrchestra) {
+    hints.push(
+      { text: "Full orchestral arrangement with layered strings, winds, brass and low-end support.", weight: 1.2 },
+      { text: "Not solo piano. Ensemble texture required.", weight: 1.18 }
+    );
+  }
+  return hints;
+}
+
+function _ascBuildExpressiveIntentHints(trackProfile = {}, energetic = false) {
+  const tone = String(trackProfile?.tone || "").trim().toLowerCase();
+  if (energetic) {
+    const toneHint = tone ? `Emotional target: ${tone}.` : "Emotional target: energetic and uplifting.";
+    return [
+      { text: `${toneHint} Clear tension-release arc across sections.`, weight: 1.15 },
+      { text: "Expressive groove: accent patterns, syncopation, velocity variation, dynamic contrasts.", weight: 1.12 },
+      { text: "Phrase with intention, not static loop. Build, peak, and resolve.", weight: 1.14 },
+    ];
+  }
+  const toneHint = tone ? `Emotional target: ${tone}.` : "Emotional target: lyrical and expressive.";
+  return [
+    { text: `${toneHint} Shape long melodic phrases with breath-like contour.`, weight: 1.18 },
+    { text: "Dynamic arc: pianissimo to forte swells and intentional cadential release.", weight: 1.16 },
+    { text: "Human interpretation: rubato nuance, articulation contrast (legato/staccato), expressive voicing.", weight: 1.15 },
+  ];
+}
+
+function _ascBuildPerInstrumentIntentHints(trackProfile = {}, energetic = false) {
+  const tone = String(trackProfile?.tone || "").trim().toLowerCase();
+  if (energetic) {
+    return [
+      { text: `Drums: tight transient accents, controlled ghost notes, energetic backbeat (${tone || "upbeat"}).`, weight: 1.12 },
+      { text: "Bass synth: sidechain pulse with short articulation and clear note separation.", weight: 1.12 },
+      { text: "Lead synth: expressive phrasing with hook contour, not constant full-intensity.", weight: 1.1 },
+      { text: "Chord layer/pads: support harmony with dynamic swells behind lead and rhythm.", weight: 1.06 },
+      { text: "FX/percussion details: sparse fills at transitions, avoid clutter.", weight: 1.04 },
+    ];
+  }
+  return [
+    { text: `Strings: long legato lines with gradual cresc/decresc and expressive vibrato (${tone || "lyrical"}).`, weight: 1.14 },
+    { text: "Woodwinds: lighter counterphrases, clearer articulation than strings, phrase-by-phrase breathing.", weight: 1.11 },
+    { text: "Brass/horns: restrained support in A sections, stronger swells only at climactic points.", weight: 1.09 },
+    { text: "Piano/continuo: melodic guidance with nuanced rubato, avoid dominating all sections.", weight: 1.1 },
+    { text: "Low strings/timpani: structural tension-release cues at cadences and transitions only.", weight: 1.06 },
+  ];
+}
+
+function _ascIsStaticLocalDev() {
+  const host = String(window.location.hostname || "").toLowerCase();
+  const port = String(window.location.port || "");
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  if (!isLocalHost) return false;
+  return port !== "5000" && port !== "5001";
+}
+
+async function _ascGeminiGenerateViaBackend(model = "gemini-2.5-flash", payload = {}, signal = null) {
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : "";
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: String(model || "gemini-2.5-flash"),
+      payload: payload || {}
+    }),
+    ...(signal ? { signal } : {})
+  });
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
+}
+
+function _ascDecodeBase64ToBytes(base64 = "") {
+  const binary = atob(String(base64 || "").trim());
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function _ascHashSeedFromText(text = "") {
+  const str = String(text || "");
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0);
+}
+
+function _ascPcm16ToWavBlob(pcmBytes, sampleRate = 24000, channels = 1) {
+  const data = pcmBytes instanceof Uint8Array ? pcmBytes : new Uint8Array(0);
+  const byteRate = sampleRate * channels * 2;
+  const blockAlign = channels * 2;
+  const wav = new ArrayBuffer(44 + data.length);
+  const view = new DataView(wav);
+  let off = 0;
+  const write = (s) => { for (let i = 0; i < s.length; i += 1) view.setUint8(off + i, s.charCodeAt(i)); off += s.length; };
+  write("RIFF");
+  view.setUint32(off, 36 + data.length, true); off += 4;
+  write("WAVE");
+  write("fmt ");
+  view.setUint32(off, 16, true); off += 4;
+  view.setUint16(off, 1, true); off += 2;
+  view.setUint16(off, channels, true); off += 2;
+  view.setUint32(off, sampleRate, true); off += 4;
+  view.setUint32(off, byteRate, true); off += 4;
+  view.setUint16(off, blockAlign, true); off += 2;
+  view.setUint16(off, 16, true); off += 2;
+  write("data");
+  view.setUint32(off, data.length, true); off += 4;
+  new Uint8Array(wav, off).set(data);
+  return new Blob([wav], { type: "audio/wav" });
+}
+
+function _ascPcm16BytesToMonoFloat(pcmBytes = new Uint8Array(0), channels = 2) {
+  const bytes = (pcmBytes instanceof Uint8Array) ? pcmBytes : new Uint8Array(0);
+  if (!bytes.length) return new Float32Array(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ch = Math.max(1, Math.min(2, Number(channels || 1)));
+  const totalSamples = Math.floor(bytes.byteLength / 2);
+  const frames = Math.floor(totalSamples / ch);
+  const out = new Float32Array(frames);
+  for (let i = 0; i < frames; i += 1) {
+    let acc = 0;
+    for (let c = 0; c < ch; c += 1) {
+      const s = view.getInt16((i * ch + c) * 2, true) / 32768;
+      acc += s;
+    }
+    out[i] = acc / ch;
+  }
+  return out;
+}
+
+function _ascScoreMusicalStructureFromPcm(pcmBytes = new Uint8Array(0), sampleRate = 48000, channels = 2) {
+  const x = _ascPcm16BytesToMonoFloat(pcmBytes, channels);
+  const n = x.length;
+  if (!n || !Number.isFinite(sampleRate) || sampleRate < 8000) return -9999;
+  const secSamples = Math.max(256, Math.floor(sampleRate)); // 1 second blocks
+  const blocks = [];
+  for (let i = 0; i < n; i += secSamples) {
+    const end = Math.min(n, i + secSamples);
+    let e = 0;
+    let peak = 0;
+    for (let j = i; j < end; j += 1) {
+      const v = x[j];
+      e += v * v;
+      const a = Math.abs(v);
+      if (a > peak) peak = a;
+    }
+    const len = Math.max(1, end - i);
+    blocks.push({ rms: Math.sqrt(e / len), peak });
+  }
+  if (blocks.length < 6) return -9999;
+  const rms = blocks.map((b) => b.rms);
+  const peak = blocks.map((b) => b.peak);
+  const meanRms = rms.reduce((a, b) => a + b, 0) / rms.length;
+  const stdRms = Math.sqrt(rms.reduce((a, b) => a + ((b - meanRms) ** 2), 0) / Math.max(1, rms.length));
+  const maxPeak = Math.max(...peak);
+  const clipPenalty = maxPeak > 0.985 ? (maxPeak - 0.985) * 28 : 0;
+  const flatPenalty = stdRms < 0.01 ? 3.5 : 0;
+  // 4-part form contrast
+  const q = Math.max(1, Math.floor(rms.length / 4));
+  const secA = rms.slice(0, q);
+  const secB = rms.slice(q, q * 2);
+  const secC = rms.slice(q * 2, q * 3);
+  const secD = rms.slice(q * 3);
+  const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const a = avg(secA), b = avg(secB), c = avg(secC), d = avg(secD);
+  const sectionContrast = Math.abs(a - b) + Math.abs(b - c) + Math.abs(c - d);
+  // novelty between blocks
+  let novelty = 0;
+  for (let i = 1; i < rms.length; i += 1) novelty += Math.abs(rms[i] - rms[i - 1]);
+  novelty /= Math.max(1, rms.length - 1);
+  // target curve preference: evolve and resolve (B/C > A and D < C)
+  const formBonus = ((b > a ? 0.6 : 0) + (c >= b ? 0.6 : 0) + (d < c ? 0.6 : 0));
+  const score = (sectionContrast * 42) + (novelty * 30) + (stdRms * 40) + formBonus - clipPenalty - flatPenalty;
+  return Number.isFinite(score) ? score : -9999;
+}
+
+function _ascAudioBufferToWavBlob(audioBuffer) {
+  const channels = Math.max(1, Number(audioBuffer?.numberOfChannels || 1));
+  const sampleRate = Math.max(8000, Number(audioBuffer?.sampleRate || 24000));
+  const length = Math.max(0, Number(audioBuffer?.length || 0));
+  const pcm = new Int16Array(length * channels);
+  for (let i = 0; i < length; i += 1) {
+    for (let ch = 0; ch < channels; ch += 1) {
+      const data = audioBuffer.getChannelData(ch);
+      const s = Math.max(-1, Math.min(1, Number(data?.[i] || 0)));
+      pcm[i * channels + ch] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+  }
+  return _ascPcm16ToWavBlob(new Uint8Array(pcm.buffer), sampleRate, channels);
+}
+
+async function _ascDecodeWavBlobToAudioBuffer(blob = null) {
+  if (!(blob instanceof Blob)) return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (typeof Ctx !== "function") return null;
+  const ctx = new Ctx();
+  try {
+    const ab = await blob.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(ab.slice(0));
+    return decoded || null;
+  } catch (_) {
+    return null;
+  } finally {
+    try { await ctx.close(); } catch (_) {}
+  }
+}
+
+function _ascBuildLoopableAudioBuffer(buffer = null, options = {}) {
+  if (!buffer) return null;
+  const sampleRate = Math.max(8000, Number(buffer.sampleRate || 48000));
+  const channels = Math.max(1, Number(buffer.numberOfChannels || 1));
+  const length = Math.max(1, Number(buffer.length || 1));
+  const fadeSecRaw = Number(options?.fadeSec || 1.1);
+  const fadeSamples = Math.max(256, Math.min(Math.floor(length / 4), Math.floor(sampleRate * Math.max(0.18, fadeSecRaw))));
+  if (fadeSamples * 2 >= length) return buffer;
+  const outLen = length;
+  const out = new AudioBuffer({
+    length: outLen,
+    numberOfChannels: channels,
+    sampleRate
+  });
+  for (let ch = 0; ch < channels; ch += 1) {
+    const src = buffer.getChannelData(ch);
+    const dst = out.getChannelData(ch);
+    dst.set(src);
+    const seam = new Float32Array(fadeSamples);
+    for (let i = 0; i < fadeSamples; i += 1) {
+      const t = i / Math.max(1, fadeSamples - 1);
+      const a = Math.cos(t * Math.PI * 0.5);
+      const b = Math.sin(t * Math.PI * 0.5);
+      const head = src[i] || 0;
+      const tail = src[outLen - fadeSamples + i] || 0;
+      seam[i] = (head * a) + (tail * b);
+    }
+    for (let i = 0; i < fadeSamples; i += 1) dst[i] = seam[i];
+    for (let i = 0; i < fadeSamples; i += 1) dst[outLen - fadeSamples + i] = seam[(i + 1) % fadeSamples];
+    dst[outLen - 1] = dst[0];
+  }
+  return out;
+}
+
+async function _ascMakeWavLoopable(blob = null, options = {}) {
+  const buffer = await _ascDecodeWavBlobToAudioBuffer(blob);
+  if (!buffer) return blob;
+  const loopable = _ascBuildLoopableAudioBuffer(buffer, options);
+  if (!loopable) return blob;
+  return _ascAudioBufferToWavBlob(loopable);
+}
+
+function _ascSeededRandom(seedText = "") {
+  let h = 2166136261 >>> 0;
+  const txt = String(seedText || "");
+  for (let i = 0; i < txt.length; i += 1) {
+    h ^= txt.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h += 0x6D2B79F5;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function _ascMusicNonce(force = false) {
+  const now = Date.now();
+  const rnd = Math.floor(Math.random() * 1e9);
+  if (force) return `force-${now}-${rnd}`;
+  return `slot-${Math.floor(now / 45000)}-${rnd}`;
+}
+
+function _ascPickMusicVariant(energetic = false, nonce = "") {
+  const variants = energetic ?
+    ["arcade-synth", "electro-waltz", "orchestral-drive", "pulse-run"] :
+    ["nocturne", "waltz", "concerto", "adagio"];
+  let h = 0;
+  const txt = String(nonce || "");
+  for (let i = 0; i < txt.length; i += 1) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  return variants[h % variants.length];
+}
+
+function _ascTryParseJson(raw = "") {
+  const txt = String(raw || "").trim();
+  if (!txt) return null;
+  try { return JSON.parse(txt); } catch (_) {}
+  const a = txt.indexOf("{");
+  const b = txt.lastIndexOf("}");
+  if (a >= 0 && b > a) {
+    try { return JSON.parse(txt.slice(a, b + 1)); } catch (_) {}
+  }
+  return null;
+}
+
+async function _ascAnalyzeMusicProfileWithGemini({ prompt = "", energetic = false } = {}) {
+  const instruction = `
+Eres compositor. Analiza el texto y devuelve SOLO JSON:
+{
+  "mood":"calm|hopeful|mysterious|dramatic|playful|heroic",
+  "energy":0.0,
+  "tempoBpm":80,
+  "scale":"major|minor|dorian|mixolydian",
+  "keyCenterMidi":60,
+  "orchestration":{"strings":0.8,"piano":0.7,"cello":0.6,"woodwinds":0.3,"synth":0.2,"percussion":0.1}
+}
+Sin markdown.
+`.trim();
+  const { response, data } = await _ascGeminiGenerateViaBackend("gemini-2.5-flash", {
+    contents: [{ role: "user", parts: [{ text: `${instruction}\n\nTexto:\n${String(prompt || "").slice(0, 7000)}` }] }],
+    generationConfig: { temperature: energetic ? 0.65 : 0.4, responseMimeType: "application/json" }
+  });
+  if (!response.ok) return null;
+  const raw = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  return _ascTryParseJson(raw);
+}
+
+async function _ascGenerateProceduralMusicBlob({ prompt = "", energetic = false, profile = null, nonce = "", variant = "" } = {}) {
+  const sampleRate = 32000;
+  const durationSec = energetic ? 26 : 24;
+  const totalFrames = Math.floor(sampleRate * durationSec);
+  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (typeof OfflineCtx !== "function") {
+    throw new Error("OfflineAudioContext no soportado en este navegador.");
+  }
+  const ctx = new OfflineCtx(2, totalFrames, sampleRate);
+  const rand = _ascSeededRandom(`${prompt}|${energetic ? "game" : "reading"}|${JSON.stringify(profile || {})}|${nonce}|${variant}`);
+
+  const master = ctx.createGain();
+  master.gain.value = energetic ? 0.8 : 0.65;
+  master.connect(ctx.destination);
+
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = energetic ? 6400 : 4600;
+  lowpass.Q.value = 0.8;
+  lowpass.connect(master);
+
+  const reverb = ctx.createConvolver();
+  const irLen = Math.floor(sampleRate * (energetic ? 1.2 : 1.8));
+  const ir = ctx.createBuffer(2, irLen, sampleRate);
+  for (let ch = 0; ch < 2; ch += 1) {
+    const data = ir.getChannelData(ch);
+    for (let i = 0; i < irLen; i += 1) {
+      const n = (rand() * 2 - 1) * Math.pow(1 - (i / irLen), energetic ? 2.2 : 2.8);
+      data[i] = n * (energetic ? 0.12 : 0.16);
+    }
+  }
+  reverb.buffer = ir;
+  const dry = ctx.createGain();
+  dry.gain.value = energetic ? 0.8 : 0.72;
+  const wet = ctx.createGain();
+  wet.gain.value = energetic ? 0.2 : 0.28;
+  lowpass.connect(dry).connect(master);
+  lowpass.connect(reverb);
+  reverb.connect(wet).connect(master);
+
+  const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  const p = (profile && typeof profile === "object") ? profile : {};
+  const energy = Math.max(0, Math.min(1, Number(p.energy ?? (energetic ? 0.8 : 0.35))));
+  const bpmVariantBoost = String(variant).includes("waltz") ? -8 :
+    (String(variant).includes("concerto") ? 6 :
+      (String(variant).includes("adagio") ? -14 :
+        (String(variant).includes("pulse") ? 10 : 0)));
+  const bpmBase = (energetic ? 124 : 82) + bpmVariantBoost;
+  const bpm = Math.max(58, Math.min(158, Number(p.tempoBpm || (bpmBase + energy * 8))));
+  const keyCenter = Math.max(42, Math.min(66, Number(p.keyCenterMidi || (energetic ? 50 : 54))));
+  const scaleName = String(p.scale || (energetic ? "mixolydian" : "minor")).toLowerCase();
+  const scaleMap = {
+    major: [0, 2, 4, 5, 7, 9, 11],
+    minor: [0, 2, 3, 5, 7, 8, 10],
+    dorian: [0, 2, 3, 5, 7, 9, 10],
+    mixolydian: [0, 2, 4, 5, 7, 9, 10]
+  };
+  const scale = scaleMap[scaleName] || scaleMap.minor;
+  const triad = (root) => [root, root + scale[2], root + scale[4]];
+  const progression = String(variant).includes("waltz")
+    ? [triad(keyCenter), triad(keyCenter - 3), triad(keyCenter - 5), triad(keyCenter + 2)]
+    : String(variant).includes("adagio")
+      ? [triad(keyCenter), triad(keyCenter - 2), triad(keyCenter - 5), triad(keyCenter - 7)]
+      : [triad(keyCenter), triad(keyCenter - 5), triad(keyCenter + 2), triad(keyCenter - 2)];
+  const beat = 60 / bpm;
+  const bar = beat * 4;
+  const bars = Math.floor(durationSec / bar);
+
+  const scheduleStringPad = (time, len, note, detune = 0, gain = 0.055) => {
+    const osc = ctx.createOscillator();
+    osc.type = energetic ? "sawtooth" : "triangle";
+    osc.frequency.setValueAtTime(midiToHz(note), time);
+    osc.detune.setValueAtTime(detune, time);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(gain, time + 0.28);
+    g.gain.exponentialRampToValueAtTime(gain * 0.66, time + len * 0.65);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + len);
+    osc.connect(g).connect(lowpass);
+    osc.start(time);
+    osc.stop(time + len + 0.05);
+  };
+
+  const schedulePiano = (time, note, len = 0.45, gain = 0.09) => {
+    const o1 = ctx.createOscillator();
+    const o2 = ctx.createOscillator();
+    o1.type = "triangle";
+    o2.type = "sine";
+    const hz = midiToHz(note);
+    o1.frequency.setValueAtTime(hz, time);
+    o2.frequency.setValueAtTime(hz * 2, time);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(gain, time + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + len);
+    o1.connect(g);
+    o2.connect(g);
+    g.connect(lowpass);
+    o1.start(time);
+    o2.start(time);
+    o1.stop(time + len + 0.03);
+    o2.stop(time + len + 0.03);
+  };
+
+  const scheduleCello = (time, note, len = beat * 0.95) => {
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(midiToHz(note), time);
+    const filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.setValueAtTime(620, time);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(0.065, time + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + len);
+    osc.connect(filt).connect(g).connect(lowpass);
+    osc.start(time);
+    osc.stop(time + len + 0.03);
+  };
+
+  const melodicScale = energetic ? [62, 65, 67, 69, 70, 72] : [62, 64, 65, 67, 69, 71, 72];
+  for (let b = 0; b < bars; b += 1) {
+    const t0 = b * bar;
+    const chord = progression[b % progression.length];
+    const orchestration = p.orchestration || {};
+    const stringsMix = Math.max(0, Math.min(1, Number(orchestration.strings ?? 0.75)));
+    const pianoMix = Math.max(0, Math.min(1, Number(orchestration.piano ?? 0.65)));
+    const celloMix = Math.max(0, Math.min(1, Number(orchestration.cello ?? 0.7)));
+    for (const note of chord) {
+      scheduleStringPad(t0, bar * 0.98, note + 12, -4, energetic ? 0.03 : 0.05);
+      scheduleStringPad(t0, bar * 0.98, note + 12, 4, energetic ? 0.03 : 0.05);
+      if (stringsMix > 0.65) scheduleStringPad(t0, bar * 0.95, note + 19, 0, energetic ? 0.02 : 0.03);
+    }
+
+    // Cello pulse
+    for (let k = 0; k < 4; k += 1) {
+      if (celloMix > 0.2) scheduleCello(t0 + (k * beat), chord[0] - 12, energetic ? beat * 0.6 : beat * 0.92);
+    }
+
+    // Piano/arpeggio
+    const arpCount = String(variant).includes("waltz") ? 6 : (energetic ? 8 : 6);
+    for (let i = 0; i < arpCount; i += 1) {
+      const st = t0 + (i * bar / arpCount);
+      const n = chord[i % chord.length] + (energetic ? 24 : 19);
+      if (pianoMix > 0.2) schedulePiano(st, n, energetic ? 0.18 : 0.32, energetic ? 0.06 : 0.08);
+    }
+
+    // Violin-like melody
+    const melodyHits = String(variant).includes("adagio") ? 2 : (energetic ? 4 : 3);
+    for (let m = 0; m < melodyHits; m += 1) {
+      const mt = t0 + (m + 0.5) * (bar / melodyHits);
+      const n = melodicScale[Math.floor(rand() * melodicScale.length)] + (energetic ? 0 : 12);
+      scheduleStringPad(mt, energetic ? 0.28 : 0.55, n, 0, energetic ? 0.04 : 0.05);
+    }
+  }
+
+  const rendered = await ctx.startRendering();
+  return _ascAudioBufferToWavBlob(rendered);
+}
+
+function _ascExtractInlineAudioPart(data = {}) {
+  const parts = Array.isArray(data?.candidates?.[0]?.content?.parts) ? data.candidates[0].content.parts : [];
+  for (const part of parts) {
+    const inline = part?.inlineData || part?.inline_data;
+    const mime = String(inline?.mimeType || inline?.mime_type || "").trim();
+    const b64 = String(inline?.data || "").trim();
+    if (b64 && /^audio\//i.test(mime)) return { mime, b64 };
+  }
+  return null;
+}
+
+let _ascGoogleGenAiModPromise = null;
+
+async function _ascLoadGoogleGenAiModule() {
+  throw new Error("Gemini directo en frontend está deshabilitado. Usa solo el backend.");
+}
+
+function _ascSleep(ms = 0) {
+  const safe = Math.max(0, Number(ms || 0));
+  return new Promise((resolve) => setTimeout(resolve, safe));
+}
+
+function _ascExtractLyriaAudioChunksFromMessage(message = {}) {
+  const out = [];
+  const serverContent = message?.serverContent || {};
+  const chunks = Array.isArray(serverContent?.audioChunks) ? serverContent.audioChunks : [];
+  for (const chunk of chunks) {
+    const b64 = String(chunk?.data || "").trim();
+    if (!b64) continue;
+    try {
+      out.push(_ascDecodeBase64ToBytes(b64));
+    } catch (_) {}
+  }
+  return out;
+}
+
+function _ascExtractLyriaSampleRateFromMessage(message = {}, fallback = 48000) {
+  const serverContent = message?.serverContent || {};
+  const direct = Number(
+    serverContent?.sampleRateHertz ||
+    serverContent?.audioMetadata?.sampleRateHertz ||
+    serverContent?.audioChunks?.[0]?.sampleRateHertz ||
+    fallback
+  );
+  if (!Number.isFinite(direct)) return Number(fallback || 48000);
+  return Math.max(8000, Math.min(96000, Math.round(direct)));
+}
+
+function _ascExtractLyriaChannelsFromMessage(message = {}, fallback = 2) {
+  const serverContent = message?.serverContent || {};
+  const direct = Number(
+    serverContent?.audioMetadata?.channels ||
+    serverContent?.audioMetadata?.channelCount ||
+    serverContent?.audioChunks?.[0]?.channels ||
+    serverContent?.audioChunks?.[0]?.channelCount ||
+    fallback
+  );
+  if (!Number.isFinite(direct)) return Number(fallback || 2);
+  return Math.max(1, Math.min(2, Math.round(direct)));
+}
+
+function _ascNormalizeLyriaLiveModel(model = "") {
+  const raw = String(model || "").trim().toLowerCase().replace(/^models\//, "");
+  const safe = (raw === "lyria-002" || raw === "lyria-realtime-exp") ? raw : "lyria-realtime-exp";
+  return `models/${safe}`;
+}
+
+function _ascLogLyriaDebug(event = "", payload = {}) {
+  const ts = new Date().toISOString();
+  const entry = { ts, event: String(event || "").trim(), ...(payload || {}) };
+  try {
+    window.__CB_LYRIA_DEBUG__ = window.__CB_LYRIA_DEBUG__ || [];
+    window.__CB_LYRIA_DEBUG__.push(entry);
+    if (window.__CB_LYRIA_DEBUG__.length > 200) window.__CB_LYRIA_DEBUG__.splice(0, window.__CB_LYRIA_DEBUG__.length - 200);
+  } catch (_) {}
+  const debugOn = (
+    String(localStorage.getItem("cb_lyria_debug") || "").trim().toLowerCase() === "true" &&
+    window.__CB_SHOW_LYRIA_CONSOLE__ === true
+  );
+  if (debugOn) {
+    try {
+      console.log("[LyriaDebug]", entry);
+    } catch (_) {}
+  }
+}
+
+window.cbGetLyriaDebug = function cbGetLyriaDebug() {
+  try {
+    return Array.isArray(window.__CB_LYRIA_DEBUG__) ? [...window.__CB_LYRIA_DEBUG__] : [];
+  } catch (_) {
+    return [];
+  }
+};
+
+function _ascCompactLyriaPrompt(prompt = "", options = {}) {
+  const clean = String(prompt || "")
+    .replace(/\s+/g, " ")
+    .replace(/reading excerpt:[^\.]*\./gi, "")
+    .trim();
+  return clean.slice(0, 900);
+}
+
+const ASC_LYRIA_SCALE_MAP = Object.freeze({
+  C_MAJOR: "C_MAJOR_A_MINOR",
+  A_MINOR: "C_MAJOR_A_MINOR",
+  D_FLAT_MAJOR: "D_FLAT_MAJOR_B_FLAT_MINOR",
+  B_FLAT_MINOR: "D_FLAT_MAJOR_B_FLAT_MINOR",
+  D_MAJOR: "D_MAJOR_B_MINOR",
+  B_MINOR: "D_MAJOR_B_MINOR",
+  E_FLAT_MAJOR: "E_FLAT_MAJOR_C_MINOR",
+  C_MINOR: "E_FLAT_MAJOR_C_MINOR",
+  E_MAJOR: "E_MAJOR_D_FLAT_MINOR",
+  D_FLAT_MINOR: "E_MAJOR_D_FLAT_MINOR",
+  F_MAJOR: "F_MAJOR_D_MINOR",
+  D_MINOR: "F_MAJOR_D_MINOR",
+  G_FLAT_MAJOR: "G_FLAT_MAJOR_E_FLAT_MINOR",
+  E_FLAT_MINOR: "G_FLAT_MAJOR_E_FLAT_MINOR",
+  G_MAJOR: "G_MAJOR_E_MINOR",
+  E_MINOR: "G_MAJOR_E_MINOR",
+  A_FLAT_MAJOR: "A_FLAT_MAJOR_F_MINOR",
+  F_MINOR: "A_FLAT_MAJOR_F_MINOR",
+  A_MAJOR: "A_MAJOR_G_FLAT_MINOR",
+  G_FLAT_MINOR: "A_MAJOR_G_FLAT_MINOR",
+  B_FLAT_MAJOR: "B_FLAT_MAJOR_G_MINOR",
+  G_MINOR: "B_FLAT_MAJOR_G_MINOR",
+  B_MAJOR: "B_MAJOR_A_FLAT_MINOR",
+  A_FLAT_MINOR: "B_MAJOR_A_FLAT_MINOR",
+  C_MAJOR_A_MINOR: "C_MAJOR_A_MINOR",
+  D_FLAT_MAJOR_B_FLAT_MINOR: "D_FLAT_MAJOR_B_FLAT_MINOR",
+  D_MAJOR_B_MINOR: "D_MAJOR_B_MINOR",
+  E_FLAT_MAJOR_C_MINOR: "E_FLAT_MAJOR_C_MINOR",
+  E_MAJOR_D_FLAT_MINOR: "E_MAJOR_D_FLAT_MINOR",
+  F_MAJOR_D_MINOR: "F_MAJOR_D_MINOR",
+  G_FLAT_MAJOR_E_FLAT_MINOR: "G_FLAT_MAJOR_E_FLAT_MINOR",
+  G_MAJOR_E_MINOR: "G_MAJOR_E_MINOR",
+  A_FLAT_MAJOR_F_MINOR: "A_FLAT_MAJOR_F_MINOR",
+  A_MAJOR_G_FLAT_MINOR: "A_MAJOR_G_FLAT_MINOR",
+  B_FLAT_MAJOR_G_MINOR: "B_FLAT_MAJOR_G_MINOR",
+  B_MAJOR_A_FLAT_MINOR: "B_MAJOR_A_FLAT_MINOR",
+});
+
+const ASC_LYRIA_ALLOWED_SCALES = new Set(Object.values(ASC_LYRIA_SCALE_MAP));
+
+function _ascNormalizeLyriaScale(value = "") {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  return String(ASC_LYRIA_SCALE_MAP[raw] || "");
+}
+
+async function _ascProbeLyriaModelAccess(model = "lyria-realtime-exp") {
+  const name = String(model || "").trim().replace(/^models\//, "");
+  try {
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : "";
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(buildApiUrl("/api/gemini/models"), { method: "GET", headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = String(data?.error?.message || data?.error || `HTTP ${res.status}`);
+      return { ok: false, status: res.status, reason: "http_error", message: msg };
+    }
+    const models = Array.isArray(data?.models) ? data.models : [];
+    const found = models.find((m) => String(m?.name || "").replace(/^models\//, "") === name);
+    if (!found) {
+      return { ok: false, status: 404, reason: "unknown_in_catalog", message: `Model ${name} no aparece en catálogo.` };
+    }
+    return { ok: true, modelName: String(found?.name || `models/${name}`) };
+  } catch (err) {
+    return { ok: false, reason: "network_error", message: String(err?.message || err || "") };
+  }
+}
+
+async function _ascGenerateLyriaPcmTrack(prompt = "", options = {}) {
+  void prompt;
+  void options;
+  throw new Error("La generación directa de Lyria en navegador fue deshabilitada por seguridad. Usa el endpoint backend /api/gemini/lyria/generate.");
+}
+
+async function _ascGenerateBestLyriaTrack(prompt = "", options = {}) {
+  const sampleCount = Math.max(1, Math.min(4, Number(options?.sampleCount || 1)));
+  const preferredModel = _ascNormalizeLyriaLiveModel(String(options?.model || "lyria-realtime-exp"));
+  const allowModelFallback = options?.allowModelFallback === true;
+  const modelOrder = allowModelFallback
+    ? (preferredModel.includes("lyria-002")
+      ? ["models/lyria-002", "models/lyria-realtime-exp"]
+      : ["models/lyria-realtime-exp", "models/lyria-002"])
+    : [preferredModel];
+  let best = null;
+  let bestScore = -9999;
+  let lastErr = null;
+  for (const model of modelOrder) {
+    _ascLogLyriaDebug("best:try_model", { model, sampleCount });
+    for (let i = 0; i < sampleCount; i += 1) {
+      const seedBase = Number(options?.seed);
+      const seed = Number.isFinite(seedBase) ? (seedBase + i) : null;
+      try {
+        _ascLogLyriaDebug("best:try_take", { model, take: i + 1, seed });
+        const take = await _ascGenerateLyriaPcmTrack(prompt, { ...options, model, seed });
+        const score = _ascScoreMusicalStructureFromPcm(
+          take?.pcm || new Uint8Array(0),
+          Number(take?.sampleRateHz || 48000),
+          Number(take?.channels || 2)
+        );
+        if (!best || score > bestScore) {
+          best = take;
+          bestScore = score;
+        }
+        _ascLogLyriaDebug("best:take_ok", { model, take: i + 1, pcmBytes: Number(take?.pcm?.length || 0), score });
+      } catch (err) {
+        lastErr = err;
+        _ascLogLyriaDebug("best:take_err", { model, take: i + 1, seed, message: String(err?.message || err || "") });
+        try {
+          // Retry once with compacted user prompt only (no hardcoded internal style prompt).
+          const safePrompt = String(prompt || "").replace(/\s+/g, " ").trim().slice(0, 220);
+          if (!safePrompt) throw err;
+          _ascLogLyriaDebug("best:retry_safe_prompt", { model, take: i + 1, seed, safePrompt });
+          const takeRetry = await _ascGenerateLyriaPcmTrack(safePrompt, { ...options, model, seed });
+          const retryScore = _ascScoreMusicalStructureFromPcm(
+            takeRetry?.pcm || new Uint8Array(0),
+            Number(takeRetry?.sampleRateHz || 48000),
+            Number(takeRetry?.channels || 2)
+          );
+          if (!best || retryScore > bestScore) {
+            best = takeRetry;
+            bestScore = retryScore;
+          }
+          _ascLogLyriaDebug("best:retry_ok", { model, take: i + 1, pcmBytes: Number(takeRetry?.pcm?.length || 0), score: retryScore });
+        } catch (retryErr) {
+          lastErr = retryErr;
+          _ascLogLyriaDebug("best:retry_err", { model, take: i + 1, seed, message: String(retryErr?.message || retryErr || "") });
+        }
+      }
+    }
+    if (best) break;
+  }
+  if (!best) {
+    const finalMessage = String(lastErr?.message || lastErr || "No se pudo obtener audio de Lyria en frontend.");
+    _ascLogLyriaDebug("best:failed", { message: finalMessage });
+    throw new Error(finalMessage);
+  }
+  const wavBlob = _ascPcm16ToWavBlob(
+    best?.pcm || new Uint8Array(0),
+    Number(best?.sampleRateHz || 48000),
+    Number(best?.channels || 2)
+  );
+  return { wavBlob, model: String(best?.model || preferredModel) };
+}
+
+async function _ascGenerateAudioViaGeminiApi(prompt = "", tag = "", options = {}) {
+  const model = String(localStorage.getItem("cb_frontend_audio_model") || "gemini-2.5-flash-preview-tts").trim();
+  const nonce = String(options?.nonce || _ascMusicNonce(options?.forceVariation === true));
+  const finalPrompt = [
+    "Generate audio only. Instrumental only. No vocals.",
+    tag ? `Style: ${tag}` : "",
+    `Variation nonce: ${nonce}`,
+    String(prompt || "").trim()
+  ].filter(Boolean).join("\n");
+  const { response, data } = await _ascGeminiGenerateViaBackend(model, {
+    contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      temperature: Number.isFinite(Number(options?.temperature)) ? Number(options.temperature) : 1.2
+    }
+  });
+  if (!response.ok) throw new Error(String(data?.error?.message || data?.error || `Gemini audio HTTP ${response.status}`));
+  const inline = _ascExtractInlineAudioPart(data);
+  if (!inline) throw new Error("Gemini no devolvió audio inline.");
+  const sampleRateMatch = String(inline.mime || "").match(/rate=(\d+)/i);
+  const sampleRate = Number(sampleRateMatch?.[1] || 24000);
+  const pcm = _ascDecodeBase64ToBytes(inline.b64);
+  const wavBlob = _ascPcm16ToWavBlob(pcm, Number.isFinite(sampleRate) ? sampleRate : 24000, 1);
+  return { wavBlob, model };
+}
+
+async function _ascGenerateMusicTrackDirect(prompt = "", tag = "", options = {}) {
+  if (_ascIsStaticLocalDev()) {
+    const mode = String(options?.mode || "").trim().toLowerCase();
+    const energetic = mode === "game";
+    const forceVariation = options?.forceVariation === true;
+    const nonce = String(options?.nonce || _ascMusicNonce(forceVariation));
+    const variant = _ascPickMusicVariant(energetic, `${nonce}|${String(prompt || "").slice(0, 140)}`);
+    const lyriaConfig = (options?.lyriaConfig && typeof options.lyriaConfig === "object") ? options.lyriaConfig : {};
+    const trackProfile = (options?.trackProfile && typeof options.trackProfile === "object") ? options.trackProfile : {};
+    const vocalModeNorm = String(trackProfile?.vocalMode || "").trim().toLowerCase();
+    const styleMix = `${String(trackProfile?.genre || "").toLowerCase()} ${String(trackProfile?.prompt || "").toLowerCase()}`;
+    const wantsBaroque = /(barroc|baroque|bach|vivaldi|handel|haendel)/.test(styleMix);
+    const wantsMozart = /(mozart|clasico|clasicismo|classical era|viennese)/.test(styleMix);
+    const wantsOrchestra = /(orquest|orchestra|symphon|sinfon|ensemble|camerata)/.test(styleMix);
+    const wantsComplexClassical = !energetic && (wantsBaroque || wantsMozart || wantsOrchestra);
+    const modelRaw = String(lyriaConfig?.model || localStorage.getItem("cb_lyria_model") || "lyria-realtime-exp").trim();
+    const model = (modelRaw === "lyria-002" || modelRaw === "lyria-realtime-exp") ? modelRaw : "lyria-realtime-exp";
+    const modeBpmRaw = energetic
+      ? Number(lyriaConfig?.gameBpm || localStorage.getItem("cb_lyria_game_bpm") || 156)
+      : Number(lyriaConfig?.bpm || localStorage.getItem("cb_lyria_bpm") || 76);
+    let modeBpm = Number.isFinite(modeBpmRaw) ? Math.max(60, Math.min(200, Math.round(modeBpmRaw))) : (energetic ? 156 : 76);
+    if (energetic) {
+      const toneNorm = String(trackProfile?.tone || "").trim().toLowerCase();
+      if (toneNorm === "alegre" || toneNorm === "epico") modeBpm = Math.max(modeBpm, 166);
+      if (toneNorm === "tenso") modeBpm = Math.max(modeBpm, 172);
+    }
+    const modeNegativePrompt = energetic
+      ? String(
+          lyriaConfig?.negativePromptGame ||
+          localStorage.getItem("cb_lyria_negative_prompt_game") ||
+          "cheap GM midi, toy keyboard, thin soundfont, harsh aliasing, low fidelity, clipping, noisy crackle"
+        )
+      : String(
+          lyriaConfig?.negativePromptReading ||
+          lyriaConfig?.negativePrompt ||
+          localStorage.getItem("cb_lyria_negative_prompt") ||
+          "cheap GM midi, toy piano, thin soundfont, artificial plastic timbre, low fidelity, clipped mix, noisy crackle"
+        );
+    const modeGuidance = energetic
+      ? Number(lyriaConfig?.guidanceGame || lyriaConfig?.guidance || 4)
+      : Number(lyriaConfig?.guidanceReading || lyriaConfig?.guidance || 4);
+    const modeDensity = energetic
+      ? Number(lyriaConfig?.densityGame || lyriaConfig?.density || 0.5)
+      : Number(lyriaConfig?.densityReading || lyriaConfig?.density || 0.5);
+    const modeBrightness = energetic
+      ? Number(lyriaConfig?.brightnessGame || lyriaConfig?.brightness || 0.7)
+      : Number(lyriaConfig?.brightnessReading || lyriaConfig?.brightness || 0.7);
+    const modeTemperature = energetic
+      ? Number(lyriaConfig?.temperatureGame || lyriaConfig?.temperature || 1.2)
+      : Number(lyriaConfig?.temperatureReading || lyriaConfig?.temperature || 1.2);
+    const configuredDurationRaw = Number(lyriaConfig?.durationMs || localStorage.getItem("cb_lyria_duration_ms") || 30000);
+    const configuredDuration = Number.isFinite(configuredDurationRaw)
+      ? Math.max(12000, Math.min(70000, Math.round(configuredDurationRaw)))
+      : 30000;
+    const modeWeightedPrompts = [
+      { text: String(prompt || "").trim(), weight: 1.2 },
+      trackProfile?.genre ? { text: `Genre: ${String(trackProfile.genre || "").trim()}`, weight: 1.0 } : null,
+      trackProfile?.tone ? { text: `Tone: ${String(trackProfile.tone || "").trim()}`, weight: 1.0 } : null,
+      trackProfile?.vocalMode ? { text: `Voice mode: ${String(trackProfile.vocalMode || "").trim()}`, weight: 1.0 } : null,
+      { text: "Production quality: realistic timbre, high fidelity, natural dynamics, no toy-midi character.", weight: 1.18 },
+      { text: "Humanized performance with articulation and expressive micro-variation, avoid robotic quantization.", weight: 1.12 },
+      ..._ascBuildAdvancedStyleHints(trackProfile, energetic),
+      ..._ascBuildExpressiveIntentHints(trackProfile, energetic),
+      ..._ascBuildPerInstrumentIntentHints(trackProfile, energetic),
+    ].filter(Boolean);
+    const timelineSections = _ascBuildSongSections(energetic, String(prompt || ""), trackProfile);
+    const baseSeed = Number(lyriaConfig?.seed);
+    const seed = Number.isFinite(baseSeed) ? (
+      forceVariation ? (Math.max(0, Math.floor(baseSeed)) + (_ascHashSeedFromText(nonce) % 1000000)) : Math.max(0, Math.floor(baseSeed))
+    ) : null;
+    try {
+      const tunedGuidance = wantsComplexClassical ? Math.max(modeGuidance, 5.9) : modeGuidance;
+      const tunedDensity = wantsComplexClassical ? Math.max(modeDensity, 0.74) : modeDensity;
+      const tunedBrightness = wantsComplexClassical ? Math.min(Math.max(modeBrightness, 0.56), 0.68) : modeBrightness;
+      const tunedTemperature = wantsComplexClassical ? Math.min(modeTemperature, 0.86) : modeTemperature;
+      return await _ascGenerateBestLyriaTrack(`${prompt}\nVariation nonce: ${nonce}\nVariation profile: ${variant}`, {
+        model,
+        sampleCount: Number(lyriaConfig?.sampleCount || 1),
+        seed,
+        negativePrompt: String(modeNegativePrompt || "").trim(),
+        guidance: tunedGuidance,
+        bpm: modeBpm,
+        density: tunedDensity,
+        brightness: tunedBrightness,
+        temperature: tunedTemperature,
+        scale: String(lyriaConfig?.scale || ""),
+        durationMs: configuredDuration,
+        energetic,
+        weightedPrompts: modeWeightedPrompts,
+        timelineSections,
+        musicGenerationMode: vocalModeNorm.includes("voz") ? "VOCALIZATION" : (energetic ? "DIVERSITY" : "QUALITY"),
+        muteDrums: energetic ? false : (String(trackProfile?.genre || "").toLowerCase().includes("orquest") || String(trackProfile?.genre || "").toLowerCase().includes("clas")),
+        muteBass: energetic ? false : (String(trackProfile?.genre || "").toLowerCase().includes("orquest") || String(trackProfile?.genre || "").toLowerCase().includes("clas"))
+      });
+    } catch (lyriaErr) {
+      const allowSynthFallback = false;
+      if (!allowSynthFallback) {
+        throw new Error(`Lyria frontend falló y el fallback synth está desactivado. ${String(lyriaErr?.message || lyriaErr || "").trim()}`);
+      }
+      const profile = await _ascAnalyzeMusicProfileWithGemini({ prompt, energetic }).catch(() => null);
+      const wavBlob = await _ascGenerateProceduralMusicBlob({ prompt, energetic, profile, nonce, variant });
+      return { wavBlob, model: `local-procedural-${energetic ? "game" : "classical"}-gemini-profile-${variant}` };
+    }
+  }
+  const model = "gemini-2.5-flash-preview-tts";
+  const finalPrompt = [
+    "Generate audio only.",
+    "No spoken words, no lyrics, no narration.",
+    "Keep it musical and atmospheric.",
+    tag ? `Style target: ${tag}.` : "",
+    String(prompt || "").trim()
+  ].filter(Boolean).join("\n");
+  const { response, data } = await _ascGeminiGenerateViaBackend(model, {
+    contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      temperature: 0.75,
+      speechConfig: {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }
+      }
+    }
+  });
+  if (!response.ok) {
+    throw new Error(String(data?.error?.message || data?.error || `Gemini audio HTTP ${response.status}`));
+  }
+  const inline = _ascExtractInlineAudioPart(data);
+  if (!inline) {
+    const energetic = /energetic|electronic|game/i.test(String(tag || ""));
+    const forceVariation = options?.forceVariation === true;
+    const nonce = String(options?.nonce || _ascMusicNonce(forceVariation));
+    const variant = _ascPickMusicVariant(energetic, `${nonce}|${tag}`);
+    const wavBlob = await _ascGenerateProceduralMusicBlob({ prompt: finalPrompt, energetic, nonce, variant });
+    return { wavBlob, model: `${model}-fallback-procedural` };
+  }
+  const sampleRateMatch = String(inline.mime || "").match(/rate=(\d+)/i);
+  const sampleRate = Number(sampleRateMatch?.[1] || 24000);
+  const pcm = _ascDecodeBase64ToBytes(inline.b64);
+  const wavBlob = _ascPcm16ToWavBlob(pcm, Number.isFinite(sampleRate) ? sampleRate : 24000, 1);
+  return { wavBlob, model };
+}
+
+async function _ascUploadMusicLocalBlob({ sourceCollection = "lecturasASC", lecturaId = "", mode = "reading", blob = null, versionTag = "" } = {}) {
+  const safeMode = mode === "game" ? "game" : "reading";
+  const safeTag = String(versionTag || `${Date.now()}-${Math.floor(Math.random() * 1e6)}`)
+    .replace(/[^a-zA-Z0-9_-]/g, "")
+    .slice(0, 48) || `${Date.now()}`;
+  const path = `lecturas_music/${sourceCollection}/${lecturaId}/${safeMode}-local-${safeTag}.wav`;
+  const ref = storageRef(storage, path);
+  await uploadBytes(ref, blob, {
+    contentType: "audio/wav",
+    cacheControl: "no-cache, max-age=0"
+  });
+  const url = await getDownloadURL(ref);
+  return { path, url };
+}
+
+function _ascGuessAudioExtension(file = null) {
+  const name = String(file?.name || "").trim().toLowerCase();
+  const mime = String(file?.type || "").trim().toLowerCase();
+  const extFromName = name.includes(".") ? name.split(".").pop() : "";
+  const allow = new Set(["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]);
+  if (allow.has(extFromName)) return extFromName;
+  if (mime.includes("mpeg")) return "mp3";
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
+  if (mime.includes("aac")) return "aac";
+  if (mime.includes("flac")) return "flac";
+  if (mime.includes("webm")) return "webm";
+  return "wav";
+}
+
+function _ascValidateManualAudioFile(file = null, label = "archivo") {
+  if (!(file instanceof File)) throw new Error(`No se recibió ${label}.`);
+  const size = Number(file.size || 0);
+  if (!size) throw new Error(`${label} está vacío.`);
+  const maxBytes = 30 * 1024 * 1024;
+  if (size > maxBytes) throw new Error(`${label} supera 30MB.`);
+  const mime = String(file.type || "").toLowerCase();
+  const ext = _ascGuessAudioExtension(file);
+  const allowedExt = new Set(["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]);
+  if (!mime.startsWith("audio/") && !allowedExt.has(ext)) {
+    throw new Error(`${label} debe ser audio (wav, mp3, ogg, m4a, aac, flac o webm).`);
+  }
+}
+
+async function _ascUploadMusicUserFile({ sourceCollection = "lecturasASC", lecturaId = "", mode = "reading", file = null, versionTag = "" } = {}) {
+  const safeMode = mode === "game" ? "game" : "reading";
+  const ext = _ascGuessAudioExtension(file);
+  const safeTag = String(versionTag || `${Date.now()}-${Math.floor(Math.random() * 1e6)}`)
+    .replace(/[^a-zA-Z0-9_-]/g, "")
+    .slice(0, 48) || `${Date.now()}`;
+  const path = `lecturas_music/${sourceCollection}/${lecturaId}/${safeMode}-manual-${safeTag}.${ext}`;
+  const ref = storageRef(storage, path);
+  const contentType = String(file?.type || "").trim() || `audio/${ext === "mp3" ? "mpeg" : ext}`;
+  await uploadBytes(ref, file, {
+    contentType,
+    cacheControl: "no-cache, max-age=0"
+  });
+  const url = await getDownloadURL(ref);
+  return { path, url, contentType };
+}
+
+async function _ascUploadManualMusicForLectura(row = {}, options = {}) {
+  const lecturaId = String(row?.id || "").trim();
+  if (!lecturaId) throw new Error("No se pudo identificar la lectura.");
+  const sourceCollection = String(options?.sourceCollection || row?.sourceCollection || "lecturasASC").trim() || "lecturasASC";
+  const readingFile = options?.readingFile || null;
+  const gameFile = options?.gameFile || null;
+  if (!readingFile && !gameFile) throw new Error("Debes subir al menos un archivo (lectura o game).");
+  const musicConfig = _ascNormalizeMusicProfile(options?.musicConfig || _ascExtractStoredMusicConfig(row));
+  const currentAssets = _ascExtractMusicAssets(row);
+  if (readingFile) _ascValidateManualAudioFile(readingFile, "audio de lectura");
+  if (gameFile) _ascValidateManualAudioFile(gameFile, "audio de game");
+  const nonceBase = `manual-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+  const [readingUpload, gameUpload] = await Promise.all([
+    readingFile
+      ? _ascUploadMusicUserFile({ sourceCollection, lecturaId, mode: "reading", file: readingFile, versionTag: `${nonceBase}-r` })
+      : Promise.resolve(null),
+    gameFile
+      ? _ascUploadMusicUserFile({ sourceCollection, lecturaId, mode: "game", file: gameFile, versionTag: `${nonceBase}-g` })
+      : Promise.resolve(null)
+  ]);
+  if (readingFile && currentAssets.readingPath && currentAssets.readingPath !== readingUpload?.path) {
+    deleteObject(storageRef(storage, currentAssets.readingPath)).catch(() => {});
+  }
+  if (gameFile && currentAssets.gamePath && currentAssets.gamePath !== gameUpload?.path) {
+    deleteObject(storageRef(storage, currentAssets.gamePath)).catch(() => {});
+  }
+  const generatedAt = new Date().toISOString();
+  const nextReadingUrl = String(readingUpload?.url || currentAssets.readingUrl || "").trim();
+  const nextGameUrl = String(gameUpload?.url || currentAssets.gameUrl || "").trim();
+  const nextReadingPath = String(readingUpload?.path || currentAssets.readingPath || "").trim();
+  const nextGamePath = String(gameUpload?.path || currentAssets.gamePath || "").trim();
+  await updateDoc(doc(db, sourceCollection, lecturaId), {
+    music: {
+      model: "manual-upload",
+      generatedAt,
+      generatedBy: String(auth.currentUser?.uid || ""),
+      readingUrl: nextReadingUrl,
+      gameUrl: nextGameUrl,
+      readingPath: nextReadingPath,
+      gamePath: nextGamePath,
+      readingContentType: String(readingUpload?.contentType || row?.music?.readingContentType || "").trim(),
+      gameContentType: String(gameUpload?.contentType || row?.music?.gameContentType || "").trim(),
+      variationNonce: nonceBase,
+      musicConfig,
+      source: "manual-upload"
+    }
+  });
+  const idx = cache.findIndex((x) => String(x?.id || "") === lecturaId);
+  if (idx >= 0) {
+    const rowCache = cache[idx] || {};
+    rowCache.music = {
+      ...(rowCache.music || {}),
+      readingUrl: nextReadingUrl,
+      gameUrl: nextGameUrl,
+      readingPath: nextReadingPath,
+      gamePath: nextGamePath,
+      generatedAt,
+      variationNonce: nonceBase,
+      musicConfig,
+      source: "manual-upload",
+      model: "manual-upload"
+    };
+    cache[idx] = rowCache;
+  }
+  return {
+    ok: true,
+    source: "manual-upload",
+    model: "manual-upload",
+    generatedAt,
+    variationNonce: nonceBase,
+    readingUrl: nextReadingUrl,
+    gameUrl: nextGameUrl,
+    readingPath: nextReadingPath,
+    gamePath: nextGamePath,
+    musicConfig
+  };
+}
+
+async function _ascDeleteMusicAssetsForLectura(row = {}, sourceCollection = "lecturasASC") {
+  const lecturaId = String(row?.id || "").trim();
+  if (!lecturaId) throw new Error("No se pudo identificar la lectura.");
+  const paths = _ascCollectMusicStoragePaths(row);
+  await Promise.all(paths.map(async (p) => {
+    try {
+      await deleteObject(storageRef(storage, p));
+    } catch (_) {
+      // ignore not-found or permission edge cases; continue cleanup
+    }
+  }));
+  await updateDoc(doc(db, sourceCollection, lecturaId), {
+    music: deleteField()
+  });
+  const idx = cache.findIndex((x) => String(x?.id || "") === lecturaId);
+  if (idx >= 0) {
+    const next = {...(cache[idx] || {})};
+    delete next.music;
+    cache[idx] = next;
+  }
+  return { ok: true, deletedPaths: paths.length };
+}
+
+async function _ascGenerateMusicForLecturaDirectLocal(row = {}, options = {}) {
+  const lecturaId = String(row?.id || "").trim();
+  const sourceCollection = String(options?.sourceCollection || row?.sourceCollection || "lecturasASC").trim() || "lecturasASC";
+  const force = options?.force === true;
+  const resolved = _ascResolveMusicPromptInputs(row, options);
+  const promptReading = resolved.promptReading;
+  const promptGame = resolved.promptGame;
+  const musicConfig = resolved.musicConfig;
+  const lyriaConfig = options?.lyriaConfig || _ascBuildLyriaRuntimeConfig(row);
+  const nonceBase = _ascMusicNonce(force);
+  if (force) {
+    await _ascDeleteMusicAssetsForLectura(row, sourceCollection).catch(() => {});
+  }
+  const [readingTrack, gameTrack] = await Promise.all([
+    _ascGenerateMusicTrackDirect(`${promptReading}\nVariation nonce: ${nonceBase}-reading`, "reading", {
+      mode: "reading",
+      trackProfile: musicConfig?.reading || {},
+      nonce: `${nonceBase}-reading`,
+      forceVariation: force,
+      lyriaConfig
+    }),
+    _ascGenerateMusicTrackDirect(`${promptGame}\nVariation nonce: ${nonceBase}-game`, "game", {
+      mode: "game",
+      trackProfile: musicConfig?.game || {},
+      nonce: `${nonceBase}-game`,
+      forceVariation: force,
+      lyriaConfig
+    })
+  ]);
+  const [readingLoopableBlob, gameLoopableBlob] = await Promise.all([
+    _ascMakeWavLoopable(readingTrack.wavBlob, { fadeSec: 1.3 }),
+    _ascMakeWavLoopable(gameTrack.wavBlob, { fadeSec: 0.95 })
+  ]);
+  const [readingUpload, gameUpload] = await Promise.all([
+    _ascUploadMusicLocalBlob({ sourceCollection, lecturaId, mode: "reading", blob: readingLoopableBlob, versionTag: `${nonceBase}-r` }),
+    _ascUploadMusicLocalBlob({ sourceCollection, lecturaId, mode: "game", blob: gameLoopableBlob, versionTag: `${nonceBase}-g` })
+  ]);
+  const generatedAt = new Date().toISOString();
+  await updateDoc(doc(db, sourceCollection, lecturaId), {
+    music: {
+      model: "gemini-2.5-flash-preview-tts",
+      generatedAt,
+      generatedBy: String(auth.currentUser?.uid || ""),
+      readingUrl: readingUpload.url,
+      gameUrl: gameUpload.url,
+      readingPath: readingUpload.path,
+      gamePath: gameUpload.path,
+      promptReading,
+      promptGame,
+      musicConfig,
+      variationNonce: nonceBase,
+      lyriaConfig,
+      durationMs: Number(lyriaConfig?.durationMs || 30000),
+      source: "frontend-direct-local"
+    }
+  });
+  return {
+    ok: true,
+    source: "frontend-direct-local",
+    model: "gemini-2.5-flash-preview-tts",
+    generatedAt,
+    variationNonce: nonceBase,
+    durationMs: Number(lyriaConfig?.durationMs || 30000),
+    readingUrl: readingUpload.url,
+    gameUrl: gameUpload.url,
+    readingPath: readingUpload.path,
+    gamePath: gameUpload.path,
+    musicConfig
+  };
+}
+
+function _ascBuildLyriaApiCandidates() {
+  const path = "/api/gemini/lyria/generate";
+  if (_ascIsStaticLocalDev()) {
+    const candidates = [];
+    const preferred = Number(localStorage.getItem("cb_functions_port") || "5001");
+    const ports = [preferred, 5001, 5002, 5003, 5004, 5005, 4400];
+    const uniquePorts = [...new Set(ports.filter((p) => Number.isFinite(p) && p > 0))];
+    for (const p of uniquePorts) {
+      candidates.push(`http://127.0.0.1:${p}/charly-brown/us-central1/api/gemini/lyria/generate`);
+      candidates.push(`http://localhost:${p}/charly-brown/us-central1/api/gemini/lyria/generate`);
+    }
+    return candidates;
+  }
+  return [buildApiUrl(path)];
+}
+
+async function _ascGenerateMusicForLectura(row = {}, options = {}) {
+  const lecturaId = String(row?.id || "").trim();
+  if (!lecturaId) throw new Error("No se pudo identificar la lectura.");
+  const sourceCollection = String(options?.sourceCollection || row?.sourceCollection || "lecturasASC").trim() || "lecturasASC";
+  const force = options?.force === true;
+  const resolved = _ascResolveMusicPromptInputs(row, options);
+  const promptReading = resolved.promptReading;
+  const promptGame = resolved.promptGame;
+  const musicConfig = resolved.musicConfig;
+  const lyriaConfig = options?.lyriaConfig || _ascBuildLyriaRuntimeConfig(row);
+  const isLocal = _ascIsStaticLocalDev();
+  if (isLocal) {
+    return _ascGenerateMusicForLecturaDirectLocal(row, { sourceCollection, force, promptReading, promptGame, musicConfig, lyriaConfig });
+  }
+  const user = auth.currentUser;
+  if (!user) throw new Error("Debes iniciar sesión.");
+  const token = await user.getIdToken();
+  let response = null;
+  let data = {};
+  let lastNetworkErr = null;
+  const endpoints = _ascBuildLyriaApiCandidates();
+  for (const endpoint of endpoints) {
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          lecturaId,
+          sourceCollection,
+          title: row?.titulo || "",
+          level: row?.nivel || "",
+          grade: row?.grado || "",
+          html: row?.textoLectura || row?.contenidoHTML || row?.htmlLectura || "",
+          promptReading,
+          promptGame,
+          musicConfig,
+          lyriaConfig,
+          force
+        })
+      });
+      data = await response.json().catch(() => ({}));
+      try {
+        const parsed = new URL(endpoint);
+        const port = Number(parsed.port || "0");
+        if (port > 0) localStorage.setItem("cb_functions_port", String(port));
+      } catch (_) {}
+      break;
+    } catch (err) {
+      lastNetworkErr = err;
+    }
+  }
+  if (!response) {
+    throw (lastNetworkErr || new Error("No se pudo conectar al backend de música."));
+  }
+  if (!response.ok || data?.error) {
+    if (response.status === 404 || response.status === 405) {
+      throw new Error("La ruta de música no está disponible en este entorno. Para música se necesita backend `api`.");
+    }
+    throw new Error(String(data?.error || `No se pudo generar música (HTTP ${response.status}).`));
+  }
+  const readingUrl = String(data?.readingUrl || "").trim();
+  const gameUrl = String(data?.gameUrl || "").trim();
+  const readingPath = String(data?.readingPath || "").trim();
+  const gamePath = String(data?.gamePath || "").trim();
+  if (!readingUrl || !gameUrl) {
+    throw new Error("No se recibieron ambos audios (lectura y game).");
+  }
+  const idx = cache.findIndex((x) => String(x?.id || "") === lecturaId);
+  if (idx >= 0) {
+    const rowCache = cache[idx] || {};
+    rowCache.music = {
+      ...(rowCache.music || {}),
+      readingUrl,
+      gameUrl,
+      readingPath,
+      gamePath,
+      model: "lyria-realtime-exp",
+      generatedAt: new Date().toISOString(),
+      musicConfig
+    };
+    cache[idx] = rowCache;
+  }
+  return {readingUrl, gameUrl, readingPath, gamePath, musicConfig, source: String(data?.source || "generated")};
+}
 async function ensureXLSX(){
   if (window.XLSX) return;
   await new Promise((res, rej)=>{
     const s=document.createElement("script");
-    s.src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+    s.src="vendor/xlsx/xlsx.full.min.js";
     s.onload=res; s.onerror=rej; document.head.appendChild(s);
   });
 }
@@ -39,6 +1533,7 @@ let ascEditorFontFamily, ascEditorFontSize, ascEditorSheetSize, ascEditorFontCol
 let ascEditorZoomRange, ascEditorZoomLabel;
 let ascQuestionModal, ascQuestionModalClose, ascQuestionModalDone, ascQuestionModalTitle;
 let ascToggleMeta, ascToggleQuestions;
+let ascOpenSynonymsPanel, ascSynonymsPanel, ascSynonymsClose, ascSynonymsDone, ascSynonymsBody;
 let ascAiAssistBtn, ascAiEditorModal, ascAiClose, ascAiPrompt, ascAiSend, ascAiChatList, ascAiScopePreview, ascAiRefreshScope, ascAiStatus;
 let ascQuestionAiBtn, ascQuestionAiPanel, ascQuestionAiPreview, ascQuestionAiChat, ascQuestionAiPrompt, ascQuestionAiSend, ascQuestionAiStatus;
 
@@ -102,6 +1597,11 @@ document.addEventListener("DOMContentLoaded", () => {
   ascQuestionModalTitle = $("#ascQuestionModalTitle");
   ascToggleMeta = $("#ascToggleMeta");
   ascToggleQuestions = $("#ascToggleQuestions");
+  ascOpenSynonymsPanel = $("#ascOpenSynonymsPanel");
+  ascSynonymsPanel = $("#ascSynonymsPanel");
+  ascSynonymsClose = $("#ascSynonymsClose");
+  ascSynonymsDone = $("#ascSynonymsDone");
+  ascSynonymsBody = $("#ascSynonymsBody");
   ascAiAssistBtn = $("#ascAiAssistBtn");
   ascAiEditorModal = $("#ascAiEditorModal");
   ascAiClose = $("#ascAiClose");
@@ -127,6 +1627,10 @@ document.addEventListener("DOMContentLoaded", () => {
   ascBackdrop?.addEventListener("click", closeAscModal);
   document.addEventListener("keydown", (e)=>{
     if (e.key !== "Escape") return;
+    if (ascSynonymsPanel && !ascSynonymsPanel.classList.contains("hidden")) {
+      closeAscSynonymsPanel();
+      return;
+    }
     if (ascQuestionModal && !ascQuestionModal.classList.contains("hidden")) {
       closePreguntaModalAsc();
       return;
@@ -159,6 +1663,16 @@ document.addEventListener("DOMContentLoaded", () => {
   ascQuestionAiSend?.addEventListener("click", enviarAscQuestionAiPrompt);
   ascToggleMeta?.addEventListener("click", () => toggleMetaAsc());
   ascToggleQuestions?.addEventListener("click", () => togglePreguntasAsc());
+  ascOpenSynonymsPanel?.addEventListener("click", openAscSynonymsPanel);
+  ascSynonymsClose?.addEventListener("click", closeAscSynonymsPanel);
+  ascSynonymsDone?.addEventListener("click", closeAscSynonymsPanel);
+  ascSynonymsBody?.addEventListener("input", (e) => {
+    const table = e.target?.closest?.("table.lectura-tabla-sinonimos");
+    if (!table) return;
+    const wrap = table.closest("[data-synonym-table-index]");
+    const idx = Number(wrap?.getAttribute("data-synonym-table-index") || 0);
+    syncAscSynonymsTableToEditor(idx, table.outerHTML);
+  });
   ascAiAssistBtn?.addEventListener("click", toggleAscAiEditor);
   ascAiClose?.addEventListener("click", closeAscAiEditor);
   ascAiSend?.addEventListener("click", enviarAscAiPrompt);
@@ -214,6 +1728,7 @@ function openEditorModal(){
 function closeEditorModal(){
   if (!ascEditorModal) return;
   ascEditorModal.classList.add("hidden");
+  closeAscSynonymsPanel();
   closePreguntaModalAsc();
   closeAscAiEditor();
   configureAscSharedEditor(null);
@@ -478,7 +1993,6 @@ function _ascModeloGeminiActual() {
 
 async function _ascEditarConGemini({ instruccion = "", scope = {} } = {}) {
   const modelo = _ascModeloGeminiActual();
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${ASC_EDITOR_GEMINI_API_KEY}`;
   const prompt = `
 Eres un editor experto de textos escolares en HTML.
 Debes editar SOLO el alcance indicado. No resumas fuera del alcance. No expliques el proceso.
@@ -509,20 +2023,15 @@ Solicitud del usuario:
 ${instruccion}
 `.trim();
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.55,
-        topP: 0.9,
-        topK: 30,
-        maxOutputTokens: 4096
-      }
-    })
+  const { response, data } = await _ascGeminiGenerateViaBackend(modelo, {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.55,
+      topP: 0.9,
+      topK: 30,
+      maxOutputTokens: 4096
+    }
   });
-  const data = await response.json();
   if (!response.ok) throw new Error(data?.error?.message || "No se pudo editar con Gemini.");
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = _ascExtraerJson(text);
@@ -792,6 +2301,9 @@ function bindPreguntasAsc() {
   ascQuestionModal?.addEventListener("click", (e) => {
     if (e.target === ascQuestionModal) closePreguntaModalAsc();
   });
+  ascSynonymsPanel?.addEventListener("click", (e) => {
+    if (e.target === ascSynonymsPanel) closeAscSynonymsPanel();
+  });
   ascEditorModal.dataset.questionsBound = "1";
 }
 
@@ -849,6 +2361,114 @@ function closePreguntaModalAsc() {
   ascQuestionModal?.setAttribute("aria-hidden", "true");
   closeAscQuestionAiPanel();
   renderResumenPreguntasAsc();
+}
+
+function extraerTablasSinonimosAsc(html = "") {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = String(html || "");
+  const tablas = Array.from(wrap.querySelectorAll("table"));
+  return tablas.filter((table) => {
+    const contenido = String(table.textContent || "").toLowerCase();
+    if (/\bsin[oó]nim/.test(contenido)) return true;
+    let prev = table.previousElementSibling;
+    while (prev) {
+      const tag = String(prev.tagName || "").toUpperCase();
+      const txt = String(prev.textContent || "").trim().toLowerCase();
+      if (/\bsin[oó]nim/.test(txt)) return true;
+      if (/^H[1-6]$/.test(tag) || tag === "P") break;
+      prev = prev.previousElementSibling;
+    }
+    return false;
+  }).map((table) => table.outerHTML);
+}
+
+function renderAscSynonymsPanel() {
+  if (!ascSynonymsBody) return;
+  const tablas = extraerTablasSinonimosAsc(ascTexto?.innerHTML || "");
+  if (!tablas.length) {
+    ascSynonymsBody.replaceChildren();
+    const empty = document.createElement("p");
+    empty.className = "asc-synonyms-empty";
+    empty.textContent = "No se detectaron tablas de sinónimos en esta lectura.";
+    ascSynonymsBody.appendChild(empty);
+    return;
+  }
+  ascSynonymsBody.replaceChildren();
+  const fragment = document.createDocumentFragment();
+  tablas.forEach((tabla, idx) => {
+    const section = document.createElement("section");
+    section.className = "asc-synonyms-block";
+
+    const title = document.createElement("h4");
+    title.textContent = `Tabla ${idx + 1}`;
+
+    const tableWrap = document.createElement("div");
+    tableWrap.className = "asc-synonyms-table-wrap";
+    tableWrap.dataset.synonymTableIndex = String(idx);
+
+    const parsed = new DOMParser().parseFromString(String(tabla || ""), "text/html");
+    const tableEl = parsed.querySelector("table");
+    if (tableEl) {
+      tableWrap.appendChild(tableEl.cloneNode(true));
+    }
+
+    section.append(title, tableWrap);
+    fragment.appendChild(section);
+  });
+  ascSynonymsBody.appendChild(fragment);
+  $$("table.lectura-tabla-sinonimos", ascSynonymsBody).forEach((tableEl) => {
+    tableEl.setAttribute("contenteditable", "true");
+    tableEl.setAttribute("spellcheck", "false");
+  });
+}
+
+function syncAscSynonymsTableToEditor(tableIndex = 0, tableHtml = "") {
+  const idx = Math.max(0, Number(tableIndex || 0));
+  const html = String(tableHtml || "").trim();
+  if (!html || !ascTexto) return;
+  const parsedEditor = new DOMParser().parseFromString(String(ascTexto.innerHTML || ""), "text/html");
+  const wrap = document.createElement("div");
+  Array.from(parsedEditor.body.childNodes).forEach((node) => {
+    wrap.appendChild(node.cloneNode(true));
+  });
+  const tables = extraerTablasSinonimosAsc(wrap.innerHTML);
+  if (!tables.length || !tables[idx]) return;
+  const globalTables = Array.from(wrap.querySelectorAll("table")).filter((table) => {
+    const contenido = String(table.textContent || "").toLowerCase();
+    if (/\bsin[oó]nim/.test(contenido)) return true;
+    let prev = table.previousElementSibling;
+    while (prev) {
+      const tag = String(prev.tagName || "").toUpperCase();
+      const txt = String(prev.textContent || "").trim().toLowerCase();
+      if (/\bsin[oó]nim/.test(txt)) return true;
+      if (/^H[1-6]$/.test(tag) || tag === "P") break;
+      prev = prev.previousElementSibling;
+    }
+    return false;
+  });
+  const target = globalTables[idx];
+  if (!target) return;
+  const parsedIncoming = new DOMParser().parseFromString(html, "text/html");
+  const incoming = parsedIncoming.querySelector("table");
+  if (!incoming) return;
+  target.replaceWith(incoming.cloneNode(true));
+  const fragment = document.createDocumentFragment();
+  Array.from(wrap.childNodes).forEach((node) => {
+    fragment.appendChild(node.cloneNode(true));
+  });
+  ascTexto.replaceChildren(fragment);
+}
+
+function openAscSynonymsPanel() {
+  if (!ascSynonymsPanel) return;
+  renderAscSynonymsPanel();
+  ascSynonymsPanel.classList.remove("hidden");
+  ascSynonymsPanel.setAttribute("aria-hidden", "false");
+}
+
+function closeAscSynonymsPanel() {
+  ascSynonymsPanel?.classList.add("hidden");
+  ascSynonymsPanel?.setAttribute("aria-hidden", "true");
 }
 
 function _ascQuestionScopeSnapshot() {
@@ -919,7 +2539,6 @@ function toggleAscQuestionAiPanel() {
 
 async function _ascEditarPreguntaConGemini({ instruccion = "", scope = {} } = {}) {
   const modelo = _ascModeloGeminiActual();
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${ASC_EDITOR_GEMINI_API_KEY}`;
   const prompt = `
 Eres un editor experto de preguntas de comprensión escolar.
 Debes devolver estrictamente JSON válido con este formato:
@@ -940,15 +2559,10 @@ ${JSON.stringify(scope.payload || {}, null, 2)}
 Solicitud del usuario:
 ${instruccion}
 `.trim();
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.55, topP: 0.9, topK: 30, maxOutputTokens: 2048 }
-    })
+  const { response, data } = await _ascGeminiGenerateViaBackend(modelo, {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.55, topP: 0.9, topK: 30, maxOutputTokens: 2048 }
   });
-  const data = await response.json();
   if (!response.ok) throw new Error(data?.error?.message || "No se pudo editar la pregunta con Gemini.");
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const parsed = _ascExtraerJson(text);
@@ -1044,6 +2658,10 @@ async function renderTabla(){
 
   let html = "";
   for (const r of cache){
+      const published = r?.published === true;
+      const publishLabel = published ? "Despublicar lectura" : "Publicar lectura";
+      const hasMusic = _ascHasMusicAssets(r);
+      const musicLabel = hasMusic ? "Re-generar música" : "Generar música";
       html += `
       <tr data-id="${esc(r.id)}">
         <td>${esc(r.titulo||"—")}</td>
@@ -1054,11 +2672,20 @@ async function renderTabla(){
         <td>${esc(r.unidad??"—")}</td>
         <td>
           <div class="lectura-row-actions">
+            <label class="lectura-publish-switch" title="${publishLabel}" aria-label="${publishLabel}">
+              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${published ? "checked" : ""} aria-label="${publishLabel}">
+              <span class="lectura-publish-switch-track" aria-hidden="true">
+                <span class="lectura-publish-switch-thumb"></span>
+              </span>
+            </label>
             <button class="lectura-action-btn action-ver ascView" title="Ver lectura" aria-label="Ver lectura">
               <i class="far fa-eye"></i>
             </button>
             <button class="lectura-action-btn action-live ascReadLive" title="Leer con Gemini Flash Live" aria-label="Leer con Gemini Flash Live" data-coleccion="lecturasASC">
               <i class="fas fa-volume-up"></i>
+            </button>
+            <button class="lectura-action-btn action-music ascMusic" title="${musicLabel}" aria-label="${musicLabel}">
+              <i class="fas ${hasMusic ? "fa-rotate-right" : "fa-music"}"></i>
             </button>
             <button class="lectura-action-btn action-editar ascEdit" title="Editar lectura" aria-label="Editar lectura">
               <i class="fas fa-pen"></i>
@@ -1078,6 +2705,8 @@ async function renderTabla(){
   $$(".ascView", ascTbody).forEach(b => b.addEventListener("click", onViewRow));
   $$(".ascReadLive", ascTbody).forEach(b => b.addEventListener("click", onReadLiveRow));
   $$(".ascReadLive", ascTbody).forEach(b => b.addEventListener("dblclick", onStopLiveRow));
+  $$(".ascMusic", ascTbody).forEach(b => b.addEventListener("click", onGenerateMusicRow));
+  $$(".ascPublishToggle", ascTbody).forEach(b => b.addEventListener("change", onTogglePublishedRow));
   $$(".ascEdit", ascTbody).forEach(b => b.addEventListener("click", onEditRow));
   $$(".ascDel",  ascTbody).forEach(b => b.addEventListener("click", onDeleteRow));
   $$(".ascWord", ascTbody).forEach(b => b.addEventListener("click", onDownloadWordRow));
@@ -1165,6 +2794,10 @@ function aplicarFiltrosAsc(){
 
   let html = "";
   for (const r of filtradas){
+      const published = r?.published === true;
+      const publishLabel = published ? "Despublicar lectura" : "Publicar lectura";
+      const hasMusic = _ascHasMusicAssets(r);
+      const musicLabel = hasMusic ? "Re-generar música" : "Generar música";
       html += `
       <tr data-id="${esc(r.id)}">
         <td>${esc(r.titulo||"—")}</td>
@@ -1175,11 +2808,20 @@ function aplicarFiltrosAsc(){
         <td>${esc(r.unidad??"—")}</td>
         <td>
           <div class="lectura-row-actions">
+            <label class="lectura-publish-switch" title="${publishLabel}" aria-label="${publishLabel}">
+              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${published ? "checked" : ""} aria-label="${publishLabel}">
+              <span class="lectura-publish-switch-track" aria-hidden="true">
+                <span class="lectura-publish-switch-thumb"></span>
+              </span>
+            </label>
             <button class="lectura-action-btn action-ver ascView" title="Ver lectura" aria-label="Ver lectura">
               <i class="far fa-eye"></i>
             </button>
             <button class="lectura-action-btn action-live ascReadLive" title="Leer con Gemini Flash Live" aria-label="Leer con Gemini Flash Live" data-coleccion="lecturasASC">
               <i class="fas fa-volume-up"></i>
+            </button>
+            <button class="lectura-action-btn action-music ascMusic" title="${musicLabel}" aria-label="${musicLabel}">
+              <i class="fas ${hasMusic ? "fa-rotate-right" : "fa-music"}"></i>
             </button>
             <button class="lectura-action-btn action-editar ascEdit" title="Editar lectura" aria-label="Editar lectura">
               <i class="fas fa-pen"></i>
@@ -1198,6 +2840,8 @@ function aplicarFiltrosAsc(){
   $$(".ascView", ascTbody).forEach(b => b.addEventListener("click", onViewRow));
   $$(".ascReadLive", ascTbody).forEach(b => b.addEventListener("click", onReadLiveRow));
   $$(".ascReadLive", ascTbody).forEach(b => b.addEventListener("dblclick", onStopLiveRow));
+  $$(".ascMusic", ascTbody).forEach(b => b.addEventListener("click", onGenerateMusicRow));
+  $$(".ascPublishToggle", ascTbody).forEach(b => b.addEventListener("change", onTogglePublishedRow));
   $$(".ascEdit", ascTbody).forEach(b => b.addEventListener("click", onEditRow));
   $$(".ascDel",  ascTbody).forEach(b => b.addEventListener("click", onDeleteRow));
   $$(".ascWord", ascTbody).forEach(b => b.addEventListener("click", onDownloadWordRow));
@@ -1248,10 +2892,15 @@ function openEditorNew(){
   openEditorModal(); // 🔁 en lugar de toggleEditor(true)
 }
 
-function onEditRow(e){
+async function onEditRow(e){
   const id = e.currentTarget.closest("tr")?.dataset.id;
-  const x = cache.find(d=>d.id===id);
-  if (!x) return;
+  if (!id) return;
+  let x = cache.find(d => d.id === id) || null;
+  if (!x) {
+    const snap = await getDoc(doc(db, "lecturasASC", id));
+    if (!snap.exists()) return;
+    x = { id, ...snap.data() };
+  }
 
   configureAscSharedEditor(null);
   MODO = "edit";
@@ -1263,7 +2912,8 @@ function onEditRow(e){
   ascTrimestre.value = x.trimestre ?? "";
   ascUnidad.value    = x.unidad ?? "";
   ascTitulo.value    = x.titulo || "";
-  ascTexto.innerHTML = normalizarContenidoAscEditor(x.textoLectura || "<p></p>");
+  const contenidoLectura = x.textoLectura || x.contenidoHTML || x.lecturaHTML || x.htmlLectura || "";
+  ascTexto.innerHTML = normalizarContenidoAscEditor(contenidoLectura || "<p></p>");
   if (!String(ascTexto.innerHTML || "").trim()) {
     ascTexto.innerHTML = "<p></p>";
   }
@@ -1335,16 +2985,17 @@ async function onViewRow(e){
     return;
   }
   const d = snap.data() || {};
-  const agentExclusive = typeof window.cbIsAgentExclusiveMode === "function"
-    ? window.cbIsAgentExclusiveMode() === true
-    : false;
-  if (agentExclusive && typeof window.cbOpenLecturasAgentViewer === "function") {
+  const musicAssets = _ascExtractMusicAssets(d);
+  if (typeof window.cbOpenLecturasAgentViewer === "function") {
     window.cbOpenLecturasAgentViewer({
       id,
       coleccion: "lecturasASC",
       sourceCollection: "lecturasASC",
       titulo: d.titulo || "Lectura sin título",
       htmlLectura: d.textoLectura || "<p>(Sin contenido)</p>",
+      musicAssets,
+      musicConfig: musicAssets?.musicConfig || {},
+      allowMusicGeneration: true,
       preguntas: Array.isArray(d.preguntas) ? d.preguntas : [],
       metadatos: {
         nivel: d.nivel || "",
@@ -1379,6 +3030,36 @@ async function onViewRow(e){
   } else {
     modal.style.display = "block";
     document.body.style.overflow = "hidden";
+  }
+}
+
+async function onGenerateMusicRow(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const rowEl = e.currentTarget.closest("tr");
+  const id = rowEl?.dataset.id || "";
+  if (!id) return;
+  const icon = e.currentTarget.querySelector("i");
+  const prevClass = icon?.className || "";
+  if (icon) icon.className = "fas fa-spinner fa-spin";
+  e.currentTarget.disabled = true;
+  try {
+    let row = cache.find((item) => String(item?.id || "") === id) || null;
+    if (!row) {
+      const snap = await getDoc(doc(db, "lecturasASC", id));
+      if (!snap.exists()) throw new Error("Lectura no encontrada.");
+      row = {id, ...snap.data()};
+    }
+    const force = _ascHasMusicAssets(row);
+    const result = await _ascGenerateMusicForLectura(row, {sourceCollection: "lecturasASC", force});
+    const modeText = force ? "re-generada" : "generada";
+    alert(`✅ Música ${modeText}. Lectura y game listas.\nFuente: ${result.source === "storage" ? "Storage" : "Lyria"}`);
+    await renderTabla();
+  } catch (err) {
+    alert(`❌ ${err?.message || "No se pudo generar la música."}`);
+    if (icon) icon.className = prevClass || "fas fa-music";
+  } finally {
+    e.currentTarget.disabled = false;
   }
 }
 
@@ -1443,6 +3124,33 @@ async function onDeleteRow(e){
   }
 }
 
+async function onTogglePublishedRow(e){
+  const input = e.currentTarget;
+  const id = input.closest("tr")?.dataset.id;
+  if (!id) return;
+  const nextPublished = input.checked === true;
+  input.disabled = true;
+  try {
+    await updateDoc(doc(db, "lecturasASC", id), {
+      published: nextPublished
+    });
+    const label = input.closest(".lectura-publish-switch");
+    const nextLabel = nextPublished ? "Despublicar lectura" : "Publicar lectura";
+    if (label) {
+      label.setAttribute("title", nextLabel);
+      label.setAttribute("aria-label", nextLabel);
+    }
+    input.setAttribute("aria-label", nextLabel);
+    const idx = cache.findIndex((r) => r?.id === id);
+    if (idx >= 0) cache[idx].published = nextPublished;
+  } catch (_) {
+    input.checked = !nextPublished;
+    alert("❌ No se pudo actualizar el estado de publicación.");
+  } finally {
+    input.disabled = false;
+  }
+}
+
 // Guardar
 async function onSubmit(ev){
   ev.preventDefault();
@@ -1470,7 +3178,7 @@ async function onSubmit(ev){
     if (MODO==="edit" && ascId.value){
       await updateDoc(doc(db,"lecturasASC", ascId.value), payload);
     } else {
-      await addDoc(collection(db,"lecturasASC"), { ...payload, createdAt:new Date(), userId: auth.currentUser?.uid || "anónimo" });
+      await addDoc(collection(db,"lecturasASC"), { ...payload, published: false, createdAt:new Date(), userId: auth.currentUser?.uid || "anónimo" });
     }
     closeEditorModal();
     await renderTabla();
@@ -1605,6 +3313,7 @@ async function importarXlsx(file){
         unidad: r.unidad||"",
         titulo: r.titulo||"",
         textoLectura: textoFormateado,
+        published: false,
         preguntas,
         createdAt: new Date()
       };
@@ -1692,6 +3401,65 @@ function procesarTextoLectura(textoPlano) {
   const conEstilo = convertirMarkdownBasicoAHTML(textoPlano);
   return convertirTextoPlanoAHTML(conEstilo);
 }
+
+window.cbGenerateLecturaMusicAssets = async function cbGenerateLecturaMusicAssets(payload = {}) {
+  const lecturaId = String(payload?.id || "").trim();
+  if (!lecturaId) throw new Error("No se recibió id de lectura.");
+  const sourceCollection = String(payload?.sourceCollection || payload?.coleccion || "lecturasASC").trim() || "lecturasASC";
+  let row = cache.find((item) => String(item?.id || "") === lecturaId) || null;
+  if (!row) {
+    const snap = await getDoc(doc(db, sourceCollection, lecturaId));
+    if (!snap.exists()) throw new Error("Lectura no encontrada.");
+    row = {id: lecturaId, ...snap.data()};
+  }
+  const mergedRow = {
+    ...row,
+    titulo: payload?.titulo || row?.titulo || "",
+    textoLectura: payload?.htmlLectura || row?.textoLectura || row?.contenidoHTML || ""
+  };
+  const force = payload?.force === true || _ascHasMusicAssets(mergedRow);
+  const musicConfig = _ascNormalizeMusicProfile(payload?.musicConfig || _ascExtractStoredMusicConfig(mergedRow));
+  const promptReading = String(payload?.promptReading || "").trim();
+  const promptGame = String(payload?.promptGame || "").trim();
+  return _ascGenerateMusicForLectura(mergedRow, {
+    sourceCollection,
+    force,
+    promptReading,
+    promptGame,
+    musicConfig
+  });
+};
+
+window.cbDeleteLecturaMusicAssets = async function cbDeleteLecturaMusicAssets(payload = {}) {
+  const lecturaId = String(payload?.id || "").trim();
+  if (!lecturaId) throw new Error("No se recibió id de lectura.");
+  const sourceCollection = String(payload?.sourceCollection || payload?.coleccion || "lecturasASC").trim() || "lecturasASC";
+  let row = cache.find((item) => String(item?.id || "") === lecturaId) || null;
+  if (!row) {
+    const snap = await getDoc(doc(db, sourceCollection, lecturaId));
+    if (!snap.exists()) throw new Error("Lectura no encontrada.");
+    row = {id: lecturaId, ...snap.data()};
+  }
+  return _ascDeleteMusicAssetsForLectura(row, sourceCollection);
+};
+
+window.cbUploadLecturaMusicAssets = async function cbUploadLecturaMusicAssets(payload = {}) {
+  const lecturaId = String(payload?.id || "").trim();
+  if (!lecturaId) throw new Error("No se recibió id de lectura.");
+  const sourceCollection = String(payload?.sourceCollection || payload?.coleccion || "lecturasASC").trim() || "lecturasASC";
+  let row = cache.find((item) => String(item?.id || "") === lecturaId) || null;
+  if (!row) {
+    const snap = await getDoc(doc(db, sourceCollection, lecturaId));
+    if (!snap.exists()) throw new Error("Lectura no encontrada.");
+    row = {id: lecturaId, ...snap.data()};
+  }
+  return _ascUploadManualMusicForLectura(row, {
+    sourceCollection,
+    readingFile: payload?.readingFile || null,
+    gameFile: payload?.gameFile || null,
+    musicConfig: payload?.musicConfig || _ascExtractStoredMusicConfig(row)
+  });
+};
 
 window.cbAgentLecturaAsc = {
   openLista() {

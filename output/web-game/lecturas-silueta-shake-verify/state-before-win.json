@@ -1,0 +1,270 @@
+{
+  "mode": "playing",
+  "playMode": "solo",
+  "challengeType": "synonyms",
+  "coordinate_system": "origin top-left, +x right, +y down",
+  "targetWord": "FELIZ",
+  "correctWord": "CONTENTO",
+  "wrongRemaining": 16,
+  "touchedCorrect": false,
+  "fireModeActive": false,
+  "fireModeMsLeft": 0,
+  "cameraReady": true,
+  "pose": {
+    "confidence": 1,
+    "joints": [
+      {
+        "kind": "head",
+        "x": 480,
+        "y": 311,
+        "r": 14
+      },
+      {
+        "kind": "leftWrist",
+        "x": 414,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "rightWrist",
+        "x": 546,
+        "y": 371,
+        "r": 14
+      },
+      {
+        "kind": "torso",
+        "x": 480,
+        "y": 367,
+        "r": 18
+      }
+    ],
+    "segments": [
+      {
+        "kind": "leftArm",
+        "ax": 464,
+        "ay": 337,
+        "bx": 408,
+        "by": 365
+      },
+      {
+        "kind": "rightArm",
+        "ax": 496,
+        "ay": 337,
+        "bx": 552,
+        "by": 365
+      },
+      {
+        "kind": "shoulders",
+        "ax": 454,
+        "ay": 331,
+        "bx": 506,
+        "by": 331
+      },
+      {
+        "kind": "torso",
+        "ax": 480,
+        "ay": 329,
+        "bx": 480,
+        "by": 403
+      }
+    ]
+  },
+  "hands": {
+    "left": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    },
+    "right": {
+      "closed": false,
+      "chargeNorm": 0,
+      "aim": null
+    }
+  },
+  "progress": {
+    "level": 1,
+    "score": 30,
+    "seeds": 0,
+    "waters": 0,
+    "harvests": 0,
+    "knowledge": 0,
+    "alivePlants": 0
+  },
+  "background": {
+    "url": "mindmapBackground.png",
+    "ready": true,
+    "transitionActive": false
+  },
+  "effects": {
+    "levelTransitionActive": false,
+    "levelTransitionMsLeft": 0
+  },
+  "silhouette": {
+    "enabled": true,
+    "preferReal": true,
+    "hasRecentMask": {
+      "solo": false,
+      "left": false,
+      "right": false
+    }
+  },
+  "powerup": {
+    "text": "POW",
+    "x": 582,
+    "y": 38,
+    "active": true
+  },
+  "fireballs": [],
+  "players": {
+    "left": {
+      "wrongRemaining": 16,
+      "fireModeActive": false,
+      "powerupActive": false,
+      "fireballsCount": 0
+    },
+    "right": {
+      "wrongRemaining": 0,
+      "fireModeActive": false,
+      "powerupActive": true,
+      "fireballsCount": 0
+    }
+  },
+  "activeWords": [
+    {
+      "text": "IDEA",
+      "isCorrect": false,
+      "x": 458,
+      "y": 224,
+      "width": 380,
+      "height": 114
+    },
+    {
+      "text": "FRESCO",
+      "isCorrect": false,
+      "x": 432,
+      "y": -3,
+      "width": 560,
+      "height": 168
+    },
+    {
+      "text": "TORPE",
+      "isCorrect": false,
+      "x": 480,
+      "y": 86,
+      "width": 488,
+      "height": 146
+    },
+    {
+      "text": "HERMOSO",
+      "isCorrect": false,
+      "x": 223,
+      "y": -203,
+      "width": 701,
+      "height": 210
+    },
+    {
+      "text": "CONTENTO",
+      "isCorrect": true,
+      "x": 181,
+      "y": -243,
+      "width": 747,
+      "height": 224
+    },
+    {
+      "text": "PUEBLO",
+      "isCorrect": false,
+      "x": 229,
+      "y": -139,
+      "width": 569,
+      "height": 171
+    },
+    {
+      "text": "CHICO",
+      "isCorrect": false,
+      "x": 357,
+      "y": -251,
+      "width": 476,
+      "height": 143
+    },
+    {
+      "text": "PROTEGER",
+      "isCorrect": false,
+      "x": 261,
+      "y": -409,
+      "width": 720,
+      "height": 216
+    },
+    {
+      "text": "LIMPIDO",
+      "isCorrect": false,
+      "x": 371,
+      "y": -315,
+      "width": 587,
+      "height": 176
+    },
+    {
+      "text": "AUXILIO",
+      "isCorrect": false,
+      "x": 457,
+      "y": -754,
+      "width": 571,
+      "height": 171
+    },
+    {
+      "text": "TENIA",
+      "isCorrect": false,
+      "x": 307,
+      "y": -840,
+      "width": 452,
+      "height": 136
+    },
+    {
+      "text": "PRONTO",
+      "isCorrect": false,
+      "x": 444,
+      "y": -653,
+      "width": 596,
+      "height": 179
+    },
+    {
+      "text": "LIMPIO",
+      "isCorrect": false,
+      "x": 431,
+      "y": -808,
+      "width": 500,
+      "height": 150
+    },
+    {
+      "text": "ARDIENTE",
+      "isCorrect": false,
+      "x": 67,
+      "y": -754,
+      "width": 688,
+      "height": 206
+    },
+    {
+      "text": "ENDEBLE",
+      "isCorrect": false,
+      "x": 107,
+      "y": -1091,
+      "width": 634,
+      "height": 190
+    },
+    {
+      "text": "DOCENTE",
+      "isCorrect": false,
+      "x": 344,
+      "y": -1102,
+      "width": 662,
+      "height": 199
+    },
+    {
+      "text": "REDUCIDO",
+      "isCorrect": false,
+      "x": 303,
+      "y": -1128,
+      "width": 718,
+      "height": 215
+    }
+  ]
+}

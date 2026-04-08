@@ -1,15 +1,15 @@
 import {
     initializeApp
-  } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
+  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
   import {
     getFirestore, collection, query, where, getDocs, doc, 
     updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot
-  } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
     getAuth,
     onAuthStateChanged,
     signInWithEmailAndPassword,
-  } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
+  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
   
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);

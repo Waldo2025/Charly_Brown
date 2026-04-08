@@ -1112,6 +1112,20 @@ export function createUnidadAgentController(deps = {}) {
     });
   }
 
+  function clearAgentMemory(agentId = 0) {
+    const id = Number(agentId) || 0;
+    if (!id) return null;
+    stopThinkingTicker();
+    if (typeof deps.clearReadingWorkflowState === "function") {
+      try { deps.clearReadingWorkflowState(); } catch (_) {}
+    }
+    state.states[id] = createBaseState(id);
+    saveStates();
+    if (id === Number(state.activeAgentId || 0)) renderStageOptions();
+    setAcademicContext(id);
+    return state.states[id];
+  }
+
   function persona(agentId = 0) {
     return state.personas[Number(agentId)] || sanitizePersona(agentId, { nombre: `Agente ${agentId || ""}`, portrait: "agentePrimero.png" });
   }
@@ -1201,23 +1215,40 @@ export function createUnidadAgentController(deps = {}) {
           voiceTitlePrompt: String(it?.voiceTitlePrompt || titulo).trim()
         };
       })
-      .filter(Boolean)
-      .slice(0, 6);
+      .filter(Boolean);
   }
 
-  function resolveReadingCandidateFromInput(raw = "", candidates = []) {
+  function looksLikeBareReadingTitle(raw = "") {
+    const norm = normalizeText(raw);
+    if (!norm) return false;
+    if (/^(si|sí|no|ok|vale|continuar|continua|continúa|siguiente|cancelar)$/.test(norm)) return false;
+    const tokens = norm.split(/\s+/).filter(Boolean);
+    if (!tokens.length || tokens.length > 12) return false;
+    if (/\b(listo|estoy|elige|dicta|numero|número|opcion|opción|comando|acciones|actualice|actualicé|titulo|título|dime|ahora|despues|después)\b/.test(norm)) return false;
+    if (/\b(asc|ask|asq)\b/.test(norm)) return false;
+    if (/^(?:lectura|lecturas)\b/.test(norm)) return false;
+    return tokens.some((tk) => tk.length >= 3);
+  }
+
+  function resolveReadingCandidateFromInput(raw = "", candidates = [], options = {}) {
+    const strict = options?.strict === true;
     const list = Array.isArray(candidates) ? candidates : [];
     if (!list.length) return null;
     const norm = normalizeText(raw);
     if (!norm) return null;
     const directNumber = norm.match(/\b(?:lectura|opcion|opción|numero|número)\s+([a-z0-9º°]+)\b/i);
     const numberToken = String(directNumber?.[1] || "").trim();
-    const numberRaw = numberToken || normalizeOrdinal(norm);
-    const numberFallback = norm.match(/\b([1-9]|10)\b/)?.[1] || "";
+    const numberRaw = normalizeOrdinal(numberToken) || normalizeOrdinal(norm) || numberToken;
+    const numberFallback = norm.match(/\b([1-9][0-9]{0,2})\b/)?.[1] || "";
+    const strictBareNumber = /^([1-9][0-9]{0,2}|[a-z0-9º°]+)$/i.test(norm) && !!normalizeOrdinal(norm);
     const asNumber = Number(numberRaw || numberFallback || 0);
     if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= list.length) {
+      if (strict && !numberToken && !strictBareNumber && !/^[1-9][0-9]{0,2}$/.test(norm)) {
+        return null;
+      }
       return list[asNumber - 1];
     }
+    if (strict && !looksLikeBareReadingTitle(raw)) return null;
     let best = null;
     let bestScore = 0;
     list.forEach((it) => {
@@ -1265,13 +1296,7 @@ export function createUnidadAgentController(deps = {}) {
       if (!readingCandidates.length) return;
       const accents = ["cool", "mint", "sun", "violet", "rose", "cyan"];
       readingCandidates.forEach((cand, idx) => {
-        const meta = [
-          cand.nivel ? `Nivel ${cand.nivel}` : "",
-          cand.grado ? `Grado ${cand.grado}` : "",
-          cand.trimestre ? `T${cand.trimestre}` : "",
-          cand.unidad ? `U${cand.unidad}` : ""
-        ].filter(Boolean).join(" · ");
-        add(`${cand.visualIndex}. ${cand.titulo}`, cand.voiceNumberPrompt, meta || "Puedes elegir por número o por título.", {
+        add(cand.titulo, cand.voiceNumberPrompt, "Di el número o título de la lectura.", {
           section: "Lecturas disponibles",
           kind: "reading_card",
           accent: accents[idx % accents.length],
@@ -1304,6 +1329,10 @@ export function createUnidadAgentController(deps = {}) {
       add("Crear unidad nueva", "crear unidad nueva", "Genera una unidad desde cero.", {
         section: "Acciones principales",
         accent: "rose"
+      });
+      add("Limpiar memoria", "limpiar memoria del agente", "Reinicia el contexto guardado del agente.", {
+        section: "Acciones principales",
+        accent: "mint"
       });
       return options;
     }
@@ -1540,37 +1569,20 @@ export function createUnidadAgentController(deps = {}) {
         const card = document.createElement("article");
         card.className = "unidad-agent-reading-card";
         if (entry.accent) card.dataset.accent = entry.accent;
-        card.innerHTML = `
-          <div class="unidad-agent-reading-card-head">
-            <span class="unidad-agent-reading-card-badge">${Number(entry.readingIndex || index + 1)}</span>
-            <h4 class="unidad-agent-reading-card-title">${escapeHtml(entry.readingTitle || entry.label || "")}</h4>
-          </div>
-          <p class="unidad-agent-reading-card-meta">${escapeHtml(entry.hint || "Elige por número o por título.")}</p>
-          <div class="unidad-agent-reading-card-actions">
-            <button type="button" class="unidad-agent-reading-btn is-number">Elegir #${Number(entry.readingIndex || index + 1)}</button>
-            <button type="button" class="unidad-agent-reading-btn is-title">Elegir título</button>
-          </div>
-        `;
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.setAttribute("aria-label", `Elegir lectura ${Number(entry.readingIndex || index + 1)}: ${String(entry.readingTitle || entry.label || "").trim()}`);
+        card.innerHTML = `<h4 class="unidad-agent-reading-card-title">${escapeHtml(entry.readingTitle || entry.label || "")}</h4>`;
         const pickByNumber = () => {
           const prompt = String(entry.readingNumberPrompt || entry.prompt || "").trim();
           if (!prompt) return;
           handleVoiceTranscript(prompt, normalizeText(prompt), { bypassBlock: true, source: "ui-reading-number" }).catch(() => {});
         };
-        const pickByTitle = () => {
-          const prompt = String(entry.readingTitlePrompt || entry.readingTitle || "").trim();
-          if (!prompt) return;
-          handleVoiceTranscript(prompt, normalizeText(prompt), { bypassBlock: true, source: "ui-reading-title" }).catch(() => {});
-        };
         card.addEventListener("click", () => pickByNumber());
-        card.querySelector(".unidad-agent-reading-btn.is-number")?.addEventListener("click", (ev) => {
+        card.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
           ev.preventDefault();
-          ev.stopPropagation();
           pickByNumber();
-        });
-        card.querySelector(".unidad-agent-reading-btn.is-title")?.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          pickByTitle();
         });
         sectionMap.get(sectionName)?.appendChild(card);
         return;
@@ -2098,6 +2110,25 @@ export function createUnidadAgentController(deps = {}) {
     if (/^(resumen|profundizar|analiza|analizar)\s+lectura\b/.test(norm)) return true;
     if (/^(exportar|descargar)\s+word\s+lectura\b/.test(norm)) return true;
     if (/^(crear|genera|generar|haz)\b[\s\S]*\bunidad\b/.test(norm)) return true;
+    return false;
+  }
+
+  function isExplicitReadingSelectionCommand(text = "", candidates = []) {
+    const norm = normalizeText(text);
+    if (!norm) return false;
+    if (/\b(si|sí|no|cancelar|cancela|siguiente|otra)\b/.test(norm)) return true;
+    if (resolveReadingCandidateFromInput(text, candidates)) return true;
+    return false;
+  }
+
+  function isExplicitReadingTitleCommand(text = "", candidates = []) {
+    const norm = normalizeText(text);
+    if (!norm) return false;
+    if (resolveReadingCandidateFromInput(text, candidates, { strict: true })) return true;
+    if (/\b(listo|continuar|continua|continúa|siguiente|avanzar|ok)\b/.test(norm)) return true;
+    if (/\b(titulo|título|nombre)\b/.test(norm)) return true;
+    if (/^(selecciona|elige|escoge|usar|usa|buscar|busca|encuentra|localiza)\b/.test(norm)) return true;
+    if (looksLikeBareReadingTitle(text)) return true;
     return false;
   }
 
@@ -2832,6 +2863,8 @@ export function createUnidadAgentController(deps = {}) {
     if (!agentState || agentState.flow !== "reading_action") return false;
     if (["await_reading_selection", "await_reading_action"].includes(agentState.step)) {
       const norm = normalizeText(raw);
+      const wfState = typeof deps.getReadingWorkflowState === "function" ? deps.getReadingWorkflowState() : null;
+      const wfCandidates = getReadingWorkflowCandidates(wfState);
       if (agentState.step === "await_reading_action" && /\b(crear|crea|generar|genera|haz|hacer)\b[\s\S]*\bunidad\b/.test(norm)) {
         if (typeof deps.createUnitFromCurrentReading !== "function") {
           await speakCurrent("No pude vincular la lectura actual para generar la unidad.");
@@ -2852,6 +2885,14 @@ export function createUnidadAgentController(deps = {}) {
       const readingConversationActive = typeof deps.isReadingConversationActive === "function"
         ? deps.isReadingConversationActive()
         : false;
+      if (agentState.step === "await_reading_selection" && !isExplicitReadingSelectionCommand(raw, wfCandidates)) {
+        return true;
+      }
+      if (agentState.step === "await_reading_action"
+        && !readingConversationActive
+        && !isExplicitReadingWorkflowCommand(raw)) {
+        return true;
+      }
       if (readingConversationActive
         && agentState.step === "await_reading_action"
         && !isExplicitReadingWorkflowCommand(raw)) {
@@ -2899,24 +2940,32 @@ export function createUnidadAgentController(deps = {}) {
       const rawNorm = normalizeText(raw);
       const wfState = typeof deps.getReadingWorkflowState === "function" ? deps.getReadingWorkflowState() : null;
       const wfCandidates = getReadingWorkflowCandidates(wfState);
-      const candidatePick = resolveReadingCandidateFromInput(raw, wfCandidates);
-      if (candidatePick && typeof deps.processReadingWorkflowInput === "function") {
-        const pickPrompt = String(candidatePick.voiceNumberPrompt || `lectura ${candidatePick.visualIndex || 1}`).trim();
-        const consumedPick = await deps.processReadingWorkflowInput(pickPrompt);
-        if (consumedPick) {
-          const nextStep = syncReadingWorkflowState(agentId);
-          if (!nextStep) {
-            updateAgentState(agentId, { flow: "reading_action", step: "await_reading_selection" });
-          }
-          return true;
-        }
-      }
       const isContinue = /\b(listo|listos|continuar|continua|continúa|siguiente|avanzar|ok)\b/.test(rawNorm);
       const draftTitle = String(pending?.titulo || agentState?.readingTitleCache || "").trim();
       if (!isContinue) {
-        const titleDraft = String(raw || "").trim();
+        if (!isExplicitReadingTitleCommand(raw, wfCandidates)) {
+          return true;
+        }
+        const candidatePick = resolveReadingCandidateFromInput(raw, wfCandidates, { strict: true });
+        if (candidatePick && typeof deps.processReadingWorkflowInput === "function") {
+          const pickPrompt = String(candidatePick.voiceNumberPrompt || `lectura ${candidatePick.visualIndex || 1}`).trim();
+          const consumedPick = await deps.processReadingWorkflowInput(pickPrompt);
+          if (consumedPick) {
+            const nextStep = syncReadingWorkflowState(agentId);
+            if (!nextStep) {
+              updateAgentState(agentId, { flow: "reading_action", step: "await_reading_selection" });
+            }
+            return true;
+          }
+        }
+        const extractedTitle = typeof deps.extractTitleFromCommand === "function"
+          ? deps.extractTitleFromCommand(raw, raw) || ""
+          : "";
+        const titleDraft = String(extractedTitle || raw || "").trim().replace(/^["“'`]+|["”'`]+$/g, "");
+        const titleDraftNorm = normalizeText(titleDraft);
+        const looksNoiseTitle = /\b(listo|elige|dicta|numero|número|opcion|opción|comando|acciones|titulo|título)\b/.test(titleDraftNorm);
         const words = titleDraft.split(/\s+/).filter(Boolean).length;
-        if (titleDraft.length < 3 || words < 1) {
+        if (!titleDraft || /^(asc|ask|asq|nueva|nuevas)$/.test(titleDraftNorm) || titleDraft.length < 3 || words < 1 || looksNoiseTitle) {
           await speakCurrent("No capté bien el título. Dímelo completo y luego di continuar.");
           return true;
         }
@@ -2977,6 +3026,9 @@ export function createUnidadAgentController(deps = {}) {
         if (!nextStep) updateAgentState(agentId, { flow: "reading_action", step: "await_reading_selection" });
         return true;
       }
+    }
+    if (!candidatePick && !/\b(asc|ask|asq|nueva|nuevas)\b/.test(normalizeText(raw))) {
+      return true;
     }
     const tipo = parseReadingKind(raw);
     if (!tipo) {
@@ -3279,6 +3331,13 @@ export function createUnidadAgentController(deps = {}) {
       setAcademicContext(agentId);
       markConsumed(raw);
       await speakCurrent(`Actualicé tu contexto a ${summarizeContext(agentId)}.`);
+      return true;
+    }
+    if (/\b(limpiar|limpia|borrar|borra|reiniciar|reinicia|resetear|resetea|restablecer|restablece)\b/.test(text)
+      && /\b(memoria|contexto|historial|estado|datos)\b/.test(text)) {
+      markConsumed(raw);
+      clearAgentMemory(agentId);
+      await speakCurrent(`Listo. Limpié mi memoria y reinicié el agente. ${actionsCatalogPrompt()}`);
       return true;
     }
     if (/\b(crear|crea|haz|hacer)\s+(?:una\s+|nueva\s+|nueva\s+una\s+|una\s+nueva\s+)?lectura\b/i.test(text)) {

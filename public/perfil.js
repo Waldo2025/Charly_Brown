@@ -1,12 +1,15 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.19.1/firebase-app.js";
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-auth.js';
-import { getFirestore, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
+import { sanitizeTextInput } from "./security-utils.js";
 
 let auth = null;
 let db = null;
 try {
   const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+  void bootstrapFirebaseAppCheck(app);
   auth = getAuth(app);
   db = getFirestore(app);
 } catch (err) {
@@ -65,9 +68,13 @@ document.getElementById('perfilForm').addEventListener('submit', async (e) => {
 
   try {
     const userDocRef = doc(db, 'users', user.uid);
+    const cleanFirstName = sanitizeTextInput(nameInput.value, {maxLength: 120});
+    const cleanPhone = sanitizeTextInput(phoneInput.value, {maxLength: 40});
+    nameInput.value = cleanFirstName;
+    phoneInput.value = cleanPhone;
     await updateDoc(userDocRef, {
-      firstName: nameInput.value,  // Actualizar el primer nombre
-      phone: phoneInput.value
+      firstName: cleanFirstName,
+      phone: cleanPhone
     });
 
     alert('Perfil actualizado exitosamente');

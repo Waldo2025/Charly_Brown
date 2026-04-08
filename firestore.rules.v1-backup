@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Lecturas compartidas: lectura pública si estatusLectura == "Compartido".
+    match /lecturas/{lecturaId} {
+      allow read: if resource.data.estatusLectura == "Compartido";
+      allow create, update, delete: if request.auth != null;
+    }
+
+    // Fuentes de lecturas para juego: públicas de lectura.
+    match /lecturasASC/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    match /lecturasNuevas/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Lecturas game: acceso sin autenticación (requerido por modo anónimo).
+    match /lecturasGame/{playerId} {
+      allow read, write: if true;
+
+      match /stats/{docId} {
+        allow read, write: if true;
+      }
+
+      match /history/{docId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Unidades por dueño.
+    match /Unidades/{unidadId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow write: if request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+
+    // audioTranslate por dueño (lectura admin opcional por email verificado).
+    match /audioTranslate/{sessionId} {
+      allow read: if request.auth != null
+        && (resource.data.userId == request.auth.uid
+          || request.auth.token.email_verified == true);
+
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Comportamiento legacy: cualquier usuario autenticado puede leer/escribir resto.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

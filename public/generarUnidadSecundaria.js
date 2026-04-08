@@ -1,8 +1,8 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // generarUnidadSecundaria.js
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
-import { getFirestore, addDoc, collection, getDocs, where, query, updateDoc, getDoc, doc } from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getFirestore, addDoc, collection, getDocs, where, query, updateDoc, getDoc, doc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
 /* =========================
    HELPERS SEGUROS
@@ -12,6 +12,12 @@ const on = (id, event, handler) => {
   const el = $(id);
   if (el) el.addEventListener(event, handler);
 };
+const escapeHtml = (value = "") => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
 
 /* =========================
    CONFIGURACIÓN FIREBASE
@@ -52,56 +58,59 @@ function generarCamposSubtema(subtema, valores = {}) {
   const dominiosVal = (valores[`${subtema}_dominios`] || [""]).join("\n");
   const contenidosVal = (valores[`${subtema}_contenidos`] || [""]).join("\n");
   const procesosVal = (valores[`${subtema}_procesos`] || [""]).join("\n");
+  const addFieldButton = (containerId, fieldType, fieldName, placeholder) => `
+      <button
+        type="button"
+        class="btn-add-mini"
+        data-action="add-dynamic-field"
+        data-container-id="${escapeHtml(containerId)}"
+        data-field-type="${escapeHtml(fieldType)}"
+        data-field-name="${escapeHtml(fieldName)}"
+        data-placeholder="${escapeHtml(placeholder)}"
+      >
+        <i class="fas fa-plus"></i>
+      </button>
+  `;
 
   return `
     <div class="subtema-block">
-      <h4>📖 Subtema: ${subtema}</h4>
+      <h4>📖 Subtema: ${escapeHtml(subtema)}</h4>
       
       <label>Tema:</label>
-      <input type="text" name="${subtema}_tema" value="${temaVal}" placeholder="Tema del subtema..." required>
+      <input type="text" name="${escapeHtml(subtema)}_tema" value="${escapeHtml(temaVal)}" placeholder="Tema del subtema..." required>
 
       <label>Lectura:</label>
-      <input type="text" name="${subtema}_lectura" value="${lecturaVal}" placeholder="Título de la lectura..." required>
+      <input type="text" name="${escapeHtml(subtema)}_lectura" value="${escapeHtml(lecturaVal)}" placeholder="Título de la lectura..." required>
 
-      <fieldset id="${subtema}_aprendizajesContainer">
+      <fieldset id="${escapeHtml(subtema)}_aprendizajesContainer">
         <legend>Aprendizajes ASC</legend>
-        <textarea name="${subtema}_aprendizajes[]" placeholder="Aprendizaje esperado...">${aprendizajesVal}</textarea>
+        <textarea name="${escapeHtml(subtema)}_aprendizajes[]" placeholder="Aprendizaje esperado...">${escapeHtml(aprendizajesVal)}</textarea>
       </fieldset>
-      <button type="button" class="btn-add-mini" onclick="addDynamicField('${subtema}_aprendizajesContainer','textarea','${subtema}_aprendizajes[]','Otro aprendizaje...')">
-        <i class="fas fa-plus"></i>
-      </button>
+      ${addFieldButton(`${subtema}_aprendizajesContainer`, "textarea", `${subtema}_aprendizajes[]`, "Otro aprendizaje...")}
 
-      <fieldset id="${subtema}_habilidadesContainer">
+      <fieldset id="${escapeHtml(subtema)}_habilidadesContainer">
         <legend>Habilidad</legend>
-        <textarea name="${subtema}_habilidades[]" placeholder="Ej. CRM, ERM, CSM...">${habilidadesVal}</textarea>
+        <textarea name="${escapeHtml(subtema)}_habilidades[]" placeholder="Ej. CRM, ERM, CSM...">${escapeHtml(habilidadesVal)}</textarea>
       </fieldset>
-      <button type="button" class="btn-add-mini" onclick="addDynamicField('${subtema}_habilidadesContainer','textarea','${subtema}_habilidades[]','Otra habilidad...')">
-        <i class="fas fa-plus"></i>
-      </button>
+      ${addFieldButton(`${subtema}_habilidadesContainer`, "textarea", `${subtema}_habilidades[]`, "Otra habilidad...")}
 
-      <fieldset id="${subtema}_dominiosContainer">
+      <fieldset id="${escapeHtml(subtema)}_dominiosContainer">
         <legend>Dominio Cognitivo</legend>
-        <textarea name="${subtema}_dominios[]" placeholder="Dominios cognitivos...">${dominiosVal}</textarea>
+        <textarea name="${escapeHtml(subtema)}_dominios[]" placeholder="Dominios cognitivos...">${escapeHtml(dominiosVal)}</textarea>
       </fieldset>
-      <button type="button" class="btn-add-mini" onclick="addDynamicField('${subtema}_dominiosContainer','textarea','${subtema}_dominios[]','Otro dominio...')">
-        <i class="fas fa-plus"></i>
-      </button>
+      ${addFieldButton(`${subtema}_dominiosContainer`, "textarea", `${subtema}_dominios[]`, "Otro dominio...")}
 
-      <fieldset id="${subtema}_contenidosContainer">
+      <fieldset id="${escapeHtml(subtema)}_contenidosContainer">
         <legend>Contenido</legend>
-        <textarea name="${subtema}_contenidos[]" placeholder="Contenido clave...">${contenidosVal}</textarea>
+        <textarea name="${escapeHtml(subtema)}_contenidos[]" placeholder="Contenido clave...">${escapeHtml(contenidosVal)}</textarea>
       </fieldset>
-      <button type="button" class="btn-add-mini" onclick="addDynamicField('${subtema}_contenidosContainer','textarea','${subtema}_contenidos[]','Otro contenido...')">
-        <i class="fas fa-plus"></i>
-      </button>
+      ${addFieldButton(`${subtema}_contenidosContainer`, "textarea", `${subtema}_contenidos[]`, "Otro contenido...")}
 
-      <fieldset id="${subtema}_procesosContainer">
+      <fieldset id="${escapeHtml(subtema)}_procesosContainer">
         <legend>Procesos de desarrollo de aprendizaje</legend>
-        <textarea name="${subtema}_procesos[]" placeholder="Describe procesos de aprendizaje...">${procesosVal}</textarea>
+        <textarea name="${escapeHtml(subtema)}_procesos[]" placeholder="Describe procesos de aprendizaje...">${escapeHtml(procesosVal)}</textarea>
       </fieldset>
-      <button type="button" class="btn-add-mini" onclick="addDynamicField('${subtema}_procesosContainer','textarea','${subtema}_procesos[]','Otro proceso...')">
-        <i class="fas fa-plus"></i>
-      </button>
+      ${addFieldButton(`${subtema}_procesosContainer`, "textarea", `${subtema}_procesos[]`, "Otro proceso...")}
     </div>
     <hr>
   `;
@@ -122,8 +131,7 @@ function renderCategoriasPorGrado(grado, contenedor, valores = {}) {
   }
 }
 
-// Campo dinámico (expuesto en window por los onclick del HTML generado)
-window.addDynamicField = function (containerId, type, name, placeholder = "") {
+function addDynamicField(containerId, type, name, placeholder = "") {
   const container = $(containerId);
   if (!container) return;
   let element;
@@ -138,7 +146,8 @@ window.addDynamicField = function (containerId, type, name, placeholder = "") {
     element.placeholder = placeholder;
   }
   container.appendChild(element);
-};
+}
+window.addDynamicField = addDynamicField;
 
 /* =========================
    MODALES Y LISTENERS
@@ -239,7 +248,7 @@ async function cargarSecuenciasGuardadas() {
       <td>${data.trimestre || "-"}</td>
       <td>${data.unidad || "-"}</td>
       <td style="text-align:center;">
-        <button class="btn-editar" onclick="editarSecuencia('${id}')">
+        <button class="btn-editar" data-action="editar-secuencia" data-doc-id="${escapeHtml(id)}">
           <i class="fas fa-edit"></i>
         </button>
       </td>
@@ -257,8 +266,7 @@ function renderArrayForTextarea(valor) {
   return String(valor);
 }
 
-// Exponer para botón inline
-window.editarSecuencia = async function (docId) {
+async function editarSecuencia(docId) {
   try {
     const ref = doc(db, "secuenciaAlcance", docId);
     const snap = await getDoc(ref);
@@ -309,21 +317,21 @@ window.editarSecuencia = async function (docId) {
 
           contenedorEdicion.innerHTML += `
             <div class="subtema-edit-block">
-              <h4>📖 ${subtema}</h4>
+              <h4>📖 ${escapeHtml(subtema)}</h4>
               <label>Tema:</label>
-              <input type="text" name="${temaKey}" value="${data[temaKey] || ""}">
+              <input type="text" name="${escapeHtml(temaKey)}" value="${escapeHtml(data[temaKey] || "")}">
               <label>Lectura:</label>
-              <input type="text" name="${lecturaKey}" value="${data[lecturaKey] || ""}">
+              <input type="text" name="${escapeHtml(lecturaKey)}" value="${escapeHtml(data[lecturaKey] || "")}">
               <label>Aprendizajes ASC:</label>
-              <textarea name="${aprendizajesKey}">${renderArrayForTextarea(data[aprendizajesKey])}</textarea>
+              <textarea name="${escapeHtml(aprendizajesKey)}">${escapeHtml(renderArrayForTextarea(data[aprendizajesKey]))}</textarea>
               <label>Habilidades:</label>
-              <textarea name="${habilidadesKey}">${renderArrayForTextarea(data[habilidadesKey])}</textarea>
+              <textarea name="${escapeHtml(habilidadesKey)}">${escapeHtml(renderArrayForTextarea(data[habilidadesKey]))}</textarea>
               <label>Dominios Cognitivos:</label>
-              <textarea name="${dominiosKey}">${renderArrayForTextarea(data[dominiosKey])}</textarea>
+              <textarea name="${escapeHtml(dominiosKey)}">${escapeHtml(renderArrayForTextarea(data[dominiosKey]))}</textarea>
               <label>Contenidos:</label>
-              <textarea name="${contenidosKey}">${renderArrayForTextarea(data[contenidosKey])}</textarea>
+              <textarea name="${escapeHtml(contenidosKey)}">${escapeHtml(renderArrayForTextarea(data[contenidosKey]))}</textarea>
               <label>Procesos de Aprendizaje:</label>
-              <textarea name="${procesosKey}">${renderArrayForTextarea(data[procesosKey])}</textarea>
+              <textarea name="${escapeHtml(procesosKey)}">${escapeHtml(renderArrayForTextarea(data[procesosKey]))}</textarea>
             </div>
             <hr>
           `;
@@ -339,7 +347,8 @@ window.editarSecuencia = async function (docId) {
   } catch (error) {
     alert("❌ Ocurrió un error al abrir la secuencia para editar.");
   }
-};
+}
+window.editarSecuencia = editarSecuencia;
 
 // Guardar cambios edición
 on("formEditarSecuencia", "submit", async (e) => {
@@ -390,6 +399,25 @@ on("formEditarSecuencia", "submit", async (e) => {
    MODAL: GENERAR UNIDAD SECUNDARIA
 ========================= */
 document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("click", (event) => {
+    const actionTarget = event.target.closest("[data-action]");
+    if (!actionTarget) return;
+
+    if (actionTarget.dataset.action === "add-dynamic-field") {
+      addDynamicField(
+        actionTarget.dataset.containerId,
+        actionTarget.dataset.fieldType,
+        actionTarget.dataset.fieldName,
+        actionTarget.dataset.placeholder || ""
+      );
+      return;
+    }
+
+    if (actionTarget.dataset.action === "editar-secuencia") {
+      editarSecuencia(actionTarget.dataset.docId || "");
+    }
+  });
+
   const btnAbrirModalUnidadSec = $("btnAbrirModalUnidadSecundaria");
   const modalUnidadSec = $("modalGenerarUnidadSecundaria");
   const btnCerrarModalUnidadSec = $("cerrarModalUnidadSecundaria");

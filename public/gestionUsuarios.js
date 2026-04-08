@@ -1,228 +1,455 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-app.js';
-import { getFirestore, collection, getDocs, query, where, doc, getDoc, updateDoc, addDoc } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.19.1/firebase-auth.js';
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getFirestore, collection, getDocs, doc, getDoc, updateDoc, deleteDoc, query, where, limit } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
+import { escapeHtml } from "./security-utils.js";
 
-// Inicialización de Firebase
-const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+const app = getApps().length ? getApp() : initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+void bootstrapFirebaseAppCheck(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-let table; // Definir la variable de la tabla
+const AREA_ROLE_MAP = Object.freeze({
+  editorial: "editor",
+  autoria: "author",
+  diseno: "designer",
+  desarrollo: "developer"
+});
 
-// Verificar si el usuario es admin
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    const currentUserId = user.uid;
-    
-    // Obtener datos del usuario desde Firestore
-    const userDocRef = doc(db, 'users', currentUserId);
-    const userSnap = await getDoc(userDocRef);
-    
-    if (userSnap.exists()) {
-      const userData = userSnap.data();
-      
-      // Si el rol es admin, mostrar la sección "Gestionar Usuarios"
-      if (userData.role === "admin") {
-        document.getElementById('gestionUsuariosLink').style.display = 'block';
-      } else {
-        document.getElementById('gestionUsuariosLink').style.display = 'none';
-      }
-    }
+const ROLE_LABELS = Object.freeze({
+  admin: "Administrador",
+  author: "Author",
+  editor: "Editor",
+  designer: "Designer",
+  developer: "Developer",
+  pending: "Pendiente"
+});
 
-    // Cargar todos los usuarios
-    loadUsers();
+const AREA_LABELS = Object.freeze({
+  editorial: "Editorial",
+  autoria: "Autoría",
+  diseno: "Diseño",
+  desarrollo: "Desarrollo"
+});
 
-  } else {
-    window.location.href = "login.html";
+const STATUS_LABELS = Object.freeze({
+  pending: "Pendiente",
+  approved: "Aprobado",
+  rejected: "Rechazado"
+});
+
+const state = {
+  currentAdmin: null,
+  users: [],
+  filteredUsers: [],
+  roleModal: null
+};
+
+const els = {
+  searchName: document.getElementById("searchName"),
+  searchArea: document.getElementById("searchArea"),
+  searchStatus: document.getElementById("searchStatus"),
+  searchRole: document.getElementById("searchRole"),
+  usersTableBody: document.getElementById("usersTableBody"),
+  usersEmptyState: document.getElementById("usersEmptyState"),
+  btnRefreshUsers: document.getElementById("btnRefreshUsers"),
+  statTotalUsers: document.getElementById("statTotalUsers"),
+  statPendingUsers: document.getElementById("statPendingUsers"),
+  statApprovedUsers: document.getElementById("statApprovedUsers"),
+  statRejectedUsers: document.getElementById("statRejectedUsers"),
+  editRoleForm: document.getElementById("editRoleForm"),
+  editUserId: document.getElementById("editUserId"),
+  editRoleHint: document.getElementById("editRoleHint"),
+  newRole: document.getElementById("newRole"),
+  editRoleModalEl: document.getElementById("editRoleModal")
+};
+
+if (els.editRoleModalEl) {
+  state.roleModal = new bootstrap.Modal(els.editRoleModalEl);
+}
+
+function normalizeText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeToken(value = "") {
+  return normalizeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_-]+/g, "");
+}
+
+function canonicalRole(value = "") {
+  const token = normalizeToken(value);
+  if (!token) return "";
+  if (["admin", "administrador", "administrator", "superadmin", "owner"].includes(token)) return "admin";
+  if (["author", "autor", "autoria"].includes(token)) return "author";
+  if (["editor", "editorial"].includes(token)) return "editor";
+  if (["designer", "disenador", "diseno"].includes(token)) return "designer";
+  if (["developer", "desarrollador", "desarrollo", "dev"].includes(token)) return "developer";
+  if (["pending", "pendiente"].includes(token)) return "pending";
+  return token;
+}
+
+function canonicalStatus(value = "") {
+  const token = normalizeToken(value);
+  if (!token) return "";
+  if (["approved", "aprobado", "active", "activo"].includes(token)) return "approved";
+  if (["rejected", "rechazado", "denied", "denegado", "blocked", "bloqueado"].includes(token)) return "rejected";
+  if (["pending", "pendiente", "review", "revision"].includes(token)) return "pending";
+  return token;
+}
+
+function normalizeArea(area = "") {
+  return normalizeText(area)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function resolveRoleByArea(area = "") {
+  return AREA_ROLE_MAP[normalizeArea(area)] || "";
+}
+
+function getApprovalStatus(data = {}) {
+  const explicit = canonicalStatus(data.approvalStatus || data.status || data.estado || data.estadoAprobacion);
+  if (explicit === "pending" || explicit === "approved" || explicit === "rejected") return explicit;
+  const role = canonicalRole(data.role || data.rol || data.userRole);
+  return role && role !== "pending" ? "approved" : "pending";
+}
+
+function roleLabel(role = "") {
+  const normalized = canonicalRole(role);
+  return ROLE_LABELS[normalized] || (normalized ? normalized : "Sin rol");
+}
+
+function areaLabel(area = "") {
+  const normalized = normalizeArea(area);
+  return AREA_LABELS[normalized] || (String(area || "").trim() || "Sin área");
+}
+
+function statusLabel(status = "") {
+  const normalized = canonicalStatus(status);
+  return STATUS_LABELS[normalized] || "Pendiente";
+}
+
+async function findUserProfileByAuthUser(user) {
+  if (!user?.uid) return null;
+
+  // 1) Caso esperado: documento users/{uid}
+  const directSnap = await getDoc(doc(db, "users", user.uid));
+  if (directSnap.exists()) {
+    return { id: directSnap.id, data: directSnap.data() || {} };
   }
-});
 
-document.getElementById("btnAgregarUsuario").addEventListener("click", () => {
-  const modal = new bootstrap.Modal(document.getElementById("newUserModal"));
-  modal.show();
-});
+  // 2) Compatibilidad legacy: buscar por campo uid
+  const byUidSnap = await getDocs(query(collection(db, "users"), where("uid", "==", user.uid), limit(1)));
+  if (!byUidSnap.empty) {
+    const d = byUidSnap.docs[0];
+    return { id: d.id, data: d.data() || {} };
+  }
 
-document.getElementById("newUserForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
+  // 3) Compatibilidad legacy: buscar por email (exacto / lowercase)
+  const email = String(user.email || "").trim();
+  if (email) {
+    const byEmailSnap = await getDocs(query(collection(db, "users"), where("email", "==", email), limit(1)));
+    if (!byEmailSnap.empty) {
+      const d = byEmailSnap.docs[0];
+      return { id: d.id, data: d.data() || {} };
+    }
+    const byEmailLowerSnap = await getDocs(query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1)));
+    if (!byEmailLowerSnap.empty) {
+      const d = byEmailLowerSnap.docs[0];
+      return { id: d.id, data: d.data() || {} };
+    }
+  }
 
-  const firstName = document.getElementById("newFirstName").value.trim();
-  const lastName = document.getElementById("newLastName").value.trim();
-  const email = document.getElementById("newEmail").value.trim();
-  const area = document.getElementById("newArea").value.trim();
-  const role = document.getElementById("newRoleSelect").value;
+  // 4) Último fallback: barrido completo (colecciones pequeñas/medias)
+  const allUsers = await getDocs(collection(db, "users"));
+  const targetEmail = normalizeText(email);
+  for (const d of allUsers.docs) {
+    const data = d.data() || {};
+    if (String(data.uid || "") === String(user.uid)) {
+      return { id: d.id, data };
+    }
+    if (targetEmail && normalizeText(data.email || "") === targetEmail) {
+      return { id: d.id, data };
+    }
+  }
 
-  if (!firstName || !lastName || !email || !area || !role) {
-    alert("Por favor, completa todos los campos.");
+  return null;
+}
+
+function mapUser(docSnap) {
+  const data = docSnap.data() || {};
+  const firstName = String(data.firstName || "").trim();
+  const lastName = String(data.lastName || "").trim();
+  const fullName = `${firstName} ${lastName}`.trim() || "Sin nombre";
+  const areaRaw = String(data.area || data.departamento || "").trim();
+  const areaNorm = normalizeArea(areaRaw);
+  const requestedRole = canonicalRole(data.requestedRole || data.rolSolicitado) || resolveRoleByArea(areaRaw);
+  const role = canonicalRole(data.role || data.rol || data.userRole) || (requestedRole ? "pending" : "");
+  const approvalStatus = getApprovalStatus(data);
+  return {
+    id: docSnap.id,
+    uid: String(data.uid || data.userId || docSnap.id || ""),
+    firstName,
+    lastName,
+    fullName,
+    email: String(data.email || "").trim(),
+    area: areaRaw,
+    areaNorm,
+    requestedRole,
+    role,
+    approvalStatus,
+    createdAt: String(data.createdAt || ""),
+    updatedAt: String(data.updatedAt || "")
+  };
+}
+
+function renderStats(users = []) {
+  const total = users.length;
+  const pending = users.filter((u) => u.approvalStatus === "pending").length;
+  const approved = users.filter((u) => u.approvalStatus === "approved").length;
+  const rejected = users.filter((u) => u.approvalStatus === "rejected").length;
+  if (els.statTotalUsers) els.statTotalUsers.textContent = String(total);
+  if (els.statPendingUsers) els.statPendingUsers.textContent = String(pending);
+  if (els.statApprovedUsers) els.statApprovedUsers.textContent = String(approved);
+  if (els.statRejectedUsers) els.statRejectedUsers.textContent = String(rejected);
+}
+
+function buildRowActions(user) {
+  const isSelf = user.uid && state.currentAdmin?.uid && user.uid === state.currentAdmin.uid;
+  const canApprove = !isSelf && user.approvalStatus !== "approved";
+  const canReject = !isSelf && user.approvalStatus === "pending";
+  const canDelete = !isSelf;
+
+  return `
+    <div class="users-actions">
+      ${canApprove ? `
+        <button type="button" class="users-action-btn is-approve" data-action="approve" data-id="${escapeHtml(user.id)}" title="Aprobar usuario" aria-label="Aprobar usuario">
+          <i class="fas fa-check"></i>
+        </button>` : ""
+      }
+      ${canReject ? `
+        <button type="button" class="users-action-btn is-reject" data-action="reject" data-id="${escapeHtml(user.id)}" title="Rechazar usuario" aria-label="Rechazar usuario">
+          <i class="fas fa-xmark"></i>
+        </button>` : ""
+      }
+      <button type="button" class="users-action-btn is-role" data-action="edit-role" data-id="${escapeHtml(user.id)}" title="Editar rol" aria-label="Editar rol">
+        <i class="fas fa-user-gear"></i>
+      </button>
+      ${canDelete ? `
+        <button type="button" class="users-action-btn is-delete" data-action="delete" data-id="${escapeHtml(user.id)}" title="Eliminar usuario" aria-label="Eliminar usuario">
+          <i class="fas fa-trash"></i>
+        </button>` : ""
+      }
+    </div>
+  `;
+}
+
+function renderUsersTable(users = []) {
+  if (!els.usersTableBody) return;
+  if (!users.length) {
+    els.usersTableBody.innerHTML = "";
+    els.usersEmptyState?.classList.remove("hidden");
     return;
   }
+  els.usersEmptyState?.classList.add("hidden");
+  const rows = users.map((user) => `
+    <tr>
+      <td class="users-cell-name">
+        <p class="users-name">${escapeHtml(user.fullName)}</p>
+        <p class="users-user-id">${escapeHtml(user.uid)}</p>
+      </td>
+      <td>${escapeHtml(user.email || "—")}</td>
+      <td>${escapeHtml(areaLabel(user.area))}</td>
+      <td><span class="users-role-chip">${escapeHtml(roleLabel(user.requestedRole || resolveRoleByArea(user.area)))}</span></td>
+      <td><span class="users-pill is-${escapeHtml(user.approvalStatus)}">${escapeHtml(statusLabel(user.approvalStatus))}</span></td>
+      <td><span class="users-role-chip">${escapeHtml(roleLabel(user.role))}</span></td>
+      <td>${buildRowActions(user)}</td>
+    </tr>
+  `).join("");
+  els.usersTableBody.innerHTML = rows;
+}
 
-  try {
-    await addDoc(collection(db, "users"), {
-      firstName,
-      lastName,
-      email,
-      area,
-      role
-    });
+function applyFilters() {
+  const search = normalizeText(els.searchName?.value || "");
+  const area = normalizeArea(els.searchArea?.value || "");
+  const status = normalizeText(els.searchStatus?.value || "");
+  const role = normalizeText(els.searchRole?.value || "");
 
-    alert("Usuario creado correctamente.");
-    document.getElementById("newUserForm").reset();
-    bootstrap.Modal.getInstance(document.getElementById("newUserModal")).hide();
-    loadUsers();
-  } catch (error) {
-    alert("Error al crear el usuario. Intenta de nuevo.");
-  }
-});
+  state.filteredUsers = state.users.filter((user) => {
+    const matchesSearch = !search
+      || normalizeText(user.fullName).includes(search)
+      || normalizeText(user.email).includes(search);
+    const matchesArea = !area || user.areaNorm === area;
+    const matchesStatus = !status || user.approvalStatus === status;
+    const matchesRole = !role || user.role === role;
+    return matchesSearch && matchesArea && matchesStatus && matchesRole;
+  });
 
+  renderUsersTable(state.filteredUsers);
+}
 
-// Función para cargar todos los usuarios
 async function loadUsers() {
-  const usersRef = collection(db, 'users');
-  const snapshot = await getDocs(usersRef);
-  
-  const userList = snapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      email: data.email,
-      area: data.area,
-      role: data.role
-    };
-  });
-
-  renderUserTable(userList);
+  const snapshot = await getDocs(collection(db, "users"));
+  state.users = snapshot.docs.map(mapUser).sort((a, b) => normalizeText(a.fullName).localeCompare(normalizeText(b.fullName), "es"));
+  renderStats(state.users);
+  applyFilters();
 }
 
-$(document).ready(function() {
-  // Inicializa DataTable una sola vez
-  if (!$.fn.DataTable.isDataTable('#myTable')) {
-    table = new DataTable('#myTable', {
-      "ordering": true, // Habilitar la ordenación
-      "paging": true,   // Habilitar la paginación
-      "searching": true // Habilitar la búsqueda
-    });
+function getUserById(userId = "") {
+  return state.users.find((user) => user.id === userId) || null;
+}
+
+async function approveUser(userId = "") {
+  const user = getUserById(userId);
+  if (!user) return;
+  const targetRole = user.requestedRole || resolveRoleByArea(user.area);
+  if (!targetRole) {
+    alert("No se pudo determinar el rol solicitado para este usuario.");
+    return;
   }
+  const ok = confirm(`¿Aprobar a ${user.fullName} con rol ${roleLabel(targetRole)}?`);
+  if (!ok) return;
+
+  await updateDoc(doc(db, "users", user.id), {
+    requestedRole: targetRole,
+    role: targetRole,
+    approvalStatus: "approved",
+    approvedBy: state.currentAdmin?.uid || "",
+    approvedAt: new Date().toISOString(),
+    rejectedAt: null,
+    rejectedBy: null,
+    updatedAt: new Date().toISOString()
+  });
+  await loadUsers();
+}
+
+async function rejectUser(userId = "") {
+  const user = getUserById(userId);
+  if (!user) return;
+  const ok = confirm(`¿Rechazar el acceso de ${user.fullName}?`);
+  if (!ok) return;
+
+  await updateDoc(doc(db, "users", user.id), {
+    role: "pending",
+    approvalStatus: "rejected",
+    rejectedBy: state.currentAdmin?.uid || "",
+    rejectedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  await loadUsers();
+}
+
+function openEditRoleModal(userId = "") {
+  const user = getUserById(userId);
+  if (!user || !state.roleModal) return;
+  if (els.editUserId) els.editUserId.value = user.id;
+  const selectedRole = user.role && user.role !== "pending"
+    ? user.role
+    : (user.requestedRole || resolveRoleByArea(user.area) || "editor");
+  if (els.newRole) els.newRole.value = selectedRole;
+  if (els.editRoleHint) {
+    els.editRoleHint.textContent = user.approvalStatus === "approved"
+      ? `Rol activo de ${user.fullName}.`
+      : `Rol solicitado para ${user.fullName}. Al aprobar tomará este rol.`;
+  }
+  state.roleModal.show();
+}
+
+async function saveRoleChanges(event) {
+  event.preventDefault();
+  const userId = String(els.editUserId?.value || "");
+  const role = normalizeText(els.newRole?.value || "");
+  if (!userId || !role) return;
+  const user = getUserById(userId);
+  if (!user) return;
+
+  const payload = {
+    requestedRole: role,
+    updatedAt: new Date().toISOString()
+  };
+  if (user.approvalStatus === "approved" && user.role !== "pending") {
+    payload.role = role;
+  }
+
+  await updateDoc(doc(db, "users", userId), payload);
+  state.roleModal?.hide();
+  await loadUsers();
+}
+
+async function deleteUserById(userId = "") {
+  const user = getUserById(userId);
+  if (!user) return;
+  if (state.currentAdmin?.uid && user.uid === state.currentAdmin.uid) {
+    alert("No puedes eliminar tu propio usuario administrador.");
+    return;
+  }
+  const ok = confirm(`¿Eliminar al usuario ${user.fullName}?`);
+  if (!ok) return;
+  await deleteDoc(doc(db, "users", userId));
+  await loadUsers();
+}
+
+async function handleTableAction(event) {
+  const btn = event.target.closest("[data-action][data-id]");
+  if (!btn) return;
+  const action = String(btn.dataset.action || "");
+  const userId = String(btn.dataset.id || "");
+  if (!action || !userId) return;
+
+  btn.disabled = true;
+  try {
+    if (action === "approve") await approveUser(userId);
+    else if (action === "reject") await rejectUser(userId);
+    else if (action === "edit-role") openEditRoleModal(userId);
+    else if (action === "delete") await deleteUserById(userId);
+  } catch (err) {
+    alert("No se pudo completar la acción.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function ensureAdminAccess(user) {
+  const profile = await findUserProfileByAuthUser(user);
+  if (!profile) return { allowed: false, role: "", status: "", reason: "Perfil no encontrado en users." };
+  const data = profile.data || {};
+  const role = canonicalRole(data.role || data.rol || data.userRole);
+  const status = getApprovalStatus(data);
+  if (role !== "admin") return { allowed: false, role, status, reason: "El rol no es admin." };
+  if (status === "rejected") return { allowed: false, role, status, reason: "La cuenta está rechazada." };
+  return { allowed: true, role, status, reason: "" };
+}
+
+function bindEvents() {
+  els.searchName?.addEventListener("input", applyFilters);
+  els.searchArea?.addEventListener("change", applyFilters);
+  els.searchStatus?.addEventListener("change", applyFilters);
+  els.searchRole?.addEventListener("change", applyFilters);
+  els.btnRefreshUsers?.addEventListener("click", loadUsers);
+  els.usersTableBody?.addEventListener("click", handleTableAction);
+  els.editRoleForm?.addEventListener("submit", saveRoleChanges);
+}
+
+bindEvents();
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    window.location.href = "index.html";
+    return;
+  }
+  const access = await ensureAdminAccess(user);
+  if (!access.allowed) {
+    await signOut(auth);
+    const roleText = access.role || "sin rol";
+    const statusText = access.status || "sin estado";
+    alert(`No tienes permisos para acceder a Gestión de Usuarios.\nRol detectado: ${roleText}\nEstado detectado: ${statusText}\nDetalle: ${access.reason}`);
+    window.location.href = "index.html";
+    return;
+  }
+  state.currentAdmin = user;
+  await loadUsers();
 });
-
-// Función para filtrar usuarios
-document.getElementById('searchName').addEventListener('input', filterUsers);
-document.getElementById('searchArea').addEventListener('input', filterUsers);
-document.getElementById('searchRole').addEventListener('change', filterUsers);
-
-async function filterUsers() {
-  const name = document.getElementById('searchName').value.toLowerCase();
-  const area = document.getElementById('searchArea').value.toLowerCase();
-  const role = document.getElementById('searchRole').value;
-
-  const usersRef = collection(db, 'users');
-  let q = query(usersRef);
-
-  if (name) q = query(q, where('firstName', '>=', name), where('firstName', '<=', name + '\uf8ff'));
-  if (area) q = query(q, where('area', '>=', area), where('area', '<=', area + '\uf8ff'));
-  if (role) q = query(q, where('role', '==', role));
-
-  const snapshot = await getDocs(q);
-  const userList = snapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      email: data.email,
-      area: data.area,
-      role: data.role
-    };
-  });
-
-  renderUserTable(userList);
-}
-
-// Renderizar tabla de usuarios con DataTable
-function renderUserTable(userList) {
-  const tbody = document.querySelector('#myTable tbody');
-  tbody.innerHTML = '';
-
-  userList.forEach(user => {
-    const row = document.createElement('tr');
-
-    const fullName = `${String(user.firstName || "").trim()} ${String(user.lastName || "").trim()}`.trim();
-    const tdName = document.createElement("td");
-    tdName.textContent = fullName;
-    const tdEmail = document.createElement("td");
-    tdEmail.textContent = String(user.email || "");
-    const tdArea = document.createElement("td");
-    tdArea.textContent = String(user.area || "");
-    const tdRole = document.createElement("td");
-    tdRole.textContent = String(user.role || "");
-    const tdActions = document.createElement("td");
-
-    const editIcon = document.createElement("i");
-    editIcon.className = "fas fa-edit";
-    editIcon.addEventListener("click", () => openEditModal(String(user.id || "")));
-    const deleteIcon = document.createElement("i");
-    deleteIcon.className = "fas fa-trash-alt";
-    deleteIcon.addEventListener("click", () => deleteUser(String(user.id || "")));
-
-    tdActions.appendChild(editIcon);
-    tdActions.appendChild(deleteIcon);
-    row.appendChild(tdName);
-    row.appendChild(tdEmail);
-    row.appendChild(tdArea);
-    row.appendChild(tdRole);
-    row.appendChild(tdActions);
-    tbody.appendChild(row);
-  });
-
-  // Reinicializar DataTable (si ya está inicializado, no se vuelve a crear)
-  if (table) {
-    table.clear();
-    table.rows.add($(tbody).children()).draw();
-  }
-}
-
-// Función para abrir el modal de edición
-function openEditModal(userId) {
-  const userDocRef = doc(db, 'users', userId);
-  const userSnap = getDoc(userDocRef).then((docSnap) => {
-    if (docSnap.exists()) {
-      const userData = docSnap.data();
-
-      // Prellenar el campo con el rol actual del usuario
-      const newRoleSelect = document.getElementById('newRole');
-      newRoleSelect.value = userData.role;
-
-      // Mostrar el modal
-      const editModal = new bootstrap.Modal(document.getElementById('editRoleModal'));
-      editModal.show();
-
-      // Guardar cambios en Firestore
-      document.getElementById('saveRoleButton').addEventListener('click', async () => {
-        const newRole = newRoleSelect.value;
-        await updateDoc(userDocRef, { role: newRole });
-        alert('Usuario actualizado');
-        loadUsers(); // Refrescar la tabla después de la edición
-        editModal.hide(); // Cerrar el modal
-      });
-    }
-  });
-}
-
-// Eliminar usuario
-async function deleteUser(userId) {
-  const confirmDelete = confirm('¿Estás seguro de que quieres eliminar este usuario?');
-  if (confirmDelete) {
-    await deleteDoc(doc(db, 'users', userId));
-    alert('Usuario eliminado');
-    loadUsers(); // Refrescar la tabla después de la eliminación
-  }
-}
-
-// Exponer funciones a la ventana global para que estén accesibles desde el HTML
-window.openEditModal = openEditModal;
-window.deleteUser = deleteUser;
-
-// Cargar usuarios al cargar la página
-loadUsers();

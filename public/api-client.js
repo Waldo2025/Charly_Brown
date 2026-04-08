@@ -25,19 +25,13 @@ export function resolveApiBase() {
   const host = String(window.location.hostname || "").toLowerCase();
   const port = String(window.location.port || "");
   const isLocalHost = isLocalHostRuntime();
-  if (configured) {
-    const sanitized = configured.replace(/\/+$/, "");
-    // En localhost nunca usar Cloud Functions remoto para evitar CORS en preflight.
-    if (isLocalHost && /cloudfunctions\.net/i.test(sanitized)) {
-      return DEFAULT_LOCAL_API_BASE;
-    }
-    return sanitized;
-  }
-
   if (isLocalHost) {
     if (port === "8787") return "/api";
-    if (port === "5000") return "/api";
     return DEFAULT_LOCAL_API_BASE;
+  }
+  if (configured) {
+    const sanitized = configured.replace(/\/+$/, "");
+    return sanitized;
   }
   if (window.__CHARLY_CONFIG__?.allowSameOriginApi === true) {
     return DEFAULT_REMOTE_API_BASE_SAFE;
@@ -85,6 +79,20 @@ export async function authFetchJson(url, options = {}) {
       ...(options.headers || {}),
     },
   };
+  const contentType = String(requestInit.headers?.["Content-Type"] || requestInit.headers?.["content-type"] || "").toLowerCase();
+  const body = requestInit.body;
+  const shouldSerializeJson =
+    body != null &&
+    typeof body === "object" &&
+    !(body instanceof FormData) &&
+    !(body instanceof Blob) &&
+    !(body instanceof URLSearchParams) &&
+    !(body instanceof ArrayBuffer) &&
+    !ArrayBuffer.isView(body) &&
+    contentType.includes("application/json");
+  if (shouldSerializeJson) {
+    requestInit.body = JSON.stringify(body);
+  }
 
   let response = null;
   try {
@@ -104,7 +112,10 @@ export async function authFetchJson(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
-    throw new Error(String(detail));
+    const error = new Error(String(detail));
+    error.status = Number(response.status || 0);
+    error.detail = data;
+    throw error;
   }
   return data;
 }

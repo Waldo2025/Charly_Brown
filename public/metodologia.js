@@ -1,10 +1,11 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // generarLectura.js
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-import { getStorage } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getStorage } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import setupImageGenerator from './imageGenerator.js';
+import { sanitizeRichText } from './security-utils.js';
 
 // Config
 // Configuración Firebase
@@ -186,8 +187,8 @@ async function abrirEditorPara(id = null) {
 
     $id(INPUT_ID).value = id;
     $id(INPUT_TITULO).value = data.tema || '';
-    $id(INPUT_CONCEPTO).innerHTML = data.concepto || '';
-    $id(INPUT_COMENT).innerHTML = data.comentarios || '';
+    $id(INPUT_CONCEPTO).innerHTML = sanitizeRichText(data.concepto || '');
+    $id(INPUT_COMENT).innerHTML = sanitizeRichText(data.comentarios || '');
   } else {
     // Nuevo
     $id(INPUT_ID).value = '';
@@ -205,8 +206,8 @@ async function guardarTemaMetodologia(e) {
 
   const idHidden = (document.getElementById(INPUT_ID)?.value || '').trim();
   const tema = document.getElementById(INPUT_TITULO)?.value.trim() || '';
-  const concepto = document.getElementById(INPUT_CONCEPTO)?.innerHTML || '';
-  const comentarios = document.getElementById(INPUT_COMENT)?.innerHTML || '';
+  const concepto = sanitizeRichText(document.getElementById(INPUT_CONCEPTO)?.innerHTML || '');
+  const comentarios = sanitizeRichText(document.getElementById(INPUT_COMENT)?.innerHTML || '');
 
   const payload = { tema, concepto, comentarios };
 

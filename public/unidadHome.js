@@ -1,50 +1,42 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-import { getFirestore, collection, query, where, getDocs, doc, deleteDoc, updateDoc, getDoc } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import VanillaTilt from 'https://cdn.jsdelivr.net/npm/vanilla-tilt@1.7.3/lib/vanilla-tilt.es2015.min.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getFirestore, collection, query, where, getDocs, doc, deleteDoc, updateDoc, getDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import VanillaTilt from './vendor/vanilla-tilt/vanilla-tilt.es2015.js';
+import { escapeHtml } from './security-utils.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
 
-// Configuración de Firebase
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
-
-// Inicializa Firebase
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 const db = getFirestore(app);
 const auth = getAuth(app);
 
 let currentUserId = null;
 let toggleVerArchivadosUnidades = false;
 
-// Verificar el rol de usuario
+function createInfoParagraph(label, value) {
+  const p = document.createElement("p");
+  const strong = document.createElement("strong");
+  strong.textContent = `${label}:`;
+  p.appendChild(strong);
+  p.append(` ${value}`);
+  return p;
+}
+
 onAuthStateChanged(auth, async (user) => {
   if (user) {
-    // Obtener el rol del usuario de Firestore
     const userDocRef = doc(db, 'users', user.uid);
     const userSnap = await getDoc(userDocRef);
     
     if (userSnap.exists()) {
       const userData = userSnap.data();
       if (userData.role === "admin") {
-        // Mostrar la sección de "Gestionar Usuarios" solo si el rol es admin
         document.getElementById('gestionUsuariosLink').style.display = 'block';
       } else {
-        // Ocultar la sección si no es admin
         document.getElementById('gestionUsuariosLink').style.display = 'none';
       }
     }
   } else {
     const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      // Modo offline, manejar el flujo sin conexión
-    } else {
-      // Redirigir a la página de inicio después de 1.5 segundos
+    if (!storedUser) {
       setTimeout(() => {
         window.location.href = "index.html";
       }, 1500);
@@ -52,53 +44,11 @@ onAuthStateChanged(auth, async (user) => {
   }
 });
 
-
-
-// Función para filtrar unidades basadas en la búsqueda
-const filterUnidades = (query) => {
-  const unidadItems = document.querySelectorAll(".unidad-item");
-
-  if (!unidadItems.length) {
-      return;
-  }
-
-  let hasMatches = false;
-  const searchTerms = query.split(' ').filter(term => term.length > 0);
-
-  unidadItems.forEach(item => {
-      const text = item.textContent.toLowerCase();  // Obtiene el texto de la tarjeta
-
-      const matches = searchTerms.length === 0 || 
-                     searchTerms.some(term => text.includes(term));
-
-      item.style.display = matches ? "block" : "none";
-      if (matches) hasMatches = true;
-  });
-
-  // Manejar mensaje de no resultados
-  const unidadesList = document.getElementById("unidades-list");
-  const noResultsMsg = document.getElementById("no-results-msg");
-
-  if (!hasMatches && query.length > 0) {
-      if (!noResultsMsg && unidadesList) {
-          const msg = document.createElement("p");
-          msg.id = "no-results-msg";
-          msg.textContent = "No se encontraron unidades que coincidan con la búsqueda.";
-          unidadesList.appendChild(msg);
-      }
-  } else if (noResultsMsg) {
-      noResultsMsg.remove();
-  }
-};
-
-
-// Escuchar evento global de búsqueda
 window.addEventListener("globalSearch", (e) => {
-  loadUnidades(currentUserId, e.detail.query); // <--- Aquí usas currentUserId
+  loadUnidades(currentUserId, e.detail.query);
 });
 
 
-// Función para obtener las unidades del usuario
 const loadUnidades = async (userId, searchQuery = '') => {
   const unidadesList = document.getElementById("unidades-list");
 
@@ -152,26 +102,53 @@ const loadUnidades = async (userId, searchQuery = '') => {
       const unidadItem = document.createElement("div");
       unidadItem.classList.add("unidad-item", "searchable-item");
       unidadItem.setAttribute("id", `unidad-${unidad.id}`);
-    
-      unidadItem.innerHTML = `
-        <div class="unidad-header">
-          <h3>${unidad.materia} • ${unidad.nivel} ${unidad.grado} • Unidad ${unidad.unidad}</h3>
-        </div>
-        <div class="unidad-body">
-          <p><strong>Nombre de la Unidad:</strong> ${unidad.nombreUnidad}</p>
-          <p><strong>Trimestre:</strong> ${unidad.trimestre}</p>
-          <p><strong>Privacidad:</strong> ${unidad.privacidad}</p>
-          <p><strong>Fecha de creación:</strong> ${
-            unidad.createdAt
-              ? new Date(unidad.createdAt.seconds * 1000).toLocaleDateString()
-              : "Sin fecha"
-          }</p>
-        </div>
-        <div class="unidad-item-footer">
-          <i class="bx bx-trash" title="Eliminar" onclick="event.stopPropagation(); eliminarUnidad('${unidad.id}')"></i>
-          <i class="bx bx-archive archivar-unidad" title="${unidad.archivado ? 'Desarchivar' : 'Archivar'}" style="cursor: pointer; margin-left: 12px; color: ${unidad.archivado ? 'dodgerblue' : 'gray'};"></i>
-        </div>
-      `;
+      const header = document.createElement("div");
+      header.className = "unidad-header";
+      const title = document.createElement("h3");
+      title.textContent = `${unidad.materia || ""} • ${unidad.nivel || ""} ${unidad.grado || ""} • Unidad ${unidad.unidad || ""}`.trim();
+      header.appendChild(title);
+
+      const body = document.createElement("div");
+      body.className = "unidad-body";
+      body.appendChild(createInfoParagraph("Nombre de la Unidad", unidad.nombreUnidad || "Sin nombre"));
+      body.appendChild(createInfoParagraph("Trimestre", unidad.trimestre || "Sin trimestre"));
+      body.appendChild(createInfoParagraph("Privacidad", unidad.privacidad || "Sin definir"));
+      body.appendChild(createInfoParagraph(
+        "Fecha de creación",
+        unidad.createdAt ? new Date(unidad.createdAt.seconds * 1000).toLocaleDateString() : "Sin fecha"
+      ));
+
+      const footer = document.createElement("div");
+      footer.className = "unidad-item-footer";
+
+      const deleteIcon = document.createElement("i");
+      deleteIcon.className = "bx bx-trash";
+      deleteIcon.title = "Eliminar";
+      deleteIcon.setAttribute("role", "button");
+      deleteIcon.setAttribute("tabindex", "0");
+      deleteIcon.setAttribute("aria-label", `Eliminar unidad ${escapeHtml(unidad.nombreUnidad || unidad.id)}`);
+
+      const archiveIcon = document.createElement("i");
+      archiveIcon.className = "bx bx-archive archivar-unidad";
+      archiveIcon.title = unidad.archivado ? "Desarchivar" : "Archivar";
+      archiveIcon.style.cursor = "pointer";
+      archiveIcon.style.marginLeft = "12px";
+      archiveIcon.style.color = unidad.archivado ? "dodgerblue" : "gray";
+
+      footer.append(deleteIcon, archiveIcon);
+      unidadItem.append(header, body, footer);
+
+      deleteIcon.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await eliminarUnidad(unidad.id);
+      });
+
+      deleteIcon.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        await eliminarUnidad(unidad.id);
+      });
     
       // Archivar / Desarchivar
       unidadItem.querySelector(".archivar-unidad")?.addEventListener("click", async (e) => {
@@ -211,38 +188,21 @@ const loadUnidades = async (userId, searchQuery = '') => {
   }
 };
 
-// Función para editar los datos de la unidad
-function editarDatos(unidadId) {
-  // Redirige a la página de edición con el id de la unidad
-  window.location.href = `editarUnidad.html?id=${unidadId}`;
-}
-
-// Función para editar el contenido de la unidad
-function editarContenido(unidadId) {
-  // Redirige a la página de contenido con el id de la unidad
-  window.location.href = `contenidoUnidad.html?id=${unidadId}`;
-}
-
-// Función para eliminar la unidad
 async function eliminarUnidad(unidadId) {
   if (confirm("¿Estás seguro de que deseas eliminar esta unidad y todas las lecturas relacionadas?")) {
     try {
-      // Eliminar las lecturas relacionadas con la unidad
       const lecturasQuery = query(
         collection(db, "lecturas"),
         where("unidadId", "==", unidadId)
       );
       const lecturasSnapshot = await getDocs(lecturasQuery);
 
-      // Eliminar cada lectura asociada a la unidad
       lecturasSnapshot.forEach(async (doc) => {
         await deleteDoc(doc.ref);
       });
 
-      // Eliminar la unidad de Firestore
       await deleteDoc(doc(db, "Unidades", unidadId));
 
-      // Eliminar la unidad de la interfaz
       const unidadElement = document.getElementById(`unidad-${unidadId}`);
       if (unidadElement) {
         unidadElement.remove();
@@ -254,14 +214,7 @@ async function eliminarUnidad(unidadId) {
     }
   }
 }
-
-
-window.eliminarUnidad = eliminarUnidad;
-
-
-// Ejecutar cuando se cargue la página
 document.addEventListener("DOMContentLoaded", () => {
-  // Observar cambios de autenticación
   auth.onAuthStateChanged(async (user) => {
     if (user) {
       currentUserId = user.uid;
@@ -273,34 +226,29 @@ document.addEventListener("DOMContentLoaded", () => {
   
   configurarBuscador();
 
-
-    // Botón Crear Unidad
-    const createUnidadBtn = document.getElementById("createUnidadBtn");
-    if (createUnidadBtn) {
-        createUnidadBtn.addEventListener("click", () => {
-            window.location.href = "crearUnidades.html";
-        });
-    }
-
- 
-    const toggleBtn = document.createElement("button");
-    toggleBtn.id = "toggleArchivadosUnidadesBtn";
-    toggleBtn.innerHTML = "<i class='bx bx-box'></i> Mostrar archivados";
-    toggleBtn.classList.add("btn", "btn-secondary");
-    toggleBtn.style.margin = "1rem";
-
-    document.querySelector("#app-container-unidadHome").prepend(toggleBtn);
-
-    toggleBtn.addEventListener("click", () => {
-      toggleVerArchivadosUnidades = !toggleVerArchivadosUnidades;
-      toggleBtn.innerHTML = toggleVerArchivadosUnidades
-        ? "<i class='bx bx-box'></i> Ocultar archivados"
-        : "<i class='bx bx-box'></i> Mostrar archivados";
-
-      loadUnidades(currentUserId);
+  const createUnidadBtn = document.getElementById("createUnidadBtn");
+  if (createUnidadBtn) {
+    createUnidadBtn.addEventListener("click", () => {
+      window.location.href = "crearUnidades.html";
     });
+  }
 
+  const toggleBtn = document.createElement("button");
+  toggleBtn.id = "toggleArchivadosUnidadesBtn";
+  toggleBtn.innerHTML = "<i class='bx bx-box'></i> Mostrar archivados";
+  toggleBtn.classList.add("btn", "btn-secondary");
+  toggleBtn.style.margin = "1rem";
 
+  document.querySelector("#app-container-unidadHome").prepend(toggleBtn);
+
+  toggleBtn.addEventListener("click", () => {
+    toggleVerArchivadosUnidades = !toggleVerArchivadosUnidades;
+    toggleBtn.innerHTML = toggleVerArchivadosUnidades
+      ? "<i class='bx bx-box'></i> Ocultar archivados"
+      : "<i class='bx bx-box'></i> Mostrar archivados";
+
+    loadUnidades(currentUserId);
+  });
 });
 
 
@@ -441,5 +389,3 @@ document.getElementById("btnReiniciarFiltros")?.addEventListener("click", () => 
   });
 });
   
-
-

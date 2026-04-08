@@ -1,17 +1,17 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 import {
   initializeApp
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
   getFirestore, collection, collectionGroup, query, where, getDocs, doc, 
   updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut
-} from "https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 
 
 // Configuración de Firebase
@@ -126,6 +126,134 @@ function startSidebarUnreadListener(uid) {
   );
 }
 
+function applySidebarRoleVisibility(role = "") {
+  const normalizedRole = canonicalRole(role);
+  if (document.body) {
+    document.body.setAttribute("data-user-role", normalizedRole || "");
+  }
+  const roleLinks = document.querySelectorAll("#sidebar .sidebar-link[data-role-visibility]");
+  roleLinks.forEach((link) => {
+    const allowed = String(link.dataset.roleVisibility || "")
+      .split(",")
+      .map((v) => canonicalRole(v))
+      .filter(Boolean);
+    const isVisible = allowed.length > 0 && allowed.includes(normalizedRole);
+    link.classList.toggle("d-none", !isVisible);
+    link.hidden = !isVisible;
+    if (!isVisible) {
+      link.setAttribute("aria-hidden", "true");
+      link.setAttribute("tabindex", "-1");
+    } else {
+      link.setAttribute("aria-hidden", "false");
+      link.removeAttribute("tabindex");
+    }
+  });
+
+  // Hard guard por enlace para que cada opción respete su rol real.
+  const roleLockedIds = {
+    gestionUsuariosLink: "admin",
+    themeCommandSettingsBtn: "admin",
+    lecturasGameLink: "admin"
+  };
+  Object.entries(roleLockedIds).forEach(([id, expectedRole]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const isVisible = normalizedRole === expectedRole;
+    el.classList.toggle("d-none", !isVisible);
+    el.hidden = !isVisible;
+    if (!isVisible) {
+      el.style.display = "none";
+      el.setAttribute("aria-hidden", "true");
+      el.setAttribute("tabindex", "-1");
+    } else {
+      el.style.display = "";
+      el.setAttribute("aria-hidden", "false");
+      el.removeAttribute("tabindex");
+    }
+  });
+}
+
+function normalizeToken(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_-]+/g, "");
+}
+
+function canonicalRole(value = "") {
+  const token = normalizeToken(value);
+  if (!token) return "";
+  if (["superadmin", "superadministrator", "owner"].includes(token)) return "superAdmin";
+  if (["admin", "administrador", "administrator"].includes(token)) return "admin";
+  if (["author", "autor", "autoria"].includes(token)) return "author";
+  if (["editor", "editorial"].includes(token)) return "editor";
+  if (["designer", "disenador", "diseno"].includes(token)) return "designer";
+  if (["developer", "desarrollador", "desarrollo", "dev"].includes(token)) return "developer";
+  if (["pending", "pendiente"].includes(token)) return "pending";
+  return token;
+}
+
+function extractUserRole(data = {}) {
+  if (data?.superAdmin === true || data?.superadmin === true) return "superAdmin";
+  if (data?.admin === true) return "admin";
+  return canonicalRole(
+    data.role
+    || data.rol
+    || data.userRole
+    || data.user_role
+    || data.userType
+    || data.tipoUsuario
+    || data.requestedRole
+  ) || null;
+}
+
+async function resolveUserRole(user) {
+  if (!user?.uid) return null;
+
+  // 1) Ruta estándar users/{uid}
+  const direct = await getDoc(doc(db, "users", user.uid));
+  if (direct.exists()) {
+    const data = direct.data() || {};
+    return extractUserRole(data);
+  }
+
+  // 2) Compatibilidad por campo uid
+  const byUid = await getDocs(query(collection(db, "users"), where("uid", "==", user.uid)));
+  if (!byUid.empty) {
+    const data = byUid.docs[0].data() || {};
+    return extractUserRole(data);
+  }
+
+  // 3) Compatibilidad por email
+  const email = String(user.email || "").trim();
+  if (email) {
+    const byEmail = await getDocs(query(collection(db, "users"), where("email", "==", email)));
+    if (!byEmail.empty) {
+      const data = byEmail.docs[0].data() || {};
+      return extractUserRole(data);
+    }
+    const byEmailLower = await getDocs(query(collection(db, "users"), where("email", "==", email.toLowerCase())));
+    if (!byEmailLower.empty) {
+      const data = byEmailLower.docs[0].data() || {};
+      return extractUserRole(data);
+    }
+  }
+
+  return null;
+}
+
+async function resolveRoleFromToken(user) {
+  if (!user?.getIdTokenResult) return null;
+  try {
+    const tokenResult = await user.getIdTokenResult();
+    return extractUserRole(tokenResult?.claims || {});
+  } catch (_) {
+    return null;
+  }
+}
+
 
 
 
@@ -136,17 +264,34 @@ onAuthStateChanged(auth, async user => {
     unsubscribeSidebarUnread = null;
     updateChatBadge(0);
     setHeaderUserEmail("");
+    applySidebarRoleVisibility("");
     return;
   }
   setHeaderUserEmail(user.email || "");
-  // 1) recuperar rol desde Firestore
-  const snap = await getDoc(doc(db, "users", user.uid));
-  const role = snap.exists() ? snap.data().role : null;
-  // 2) ocultar enlace Análisis Editorial si no está en la lista
+  let role = null;
+  // 1) priorizar claims/token, igual que el backend de seguridad
+  if (!role) {
+    role = await resolveRoleFromToken(user);
+  }
+  if (!role) {
+    try {
+      // 2) fallback a Firestore (compatibilidad con docs legacy)
+      role = await resolveUserRole(user);
+    } catch (_) {
+      role = null;
+    }
+  }
+  // 2) aplicar visibilidad por rol para enlaces del sidebar
+  applySidebarRoleVisibility(role);
+  // 3) compatibilidad legacy por id (si falta data-role-visibility)
   const analisisLink = document.getElementById("analisisEditorialLink");
-  if (analisisLink) {
+  if (analisisLink && !analisisLink.dataset.roleVisibility) {
     const permitidos = ["admin","author","developer"];
-    analisisLink.classList.toggle("d-none", !permitidos.includes(role));
+    analisisLink.classList.toggle("d-none", !permitidos.includes(canonicalRole(role)));
+  }
+  const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
+  if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) {
+    gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
   }
 
   startSidebarUnreadListener(user.uid);
@@ -155,6 +300,7 @@ onAuthStateChanged(auth, async user => {
 
 document.addEventListener("DOMContentLoaded", () => {
   setHeaderUserEmail(auth.currentUser?.email || "");
+  applySidebarRoleVisibility("");
   const sidebar = document.getElementById("sidebar");
   const toggleBtn = document.getElementById("menuToggle");
   if (!sidebar) return;

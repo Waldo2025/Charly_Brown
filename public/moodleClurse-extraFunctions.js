@@ -1,6 +1,6 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 // Firebase imports
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
     getFirestore,
     doc,
@@ -12,14 +12,15 @@ import {
     where,
     getDocs,
     deleteDoc
-} from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 
 import {
     getAuth,
-} from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 
 import { guardarModulo } from './moodleCourse.js';
 import { obtenerModulo } from './moodleCourse.js';
+import { sanitizeRichText } from './security-utils.js';
 
 /* CONFIGURACIÓN FIREBASE */
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
@@ -74,35 +75,38 @@ function desactivarEdicionModuloCompleto() {
     contenedor.style.background = "";
     contenedor.style.padding = "";
     
-    guardarContenidoModulo(moduloEditandoCompleto, contenedor.innerHTML);
+    guardarContenidoModulo(moduloEditandoCompleto, sanitizeRichText(contenedor.innerHTML));
     
     moduloEditandoCompleto = null;
 }
 
 function configurarAutoguardadoModulo(contenedor, moduloId) {
     let timeoutId;
-    let contenidoAnterior = contenedor.innerHTML;
+    let contenidoAnterior = sanitizeRichText(contenedor.innerHTML);
 
     contenedor.addEventListener("blur", () => {
-        if (contenedor.innerHTML !== contenidoAnterior) {
-            guardarContenidoModulo(moduloId, contenedor.innerHTML);
-            contenidoAnterior = contenedor.innerHTML;
+        const sanitized = sanitizeRichText(contenedor.innerHTML);
+        if (sanitized !== contenidoAnterior) {
+            guardarContenidoModulo(moduloId, sanitized);
+            contenidoAnterior = sanitized;
         }
     });
 
     contenedor.addEventListener("input", () => {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
-            guardarContenidoModulo(moduloId, contenedor.innerHTML);
-            contenidoAnterior = contenedor.innerHTML;
+            const sanitized = sanitizeRichText(contenedor.innerHTML);
+            guardarContenidoModulo(moduloId, sanitized);
+            contenidoAnterior = sanitized;
         }, 5000);
     });
 
     contenedor.addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "s") {
             e.preventDefault();
-            guardarContenidoModulo(moduloId, contenedor.innerHTML);
-            contenidoAnterior = contenedor.innerHTML;
+            const sanitized = sanitizeRichText(contenedor.innerHTML);
+            guardarContenidoModulo(moduloId, sanitized);
+            contenidoAnterior = sanitized;
             
             mostrarFeedbackGuardado(moduloId);
         }
@@ -127,7 +131,11 @@ function mostrarFeedbackGuardado(moduloId) {
     const spinner = document.getElementById(`spinner-${moduloId}`);
     if (spinner) {
         spinner.classList.remove("hidden");
-        spinner.innerHTML = `<span class="text-green-600 text-xs">✓ Guardado automáticamente</span>`;
+        spinner.replaceChildren();
+        const label = document.createElement("span");
+        label.className = "text-green-600 text-xs";
+        label.textContent = "✓ Guardado automáticamente";
+        spinner.appendChild(label);
         
         setTimeout(() => {
             spinner.classList.add("hidden");
@@ -139,7 +147,11 @@ function mostrarErrorGuardado(moduloId) {
     const spinner = document.getElementById(`spinner-${moduloId}`);
     if (spinner) {
         spinner.classList.remove("hidden");
-        spinner.innerHTML = `<span class="text-red-600 text-xs">✗ Error al guardar</span>`;
+        spinner.replaceChildren();
+        const label = document.createElement("span");
+        label.className = "text-red-600 text-xs";
+        label.textContent = "✗ Error al guardar";
+        spinner.appendChild(label);
         
         setTimeout(() => {
             spinner.classList.add("hidden");

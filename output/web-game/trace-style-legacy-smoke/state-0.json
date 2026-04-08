@@ -1,0 +1,5 @@
+{
+  "btnClass": "trace-touch-btn lecturas-game-pixel-btn",
+  "shellClass": "trace-game-shell lecturas-game-shell theme-kawaii",
+  "text": "{\"mode\":\"intro\",\"readingTitle\":\"La Selva Magica\",\"letter\":\"M\",\"currentWord\":\"MAGICA\",\"progress\":0,\"score\":0,\"combo\":0,\"timerMs\":30000,\"cameraReady\":false,\"pointerSource\":\"pointer\",\"pinchActive\":false,\"strokeIndex\":0,\"hoveredAction\":\"\",\"version\":\"20260316-trace-indie-v1\"}"
+}

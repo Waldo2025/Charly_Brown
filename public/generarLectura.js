@@ -1,25 +1,22 @@
 // generarLectura.js
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js';
-import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-auth.js';
-import { getStorage } from 'https://www.gstatic.com/firebasejs/9.1.3/firebase-storage.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { getStorage } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { buildApiUrl } from "./api-client.js";
 import setupImageGenerator from './imageGenerator.js';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput, escapeHtml, sanitizeAssistantHtml, setSanitizedHtml } from './security-utils.js';
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 
 // Config
 // Configuración Firebase
-const firebaseConfig = {
-  apiKey: window.__CB_FIREBASE_WEB_API_KEY__ || window.__CHARLY_CONFIG__?.firebase?.apiKey || "",
-  authDomain: window.__CHARLY_CONFIG__?.firebase?.authDomain || "",
-  projectId: window.__CHARLY_CONFIG__?.firebase?.projectId || "",
-  storageBucket: window.__CHARLY_CONFIG__?.firebase?.storageBucket || "",
-  messagingSenderId: window.__CHARLY_CONFIG__?.firebase?.messagingSenderId || "",
-  appId: window.__CHARLY_CONFIG__?.firebase?.appId || "",
-  measurementId: window.__CHARLY_CONFIG__?.firebase?.measurementId || ""
-};
+const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 
 // ✅ Inicializar Firebase
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
@@ -36,6 +33,58 @@ const authReady = new Promise((resolve) => {
   resolveAuthReady = resolve;
 });
 let authInitialized = false;
+
+function createQuestionDetailsFragment(question = {}, index = 0) {
+  const fragment = document.createDocumentFragment();
+  const strong = document.createElement("strong");
+  strong.textContent = `${index + 1}.`;
+  fragment.appendChild(strong);
+  fragment.append(` ${question?.texto || "(sin pregunta)"} `);
+
+  const details = document.createElement("div");
+  details.style.marginLeft = "20px";
+
+  const nivel = document.createElement("small");
+  nivel.innerHTML = `<strong>Nivel:</strong> ${escapeHtml(question?.nivel || "No especificado")}`;
+  const criterio = document.createElement("small");
+  criterio.innerHTML = `<strong>Criterio:</strong> ${escapeHtml(question?.criterio || "No especificada")}`;
+  const respuesta = document.createElement("small");
+  respuesta.innerHTML = `<strong>Respuesta esperada:</strong> ${escapeHtml(question?.respuesta || "No especificada")}`;
+
+  details.append(nivel, document.createElement("br"), criterio, document.createElement("br"), respuesta);
+  fragment.appendChild(details);
+  return fragment;
+}
+
+function appendPlainTextParagraph(container, value) {
+  if (!container) return;
+  const safeText = sanitizeTextInput(value, {maxLength: 20000, preserveNewlines: true});
+  if (!safeText) return;
+  safeText.split("\n").forEach((line) => {
+    const p = document.createElement("p");
+    p.textContent = line;
+    container.appendChild(p);
+  });
+}
+
+function createAssistantAnalysisPanel(title, assistantHtml) {
+  const wrapper = document.createElement("div");
+
+  const heading = document.createElement("h2");
+  heading.style.marginTop = "0";
+  heading.textContent = title;
+
+  const body = document.createElement("div");
+  body.className = "analisisTablaLectura";
+  body.style.marginTop = "20px";
+  body.style.padding = "15px";
+  body.style.background = "#f9f9f9";
+  body.style.border = "1px solid #ccc";
+  setSanitizedHtml(body, assistantHtml);
+
+  wrapper.append(heading, body);
+  return wrapper;
+}
 
 // Cargar conversación al iniciar
 onAuthStateChanged(auth, async (user) => {
@@ -71,8 +120,9 @@ const MODELOS_GEMINI_FALLBACK = [
   "gemini-2.5-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-3-flash-preview"
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3-pro-preview"
 ];
 
 function normalizeGeminiModel(modelo = "") {
@@ -106,7 +156,7 @@ async function postGeminiWithModelFallback({ mensajes, selectId = "selectGeminiE
     for (let intento = 0; intento < maxIntentosPorModelo; intento += 1) {
       try {
         const headers = await _geminiAuthHeaders();
-        const response = await fetch(`/api/gemini/generate`, {
+        const response = await fetch(buildApiUrl("/api/gemini/generate"), {
           method: "POST",
           headers,
           body: JSON.stringify({
@@ -439,39 +489,10 @@ function isInsufficientLocalAnswer(answer = "") {
   return patterns.some(p => text.includes(p));
 }
 
-async function fetchWebContextForQuestion(question) {
-  const q = encodeURIComponent(String(question || "").trim());
-  if (!q) return "";
-  try {
-    const searchRes = await fetch(`https://es.wikipedia.org/w/rest.php/v1/search/title?q=${q}&limit=3`);
-    if (!searchRes.ok) return "";
-    const searchData = await searchRes.json().catch(() => ({}));
-    const pages = Array.isArray(searchData?.pages) ? searchData.pages.slice(0, 3) : [];
-    if (!pages.length) return "";
-
-    const chunks = [];
-    for (const page of pages) {
-      const title = page?.title;
-      if (!title) continue;
-      const sumRes = await fetch(`https://es.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
-      if (!sumRes.ok) continue;
-      const sumData = await sumRes.json().catch(() => ({}));
-      const extract = String(sumData?.extract || "").trim();
-      if (!extract) continue;
-      chunks.push(`- ${title}: ${extract}`);
-    }
-
-    return chunks.join("\n");
-  } catch (_) {
-    return "";
-  }
-}
-
 function sourceTagHtml(source = "local") {
   const normalized = String(source || "local").toLowerCase().trim();
   const map = {
     local: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--local inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Fuente: Local</span>`,
-    web: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--web inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200">Fuente: Web</span>`,
     model: `<span class="respuesta-ia-source-tag respuesta-ia-source-tag--model inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">Fuente: Modelo IA</span>`
   };
   return map[normalized] || map.local;
@@ -490,35 +511,6 @@ async function resolverRespuestaCharly(userMessage, contextoLecturasExtra = "", 
 
   if (!isInsufficientLocalAnswer(localAnswer)) {
     return { answer: localAnswer, source: "local" };
-  }
-
-  const webContext = await fetchWebContextForQuestion(userMessage);
-  if (webContext) {
-    const webPrompt = [
-      {
-        role: "user",
-        text: `
-Eres Charly. Responde con claridad usando estas referencias web.
-Devuelve SOLO HTML válido (sin Markdown ni bloques de código).
-
-Pregunta del usuario:
-${userMessage}
-
-${contextoConversacion ? `Contexto de conversación previa:\n${contextoConversacion}\n` : ""}
-
-Referencias web:
-${webContext}
-`
-      }
-    ];
-    let webAnswer = await enviarPrompt(webPrompt);
-    webAnswer = String(webAnswer || "")
-      .replace(/```[a-zA-Z]*\s*/g, "")
-      .replace(/```/g, "")
-      .trim();
-    if (!isInsufficientLocalAnswer(webAnswer)) {
-      return { answer: webAnswer, source: "web" };
-    }
   }
 
   const modelPrompt = [
@@ -674,6 +666,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const vistaTitulo = document.getElementById("vistaTituloLectura");
   const vistaTexto = document.getElementById("vistaTextoLectura");
   const vistaPreguntas = document.getElementById("vistaPreguntasLectura");
+  const cerrarPanelLecturasGuardadasBtn = document.getElementById("cerrarPanelLecturasGuardadasBtn");
+  const cerrarModalImagenesBtn = document.getElementById("cerrarModalImagenesBtn");
+  const btnToggleTablaUnidad = document.getElementById("btnToggleTablaUnidad");
+
+  cerrarPanelLecturasGuardadasBtn?.addEventListener("click", () => {
+    const panel = document.getElementById("panelLecturasGuardadas");
+    if (panel) panel.style.display = "none";
+  });
+
+  cerrarModalImagenesBtn?.addEventListener("click", () => {
+    const modalImagenes = document.getElementById("modalImagenes");
+    if (modalImagenes) modalImagenes.style.display = "none";
+  });
+
+  btnToggleTablaUnidad?.addEventListener("click", () => {
+    if (typeof window.toggleTablaInicialUnidad === "function") {
+      window.toggleTablaInicialUnidad();
+    }
+  });
 
 
 
@@ -889,25 +900,26 @@ document.addEventListener("DOMContentLoaded", () => {
             header.style.fontSize = "0.85rem";
             header.style.marginBottom = "5px";
             header.style.color = "#555";
-            header.innerHTML = `
-            <strong>${lectura.nivel || "N/A"}</strong> • 
-            Grado ${lectura.grado || "N/A"} • 
-            Trimestre ${lectura.trimestre || "N/A"} • 
-            Unidad ${lectura.unidad || "N/A"}
-            `;
+            header.textContent = `${lectura.nivel || "N/A"} • Grado ${lectura.grado || "N/A"} • Trimestre ${lectura.trimestre || "N/A"} • Unidad ${lectura.unidad || "N/A"}`;
     
             const titulo = document.createElement("h5");
             titulo.textContent = lectura.titulo || "Sin título";
             titulo.style.margin = "4px 0";
     
             const iconos = document.createElement("div");
-            iconos.innerHTML = `
-            <i class="fas fa-pen" title="Editar" style="margin-right: 10px; cursor:pointer;"></i>
-            <i class="fas fa-trash" title="Eliminar" style="cursor:pointer; color:red;"></i>
-            `;
-    
-            const editar = iconos.querySelector(".fa-pen");
-            const eliminar = iconos.querySelector(".fa-trash");
+            const editar = document.createElement("i");
+            editar.className = "fas fa-pen";
+            editar.title = "Editar";
+            editar.style.marginRight = "10px";
+            editar.style.cursor = "pointer";
+
+            const eliminar = document.createElement("i");
+            eliminar.className = "fas fa-trash";
+            eliminar.title = "Eliminar";
+            eliminar.style.cursor = "pointer";
+            eliminar.style.color = "red";
+
+            iconos.append(editar, eliminar);
     
             editar.addEventListener("click", async (e) => {
             e.stopPropagation();
@@ -925,19 +937,12 @@ document.addEventListener("DOMContentLoaded", () => {
     
             card.addEventListener("click", () => {
             vistaTitulo.textContent = lectura.titulo;
-            vistaTexto.innerHTML = lectura.textoLectura || "<em>Sin texto</em>";
+            vistaTexto.innerHTML = sanitizeHtml(lectura.textoLectura || "<em>Sin texto</em>");
             vistaPreguntas.innerHTML = "";
             lectura.preguntas?.forEach((preg, i) => {
                 const li = document.createElement("li");
                 li.style.marginBottom = "10px";
-                li.innerHTML = `
-                <strong>${i + 1}.</strong> ${preg.texto || "(sin pregunta)"} 
-                <div style="margin-left: 20px;">
-                    <small><strong>Nivel:</strong> ${preg.nivel || "No especificado"}</small><br>
-                    <small><strong>Criterio:</strong> ${preg.criterio || "No especificada"}</small><br>
-                    <small><strong>Respuesta esperada:</strong> ${preg.respuesta || "No especificada"}</small>
-                </div>
-                `;
+                li.appendChild(createQuestionDetailsFragment(preg, i));
                 vistaPreguntas.appendChild(li);
             });
             modalVistaLectura.style.display = "block";
@@ -991,7 +996,7 @@ window.addEventListener("click", (e) => {
 
     if (btn) {
         btn.addEventListener("click", async () => {
-        const texto = document.getElementById("campoLectura")?.value || "";
+        const texto = sanitizeTextInput(document.getElementById("campoLectura")?.value || "", {maxLength: 20000, preserveNewlines: true});
         if (!texto.trim()) return alert("Texto vacío");
 
         const user = auth.currentUser;
@@ -1190,14 +1195,10 @@ window.addEventListener("click", (e) => {
         try {
             const resultado = await enviarPrompt(promptGemini);
                 const limpio = resultado.replace(/```html\s*/g, "").replace(/```/g, "").trim();
-                ultimoAnalisisHTML = limpio;
+                const limpioSeguro = sanitizeAssistantHtml(limpio);
+                ultimoAnalisisHTML = limpioSeguro;
 
-                const output = document.createElement("div");
-                output.innerHTML = `
-                <h2 style="margin-top:0;">Análisis de lecturas con Gemini</h2>
-                <div class="analisisTablaLectura" style="margin-top:20px; padding:15px; background:#f9f9f9; border:1px solid #ccc;">
-                    ${limpio}
-                </div>`;
+                const output = createAssistantAnalysisPanel("Análisis de lecturas con Gemini", limpioSeguro);
                 document.querySelector("#modalLecturasConcentradas .modal-body").prepend(output);
             } catch (err) {
                 alert("Error al analizar con Gemini.");
@@ -1275,21 +1276,45 @@ window.addEventListener("click", (e) => {
         });
       
         const item = document.createElement("li");
-        item.innerHTML = `
-          <div style="padding:10px; margin-bottom:10px; background:#f1f1f1; border-radius:6px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <strong>Análisis guardado - ${fechaTexto}</strong>
-                <button class="ver-analisis-btn" data-html="${encodeURIComponent(doc.data().contenido)}" style="border:none; background:none; cursor:pointer; font-size:1em;">👁️</button>
-            </div>
-            <div class="contenido-analisis-guardado" style="display:none; margin-top:10px;">${doc.data().contenido}</div>
-          </div>
-        `;
+        const wrapper = document.createElement("div");
+        wrapper.style.padding = "10px";
+        wrapper.style.marginBottom = "10px";
+        wrapper.style.background = "#f1f1f1";
+        wrapper.style.borderRadius = "6px";
+
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+
+        const title = document.createElement("strong");
+        title.textContent = `Análisis guardado - ${fechaTexto}`;
+
+        const viewBtn = document.createElement("button");
+        viewBtn.className = "ver-analisis-btn";
+        viewBtn.dataset.html = encodeURIComponent(doc.data().contenido || "");
+        viewBtn.style.border = "none";
+        viewBtn.style.background = "none";
+        viewBtn.style.cursor = "pointer";
+        viewBtn.style.fontSize = "1em";
+        viewBtn.textContent = "👁️";
+
+        const content = document.createElement("div");
+        content.className = "contenido-analisis-guardado";
+        content.style.display = "none";
+        content.style.marginTop = "10px";
+        setSanitizedHtml(content, doc.data().contenido || "");
+
+        row.append(title, viewBtn);
+        wrapper.append(row, content);
+        item.appendChild(wrapper);
         lista.appendChild(item);
       });
       document.querySelectorAll(".ver-analisis-btn").forEach(btn => {
         btn.addEventListener("click", (e) => {
           const html = decodeURIComponent(btn.getAttribute("data-html"));
-          document.getElementById("contenidoVistaAnalisis").innerHTML = html;
+          const vistaAnalisis = document.getElementById("contenidoVistaAnalisis");
+          setSanitizedHtml(vistaAnalisis, html);
           document.getElementById("modalVistaAnalisis").style.display = "block";
         });
       });
@@ -1386,8 +1411,8 @@ function renderizarTarjetas(docs) {
 
     card.addEventListener("click", () => {
       document.getElementById("vistaTema").textContent = item.tema || "(Sin título)";
-      document.getElementById("vistaConcepto").innerHTML = item.concepto || "<em>Sin concepto</em>";
-      document.getElementById("vistaComentarios").innerHTML = item.comentarios || "<em>Sin comentarios</em>";
+      document.getElementById("vistaConcepto").innerHTML = sanitizeHtml(item.concepto || "<em>Sin concepto</em>");
+      document.getElementById("vistaComentarios").innerHTML = sanitizeHtml(item.comentarios || "<em>Sin comentarios</em>");
       document.getElementById("modalVistaPrevia").style.display = "block";
     });
 
@@ -1460,10 +1485,11 @@ function seleccionarRespuestaSeguimiento(texto, icono) {
 function crearBloqueRespuestaIA(textoHTML) {
   const div = document.createElement("div");
   div.classList.add("respuesta-ia");
+  const safeAssistantHtml = sanitizeAssistantHtml(textoHTML || "");
 
   const contenidoRespuesta = document.createElement("div");
   contenidoRespuesta.className = "respuesta-ia-contenido";
-  contenidoRespuesta.innerHTML = textoHTML || "";
+  setSanitizedHtml(contenidoRespuesta, safeAssistantHtml);
   div.appendChild(contenidoRespuesta);
 
   const iconContainer = document.createElement("div");
@@ -1476,7 +1502,7 @@ function crearBloqueRespuestaIA(textoHTML) {
   icono.className = "fas fa-plus-circle icono-seguimiento";
   icono.style.cursor = "pointer";
   icono.style.marginLeft = "10px";
-  if (respuestaSeleccionada && respuestaSeleccionada === (textoHTML || "")) icono.classList.add("is-selected");
+  if (respuestaSeleccionada && respuestaSeleccionada === safeAssistantHtml) icono.classList.add("is-selected");
   icono.title = "Responder sobre este contenido";
 
   icono.addEventListener("click", () => {
@@ -1550,7 +1576,7 @@ function crearBloqueRespuestaIA(textoHTML) {
       alert("No se pudo continuar la generación. Intenta de nuevo.");
       return;
     }
-    contenidoRespuesta.innerHTML += `<p>${nuevoTexto}</p>`;
+    appendPlainTextParagraph(contenidoRespuesta, nuevoTexto);
     if (respuestaSeleccionada && respuestaSeleccionada === htmlAntes) {
       // Mantener contexto seleccionado actualizado solo si estaba seleccionada esta respuesta.
       seleccionarRespuestaSeguimiento(contenidoRespuesta.innerHTML, icono);
@@ -1599,8 +1625,8 @@ async function guardarMensaje(texto, tipo) {
   if (!currentUserId) return;
   await addDoc(collection(db, "conversacionIA"), {
     userId: currentUserId,
-    texto,
-    tipo,
+    texto: tipo === "asistente" ? sanitizeRichText(texto, {fallback: ""}) : sanitizeTextInput(texto, {maxLength: 20000, preserveNewlines: true}),
+    tipo: sanitizeTextInput(tipo, {maxLength: 32}),
     timestamp: Date.now()
   });
 }
@@ -1761,7 +1787,7 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
         }
       });
       document.getElementById("loadingMensajeIA").remove();
-      const div = crearBloqueRespuestaIA(html);
+      const div = crearBloqueRespuestaIA(sanitizeRichText(html, {fallback: "<p>Sin contenido.</p>"}));
       contenido.appendChild(div);
       await guardarMensaje(html, "asistente");
       historialConversacion.push({ tipo: "asistente", texto: stripHtmlToText(html) });
@@ -1796,10 +1822,10 @@ document.getElementById("enviarMensaje").addEventListener("click", async () => {
       }).join("\n\n");
     }
 
-    // ✅ Resolver con prioridad local y fallback web/model como en Chat con Charly de voiceTranscribe
+    // ✅ Resolver con prioridad local y fallback al modelo cuando el contexto interno no alcance.
     const contextoConversacion = buildConversationContext(12);
     const result = await resolverRespuestaCharly(userMessage, contextoLecturas, contextoSeleccionado, contextoConversacion);
-    const respuestaIA = `${sourceTagHtml(result.source)}<div class="mt-2">${result.answer}</div>`;
+    const respuestaIA = `${sourceTagHtml(result.source)}<div class="mt-2">${sanitizeAssistantHtml(result.answer)}</div>`;
 
     // ✅ Mostramos resultado
     document.getElementById("loadingMensajeIA").remove();
@@ -1835,27 +1861,35 @@ async function obtenerImagenComoBase64(urlImagen) {
 
 
 document.getElementById("imprimirAnalisis").addEventListener("click", () => {
-    const contenido = document.getElementById("contenidoVistaAnalisis").innerHTML;
+    const contenido = sanitizeHtml(document.getElementById("contenidoVistaAnalisis").innerHTML);
 
     const ventana = window.open("", "", "width=800,height=600");
-    ventana.document.write(`
-        <html>
-        <head>
-            <title>Imprimir Análisis</title>
-            <style>
-            body { font-family: 'Inter', sans-serif; padding: 20px; }
-            h1, h2, h3, h4, h5 { margin-top: 1rem; }
-            ul, ol { margin-left: 2rem; }
-            table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-            .respuesta-ia { font-size: 14px; line-height: 1.6; }
-            </style>
-        </head>
-        <body>
-            ${contenido}
-        </body>
-        </html>
-    `);
+    if (!ventana) return;
+
+    const printDoc = ventana.document;
+    printDoc.open();
+
+    const htmlEl = printDoc.documentElement || printDoc.appendChild(printDoc.createElement("html"));
+    const head = printDoc.head || htmlEl.appendChild(printDoc.createElement("head"));
+    const body = printDoc.body || htmlEl.appendChild(printDoc.createElement("body"));
+    const title = printDoc.createElement("title");
+    title.textContent = "Imprimir Análisis";
+
+    const style = printDoc.createElement("style");
+    style.textContent = `
+        body { font-family: 'Inter', sans-serif; padding: 20px; }
+        h1, h2, h3, h4, h5 { margin-top: 1rem; }
+        ul, ol { margin-left: 2rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        .respuesta-ia { font-size: 14px; line-height: 1.6; }
+    `;
+
+    head.textContent = "";
+    body.textContent = "";
+    head.appendChild(title);
+    head.appendChild(style);
+    setSanitizedHtml(body, contenido);
     ventana.document.close();
     ventana.focus();
     ventana.print();
@@ -1896,7 +1930,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const modalEditar = document.getElementById('modalEditarLectura');
   const cerrarEditar = document.getElementById('cerrarModalEditarLectura');
-  const editorLectura = document.getElementById('editorLectura');
+  const editorLectura = document.getElementById('editarPreview') || document.getElementById('editorLectura');
 
   let lecturaEditandoId = null;
   let debounceTimeout = null;
@@ -1909,18 +1943,18 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.style.overflow = 'auto';
     });
   }
-  cerrarVer.addEventListener('click', () => {
+  cerrarVer?.addEventListener('click', () => {
     modalVer.style.display = 'none';
     document.body.style.overflow = 'auto';
   });
-  cerrarEditar.addEventListener('click', () => {
+  cerrarEditar?.addEventListener('click', () => {
     modalEditar.style.display = 'none';
     document.body.style.overflow = 'auto';
     lecturaEditandoId = null;
   });
 
   // Cerrar al hacer clic fuera del modal
-  [modalLista, modalVer, modalEditar].forEach(modal => {
+  [modalLista, modalVer, modalEditar].filter(Boolean).forEach(modal => {
     modal.addEventListener('click', e => {
       if (e.target === modal) {
         modal.style.display = 'none';
@@ -1931,15 +1965,16 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Guardado automático (debounced) al editar
-  editorLectura.addEventListener('input', () => {
+  editorLectura?.addEventListener('input', () => {
     if (!lecturaEditandoId) return;
     clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(async () => {
-      const nuevoHTML = editorLectura.innerHTML;
+      const nuevoHTML = sanitizeRichText(editorLectura.innerHTML);
       try {
         await updateDoc(doc(db, 'lecturasNuevas', lecturaEditandoId), {
           contenidoHTML: nuevoHTML
         });
+        editorLectura.innerHTML = nuevoHTML;
       } catch (err) {
       }
     }, 1000);
@@ -1953,38 +1988,39 @@ const btnConfirmarCompartir = document.getElementById('btnConfirmarCompartir');
 let lecturaParaCompartir = null;
 
 // Cerrar modal compartir
-cerrarCompartir.addEventListener('click', () => {
+cerrarCompartir?.addEventListener('click', () => {
   modalCompartir.style.display = 'none';
   document.body.style.overflow = 'auto';
 });
 
 // Acción al hacer clic en "Compartir"
-listaLecturasUl.querySelectorAll('.icon-compartir').forEach(icon => {
+listaLecturasUl?.querySelectorAll('.icon-compartir').forEach(icon => {
   icon.addEventListener('click', async e => {
     e.stopPropagation();
     const idLectura = e.target.dataset.id;
     lecturaParaCompartir = idLectura;
 
-    document.getElementById('materiaSeleccionada').value = lectura.materia || '';
-
-
     const docRef = doc(db, 'lecturasNuevas', idLectura);
     const docSnap = await getDoc(docRef);
     const lectura = docSnap.exists() ? docSnap.data() : null;
     if (!lectura) return;
+    document.getElementById('materiaSeleccionada').value = lectura.materia || '';
 
     const usuariosSnap = await getDocs(collection(db, 'users'));
     listaUsuariosCompartir.innerHTML = '';
     usuariosSnap.forEach(userDoc => {
       const user = userDoc.data();
-      const isChecked = lectura.sharewith?.includes(userDoc.id) ? 'checked' : '';
-      listaUsuariosCompartir.innerHTML += `
-        <div>
-          <label>
-            <input type="checkbox" value="${userDoc.id}" ${isChecked}> ${user.nombre || user.email || userDoc.id}
-          </label>
-        </div>
-      `;
+      const isChecked = lectura.sharewith?.includes(userDoc.id);
+      const row = document.createElement("div");
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = userDoc.id;
+      checkbox.checked = Boolean(isChecked);
+      const displayName = String(user.nombre || user.email || userDoc.id || "").trim() || userDoc.id;
+      label.append(checkbox, document.createTextNode(` ${displayName}`));
+      row.appendChild(label);
+      listaUsuariosCompartir.appendChild(row);
     });
 
     modalCompartir.style.display = 'block';
@@ -1993,7 +2029,7 @@ listaLecturasUl.querySelectorAll('.icon-compartir').forEach(icon => {
 });
 
 // Confirmar compartir
-btnConfirmarCompartir.addEventListener('click', async () => {
+btnConfirmarCompartir?.addEventListener('click', async () => {
   const checkboxes = listaUsuariosCompartir.querySelectorAll('input[type="checkbox"]:checked');
   const seleccionados = Array.from(checkboxes).map(cb => cb.value);
 
@@ -2016,7 +2052,7 @@ btnConfirmarCompartir.addEventListener('click', async () => {
 
 
 document.getElementById("btnDescargarEditorLectura")?.addEventListener("click", () => {
-  const editor = document.getElementById("editorLectura");
+  const editor = document.getElementById("editarPreview") || document.getElementById("editorLectura");
   const html = editor?.innerHTML?.trim();
 
   if (!html || html === "<p>Sin contenido.</p>") {

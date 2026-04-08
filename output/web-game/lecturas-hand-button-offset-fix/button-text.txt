@@ -1,0 +1,2 @@
+before=Iniciar ronda
+after=Iniciar ronda
