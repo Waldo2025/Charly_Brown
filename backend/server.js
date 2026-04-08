@@ -1368,6 +1368,53 @@ app.post("/api/moodle/share-course", async (req, res) => {
   }
 });
 
+app.post("/api/moodle/delete-course", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const courseId = clampText(req.body?.courseId || "", 140);
+    if (!courseId) {
+      return res.status(400).json({ error: "Falta courseId." });
+    }
+
+    const courseRef = db.collection("moodleCourses").doc(courseId);
+    const courseSnap = await courseRef.get();
+    if (!courseSnap.exists) {
+      return res.status(404).json({ error: "El curso no existe." });
+    }
+
+    const courseData = courseSnap.data() || {};
+    const ownerUid = String(courseData?.userId || courseData?.uid || courseData?.ownerUid || "").trim();
+    if (!ownerUid || ownerUid !== uid) {
+      return res.status(403).json({ error: "Solo el propietario puede eliminar este curso." });
+    }
+
+    const moduleDocIds = new Set();
+    const temas = Array.isArray(courseData?.temas) ? courseData.temas : [];
+    temas.forEach((tema) => {
+      const subtemas = Array.isArray(tema?.subtemas) ? tema.subtemas : [];
+      subtemas.forEach((subtema) => {
+        const modulosIds = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+        modulosIds.forEach((moduloId) => {
+          const normalized = clampText(moduloId, 200);
+          if (!normalized) return;
+          moduleDocIds.add(normalized.includes("_") ? normalized : `${courseId}_${normalized}`);
+        });
+      });
+    });
+
+    const batch = db.batch();
+    batch.delete(courseRef);
+    moduleDocIds.forEach((docId) => {
+      batch.delete(db.collection("moodleCourses").doc(docId));
+    });
+    await batch.commit();
+
+    return res.status(200).json({ ok: true, deletedCourseId: courseId, deletedModules: moduleDocIds.size });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar el curso.") });
+  }
+});
+
 app.post("/api/podcaster/sessions/save", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
