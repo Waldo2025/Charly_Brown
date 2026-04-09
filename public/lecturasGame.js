@@ -20,23 +20,9 @@ function readRequestedGame() {
 }
 
 async function boot() {
-  await registerLecturasGameServiceWorker();
   const gameId = readRequestedGame();
   const target = GAME_MODULES[gameId] || GAME_MODULES.synonyms;
   await import(target);
-}
-
-async function registerLecturasGameServiceWorker() {
-  if (!("serviceWorker" in navigator)) return false;
-  const host = String(window.location.hostname || "").toLowerCase();
-  const secure = window.isSecureContext || host === "localhost" || host === "127.0.0.1";
-  if (!secure) return false;
-  try {
-    await navigator.serviceWorker.register(withGameVersion("/lecturasGame-sw.js"), { scope: "/lecturasGame" });
-    return true;
-  } catch (_) {
-    return false;
-  }
 }
 
 boot().catch((err) => {

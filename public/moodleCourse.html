@@ -3,50 +3,22 @@
 <head>
   <meta charset="UTF-8">
     <script src="runtime-config-loader.js" defer></script>
-  <script>
-    (function () {
-      try {
-        if (!('serviceWorker' in navigator)) return;
-        const controllerUrl = String(navigator.serviceWorker.controller?.scriptURL || '');
-        const usesLegacyLecturasGameSw = controllerUrl.includes('/lecturasGame-sw.js');
-        if (!usesLegacyLecturasGameSw) return;
-
-        navigator.serviceWorker.getRegistrations()
-          .then((registrations) => Promise.all(
-            (registrations || []).map((registration) => {
-              const scriptUrl = registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
-              if (!String(scriptUrl).includes('/lecturasGame-sw.js')) return Promise.resolve();
-              return registration.unregister().catch(() => undefined);
-            })
-          ))
-          .catch(() => undefined);
-
-        const currentUrl = new URL(window.location.href);
-        if (currentUrl.searchParams.get('cb-sw-reset') === '1') return;
-        currentUrl.searchParams.set('cb-sw-reset', '1');
-        currentUrl.searchParams.set('cb-sw-bust', String(Date.now()));
-        window.location.replace(currentUrl.toString());
-      } catch (_) {
-        // no-op
-      }
-    })();
-  </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aprende Author/Builder</title>
 
   <!-- Font Awesome -->
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <!-- CSS Personalizado con soporte para temas -->
-  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.0.57">
-  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.0.57">
+  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.0.58">
+  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.0.58">
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
     crossorigin="anonymous"
   >
 
-    <link rel="stylesheet" href="header.css?v=2026-1.0.0.57">
-    <link rel="stylesheet" href="sidebar.css?v=2026-1.0.0.57">
+    <link rel="stylesheet" href="header.css?v=2026-1.0.0.58">
+    <link rel="stylesheet" href="sidebar.css?v=2026-1.0.0.58">
     <script
       defer
       src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
@@ -1008,10 +980,10 @@
 <script src="vendor/sortablejs/Sortable.min.js?v=2026-1.0.0.20"></script>
 
 
-<script src="chromeLayout.js?v=2026-1.0.0.57"></script>
-  <script type="module" src="sidebar.js?v=2026-1.0.0.57"></script>
-<script type="module" src="moodleCourse.js?v=2026-1.0.0.57"></script>
-<script type="module" src="moodleCourse-Theme.js?v=2026-1.0.0.57"></script>
+<script src="chromeLayout.js?v=2026-1.0.0.58"></script>
+  <script type="module" src="sidebar.js?v=2026-1.0.0.58"></script>
+<script type="module" src="moodleCourse.js?v=2026-1.0.0.58"></script>
+<script type="module" src="moodleCourse-Theme.js?v=2026-1.0.0.58"></script>
 
 <script src="update-banner-loader.js" defer></script>
 </body>

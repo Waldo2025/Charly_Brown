@@ -1201,18 +1201,6 @@ async function _lecturasGameOfflineConfigGet() {
   return _lecturasGameOfflineStoreGet(LECTURAS_GAME_OFFLINE_DB_CONFIG_STORE, "offlineConfig");
 }
 
-async function _lecturasGameRegisterServiceWorker() {
-  if (!("serviceWorker" in navigator)) return false;
-  const isSecure = window.isSecureContext || /^(localhost|127\.0\.0\.1)$/i.test(String(window.location.hostname || ""));
-  if (!isSecure) return false;
-  try {
-    await navigator.serviceWorker.register("/lecturasGame-sw.js?v=20260409a", { scope: "/lecturasGame" });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
 const els = {
   gameHero: null,
   lecturaScene: null,

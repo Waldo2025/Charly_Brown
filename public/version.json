@@ -1,12 +1,12 @@
 {
-  "version": "2026-1.0.0.57",
+  "version": "2026-1.0.0.58",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo moodleCourse para limpiar el service worker heredado y forzar una copia fresca de estilos y scripts. Da click en Actualizar ahora.",
+  "message": "Se removio por completo el uso de service worker del proyecto y se forzo una copia fresca de los assets. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para eliminar el service worker heredado de Lecturas Game y volver a descargar los assets actuales de moodleCourse.",
+  "forceClearCacheReason": "Actualizacion para remover las referencias restantes a service worker y volver a descargar los assets actuales del frontend.",
   "updates": [
-    "Corregido: moodleCourse limpia un service worker heredado de Lecturas Game antes de cargar sus assets.",
-    "Corregido: se fuerza una URL fresca para los estilos y scripts principales de moodleCourse.",
-    "Corregido: se mantienen los estilos actuales de retroalimentaciones, botones y modal de instrucciones."
+    "Corregido: se eliminaron los registros y referencias a service worker del frontend.",
+    "Corregido: se removio el service worker de Lecturas Game del proyecto.",
+    "Corregido: se fuerza una URL fresca para los assets principales del frontend."
   ]
 }

@@ -71,33 +71,6 @@
     document.body.appendChild(script);
   }
 
-  async function cleanupLegacyLecturasGameServiceWorkers() {
-    if (!('serviceWorker' in navigator) || typeof navigator.serviceWorker.getRegistrations !== 'function') return;
-    const path = String(window.location.pathname || '').toLowerCase();
-    const isGamePage = path === '/lecturasgame' || path.endsWith('/lecturasgame.html');
-    if (isGamePage) return;
-    const hadLecturasController = String(navigator.serviceWorker.controller?.scriptURL || '').includes('/lecturasGame-sw.js');
-    let removedLecturasRegistration = false;
-    try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map(async (registration) => {
-        const scriptUrl = registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
-        if (!scriptUrl.includes('/lecturasGame-sw.js')) return;
-        await registration.unregister();
-        removedLecturasRegistration = true;
-      }));
-      if (hadLecturasController && removedLecturasRegistration) {
-        const reloadKey = 'cb_lecturas_game_sw_cleanup_reloaded';
-        if (sessionStorage.getItem(reloadKey) !== '1') {
-          sessionStorage.setItem(reloadKey, '1');
-          window.location.reload();
-        }
-      }
-    } catch (_) {
-      // no-op
-    }
-  }
-
   function isStyleDebugEnabled() {
     try {
       const params = new URLSearchParams(window.location.search || '');
@@ -161,8 +134,6 @@
       page,
       path: window.location.pathname,
       bodyDataPage: String(document.body?.dataset?.page || ''),
-      serviceWorkerControlled: !!navigator.serviceWorker?.controller,
-      serviceWorkerControllerUrl: navigator.serviceWorker?.controller?.scriptURL || '',
       stylesheets,
       selectorChecks
     };
@@ -174,8 +145,6 @@
       console.groupCollapsed(`[cb-style-debug] ${reason} :: ${report.path}`);
       console.table(report.stylesheets);
       console.table(report.selectorChecks);
-      console.log('serviceWorkerControlled', report.serviceWorkerControlled);
-      console.log('serviceWorkerControllerUrl', report.serviceWorkerControllerUrl || '(none)');
       console.groupEnd();
     } catch (_) {
       // no-op
@@ -216,7 +185,6 @@
   }
 
   applyStoredThemeSnapshot();
-  void cleanupLegacyLecturasGameServiceWorkers();
   setupStyleDiagnostics();
 
   const escapeHtml = (text) => String(text || '')

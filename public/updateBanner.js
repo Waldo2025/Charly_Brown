@@ -366,10 +366,6 @@
         const keys = await caches.keys();
         await Promise.all(keys.map((k) => caches.delete(k)));
       }
-      if ('serviceWorker' in navigator && typeof navigator.serviceWorker.getRegistrations === 'function') {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map((registration) => registration.unregister().catch(() => undefined)));
-      }
       await clearIndexedDbStorage();
       try { localStorage.clear(); } catch (_) {}
       try { sessionStorage.clear(); } catch (_) {}
@@ -414,8 +410,6 @@
     return {
       version: latestInfoCache?.version || '',
       forceClearCache: latestInfoCache?.forceClearCache === true,
-      serviceWorkerControlled: !!navigator.serviceWorker?.controller,
-      serviceWorkerControllerUrl: navigator.serviceWorker?.controller?.scriptURL || '',
       urlVersion: url.searchParams.get('v') || '',
       launcherVisible: !!document.getElementById(LAUNCHER_ID)?.classList.contains('is-visible')
     };
