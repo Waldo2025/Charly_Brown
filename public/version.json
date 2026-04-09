@@ -1,5 +1,5 @@
 {
-  "version": "2026-1.0.0.55",
+  "version": "2026-1.0.0.56",
   "title": "Nuevas actualizaciones",
   "message": "Se actualizo moodleCourse para forzar una copia fresca del editor y del menu de acciones de modulos. Da click en Actualizar ahora.",
   "forceClearCache": true,
