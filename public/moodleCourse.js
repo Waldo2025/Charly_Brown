@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.59";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.62";
 // Firebase imports
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
@@ -33,16 +33,16 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.59';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.62';
 
 import { 
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.59';
-import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.59';
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
-import { authFetchJson } from "./api-client.js?v=2026-1.0.0.59";
+} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.62';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.62';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.62";
+import { authFetchJson } from "./api-client.js?v=2026-1.0.0.62";
 
 
 /* CONFIGURACIÓN FIREBASE */
@@ -1288,11 +1288,30 @@ function ensureGraphicLightboxDrag(modal) {
 
 window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRaw = "") {
     const sourceEl = sourceOrSrc && typeof sourceOrSrc === "object" && sourceOrSrc.nodeType === 1 ? sourceOrSrc : null;
-    const cleanSrc = String(sourceEl?.dataset?.mcImageSrc || sourceOrSrc || "").trim();
+    const figureEl = sourceEl?.closest?.(".cb-module-generated-graphic") || null;
+    const fallbackImg = sourceEl?.matches?.("img") ? sourceEl : figureEl?.querySelector?.("img");
+    const cleanSrc = String(
+        sourceEl?.dataset?.mcImageSrc ||
+        fallbackImg?.getAttribute?.("src") ||
+        sourceOrSrc ||
+        ""
+    ).trim();
     if (!cleanSrc) return;
     moduleGraphicLightboxLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : sourceEl;
-    const cleanAlt = String(sourceEl?.dataset?.mcImageAlt || alt || "").trim();
-    const layers = normalizeEditableGraphicLayers(decodeGraphicLayers(String(sourceEl?.dataset?.mcImageLayers || layersRaw || "").trim()) || {});
+    const cleanAlt = String(
+        sourceEl?.dataset?.mcImageAlt ||
+        fallbackImg?.getAttribute?.("alt") ||
+        alt ||
+        ""
+    ).trim();
+    const layers = normalizeEditableGraphicLayers(
+        decodeGraphicLayers(String(
+            sourceEl?.dataset?.mcImageLayers ||
+            fallbackImg?.dataset?.mcImageLayers ||
+            layersRaw ||
+            ""
+        ).trim()) || {}
+    );
     const inferred = inferGraphicContextFromNode(sourceEl);
     const modal = ensureModuleGraphicLightbox();
     const image = modal.querySelector(".cb-module-graphic-lightbox__image");
@@ -1300,10 +1319,10 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
     const backgroundLayer = modal.querySelector(".cb-module-graphic-lightbox__background-layer");
     modal.__graphicLayers = layers;
     modal.__graphicContext = {
-        moduleId: String(sourceEl?.dataset?.mcModuloId || inferred.moduleId || "").trim(),
-        courseId: String(sourceEl?.dataset?.mcCourseId || inferred.courseId || "").trim(),
-        moduleName: String(sourceEl?.dataset?.mcModuleName || inferred.moduleName || "").trim(),
-        moduleType: String(sourceEl?.dataset?.mcModuleType || inferred.moduleType || "").trim()
+        moduleId: String(sourceEl?.dataset?.mcModuloId || fallbackImg?.dataset?.mcModuloId || inferred.moduleId || "").trim(),
+        courseId: String(sourceEl?.dataset?.mcCourseId || fallbackImg?.dataset?.mcCourseId || inferred.courseId || "").trim(),
+        moduleName: String(sourceEl?.dataset?.mcModuleName || fallbackImg?.dataset?.mcModuleName || inferred.moduleName || "").trim(),
+        moduleType: String(sourceEl?.dataset?.mcModuleType || fallbackImg?.dataset?.mcModuleType || inferred.moduleType || "").trim()
     };
     ensureGraphicLightboxDrag(modal);
     renderCanvasMeta(modal);
@@ -1387,6 +1406,12 @@ window.cerrarGaleriaGraficoModulo = function() {
 };
 
 document.addEventListener("click", (event) => {
+    const graphicTrigger = event.target.closest(".cb-module-generated-graphic__image, .cb-module-generated-graphic__open");
+    if (graphicTrigger) {
+        window.abrirGaleriaGraficoModulo?.(graphicTrigger);
+        return;
+    }
+
     const actionEl = event.target.closest("[data-mc-action]");
     if (!actionEl) return;
 

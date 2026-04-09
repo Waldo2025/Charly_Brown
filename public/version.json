@@ -1,12 +1,12 @@
 {
-  "version": "2026-1.0.0.59",
+  "version": "2026-1.0.0.62",
   "title": "Nuevas actualizaciones",
-  "message": "Se versiono toda la cadena de imports internos del frontend para forzar la descarga de modulos secundarios actualizados. Da click en Actualizar ahora.",
+  "message": "Se corrigio la apertura de la galeria del grafico al hacer click en la imagen del modulo. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para forzar la recarga no solo del HTML principal, sino tambien de los submodulos ES importados internamente por moodleCourse y sidebar.",
+  "forceClearCacheReason": "Actualizacion para forzar la recarga del handler de click del grafico y su apertura en cbModuleGraphicLightbox.",
   "updates": [
-    "Corregido: se agrego versionado a imports internos de moodleCourse, sidebar y modulos auxiliares.",
-    "Corregido: chromeLayout ahora fuerza una version nueva de themeManager.",
-    "Corregido: se fuerza una URL fresca para los assets principales y secundarios del frontend."
+    "Corregido: click sobre la imagen generada del modulo abre nuevamente cbModuleGraphicLightbox.",
+    "Corregido: apertura de galeria ahora tambien funciona si se perdieron data-attributes al sanitizar HTML.",
+    "Corregido: se versionaron imports de moodleCourse para forzar carga del fix en navegador."
   ]
 }
