@@ -1,13 +1,12 @@
 {
-  "version": "2026-1.0.0.53",
+  "version": "2026-1.0.0.54",
   "title": "Nuevas actualizaciones",
   "message": "Se actualizo moodleCourse para forzar una copia fresca del editor y del menu de acciones de modulos. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para forzar una copia fresca de los CSS y JS de moodleCourse, header, sidebar y moodlecourse-geminiOperations.",
+  "forceClearCacheReason": "Actualizacion para forzar una copia fresca de moodleCourse.js despues de corregir el refresco del subtema activo tras generar modulos con IA.",
   "updates": [
-    "Corregido: se fuerza recarga de moodleCourse.css, header.css, sidebar.css, moodleCourse.js y moodlecourse-geminiOperations.js.",
-    "Corregido: los errores al generar modulos con IA ya muestran el detalle real del fallo.",
-    "Corregido: codex-bootstrap mantiene los cambios frontend, CSS y sidebar que ya estaban en main.",
-    "Corregido: la ventana flotante del menu de acciones de modulos vuelve a tener sus estilos."
+    "Corregido: al generar un modulo con IA, el editor vuelve a localizar el subtema por moduloId antes de refrescar.",
+    "Corregido: se evita llamar cargarSubtema con subtema nulo.",
+    "Corregido: los errores al generar modulos con IA muestran el detalle real del fallo."
   ]
 }

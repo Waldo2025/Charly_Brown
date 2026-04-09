@@ -5926,8 +5926,36 @@ async function duplicarTema(temaOriginal) {
 
 
 
+function resolverSubtemaParaModulo(moduloId = "") {
+    const cleanModuloId = String(moduloId || "").trim();
+    const active = window.subtemaActivo || subtemaActivo || null;
+    if (active?.id && (!cleanModuloId || (Array.isArray(active.modulosIds) && active.modulosIds.some((id) => {
+        const cleanId = String(id || "").trim();
+        return cleanId === cleanModuloId || cleanId === cleanModuloId.split("_").pop();
+    })))) {
+        return active;
+    }
+
+    if (!curso?.temas?.length || !cleanModuloId) return active;
+    const cleanModuloIdShort = cleanModuloId.split("_").pop();
+    for (const tema of curso.temas) {
+        for (const sub of (tema?.subtemas || [])) {
+            const ids = Array.isArray(sub?.modulosIds) ? sub.modulosIds : [];
+            const found = ids.some((id) => {
+                const cleanId = String(id || "").trim();
+                return cleanId === cleanModuloId || cleanId === cleanModuloIdShort || cleanId.split("_").pop() === cleanModuloIdShort;
+            });
+            if (found) return sub;
+        }
+    }
+    return active;
+}
+
 /* EDITAR SUBTEMA EN EL EDITOR */
 async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = false) {
+    if (!subtema?.id) {
+        throw new Error("No se pudo refrescar el subtema activo después de generar el módulo.");
+    }
     // HACER SUBTEMA GLOBAL PARA OTROS ARCHIVOS
     subtemaActivo = subtema;
     window.subtemaActivo = subtema;
@@ -6419,7 +6447,11 @@ function crearModalInstruccionesSubtema() {
 window.ejecutarGeneracionModuloGemini = async function (moduloId) {
     try {
         await generarModuloGemini(moduloId);   // ← SOLO 1 parámetro
-        await cargarSubtema(subtemaActivo, moduloId);          // refrescar UI con el mismo módulo activo
+        const subtemaParaRefrescar = resolverSubtemaParaModulo(moduloId);
+        if (!subtemaParaRefrescar?.id) {
+            throw new Error("El contenido se generó, pero no se pudo localizar el subtema activo para refrescar la vista.");
+        }
+        await cargarSubtema(subtemaParaRefrescar, moduloId);          // refrescar UI con el mismo módulo activo
     } catch (err) {
         console.error("Error al generar contenido con IA:", err);
         alert(`Error al generar contenido con IA.\n${err?.message || "Revisa la consola o los logs del backend para más detalle."}`);
