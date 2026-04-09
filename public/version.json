@@ -1,12 +1,12 @@
 {
-  "version": "2026-1.0.0.56",
+  "version": "2026-1.0.0.57",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo moodleCourse para forzar una copia fresca del editor y del menu de acciones de modulos. Da click en Actualizar ahora.",
+  "message": "Se actualizo moodleCourse para limpiar el service worker heredado y forzar una copia fresca de estilos y scripts. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para forzar una copia fresca de moodleCourse.js despues de corregir el refresco del subtema activo tras generar modulos con IA.",
+  "forceClearCacheReason": "Actualizacion para eliminar el service worker heredado de Lecturas Game y volver a descargar los assets actuales de moodleCourse.",
   "updates": [
-    "Corregido: al generar un modulo con IA, el editor vuelve a localizar el subtema por moduloId antes de refrescar.",
-    "Corregido: se evita llamar cargarSubtema con subtema nulo.",
-    "Corregido: los errores al generar modulos con IA muestran el detalle real del fallo."
+    "Corregido: moodleCourse limpia un service worker heredado de Lecturas Game antes de cargar sus assets.",
+    "Corregido: se fuerza una URL fresca para los estilos y scripts principales de moodleCourse.",
+    "Corregido: se mantienen los estilos actuales de retroalimentaciones, botones y modal de instrucciones."
   ]
 }
