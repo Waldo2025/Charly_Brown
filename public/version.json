@@ -1,11 +1,13 @@
 {
-  "version": "2026-1.0.0.19",
+  "version": "2026-1.0.0.51",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo el editor de cursos y scripts del frontend para corregir estilos y evitar caché vieja en produccion. Da click aqui para actualizar.",
+  "message": "Se actualizo moodleCourse para forzar una copia fresca del editor y del menu de acciones de modulos. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion de moodleCourse con cache-busting de CSS y JS para corregir estilos viejos en produccion.",
+  "forceClearCacheReason": "Actualizacion para forzar una copia fresca de moodleCourse.js y moodleCourse.css despues de restaurar cambios de main en codex-bootstrap, corregir el menu flotante, el sidebar y el foco del lightbox.",
   "updates": [
-    "Corregido: moodleCourse ahora fuerza recarga de CSS y JS del editor para evitar que produccion use archivos viejos en cache.",
-    "Corregido: mejoras de estilos del contenido estructurado del modulo ya deben reflejarse correctamente en produccion."
+    "Corregido: codex-bootstrap vuelve a incluir los cambios frontend, CSS y sidebar que ya estaban en main.",
+    "Corregido: la ventana flotante del menu de acciones de modulos vuelve a tener sus estilos.",
+    "Corregido: el lightbox del grafico mueve el foco antes de ocultarse para evitar el warning de aria-hidden.",
+    "Mejorado: el boton Actualizar ahora usa un pulso de alerta mas limpio y legible."
   ]
 }

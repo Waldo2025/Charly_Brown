@@ -23,6 +23,11 @@
   z-index: 999;
 }
 
+#sidebar,
+#sidebar * {
+  box-sizing: border-box;
+}
+
 #sidebar.show {
   width: var(--cb-sidebar-expanded-width);
 }
@@ -100,6 +105,10 @@ body.sidebar-collapsed #sidebar {
   padding: 0.55rem 0.7rem;
   color: rgba(255, 255, 255, 0.95);
   text-decoration: none;
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  min-height: 42px;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -174,6 +183,7 @@ body.sidebar-collapsed #sidebar {
 .sidebar-link:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.16);
+  text-decoration: none;
 }
 
 .sidebar-link.active,
@@ -202,17 +212,4 @@ body.sidebar-collapsed #sidebar {
     top: var(--cb-header-mobile-height);
     height: calc(100vh - var(--cb-header-mobile-height));
   }
-}
-
-/* Role-restricted links: ocultos por defecto y visibles solo para el rol esperado */
-#sidebar #gestionUsuariosLink,
-#sidebar #themeCommandSettingsBtn,
-#sidebar #lecturasGameLink {
-  display: none !important;
-}
-
-body[data-user-role="admin"] #sidebar #gestionUsuariosLink,
-body[data-user-role="admin"] #sidebar #themeCommandSettingsBtn,
-body[data-user-role="admin"] #sidebar #lecturasGameLink {
-  display: flex !important;
 }

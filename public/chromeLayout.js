@@ -1,5 +1,15 @@
 (function () {
-  const page = (window.location.pathname.split('/').pop() || 'index.html').toLowerCase();
+  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.0.21';
+
+  function normalizePageId(pageId, fallback = 'index.html') {
+    const normalized = String(pageId || '').trim().toLowerCase();
+    const candidate = normalized || fallback;
+    if (!candidate) return '';
+    if (candidate.includes('.')) return candidate;
+    return `${candidate}.html`;
+  }
+
+  const page = normalizePageId(window.location.pathname.split('/').pop());
   const THEME_STORAGE_KEY = 'cb_theme_settings_v1';
 
   const pageConfig = {
@@ -56,12 +66,148 @@
   function ensureThemeManagerScript() {
     if (document.querySelector('script[data-theme-manager="1"]')) return;
     const script = document.createElement('script');
-    script.src = 'themeManager.js';
+    script.src = `themeManager.js?v=${encodeURIComponent(CHROME_LAYOUT_ASSET_VERSION)}`;
     script.setAttribute('data-theme-manager', '1');
     document.body.appendChild(script);
   }
 
+  async function cleanupLegacyLecturasGameServiceWorkers() {
+    if (!('serviceWorker' in navigator) || typeof navigator.serviceWorker.getRegistrations !== 'function') return;
+    const path = String(window.location.pathname || '').toLowerCase();
+    const isGamePage = path === '/lecturasgame' || path.endsWith('/lecturasgame.html');
+    if (isGamePage) return;
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(async (registration) => {
+        const scriptUrl = registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
+        if (!scriptUrl.includes('/lecturasGame-sw.js')) return;
+        await registration.unregister();
+      }));
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  function isStyleDebugEnabled() {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const fromQuery = String(params.get('debugStyles') || '').trim();
+      if (fromQuery === '1' || fromQuery.toLowerCase() === 'true') return true;
+      return localStorage.getItem('cb_debug_styles') === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getStyleDiagnosticSelectors() {
+    const bodyPage = String(document.body?.dataset?.page || '').toLowerCase();
+    const normalizedBodyPage = bodyPage.endsWith('.html') ? bodyPage : (bodyPage ? `${bodyPage}.html` : '');
+    const selectors = [
+      '#sidebar',
+      '.main-header',
+      '.icon-btn'
+    ];
+    if (normalizedBodyPage === 'moodlecourse.html') {
+      selectors.push(
+        '#btnToggleArchivados',
+        '.modulo-archive-switch__track',
+        '.modulo-archive-switch__label',
+        '.cb-module-feedback-line',
+        '.cb-module-question-block',
+        '.cb-module-block-title.is-original',
+        '.cb-module-block-title.is-proposal'
+      );
+    }
+    return selectors;
+  }
+
+  function collectStyleDiagnostics() {
+    const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map((node, index) => ({
+      index,
+      tag: node.tagName.toLowerCase(),
+      href: node.getAttribute('href') || '',
+      media: node.getAttribute('media') || '',
+      disabled: node.disabled === true
+    }));
+
+    const selectorChecks = getStyleDiagnosticSelectors().map((selector) => {
+      const element = document.querySelector(selector);
+      const matches = !!element;
+      const computed = matches ? window.getComputedStyle(element) : null;
+      return {
+        selector,
+        matches,
+        className: matches ? String(element.className || '') : '',
+        display: computed ? computed.display : '',
+        visibility: computed ? computed.visibility : '',
+        color: computed ? computed.color : '',
+        backgroundColor: computed ? computed.backgroundColor : '',
+        borderLeftColor: computed ? computed.borderLeftColor : '',
+        borderColor: computed ? computed.borderColor : ''
+      };
+    });
+
+    return {
+      page,
+      path: window.location.pathname,
+      bodyDataPage: String(document.body?.dataset?.page || ''),
+      serviceWorkerControlled: !!navigator.serviceWorker?.controller,
+      serviceWorkerControllerUrl: navigator.serviceWorker?.controller?.scriptURL || '',
+      stylesheets,
+      selectorChecks
+    };
+  }
+
+  function logStyleDiagnostics(reason = 'manual') {
+    const report = collectStyleDiagnostics();
+    try {
+      console.groupCollapsed(`[cb-style-debug] ${reason} :: ${report.path}`);
+      console.table(report.stylesheets);
+      console.table(report.selectorChecks);
+      console.log('serviceWorkerControlled', report.serviceWorkerControlled);
+      console.log('serviceWorkerControllerUrl', report.serviceWorkerControllerUrl || '(none)');
+      console.groupEnd();
+    } catch (_) {
+      // no-op
+    }
+    return report;
+  }
+
+  function setupStyleDiagnostics() {
+    window.__cbStyleDiagnostics = () => logStyleDiagnostics('manual');
+    window.__cbEnableStyleDiagnostics = () => {
+      try { localStorage.setItem('cb_debug_styles', '1'); } catch (_) {}
+      return logStyleDiagnostics('enabled');
+    };
+    window.__cbDisableStyleDiagnostics = () => {
+      try { localStorage.removeItem('cb_debug_styles'); } catch (_) {}
+      return true;
+    };
+
+    if (!isStyleDebugEnabled()) return;
+
+    const run = (reason) => {
+      window.requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          logStyleDiagnostics(reason);
+        }, 150);
+      });
+    };
+
+    if (document.readyState === 'complete') {
+      run('ready');
+    } else {
+      window.addEventListener('load', () => run('load'), { once: true });
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) run('visible');
+    });
+  }
+
   applyStoredThemeSnapshot();
+  void cleanupLegacyLecturasGameServiceWorkers();
+  setupStyleDiagnostics();
 
   const escapeHtml = (text) => String(text || '')
     .replace(/&/g, '&amp;')
@@ -138,15 +284,14 @@
   function renderSidebar(currentPage, showFavoritesToggle) {
     const links = [
       { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,developer' },
-      { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
-      { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
+      { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
+      { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
       { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
       { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' },
       { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },
-      { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' },
-      { href: '#', icon: 'fas fa-head-side-cough', label: 'Comandos de voz', id: 'themeCommandSettingsBtn', roleVisibility: 'admin' }
+      { href: '#', icon: 'fas fa-sliders-h', label: 'Tema del sistema', id: 'themeSettingsLink' }
     ];
 
     const sidebarLinks = links.map((link) => {

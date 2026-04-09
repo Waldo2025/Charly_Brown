@@ -56,6 +56,8 @@ const MAX_DIALOGUE_VIDEO_BYTES = 80 * 1024 * 1024;
 const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
+const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
+const MOODLE_GRAPHIC_PROMPT_VERSION = "moodle_graphic_render_v1";
 const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
@@ -138,6 +140,7 @@ app.get("/api/health", (_req, res) => {
     port: PORT,
     geminiConfigured: hasGeminiKey(),
     moodleShareUsersRoute: true,
+    moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true,
     podcasterMusicGenerateRoute: true,
     startupSignature: BACKEND_BOOT_SIGNATURE,
@@ -1139,6 +1142,130 @@ function getVideoExtension(mimeType = "video/mp4") {
   if (clean === "video/webm") return "webm";
   if (clean === "video/quicktime") return "mov";
   return "mp4";
+}
+
+function getImageExtension(mimeType = "image/png") {
+  const clean = String(mimeType || "").trim().toLowerCase();
+  if (clean === "image/webp") return "webp";
+  if (clean === "image/jpeg" || clean === "image/jpg") return "jpg";
+  return "png";
+}
+
+function extractGeminiInlineImage(data = {}) {
+  const parts = Array.isArray(data?.candidates?.[0]?.content?.parts) ? data.candidates[0].content.parts : [];
+  const inline = parts.find((part) => part?.inlineData?.data || part?.inline_data?.data) || null;
+  const imageBase64 = String(inline?.inlineData?.data || inline?.inline_data?.data || "").trim();
+  const mimeType = String(inline?.inlineData?.mimeType || inline?.inline_data?.mimeType || "image/png").trim() || "image/png";
+  if (!imageBase64) return null;
+  return {
+    buffer: Buffer.from(imageBase64, "base64"),
+    mimeType
+  };
+}
+
+function buildMoodleModuleGraphicPrompt({
+  moduleName = "",
+  moduleType = "",
+  languageCode = "es",
+  instructions = "",
+  content = ""
+} = {}) {
+  const isEnglish = String(languageCode || "").toLowerCase().startsWith("en");
+  return [
+    `Modulo: ${clampText(moduleName || "Modulo educativo", 180)}`,
+    `Tipo: ${clampText(moduleType || "Modulo", 80)}`,
+    `Idioma: ${isEnglish ? "English" : "Español"}`,
+    instructions ? `Instrucciones: ${clampText(instructions, 2200)}` : "",
+    content ? `Contenido: ${clampText(content, 2600)}` : "",
+    "Genera una imagen o grafico educativo que acompañe esta actividad y ayude a analizar, observar o responder el ejercicio.",
+    "No generes escenarios de podcast, estudios, sets cinematograficos ni interfaces decorativas ajenas al contenido educativo.",
+    "Prefiere una infografia o diagrama claro, con iconos, flechas, formas y elementos visuales relacionados directamente con la actividad.",
+    "No incluyas palabras, letras, numeros, etiquetas ni texto incrustado dentro de la imagen final.",
+    "Usa composicion limpia, centrada, de alta legibilidad visual y adecuada para superponerse junto al contenido del modulo."
+  ].filter(Boolean).join("\n");
+}
+
+async function generateMoodleModuleGraphicAsset({
+  uid = "",
+  courseId = "",
+  moduleId = "",
+  moduleType = "",
+  moduleName = "",
+  languageCode = "es",
+  instructions = "",
+  content = "",
+  previousStoragePath = ""
+} = {}) {
+  if (!hasGeminiKey()) {
+    const err = new Error("Falta GEMINI_API_KEY o GOOGLE_API_KEY en backend.");
+    err.status = 500;
+    throw err;
+  }
+
+  const prompt = buildMoodleModuleGraphicPrompt({
+    moduleName,
+    moduleType,
+    languageCode,
+    instructions,
+    content
+  });
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"],
+      imageConfig: {
+        aspectRatio: "1:1"
+      }
+    }
+  };
+  const upstream = await fetchCompat(
+    `${GEMINI_BASE}/models/${encodeURIComponent(DEFAULT_MOODLE_GRAPHIC_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+  const data = await safeJson(upstream);
+  if (!upstream.ok) {
+    const err = new Error(String(data?.error?.message || data?.error || `HTTP ${upstream.status}`));
+    err.status = upstream.status;
+    throw err;
+  }
+
+  const inline = extractGeminiInlineImage(data);
+  if (!inline?.buffer?.length) {
+    const err = new Error("Gemini no devolvio una imagen utilizable para el modulo.");
+    err.status = 502;
+    throw err;
+  }
+
+  const mimeType = String(inline.mimeType || "image/png").trim() || "image/png";
+  const ext = getImageExtension(mimeType);
+  const storagePath = `images/${normalizeStorageSegment(uid, "user")}/moodle-modules/${normalizeStorageSegment(courseId, "curso")}/${normalizeStorageSegment(moduleId, "modulo")}/${Date.now()}.${ext}`;
+  if (previousStoragePath && previousStoragePath !== storagePath) {
+    await deleteStoragePath(previousStoragePath).catch(() => {});
+  }
+  const asset = await uploadScreenshotAsset({
+    path: storagePath,
+    buffer: inline.buffer,
+    mimeType,
+    metadata: {
+      origin: "moodleCourse",
+      courseId: String(courseId || "").trim(),
+      moduleId: String(moduleId || "").trim(),
+      model: DEFAULT_MOODLE_GRAPHIC_MODEL,
+      promptVersion: MOODLE_GRAPHIC_PROMPT_VERSION
+    }
+  });
+  return {
+    downloadUrl: asset.downloadUrl,
+    storagePath: asset.path,
+    mimeType,
+    model: DEFAULT_MOODLE_GRAPHIC_MODEL,
+    promptVersion: MOODLE_GRAPHIC_PROMPT_VERSION,
+    updatedAt: new Date().toISOString()
+  };
 }
 
 async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metadata = {} }) {
@@ -2790,6 +2917,7 @@ app.get("/api/health", (_req, res) => {
     service: "gemini-backend",
     hasGeminiKey: hasGeminiKey(),
     moodleShareUsersRoute: true,
+    moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true,
     podcasterMusicGenerateRoute: true,
     startupSignature: BACKEND_BOOT_SIGNATURE,
@@ -2801,6 +2929,31 @@ app.post("/api/mineblox/screenshots/upload", async (req, res) => {
     return await handleMinebloxScreenshotUpload(req, res);
   } catch (error) {
     return res.status(400).json({ error: String(error?.message || "No se pudo subir la captura.") });
+  }
+});
+
+app.post("/api/moodle/module-graphics/generate", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const courseId = clampText(req.body?.courseId || "", 180);
+    const moduleId = clampText(req.body?.moduleId || "", 180);
+    if (!uid || !courseId || !moduleId) {
+      return res.status(400).json({ error: "Faltan uid, courseId o moduleId para generar el gráfico del módulo." });
+    }
+    const image = await generateMoodleModuleGraphicAsset({
+      uid,
+      courseId,
+      moduleId,
+      moduleType: clampText(req.body?.moduleType || "", 80),
+      moduleName: clampText(req.body?.moduleName || "", 220),
+      languageCode: clampText(req.body?.languageCode || "es", 12) || "es",
+      instructions: clampText(req.body?.instructions || "", 5000),
+      content: clampText(req.body?.content || "", 8000),
+      previousStoragePath: clampText(req.body?.previousStoragePath || "", 700)
+    });
+    return res.status(200).json({ ok: true, image });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar el gráfico del módulo.") });
   }
 });
 
@@ -3048,6 +3201,7 @@ app.listen(PORT, HOST, () => {
     pid: process.pid,
     startedAt: BACKEND_BOOT_ISO,
     startupSignature: BACKEND_BOOT_SIGNATURE,
+    moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true
   });
   console.log(`[gemini-backend] listening on http://${HOST}:${PORT}`);
