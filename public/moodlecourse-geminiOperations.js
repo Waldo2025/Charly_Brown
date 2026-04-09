@@ -1,5 +1,5 @@
-import { obtenerModulo, guardarModulo } from "./moodleCourse.js";
-import { buildApiUrl, getAuthHeaders } from "./api-client.js";
+import { obtenerModulo, guardarModulo } from "./moodleCourse.js?v=2026-1.0.0.59";
+import { buildApiUrl, getAuthHeaders } from "./api-client.js?v=2026-1.0.0.59";
 const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function getGeminiEndpoint() {

@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.59";
 // Firebase imports
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
@@ -33,16 +33,16 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.58';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.59';
 
 import { 
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js';
-import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js';
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson } from "./api-client.js";
+} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.59';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.59';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
+import { authFetchJson } from "./api-client.js?v=2026-1.0.0.59";
 
 
 /* CONFIGURACIÓN FIREBASE */

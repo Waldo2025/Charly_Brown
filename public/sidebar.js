@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.59";
 import {
   initializeApp
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
@@ -338,9 +338,9 @@ document.addEventListener("DOMContentLoaded", () => {
   
         // Si quieres cargar lógica JS específica:
         if (page === "unidadHome.html") {
-          import("./unidadHome.js");
+          import("./unidadHome.js?v=2026-1.0.0.59");
         } else if (page === "home.html") {
-          import("./home.js");
+          import("./home.js?v=2026-1.0.0.59");
         }
   
       } catch (error) {

@@ -1,5 +1,5 @@
 (function () {
-  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.0.21';
+  const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.0.59';
 
   function normalizePageId(pageId, fallback = 'index.html') {
     const normalized = String(pageId || '').trim().toLowerCase();

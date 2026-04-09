@@ -2,8 +2,8 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebas
 import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { getFirestore, collection, query, where, getDocs, doc, deleteDoc, updateDoc, getDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 import VanillaTilt from './vendor/vanilla-tilt/vanilla-tilt.es2015.js';
-import { escapeHtml } from './security-utils.js';
-import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
+import { escapeHtml } from './security-utils.js?v=2026-1.0.0.59';
+import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js?v=2026-1.0.0.59';
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 const db = getFirestore(app);

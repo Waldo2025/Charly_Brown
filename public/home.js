@@ -10,9 +10,9 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
-import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js";
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.59";
+import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js?v=2026-1.0.0.59";
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 void bootstrapFirebaseAppCheck(app);

@@ -1,12 +1,12 @@
 {
-  "version": "2026-1.0.0.58",
+  "version": "2026-1.0.0.59",
   "title": "Nuevas actualizaciones",
-  "message": "Se removio por completo el uso de service worker del proyecto y se forzo una copia fresca de los assets. Da click en Actualizar ahora.",
+  "message": "Se versiono toda la cadena de imports internos del frontend para forzar la descarga de modulos secundarios actualizados. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para remover las referencias restantes a service worker y volver a descargar los assets actuales del frontend.",
+  "forceClearCacheReason": "Actualizacion para forzar la recarga no solo del HTML principal, sino tambien de los submodulos ES importados internamente por moodleCourse y sidebar.",
   "updates": [
-    "Corregido: se eliminaron los registros y referencias a service worker del frontend.",
-    "Corregido: se removio el service worker de Lecturas Game del proyecto.",
-    "Corregido: se fuerza una URL fresca para los assets principales del frontend."
+    "Corregido: se agrego versionado a imports internos de moodleCourse, sidebar y modulos auxiliares.",
+    "Corregido: chromeLayout ahora fuerza una version nueva de themeManager.",
+    "Corregido: se fuerza una URL fresca para los assets principales y secundarios del frontend."
   ]
 }
