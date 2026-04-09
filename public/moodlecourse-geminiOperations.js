@@ -1,6 +1,14 @@
 import { obtenerModulo, guardarModulo } from "./moodleCourse.js";
-import { buildApiUrl, getAuthHeaders } from "./api-client.js";
+import { authFetchJson, buildApiUrl, getAuthHeaders } from "./api-client.js";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
+const MODULE_GENERATION_PENDING = new Set();
+const moodleGeminiApp = getApps().length ? getApp() : initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
+const moodleGeminiStorage = getStorage(moodleGeminiApp);
+const moodleGeminiAuth = getAuth(moodleGeminiApp);
 
 function getGeminiEndpoint() {
   return buildApiUrl("/api/gemini/generate");
@@ -158,6 +166,195 @@ function truncateText(value = "", maxChars = 2000) {
     const limit = Math.max(0, Number(maxChars) || 0);
     if (!clean || clean.length <= limit) return clean;
     return `${clean.slice(0, Math.max(0, limit - 24)).trim()}\n...[recortado]`;
+}
+
+function limpiarHtmlGraficoGenerado(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return "";
+    const container = document.createElement("div");
+    container.innerHTML = raw;
+    container.querySelectorAll(".cb-module-generated-graphic").forEach((node) => node.remove());
+    return container.innerHTML.trim();
+}
+
+function extraerStoragePathGraficoGenerado(modulo = {}) {
+    const directPath = String(modulo?.graficoGenerado?.storagePath || "").trim();
+    if (directPath) return directPath;
+    const html = String(modulo?.contenido || "").trim();
+    if (!html) return "";
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const figure = container.querySelector(".cb-module-generated-graphic");
+    return String(figure?.getAttribute("data-storage-path") || "").trim();
+}
+
+function construirPromptGraficoModulo({ modulo = {}, instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
+    const idiomaLabel = String(idioma?.code || "").toLowerCase().startsWith("en") ? "English" : "Español";
+    return [
+        `Modulo: ${String(modulo?.nombre || "Modulo educativo").trim() || "Modulo educativo"}`,
+        `Tipo: ${String(modulo?.tipo || "Modulo").trim() || "Modulo"}`,
+        `Idioma: ${idiomaLabel}`,
+        instrucciones ? `Instrucciones del autor: ${truncateText(stripHtmlToText(instrucciones), 1600)}` : "",
+        contenido ? `Contenido generado: ${truncateText(stripHtmlToText(contenido), 2200)}` : "",
+        "Genera una imagen o grafico educativo que acompañe esta actividad y ayude a analizar, observar o responder el ejercicio."
+    ].filter(Boolean).join("\n");
+}
+
+function construirFiguraGraficoModulo(image = {}, modulo = {}) {
+    const src = String(image?.downloadUrl || "").trim();
+    if (!src) return "";
+    const altBase = String(modulo?.nombre || modulo?.tipo || "Grafico del modulo").trim() || "Grafico del modulo";
+    const alt = `${altBase} - grafico de apoyo`;
+    const storagePath = String(image?.storagePath || "").trim();
+    const mimeType = String(image?.mimeType || "image/png").trim() || "image/png";
+    const model = String(image?.model || "").trim();
+    return `
+<figure class="cb-module-generated-graphic my-4" data-storage-path="${storagePath.replace(/"/g, "&quot;")}" data-mime-type="${mimeType.replace(/"/g, "&quot;")}" data-model="${model.replace(/"/g, "&quot;")}">
+  <img src="${src.replace(/"/g, "&quot;")}" alt="${alt.replace(/"/g, "&quot;")}" class="cb-module-generated-graphic__image" loading="lazy" decoding="async">
+</figure>`.trim();
+}
+
+function combinarContenidoConGrafico(image = {}, contenido = "", modulo = {}) {
+    const baseHtml = limpiarHtmlGraficoGenerado(contenido);
+    const figureHtml = construirFiguraGraficoModulo(image, modulo);
+    if (!figureHtml) return baseHtml;
+    return `${figureHtml}\n${baseHtml}`.trim();
+}
+
+function blobDesdeBase64(base64 = "", mimeType = "image/png") {
+    const clean = String(base64 || "").trim();
+    if (!clean) throw new Error("No se recibio base64 para la imagen.");
+    const binary = atob(clean);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType || "image/png" });
+}
+
+async function blobDesdeUrl(url = "") {
+    const response = await fetch(String(url || "").trim());
+    if (!response.ok) {
+        throw new Error(`No se pudo descargar la imagen generada (${response.status}).`);
+    }
+    return response.blob();
+}
+
+function obtenerExtensionMime(mimeType = "image/png") {
+    const clean = String(mimeType || "").trim().toLowerCase();
+    if (clean === "image/webp") return "webp";
+    if (clean === "image/jpeg") return "jpg";
+    return "png";
+}
+
+async function subirGraficoModuloAFirebaseStorage({ blob = null, mimeType = "image/png", cursoId = "", moduloId = "" } = {}) {
+    const user = moodleGeminiAuth.currentUser;
+    if (!user?.uid) {
+        throw new Error("Debes iniciar sesion para guardar el grafico en Firebase Storage.");
+    }
+    const ext = obtenerExtensionMime(mimeType);
+    const path = `images/${user.uid}/moodle-modules/${String(cursoId || "curso").trim()}/${String(moduloId || "modulo").trim()}/${Date.now()}.${ext}`;
+    const ref = storageRef(moodleGeminiStorage, path);
+    await uploadBytes(ref, blob, {
+        contentType: mimeType || "image/png",
+        customMetadata: {
+            origin: "moodleCourse",
+            courseId: String(cursoId || "").trim(),
+            moduleId: String(moduloId || "").trim()
+        }
+    });
+    const downloadUrl = await getDownloadURL(ref);
+    return {
+        downloadUrl,
+        storagePath: path,
+        mimeType: mimeType || "image/png",
+        model: "openai-image-fallback",
+        promptVersion: "moodle_graphic_storage_fallback_v1",
+        updatedAt: new Date().toISOString()
+    };
+}
+
+async function generarGraficoModuloConPodcasterFallback({ modulo = {}, cursoId = "", instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
+    const previousStoragePath = extraerStoragePathGraficoGenerado(modulo);
+    const response = await authFetchJson("/api/podcaster/scenario-images/generate", {
+        method: "POST",
+        body: {
+            sessionId: `moodle-${String(cursoId || "curso").trim()}`,
+            scenarioId: String(modulo?.id || "modulo").trim(),
+            title: String(modulo?.nombre || modulo?.tipo || "Grafico del modulo").trim() || "Grafico del modulo",
+            prompt: construirPromptGraficoModulo({ modulo, instrucciones, contenido, idioma }),
+            previousStoragePath,
+            regenerate: Boolean(previousStoragePath)
+        }
+    });
+    const image = response?.image && typeof response.image === "object" ? response.image : null;
+    if (!image?.downloadUrl) {
+        throw new Error("El backend activo no devolvio una imagen utilizable para el modulo.");
+    }
+    return {
+        downloadUrl: String(image.downloadUrl || "").trim(),
+        storagePath: String(image.storagePath || "").trim(),
+        mimeType: String(image.mimeType || "image/png").trim() || "image/png",
+        model: String(image.model || "podcaster-scenario-fallback").trim(),
+        promptVersion: String(image.promptVersion || "podcaster_scenario_fallback_v1").trim(),
+        updatedAt: String(image.updatedAt || new Date().toISOString()).trim()
+    };
+}
+
+async function generarGraficoComplementarioModulo({ modulo = {}, cursoId = "", instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
+    const courseId = String(cursoId || modulo?.cursoId || window.curso?.id || "").trim();
+    const moduleId = String(modulo?.id || "").trim();
+    if (!courseId || !moduleId) {
+        throw new Error("Falta contexto del modulo para generar el grafico.");
+    }
+    const previousStoragePath = extraerStoragePathGraficoGenerado(modulo);
+    let response;
+    try {
+        response = await authFetchJson("/api/moodle/module-graphics/generate", {
+            method: "POST",
+            body: {
+                courseId,
+                moduleId,
+                moduleType: String(modulo?.tipo || "").trim(),
+                moduleName: String(modulo?.nombre || "").trim(),
+                languageCode: String(idioma?.code || "es").trim(),
+                instructions: instrucciones,
+                content: contenido,
+                prompt: construirPromptGraficoModulo({ modulo, instrucciones, contenido, idioma }),
+                previousStoragePath,
+                regenerate: Boolean(previousStoragePath)
+            }
+        });
+    } catch (error) {
+        if (Number(error?.status || 0) === 404) {
+            return generarGraficoModuloConPodcasterFallback({
+                modulo,
+                cursoId: courseId,
+                instrucciones,
+                contenido,
+                idioma
+            });
+        }
+        throw error;
+    }
+    const image = response?.image && typeof response.image === "object" ? response.image : null;
+    if (!image?.downloadUrl) {
+        throw new Error("No se recibio una imagen valida para el modulo.");
+    }
+    return image;
+}
+
+function moduleMatchesExcludedId(moduleLike = {}, excludedIds = new Set()) {
+    const rawIds = [
+        String(moduleLike?.id || "").trim(),
+        String(moduleLike?.docId || "").trim()
+    ].filter(Boolean);
+
+    return rawIds.some((rawId) => {
+        if (excludedIds.has(rawId)) return true;
+        const suffix = rawId.includes("_") ? rawId.split("_").pop() : rawId;
+        return excludedIds.has(suffix);
+    });
 }
 
 function estimatePayloadBytes(payload = {}) {
@@ -662,9 +859,16 @@ for (let intento = 0; intento < 3; intento++) {
    GENERAR CONTENIDO PARA MÓDULO ESPECÍFICO (QUIZ, PÁGINA, ETC)
 ============================================================ */
 export async function generarModuloGemini(moduloId) {
+    const pendingKey = String(moduloId || "").trim();
+    if (pendingKey && MODULE_GENERATION_PENDING.has(pendingKey)) {
+        alert("Este módulo ya se está generando.");
+        return;
+    }
+    if (pendingKey) MODULE_GENERATION_PENDING.add(pendingKey);
 
     // 1. Validar curso global (variable correcta: window.curso)
     if (!window.curso) {
+        if (pendingKey) MODULE_GENERATION_PENDING.delete(pendingKey);
         alert("Error interno: no hay curso activo cargado.");
         return;
     }
@@ -672,13 +876,16 @@ export async function generarModuloGemini(moduloId) {
     // 2. Validar subtema activo
     const subtema = window.subtemaActivo;
     if (!subtema) {
+        if (pendingKey) MODULE_GENERATION_PENDING.delete(pendingKey);
         alert("No hay un subtema activo seleccionado.");
         return;
     }
 
     // 3. Traer módulo
-    const modulo = await obtenerModulo(moduloId);
+    const cursoIdActivo = String(window.curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloId, cursoIdActivo);
     if (!modulo) {
+        if (pendingKey) MODULE_GENERATION_PENDING.delete(pendingKey);
         alert("No se encontró el módulo en Firebase.");
         return;
     }
@@ -707,6 +914,7 @@ export async function generarModuloGemini(moduloId) {
         const instruccionesRaw = modulo.instrucciones || "";
         const cursoIdModulo = String(modulo.cursoId || window.curso?.id || "").trim() || null;
         const incluirInstruccionOriginalEnPropuesta = modulo.incluirInstruccionOriginalEnPropuesta === true;
+        const generarGrafico = modulo.generarGrafico === true;
         const { textOnly: instruccionesSoloTexto, richText: instruccionesRichText, images: imagenesInstrucciones } =
             extraerPartesMultimodalesDesdeInstrucciones(instruccionesRaw, modulo.id || moduloId);
         const instruccionesParaPrompt = modulo.tipo === "Lectura" && String(instruccionesRichText || "").trim()
@@ -834,9 +1042,28 @@ export async function generarModuloGemini(moduloId) {
         ======================================
         ` : "";
 
+        const bloqueGraficoComplementario = generarGrafico ? `
+        ===== GRÁFICO COMPLEMENTARIO (NANO BANANA) =====
+        - Este módulo debe quedar preparado para acompañarse con un gráfico o imagen nueva relacionada con la actividad.
+        - NO generes código ni instrucciones técnicas para Nano Banana dentro de la salida final.
+        - SÍ estructura el contenido para que la actividad pueda referirse de forma natural al gráfico.
+        - Cuando el tipo sea Quizz o actividad guiada, puedes usar frases como:
+          - "Analiza la imagen anterior y responde."
+          - "Observa el gráfico anterior antes de contestar."
+          - "Con base en la imagen anterior, selecciona la opción correcta."
+        - La referencia a la imagen debe sentirse parte natural de la consigna, sin romper la estructura obligatoria del módulo.
+        - Si el módulo es Quizz, mantén intacta la estructura de pregunta, opciones, respuesta correcta y retroalimentaciones.
+        - El gráfico debe ser coherente con el tema, el idioma y el nivel pedagógico del módulo.
+        ======================================
+        ` : "";
+
         // **🔵 AQUÍ YA ESTÁ CORREGIDO — Usa window.curso**
-        const contextoCursoCompacto = obtenerContextoCompactoDelCurso(window.curso, 12000);
-        const contextoSubtemaCompacto = obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
+        const excludedModuleIds = new Set([
+            String(moduloId || "").trim(),
+            String(modulo?.id || "").trim()
+        ].filter(Boolean));
+        const contextoCursoCompacto = obtenerContextoCompactoDelCurso(window.curso, 12000, excludedModuleIds);
+        const contextoSubtemaCompacto = obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000, excludedModuleIds);
         const imagenesLimitadas = [];
         let totalInlineChars = 0;
         imagenesInstrucciones.slice(0, 2).forEach((img) => {
@@ -920,6 +1147,7 @@ export async function generarModuloGemini(moduloId) {
         ${permisoTablas}
         ${bloqueContenidoProtegido}
         ${bloqueInstruccionOriginalEnSalida}
+        ${bloqueGraficoComplementario}
 
         ===== REGLAS PEDAGÓGICAS =====
         ${promptExtraPorTipo(modulo.tipo, {
@@ -927,11 +1155,12 @@ export async function generarModuloGemini(moduloId) {
             incluirRespuestas: preferenciasQuizz.incluirRespuestas,
             incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
             usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
-            exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad
+            exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
+            idiomaDetectado: idiomaDetectadoModulo
         })}
 
         ===== FORMATO DE SALIDA =====
-        ${BLOQUE_FORMATO_MARKDOWN}
+        ${modulo.tipo === "Temario" ? BLOQUE_FORMATO_MOODLE : BLOQUE_FORMATO_MARKDOWN}
 
         ===== IDIOMA DE SALIDA (OBLIGATORIO) =====
         - Idioma detectado en instrucciones del módulo: ${idiomaDetectadoModulo.label} (${idiomaDetectadoModulo.code}).
@@ -939,8 +1168,12 @@ export async function generarModuloGemini(moduloId) {
         - Si el idioma detectado NO es español, NO traduzcas la respuesta al español.
         - Mantén el tono natural del idioma detectado.
 
-        DEVUELVE SOLO MARKDOWN ESTRUCTURADO.
-        Si alguna instrucción previa incluye ejemplos en HTML, conviértelos a markdown equivalente.
+        ${modulo.tipo === "Temario"
+            ? "DEVUELVE SOLO HTML ESTRUCTURADO PARA EL TEMARIO."
+            : "DEVUELVE SOLO MARKDOWN ESTRUCTURADO."}
+        ${modulo.tipo === "Temario"
+            ? "No conviertas la salida a markdown. Mantén la tabla HTML final."
+            : "Si alguna instrucción previa incluye ejemplos en HTML, conviértelos a markdown equivalente."}
         NO menciones que eres IA.
         ${tieneLecturaProtegida ? "⚠️ ADVERTENCIA CRÍTICA: Si el autor incluyó una lectura, NO la modifiques si el autor lo indica. Transcríbela exactamente como está." : ""}
         ${incluirInstruccionOriginalEnPropuesta ? "Debes incluir siempre pares por actividad: 'Actividad N original' y luego 'Propuesta Actividad N'." : ""}
@@ -1003,7 +1236,8 @@ export async function generarModuloGemini(moduloId) {
                 incluirRespuestas: preferenciasQuizz.incluirRespuestas,
                 incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
                 usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
-                exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad
+                exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
+                idiomaDetectado: idiomaDetectadoModulo
             })}
 
             ${incluirInstruccionOriginalEnPropuesta ? `
@@ -1022,12 +1256,19 @@ export async function generarModuloGemini(moduloId) {
             No agrupes todas las originales en una sola sección.`}
             ` : ""}
 
+            ${generarGrafico ? `
+            # GRÁFICO COMPLEMENTARIO
+            El contenido debe quedar preparado para acompañarse con un gráfico nuevo relacionado con la actividad.
+            Si el módulo es Quizz, puedes referirte a la imagen de forma natural, pero sin romper la estructura del cuestionario.
+            ` : ""}
+
             # FORMATO DE SALIDA
-            ${BLOQUE_FORMATO_MARKDOWN}
+            ${modulo.tipo === "Temario" ? BLOQUE_FORMATO_MOODLE : BLOQUE_FORMATO_MARKDOWN}
 
             # IDIOMA
             Devuelve todo en ${idiomaDetectadoModulo.label} (${idiomaDetectadoModulo.code}).
-            No repitas contenido existente. Devuelve solo el markdown final.
+            No repitas contenido existente.
+            ${modulo.tipo === "Temario" ? "Devuelve solo el HTML final de la tabla." : "Devuelve solo el markdown final."}
             `;
             ({ response: res, data } = await geminiGenerateRequest(buildModulePayload({
                 promptText: promptMinimo,
@@ -1054,14 +1295,44 @@ export async function generarModuloGemini(moduloId) {
         texto = limpiarBloquesCode(texto);
         texto = limpiarRespuestaGemini(texto);
 
-        const contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
+        let contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
             ? window.normalizarContenidoModuloPersistible(texto)
             : typeof window.renderizarContenidoModulo === "function"
                 ? window.renderizarContenidoModulo(texto)
             : texto;
 
+        let graficoGeneradoPayload = null;
+        if (generarGrafico) {
+            try {
+                const image = await generarGraficoComplementarioModulo({
+                    modulo,
+                    cursoId: cursoIdModulo,
+                    instrucciones: instruccionesParaPrompt,
+                    contenido: contenidoParaGuardar,
+                    idioma: idiomaDetectadoModulo
+                });
+                contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
+                    ? window.normalizarContenidoModuloPersistible(combinarContenidoConGrafico(image, contenidoParaGuardar, modulo))
+                    : combinarContenidoConGrafico(image, contenidoParaGuardar, modulo);
+                graficoGeneradoPayload = {
+                    downloadUrl: String(image.downloadUrl || "").trim(),
+                    storagePath: String(image.storagePath || "").trim(),
+                    mimeType: String(image.mimeType || "image/png").trim() || "image/png",
+                    model: String(image.model || "").trim(),
+                    promptVersion: String(image.promptVersion || "").trim(),
+                    updatedAt: String(image.updatedAt || "").trim(),
+                };
+            } catch (imageError) {
+                console.warn("No se pudo generar el grafico complementario del modulo:", imageError);
+                alert(`El contenido se generó, pero el gráfico no se pudo crear.\n${imageError?.message || ""}`);
+            }
+        }
+
         // Guardar el HTML decorado para que el estilo persista tras recargar.
-        await guardarModulo(moduloId, { contenido: contenidoParaGuardar }, cursoIdModulo);
+        await guardarModulo(moduloId, {
+            contenido: contenidoParaGuardar,
+            ...(graficoGeneradoPayload ? { graficoGenerado: graficoGeneradoPayload } : {})
+        }, cursoIdModulo);
         const moduloGuardado = await obtenerModulo(moduloId, cursoIdModulo);
         const contenidoPersistido = String(moduloGuardado?.contenido || "").trim();
         if (!contenidoPersistido) {
@@ -1080,6 +1351,8 @@ export async function generarModuloGemini(moduloId) {
     } catch (e) {
         console.error("Error en generarModuloGemini:", e);
         alert(`Hubo un error al generar el módulo con IA.\n${e?.message || ""}`);
+    } finally {
+        if (pendingKey) MODULE_GENERATION_PENDING.delete(pendingKey);
     }
 }
 
@@ -1188,6 +1461,7 @@ ${textoOriginal}
 
 function promptExtraPorTipo(tipo, options = {}) {
     const cantidadSolicitada = Number(options?.cantidadSolicitadaQuizz || 0) || null;
+    const idiomaCode = String(options?.idiomaDetectado?.code || "es").toLowerCase();
     switch (tipo) {
 case "Quizz": return `
 Genera un CUESTIONARIO (Quizz) en markdown estructurado.
@@ -1285,22 +1559,48 @@ REGLAS:
         `;
 
         case "Temario": return `
-        Genera un TEMARIO Moodle en markdown estructurado.
+        Genera un TEMARIO Moodle en una TABLA HTML clara y lista para mostrar en el editor.
 
         OBJETIVO:
-        - Presentar de forma clara el recorrido del subtema.
-        - Servir como guía inicial y mapa de navegación del contenido.
-        - Ordenar los puntos, apartados o bloques principales sin desarrollar cada uno en exceso.
+        - Presentar de forma visual el recorrido del subtema como mapa de ruta.
+        - Organizar la información principal en columnas, no en párrafos extensos.
+        - Permitir lectura rápida tipo syllabus/chapter overview.
+
+        FORMATO OBLIGATORIO:
+        - Devuelve SOLO HTML válido.
+        - Devuelve una sola tabla principal usando <table>, <thead>, <tbody>, <tr>, <th>, <td>.
+        - NO uses markdown.
+        - NO uses listas fuera de la tabla.
+        - Puedes usar <p> dentro de las celdas para separar ideas.
+        - Puedes usar rowspan o colspan si mejora la claridad visual.
+        - Si detectas un título de capítulo o unidad, colócalo antes de la tabla con <h2> o <h3>.
+
+        ESTRUCTURA ESPERADA:
+        - La tabla debe tener EXACTAMENTE 3 columnas.
+        - Usa EXACTAMENTE estos encabezados:
+          ${idiomaCode === "en"
+            ? `CLIL | Language Arts (Grammar & Vocabulary) | Language Functions (Skills)`
+            : `CLIL | Lengua y vocabulario | Funciones del lenguaje y habilidades`}
+        - Identifica el tema eje o área CLIL/contenido principal y colócalo en la PRIMERA columna.
+        - La primera columna debe contener solo el enfoque CLIL principal, por ejemplo: History, Science, Geography, Arte, Historia.
+        - La segunda columna debe contener solo contenidos de lengua: gramática, vocabulario, estructuras, formation, expressions.
+        - La tercera columna debe contener solo funciones comunicativas, habilidades o desempeños: hablar, describir, compare, explain, relate, classify.
+        - No inventes encabezados alternativos ni abreviados.
+        - No mezcles contenidos de gramática/vocabulario dentro de la tercera columna.
+        - No mezcles funciones o habilidades dentro de la segunda columna.
+        - Si recibes una lista de acciones, decide una por una en qué columna debe ir según su función pedagógica.
 
         REGLAS:
-        - Usa encabezados markdown claros.
-        - Incluye una breve introducción de orientación.
-        - Presenta los temas o apartados principales en orden lógico.
-        - Puedes usar listas numeradas o viñetas.
+        - Escribe TODO en el idioma detectado del módulo.
+        - Si el texto está en inglés, los encabezados deben estar EXACTAMENTE en inglés.
+        - Si el texto está en español, los encabezados deben estar EXACTAMENTE en español.
         - No lo conviertas en cuestionario.
         - No lo conviertas en lectura extensa.
         - No agregues evaluación ni retroalimentaciones.
-        - Devuelve solo el temario final, limpio y estructurado.
+        - Resume y agrupa la información en celdas compactas, claras y reutilizables.
+        - Si existe un título de chapter o chapter focus, colócalo arriba de la tabla en un solo encabezado limpio.
+        - En inglés, evita títulos defectuosos como "Chapter 1 The..." si hace falta el separador; usa una forma natural como "Chapter 1 - The Greek Culture" o similar.
+        - Devuelve solo el temario final en tabla, limpio y estructurado.
         `;
 
         case "Lectura": return `
@@ -1446,7 +1746,7 @@ function obtenerContextoCompletoDelCurso(curso) {
     return texto;
 }
 
-function obtenerContextoCompactoDelCurso(curso, limiteTotal = 12000) {
+function obtenerContextoCompactoDelCurso(curso, limiteTotal = 12000, excludedModuleIds = new Set()) {
     if (!curso || !Array.isArray(curso.temas)) return "";
 
     const bloques = ["=== CONTEXTO RESUMIDO DEL CURSO ==="];
@@ -1463,6 +1763,7 @@ function obtenerContextoCompactoDelCurso(curso, limiteTotal = 12000) {
             if (modulos.length) {
                 bloques.push("  Módulos previos:");
                 modulos.forEach((mod) => {
+                    if (moduleMatchesExcludedId(mod, excludedModuleIds)) return;
                     const nombre = truncateText(mod?.nombre || "Sin nombre", 140);
                     const tipo = truncateText(mod?.tipo || "Sin tipo", 40);
                     const contenido = truncateText(stripHtmlToText(mod?.contenido || ""), 280);
@@ -1518,7 +1819,7 @@ ${mod.contenido || "<sin contenido>"}
     return contexto;
 }
 
-function obtenerContextoCompactoDelSubtema(subtema, limiteTotal = 9000) {
+function obtenerContextoCompactoDelSubtema(subtema, limiteTotal = 9000, excludedModuleIds = new Set()) {
     if (!subtema) return "";
 
     const bloques = [
@@ -1536,6 +1837,7 @@ function obtenerContextoCompactoDelSubtema(subtema, limiteTotal = 9000) {
     if (modulosSubtema.length) {
         bloques.push("Módulos existentes:");
         modulosSubtema.forEach((mod) => {
+            if (moduleMatchesExcludedId(mod, excludedModuleIds)) return;
             const nombre = truncateText(mod?.nombre || "Sin nombre", 160);
             const tipo = truncateText(mod?.tipo || "Sin tipo", 40);
             const instruccionesModulo = truncateText(stripHtmlToText(mod?.instrucciones || ""), 450);

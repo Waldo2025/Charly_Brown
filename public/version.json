@@ -1,11 +1,13 @@
 {
-  "version": "2026-1.0.0.19",
+  "version": "2026-1.0.0.23",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo el editor de cursos y scripts del frontend para corregir estilos y evitar caché vieja en produccion. Da click aqui para actualizar.",
+  "message": "Se actualizo la plataforma para soportar graficos generados en modulos y seguir limpiando los datos del sitio antes de reiniciar desde index.html. Da click aqui para actualizar.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion de moodleCourse con cache-busting de CSS y JS para corregir estilos viejos en produccion.",
+  "forceClearCacheReason": "Actualizacion del update banner para limpiar datos locales del sitio, desregistrar service workers e iniciar desde index.html tras aplicar la nueva version.",
   "updates": [
-    "Corregido: moodleCourse ahora fuerza recarga de CSS y JS del editor para evitar que produccion use archivos viejos en cache.",
-    "Corregido: mejoras de estilos del contenido estructurado del modulo ya deben reflejarse correctamente en produccion."
+    "Corregido: el banner ahora limpia Cache Storage, IndexedDB, localStorage, sessionStorage y cookies accesibles por JS para este origen.",
+    "Corregido: la actualizacion ahora desregistra los service workers del sitio antes de recargar.",
+    "Corregido: despues de limpiar los datos del sitio, la app redirige a index.html para iniciar desde una shell limpia.",
+    "Diagnostico: el aviso sigue incluyendo pasos rapidos para revisar service worker activo, Cache Storage y el parametro ?v en la URL."
   ]
 }
