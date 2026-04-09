@@ -1079,7 +1079,7 @@ export async function generarModuloGemini(moduloId) {
 
     } catch (e) {
         console.error("Error en generarModuloGemini:", e);
-        alert(`Hubo un error al generar el módulo con IA.\n${e?.message || ""}`);
+        throw e;
     }
 }
 

@@ -33,7 +33,7 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.47';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.53';
 
 import { 
     activarEdicionModuloCompleto,
@@ -6421,7 +6421,8 @@ window.ejecutarGeneracionModuloGemini = async function (moduloId) {
         await generarModuloGemini(moduloId);   // ← SOLO 1 parámetro
         await cargarSubtema(subtemaActivo, moduloId);          // refrescar UI con el mismo módulo activo
     } catch (err) {
-        alert("Error al generar contenido con IA.");
+        console.error("Error al generar contenido con IA:", err);
+        alert(`Error al generar contenido con IA.\n${err?.message || "Revisa la consola o los logs del backend para más detalle."}`);
     }
 };
 

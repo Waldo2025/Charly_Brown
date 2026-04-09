@@ -86,16 +86,26 @@ const fetchCompat = (...args) => {
 };
 
 function parseAllowedOrigins() {
+  const defaults = [
+    "https://charly-brown.web.app",
+    "https://charly-brown.firebaseapp.com",
+    "https://charly-brown-gemini-backend.onrender.com",
+    "https://*.onrender.com"
+  ];
   const raw = String(
     process.env.CORS_ALLOWED_ORIGINS
     || process.env.ALLOWED_ORIGINS
     || ""
   ).trim();
-  if (!raw) return [];
-  return raw
-    .split(",")
+  const configured = raw
+    ? raw.split(",")
+    : [];
+  return Array.from(new Set([
+    ...defaults,
+    ...configured
+  ]
     .map((item) => String(item || "").trim())
-    .filter(Boolean);
+    .filter(Boolean)));
 }
 
 const ALLOWED_ORIGINS = parseAllowedOrigins();
