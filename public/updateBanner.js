@@ -6,6 +6,8 @@
   const LAUNCHER_ID = 'updateBannerLauncher';
   const DEFAULT_TITLE = 'Actualización disponible de Charly Brown';
   const DEFAULT_MESSAGE = 'Hay cambios nuevos en la aplicación. Revisa el resumen y recarga cuando estés listo.';
+  const POST_CLEAR_REDIRECT_PATH = '/index.html';
+  const WINDOW_NAME_PREFIX = '__cbAppliedVersion__:';
 
   function escapeHtml(value) {
     return String(value || '')
@@ -33,184 +35,161 @@
         display: none;
         position: fixed;
         right: 20px;
-        top: 20px;
+        top: 68px;
         bottom: auto;
         z-index: 10000;
         margin: 0;
-        padding: 12px 14px;
-        border-radius: 10px;
-        background: var(--app-alert-bg, #facc15);
-        color: var(--app-alert-text, #111111);
+        padding: 12px 14px 10px;
+        border-radius: 14px;
+        background: rgba(7, 10, 20, 0.96);
+        color: #f8fafc;
         font-size: 12px;
         font-weight: 700;
         letter-spacing: 0.01em;
-        cursor: pointer;
-        border: 2px solid var(--app-alert-border, #111111);
-        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
+        border: 1px solid rgba(250, 204, 21, 0.45);
+        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
         flex-direction: column;
-        gap: 6px;
-        max-width: 380px;
-      }
-      .update-banner-head {
-        display: flex;
-        align-items: center;
         gap: 8px;
-        margin-bottom: 2px;
-      }
-      .update-banner-icon {
-        width: 18px;
-        height: 18px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--app-alert-text, #111111);
-        font-size: 15px;
-        line-height: 1;
+        max-width: 420px;
+        pointer-events: none;
       }
       .update-banner-title {
         font-size: 12px;
         font-weight: 800;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .update-banner-msg {
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: none;
-        letter-spacing: 0;
-        color: var(--app-alert-text, #111111);
-      }
-      .update-banner-cta {
-        font-size: 11px;
-        font-weight: 700;
-        color: var(--app-alert-text, #1f2937);
-      }
-      .update-banner-summary {
-        margin-top: 4px;
-        border-top: 1px dashed var(--app-alert-border, #111111);
-        padding-top: 6px;
-      }
-      .update-banner-summary > summary {
-        cursor: pointer;
-        list-style: none;
-        font-size: 11px;
-        font-weight: 800;
-        color: var(--app-alert-text, #111111);
-      }
-      .update-banner-summary > summary::-webkit-details-marker {
-        display: none;
-      }
-      .update-banner-summary > summary::before {
-        content: "▸";
-        margin-right: 6px;
-      }
-      .update-banner-summary[open] > summary::before {
-        content: "▾";
+        letter-spacing: 0.06em;
+        color: #facc15;
       }
       .update-banner-list {
-        margin: 6px 0 0;
+        margin: 0;
         padding: 0;
         list-style: none;
         display: grid;
-        gap: 4px;
-        max-height: 160px;
+        gap: 6px;
+        max-height: 220px;
         overflow-y: auto;
       }
       .update-banner-item {
         display: flex;
         align-items: flex-start;
-        gap: 6px;
-        font-size: 11px;
-        line-height: 1.35;
-        color: var(--app-alert-text, #111111);
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: #f8fafc;
       }
       .update-banner-item-index {
-        min-width: 14px;
-        color: var(--app-alert-text, #111111);
+        min-width: 16px;
+        color: #facc15;
         font-weight: 800;
-      }
-      .update-banner:hover {
-        background: color-mix(in srgb, var(--app-alert-bg, #facc15) 86%, #ffffff 14%);
-        border-color: var(--app-alert-border, #111111);
-        transform: translateY(-1px);
-      }
-      .update-banner:focus {
-        outline: 2px solid color-mix(in srgb, var(--app-alert-border, #111111) 55%, transparent);
-        outline-offset: 2px;
       }
       .update-banner.is-visible {
         display: flex;
       }
-      .update-banner-launcher {
+      #${LAUNCHER_ID}.update-banner-launcher {
         display: none;
         align-items: center;
         justify-content: center;
-        min-height: 38px;
+        gap: 8px;
+        min-height: 40px;
         padding: 0 18px;
-        border: 0;
+        border: 2px solid #facc15;
         border-radius: 999px;
-        background: linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--cb-chrome-bg, #1677f2) 82%, #ffffff 18%) 0%,
-          var(--cb-chrome-bg, #1677f2) 100%
-        );
-        color: var(--cb-header-text-color, #ffffff);
+        background: #111111;
+        color: #ffffff;
         font-size: 12px;
         font-weight: 800;
-        letter-spacing: 0.01em;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
         cursor: pointer;
-        box-shadow: 0 8px 18px color-mix(in srgb, var(--cb-chrome-bg, #1677f2) 28%, transparent);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
         margin-left: auto;
         white-space: nowrap;
+        animation: cb-update-alert-pulse 1.15s steps(2, jump-none) infinite;
       }
-      .update-banner-launcher:hover {
-        background: linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--cb-chrome-bg, #1677f2) 74%, #ffffff 26%) 0%,
-          color-mix(in srgb, var(--cb-chrome-bg, #1677f2) 92%, #000000 8%) 100%
-        );
+      #${LAUNCHER_ID}.update-banner-launcher,
+      #${LAUNCHER_ID}.update-banner-launcher:visited,
+      #${LAUNCHER_ID}.update-banner-launcher:active {
+        background-color: #111111;
+        color: #ffffff !important;
+        border-color: #facc15;
+        text-decoration: none !important;
+        opacity: 1 !important;
+      }
+      #${LAUNCHER_ID}.update-banner-launcher:hover {
+        background: #facc15;
+        color: #111111;
         transform: translateY(-1px);
       }
-      .update-banner-launcher:focus-visible {
-        outline: 2px solid color-mix(in srgb, var(--cb-chrome-bg, #1677f2) 40%, transparent);
+      #${LAUNCHER_ID}.update-banner-launcher:hover,
+      #${LAUNCHER_ID}.update-banner-launcher:hover span,
+      #${LAUNCHER_ID}.update-banner-launcher:hover i {
+        color: #111111 !important;
+      }
+      #${LAUNCHER_ID}.update-banner-launcher:focus-visible {
+        outline: 2px solid rgba(250, 204, 21, 0.55);
         outline-offset: 2px;
       }
-      .update-banner-launcher.is-visible {
+      #${LAUNCHER_ID}.update-banner-launcher span,
+      #${LAUNCHER_ID}.update-banner-launcher i {
+        color: inherit !important;
+        opacity: 1 !important;
+      }
+      #${LAUNCHER_ID}.update-banner-launcher.is-visible {
         display: inline-flex;
+      }
+      #${LAUNCHER_ID}.update-banner-launcher.is-floating {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 10001;
+        margin-left: 0;
+      }
+      #${LAUNCHER_ID} .update-banner-launcher-icon {
+        color: #facc15;
+        font-size: 13px;
+        line-height: 1;
+      }
+      #${LAUNCHER_ID}.update-banner-launcher:hover .update-banner-launcher-icon {
+        color: #111111;
+      }
+      @keyframes cb-update-alert-pulse {
+        0%, 49% {
+          background-color: #111111;
+          color: #ffffff;
+          border-color: #facc15;
+        }
+        50%, 100% {
+          background-color: #facc15;
+          color: #111111;
+          border-color: #111111;
+        }
       }
     `;
     document.head.appendChild(style);
   }
 
   function renderBannerContent(banner, info) {
-    const title = (info && typeof info.title === 'string' && info.title.trim()) || DEFAULT_TITLE;
-    const message = (info && typeof info.message === 'string' && info.message.trim()) || DEFAULT_MESSAGE;
     const updates = normalizeUpdates(info && info.updates);
-
-    const listHtml = updates.length
+    banner.innerHTML = updates.length
       ? `
-      <details class="update-banner-summary">
-        <summary>Últimas actualizaciones (${updates.length})</summary>
-        <ul class="update-banner-list" aria-label="Lista de actualizaciones recientes">
-          ${updates.map((item, idx) => `
-            <li class="update-banner-item">
-              <span class="update-banner-item-index">${idx + 1}.</span>
-              <span>${escapeHtml(item)}</span>
-            </li>
-          `).join('')}
-        </ul>
-      </details>
-      `
-      : '';
-
-    banner.innerHTML = `
-      <div class="update-banner-head">
-        <span class="update-banner-icon" aria-hidden="true">⚠</span>
-        <div class="update-banner-title">${escapeHtml(title)}</div>
-      </div>
-      <div class="update-banner-msg">${escapeHtml(message)}</div>
-      <div class="update-banner-cta">Acción: abrir aviso y recargar la app.</div>
-      ${listHtml}
+      <div class="update-banner-title">Cambios incluidos</div>
+      <ul class="update-banner-list" aria-label="Lista de actualizaciones recientes">
+        ${updates.map((item, idx) => `
+          <li class="update-banner-item">
+            <span class="update-banner-item-index">${idx + 1}.</span>
+            <span>${escapeHtml(item)}</span>
+          </li>
+        `).join('')}
+      </ul>
+    `
+      : `
+      <div class="update-banner-title">Cambios incluidos</div>
+      <ul class="update-banner-list" aria-label="Lista de actualizaciones recientes">
+        <li class="update-banner-item">
+          <span class="update-banner-item-index">1.</span>
+          <span>Hay una actualización lista para aplicar.</span>
+        </li>
+      </ul>
     `;
   }
 
@@ -236,17 +215,25 @@
   function ensureLauncher() {
     let btn = document.getElementById(LAUNCHER_ID);
     const headerContent = getHeaderContent();
-    if (!headerContent) return btn || null;
 
     if (!btn) {
       btn = document.createElement('button');
       btn.id = LAUNCHER_ID;
       btn.type = 'button';
       btn.className = 'update-banner-launcher';
-      btn.textContent = 'Ver cambios';
-      btn.setAttribute('aria-label', 'Ver cambios disponibles en Charly Brown');
+      btn.innerHTML = '<span class="update-banner-launcher-icon" aria-hidden="true">⚠</span><span>Actualizar ahora</span>';
+      btn.setAttribute('aria-label', 'Actualizar ahora');
     }
 
+    if (!headerContent) {
+      if (btn.parentElement !== document.body && document.body) {
+        document.body.appendChild(btn);
+      }
+      btn.classList.add('is-floating');
+      return btn;
+    }
+
+    btn.classList.remove('is-floating');
     if (btn.parentElement !== headerContent) {
       headerContent.appendChild(btn);
     }
@@ -281,31 +268,90 @@
     const version = String(info?.version || '');
     btn.classList.add('is-visible');
     if (version) btn.setAttribute('data-version', version);
-    const title = (info && typeof info.title === 'string' && info.title.trim()) || DEFAULT_TITLE;
     const updatesCount = normalizeUpdates(info && info.updates).length;
     btn.title = updatesCount
-      ? `${title} (${updatesCount} cambios)`
-      : title;
+      ? `Actualizar ahora (${updatesCount} cambios)`
+      : 'Actualizar ahora';
   }
 
-  async function hardRefresh(version) {
+  function persistAppliedVersionFromWindowName() {
+    try {
+      const rawWindowName = String(window.name || '');
+      if (!rawWindowName.startsWith(WINDOW_NAME_PREFIX)) return;
+      const appliedVersion = rawWindowName.slice(WINDOW_NAME_PREFIX.length).trim();
+      if (!appliedVersion) return;
+      localStorage.setItem(STORAGE_KEY, appliedVersion);
+      localStorage.setItem(`${FORCE_ACK_KEY_PREFIX}${appliedVersion}`, '1');
+      window.name = '';
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function clearIndexedDbStorage() {
+    if (!('indexedDB' in window)) return;
+    if (typeof indexedDB.databases === 'function') {
+      try {
+        const databases = await indexedDB.databases();
+        await Promise.all((databases || []).map((entry) => {
+          const name = String(entry?.name || '').trim();
+          if (!name) return Promise.resolve();
+          return new Promise((resolve) => {
+            const request = indexedDB.deleteDatabase(name);
+            request.onsuccess = () => resolve();
+            request.onerror = () => resolve();
+            request.onblocked = () => resolve();
+          });
+        }));
+        return;
+      } catch (_) {
+        // ignore and continue
+      }
+    }
+  }
+
+  function clearCookieStorage() {
+    try {
+      const cookies = String(document.cookie || '').split(';');
+      cookies.forEach((cookie) => {
+        const eqIndex = cookie.indexOf('=');
+        const rawName = eqIndex >= 0 ? cookie.slice(0, eqIndex) : cookie;
+        const name = rawName.trim();
+        if (!name) return;
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+      });
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function clearOriginBrowsingData() {
     try {
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map((k) => {
-          if (String(k || '').startsWith('cb-lecturas-game-')) return Promise.resolve(false);
-          return caches.delete(k);
-        }));
+        await Promise.all(keys.map((k) => caches.delete(k)));
       }
-      // Importante: no desregistrar SW globalmente, rompe el modo offline.
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'CB_SKIP_WAITING' });
+      if ('serviceWorker' in navigator && typeof navigator.serviceWorker.getRegistrations === 'function') {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister().catch(() => undefined)));
       }
+      await clearIndexedDbStorage();
+      try { localStorage.clear(); } catch (_) {}
+      try { sessionStorage.clear(); } catch (_) {}
+      clearCookieStorage();
     } catch (_) {
-      // ignore cache delete errors
+      // ignore storage cleanup errors
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set('v', version || Date.now().toString());
+  }
+
+  async function hardRefresh(version) {
+    const url = new URL(POST_CLEAR_REDIRECT_PATH, window.location.origin);
+    try {
+      window.name = version ? `${WINDOW_NAME_PREFIX}${version}` : '';
+    } catch (_) {
+      // ignore
+    }
+    await clearOriginBrowsingData();
     window.location.replace(url.toString());
   }
 
@@ -328,6 +374,18 @@
 
   let latestInfoCache = null;
   let pendingLauncherInfo = null;
+  window.__cbUpdateDiagnostics = function getCbUpdateDiagnostics() {
+    const url = new URL(window.location.href);
+    return {
+      version: latestInfoCache?.version || '',
+      forceClearCache: latestInfoCache?.forceClearCache === true,
+      serviceWorkerControlled: !!navigator.serviceWorker?.controller,
+      serviceWorkerControllerUrl: navigator.serviceWorker?.controller?.scriptURL || '',
+      urlVersion: url.searchParams.get('v') || '',
+      launcherVisible: !!document.getElementById(LAUNCHER_ID)?.classList.contains('is-visible')
+    };
+  };
+
   async function checkVersion() {
     try {
       const latestInfo = await fetchVersionInfo();
@@ -359,6 +417,7 @@
     }
   }
 
+  persistAppliedVersionFromWindowName();
   ensureStyles();
   const banner = ensureBanner();
   const ensureLauncherBinding = () => {
@@ -370,11 +429,25 @@
       e.stopPropagation();
       const latestInfo = latestInfoCache || await fetchVersionInfo().catch(() => null);
       if (!latestInfo?.version) return;
-      if (banner.classList.contains('is-visible')) {
-        hideBanner();
-        return;
-      }
+      localStorage.setItem(STORAGE_KEY, latestInfo.version);
+      localStorage.setItem(`${FORCE_ACK_KEY_PREFIX}${latestInfo.version}`, '1');
+      hardRefresh(latestInfo.version);
+    });
+    btn.addEventListener('mouseenter', async () => {
+      const latestInfo = latestInfoCache || await fetchVersionInfo().catch(() => null);
+      if (!latestInfo?.version) return;
       showBanner(latestInfo);
+    });
+    btn.addEventListener('mouseleave', () => {
+      hideBanner();
+    });
+    btn.addEventListener('focus', async () => {
+      const latestInfo = latestInfoCache || await fetchVersionInfo().catch(() => null);
+      if (!latestInfo?.version) return;
+      showBanner(latestInfo);
+    });
+    btn.addEventListener('blur', () => {
+      hideBanner();
     });
     btn.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -395,30 +468,6 @@
     childList: true,
     subtree: true
   });
-
-  banner.addEventListener('click', async () => {
-    const latestInfo = latestInfoCache || await fetchVersionInfo().catch(() => null);
-    const latest = latestInfo && latestInfo.version ? latestInfo.version : '';
-    if (latest) {
-      localStorage.setItem(STORAGE_KEY, latest);
-      localStorage.setItem(`${FORCE_ACK_KEY_PREFIX}${latest}`, '1');
-    }
-    hardRefresh(latest);
-  });
-
-  banner.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      banner.click();
-    }
-  });
-
-  // Permite abrir/cerrar el summary sin disparar actualización.
-  banner.addEventListener('click', (e) => {
-    if (e.target && e.target.closest('.update-banner-summary')) {
-      e.stopPropagation();
-    }
-  }, true);
 
   let lastCheck = 0;
   const MIN_INTERVAL_MS = 60 * 1000;

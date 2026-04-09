@@ -151,14 +151,14 @@ function applySidebarRoleVisibility(role = "") {
 
   // Hard guard por enlace para que cada opción respete su rol real.
   const roleLockedIds = {
-    gestionUsuariosLink: "admin",
-    themeCommandSettingsBtn: "admin",
-    lecturasGameLink: "admin"
+    gestionUsuariosLink: ["admin"],
+    lecturasGameLink: ["admin"]
   };
-  Object.entries(roleLockedIds).forEach(([id, expectedRole]) => {
+  Object.entries(roleLockedIds).forEach(([id, allowedRoles]) => {
     const el = document.getElementById(id);
     if (!el) return;
-    const isVisible = normalizedRole === expectedRole;
+    const roleList = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+    const isVisible = roleList.includes(normalizedRole);
     el.classList.toggle("d-none", !isVisible);
     el.hidden = !isVisible;
     if (!isVisible) {

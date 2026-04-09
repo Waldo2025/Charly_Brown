@@ -354,7 +354,9 @@ service cloud.firestore {
 
     // Users explícito.
     match /users/{uid} {
-      allow read: if isAdmin() || isOwner(uid);
+      // Chat y otros directorios internos necesitan listar perfiles autenticados.
+      // La administración sigue protegida en frontend y escritura.
+      allow read: if isSignedIn();
 
       allow create: if isOwner(uid) &&
         (

@@ -1,13 +1,12 @@
 {
-  "version": "2026-1.0.0.23",
+  "version": "2026-1.0.0.47",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo la plataforma para soportar graficos generados en modulos y seguir limpiando los datos del sitio antes de reiniciar desde index.html. Da click aqui para actualizar.",
+  "message": "Se actualizo moodleCourse para forzar una copia fresca del editor y del menu de acciones de modulos. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion del update banner para limpiar datos locales del sitio, desregistrar service workers e iniciar desde index.html tras aplicar la nueva version.",
+  "forceClearCacheReason": "Actualizacion para forzar una copia fresca de moodleCourse.js y moodlecourse-geminiOperations.js despues de cambios en el menu de acciones de modulos.",
   "updates": [
-    "Corregido: el banner ahora limpia Cache Storage, IndexedDB, localStorage, sessionStorage y cookies accesibles por JS para este origen.",
-    "Corregido: la actualizacion ahora desregistra los service workers del sitio antes de recargar.",
-    "Corregido: despues de limpiar los datos del sitio, la app redirige a index.html para iniciar desde una shell limpia.",
-    "Diagnostico: el aviso sigue incluyendo pasos rapidos para revisar service worker activo, Cache Storage y el parametro ?v en la URL."
+    "Corregido: se subio la version de moodleCourse para forzar entrada limpia del editor.",
+    "Corregido: se subio la version del modulo de acciones para evitar que el navegador siga usando una copia vieja.",
+    "Corregido: Actualizar ahora vuelve a limpiar datos locales del sitio e iniciar desde index.html."
   ]
 }

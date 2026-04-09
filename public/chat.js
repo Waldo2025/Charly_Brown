@@ -354,6 +354,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
+        }, (error) => {
+            console.error("No se pudo cargar la lista de contactos del chat.", error);
+            usersListDiv.innerHTML = `
+              <div class="chat-empty-state">
+                <p>No se pudieron cargar los contactos del chat.</p>
+              </div>
+            `;
         });
     }
     
@@ -374,23 +381,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
     onAuthStateChanged(auth, async (user) => {
         if (user) {
-            const userDocRef = doc(db, "users", user.uid);
-            const userDoc = await getDoc(userDocRef);
-    
-            if (userDoc.exists()) {
-                const data = userDoc.data();
-                if (userNameSpan) userNameSpan.textContent = `${data.firstName} ${data.lastName}`;
-                if (userRoleSpan) userRoleSpan.textContent = data.role;
-    
-                // 🔒 Oculta el menú de usuarios si no es admin
-                const usuariosLink = document.getElementById("gestionUsuariosLink");
-                if (data.role !== "admin" && usuariosLink) {
-                    usuariosLink.style.display = "none";
+            try {
+                const userDocRef = doc(db, "users", user.uid);
+                const userDoc = await getDoc(userDocRef);
+
+                if (userDoc.exists()) {
+                    const data = userDoc.data();
+                    if (userNameSpan) userNameSpan.textContent = `${data.firstName} ${data.lastName}`;
+                    if (userRoleSpan) userRoleSpan.textContent = data.role || "";
+
+                    const usuariosLink = document.getElementById("gestionUsuariosLink");
+                    if ((data.role || "") !== "admin" && usuariosLink) {
+                        usuariosLink.style.display = "none";
+                    }
                 }
-    
-                loadUsersList();
-                startUnreadListener();
+            } catch (error) {
+                console.error("No se pudo cargar el perfil del usuario para el chat.", error);
             }
+
+            loadUsersList();
+            startUnreadListener();
         } else {
             if (typeof unsubscribeUnread === "function") unsubscribeUnread();
             updateSidebarUnreadBadge(0);

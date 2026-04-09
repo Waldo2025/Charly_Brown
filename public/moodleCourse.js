@@ -19,6 +19,12 @@ import {
     getAuth,
     onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import {
+    getStorage,
+    ref as storageRef,
+    uploadBytes,
+    getDownloadURL
+} from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 
 
 import { 
@@ -27,7 +33,7 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.47';
 
 import { 
     activarEdicionModuloCompleto,
@@ -46,6 +52,7 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
 
 export let currentUserId = null;
@@ -202,6 +209,1168 @@ const escapeHtml = (value = "") => String(value ?? "")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const MODULE_GRAPHIC_LIGHTBOX_ID = "cbModuleGraphicLightbox";
+
+function ensureModuleGraphicLightbox() {
+    let modal = document.getElementById(MODULE_GRAPHIC_LIGHTBOX_ID);
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = MODULE_GRAPHIC_LIGHTBOX_ID;
+    modal.className = "cb-module-graphic-lightbox hidden";
+    modal.setAttribute("aria-hidden", "true");
+    modal.innerHTML = `
+        <div class="cb-module-graphic-lightbox__backdrop" data-mc-action="cerrar-galeria-grafico-modulo"></div>
+        <div class="cb-module-graphic-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Galería del gráfico del módulo">
+            <header class="cb-module-graphic-lightbox__header">
+                <div>
+                    <div class="cb-module-graphic-lightbox__header-title">Galería del gráfico</div>
+                    <div class="cb-module-graphic-lightbox__header-subtitle">Canvas editable por capas</div>
+                </div>
+                <div class="cb-module-graphic-lightbox__header-actions">
+                    <button type="button" class="cb-module-graphic-lightbox__export" data-layer-command="download-svg" aria-label="Descargar SVG editable">
+                        <i class="fas fa-file-arrow-down"></i>
+                        <span>Descargar SVG</span>
+                    </button>
+                    <button type="button" class="cb-module-graphic-lightbox__close" data-mc-action="cerrar-galeria-grafico-modulo" aria-label="Cerrar galería">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </header>
+            <div class="cb-module-graphic-lightbox__body">
+                <aside class="cb-module-graphic-lightbox__sidebar">
+                    <div class="cb-module-graphic-lightbox__inspector-header">
+                        <div>
+                            <div class="cb-module-graphic-lightbox__inspector-title">Capas</div>
+                            <div class="cb-module-graphic-lightbox__inspector-subtitle">Editor por capas del gráfico</div>
+                        </div>
+                        <button type="button" class="cb-module-graphic-lightbox__add-layer" data-layer-command="add">
+                            <i class="fas fa-plus"></i>
+                            <span>Nueva capa</span>
+                        </button>
+                    </div>
+                    <div class="cb-module-graphic-lightbox__canvas-meta"></div>
+                    <div class="cb-module-graphic-lightbox__layer-toggles">
+                        <label><input type="checkbox" data-layer-toggle="background" checked> Fondo</label>
+                        <label><input type="checkbox" data-layer-toggle="graphic" checked> Gráfico</label>
+                        <label><input type="checkbox" data-layer-toggle="text" checked> Texto</label>
+                    </div>
+                    <div class="cb-module-graphic-lightbox__layer-stack"></div>
+                </aside>
+                <section class="cb-module-graphic-lightbox__stage-wrap">
+                    <div class="cb-module-graphic-lightbox__stage-scroll">
+                        <div class="cb-module-graphic-lightbox__stage">
+                            <div class="cb-module-graphic-lightbox__background-layer"></div>
+                            <img class="cb-module-graphic-lightbox__image" src="" alt="">
+                            <div class="cb-module-graphic-lightbox__graphic-layer"></div>
+                            <div class="cb-module-graphic-lightbox__custom-layer"></div>
+                            <div class="cb-module-graphic-lightbox__text-layer"></div>
+                        </div>
+                    </div>
+                    <div class="cb-module-graphic-lightbox__caption"></div>
+                </section>
+            </div>
+        </div>
+    `;
+    modal.addEventListener("change", (event) => {
+        const input = event.target.closest("[data-layer-toggle]");
+        if (!input) return;
+        const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+        if (!stage) return;
+        const layer = String(input.getAttribute("data-layer-toggle") || "").trim();
+        const shouldShow = !!input.checked;
+        stage.classList.toggle(`is-hidden-${layer}`, !shouldShow);
+    });
+    modal.addEventListener("click", async (event) => {
+        const action = event.target.closest("[data-layer-command]");
+        if (!action) return;
+        const command = String(action.getAttribute("data-layer-command") || "").trim();
+        const layerId = String(action.getAttribute("data-layer-id") || "").trim();
+        const layers = normalizeEditableGraphicLayers(modal.__graphicLayers || {});
+        if (command === "download-svg") {
+            descargarGraficoModuloComoSvg(modal);
+            return;
+        }
+        if (command === "add") {
+            layers.extraLayers.push({
+                id: `custom-${Date.now()}`,
+                label: `Capa extra ${layers.extraLayers.length + 1}`,
+                prompt: "Elemento adicional",
+                position: "center",
+                kind: "custom"
+            });
+            modal.__graphicLayers = layers;
+            renderEditableGraphicLayers(modal, layers);
+            return;
+        }
+        const textarea = layerId ? modal.querySelector(`textarea[data-layer-editor="${layerId}"]`) : null;
+        if (command === "edit" && textarea) {
+            const enabled = !textarea.disabled;
+            textarea.disabled = enabled;
+            textarea.focus();
+            textarea.select();
+            action.innerHTML = enabled ? '<i class="fas fa-pen"></i><span>Editar prompt</span>' : '<i class="fas fa-check"></i><span>Guardar</span>';
+            return;
+        }
+        if (!layerId) return;
+        if (command === "delete") {
+            eliminarLayerEditable(layers, layerId);
+            modal.__graphicLayers = layers;
+            renderEditableGraphicLayers(modal, layers);
+            return;
+        }
+        if ((command === "regenerate" || command === "edit") && textarea) {
+            actualizarLayerDesdePrompt(layers, layerId, textarea.value);
+            modal.__graphicLayers = layers;
+            if (command === "regenerate" && (layerId === "graphic" || layerId === "text")) {
+                const original = action.innerHTML;
+                action.disabled = true;
+                action.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Regenerando...</span>';
+                try {
+                    if (layerId === "graphic") {
+                        await regenerateGraphicLayerImage(modal, layers, textarea.value);
+                    } else if (layerId === "text") {
+                        layers.textLayer = {
+                            ...layers.textLayer,
+                            ...await regenerateTextLayerMetadata(modal, textarea.value)
+                        };
+                        modal.__graphicLayers = layers;
+                        await persistRegeneratedModuleGraphic({ modal, image: null, layers });
+                    }
+                } finally {
+                    action.disabled = false;
+                    action.innerHTML = original;
+                }
+            }
+            renderEditableGraphicLayers(modal, layers);
+        }
+    });
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function decodeGraphicLayers(serialized = "") {
+    const raw = String(serialized || "").trim();
+    if (!raw) return null;
+    try {
+        return JSON.parse(decodeURIComponent(raw));
+    } catch (_) {
+        return null;
+    }
+}
+
+function normalizeEditableGraphicLayers(layers = {}) {
+    const normalized = layers && typeof layers === "object" ? JSON.parse(JSON.stringify(layers)) : {};
+    if (!Array.isArray(normalized.extraLayers)) normalized.extraLayers = [];
+    if (!normalized.background || typeof normalized.background !== "object") normalized.background = {};
+    if (!normalized.graphic || typeof normalized.graphic !== "object") normalized.graphic = {};
+    if (!normalized.textLayer || typeof normalized.textLayer !== "object") normalized.textLayer = {};
+    if (!Array.isArray(normalized.graphic.anchors)) normalized.graphic.anchors = [];
+    if (Array.isArray(normalized.graphic.items) && !normalized.graphic.anchors.length) {
+        normalized.graphic.anchors = normalized.graphic.items.map((item, index) => ({
+            id: String(item?.id || `anchor-${index + 1}`),
+            label: String(item?.label || "").trim(),
+            shape: String(item?.shape || "marker").trim() || "marker",
+            position: String(item?.position || "").trim()
+        })).filter((item) => item.label);
+    }
+    if (!Array.isArray(normalized.graphic.focus)) normalized.graphic.focus = [];
+    if (!Array.isArray(normalized.textLayer.labels)) {
+        const callouts = Array.isArray(normalized.textLayer.callouts) ? normalized.textLayer.callouts : [];
+        normalized.textLayer.labels = callouts.map((item, index) => ({
+            id: `label-${index + 1}`,
+            text: String(item?.text || item || "").trim(),
+            anchorId: String(normalized.graphic.anchors[index]?.id || `anchor-${index + 1}`),
+            position: String(item?.position || "").trim()
+        })).filter((item) => item.text);
+    }
+    if (!Array.isArray(normalized.textLayer.legend)) {
+        normalized.textLayer.legend = Array.isArray(normalized.textLayer.notes) ? normalized.textLayer.notes : [];
+    }
+    if (!Array.isArray(normalized.textLayer.connectors)) {
+        normalized.textLayer.connectors = normalized.textLayer.labels.map((item, index) => ({
+            id: `connector-${index + 1}`,
+            labelId: String(item?.id || `label-${index + 1}`),
+            anchorId: String(item?.anchorId || normalized.graphic.anchors[index]?.id || `anchor-${index + 1}`)
+        }));
+    }
+    if (!normalized.background.color) normalized.background.color = "#EAF3FF";
+    if (!normalized.textLayer.titlePosition) normalized.textLayer.titlePosition = "top-left";
+    if (!normalized.textLayer.subtitlePosition) normalized.textLayer.subtitlePosition = "top-left";
+    if (!normalized.textLayer.legendPosition) normalized.textLayer.legendPosition = "bottom-right";
+    return normalized;
+}
+
+function getGraphicCanvasSpec() {
+    return {
+        width: 1024,
+        height: 1024,
+        label: "Gemini 2.5 Flash Image · 1:1 · 1024x1024"
+    };
+}
+
+function getNamedLayerPosition(name = "", index = 0, total = 1) {
+    const normalized = String(name || "").trim().toLowerCase();
+    const map = {
+        "top-left": { x: 12, y: 14 },
+        "top-center": { x: 44, y: 14 },
+        "top-right": { x: 74, y: 14 },
+        "middle-left": { x: 10, y: 42 },
+        "center": { x: 42, y: 42 },
+        "middle-right": { x: 74, y: 42 },
+        "bottom-left": { x: 12, y: 72 },
+        "bottom-center": { x: 44, y: 74 },
+        "bottom-right": { x: 72, y: 74 }
+    };
+    if (map[normalized]) return map[normalized];
+    const safeTotal = Math.max(1, Number(total) || 1);
+    const column = index % 3;
+    const row = Math.floor(index / 3) % Math.ceil(safeTotal / 3 || 1);
+    return {
+        x: 12 + (column * 28),
+        y: 16 + (row * 22)
+    };
+}
+
+function clampPercent(value, min = 0, max = 100) {
+    return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+function getAnchorStagePosition(anchor = {}, index = 0, total = 1) {
+    const manual = anchor?.manualPosition && typeof anchor.manualPosition === "object" ? anchor.manualPosition : null;
+    if (manual) {
+        return {
+            x: clampPercent(manual.x, 6, 94),
+            y: clampPercent(manual.y, 8, 92)
+        };
+    }
+    const base = getNamedLayerPosition(anchor?.position, index, total);
+    return {
+        x: clampPercent(base.x, 10, 90),
+        y: clampPercent(base.y, 12, 88)
+    };
+}
+
+function inferLabelPlacementFromAnchor(anchorPos = { x: 50, y: 50 }) {
+    const { x, y } = anchorPos;
+    if (x < 32 && y < 36) return "right";
+    if (x > 68 && y < 36) return "left";
+    if (x < 32 && y > 62) return "right";
+    if (x > 68 && y > 62) return "left";
+    if (y < 26) return "bottom";
+    if (y > 74) return "top";
+    if (x < 50) return "right";
+    return "left";
+}
+
+function getLabelOffsetForPlacement(placement = "right") {
+    const map = {
+        top: { dx: 0, dy: -11 },
+        right: { dx: 13, dy: -2 },
+        bottom: { dx: 0, dy: 11 },
+        left: { dx: -13, dy: -2 }
+    };
+    return map[String(placement || "right").trim().toLowerCase()] || map.right;
+}
+
+function getLabelPositionFromAnchor(anchorPos = { x: 50, y: 50 }, placement = "right") {
+    const offset = getLabelOffsetForPlacement(placement);
+    return {
+        x: clampPercent(anchorPos.x + offset.dx, 8, 92),
+        y: clampPercent(anchorPos.y + offset.dy, 8, 92)
+    };
+}
+
+function sanitizeLayerPositionName(value = "", fallback = "center") {
+    const allowed = new Set([
+        "top-left",
+        "top-center",
+        "top-right",
+        "middle-left",
+        "center",
+        "middle-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+    ]);
+    const clean = String(value || "").trim().toLowerCase();
+    return allowed.has(clean) ? clean : fallback;
+}
+
+function setGraphicBackground(modal, background = {}) {
+    const layer = modal?.querySelector(".cb-module-graphic-lightbox__background-layer");
+    if (!layer) return;
+    const color = String(background?.color || "").trim() || "#EAF3FF";
+    layer.style.background = color;
+}
+
+function renderGraphicConnectorOverlay(target, connectors = []) {
+    if (!target) return;
+    target.innerHTML = `
+        <svg class="cb-module-graphic-lightbox__connector-layer" viewBox="0 0 1024 1024" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+                <marker id="cbGraphicArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L12,6 L0,12 z" fill="#0f172a"></path>
+                </marker>
+            </defs>
+            ${connectors.map((connector) => `
+                <line class="cb-module-graphic-lightbox__connector-line"
+                      data-label-id="${escapeHtml(String(connector?.labelId || "").trim())}"
+                      data-anchor-id="${escapeHtml(String(connector?.anchorId || "").trim())}"
+                      x1="0" y1="0" x2="0" y2="0"></line>
+            `).join("")}
+        </svg>
+    `;
+}
+
+function getStagePointFromElement(stage, element) {
+    if (!stage || !element) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    if (stageRect.width <= 0 || stageRect.height <= 0) return null;
+    return {
+        x: (elementRect.left + (elementRect.width / 2)) - stageRect.left,
+        y: (elementRect.top + (elementRect.height / 2)) - stageRect.top
+    };
+}
+
+function updateGraphicConnectorLayout(modal) {
+    const stage = modal?.querySelector(".cb-module-graphic-lightbox__stage");
+    const svg = modal?.querySelector(".cb-module-graphic-lightbox__connector-layer");
+    if (!stage || !svg) return;
+    svg.setAttribute("viewBox", `0 0 ${stage.clientWidth || 1024} ${stage.clientHeight || 1024}`);
+    svg.querySelectorAll(".cb-module-graphic-lightbox__connector-line").forEach((line) => {
+        const labelId = String(line.getAttribute("data-label-id") || "").trim();
+        const anchorId = String(line.getAttribute("data-anchor-id") || "").trim();
+        const labelNode = modal.querySelector(`.cb-module-graphic-lightbox__label-box[data-label-id="${CSS.escape(labelId)}"]`);
+        const anchorNode = modal.querySelector(`.cb-module-graphic-lightbox__graphic-anchor[data-anchor-id="${CSS.escape(anchorId)}"]`);
+        const labelPoint = getStagePointFromElement(stage, labelNode);
+        const anchorPoint = getStagePointFromElement(stage, anchorNode);
+        if (!labelPoint || !anchorPoint) return;
+        const placement = String(labelNode?.dataset?.labelPlacement || "").trim().toLowerCase();
+        let endX = labelPoint.x;
+        let endY = labelPoint.y;
+        if (placement === "left") endX += (labelNode.offsetWidth / 2);
+        if (placement === "right") endX -= (labelNode.offsetWidth / 2);
+        if (placement === "top") endY += (labelNode.offsetHeight / 2);
+        if (placement === "bottom") endY -= (labelNode.offsetHeight / 2);
+        line.setAttribute("x1", String(anchorPoint.x));
+        line.setAttribute("y1", String(anchorPoint.y));
+        line.setAttribute("x2", String(endX));
+        line.setAttribute("y2", String(endY));
+    });
+}
+
+function syncDraggedGraphicLayerState(modal, element) {
+    const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
+    const left = clampPercent(parseFloat(element?.style?.left || "0"), 0, 100);
+    const top = clampPercent(parseFloat(element?.style?.top || "0"), 0, 100);
+    const position = { x: left, y: top };
+    const kind = String(element?.dataset?.dragKind || "").trim();
+    if (kind === "graphic") {
+        const anchorId = String(element?.dataset?.anchorId || "").trim();
+        const anchor = layers.graphic.anchors.find((item) => String(item?.id || "").trim() === anchorId);
+        if (anchor) anchor.manualPosition = position;
+    } else if (kind === "text") {
+        const labelId = String(element?.dataset?.labelId || "").trim();
+        const role = String(element?.dataset?.textRole || "").trim();
+        if (labelId) {
+            const label = layers.textLayer.labels.find((item) => String(item?.id || "").trim() === labelId);
+            if (label) label.manualPosition = position;
+        } else if (role === "title") {
+            layers.textLayer.titleManualPosition = position;
+        } else if (role === "subtitle") {
+            layers.textLayer.subtitleManualPosition = position;
+        } else if (role === "legend") {
+            layers.textLayer.legendManualPosition = position;
+        }
+    } else if (kind === "custom") {
+        const layerId = String(element?.dataset?.layerId || "").trim();
+        const extra = layers.extraLayers.find((item) => String(item?.id || "").trim() === layerId);
+        if (extra) extra.manualPosition = position;
+    }
+    modal.__graphicLayers = layers;
+}
+
+function renderGraphicLayerCard(modal, layerKey, lines = []) {
+    const card = modal.querySelector(`[data-layer-card="${layerKey}"] .cb-module-graphic-lightbox__layer-body`);
+    if (!card) return;
+    card.innerHTML = (Array.isArray(lines) ? lines : [])
+        .map((line) => String(line || "").trim())
+        .filter(Boolean)
+        .map((line) => `<p>${escapeHtml(line)}</p>`)
+        .join("") || "<p>Sin datos de esta capa.</p>";
+}
+
+function getLayerPromptValue(layers = {}, layerId = "") {
+    if (layerId === "background") {
+        return [
+            layers.background?.description || "",
+            layers.background?.color ? `Color: ${layers.background.color}` : "",
+            layers.background?.palette ? `Paleta: ${layers.background.palette}` : ""
+        ].filter(Boolean).join("\n");
+    }
+    if (layerId === "graphic") {
+        return [
+            layers.graphic?.description || "",
+            ...(Array.isArray(layers.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
+            ...(Array.isArray(layers.graphic?.focus) ? layers.graphic.focus : [])
+        ].filter(Boolean).join("\n");
+    }
+    if (layerId === "text") {
+        return [
+            layers.textLayer?.title || "",
+            layers.textLayer?.subtitle || "",
+            ...(Array.isArray(layers.textLayer?.labels) ? layers.textLayer.labels.map((item) => item?.text || "") : []),
+            ...(Array.isArray(layers.textLayer?.legend) ? layers.textLayer.legend : [])
+        ].filter(Boolean).join("\n");
+    }
+    const extra = (Array.isArray(layers.extraLayers) ? layers.extraLayers : []).find((item) => item?.id === layerId);
+    return String(extra?.prompt || "").trim();
+}
+
+function renderLayerStack(modal, layers = {}) {
+    const stack = modal.querySelector(".cb-module-graphic-lightbox__layer-stack");
+    if (!stack) return;
+    const cards = [
+        { id: "background", title: layers.background?.label || "Capa 1 · Fondo", kind: "background", deletable: false },
+        { id: "graphic", title: layers.graphic?.label || "Capa 2 · Gráfico", kind: "graphic", deletable: false },
+        { id: "text", title: layers.textLayer?.label || "Capa 3 · Texto", kind: "text", deletable: false },
+        ...(Array.isArray(layers.extraLayers) ? layers.extraLayers.map((item) => ({
+            id: item.id,
+            title: item.label || "Capa extra",
+            kind: "extra",
+            deletable: true
+        })) : [])
+    ];
+    stack.innerHTML = cards.map((card) => `
+        <section class="cb-module-graphic-layer-card is-${card.kind}" data-layer-card="${escapeHtml(card.id)}">
+            <div class="cb-module-graphic-layer-card__head">
+                <div>
+                    <div class="cb-module-graphic-layer-card__title">${escapeHtml(card.title)}</div>
+                    <div class="cb-module-graphic-layer-card__meta">${card.kind === "extra" ? "Capa adicional" : "Capa principal"}</div>
+                </div>
+                <div class="cb-module-graphic-layer-card__actions">
+                    <button type="button" data-layer-command="edit" data-layer-id="${escapeHtml(card.id)}"><i class="fas fa-pen"></i><span>Editar prompt</span></button>
+                    <button type="button" data-layer-command="regenerate" data-layer-id="${escapeHtml(card.id)}"><i class="fas fa-arrows-rotate"></i><span>Regenerar</span></button>
+                    ${card.deletable ? `<button type="button" data-layer-command="delete" data-layer-id="${escapeHtml(card.id)}"><i class="fas fa-trash"></i><span>Eliminar</span></button>` : ""}
+                </div>
+            </div>
+            <div class="cb-module-graphic-lightbox__layer-body"></div>
+            <textarea class="cb-module-graphic-layer-card__editor" data-layer-editor="${escapeHtml(card.id)}" disabled>${escapeHtml(getLayerPromptValue(layers, card.id))}</textarea>
+        </section>
+    `).join("");
+}
+
+function eliminarLayerEditable(layers = {}, layerId = "") {
+    if (!Array.isArray(layers.extraLayers)) return;
+    layers.extraLayers = layers.extraLayers.filter((item) => item?.id !== layerId);
+}
+
+function actualizarLayerDesdePrompt(layers = {}, layerId = "", prompt = "") {
+    const lines = String(prompt || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    if (layerId === "background") {
+        layers.background.description = lines[0] || "";
+        const colorLine = lines.find((line) => /^color:/i.test(line));
+        if (colorLine) {
+            layers.background.color = colorLine.replace(/^color:\s*/i, "").trim();
+        }
+        const paletteLine = lines.find((line) => /^paleta:/i.test(line));
+        if (paletteLine) {
+            layers.background.palette = paletteLine.replace(/^paleta:\s*/i, "").trim();
+        }
+        return;
+    }
+    if (layerId === "graphic") {
+        layers.graphic.description = lines[0] || "";
+        const itemLines = lines.slice(1);
+        layers.graphic.anchors = itemLines.map((line, index) => ({
+            id: `anchor-${index + 1}`,
+            label: line,
+            shape: "marker",
+            position: sanitizeLayerPositionName("", ["middle-left", "top-right", "center", "bottom-left"][index] || "center")
+        }));
+        layers.graphic.focus = itemLines.slice(0, 6);
+        return;
+    }
+    if (layerId === "text") {
+        layers.textLayer.title = lines[0] || "";
+        layers.textLayer.subtitle = lines[1] || "";
+        const extraLines = lines.slice(2);
+        layers.textLayer.labels = extraLines.slice(0, 4).map((line, index) => ({
+            id: `label-${index + 1}`,
+            text: line,
+            anchorId: String(layers.graphic?.anchors?.[index]?.id || `anchor-${index + 1}`),
+            position: ["top-left", "top-right", "middle-right", "bottom-left"][index] || "bottom-right"
+        }));
+        layers.textLayer.legend = extraLines.slice(4, 7);
+        layers.textLayer.connectors = layers.textLayer.labels.map((item, index) => ({
+            id: `connector-${index + 1}`,
+            labelId: item.id,
+            anchorId: item.anchorId
+        }));
+        return;
+    }
+    const extra = (Array.isArray(layers.extraLayers) ? layers.extraLayers : []).find((item) => item?.id === layerId);
+    if (extra) {
+        extra.prompt = String(prompt || "").trim();
+        extra.label = extra.prompt.split(/\r?\n/)[0]?.trim() || extra.label || "Capa extra";
+    }
+}
+
+function renderCanvasMeta(modal) {
+    const target = modal.querySelector(".cb-module-graphic-lightbox__canvas-meta");
+    if (!target) return;
+    const spec = getGraphicCanvasSpec();
+    target.textContent = `${spec.label} · Canvas scrollable`;
+    const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+    if (stage) {
+        stage.style.setProperty("--cb-stage-width", `${spec.width}px`);
+        stage.style.setProperty("--cb-stage-height", `${spec.height}px`);
+    }
+}
+
+function renderGraphicItemsLayer(modal, graphicLayer = {}) {
+    const target = modal.querySelector(".cb-module-graphic-lightbox__graphic-layer");
+    if (!target) return;
+    const anchors = Array.isArray(graphicLayer?.anchors) ? graphicLayer.anchors : [];
+    target.innerHTML = anchors.map((item, index) => {
+        const pos = getAnchorStagePosition(item, index, anchors.length);
+        const shape = String(item?.shape || "marker").trim().toLowerCase() || "marker";
+        return `
+            <div class="cb-module-graphic-lightbox__graphic-anchor cb-module-graphic-lightbox__draggable is-${escapeHtml(shape)}"
+                 data-drag-kind="graphic"
+                 data-anchor-id="${escapeHtml(String(item?.id || `anchor-${index + 1}`))}"
+                 style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
+                <span class="cb-module-graphic-lightbox__anchor-dot"></span>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderCustomGraphicLayers(modal, layers = {}) {
+    const target = modal.querySelector(".cb-module-graphic-lightbox__custom-layer");
+    if (!target) return;
+    const items = Array.isArray(layers.extraLayers) ? layers.extraLayers : [];
+    target.innerHTML = items.map((item, index) => {
+        const manual = item?.manualPosition && typeof item.manualPosition === "object" ? item.manualPosition : null;
+        const pos = manual || getNamedLayerPosition(item?.position, index, items.length || 1);
+        return `
+            <div class="cb-module-graphic-lightbox__custom-item cb-module-graphic-lightbox__draggable"
+                 data-drag-kind="custom"
+                 data-layer-id="${escapeHtml(String(item?.id || `custom-${index + 1}`))}"
+                 style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
+                ${escapeHtml(item?.label || `Capa extra ${index + 1}`)}
+            </div>
+        `;
+    }).join("");
+}
+
+function renderGraphicTextLayer(modal, textLayer = {}) {
+    const target = modal.querySelector(".cb-module-graphic-lightbox__text-layer");
+    if (!target) return;
+    const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+    const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
+    const anchors = Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors : [];
+    const title = String(textLayer?.title || "").trim();
+    const subtitle = String(textLayer?.subtitle || "").trim();
+    const legend = Array.isArray(textLayer?.legend) ? textLayer.legend : [];
+    const labels = Array.isArray(textLayer?.labels) ? textLayer.labels : [];
+    const connectors = Array.isArray(textLayer?.connectors) ? textLayer.connectors : [];
+    const titlePosition = textLayer?.titleManualPosition || { x: 6, y: 5 };
+    const subtitlePosition = textLayer?.subtitleManualPosition || {
+        x: 6,
+        y: 11
+    };
+    const legendPosition = textLayer?.legendManualPosition || { x: 70, y: 74 };
+    const legendBox = legend.length
+        ? `<div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__draggable is-legend"
+                data-drag-kind="text"
+                data-text-role="legend"
+                style="left:${clampPercent(legendPosition.x, 2, 86)}%;top:${clampPercent(legendPosition.y, 4, 84)}%;">
+                <ul class="cb-module-graphic-lightbox__legend">${legend.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+           </div>`
+        : "";
+    const labelBoxes = labels.map((item, index) => {
+        const linkedAnchorIndex = anchors.findIndex((anchor) => String(anchor?.id || "").trim() === String(item?.anchorId || "").trim());
+        const anchor = linkedAnchorIndex >= 0 ? anchors[linkedAnchorIndex] : anchors[index];
+        const anchorPos = getAnchorStagePosition(anchor || {}, linkedAnchorIndex >= 0 ? linkedAnchorIndex : index, anchors.length || labels.length || 1);
+        const placement = String(item?.placement || item?.position || "").trim().toLowerCase() || inferLabelPlacementFromAnchor(anchorPos);
+        const pos = item?.manualPosition && typeof item.manualPosition === "object"
+            ? item.manualPosition
+            : getLabelPositionFromAnchor(anchorPos, placement);
+        return `
+            <div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__label-box cb-module-graphic-lightbox__draggable is-callout"
+                 data-drag-kind="text"
+                 data-label-id="${escapeHtml(String(item?.id || `label-${index + 1}`))}"
+                 data-anchor-id="${escapeHtml(String(item?.anchorId || ""))}"
+                 data-label-placement="${escapeHtml(placement)}"
+                 style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
+                ${escapeHtml(item?.text || "")}
+            </div>
+        `;
+    }).join("");
+    renderGraphicConnectorOverlay(target, connectors);
+    target.insertAdjacentHTML("beforeend", `
+        ${title ? `<div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__draggable is-title" data-drag-kind="text" data-text-role="title" style="left:${clampPercent(titlePosition.x, 2, 86)}%;top:${clampPercent(titlePosition.y, 4, 84)}%;"><div class="cb-module-graphic-lightbox__text-title">${escapeHtml(title)}</div></div>` : ""}
+        ${subtitle ? `<div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__draggable is-subtitle" data-drag-kind="text" data-text-role="subtitle" style="left:${clampPercent(subtitlePosition.x, 2, 86)}%;top:${clampPercent(subtitlePosition.y, 4, 84)}%;"><div class="cb-module-graphic-lightbox__text-subtitle">${escapeHtml(subtitle)}</div></div>` : ""}
+        ${labelBoxes}
+        ${legendBox}
+    `.trim());
+    if (stage) {
+        requestAnimationFrame(() => updateGraphicConnectorLayout(modal));
+    }
+}
+
+function renderGraphicLayerSummaries(modal, layers = {}) {
+    renderGraphicLayerCard(modal, "background", [
+        layers?.background?.label || "Capa 1 · Fondo",
+        layers?.background?.description || "",
+        layers?.background?.color ? `Color plano: ${layers.background.color}` : "",
+        layers?.background?.palette ? `Paleta: ${layers.background.palette}` : ""
+    ]);
+    renderGraphicLayerCard(modal, "graphic", [
+        layers?.graphic?.label || "Capa 2 · Gráfico",
+        layers?.graphic?.description || "",
+        ...(Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
+        ...(Array.isArray(layers?.graphic?.focus) ? layers.graphic.focus : [])
+    ]);
+    renderGraphicLayerCard(modal, "text", [
+        layers?.textLayer?.label || "Capa 3 · Texto",
+        layers?.textLayer?.title || "",
+        layers?.textLayer?.subtitle || "",
+        ...(Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels.map((item) => item?.text || "") : []),
+        ...(Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [])
+    ]);
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("No se pudo convertir el blob a data URL."));
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function resolveImageHrefForSvg(imageHref = "") {
+    const src = String(imageHref || "").trim();
+    if (!src) return "";
+    if (/^data:/i.test(src)) return src;
+    const response = await fetch(src, { mode: "cors" });
+    if (!response.ok) {
+        throw new Error(`No se pudo descargar la imagen para el SVG (${response.status}).`);
+    }
+    const blob = await response.blob();
+    return blobToDataUrl(blob);
+}
+
+async function buildGraphicSvgMarkup(modal) {
+    const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
+    const imageNode = modal?.querySelector(".cb-module-graphic-lightbox__image");
+    const imageHref = String(imageNode?.getAttribute("src") || "").trim();
+    const embeddedImageHref = await resolveImageHrefForSvg(imageHref).catch(() => "");
+    const width = 1024;
+    const height = 1024;
+    const anchors = Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors : [];
+    const labels = Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels : [];
+    const connectors = Array.isArray(layers?.textLayer?.connectors) ? layers.textLayer.connectors : [];
+    const title = String(layers?.textLayer?.title || "").trim();
+    const subtitle = String(layers?.textLayer?.subtitle || "").trim();
+    const legend = Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [];
+    const titlePos = layers?.textLayer?.titleManualPosition || { x: 6, y: 5 };
+    const subtitlePos = layers?.textLayer?.subtitleManualPosition || { x: 6, y: 11 };
+    const legendPos = layers?.textLayer?.legendManualPosition || { x: 70, y: 74 };
+
+    const anchorMap = new Map();
+    const anchorMarkup = anchors.map((anchor, index) => {
+        const pos = getAnchorStagePosition(anchor, index, anchors.length || 1);
+        const point = {
+            x: (pos.x / 100) * width,
+            y: (pos.y / 100) * height
+        };
+        anchorMap.set(String(anchor?.id || `anchor-${index + 1}`), point);
+        return `<circle cx="${point.x}" cy="${point.y}" r="8" fill="#0f172a" stroke="rgba(255,255,255,0.94)" stroke-width="4" />`;
+    }).join("");
+
+    const labelMap = new Map();
+    const labelMarkup = labels.map((label, index) => {
+        const anchor = anchorMap.get(String(label?.anchorId || "").trim()) || { x: width / 2, y: height / 2 };
+        const anchorPercent = { x: (anchor.x / width) * 100, y: (anchor.y / height) * 100 };
+        const placement = String(label?.placement || label?.position || "").trim().toLowerCase() || inferLabelPlacementFromAnchor(anchorPercent);
+        const pos = label?.manualPosition && typeof label.manualPosition === "object"
+            ? label.manualPosition
+            : getLabelPositionFromAnchor(anchorPercent, placement);
+        const point = {
+            x: (pos.x / 100) * width,
+            y: (pos.y / 100) * height
+        };
+        labelMap.set(String(label?.id || `label-${index + 1}`), { point, placement });
+        return `<text x="${point.x}" y="${point.y}" font-family="Arial, sans-serif" font-size="24" font-weight="800" fill="#0f172a">${escapeHtml(String(label?.text || "").trim())}</text>`;
+    }).join("");
+
+    const connectorMarkup = connectors.map((connector, index) => {
+        const anchor = anchorMap.get(String(connector?.anchorId || "").trim());
+        const label = labelMap.get(String(connector?.labelId || "").trim());
+        if (!anchor || !label) return "";
+        let endX = label.point.x;
+        let endY = label.point.y;
+        if (label.placement === "left") endX += 42;
+        if (label.placement === "right") endX -= 42;
+        if (label.placement === "top") endY += 14;
+        if (label.placement === "bottom") endY -= 14;
+        return `<line x1="${anchor.x}" y1="${anchor.y}" x2="${endX}" y2="${endY}" stroke="#0f172a" stroke-width="3" marker-end="url(#cbSvgArrow)" />`;
+    }).join("");
+
+    const legendMarkup = legend.map((item, index) => {
+        const x = (legendPos.x / 100) * width;
+        const y = (legendPos.y / 100) * height + (index * 34);
+        return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">• ${escapeHtml(String(item || "").trim())}</text>`;
+    }).join("");
+
+    const titleMarkup = title
+        ? `<text x="${(titlePos.x / 100) * width}" y="${(titlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#0f172a">${escapeHtml(title)}</text>`
+        : "";
+    const subtitleMarkup = subtitle
+        ? `<text x="${(subtitlePos.x / 100) * width}" y="${(subtitlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#334155">${escapeHtml(subtitle)}</text>`
+        : "";
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <defs>
+    <marker id="cbSvgArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,6 L0,12 z" fill="#0f172a" />
+    </marker>
+  </defs>
+  <g id="layer-background">
+    <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeHtml(String(layers?.background?.color || "#EAF3FF"))}" />
+  </g>
+  <g id="layer-image">
+    ${embeddedImageHref ? `<image href="${escapeHtml(embeddedImageHref)}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" />` : ""}
+  </g>
+  <g id="layer-connectors">
+    ${connectorMarkup}
+  </g>
+  <g id="layer-anchors">
+    ${anchorMarkup}
+  </g>
+  <g id="layer-text">
+    ${titleMarkup}
+    ${subtitleMarkup}
+    ${labelMarkup}
+    ${legendMarkup}
+  </g>
+</svg>`;
+}
+
+async function descargarGraficoModuloComoSvg(modal) {
+    const markup = await buildGraphicSvgMarkup(modal);
+    const blob = new Blob([markup], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const title = String(modal?.querySelector(".cb-module-graphic-lightbox__caption")?.textContent || "grafico-modulo").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    anchor.href = url;
+    anchor.download = `${title || "grafico-modulo"}.svg`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+}
+
+function applyGraphicDatasetsToNode(node, payload = {}) {
+    if (!node) return;
+    if (payload.src) {
+        node.dataset.mcImageSrc = payload.src;
+        if (node.tagName === "IMG") node.src = payload.src;
+    }
+    if (payload.alt) {
+        node.dataset.mcImageAlt = payload.alt;
+        if (node.tagName === "IMG") node.alt = payload.alt;
+    }
+    if (payload.layers) node.dataset.mcImageLayers = payload.layers;
+    if (payload.moduleId) node.dataset.mcModuloId = payload.moduleId;
+    if (payload.courseId) node.dataset.mcCourseId = payload.courseId;
+    if (payload.moduleName) node.dataset.mcModuleName = payload.moduleName;
+    if (payload.moduleType) node.dataset.mcModuleType = payload.moduleType;
+}
+
+function inferGraphicContextFromNode(sourceEl = null) {
+    const element = sourceEl && typeof sourceEl === "object" && sourceEl.nodeType === 1 ? sourceEl : null;
+    if (!element) {
+        return {
+            moduleId: "",
+            courseId: String(window.curso?.id || "").trim(),
+            moduleName: "",
+            moduleType: ""
+        };
+    }
+    const contentHost = element.closest('[id^="contenido-"]');
+    const moduleId = String(contentHost?.id || "").replace(/^contenido-/, "").trim();
+    const moduleCard = moduleId ? document.getElementById(`modulo-${moduleId}`) : null;
+    const moduleName = String(
+        moduleCard?.querySelector('[data-mc-action="ejecutar-generacion-modulo-gemini"]')?.dataset?.mcModuleName
+        || moduleCard?.querySelector("h3")?.textContent
+        || moduleCard?.querySelector(".font-semibold")?.textContent
+        || ""
+    ).trim();
+    const moduleType = String(
+        moduleCard?.querySelector(".text-sm.text-slate-700")?.textContent
+        || moduleCard?.querySelector(".text-xs.text-gray-500")?.textContent
+        || ""
+    ).trim();
+    return {
+        moduleId,
+        courseId: String(window.curso?.id || "").trim(),
+        moduleName,
+        moduleType
+    };
+}
+
+async function persistRegeneratedModuleGraphic({ modal, image, layers }) {
+    const context = modal?.__graphicContext || {};
+    const moduleId = String(context.moduleId || "").trim();
+    const courseId = String(context.courseId || "").trim();
+    if (!moduleId || !courseId) return;
+    const contentNode = document.getElementById(`contenido-${moduleId}`);
+    const figure = contentNode?.querySelector(".cb-module-generated-graphic");
+    if (!figure) return;
+    const currentImage = figure.querySelector("img");
+    const downloadUrl = String(image?.downloadUrl || currentImage?.dataset?.mcImageSrc || currentImage?.getAttribute("src") || "").trim();
+    if (!downloadUrl) return;
+    const encodedLayers = encodeURIComponent(JSON.stringify(layers || {}));
+    const alt = String(modal.querySelector(".cb-module-graphic-lightbox__image")?.alt || "Gráfico del módulo").trim();
+    figure.setAttribute("data-storage-path", String(image?.storagePath || figure.getAttribute("data-storage-path") || "").trim());
+    figure.setAttribute("data-mime-type", String(image?.mimeType || figure.getAttribute("data-mime-type") || "image/png").trim() || "image/png");
+    figure.setAttribute("data-model", String(image?.model || figure.getAttribute("data-model") || "").trim());
+    figure.querySelectorAll('[data-mc-action="abrir-galeria-grafico-modulo"]').forEach((node) => {
+        applyGraphicDatasetsToNode(node, {
+            src: downloadUrl,
+            alt,
+            layers: encodedLayers,
+            moduleId,
+            courseId,
+            moduleName: String(context.moduleName || "").trim(),
+            moduleType: String(context.moduleType || "").trim()
+        });
+    });
+    const saveHtml = typeof window.normalizarContenidoModuloPersistible === "function"
+        ? window.normalizarContenidoModuloPersistible(contentNode.innerHTML)
+        : contentNode.innerHTML;
+    await guardarModulo(moduleId, {
+        contenido: saveHtml,
+        graficoGenerado: {
+            downloadUrl,
+            storagePath: String(image?.storagePath || figure.getAttribute("data-storage-path") || "").trim(),
+            mimeType: String(image?.mimeType || figure.getAttribute("data-mime-type") || "image/png").trim() || "image/png",
+            model: String(image?.model || figure.getAttribute("data-model") || "").trim(),
+            promptVersion: String(image?.promptVersion || "").trim(),
+            updatedAt: String(image?.updatedAt || new Date().toISOString()).trim(),
+            layers
+        }
+    }, courseId);
+}
+
+async function regenerateGraphicLayerImage(modal, layers = {}, prompt = "") {
+    const context = modal?.__graphicContext || {};
+    const moduleId = String(context.moduleId || "").trim();
+    const courseId = String(context.courseId || "").trim();
+    if (!moduleId || !courseId) {
+        throw new Error("Falta el contexto del módulo para regenerar el gráfico.");
+    }
+    const modulo = await obtenerModulo(moduleId, courseId);
+    if (!modulo) {
+        throw new Error("No se encontró el módulo para regenerar el gráfico.");
+    }
+    const response = await authFetchJson("/api/moodle/module-graphics/generate", {
+        method: "POST",
+        body: {
+            courseId,
+            moduleId,
+            moduleType: String(context.moduleType || modulo.tipo || "").trim(),
+            moduleName: String(context.moduleName || modulo.nombre || "").trim(),
+            languageCode: "es",
+            instructions: String(modulo.instrucciones || "").trim(),
+            content: [String(modulo.contenido || "").trim(), prompt ? `Prompt capa gráfica:\n${prompt}` : ""].filter(Boolean).join("\n\n"),
+            previousStoragePath: String(modulo?.graficoGenerado?.storagePath || "").trim(),
+            regenerate: true
+        }
+    });
+    const image = response?.image && typeof response.image === "object" ? response.image : null;
+    if (!image?.downloadUrl) {
+        throw new Error("No se recibió un gráfico válido al regenerar la capa.");
+    }
+    const imageNode = modal.querySelector(".cb-module-graphic-lightbox__image");
+    if (imageNode) {
+        imageNode.src = image.downloadUrl;
+    }
+    await persistRegeneratedModuleGraphic({ modal, image, layers });
+}
+
+function parseJsonObjectFromText(raw = "") {
+    const clean = String(raw || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+    return JSON.parse(match ? match[0] : clean);
+}
+
+function clampLayerWords(value = "", maxWords = 8, maxChars = 80) {
+    const clean = String(value || "").replace(/\s+/g, " ").trim();
+    if (!clean) return "";
+    return clean.split(" ").slice(0, Math.max(1, maxWords)).join(" ").slice(0, Math.max(1, maxChars)).trim();
+}
+
+function normalizeRegeneratedTextLayer(payload = {}, fallbackTitle = "") {
+    const textLayer = payload?.textLayer && typeof payload.textLayer === "object" ? payload.textLayer : {};
+    const labels = Array.isArray(textLayer.labels) ? textLayer.labels : [];
+    const legend = Array.isArray(textLayer.legend) ? textLayer.legend : [];
+    const normalizedLabels = labels.map((item, index) => ({
+        id: String(item?.id || `label-${index + 1}`),
+        text: clampLayerWords(String(item?.text || item || "").trim(), 4, 32),
+        anchorId: String(item?.anchorId || "").trim(),
+        position: sanitizeLayerPositionName(String(item?.position || "").trim(), ["top-left", "top-right", "middle-right", "bottom-left"][index] || "bottom-right")
+    })).filter((item) => item.text).slice(0, 4);
+    return {
+        title: clampLayerWords(String(textLayer.title || fallbackTitle || "").trim(), 4, 34),
+        subtitle: clampLayerWords(String(textLayer.subtitle || "").trim(), 6, 46),
+        labels: normalizedLabels,
+        legend: legend.map((item) => clampLayerWords(String(item || "").trim(), 6, 52)).filter(Boolean).slice(0, 3),
+        connectors: (Array.isArray(textLayer.connectors) && textLayer.connectors.length ? textLayer.connectors : normalizedLabels.map((item, index) => ({
+            id: `connector-${index + 1}`,
+            labelId: item.id,
+            anchorId: item.anchorId,
+            style: "arrow"
+        }))).slice(0, 4).map((item, index) => ({
+            id: String(item?.id || `connector-${index + 1}`),
+            labelId: String(item?.labelId || normalizedLabels[index]?.id || `label-${index + 1}`),
+            anchorId: String(item?.anchorId || normalizedLabels[index]?.anchorId || "").trim(),
+            style: String(item?.style || "arrow").trim() || "arrow"
+        })),
+        titlePosition: sanitizeLayerPositionName(String(textLayer.titlePosition || "").trim(), "top-left"),
+        subtitlePosition: sanitizeLayerPositionName(String(textLayer.subtitlePosition || "").trim(), "top-left"),
+        legendPosition: sanitizeLayerPositionName(String(textLayer.legendPosition || "").trim(), "bottom-right")
+    };
+}
+
+function repackTextLayerPositions(textLayer = {}) {
+    const next = { ...(textLayer || {}) };
+    const baseOrder = ["top-left", "top-right", "middle-right", "bottom-left"];
+    next.labels = (Array.isArray(next.labels) ? next.labels : []).map((item, index) => ({
+        ...item,
+        position: baseOrder[index] || "center"
+    }));
+    next.connectors = (Array.isArray(next.connectors) ? next.connectors : []).map((item, index) => ({
+        ...item,
+        labelId: String(item?.labelId || next.labels[index]?.id || `label-${index + 1}`),
+        anchorId: String(item?.anchorId || next.labels[index]?.anchorId || "").trim()
+    }));
+    return next;
+}
+
+async function regenerateTextLayerMetadata(modal, prompt = "") {
+    const context = modal?.__graphicContext || {};
+    const moduleId = String(context.moduleId || "").trim();
+    const courseId = String(context.courseId || "").trim();
+    if (!moduleId || !courseId) {
+        throw new Error("Falta el contexto del módulo para regenerar la capa de texto.");
+    }
+    const modulo = await obtenerModulo(moduleId, courseId);
+    if (!modulo) {
+        throw new Error("No se encontró el módulo para regenerar la capa de texto.");
+    }
+    const currentLayout = JSON.stringify(modal?.__graphicLayers?.textLayer || {});
+    const currentAnchors = JSON.stringify(modal?.__graphicLayers?.graphic?.anchors || []);
+    const requestPrompt = `
+Devuelve solo JSON valido para regenerar la capa 3 de texto de un grafico educativo.
+
+MODULO: ${String(context.moduleName || modulo.nombre || "Modulo").trim()}
+TIPO: ${String(context.moduleType || modulo.tipo || "Modulo").trim()}
+INSTRUCCIONES: ${String(modulo.instrucciones || "").replace(/\s+/g, " ").trim().slice(0, 1600)}
+CONTENIDO: ${String(modulo.contenido || "").replace(/\s+/g, " ").trim().slice(0, 2200)}
+AJUSTE DEL USUARIO: ${String(prompt || "").replace(/\s+/g, " ").trim().slice(0, 600)}
+LAYOUT ACTUAL: ${currentLayout.slice(0, 1000)}
+
+REGLAS:
+- Muy poco texto.
+- Titulo maximo 4 palabras.
+- Subtitulo maximo 6 palabras.
+- Maximo 4 labels, cada uno maximo 4 palabras.
+- Maximo 3 bullets de leyenda, cada uno maximo 6 palabras.
+- Ubica inteligentemente cada texto donde mejor acompañe al grafico.
+- Cada label debe apuntar a un anchor de la lista.
+- Devuelve conectores label-anchor.
+- Si regeneras, cambia posiciones y redaccion respecto al layout actual.
+- No generes parrafos.
+- No markdown.
+
+ANCHORS DISPONIBLES: ${currentAnchors.slice(0, 1200)}
+
+JSON:
+{
+  "textLayer": {
+    "title": "string",
+    "subtitle": "string",
+    "titlePosition": "top-left",
+    "subtitlePosition": "top-left",
+    "legendPosition": "bottom-right",
+    "legend": ["string", "string"],
+    "labels": [
+      { "id": "string", "text": "string", "anchorId": "string", "position": "top-left|top-center|top-right|middle-left|center|middle-right|bottom-left|bottom-center|bottom-right" }
+    ],
+    "connectors": [
+      { "id": "string", "labelId": "string", "anchorId": "string", "style": "arrow" }
+    ]
+  }
+}
+`.trim();
+    const response = await authFetchJson("/api/gemini/generate", {
+        method: "POST",
+        body: {
+            model: "gemini-2.5-flash-lite",
+            payload: {
+                contents: [{ parts: [{ text: requestPrompt }] }],
+                generationConfig: { temperature: 0.5 }
+            }
+        }
+    });
+    const text = String(response?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+    return repackTextLayerPositions(
+        normalizeRegeneratedTextLayer(parseJsonObjectFromText(text), String(context.moduleName || modulo.nombre || "").trim())
+    );
+}
+
+function ensureGraphicLightboxDrag(modal) {
+    if (!modal || modal.dataset.dragReady === "1") return;
+    modal.dataset.dragReady = "1";
+    const state = { target: null, stage: null, offsetX: 0, offsetY: 0 };
+
+    modal.addEventListener("pointerdown", (event) => {
+        const handle = event.target.closest(".cb-module-graphic-lightbox__draggable");
+        const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+        if (!handle || !stage) return;
+        const stageRect = stage.getBoundingClientRect();
+        const handleRect = handle.getBoundingClientRect();
+        state.target = handle;
+        state.stage = stage;
+        state.offsetX = event.clientX - handleRect.left;
+        state.offsetY = event.clientY - handleRect.top;
+        handle.setPointerCapture?.(event.pointerId);
+        handle.classList.add("is-dragging");
+        event.preventDefault();
+        if (stageRect.width <= 0 || stageRect.height <= 0) return;
+    });
+
+    modal.addEventListener("pointermove", (event) => {
+        if (!state.target || !state.stage) return;
+        const stageRect = state.stage.getBoundingClientRect();
+        const targetRect = state.target.getBoundingClientRect();
+        const nextLeft = ((event.clientX - stageRect.left - state.offsetX) / stageRect.width) * 100;
+        const nextTop = ((event.clientY - stageRect.top - state.offsetY) / stageRect.height) * 100;
+        const maxLeft = 100 - ((targetRect.width / stageRect.width) * 100);
+        const maxTop = 100 - ((targetRect.height / stageRect.height) * 100);
+        state.target.style.left = `${clampPercent(nextLeft, 0, maxLeft)}%`;
+        state.target.style.top = `${clampPercent(nextTop, 0, maxTop)}%`;
+        updateGraphicConnectorLayout(modal);
+    });
+
+    const release = () => {
+        if (!state.target) return;
+        syncDraggedGraphicLayerState(modal, state.target);
+        updateGraphicConnectorLayout(modal);
+        state.target.classList.remove("is-dragging");
+        state.target = null;
+        state.stage = null;
+    };
+
+    modal.addEventListener("pointerup", release);
+    modal.addEventListener("pointercancel", release);
+}
+
+window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRaw = "") {
+    const sourceEl = sourceOrSrc && typeof sourceOrSrc === "object" && sourceOrSrc.nodeType === 1 ? sourceOrSrc : null;
+    const cleanSrc = String(sourceEl?.dataset?.mcImageSrc || sourceOrSrc || "").trim();
+    if (!cleanSrc) return;
+    const cleanAlt = String(sourceEl?.dataset?.mcImageAlt || alt || "").trim();
+    const layers = normalizeEditableGraphicLayers(decodeGraphicLayers(String(sourceEl?.dataset?.mcImageLayers || layersRaw || "").trim()) || {});
+    const inferred = inferGraphicContextFromNode(sourceEl);
+    const modal = ensureModuleGraphicLightbox();
+    const image = modal.querySelector(".cb-module-graphic-lightbox__image");
+    const caption = modal.querySelector(".cb-module-graphic-lightbox__caption");
+    const backgroundLayer = modal.querySelector(".cb-module-graphic-lightbox__background-layer");
+    modal.__graphicLayers = layers;
+    modal.__graphicContext = {
+        moduleId: String(sourceEl?.dataset?.mcModuloId || inferred.moduleId || "").trim(),
+        courseId: String(sourceEl?.dataset?.mcCourseId || inferred.courseId || "").trim(),
+        moduleName: String(sourceEl?.dataset?.mcModuleName || inferred.moduleName || "").trim(),
+        moduleType: String(sourceEl?.dataset?.mcModuleType || inferred.moduleType || "").trim()
+    };
+    ensureGraphicLightboxDrag(modal);
+    renderCanvasMeta(modal);
+    renderLayerStack(modal, layers);
+    modal.querySelectorAll("[data-layer-toggle]").forEach((input) => {
+        input.checked = true;
+    });
+    modal.querySelector(".cb-module-graphic-lightbox__stage")?.classList.remove("is-hidden-background", "is-hidden-graphic", "is-hidden-text");
+    if (image) {
+        image.src = cleanSrc;
+        image.alt = cleanAlt || "Gráfico del módulo";
+    }
+    if (caption) {
+        caption.textContent = cleanAlt || "Gráfico del módulo";
+    }
+    if (backgroundLayer) {
+        backgroundLayer.innerHTML = "";
+    }
+    setGraphicBackground(modal, layers?.background || {});
+    renderGraphicLayerCard(modal, "background", [
+        layers?.background?.label || "Capa 1 · Fondo",
+        layers?.background?.description || "",
+        layers?.background?.color ? `Color plano: ${layers.background.color}` : "",
+        layers?.background?.palette ? `Paleta: ${layers.background.palette}` : ""
+    ]);
+    renderGraphicLayerCard(modal, "graphic", [
+        layers?.graphic?.label || "Capa 2 · Gráfico",
+        layers?.graphic?.description || "",
+        ...(Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
+        ...(Array.isArray(layers?.graphic?.focus) ? layers.graphic.focus : [])
+    ]);
+    renderGraphicLayerCard(modal, "text", [
+        layers?.textLayer?.label || "Capa 3 · Texto",
+        layers?.textLayer?.title || "",
+        layers?.textLayer?.subtitle || "",
+        ...(Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels.map((item) => item?.text || "") : []),
+        ...(Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [])
+    ]);
+    renderGraphicItemsLayer(modal, layers?.graphic || {});
+    renderCustomGraphicLayers(modal, layers);
+    renderGraphicTextLayer(modal, layers?.textLayer || {});
+    modal.classList.remove("hidden");
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("cb-module-graphic-lightbox-open");
+};
+
+function renderEditableGraphicLayers(modal, layers = {}) {
+    setGraphicBackground(modal, layers?.background || {});
+    renderLayerStack(modal, layers);
+    renderGraphicLayerSummaries(modal, layers);
+    renderGraphicItemsLayer(modal, layers.graphic || {});
+    renderCustomGraphicLayers(modal, layers);
+    renderGraphicTextLayer(modal, layers.textLayer || {});
+}
+
+window.cerrarGaleriaGraficoModulo = function() {
+    const modal = document.getElementById(MODULE_GRAPHIC_LIGHTBOX_ID);
+    if (!modal) return;
+    const image = modal.querySelector(".cb-module-graphic-lightbox__image");
+    if (image) {
+        image.removeAttribute("src");
+        image.removeAttribute("alt");
+    }
+    modal.classList.add("hidden");
+    modal.classList.remove("is-open");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("cb-module-graphic-lightbox-open");
+};
+
 document.addEventListener("click", (event) => {
     const actionEl = event.target.closest("[data-mc-action]");
     if (!actionEl) return;
@@ -232,13 +1401,22 @@ document.addEventListener("click", (event) => {
         "analizar-modulo": () => window.analizarModulo?.(actionEl.dataset.mcModuloId || ""),
         "abrir-instrucciones-gemini": () => window.abrirInstruccionesGemini?.(actionEl.dataset.mcModuloId || ""),
         "ejecutar-generacion-modulo-gemini": () => window.ejecutarGeneracionModuloGemini?.(actionEl.dataset.mcModuloId || ""),
+        "agregar-actividad-original-modulo": () => window.agregarActividadOriginalAlModulo?.(actionEl.dataset.mcModuloId || ""),
+        "toggle-menu-acciones-modulo": () => {
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            window.toggleMenuAccionesModulo?.(actionEl);
+        },
         "abrir-modal-tono": () => window.abrirModalTono?.(actionEl.dataset.mcModuloId || ""),
         "abrir-modal-crear-tabla": () => window.abrirModalCrearTabla?.(actionEl.dataset.mcModuloId || ""),
         "traducir-modulo": () => window.traducirModulo?.(actionEl.dataset.mcModuloId || ""),
+        "abrir-galeria-grafico-modulo": () => window.abrirGaleriaGraficoModulo?.(actionEl),
+        "cerrar-galeria-grafico-modulo": () => window.cerrarGaleriaGraficoModulo?.(),
         "reintentar-notas-maestro": () => window.regenerarNotasMaestro?.(),
         "abrir-traduccion-subtema": () => window.abrirTraduccionSubtema?.(actionEl.dataset.mcTranslationId || ""),
         "eliminar-traduccion-subtema": () => window.eliminarTraduccionSubtema?.(actionEl.dataset.mcTranslationId || ""),
         "abrir-traduccion": () => window.abrirTraduccion?.(actionEl.dataset.mcTranslationId || "", actionEl.dataset.mcModuloId || ""),
+        "aplicar-traduccion": () => window.aplicarTraduccionAlModulo?.(actionEl.dataset.mcTranslationId || "", actionEl.dataset.mcModuloId || ""),
         "eliminar-traduccion": () => window.eliminarTraduccion?.(actionEl.dataset.mcTranslationId || "", actionEl.dataset.mcModuloId || ""),
         "generar-vista-previa-tono": () => window.generarVistaPreviaTono?.(),
     };
@@ -271,6 +1449,12 @@ document.addEventListener("change", (event) => {
     window.toggleArchivoModulo?.(actionEl.dataset.mcModuloId || "", !!actionEl.checked);
 });
 
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+        window.cerrarGaleriaGraficoModulo?.();
+    }
+});
+
 function withTimeout(promise, ms = 30000, message = "La operación tardó demasiado.") {
     let timerId = null;
     const timeoutPromise = new Promise((_, reject) => {
@@ -296,6 +1480,17 @@ function construirDocIdModulo(moduloId, cursoIdRef = null) {
     const cursoId = cursoIdRef || (curso ? curso.id : null);
     if (!moduloId || !cursoId) return null;
     return moduloId.includes('_') ? moduloId : `${cursoId}_${moduloId}`;
+}
+
+function extraerIdInternoModulo(moduloId, cursoIdRef = null) {
+    const raw = String(moduloId || "").trim();
+    if (!raw) return "";
+    const cursoId = String(cursoIdRef || curso?.id || "").trim();
+    const prefijo = cursoId ? `${cursoId}_` : "";
+    if (prefijo && raw.startsWith(prefijo)) {
+        return raw.slice(prefijo.length);
+    }
+    return raw;
 }
 
 function actualizarBotonToggleArchivados() {
@@ -974,39 +2169,15 @@ function renderCursoItem(cursoItem) {
             if (!confirm(`¿Eliminar el curso "${cursoItem.nombre}" completo? Esta acción no se puede deshacer.`)) return;
             
             try {
-                // 1. Eliminar de Firebase
-                await deleteDoc(doc(db, "moodleCourses", cursoItem.id));
+                await authFetchJson("/api/moodle/delete-course", {
+                    method: "POST",
+                    body: { courseId: cursoItem.id }
+                });
                 
-                // 2. Eliminar módulos asociados
-                try {
-                    // Obtener todos los módulos del curso
-                    const modulosIds = [];
-                    if (Array.isArray(cursoItem.temas)) {
-                        cursoItem.temas.forEach(tema => {
-                            if (Array.isArray(tema.subtemas)) {
-                                tema.subtemas.forEach(subtema => {
-                                    if (Array.isArray(subtema.modulosIds)) {
-                                        modulosIds.push(...subtema.modulosIds);
-                                    }
-                                });
-                            }
-                        });
-                    }
-                    
-                    // Eliminar cada módulo
-                    for (const moduloId of modulosIds) {
-                        try {
-                            await deleteDoc(doc(db, "moodleCourses", `${cursoItem.id}_${moduloId}`));
-                        } catch (moduloError) {
-                        }
-                    }
-                } catch (modulosError) {
-                }
-                
-                // 3. Recargar lista desde Firebase
+                // 2. Recargar lista desde Firebase
                 await cargarCursosUsuario();
                 
-                // 4. Si el curso eliminado es el que está seleccionado, limpiar completamente
+                // 3. Si el curso eliminado es el que está seleccionado, limpiar completamente
                 if (cursoDocId === cursoItem.id) {
                     // Limpiar todas las variables globales
                     cursoDocId = null;
@@ -1048,12 +2219,12 @@ function renderCursoItem(cursoItem) {
                     }
                 }
                 
-                // 5. Si el curso eliminado era el que se estaba editando, limpiar esa referencia
+                // 4. Si el curso eliminado era el que se estaba editando, limpiar esa referencia
                 if (cursoEditando && cursoEditando.id === cursoItem.id) {
                     cursoEditando = null;
                 }
                 
-                // 6. Si quedan cursos, seleccionar el primero automáticamente
+                // 5. Si quedan cursos, seleccionar el primero automáticamente
                 if (cursosUsuario.length > 0) {
                     setTimeout(() => {
                         const primerCurso = cursosUsuario[0];
@@ -1871,6 +3042,8 @@ btnCrearCurso.addEventListener("click", async () => {
             contenido: construirContenidoInicialModulo("Temario"),
             instrucciones: construirInstruccionesInicialesModulo("Temario"),
             incluirInstruccionOriginalEnPropuesta: false,
+            generarGrafico: false,
+            ignorarContextoOtrosModulos: false,
             traducciones: [],
             creado: Date.now(),
             actualizado: Date.now()
@@ -1884,6 +3057,8 @@ btnCrearCurso.addEventListener("click", async () => {
             contenido: construirContenidoInicialModulo("Lectura"),
             instrucciones: construirInstruccionesInicialesModulo("Lectura"),
             incluirInstruccionOriginalEnPropuesta: false,
+            generarGrafico: false,
+            ignorarContextoOtrosModulos: false,
             traducciones: [],
             creado: Date.now(),
             actualizado: Date.now()
@@ -2643,7 +3818,7 @@ function suscribirCambiosModulo(moduloId) {
             // 🔥 ACTUALIZAR CONTENIDO EN TIEMPO REAL
             const contenidoDiv = document.getElementById(`contenido-${moduloId}`);
             if (contenidoDiv) {
-                const contenidoRenderizado = renderizarContenidoModulo(data.contenido || "");
+                const contenidoRenderizado = renderizarContenidoModulo(data.contenido || "", data.tipo || "");
                 if (contenidoDiv.innerHTML === contenidoRenderizado) return;
 
                 contenidoDiv.innerHTML = contenidoRenderizado;
@@ -3060,6 +4235,8 @@ btnAddTema.addEventListener("click", async () => {
         contenido: construirContenidoInicialModulo("Temario"),
         instrucciones: construirInstruccionesInicialesModulo("Temario"),
         incluirInstruccionOriginalEnPropuesta: false,
+        generarGrafico: false,
+        ignorarContextoOtrosModulos: false,
         traducciones: [],
         creado: Date.now(),
         actualizado: Date.now()
@@ -3074,6 +4251,8 @@ btnAddTema.addEventListener("click", async () => {
         contenido: construirContenidoInicialModulo("Lectura"),
         instrucciones: construirInstruccionesInicialesModulo("Lectura"),
         incluirInstruccionOriginalEnPropuesta: false,
+        generarGrafico: false,
+        ignorarContextoOtrosModulos: false,
         traducciones: [],
         creado: Date.now(),
         actualizado: Date.now()
@@ -4451,14 +5630,14 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
         renderTemas();
         // Restaurar selección si este módulo era el activo
         if (moduloActivo && (moduloActivo === moduloId || 
-            (moduloId.includes('_') && moduloId.split('_')[1] === moduloActivo) ||
-            (!moduloId.includes('_') && `${curso.id}_${moduloId}` === moduloActivo))) {
+            extraerIdInternoModulo(moduloId) === moduloActivo ||
+            construirDocIdModulo(moduloId) === moduloActivo)) {
             setTimeout(() => {
                 document.querySelectorAll(`[data-modulo-id]`).forEach(el => {
                     const elId = el.dataset.moduloId;
                     if (elId === moduloId || 
-                        (elId.includes('_') && elId.split('_')[1] === moduloId) ||
-                        (!elId.includes('_') && moduloId.includes('_') && elId === moduloId.split('_')[1])) {
+                        extraerIdInternoModulo(elId) === extraerIdInternoModulo(moduloId) ||
+                        construirDocIdModulo(elId) === construirDocIdModulo(moduloId)) {
                         el.classList.add('modulo-activo', 'highlight-pulse');
                     }
                 });
@@ -4515,7 +5694,8 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
             if (moduloActivo) {
                 moduloElements.forEach(el => {
                     if (el.dataset.moduloId === moduloActivo ||
-                        (el.dataset.moduloId.includes('_') && el.dataset.moduloId.split('_')[1] === moduloActivo)) {
+                        extraerIdInternoModulo(el.dataset.moduloId) === moduloActivo ||
+                        construirDocIdModulo(el.dataset.moduloId) === moduloActivo) {
                         el.classList.add('modulo-activo', 'highlight-pulse');
                     }
                 });
@@ -5230,6 +6410,12 @@ window.ejecutarGeneracionModuloGemini = async function (moduloId) {
     }
 };
 
+function moduloTieneActividadOriginalVisible(modulo = {}) {
+    const contenidoActual = String(modulo?.contenido || "").trim();
+    if (!contenidoActual) return false;
+    return contenidoModuloYaIncluyeActividadOriginal(renderizarContenidoModulo(contenidoActual, modulo.tipo || ""));
+}
+
 
 
 // Modifica la llamada en renderModulosHTML para que pase correctamente los parámetros:
@@ -5258,6 +6444,8 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         if (mod.archivado && !mostrarModulosArchivados) continue;
 
         const esActivo = modId === moduloActivoId || mod.id === moduloActivoId;
+        const contenidoModuloHtml = renderizarContenidoModulo(mod.contenido, mod.tipo || "");
+        const tieneActividadOriginal = contenidoModuloYaIncluyeActividadOriginal(contenidoModuloHtml);
 
         html += `
 <div class="p-4 border rounded-md bg-white shadow-sm hover:bg-gray-50 transition
@@ -5287,26 +6475,6 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                 <span class="modulo-archive-switch__label">Archivar</span>
             </label>
 
-            <!-- NUEVO ICONO: NOTAS PARA EL MAESTRO -->
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Notas del maestro"
-                    aria-label="Notas del maestro"
-                    data-tour="notas-maestro"
-                    data-mc-action="abrir-modal-notas-maestro"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-chalkboard-teacher text-green-600"></i>
-            </button>
-            
-            <!-- ANALIZAR -->
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Analizar módulo"
-                    aria-label="Analizar módulo"
-                    data-tour="analizar-modulo"
-                    data-mc-action="analizar-modulo"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-search text-orange-500"></i>
-            </button>
-
             <!-- INSTRUCCIONES GEMINI -->
             <button type="button" class="icon-btn btn-modulo-accion"
                     title="Instrucciones IA"
@@ -5326,46 +6494,35 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     data-mc-modulo-id="${escapeHtml(mod.id)}">
                 <i class="fas fa-magic text-blue-600"></i>
             </button>
-            
-            <!-- CAMBIAR TONO DEL CONTENIDO -->
+
             <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Cambiar tono del contenido"
-                    aria-label="Cambiar tono del contenido"
-                    data-tour="cambiar-tono"
-                    data-mc-action="abrir-modal-tono"
+                    title="${tieneActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                    aria-label="${tieneActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                    data-mc-action="agregar-actividad-original-modulo"
                     data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-adjust text-pink-600"></i>
-            </button>
-            
-            <!-- CREAR TABLA -->
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Crear tabla a partir del contenido"
-                    aria-label="Crear tabla a partir del contenido"
-                    data-tour="crear-tabla"
-                    data-mc-action="abrir-modal-crear-tabla"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-table text-indigo-500"></i>
+                <i class="fas ${tieneActividadOriginal ? 'fa-eye-slash' : 'fa-square-plus'} text-emerald-600"></i>
             </button>
 
-            <!-- TRADUCIR -->
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Traducir módulo"
-                    aria-label="Traducir módulo"
-                    data-tour="traducir-modulo"
-                    data-mc-action="traducir-modulo"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-language text-teal-600"></i>
-            </button>
-
-            <!-- ELIMINAR MÓDULO -->
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="Eliminar módulo"
-                    aria-label="Eliminar módulo"
-                    data-tour="eliminar-modulo"
-                    data-mc-action="eliminar-modulo"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas fa-trash text-red-600"></i>
-            </button>
+            <div class="cb-module-actions-menu">
+                <button type="button"
+                        class="icon-btn btn-modulo-accion cb-module-actions-menu__trigger"
+                        title="Más acciones"
+                        aria-label="Más acciones"
+                        aria-haspopup="menu"
+                        aria-expanded="false"
+                        data-mc-action="toggle-menu-acciones-modulo"
+                        data-mc-modulo-id="${escapeHtml(mod.id)}">
+                    <i class="fas fa-ellipsis-v text-slate-600"></i>
+                </button>
+                <div class="cb-module-actions-menu__panel hidden" data-mc-menu-panel="${escapeHtml(mod.id)}">
+                    <button type="button" data-mc-action="abrir-modal-notas-maestro" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-chalkboard-teacher text-green-600"></i><span>Notas del maestro</span></button>
+                    <button type="button" data-mc-action="analizar-modulo" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-search text-orange-500"></i><span>Analizar módulo</span></button>
+                    <button type="button" data-mc-action="abrir-modal-tono" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-adjust text-pink-600"></i><span>Cambiar tono</span></button>
+                    <button type="button" data-mc-action="abrir-modal-crear-tabla" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-table text-indigo-500"></i><span>Crear tabla</span></button>
+                    <button type="button" data-mc-action="traducir-modulo" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-language text-teal-600"></i><span>Traducir</span></button>
+                    <button type="button" data-mc-action="eliminar-modulo" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-trash text-red-600"></i><span>Eliminar</span></button>
+                </div>
+            </div>
         </div>
         ` : ''}
     </div>
@@ -5379,7 +6536,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
              id="contenido-${mod.id}"
              data-modulo-id="${mod.id}"
              contenteditable="${!esModoLecturaReal}">
-            ${renderizarContenidoModulo(mod.contenido)}
+            ${contenidoModuloHtml}
         </div>
     </div>
 
@@ -6387,7 +7544,7 @@ function renderizarStemEnElemento(root) {
     }
 }
 
-function renderizarContenidoModulo(contenido) {
+function renderizarContenidoModulo(contenido, tipoModulo = "") {
     const contenidoNormalizado = decodificarSecuenciasEscapadas(
         limpiarBloquesMarkdownEnvolventes(contenido || "")
     );
@@ -6396,11 +7553,11 @@ function renderizarContenidoModulo(contenido) {
     }
 
     if (contieneHtmlRenderizable(contenidoNormalizado)) {
-        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(contenidoNormalizado));
+        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(contenidoNormalizado), tipoModulo);
     }
 
     if (contieneMarkdownEstructurado(contenidoNormalizado)) {
-        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(convertirMarkdownBasicoAHtml(contenidoNormalizado)));
+        return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(convertirMarkdownBasicoAHtml(contenidoNormalizado)), tipoModulo);
     }
 
     const parrafos = normalizarTextoNotas(contenidoNormalizado)
@@ -6409,7 +7566,7 @@ function renderizarContenidoModulo(contenido) {
         .filter(Boolean)
         .map(p => `<p>${formatearInlineMarkdown(p).replace(/\n/g, '<br>')}</p>`);
 
-    return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(parrafos.join(''))) || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
+    return decorarContenidoModuloRenderizado(sanitizarHtmlEditorial(parrafos.join('')), tipoModulo) || "<p class='text-xs text-gray-400'>Sin contenido generado.</p>";
 }
 
 window.renderizarContenidoModulo = renderizarContenidoModulo;
@@ -6422,7 +7579,7 @@ function normalizarContenidoModuloPersistible(contenido = "") {
 
 window.normalizarContenidoModuloPersistible = normalizarContenidoModuloPersistible;
 
-function decorarContenidoModuloRenderizado(html = "") {
+function decorarContenidoModuloRenderizado(html = "", tipoModulo = "") {
     const raw = String(html || "").trim();
     if (!raw || typeof document === "undefined") return raw;
 
@@ -6430,6 +7587,9 @@ function decorarContenidoModuloRenderizado(html = "") {
     root.innerHTML = raw;
     expandirBloquesEstructuradosModulo(root);
     renderizarStemEnElemento(root);
+    if (normalizarTipoModulo(tipoModulo) === "temario") {
+        decorarTablaTemario(root);
+    }
 
     root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote").forEach((node) => {
         const text = String(node.textContent || "").trim();
@@ -6566,6 +7726,47 @@ function decorarContenidoModuloRenderizado(html = "") {
     });
 
     return root.innerHTML;
+}
+
+function decorarTablaTemario(root) {
+    if (!root) return;
+    const table = root.querySelector("table");
+    if (!table) return;
+
+    table.classList.add("cb-temario-table");
+
+    const headers = Array.from(table.querySelectorAll("thead th"));
+    if (headers.length >= 3) {
+        const first = String(headers[0].textContent || "").trim().toLowerCase();
+        const second = String(headers[1].textContent || "").trim().toLowerCase();
+        const third = String(headers[2].textContent || "").trim().toLowerCase();
+
+        if (first === "cli") {
+            headers[0].textContent = "CLIL";
+        }
+        if (second === "language arts") {
+            headers[1].textContent = "Language Arts (Grammar & Vocabulary)";
+        }
+        if (third === "language functions") {
+            headers[2].textContent = "Language Functions (Skills)";
+        }
+        if (second === "lengua" || second === "lengua / language arts") {
+            headers[1].textContent = "Lengua y vocabulario";
+        }
+        if (third === "funciones del lenguaje") {
+            headers[2].textContent = "Funciones del lenguaje y habilidades";
+        }
+    }
+
+    const heading = root.querySelector("h1, h2, h3");
+    if (heading) {
+        heading.classList.add("cb-temario-heading");
+    }
+
+    const firstBodyCell = table.querySelector("tbody td");
+    if (firstBodyCell) {
+        firstBodyCell.classList.add("cb-temario-cell-topic");
+    }
 }
 
 function expandirBloquesEstructuradosModulo(root) {
@@ -7091,7 +8292,7 @@ async function eliminarModulo(moduloId) {
     const sub = subtemaActivo;
 
     // Eliminar del array local (usando solo el ID interno si es necesario)
-    const idInterno = moduloId.includes('_') ? moduloId.split('_')[1] : moduloId;
+    const idInterno = extraerIdInternoModulo(moduloId);
     sub.modulosIds = sub.modulosIds.filter(id => {
         // Comparar IDs: si el ID en el array contiene guión bajo, comparar completo
         // si no, comparar solo la parte después del guión bajo
@@ -7127,7 +8328,7 @@ function construirContenidoInicialModulo(tipo) {
     if (tipoNormalizado === "temario") {
         return `
 <h2>Temario</h2>
-<p>Presenta aquí el recorrido general del subtema, los puntos clave y el orden sugerido de trabajo.</p>
+<p>Presenta aquí el recorrido general del subtema en formato de tabla, con columnas claras para tema, contenidos clave y funciones o desempeños.</p>
 `.trim();
     }
 
@@ -7157,12 +8358,7 @@ function construirContenidoInicialModulo(tipo) {
 function construirInstruccionesInicialesModulo(tipo) {
     const tipoNormalizado = normalizarTipoModulo(tipo);
     if (tipoNormalizado === "temario") {
-        return `
-Genera un temario breve y claro para este subtema.
-Debe funcionar como guía inicial y mapa de ruta.
-Incluye título, breve introducción, puntos principales y orden sugerido de los contenidos.
-No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.
-`.trim();
+        return "";
     }
 
     if (tipoNormalizado === "lectura") {
@@ -7232,6 +8428,8 @@ function mostrarSelectorModulo(subtema) {
                 contenido: construirContenidoInicialModulo(tipo),
                 instrucciones: construirInstruccionesInicialesModulo(tipo),
                 incluirInstruccionOriginalEnPropuesta: false,
+                generarGrafico: false,
+                ignorarContextoOtrosModulos: false,
                 traducciones: [],
                 creado: Date.now(),
                 actualizado: Date.now()
@@ -7325,8 +8523,7 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null) {
         
         // Asegurar que el ID interno esté presente
         if (!data.id) {
-            // Extraer ID interno del formato compuesto
-            data.id = idParaBuscar.includes('_') ? idParaBuscar.split('_')[1] : idParaBuscar;
+            data.id = extraerIdInternoModulo(idParaBuscar, cursoIdParaBuscar);
         }
         
         modulosCache.set(idParaBuscar, data);
@@ -7463,7 +8660,7 @@ async function reintentarGuardadoModuloReduciendoTamano({
         cursoId: cursoIdParaGuardar,
         ultimaModificacion: new Date().toISOString(),
         modificadoPor: currentUserId,
-        id: moduloId.includes('_') ? moduloId.split('_')[1] : moduloId
+        id: extraerIdInternoModulo(moduloId, cursoIdParaGuardar)
     });
 
     if (snap.exists()) {
@@ -7525,7 +8722,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
         
         // Si no tiene ID en los datos, agregarlo
         if (!datosActualizados.id) {
-            datosActualizados.id = moduloId.includes('_') ? moduloId.split('_')[1] : moduloId;
+            datosActualizados.id = extraerIdInternoModulo(moduloId, cursoIdParaGuardar);
         }
         
         if (snap.exists()) {
@@ -7537,7 +8734,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
         } else {
             // Si no existe, crear con datos básicos
             const dataNuevo = {
-                id: moduloId.includes('_') ? moduloId.split('_')[1] : moduloId,
+                id: extraerIdInternoModulo(moduloId, cursoIdParaGuardar),
                 cursoId: cursoIdParaGuardar,
                 creado: Date.now(),
                 ...datosActualizados
@@ -7959,6 +9156,9 @@ window.traducirModulo = async function(moduloId) {
     // Resetear el modal
     select.value = "";
     cont.innerHTML = `<p class="text-gray-400 text-sm">Aquí aparecerá la traducción del módulo.</p>`;
+    delete cont.dataset.traduccionId;
+    delete cont.dataset.moduloId;
+    actualizarBotonAplicarTraduccionModulo();
     
     // Cargar traducciones existentes
     if (modulo.traducciones && modulo.traducciones.length > 0) {
@@ -8008,11 +9208,11 @@ Reglas:
 - Traducción natural, NO literal.
 - Mantener formato HTML.
 - NO inventes contenido nuevo.
+- Devuelve solo el contenido traducido final.
+- NO copies ni repitas separadores, almohadillas, delimitadores ni marcadores técnicos.
 
 Contenido:
-#############################################
 ${modulo.contenido || "(Vacío)"}
-#############################################
         `;
 
         const { response: res, data } = await geminiGenerateRequest({
@@ -8022,16 +9222,13 @@ ${modulo.contenido || "(Vacío)"}
             throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${res.status}`));
         }
         let texto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta";
-
-        // LIMPIAR ```html ``` Y ``` CUALQUIER BLOQUE
-        texto = texto.replace(/```html/gi, "");
-        texto = texto.replace(/```/g, "");
+        const textoLimpio = limpiarRespuestaTraduccionModulo(texto, modulo.tipo || "");
 
         // guardar traducción en Firestore (documento del módulo)
         const nueva = {
             id: crypto.randomUUID(),
             idioma,
-            contenido: texto
+            contenido: textoLimpio
         };
 
         const nuevasTraducciones = Array.isArray(modulo.traducciones)
@@ -8047,7 +9244,10 @@ ${modulo.contenido || "(Vacío)"}
         renderListadoTraducciones(modulo);
 
         // mostrar traducción
-        document.getElementById("contenidoTraduccionModulo").innerHTML = sanitizarHtmlEditorial(texto);
+        document.getElementById("contenidoTraduccionModulo").innerHTML = textoLimpio || `<p class="text-gray-400 text-sm">Sin contenido traducido.</p>`;
+        document.getElementById("contenidoTraduccionModulo").dataset.traduccionId = nueva.id;
+        document.getElementById("contenidoTraduccionModulo").dataset.moduloId = modulo.id;
+        actualizarBotonAplicarTraduccionModulo({ traduccionId: nueva.id, moduloId: modulo.id });
 
     } catch (err) {
         const contenedorTraduccion = document.getElementById("contenidoTraduccionModulo");
@@ -8059,6 +9259,7 @@ ${modulo.contenido || "(Vacío)"}
             const errorBody = document.createElement("pre");
             errorBody.textContent = String(err?.stack || err?.message || err || "");
             contenedorTraduccion.append(errorTitle, errorBody);
+            actualizarBotonAplicarTraduccionModulo();
         }
     }
 };
@@ -8139,6 +9340,10 @@ window.renderListadoTraducciones = function(modulo) {
                     data-mc-action="abrir-traduccion"
                     data-mc-translation-id="${escapeHtml(t.id)}"
                     data-mc-modulo-id="${escapeHtml(modulo.id)}">Ver</span>
+                <span class="text-emerald-600 cursor-pointer hover:text-emerald-800"
+                    data-mc-action="aplicar-traduccion"
+                    data-mc-translation-id="${escapeHtml(t.id)}"
+                    data-mc-modulo-id="${escapeHtml(modulo.id)}">Aplicar</span>
                 <span class="text-red-600 cursor-pointer hover:text-red-800"
                     data-mc-action="eliminar-traduccion"
                     data-mc-translation-id="${escapeHtml(t.id)}"
@@ -8149,6 +9354,20 @@ window.renderListadoTraducciones = function(modulo) {
 
     cont.innerHTML = html;
 };
+
+function actualizarBotonAplicarTraduccionModulo({ traduccionId = "", moduloId = "" } = {}) {
+    const btn = document.getElementById("btnAplicarTraduccionModulo");
+    if (!btn) return;
+    const hasSelection = !!String(traduccionId || "").trim() && !!String(moduloId || "").trim();
+    btn.disabled = !hasSelection;
+    if (hasSelection) {
+        btn.dataset.traduccionId = String(traduccionId || "").trim();
+        btn.dataset.moduloId = String(moduloId || "").trim();
+    } else {
+        delete btn.dataset.traduccionId;
+        delete btn.dataset.moduloId;
+    }
+}
 
 
 window.abrirTraduccion = async function (idTraduccion, moduloId = null) {
@@ -8190,13 +9409,52 @@ window.abrirTraduccion = async function (idTraduccion, moduloId = null) {
     // Insertar contenido en el modal
     const cont = document.getElementById("contenidoTraduccionModulo");
     if (cont) {
-        cont.innerHTML = sanitizarHtmlEditorial(traduccion.contenido);
+        cont.innerHTML = limpiarRespuestaTraduccionModulo(traduccion.contenido, modulo.tipo || "");
         cont.dataset.traduccionId = idTraduccion;
         cont.dataset.moduloId = modulo.id;
     }
+    actualizarBotonAplicarTraduccionModulo({ traduccionId: idTraduccion, moduloId: modulo.id });
 
     // Activar menú contextual
     setTimeout(() => activarAccionesEnParrafos(), 50);
+};
+
+window.aplicarTraduccionAlModulo = async function (idTraduccion, moduloId = null) {
+    let modulo = moduloId ? await obtenerModulo(moduloId) : window.__moduloTraduciendo;
+    if (!modulo) {
+        alert("No se encontró el módulo.");
+        return;
+    }
+
+    const traduccion = Array.isArray(modulo.traducciones)
+        ? modulo.traducciones.find((t) => t.id === idTraduccion)
+        : null;
+    if (!traduccion) {
+        alert("No se encontró la traducción.");
+        return;
+    }
+
+    if (!confirm(`¿Aplicar la traducción en ${traduccion.idioma} al contenido del módulo?`)) return;
+
+    const contenidoAplicable = limpiarRespuestaTraduccionModulo(traduccion.contenido, modulo.tipo || "");
+    await guardarModulo(modulo.id, { contenido: contenidoAplicable }, modulo.cursoId || null);
+    modulo.contenido = contenidoAplicable;
+    window.__moduloTraduciendo = modulo;
+
+    const contModulo = document.getElementById(`contenido-${modulo.id}`);
+    if (contModulo) {
+        contModulo.innerHTML = contenidoAplicable;
+    }
+
+    const contPreview = document.getElementById("contenidoTraduccionModulo");
+    if (contPreview) {
+        contPreview.innerHTML = contenidoAplicable;
+        contPreview.dataset.traduccionId = idTraduccion;
+        contPreview.dataset.moduloId = modulo.id;
+    }
+
+    actualizarBotonAplicarTraduccionModulo({ traduccionId: idTraduccion, moduloId: modulo.id });
+    mostrarNotificacion("✅ Traducción aplicada al módulo", "success");
 };
 
 
@@ -8223,6 +9481,9 @@ window.eliminarTraduccion = async function (idTraduccion, moduloId = null) {
     const cont = document.getElementById("contenidoTraduccionModulo");
     if (cont && cont.dataset.traduccionId === idTraduccion) {
         cont.innerHTML = `<p class="text-gray-400 text-sm">Traducción eliminada.</p>`;
+        delete cont.dataset.traduccionId;
+        delete cont.dataset.moduloId;
+        actualizarBotonAplicarTraduccionModulo();
     }
 };
 
@@ -8241,7 +9502,19 @@ window.cerrarModalTraduccion = function () {
     const modal = document.getElementById("modalTraduccionModulo");
     modal.classList.add("hidden");
     modal.classList.remove("flex");
+    actualizarBotonAplicarTraduccionModulo();
 };
+
+const btnAplicarTraduccionModulo = document.getElementById("btnAplicarTraduccionModulo");
+if (btnAplicarTraduccionModulo && btnAplicarTraduccionModulo.dataset.cbBound !== "1") {
+    btnAplicarTraduccionModulo.dataset.cbBound = "1";
+    btnAplicarTraduccionModulo.addEventListener("click", async () => {
+        const traduccionId = btnAplicarTraduccionModulo.dataset.traduccionId || "";
+        const moduloId = btnAplicarTraduccionModulo.dataset.moduloId || "";
+        if (!traduccionId || !moduloId) return;
+        await window.aplicarTraduccionAlModulo?.(traduccionId, moduloId);
+    });
+}
 
 // Asegúrate de que este código se ejecute al cargar la página
 document.addEventListener('DOMContentLoaded', function() {
@@ -9788,6 +11061,246 @@ function construirContenidoModuloWord(modulo = {}) {
     `;
 }
 
+function construirActividadOriginalHtmlModulo(modulo = {}) {
+    const instruccionesRaw = String(modulo?.instrucciones || "").trim();
+    if (!instruccionesRaw) return "";
+    const hydrated = hidratarHtmlInstruccionesGemini(instruccionesRaw, String(modulo?.id || "").trim());
+    const bodyHtml = instruccionesRaw.includes("<") && instruccionesRaw.includes(">")
+        ? sanitizarHtmlEditorial(hydrated)
+        : `<p>${escapeHtml(hydrated).replace(/\n/g, "<br>")}</p>`;
+    return `
+        <p>Actividad original</p>
+        <div>${bodyHtml}</div>
+    `.trim();
+}
+
+function contenidoModuloYaIncluyeActividadOriginal(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return false;
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+    if (root.querySelector(".cb-module-block-title.is-original, .word-instruccion-original")) return true;
+    return Array.from(root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote"))
+        .some((node) => String(node.textContent || "").trim().toLowerCase() === "actividad original");
+}
+
+function quitarActividadOriginalDelContenido(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return "";
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+
+    const headings = Array.from(root.querySelectorAll(".cb-module-block-title.is-original, h1, h2, h3, h4, p, li, blockquote"));
+    headings.forEach((heading) => {
+        const text = String(heading.textContent || "").trim();
+        const esBloqueOriginal =
+            heading.classList?.contains("is-original") ||
+            /^actividad(?:\s+\d+)?\s+original\b/i.test(text);
+        if (!esBloqueOriginal) return;
+
+        let cursor = heading.nextElementSibling;
+        const nodesToRemove = [heading];
+        while (cursor) {
+            const next = cursor.nextElementSibling;
+            const textCursor = String(cursor.textContent || "").trim();
+            const esSiguienteSeparador =
+                cursor.classList?.contains("cb-module-block-title") ||
+                /^actividad(?:\s+\d+)?\s+original\b/i.test(textCursor) ||
+                /^propuesta(?:\s+actividad(?:\s+\d+)?)?\b/i.test(textCursor);
+            if (esSiguienteSeparador) break;
+            nodesToRemove.push(cursor);
+            cursor = next;
+        }
+        nodesToRemove.forEach((node) => node.remove());
+    });
+
+    return root.innerHTML.trim();
+}
+
+function aplicarVisibilidadActividadOriginalEnContenido(html = "", modulo = {}, visible = false) {
+    const contenidoBase = String(html || "").trim();
+    const root = document.createElement("div");
+    const contenidoRenderizado = typeof renderizarContenidoModulo === "function"
+        ? renderizarContenidoModulo(contenidoBase, modulo?.tipo || "")
+        : contenidoBase;
+    root.innerHTML = contenidoRenderizado && !/Sin contenido generado/i.test(contenidoRenderizado)
+        ? contenidoRenderizado
+        : "";
+
+    root.innerHTML = quitarActividadOriginalDelContenido(root.innerHTML);
+    if (visible) {
+        const bloqueActividadOriginal = construirActividadOriginalHtmlModulo(modulo);
+        if (bloqueActividadOriginal) {
+            const anchor = root.querySelector(".cb-module-block-title.is-proposal, .cb-module-question-heading, .cb-module-generated-graphic, .cb-module-question-block");
+            if (anchor) {
+                anchor.insertAdjacentHTML("beforebegin", bloqueActividadOriginal);
+            } else if (root.innerHTML.trim()) {
+                root.insertAdjacentHTML("afterbegin", bloqueActividadOriginal);
+            } else {
+                root.innerHTML = bloqueActividadOriginal;
+            }
+        }
+    }
+
+    return normalizarContenidoModuloPersistible(root.innerHTML);
+}
+
+window.aplicarVisibilidadActividadOriginalEnContenido = aplicarVisibilidadActividadOriginalEnContenido;
+
+let moduloActionsFloatingMenu = null;
+let moduloActionsFloatingMenuTrigger = null;
+
+function obtenerMenuAccionesModuloFlotante() {
+    if (moduloActionsFloatingMenu && document.body.contains(moduloActionsFloatingMenu)) {
+        return moduloActionsFloatingMenu;
+    }
+    const node = document.createElement("div");
+    node.id = "cbModuleActionsFloatingMenu";
+    node.className = "cb-module-actions-menu__floating-panel hidden";
+    node.setAttribute("role", "menu");
+    document.body.appendChild(node);
+    moduloActionsFloatingMenu = node;
+    return node;
+}
+
+function cerrarMenuAccionesModuloFlotante() {
+    const menu = obtenerMenuAccionesModuloFlotante();
+    menu.classList.add("hidden");
+    menu.innerHTML = "";
+    if (moduloActionsFloatingMenuTrigger) {
+        moduloActionsFloatingMenuTrigger.setAttribute("aria-expanded", "false");
+    }
+    moduloActionsFloatingMenuTrigger = null;
+}
+
+function posicionarMenuAccionesModuloFlotante(menu, trigger) {
+    if (!menu || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const margin = 12;
+
+    menu.style.top = "0px";
+    menu.style.left = "0px";
+    menu.classList.remove("hidden");
+
+    const menuRect = menu.getBoundingClientRect();
+    let left = rect.right - menuRect.width;
+    let top = rect.bottom + 8;
+
+    if (left < margin) left = margin;
+    if (left + menuRect.width > viewportWidth - margin) {
+        left = Math.max(margin, viewportWidth - menuRect.width - margin);
+    }
+    if (top + menuRect.height > viewportHeight - margin) {
+        top = Math.max(margin, rect.top - menuRect.height - 8);
+    }
+
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+}
+
+window.toggleMenuAccionesModulo = function(actionEl) {
+    const trigger = actionEl?.closest?.(".cb-module-actions-menu__trigger") || null;
+    if (!trigger) return;
+    const menuRoot = trigger.closest(".cb-module-actions-menu");
+    const sourcePanel = menuRoot?.querySelector(".cb-module-actions-menu__panel");
+    if (!sourcePanel) return;
+
+    const menu = obtenerMenuAccionesModuloFlotante();
+    const sameTrigger = moduloActionsFloatingMenuTrigger === trigger && !menu.classList.contains("hidden");
+    if (sameTrigger) {
+        cerrarMenuAccionesModuloFlotante();
+        return;
+    }
+
+    cerrarMenuAccionesModuloFlotante();
+    menu.innerHTML = sourcePanel.innerHTML;
+    moduloActionsFloatingMenuTrigger = trigger;
+    trigger.setAttribute("aria-expanded", "true");
+    posicionarMenuAccionesModuloFlotante(menu, trigger);
+};
+
+document.addEventListener("click", (event) => {
+    if (event.target.closest(".cb-module-actions-menu")) return;
+    if (event.target.closest(".cb-module-actions-menu__floating-panel")) return;
+    cerrarMenuAccionesModuloFlotante();
+});
+
+window.addEventListener("resize", () => {
+    if (!moduloActionsFloatingMenuTrigger || !moduloActionsFloatingMenu || moduloActionsFloatingMenu.classList.contains("hidden")) return;
+    posicionarMenuAccionesModuloFlotante(moduloActionsFloatingMenu, moduloActionsFloatingMenuTrigger);
+});
+
+window.addEventListener("scroll", () => {
+    if (!moduloActionsFloatingMenuTrigger || !moduloActionsFloatingMenu || moduloActionsFloatingMenu.classList.contains("hidden")) return;
+    posicionarMenuAccionesModuloFlotante(moduloActionsFloatingMenu, moduloActionsFloatingMenuTrigger);
+}, true);
+
+window.agregarActividadOriginalAlModulo = async function(moduloId) {
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+    if (!modulo) {
+        alert("No se encontró el módulo.");
+        return;
+    }
+    if (!String(modulo.instrucciones || "").trim()) {
+        alert("Este módulo no tiene instrucciones guardadas para convertirlas en actividad original.");
+        return;
+    }
+
+    const contenidoActual = String(modulo.contenido || "").trim();
+    const contenidoRenderizadoActual = renderizarContenidoModulo(contenidoActual, modulo.tipo || "");
+    const yaVisible = contenidoModuloYaIncluyeActividadOriginal(contenidoRenderizadoActual);
+
+    if (!yaVisible && !construirActividadOriginalHtmlModulo(modulo)) {
+        alert("No se pudo construir la actividad original a partir de las instrucciones del módulo.");
+        return;
+    }
+    const contenidoPersistible = aplicarVisibilidadActividadOriginalEnContenido(contenidoActual, modulo, !yaVisible);
+    await guardarModulo(moduloId, {
+        contenido: contenidoPersistible
+    }, cursoIdModulo);
+
+    const moduloActualizado = {
+        ...modulo,
+        contenido: contenidoPersistible
+    };
+    const cont = document.getElementById(`contenido-${moduloId}`);
+    if (cont) {
+        cont.innerHTML = renderizarContenidoModulo(contenidoPersistible, modulo.tipo || "");
+        if (typeof activarAccionesEnParrafos === "function") {
+            window.setTimeout(() => activarAccionesEnParrafos(), 0);
+        }
+    }
+    modulosCache.set(construirDocIdModulo(moduloId, cursoIdModulo), moduloActualizado);
+    if (window.subtemaActivo?.modulos && Array.isArray(window.subtemaActivo.modulos)) {
+        const target = window.subtemaActivo.modulos.find((item) => String(item?.id || "").trim() === String(moduloId || "").trim());
+        if (target) Object.assign(target, moduloActualizado);
+    }
+    renderTemas();
+    mostrarNotificacion(yaVisible ? "Actividad original oculta." : "Actividad original mostrada.", "success");
+};
+
+function limpiarRespuestaTraduccionModulo(texto = "", tipoModulo = "") {
+    let limpio = String(texto || "");
+    limpio = limpio.replace(/```html/gi, "").replace(/```/g, "");
+    limpio = limpio.replace(/^\s*#{6,}\s*$/gm, "");
+    limpio = limpio.replace(/\n{3,}/g, "\n\n").trim();
+
+    if (!limpio) return "";
+
+    if (typeof renderizarContenidoModulo === "function") {
+        return renderizarContenidoModulo(limpio, tipoModulo);
+    }
+
+    if (limpio.includes("<") && limpio.includes(">")) {
+        return sanitizarHtmlEditorial(limpio);
+    }
+
+    return `<p>${escapeHtml(limpio).replace(/\n/g, "<br>")}</p>`;
+}
+
 function crearEstilosWordCurso() {
     return `
     body { font-family: Arial, sans-serif; font-size: 11pt; color: #0f172a; line-height: 1.6; margin: 24px; }
@@ -10065,6 +11578,64 @@ function guardarImagenesGeminiPorModulo(moduloId = "", imageMap = {}) {
     guardarCacheImagenesGemini(cache);
 }
 
+function obtenerExtensionImagenGemini(mimeType = "image/png") {
+    const clean = String(mimeType || "").trim().toLowerCase();
+    if (clean === "image/jpeg") return "jpg";
+    if (clean === "image/webp") return "webp";
+    if (clean === "image/gif") return "gif";
+    return "png";
+}
+
+function dataUrlABlobGemini(dataUrl = "") {
+    const match = String(dataUrl || "").match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!match?.[1] || !match?.[2]) {
+        throw new Error("No se pudo convertir la imagen de instrucciones.");
+    }
+    const mimeType = match[1];
+    const bytes = atob(match[2]);
+    const array = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i += 1) array[i] = bytes.charCodeAt(i);
+    return new Blob([array], { type: mimeType });
+}
+
+async function subirImagenInstruccionGeminiAFirebaseStorage({
+    moduloId = "",
+    cursoId = "",
+    imageId = "",
+    dataUrl = "",
+    nombre = "imagen"
+} = {}) {
+    const user = auth.currentUser;
+    if (!user?.uid) {
+        throw new Error("Debes iniciar sesión para guardar imágenes de las instrucciones.");
+    }
+    const blob = dataUrlABlobGemini(dataUrl);
+    const mimeType = String(blob.type || "image/png").trim() || "image/png";
+    const ext = obtenerExtensionImagenGemini(mimeType);
+    const safeCourseId = String(cursoId || curso?.id || "curso").trim() || "curso";
+    const safeModuleId = String(moduloId || "modulo").trim() || "modulo";
+    const safeImageId = String(imageId || crearGeminiImageId()).trim() || crearGeminiImageId();
+    const path = `images/${user.uid}/moodle-instructions/${safeCourseId}/${safeModuleId}/${safeImageId}.${ext}`;
+    const ref = storageRef(storage, path);
+    await uploadBytes(ref, blob, {
+        contentType: mimeType,
+        customMetadata: {
+            origin: "moodleCourseInstructions",
+            courseId: safeCourseId,
+            moduleId: safeModuleId,
+            imageId: safeImageId,
+            fileName: String(nombre || `imagen_${safeImageId}`).trim()
+        }
+    });
+    const downloadUrl = await getDownloadURL(ref);
+    return {
+        downloadUrl,
+        storagePath: path,
+        mimeType,
+        updatedAt: new Date().toISOString()
+    };
+}
+
 function crearGeminiImageId() {
     return `gemimg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -10108,12 +11679,29 @@ function hidratarHtmlInstruccionesGemini(html = "", moduloId = "") {
     container.innerHTML = raw;
     container.querySelectorAll("img[data-gemini-image-id]").forEach((img) => {
         const imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
-        if (imageId) {
-            img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
-        }
+        const storedUrl = String(
+            img.getAttribute("data-gemini-storage-url") ||
+            cache?.[imageId]?.downloadUrl ||
+            ""
+        ).trim();
         const dataUrl = String(cache?.[imageId]?.dataUrl || "").trim();
         if (dataUrl.startsWith("data:image/")) {
             img.setAttribute("src", dataUrl);
+            return;
+        }
+        if (/^https?:\/\//i.test(storedUrl)) {
+            img.setAttribute("src", storedUrl);
+            img.setAttribute("data-gemini-storage-url", storedUrl);
+            const storagePath = String(
+                img.getAttribute("data-gemini-storage-path") ||
+                cache?.[imageId]?.storagePath ||
+                ""
+            ).trim();
+            if (storagePath) img.setAttribute("data-gemini-storage-path", storagePath);
+            return;
+        }
+        if (imageId) {
+            img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
             return;
         }
         img.remove();
@@ -10125,19 +11713,28 @@ function hidratarHtmlInstruccionesGemini(html = "", moduloId = "") {
         );
         if (fallbackId) {
             img.setAttribute("data-gemini-image-id", fallbackId);
-            img.setAttribute("src", construirPlaceholderImagenGemini(fallbackId));
             const dataUrl = String(cache?.[fallbackId]?.dataUrl || "").trim();
             if (dataUrl.startsWith("data:image/")) {
                 img.setAttribute("src", dataUrl);
                 return;
             }
+            const storedUrl = String(cache?.[fallbackId]?.downloadUrl || "").trim();
+            if (/^https?:\/\//i.test(storedUrl)) {
+                img.setAttribute("src", storedUrl);
+                img.setAttribute("data-gemini-storage-url", storedUrl);
+                if (cache?.[fallbackId]?.storagePath) {
+                    img.setAttribute("data-gemini-storage-path", String(cache[fallbackId].storagePath));
+                }
+                return;
+            }
+            img.setAttribute("src", construirPlaceholderImagenGemini(fallbackId));
+            return;
         }
-        img.remove();
     });
     return container.innerHTML;
 }
 
-function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "") {
+async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "", cursoId = "") {
     const key = String(moduloId || "").trim();
     if (!key) return sanitizarHtmlEditorial(sanitizeRichText(normalizarHtmlLegacyImagenGemini(html)));
     const container = document.createElement("div");
@@ -10145,7 +11742,8 @@ function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "") {
     const nextCache = { ...obtenerImagenesGeminiPorModulo(key) };
     const usedIds = new Set();
 
-    container.querySelectorAll("img").forEach((img, index) => {
+    const imageNodes = Array.from(container.querySelectorAll("img"));
+    for (const [index, img] of imageNodes.entries()) {
         const src = String(img.getAttribute("src") || "").trim();
         let imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
         if (!imageId && src.startsWith("https://gemini.local/reference-image/")) {
@@ -10153,27 +11751,62 @@ function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "") {
         }
         if (!imageId) imageId = crearGeminiImageId();
         const alt = String(img.getAttribute("alt") || `imagen_${index + 1}`).trim() || `imagen_${index + 1}`;
+        let downloadUrl = String(img.getAttribute("data-gemini-storage-url") || nextCache?.[imageId]?.downloadUrl || "").trim();
+        let storagePath = String(img.getAttribute("data-gemini-storage-path") || nextCache?.[imageId]?.storagePath || "").trim();
 
         if (src.startsWith("data:image/")) {
+            const uploaded = await subirImagenInstruccionGeminiAFirebaseStorage({
+                moduloId: key,
+                cursoId,
+                imageId,
+                dataUrl: src,
+                nombre: alt
+            });
             nextCache[imageId] = {
                 name: alt,
-                mimeType: String(src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/png").trim(),
+                mimeType: String(uploaded?.mimeType || src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/png").trim(),
                 dataUrl: src,
+                downloadUrl: uploaded.downloadUrl,
+                storagePath: uploaded.storagePath,
                 updatedAt: new Date().toISOString()
             };
+            downloadUrl = String(uploaded.downloadUrl || "").trim();
+            storagePath = String(uploaded.storagePath || "").trim();
+        } else if (/^https?:\/\//i.test(src)) {
+            downloadUrl = src;
+        } else if (nextCache?.[imageId]?.dataUrl) {
+            const uploaded = await subirImagenInstruccionGeminiAFirebaseStorage({
+                moduloId: key,
+                cursoId,
+                imageId,
+                dataUrl: String(nextCache[imageId].dataUrl || ""),
+                nombre: alt
+            });
+            nextCache[imageId] = {
+                ...nextCache[imageId],
+                name: alt,
+                mimeType: String(uploaded?.mimeType || nextCache[imageId]?.mimeType || "image/png").trim(),
+                downloadUrl: uploaded.downloadUrl,
+                storagePath: uploaded.storagePath,
+                updatedAt: new Date().toISOString()
+            };
+            downloadUrl = String(uploaded.downloadUrl || "").trim();
+            storagePath = String(uploaded.storagePath || "").trim();
         }
 
-        if (!nextCache[imageId]?.dataUrl) {
+        if (!downloadUrl) {
             img.remove();
-            return;
+            continue;
         }
 
         usedIds.add(imageId);
         img.setAttribute("data-gemini-image-id", imageId);
-        img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
+        img.setAttribute("src", downloadUrl);
+        img.setAttribute("data-gemini-storage-url", downloadUrl);
+        if (storagePath) img.setAttribute("data-gemini-storage-path", storagePath);
         img.setAttribute("alt", alt);
         img.setAttribute("title", alt);
-    });
+    }
 
     const trimmedCache = {};
     usedIds.forEach((imageId) => {
@@ -10726,21 +12359,41 @@ document.addEventListener('DOMContentLoaded', function() {
 // Modificar la función abrirInstruccionesGemini para manejar HTML
 window.abrirInstruccionesGemini = async function(moduloId) {
     inicializarToolbarInstruccionesGemini();
-    const modulo = await obtenerModulo(moduloId);
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
     if (!modulo) return;
 
     // Guardamos referencia al ID, no el objeto
     window.__moduloEditandoInstruccionesId = moduloId;
+    window.__moduloEditandoInstruccionesCursoId = String(modulo.cursoId || cursoIdModulo || "").trim();
 
     // Obtener el editor
     const editor = document.getElementById('txtModalInstruccionesGemini');
     const checkIncluirOriginal = document.getElementById('checkIncluirInstruccionOriginalModulo');
+    const checkGenerarGrafico = document.getElementById('checkGenerarGraficoModulo');
+    const checkIgnorarContexto = document.getElementById('checkIgnorarContextoOtrosModulos');
     if (!editor) {
         return;
     }
 
+    const legacyTemarioDefaults = new Set([
+        `Genera un temario breve y claro para este subtema.
+Debe funcionar como guía inicial y mapa de ruta.
+Incluye título, breve introducción, puntos principales y orden sugerido de los contenidos.
+No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.`,
+        `Genera el temario de este subtema en una tabla clara.
+Debe funcionar como guía inicial y mapa de ruta.
+Organiza la información en columnas, por ejemplo: tema o CLIL, contenidos de lengua y funciones o desempeños.
+Si las instrucciones están en inglés, responde en inglés; si están en español, responde en español.
+No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.`
+    ]);
+    const instruccionesModulo = String(modulo.instrucciones || "").trim();
+    const debeIgnorarDefaultTemario =
+        normalizarTipoModulo(modulo.tipo) === "temario" &&
+        legacyTemarioDefaults.has(instruccionesModulo);
+
     // Cargar instrucciones (pueden contener HTML)
-    if (modulo.instrucciones) {
+    if (instruccionesModulo && !debeIgnorarDefaultTemario) {
         const htmlHidratado = hidratarHtmlInstruccionesGemini(modulo.instrucciones, moduloId);
         // Si contiene HTML, usarlo directamente
         if (modulo.instrucciones.includes('<') && modulo.instrucciones.includes('>')) {
@@ -10756,6 +12409,12 @@ window.abrirInstruccionesGemini = async function(moduloId) {
 
     if (checkIncluirOriginal) {
         checkIncluirOriginal.checked = modulo.incluirInstruccionOriginalEnPropuesta === true;
+    }
+    if (checkGenerarGrafico) {
+        checkGenerarGrafico.checked = modulo.generarGrafico === true;
+    }
+    if (checkIgnorarContexto) {
+        checkIgnorarContexto.checked = modulo.ignorarContextoOtrosModulos === true;
     }
 
     // Mostrar modal
@@ -10774,10 +12433,14 @@ function inicializarEventosModalInstruccionesGemini() {
     const btnGuardar = document.getElementById("btnGuardarInstruccionesGemini");
     const modal = document.getElementById("modalInstruccionesGemini");
     const checkIncluirOriginal = document.getElementById("checkIncluirInstruccionOriginalModulo");
+    const checkGenerarGrafico = document.getElementById("checkGenerarGraficoModulo");
+    const checkIgnorarContexto = document.getElementById("checkIgnorarContextoOtrosModulos");
     if (!btnCerrar || !btnGuardar || !modal) return;
     if (btnGuardar.dataset.cbBound === "1") return;
 
     btnCerrar.addEventListener("click", () => {
+        window.__moduloEditandoInstruccionesId = null;
+        window.__moduloEditandoInstruccionesCursoId = null;
         modal.classList.add("hidden");
         modal.classList.remove("flex");
     });
@@ -10786,30 +12449,61 @@ function inicializarEventosModalInstruccionesGemini() {
         const editor = obtenerEditorGemini();
         if (!editor) return;
         const moduloId = window.__moduloEditandoInstruccionesId;
+        const cursoIdModulo = String(window.__moduloEditandoInstruccionesCursoId || curso?.id || "").trim() || null;
         if (!moduloId) return;
         const htmlNormalizado = normalizarHtmlLegacyImagenGemini(editor.innerHTML.trim());
         if (htmlNormalizado !== editor.innerHTML.trim()) {
             editor.innerHTML = sanitizarHtmlEditorial(htmlNormalizado);
         }
-        const contenidoHTML = prepararHtmlInstruccionesGeminiParaGuardar(htmlNormalizado, moduloId);
+        const contenidoHTML = await prepararHtmlInstruccionesGeminiParaGuardar(
+            htmlNormalizado,
+            moduloId,
+            cursoIdModulo
+        );
 
-        // Guardar el HTML completo (puede contener tablas)
-        await guardarModulo(moduloId, {
-            instrucciones: contenidoHTML,
-            incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true
-        });
+        try {
+            const incluirOriginalChecked = checkIncluirOriginal?.checked === true;
+            const generarGraficoChecked = checkGenerarGrafico?.checked === true;
+            const ignorarContextoChecked = checkIgnorarContexto?.checked === true;
+            await guardarModulo(moduloId, {
+                instrucciones: contenidoHTML,
+                incluirInstruccionOriginalEnPropuesta: incluirOriginalChecked,
+                generarGrafico: generarGraficoChecked,
+                ignorarContextoOtrosModulos: ignorarContextoChecked
+            }, cursoIdModulo);
 
-        // Cerrar modal
-        modal.classList.add("hidden");
-        modal.classList.remove("flex");
-        
-        // Mostrar notificación
-        const hasTable = contenidoHTML.includes('<table') || contenidoHTML.includes('<tr') || contenidoHTML.includes('<td');
-        const message = hasTable ? 
-            "✅ Instrucciones guardadas (incluyendo tablas)" : 
-            "✅ Instrucciones guardadas";
-        
-        mostrarNotificacion(message, 'success');
+            const docId = construirDocIdModulo(moduloId, cursoIdModulo);
+            const docSnap = docId ? await getDoc(doc(db, "moodleCourses", docId)) : null;
+            const instruccionesPersistidas = String(docSnap?.data()?.instrucciones || "").trim();
+            const incluirOriginalPersistido = docSnap?.data()?.incluirInstruccionOriginalEnPropuesta === true;
+            const generarGraficoPersistido = docSnap?.data()?.generarGrafico === true;
+            const ignorarContextoPersistido = docSnap?.data()?.ignorarContextoOtrosModulos === true;
+
+            if (
+                !docSnap?.exists() ||
+                instruccionesPersistidas !== String(contenidoHTML || "").trim() ||
+                incluirOriginalPersistido !== incluirOriginalChecked ||
+                generarGraficoPersistido !== generarGraficoChecked ||
+                ignorarContextoPersistido !== ignorarContextoChecked
+            ) {
+                throw new Error("Las instrucciones o sus opciones no quedaron persistidas en Firebase.");
+            }
+
+            window.__moduloEditandoInstruccionesId = null;
+            window.__moduloEditandoInstruccionesCursoId = null;
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+
+            const hasTable = contenidoHTML.includes('<table') || contenidoHTML.includes('<tr') || contenidoHTML.includes('<td');
+            const message = hasTable
+                ? "✅ Instrucciones guardadas (incluyendo tablas)"
+                : "✅ Instrucciones guardadas";
+
+            mostrarNotificacion(message, 'success');
+        } catch (error) {
+            console.error("No se pudieron guardar las instrucciones de Gemini del módulo:", error);
+            alert(`No se pudieron guardar las instrucciones del módulo.\n${error?.message || ""}`);
+        }
     });
 
     btnGuardar.dataset.cbBound = "1";
