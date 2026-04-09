@@ -4385,6 +4385,10 @@ body[data-page="moodlecourse.html"] :is(
     z-index: 12000 !important;
 }
 
+body[data-page="moodlecourse.html"] #modalInstruccionesGemini {
+    z-index: 100010 !important;
+}
+
 /* Notas maestro: forzar contraste en contenido dinamico */
 body[data-page="moodlecourse.html"] #contenidoNotasMaestro,
 body[data-page="moodlecourse.html"] #contenidoNotasMaestro * {

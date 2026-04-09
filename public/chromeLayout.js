@@ -76,13 +76,23 @@
     const path = String(window.location.pathname || '').toLowerCase();
     const isGamePage = path === '/lecturasgame' || path.endsWith('/lecturasgame.html');
     if (isGamePage) return;
+    const hadLecturasController = String(navigator.serviceWorker.controller?.scriptURL || '').includes('/lecturasGame-sw.js');
+    let removedLecturasRegistration = false;
     try {
       const registrations = await navigator.serviceWorker.getRegistrations();
       await Promise.all(registrations.map(async (registration) => {
         const scriptUrl = registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || '';
         if (!scriptUrl.includes('/lecturasGame-sw.js')) return;
         await registration.unregister();
+        removedLecturasRegistration = true;
       }));
+      if (hadLecturasController && removedLecturasRegistration) {
+        const reloadKey = 'cb_lecturas_game_sw_cleanup_reloaded';
+        if (sessionStorage.getItem(reloadKey) !== '1') {
+          sessionStorage.setItem(reloadKey, '1');
+          window.location.reload();
+        }
+      }
     } catch (_) {
       // no-op
     }

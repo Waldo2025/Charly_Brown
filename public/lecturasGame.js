@@ -32,7 +32,7 @@ async function registerLecturasGameServiceWorker() {
   const secure = window.isSecureContext || host === "localhost" || host === "127.0.0.1";
   if (!secure) return false;
   try {
-    await navigator.serviceWorker.register(withGameVersion("/lecturasGame-sw.js"), { scope: "/" });
+    await navigator.serviceWorker.register(withGameVersion("/lecturasGame-sw.js"), { scope: "/lecturasGame" });
     return true;
   } catch (_) {
     return false;

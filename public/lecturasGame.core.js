@@ -1206,7 +1206,7 @@ async function _lecturasGameRegisterServiceWorker() {
   const isSecure = window.isSecureContext || /^(localhost|127\.0\.0\.1)$/i.test(String(window.location.hostname || ""));
   if (!isSecure) return false;
   try {
-    await navigator.serviceWorker.register("/lecturasGame-sw.js?v=20260320u", { scope: "/" });
+    await navigator.serviceWorker.register("/lecturasGame-sw.js?v=20260409a", { scope: "/lecturasGame" });
     return true;
   } catch (_) {
     return false;

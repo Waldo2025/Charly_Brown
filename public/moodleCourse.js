@@ -33,7 +33,7 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.53';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.55';
 
 import { 
     activarEdicionModuloCompleto,

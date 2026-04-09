@@ -1,8 +1,8 @@
 const SW_VERSION = (() => {
   try {
-    return new URL(self.location.href).searchParams.get("v") || "20260324v2";
+    return new URL(self.location.href).searchParams.get("v") || "20260409a";
   } catch (_) {
-    return "20260320u";
+    return "20260409a";
   }
 })();
 const CACHE_SHELL = `cb-lg-shell-${SW_VERSION}`;
@@ -46,7 +46,7 @@ function isSameOrigin(url = "") {
 
 function isGameRoute(pathname = "") {
   const p = String(pathname || "");
-  return p.includes("lecturasGame") || p === "/" || p === "/index.html";
+  return p.includes("lecturasGame");
 }
 
 function isApiRequest(url = "") {
@@ -148,6 +148,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (sameOrigin) {
+    if (!isGameRoute(url.pathname) && !isCriticalGameAsset(url)) return;
     if (isCriticalGameAsset(url)) {
       event.respondWith((async () => {
         try {
