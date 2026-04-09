@@ -176,7 +176,19 @@
       pitch: 1.08
     }
   };
-  const CURRENT_PAGE = (window.location.pathname.split('/').pop() || '').toLowerCase();
+  function normalizePageId(pageId) {
+    const normalized = String(pageId || '').trim().toLowerCase();
+    if (!normalized) return '';
+    if (normalized.includes('.')) return normalized;
+    return `${normalized}.html`;
+  }
+
+  const CURRENT_PAGE = (() => {
+    const bodyPage = normalizePageId(document.body?.dataset?.page || '');
+    if (bodyPage) return bodyPage;
+    const pathPage = window.location.pathname.split('/').pop() || '';
+    return normalizePageId(pathPage);
+  })();
   const VOICE_COMMAND_CATALOG = [
     { key: 'open_generar_unidad', section: 'Boton', fn: '_clickButtonById', target: 'btnAbrirModalUnidad', name: 'Abrir Generar Unidad Nueva', defaultRegex: 'generar unidad nueva, generar una unidad nueva, genera unidad nueva, genera una unidad nueva, crear unidad nueva, crear una unidad nueva, crea unidad nueva, crea una unidad nueva, abre unidad nueva, abre una unidad nueva, abrir unidad nueva, abrir una unidad nueva, abrir modal unidad, abre generar unidad nueva, vamos a crear una unidad nueva, vamos a crear unidad nueva, hagamos una unidad', speak: false },
     { key: 'open_lecturas_nuevas', section: 'Boton', fn: '_clickButtonById', target: 'btnSugerenciasLectura', name: 'Abrir Generar Lecturas Nuevas', defaultRegex: 'generar lectura nueva, lecturas nuevas, sugerencias de lectura, abrir lecturas nuevas', speak: false },
@@ -4195,7 +4207,8 @@
     forceSyncLecturaActionRegexFromSystemOnce();
     ensureVoiceCommandDefaultsSeeded();
     if (document.body) {
-      document.body.dataset.page = CURRENT_PAGE;
+      const currentBodyPage = normalizePageId(document.body.dataset.page || '');
+      document.body.dataset.page = currentBodyPage || CURRENT_PAGE;
     }
 
     let settings = loadSettings();
