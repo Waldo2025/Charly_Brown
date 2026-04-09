@@ -67,6 +67,7 @@ const ROUTE_RATE_LIMITS = new Map([
   ["/api/gemini/generate", {limit: 24, windowMs: 60 * 1000}],
   ["/api/gemini/models", {limit: 30, windowMs: 60 * 1000}],
   ["/api/gemini/live-token", {limit: 8, windowMs: 60 * 1000}],
+  ["/api/moodle/module-graphics/generate", {limit: 12, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/save", {limit: 30, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/share", {limit: 20, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/list", {limit: 30, windowMs: 60 * 1000}],
@@ -1528,6 +1529,120 @@ async function forwardPodcasterScenarioImageGenerate(req, res) {
   });
 }
 
+async function forwardMoodleModuleGraphicGenerate(req, res) {
+  const uid = String(req.securityContext?.uid || "").trim();
+  if (!uid) return res.status(401).json({error: "AUTH_REQUIRED"});
+  const key = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+  if (!key) return res.status(500).json({error: "Falta GEMINI_API_KEY o GOOGLE_API_KEY."});
+
+  const courseId = clampText(req.body?.courseId || "", 180);
+  const moduleId = clampText(req.body?.moduleId || "", 180);
+  const moduleType = clampText(req.body?.moduleType || "", 80) || "Modulo";
+  const moduleName = clampText(req.body?.moduleName || "Grafico educativo", 180) || "Grafico educativo";
+  const languageCode = clampText(req.body?.languageCode || "", 24).toLowerCase();
+  const instructions = stripHtmlToPlain(clampText(req.body?.instructions || "", 8000));
+  const content = stripHtmlToPlain(clampText(req.body?.content || "", 12000));
+  const regenerate = req.body?.regenerate === true;
+  const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
+  const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
+  const imageModels = Array.from(new Set([
+    sanitizeModel(req.body?.model || DEFAULT_PODCASTER_IMAGE_MODEL),
+    ...requestedCandidates.map((item) => sanitizeModel(item || "")),
+    ...PODCASTER_IMAGE_MODEL_CANDIDATES,
+  ].filter(Boolean)));
+
+  if (!courseId) return res.status(400).json({error: "Falta courseId."});
+  if (!moduleId) return res.status(400).json({error: "Falta moduleId."});
+  if (!instructions && !content) return res.status(400).json({error: "Falta contexto textual del modulo."});
+
+  const languageLabel = languageCode.startsWith("en") ? "english" : "espanol";
+  const prompt = [
+    "Genera una sola imagen o grafico educativo editorial para acompanar un modulo escolar digital.",
+    `Titulo del modulo: ${moduleName}.`,
+    `Tipo de modulo: ${moduleType}.`,
+    `Idioma principal del modulo: ${languageLabel}.`,
+    instructions ? `Instrucciones del autor: ${instructions}` : "",
+    content ? `Contenido final del modulo: ${content}` : "",
+    "La imagen debe ser coherente con el tema y servir como apoyo visual para responder actividades.",
+    "Debe verse clara, didactica, moderna y lista para una plataforma educativa.",
+    "Puede ser ilustracion, esquema visual, escena educativa o grafico conceptual segun el contexto del modulo.",
+    "No incluyas interfaz, capturas de pantalla, marcas de agua, logos ni texto largo incrustado.",
+    "Si necesitas rotulos, usa solo etiquetas minimas y claras.",
+    "Composicion horizontal o cuadrada, alta definicion, fondo limpio y contraste legible.",
+    "La imagen debe poder introducir consignas como 'Analiza la imagen anterior y responde'.",
+  ].filter(Boolean).join("\n");
+
+  let lastStatus = 502;
+  let lastError = "No se pudo generar el grafico del modulo con los modelos disponibles.";
+  let base64 = "";
+  let mimeType = "image/png";
+  let resolvedModel = imageModels[0] || DEFAULT_PODCASTER_IMAGE_MODEL;
+  for (const imageModel of imageModels) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(key)}`;
+    const upstream = await fetch(endpoint, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        contents: [{role: "user", parts: [{text: prompt}]}],
+        generationConfig: {responseModalities: ["TEXT", "IMAGE"]},
+      }),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      const detail = String(data?.error?.message || data?.error || `HTTP ${upstream.status}`).trim();
+      lastStatus = Number(upstream.status || 502);
+      lastError = `${imageModel}: ${detail}`;
+      if ([400, 401, 403, 404].includes(lastStatus)) continue;
+      return res.status(lastStatus).json(data);
+    }
+    const parts = Array.isArray(data?.candidates?.[0]?.content?.parts) ? data.candidates[0].content.parts : [];
+    const inline = parts.find((part) => part?.inlineData?.data || part?.inline_data?.data) || null;
+    base64 = String(inline?.inlineData?.data || inline?.inline_data?.data || "").trim();
+    mimeType = String(inline?.inlineData?.mimeType || inline?.inline_data?.mimeType || "image/png").trim() || "image/png";
+    if (!base64) {
+      lastStatus = 502;
+      lastError = `${imageModel}: sin inlineData de imagen`;
+      continue;
+    }
+    resolvedModel = imageModel;
+    break;
+  }
+  if (!base64) return res.status(lastStatus >= 400 ? lastStatus : 502).json({error: lastError});
+
+  const buffer = Buffer.from(base64, "base64");
+  if (!buffer.length || buffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
+    return res.status(413).json({error: "La imagen generada del modulo excede el tamano permitido."});
+  }
+
+  const ext = getScreenshotExtension(mimeType);
+  const storagePath = `moodle/courses/${normalizeStorageSegment(courseId, "course")}/owners/${normalizeStorageSegment(uid, "anon")}/modules/${normalizeStorageSegment(moduleId, "module")}/graphics/${randomUUID()}.${ext}`;
+  const bucket = admin.storage().bucket();
+  const asset = await uploadScreenshotAsset({
+    bucket,
+    path: storagePath,
+    buffer,
+    mimeType,
+    metadata: {uid, courseId, moduleId, moduleType, moduleName, model: resolvedModel, promptVersion: "moodle_graphic_v1"},
+  });
+  if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
+    await deleteStoragePath(bucket, previousStoragePath).catch(() => {});
+  }
+  return res.status(200).json({
+    ok: true,
+    image: {
+      courseId,
+      moduleId,
+      title: moduleName,
+      downloadUrl: asset.downloadUrl,
+      storagePath: asset.path,
+      mimeType,
+      model: resolvedModel,
+      promptVersion: "moodle_graphic_v1",
+      updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
 async function forwardPodcasterDialogueVideoGenerate(req, res) {
   const uid = String(req.securityContext?.uid || "").trim();
   if (!uid) return res.status(401).json({error: "AUTH_REQUIRED"});
@@ -2938,6 +3053,9 @@ async function routeApi(req, res) {
   }
   if (req.method === "GET" && path === "/api/moodle/share-users") {
     return forwardMoodleShareUsers(req, res);
+  }
+  if (req.method === "POST" && path === "/api/moodle/module-graphics/generate") {
+    return forwardMoodleModuleGraphicGenerate(req, res);
   }
   if (req.method === "POST" && path === "/api/podcaster/speaker-portraits/generate") {
     return forwardPodcasterSpeakerPortraitGenerate(req, res);

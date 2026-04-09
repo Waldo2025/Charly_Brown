@@ -26,6 +26,9 @@ export function resolveApiBase() {
   const port = String(window.location.port || "");
   const isLocalHost = isLocalHostRuntime();
   if (isLocalHost) {
+    if (configured) {
+      return configured.replace(/\/+$/, "");
+    }
     if (port === "8787") return "/api";
     return DEFAULT_LOCAL_API_BASE;
   }

@@ -441,15 +441,22 @@ onAuthStateChanged(auth, async (user) => {
     window.location.href = "index.html";
     return;
   }
-  const access = await ensureAdminAccess(user);
-  if (!access.allowed) {
+  try {
+    const access = await ensureAdminAccess(user);
+    if (!access.allowed) {
+      await signOut(auth);
+      const roleText = access.role || "sin rol";
+      const statusText = access.status || "sin estado";
+      alert(`No tienes permisos para acceder a Gestión de Usuarios.\nRol detectado: ${roleText}\nEstado detectado: ${statusText}\nDetalle: ${access.reason}`);
+      window.location.href = "index.html";
+      return;
+    }
+    state.currentAdmin = user;
+    await loadUsers();
+  } catch (error) {
+    console.error("No se pudo validar el acceso a Gestión de Usuarios.", error);
+    alert("No se pudo validar tu acceso a Gestión de Usuarios.");
     await signOut(auth);
-    const roleText = access.role || "sin rol";
-    const statusText = access.status || "sin estado";
-    alert(`No tienes permisos para acceder a Gestión de Usuarios.\nRol detectado: ${roleText}\nEstado detectado: ${statusText}\nDetalle: ${access.reason}`);
     window.location.href = "index.html";
-    return;
   }
-  state.currentAdmin = user;
-  await loadUsers();
 });

@@ -648,10 +648,33 @@ function initStudioWorkspaceToggle() {
   btn.dataset.bound = "1";
 }
 
+function relocateThemeCommandSettingsBtn() {
+  const mount = document.getElementById("themeCommandSettingsMount");
+  const button = document.getElementById("themeCommandSettingsBtn");
+  if (!mount || !button) return false;
+  if (button.parentElement !== mount) {
+    mount.appendChild(button);
+  }
+  button.classList.add("gl-theme-command-link");
+  button.removeAttribute("hidden");
+  button.setAttribute("aria-hidden", "false");
+  button.removeAttribute("tabindex");
+  return true;
+}
+
+function initThemeCommandSettingsRelocation() {
+  relocateThemeCommandSettingsBtn();
+  const observer = new MutationObserver(() => {
+    relocateThemeCommandSettingsBtn();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
 // Ejemplo: manejar envío de formulario del generador
 document.addEventListener("DOMContentLoaded", () => {
   initPanelIzquierdoToggle();
   initStudioWorkspaceToggle();
+  initThemeCommandSettingsRelocation();
   const safeShow = (el) => { if (el) el.style.display = 'block'; };
   const safeHide = (el) => { if (el) el.style.display = 'none'; };
 

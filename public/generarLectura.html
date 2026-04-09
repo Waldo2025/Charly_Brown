@@ -688,11 +688,17 @@
       <div class="unidad-global-agents-footer" aria-label="Agentes disponibles">
         <div class="unidad-editor-tools-header">
           <h3 class="unidad-editor-tools-title">Agentes</h3>
+          <div id="themeCommandSettingsMount" class="unidad-editor-tools-slot" aria-label="Herramientas de comandos de voz">
+            <a href="#" id="themeCommandSettingsBtn" class="sidebar-link gl-theme-command-link" aria-label="Comandos de voz" title="Comandos de voz">
+              <i class="fas fa-head-side-cough" aria-hidden="true"></i>
+              <span>Comandos de voz</span>
+            </a>
+          </div>
           <button id="btnUnidadAgentesConfig" class="unidad-agent-config-btn" type="button" aria-label="Configurar agentes" title="Configurar agentes">
             <i class="fa-solid fa-gear"></i>
           </button>
           <label class="unidad-agent-master-toggle" for="unidadAgentEnabledToggle" title="Activar o desactivar agente">
-            <input id="unidadAgentEnabledToggle" type="checkbox" checked>
+            <input id="unidadAgentEnabledToggle" type="checkbox">
             <span class="unidad-agent-master-toggle-track" aria-hidden="true"></span>
           </label>
         </div>
@@ -3835,7 +3841,7 @@
 
 
   <script type="module" src="generarLectura.js"></script>
-  <script src="chromeLayout.js"></script>
+  <script src="chromeLayout.js?v=2026-1.0.0.22"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
