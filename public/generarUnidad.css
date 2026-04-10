@@ -2331,6 +2331,13 @@ input {
   border-bottom: 1px solid #e0e0e0;
 }
 
+#tablaUnidades td.titulo-editable {
+  max-width: 420px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #tablaUnidades tr:hover {
   background-color: #f9f9f9;
 }

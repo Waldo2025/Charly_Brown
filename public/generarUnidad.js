@@ -44,6 +44,11 @@ function shouldShortCircuitGeminiBackendFetch() {
   return (Date.now() - geminiBackendUnavailableAt) <= GEMINI_BACKEND_UNAVAILABLE_TTL_MS;
 }
 
+function isGeminiBackendLocalTarget() {
+  const url = String(buildApiUrl("/api/gemini/generate") || "").trim();
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost):8787\//i.test(url) || url === "/api/gemini/generate";
+}
+
 function mergeRuntimeConfig(base = {}, incoming = {}) {
   const a = (base && typeof base === "object") ? base : {};
   const b = (incoming && typeof incoming === "object") ? incoming : {};
@@ -235,7 +240,7 @@ async function geminiGenerateViaApi(model, payload, signal = null) {
     }
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok && (response.status === 404 || response.status === 405 || response.status >= 500)) {
+  if (isGeminiBackendLocalTarget() && !response.ok && (response.status === 404 || response.status === 405 || response.status >= 500)) {
     markGeminiBackendUnavailable(`api_http_${response.status}`);
   }
   return { response, data };
@@ -1183,6 +1188,33 @@ function normalizarCategoriaId(categoria = "") {
   return String(categoria || "").replace(/\s+/g, "-");
 }
 
+const UNIDAD_CATEGORIA_RESULTADO_ORDEN = [
+  "Proyectos",
+  "Lenguaje y comunicación",
+  "Matemáticas",
+  "Ciencias experimentales",
+  "Ciencias sociales",
+  "Formación socioemocional",
+  "Artes"
+];
+
+function _ordenCategoriaResultadoUnidad(categoria = "") {
+  const index = UNIDAD_CATEGORIA_RESULTADO_ORDEN.indexOf(String(categoria || "").trim());
+  return index >= 0 ? index : UNIDAD_CATEGORIA_RESULTADO_ORDEN.length;
+}
+
+function _insertarContenedorCategoriaResultadoUnidad(resultadoUnidad, contenedor, categoria = "") {
+  if (!resultadoUnidad || !contenedor) return;
+  contenedor.dataset.categoria = String(categoria || "").trim();
+  const ordenActual = _ordenCategoriaResultadoUnidad(categoria);
+  const referencia = Array.from(resultadoUnidad.children).find((child) => {
+    if (child === contenedor || !child.classList?.contains("bloque-categoria")) return false;
+    const catChild = String(child.dataset?.categoria || child.querySelector("h2")?.childNodes?.[0]?.textContent || "").trim();
+    return _ordenCategoriaResultadoUnidad(catChild) > ordenActual;
+  });
+  resultadoUnidad.insertBefore(contenedor, referencia || null);
+}
+
 function limpiarResultadoCategoria(categoria = "") {
   if (!categoria) return;
   const idCat = normalizarCategoriaId(categoria);
@@ -1465,8 +1497,175 @@ function _tituloLecturaUnidad(lectura = {}) {
   return String(lectura?.titulo || lectura?.tema || "Sin título").trim();
 }
 
+function _escapeHtmlUnidad(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function _normalizarContenidoLecturaHTMLUnidad(contenido = "") {
+  const raw = String(contenido || "").trim();
+  if (!raw) return "";
+  if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
+  return raw
+    .split(/\n{2,}/)
+    .map((parrafo) => parrafo.trim())
+    .filter(Boolean)
+    .map((parrafo) => `<p>${_escapeHtmlUnidad(parrafo).replace(/\n+/g, "<br>")}</p>`)
+    .join("\n");
+}
+
+function _extraerSinonimosLecturaUnidad(lectura = {}) {
+  const raw =
+    lectura?.tablaSinonimos
+    || lectura?.tabla_sinonimos
+    || lectura?.sinonimos
+    || lectura?.sinónimos
+    || lectura?.campos?.tablaSinonimos
+    || lectura?.campos?.tabla_sinonimos
+    || lectura?.campos?.sinonimos
+    || lectura?.campos?.sinónimos
+    || null;
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => {
+        if (typeof item === "string") {
+          const parts = item.split(/[:—-]/).map((p) => p.trim()).filter(Boolean);
+          return parts[0] ? { palabra: parts[0], sinonimos: parts.slice(1).join(", ") } : null;
+        }
+        const palabra = String(item?.palabra || item?.termino || item?.término || item?.vocabulario || "").trim();
+        const sinonimos = Array.isArray(item?.sinonimos || item?.sinónimos)
+          ? (item?.sinonimos || item?.sinónimos).join(", ")
+          : String(item?.sinonimos || item?.sinónimos || item?.equivalente || item?.definicion || item?.definición || "").trim();
+        return palabra ? { palabra, sinonimos } : null;
+      })
+      .filter(Boolean);
+  }
+  if (typeof raw === "object") {
+    return Object.entries(raw)
+      .map(([palabra, sinonimos]) => ({
+        palabra: String(palabra || "").trim(),
+        sinonimos: Array.isArray(sinonimos) ? sinonimos.join(", ") : String(sinonimos || "").trim()
+      }))
+      .filter((item) => item.palabra);
+  }
+  const texto = String(raw || "").trim();
+  if (!texto) return [];
+  return texto
+    .split(/\n|;/)
+    .map((linea) => {
+      const parts = linea.split(/[:—-]/).map((p) => p.trim()).filter(Boolean);
+      return parts[0] ? { palabra: parts[0], sinonimos: parts.slice(1).join(", ") } : null;
+    })
+    .filter(Boolean);
+}
+
+function _extraerBibliografiaLecturaUnidad(lectura = {}) {
+  const raw =
+    lectura?.bibliografia
+    || lectura?.bibliografía
+    || lectura?.fuentes
+    || lectura?.referencias
+    || lectura?.referenciasBibliograficas
+    || lectura?.campos?.bibliografia
+    || lectura?.campos?.bibliografía
+    || lectura?.campos?.fuentes
+    || lectura?.campos?.referencias
+    || lectura?.campos?.referenciasBibliograficas
+    || null;
+  if (!raw) return "";
+  if (typeof raw === "string") {
+    const texto = raw.trim();
+    if (!texto) return "";
+    if (/<[a-z][\s\S]*>/i.test(texto)) return texto;
+    return `<ul>${texto.split(/\n|;/).map((item) => item.trim()).filter(Boolean).map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>`;
+  }
+  if (Array.isArray(raw)) {
+    const items = raw
+      .map((item) => {
+        if (typeof item === "string") return item.trim();
+        if (item && typeof item === "object") return String(item?.texto || item?.referencia || item?.fuente || item?.titulo || "").trim();
+        return "";
+      })
+      .filter(Boolean);
+    return items.length ? `<ul>${items.map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>` : "";
+  }
+  if (typeof raw === "object") {
+    const items = Object.values(raw).map((item) => String(item || "").trim()).filter(Boolean);
+    return items.length ? `<ul>${items.map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>` : "";
+  }
+  return "";
+}
+
+function _resaltarSinonimosEnLecturaUnidad(html = "", sinonimos = []) {
+  const contenido = String(html || "").trim();
+  const palabras = (Array.isArray(sinonimos) ? sinonimos : [])
+    .map((item) => String(item?.palabra || "").trim())
+    .filter((palabra, index, arr) => palabra && arr.indexOf(palabra) === index)
+    .sort((a, b) => b.length - a.length);
+  if (!contenido || !palabras.length || typeof document === "undefined") return contenido;
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = contenido;
+  const escaped = palabras.map((palabra) => palabra.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const rx = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+  const walker = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parentTag = String(node.parentElement?.tagName || "").toLowerCase();
+      if (["strong", "b", "script", "style"].includes(parentTag)) return NodeFilter.FILTER_REJECT;
+      rx.lastIndex = 0;
+      return rx.test(node.nodeValue || "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const span = document.createElement("span");
+    span.innerHTML = String(node.nodeValue || "").replace(rx, "<strong>$1</strong>");
+    node.parentNode?.replaceChild(span, node);
+  });
+  return wrapper.innerHTML;
+}
+
+function _tablaSinonimosLecturaUnidadHTML(sinonimos = []) {
+  const rows = (Array.isArray(sinonimos) ? sinonimos : [])
+    .map((item) => {
+      const palabra = String(item?.palabra || "").trim();
+      const equivalente = String(item?.sinonimos || "").trim();
+      if (!palabra && !equivalente) return "";
+      return `<tr><td style="border:1px solid #d8dee9;padding:6px 8px;"><strong>${_escapeHtmlUnidad(palabra || "—")}</strong></td><td style="border:1px solid #d8dee9;padding:6px 8px;">${_escapeHtmlUnidad(equivalente || "—")}</td></tr>`;
+    })
+    .filter(Boolean);
+  if (!rows.length) return "";
+  return `
+    <table class="lectura-tabla-sinonimos" border="1" cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;margin:10px 0 18px;">
+      <thead><tr><th style="border:1px solid #d8dee9;padding:6px 8px;background:#f3f6fb;">Palabra en la lectura</th><th style="border:1px solid #d8dee9;padding:6px 8px;background:#f3f6fb;">Sinónimos sencillos</th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  `;
+}
+
+function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
+  if (!lectura) return "";
+  const sinonimos = _extraerSinonimosLecturaUnidad(lectura);
+  const tabla = _tablaSinonimosLecturaUnidadHTML(sinonimos);
+  const bibliografia = _extraerBibliografiaLecturaUnidad(lectura);
+  if (!tabla && !bibliografia) return "";
+  return `
+    <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;">
+      <h4 style="margin:0 0 10px;">Apoyo de la lectura</h4>
+      ${tabla ? `<h5 style="margin:10px 0 6px;">Tabla de sinónimos</h5>${tabla}` : ""}
+      ${bibliografia ? `<h5 style="margin:10px 0 6px;">Bibliografía</h5><div class="lectura-bibliografia-lista">${bibliografia}</div>` : ""}
+    </div>
+  `;
+}
+
 function _contenidoLecturaUnidad(lectura = {}) {
-  return String(
+  const contenido = String(
     lectura?.contenidoHTML
     || lectura?.contenidoPlano
     || lectura?.textoLectura
@@ -1475,6 +1674,7 @@ function _contenidoLecturaUnidad(lectura = {}) {
     || lectura?.texto
     || ""
   ).trim();
+  return _normalizarContenidoLecturaHTMLUnidad(contenido);
 }
 
 function _preguntasLecturaUnidad(lectura = {}) {
@@ -1531,7 +1731,11 @@ async function _generarLecturaUnificadaConGemini(lecturas = [], ctx = {}) {
     unidad: String(ctx?.unidad || "").trim()
   });
   if (window.__lecturaUnidadFusionCache.has(cacheKey)) {
-    return window.__lecturaUnidadFusionCache.get(cacheKey);
+    const cached = window.__lecturaUnidadFusionCache.get(cacheKey);
+    if (_extraerSinonimosLecturaUnidad(cached).length || _extraerBibliografiaLecturaUnidad(cached)) {
+      return cached;
+    }
+    window.__lecturaUnidadFusionCache.delete(cacheKey);
   }
 
   const lecturasFuente = seleccionadas.map((lectura, index) => {
@@ -1567,11 +1771,19 @@ REGLAS OBLIGATORIAS:
 {
   "titulo": "string",
   "lecturaHtml": "<p>...</p><p>...</p>",
+  "sinonimos": [
+    { "palabra": "string", "sinonimos": "string" }
+  ],
+  "bibliografia": [
+    "string"
+  ],
   "preguntas": [
     { "pregunta": "string", "respuesta": "string" }
   ]
 }
 - Genera 4 preguntas de comprensión coherentes con la nueva lectura.
+- Genera 6 a 10 palabras difíciles de la nueva lectura para la tabla de sinónimos.
+- Genera 2 referencias bibliográficas o fuentes sugeridas apropiadas para el docente.
 - La lectura debe ser nueva también para proyectos: debe poder reutilizarse como lectura detonante o lectura generadora sin inventar otra adicional.
 
 CONTEXTO:
@@ -1594,6 +1806,8 @@ ${lecturasFuente}
         .map(_normalizarPreguntaLecturaUnidad)
         .filter((pregunta) => pregunta?.pregunta)
       : [];
+    const sinonimos = _extraerSinonimosLecturaUnidad(parsed);
+    const bibliografia = parsed?.bibliografia || parsed?.bibliografía || parsed?.fuentes || [];
 
     if (!lecturaHtml) {
       throw new Error("LECTURA_FUSION_VACIA");
@@ -1605,6 +1819,8 @@ ${lecturasFuente}
       tema: titulo,
       contenidoHTML: lecturaHtml,
       preguntasComprension: preguntas,
+      sinonimos,
+      bibliografia,
       tipo: "fusion",
       sourceCollection: "fusion",
       coleccion: "fusion",
@@ -1768,7 +1984,8 @@ async function _resolverModoLecturasUnidad(ctx = {}) {
 
   const key = `${principalId}|${ascId}`;
   const current = window.__unidadLecturaDecision;
-  if (current?.key === key && current?.mode) {
+  const forceAsk = !!ctx?.forceAsk;
+  if (!forceAsk && current?.key === key && current?.mode) {
     return current.mode;
   }
 
@@ -1780,7 +1997,7 @@ async function _resolverModoLecturasUnidad(ctx = {}) {
     mode,
     categoria: String(ctx?.categoria || "").trim()
   };
-  if (mode === "unify") {
+  if (mode === "unify" || mode === "split" || mode === "split-reverse") {
     _activarRelacionLecturaProyectosUnidad();
   }
   return mode;
@@ -1792,6 +2009,10 @@ async function _asegurarModoLecturasUnidad(ctx = {}) {
   if (!principalId || !ascId) return true;
   const mode = await _resolverModoLecturasUnidad(ctx);
   return !!mode;
+}
+
+async function _asegurarModoLecturasUnidadManual(ctx = {}) {
+  return _asegurarModoLecturasUnidad({ ...ctx, forceAsk: true });
 }
 
 function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
@@ -2461,8 +2682,13 @@ function abrirSeccionAcopladaUnidad(targetModalId = "") {
 }
 
 function restaurarSeccionAcoplada() {
-  // Requisito UX: al abrir generarLectura, iniciar siempre con Generar Unidad Didáctica.
-  const saved = "modalGenerarUnidad";
+  let saved = "modalGenerarUnidad";
+  try {
+    const persisted = String(localStorage.getItem(SECTION_STATE_STORAGE_KEY) || "").trim();
+    if (persisted) saved = persisted;
+  } catch (_) {
+    saved = "modalGenerarUnidad";
+  }
 
   const buttonBySection = {
     modalUnidadesGuardadas: "btnListaUnidadesGuardadas",
@@ -2882,7 +3108,7 @@ function _leerAjustesVozLecturaDesdeThemeSettings() {
     const raw = localStorage.getItem(THEME_SETTINGS_STORAGE_KEY);
     if (!raw) {
       return {
-        useCharlyVoice: true,
+        useCharlyVoice: false,
         voiceName: _leerVozCharlyDesdeThemeSettings(),
         speed: CHARLY_VOICE_SPEED_DEFAULT,
         pitch: CHARLY_VOICE_PITCH_DEFAULT,
@@ -2892,7 +3118,7 @@ function _leerAjustesVozLecturaDesdeThemeSettings() {
     }
     const parsed = JSON.parse(raw);
     return {
-      useCharlyVoice: parsed?.lecturaUseCharlyVoice !== false,
+      useCharlyVoice: parsed?.lecturaUseCharlyVoice === true,
       voiceName: String(parsed?.lecturaVoiceName || parsed?.charlyVoiceName || _leerVozCharlyDesdeThemeSettings()).trim() || _leerVozCharlyDesdeThemeSettings(),
       speed: Math.max(0.75, Math.min(1.35, Number(parsed?.lecturaVoiceSpeed) || 0.94)),
       pitch: Math.max(0.75, Math.min(1.2, Number(parsed?.lecturaVoicePitch) || 0.92)),
@@ -2901,7 +3127,7 @@ function _leerAjustesVozLecturaDesdeThemeSettings() {
     };
   } catch (_) {
     return {
-      useCharlyVoice: true,
+      useCharlyVoice: false,
       voiceName: _leerVozCharlyDesdeThemeSettings(),
       speed: CHARLY_VOICE_SPEED_DEFAULT,
       pitch: CHARLY_VOICE_PITCH_DEFAULT,
@@ -3005,7 +3231,7 @@ function _leerConfigComandosVoz() {
       const commands = _asegurarFuncionesWorkflowLecturas(cleanCommands);
       const meta = (parsed.meta && typeof parsed.meta === "object")
         ? parsed.meta
-        : { agentEnabled: true, customFunctions: [] };
+        : { agentEnabled: false, customFunctions: [] };
       return { commands, meta };
     } catch (_) {
       return null;
@@ -3033,7 +3259,7 @@ function _leerConfigComandosVoz() {
     : {};
   const defaultsMeta = (defaultsPersistidos?.meta && typeof defaultsPersistidos.meta === "object")
     ? defaultsPersistidos.meta
-    : { agentEnabled: true, customFunctions: [] };
+    : { agentEnabled: false, customFunctions: [] };
   voiceCommandMetaCache = defaultsMeta;
   try {
     const raw = localStorage.getItem(VOICE_COMMANDS_STORAGE_KEY);
@@ -3061,7 +3287,7 @@ function _leerConfigComandosVoz() {
         .filter((fn) => !!fn.id && !!fn.label && !!fn.baseFn)
       : [];
     voiceCommandMetaCache = {
-      agentEnabled: (typeof metaRaw.agentEnabled === "boolean" ? metaRaw.agentEnabled : defaultsMeta.agentEnabled) !== false,
+      agentEnabled: (typeof metaRaw.agentEnabled === "boolean" ? metaRaw.agentEnabled : defaultsMeta.agentEnabled) === true,
       customFunctions
     };
     voiceCommandConfigCache = _asegurarFuncionesWorkflowLecturas(
@@ -3088,12 +3314,12 @@ function _leerConfigComandosVoz() {
 
 function _leerMetaComandosVoz() {
   if (!voiceCommandMetaCache) _leerConfigComandosVoz();
-  return voiceCommandMetaCache || { agentEnabled: true, customFunctions: [] };
+  return voiceCommandMetaCache || { agentEnabled: false, customFunctions: [] };
 }
 
 function _vozGlobalHabilitadaPorConfiguracion() {
   const meta = _leerMetaComandosVoz();
-  return meta?.agentEnabled !== false;
+  return meta?.agentEnabled === true;
 }
 
 function _agenteComandosVozActivo() {
@@ -10505,10 +10731,10 @@ window.cbCloseLecturasAgentViewer = function cbCloseLecturasAgentViewer() {
 function _leerEstadoMasterAgenteStorage() {
   try {
     const raw = localStorage.getItem(AGENT_MASTER_ENABLED_STORAGE_KEY);
-    if (raw == null) return true;
-    return String(raw).trim() !== "0";
+    if (raw == null) return false;
+    return String(raw).trim() === "1";
   } catch (_) {
-    return true;
+    return false;
   }
 }
 
@@ -10617,7 +10843,7 @@ function _forzarEstadoAgenteVozNoAdmin(disabled = false) {
     const hasEnvelope = Object.prototype.hasOwnProperty.call(payload, "commands") || Object.prototype.hasOwnProperty.call(payload, "meta");
     const commands = hasEnvelope ? (payload.commands && typeof payload.commands === "object" ? payload.commands : {}) : payload;
     const metaBase = hasEnvelope ? (payload.meta && typeof payload.meta === "object" ? payload.meta : {}) : {};
-    const nextMeta = { ...metaBase, agentEnabled: mustDisable ? false : (metaBase.agentEnabled !== false) };
+    const nextMeta = { ...metaBase, agentEnabled: mustDisable ? false : (metaBase.agentEnabled === true) };
     return hasEnvelope ? { ...payload, commands, meta: nextMeta } : { commands, meta: nextMeta };
   };
   try {
@@ -10626,7 +10852,7 @@ function _forzarEstadoAgenteVozNoAdmin(disabled = false) {
     localStorage.setItem(VOICE_COMMANDS_STORAGE_KEY, JSON.stringify(applyMeta(parsedCurrent)));
   } catch (_) {
     try {
-      localStorage.setItem(VOICE_COMMANDS_STORAGE_KEY, JSON.stringify({ commands: {}, meta: { agentEnabled: !mustDisable } }));
+      localStorage.setItem(VOICE_COMMANDS_STORAGE_KEY, JSON.stringify({ commands: {}, meta: { agentEnabled: false } }));
     } catch (_) {}
   }
   try {
@@ -10639,11 +10865,11 @@ function _forzarEstadoAgenteVozNoAdmin(disabled = false) {
   } catch (_) {}
   voiceCommandMetaCache = {
     ...(_leerMetaComandosVoz() || {}),
-    agentEnabled: mustDisable ? false : true
+    agentEnabled: mustDisable ? false : (_leerMetaComandosVoz()?.agentEnabled === true)
   };
   const toggle = document.getElementById("voiceAgentEnabledToggle");
   if (toggle instanceof HTMLInputElement) {
-    toggle.checked = !mustDisable;
+    toggle.checked = !mustDisable && voiceCommandMetaCache.agentEnabled === true;
     toggle.disabled = mustDisable;
   }
   if (mustDisable) {
@@ -15997,12 +16223,11 @@ function generarCategoriaHandler(event) {
 
   if (cat && !btn.disabled) {
     (async () => {
-      const estrategiaLista = await _asegurarModoLecturasUnidad({ categoria: cat });
+      const estrategiaLista = await _asegurarModoLecturasUnidadManual({ categoria: cat });
       if (!estrategiaLista) return;
 
       window.stopRequestedUnidad = false;
       window.cancelarProyectos = false;
-      prepararNuevoResultadoUnidad();
 
       // Cambiar estado visual
       btn.disabled = true;
@@ -16876,7 +17101,7 @@ function _bloqueLecturaGeneradoraProyectoExacta(contenidoLectura = "", tituloLec
   const titulo = String(tituloLectura || "").trim();
   return `
   <h3>Lectura generadora</h3>
-  ${titulo ? `<p><strong>Título de la lectura relacionada:</strong> ${titulo}</p>` : ""}
+  ${titulo ? `<p><strong>Título de la lectura:</strong> ${titulo}</p>` : ""}
   ${contenido}
   `;
 }
@@ -18424,16 +18649,16 @@ async function generarSeccionCategoria(categoria) {
 
     // Contenedor de categoría (crear si no existe / reutilizar si existe)
     let contenedor = viejoContenedor || document.getElementById(contenedorCategoriaId);
+    const resultadoUnidad = document.getElementById("resultadoUnidadGenerada");
     if (!contenedor) {
-      const resultadoUnidad = document.getElementById("resultadoUnidadGenerada");
       if (!resultadoUnidad) {
         return;
       }
       contenedor = document.createElement("div");
       contenedor.id = contenedorCategoriaId;
       contenedor.classList.add("bloque-categoria");
-      resultadoUnidad.appendChild(contenedor);
     }
+    _insertarContenedorCategoriaResultadoUnidad(resultadoUnidad, contenedor, categoria);
 
     // ✅ NUEVO: Agregar título de categoría
     const subtemasLista = subtemasDeCategoria.map(sub => formatearSubtema(sub)).join(", ");
@@ -18483,7 +18708,11 @@ async function generarSeccionCategoria(categoria) {
         window.lecturaNuevaCoincidenteGlobal.preguntasComprension ||
         window.lecturaNuevaCoincidenteGlobal.preguntas ||
         [];
-      const contenidoLecturaBase = _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
+      const sinonimosLecturaBase = _extraerSinonimosLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
+      const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(
+        _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal),
+        sinonimosLecturaBase
+      );
       const tituloLecturaBase =
         window.lecturaNuevaCoincidenteGlobal.titulo ||
         window.lecturaNuevaCoincidenteGlobal.tema ||
@@ -18635,11 +18864,24 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
       const relacionada = !!document.querySelector(`input[name='relacion_${subtema}']`)?.checked;
       const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
+      const modoDecisionLecturas = String(window.__unidadLecturaDecision?.mode || "").trim();
+      const modoLecturaSeleccionada = String(lecturaResuelta?.modo || "").trim();
+      const modoLecturasSeparadas = modoDecisionLecturas === "split" || modoDecisionLecturas === "split-reverse";
+      const modoLecturaUnicaSeleccionada = modoLecturaSeleccionada === "solo_principal" || modoLecturaSeleccionada === "solo_asc";
       const debeUsarLecturaProyecto = lecturaDisponible && (
         relacionada ||
+        modoLecturaUnicaSeleccionada ||
         lecturaResuelta?.modo === "fusion" ||
-        window.__unidadLecturaDecision?.mode === "unify"
+        modoDecisionLecturas === "unify" ||
+        modoLecturasSeparadas
       );
+      if (debeUsarLecturaProyecto && !relacionada) {
+        const chkRelacionProyecto = document.querySelector(`input[name='relacion_${subtema}']`);
+        if (chkRelacionProyecto && !chkRelacionProyecto.checked) {
+          chkRelacionProyecto.checked = true;
+          chkRelacionProyecto.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
 
       // ✅ AQUÍ VA EL CÓDIGO PARA GENERAR RECURSOS DE PROYECTOS
       const recursos = {
@@ -19112,6 +19354,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   ${window.bloqueLecturaGlobalParaLenguaje}
               </div>` :
           "";
+        const soporteLecturaMaestroHTML = esPrimerSubtemaLenguaje
+          ? _bloqueMaestroLecturaSoporteUnidad(window.lecturaNuevaCoincidenteGlobal)
+          : "";
 
         // Una vez insertada, marcar como ya insertada
         if (esPrimerSubtemaLenguaje) {
@@ -19143,6 +19388,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     </h3>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
+                    ${soporteLecturaMaestroHTML}
                     ${bloqueRutaHTML}
                     <p><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
                     <div id="${colMaestroId}-contenido" style="white-space:pre-wrap;"></div>
@@ -19189,6 +19435,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               </h3>
               <h4>${tituloCreativoLimpioBase}</h4>
               <h5 style="color:#666;font-weight:normal;">${T}</h5>
+              ${soporteLecturaMaestroHTML}
               ${bloqueRutaHTML}
               <div id="${colMaestroId}-contenido"></div>
             `;
@@ -19732,10 +19979,14 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
       throw new Error("Gemini rechazó la región o IP del backend. La solicitud sí llegó al servidor, pero Google no permite ese origen para la Gemini Developer API.");
     }
     if (String(err?.message || "") === "BACKEND_GEMINI_OFFLINE") {
+      const localTarget = isGeminiBackendLocalTarget();
       if (typeof window.onGeminiStatus === "function") {
-        window.onGeminiStatus("Backend Gemini local offline (puerto 8787)");
+        window.onGeminiStatus(localTarget ? "Backend Gemini local offline (puerto 8787)" : "Backend Gemini remoto no disponible");
       }
-      throw new Error("Backend Gemini local offline. Inicia `npm run api:dev`.");
+      throw new Error(localTarget
+        ? "Backend Gemini local offline. Inicia `npm run api:dev`."
+        : "Backend Gemini remoto no disponible. Intenta nuevamente o revisa el backend configurado."
+      );
     }
     if (err?.message === "CANCELADO_PROYECTOS" || (err?.name === "AbortError" && window.cancelarProyectos)) {
       throw new Error("CANCELADO_PROYECTOS");
@@ -20726,11 +20977,20 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
   }
 
   try {
+    const user = auth.currentUser;
+    if (!user?.uid) {
+      alert("❌ Debes iniciar sesión para guardar la unidad.");
+      return;
+    }
+
     const unidadDoc = {
       nivel,
       grado,
       trimestre,
       unidad,
+      userId: user.uid,
+      uid: user.uid,
+      email: String(user.email || "").trim().toLowerCase(),
       lecturaId,
       lecturaIds,
       contenido: htmlContenido,
@@ -20740,6 +21000,8 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       lecturaTitulo: tituloLectura || null,
       lecturaTexto: textoLectura || null,
       preguntasLectura: preguntasLectura || [],
+      tipoDocumento: "unidad_generada",
+      origen: "generarUnidadDidactica",
       timestamp: new Date()
       // Si usas Firestore serverTimestamp:
       // timestamp: serverTimestamp()

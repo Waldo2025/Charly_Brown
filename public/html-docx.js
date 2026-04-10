@@ -13018,7 +13018,8 @@ module.exports = {
     zip = new JSZip();
     internal.addFiles(zip, html, options);
     return internal.generateDocument(zip);
-  }
+  },
+  JSZip: JSZip
 };
 
 

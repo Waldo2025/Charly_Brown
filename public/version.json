@@ -1,12 +1,12 @@
 {
-  "version": "2026-1.0.0.65",
+  "version": "2026-1.0.0.72",
   "title": "Nuevas actualizaciones",
-  "message": "Se actualizo el visor del grafico en moodleCourse para separar el preview nuevo del editor legacy y recargar correctamente texto y fondo guardados. Da click en Actualizar ahora.",
+  "message": "Se reforzó el hard reset al aplicar actualizaciones desde el banner. Da click en Actualizar ahora.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para forzar la recarga del visor del grafico y evitar que el texto guardado sea sobrescrito por capas legacy.",
+  "forceClearCacheReason": "Actualizacion para forzar la recarga y ejecutar hard reset también al llegar a index.html.",
   "updates": [
-    "Corregido: el texto del preview ya no comparte la misma capa DOM con el editor legacy del lightbox.",
-    "Corregido: al reabrir el visor se recuperan mejor el texto y el fondo guardados.",
-    "Corregido: se versionaron los assets de moodleCourse para forzar la recarga del fix."
+    "Corregido: el banner ejecuta limpieza antes de redirigir a index.html.",
+    "Corregido: index.html ejecuta una segunda limpieza controlada y recarga con cache-bust.",
+    "Corregido: se desregistran service workers durante el hard reset."
   ]
 }

@@ -1307,6 +1307,41 @@
             </div>
             <span class="asc-editor-toolbar-group-title">Estilos</span>
           </div>
+          <div class="asc-editor-toolbar-group asc-editor-toolbar-group--ribbon asc-editor-toolbar-group--selects">
+            <div class="asc-editor-toolbar-row asc-editor-toolbar-row--selects">
+              <label class="asc-editor-tool-select asc-editor-tool-select--wordstyle">
+                <span>Párrafo</span>
+                <select id="ascWordParagraphStyle">
+                  <option value="">Aplicar estilo…</option>
+                  <option value="CBBody">Párrafo Normal</option>
+                  <option value="CBTitle">Título</option>
+                  <option value="CBSubtitle">Subtítulo</option>
+                  <option value="CBHeading1">Encabezado 1</option>
+                  <option value="CBHeading2">Encabezado 2</option>
+                  <option value="CBHeading3">Encabezado 3</option>
+                  <option value="CBSubtopic">Subtema</option>
+                  <option value="CBActivity">Actividad</option>
+                  <option value="CBInstructions">Instrucciones</option>
+                  <option value="CBSubinstructions">Subinstrucciones</option>
+                  <option value="CBAnswer">Respuesta</option>
+                  <option value="CBTeacherNote">Nota maestro</option>
+                  <option value="CBTableText">Texto de tabla</option>
+                </select>
+              </label>
+              <label class="asc-editor-tool-select asc-editor-tool-select--wordchar">
+                <span>Carácter</span>
+                <select id="ascWordCharacterStyle">
+                  <option value="">Aplicar estilo…</option>
+                  <option value="CBTextNormal">Normal</option>
+                  <option value="CBStrong">Negrita</option>
+                  <option value="CBEmphasis">Énfasis</option>
+                  <option value="CBUnderline">Subrayado</option>
+                  <option value="CBHighlight">Resaltado</option>
+                </select>
+              </label>
+            </div>
+            <span class="asc-editor-toolbar-group-title">Estilos</span>
+          </div>
           <div class="asc-editor-toolbar-group asc-editor-toolbar-group--ribbon">
             <div class="asc-editor-toolbar-row">
               <button type="button" class="asc-editor-tool" data-editor-cmd="justifyLeft" title="Alinear izquierda">
@@ -1369,6 +1404,23 @@
                 </label>
               </div>
             </section>
+
+            <section class="asc-editor-panel" id="ascWordStylesPanel">
+              <div class="asc-editor-panel-head">
+                <span>Estilos</span>
+                <div class="asc-editor-panel-actions">
+                  <small>En uso</small>
+                  <button type="button" id="ascToggleStyles" class="asc-editor-window-btn asc-editor-panel-toggle" title="Colapsar estilos">
+                    <i class="fas fa-chevron-left"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="asc-word-styles-toolbar">
+                <button type="button" id="ascWordStyleModifyBtn" class="asc-editor-footer-btn is-secondary">Modificar estilo</button>
+                <button type="button" id="ascWordStyleSelectAllBtn" class="asc-editor-footer-btn is-secondary">Seleccionar todo</button>
+              </div>
+              <div id="ascWordStylesList" class="asc-word-styles-list"></div>
+            </section>
           </aside>
 
           <main class="asc-editor-stage">
@@ -1408,6 +1460,16 @@
 
             <section class="asc-editor-canvas-wrap">
               <div class="asc-editor-canvas">
+                <div id="ascUnitDualCanvas" class="asc-editor-dual-canvas hidden" aria-hidden="true">
+                  <section class="asc-editor-dual-pane" data-unit-dual-pane="alumno">
+                    <div class="asc-editor-dual-pane-head"><span>Alumno</span></div>
+                    <div id="ascTextoAlumno" class="asc-editor-body asc-editor-body--split" contenteditable="true"></div>
+                  </section>
+                  <section class="asc-editor-dual-pane" data-unit-dual-pane="maestro">
+                    <div class="asc-editor-dual-pane-head"><span>Maestro</span></div>
+                    <div id="ascTextoMaestro" class="asc-editor-body asc-editor-body--split is-readonly" contenteditable="false"></div>
+                  </section>
+                </div>
                 <div id="ascTexto" class="asc-editor-body" contenteditable="true"></div>
               </div>
             </section>
@@ -1430,6 +1492,21 @@
             </div>
 
             <div id="ascQuestionSummary" class="asc-question-summary-list">
+              <button type="button" class="asc-question-summary asc-unit-section-btn" data-unit-section-open="alumno">
+                <span class="asc-question-summary-num"><i class="fas fa-user-graduate"></i></span>
+                <span class="asc-question-summary-copy">
+                  <strong>Columna alumno</strong>
+                  <small>Editar contenido visible para estudiantes</small>
+                </span>
+              </button>
+              <button type="button" class="asc-question-summary asc-unit-section-btn" data-unit-section-open="maestro">
+                <span class="asc-question-summary-num"><i class="fas fa-chalkboard-teacher"></i></span>
+                <span class="asc-question-summary-copy">
+                  <strong>Columna maestro</strong>
+                  <small>Editar notas y guía docente</small>
+                </span>
+              </button>
+              <div id="ascUnitSubthemeList" class="asc-unit-subtheme-list" aria-live="polite"></div>
               <button type="button" class="asc-question-summary" data-question-open="0">
                 <span class="asc-question-summary-num">01</span>
                 <span class="asc-question-summary-copy">
@@ -1680,11 +1757,105 @@
             </div>
           </div>
           <div class="asc-editor-footer-side">
+          <button type="button" id="ascBtnDescargarWord" class="asc-editor-footer-btn is-secondary">
+            Descargar Word
+          </button>
           <button type="button" id="ascBtnCancelar" class="asc-editor-footer-btn is-secondary">Cancelar</button>
-          <button type="submit" class="asc-editor-footer-btn is-primary">Guardar lectura</button>
+          <button type="submit" id="ascBtnGuardar" class="asc-editor-footer-btn is-primary">Guardar lectura</button>
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="ascWordExportModal" class="asc-question-modal hidden" aria-hidden="true">
+    <div class="asc-question-modal-card asc-word-export-card">
+      <div class="asc-question-modal-head">
+        <div>
+          <h3>Descargar Word</h3>
+          <p>Elige qué documento completo quieres exportar.</p>
+        </div>
+        <div class="asc-editor-panel-actions">
+          <button type="button" id="ascWordExportClose" class="asc-editor-window-btn" title="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+      <div class="asc-word-export-options">
+        <button type="button" id="ascExportAlumnoWord" class="asc-question-summary asc-word-export-btn">
+          <span class="asc-question-summary-num"><i class="fas fa-user-graduate"></i></span>
+          <span class="asc-question-summary-copy">
+            <strong>Descargar alumno</strong>
+            <small>Incluye todas las categorías visibles para estudiantes.</small>
+          </span>
+        </button>
+        <button type="button" id="ascExportMaestroWord" class="asc-question-summary asc-word-export-btn">
+          <span class="asc-question-summary-num"><i class="fas fa-chalkboard-teacher"></i></span>
+          <span class="asc-question-summary-copy">
+            <strong>Descargar maestro</strong>
+            <small>Incluye todas las categorías y notas del docente.</small>
+          </span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ascWordStyleManagerModal" class="asc-question-modal hidden" aria-hidden="true">
+    <div class="asc-question-modal-card asc-word-style-manager-card">
+      <div class="asc-question-modal-head">
+        <div>
+          <h3>Modificar estilo</h3>
+          <p id="ascWordStyleManagerSubtitle">Ajusta la definición global del estilo seleccionado.</p>
+        </div>
+        <div class="asc-editor-panel-actions">
+          <button type="button" id="ascWordStyleManagerClose" class="asc-editor-window-btn" title="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+      <div class="asc-word-style-form">
+        <label class="asc-editor-field">
+          <span>Nombre</span>
+          <input id="ascWordStyleManagerName" type="text" readonly>
+        </label>
+        <label class="asc-editor-field">
+          <span>Tamaño</span>
+          <input id="ascWordStyleManagerSize" type="number" min="10" max="72">
+        </label>
+        <label class="asc-editor-field">
+          <span>Color</span>
+          <input id="ascWordStyleManagerColor" type="color">
+        </label>
+        <label class="asc-editor-field">
+          <span>Alineación</span>
+          <select id="ascWordStyleManagerAlign">
+            <option value="left">Izquierda</option>
+            <option value="center">Centro</option>
+            <option value="right">Derecha</option>
+            <option value="both">Justificado</option>
+          </select>
+        </label>
+        <label class="asc-editor-field">
+          <span>Espaciado antes</span>
+          <input id="ascWordStyleManagerBefore" type="number" min="0" max="1000">
+        </label>
+        <label class="asc-editor-field">
+          <span>Espaciado después</span>
+          <input id="ascWordStyleManagerAfter" type="number" min="0" max="1000">
+        </label>
+        <label class="asc-editor-field">
+          <span>Sangría izquierda</span>
+          <input id="ascWordStyleManagerIndent" type="number" min="0" max="2000">
+        </label>
+        <label class="asc-word-style-checkbox"><input id="ascWordStyleManagerBold" type="checkbox"> <span>Negrita</span></label>
+        <label class="asc-word-style-checkbox"><input id="ascWordStyleManagerItalic" type="checkbox"> <span>Cursiva</span></label>
+        <label class="asc-word-style-checkbox"><input id="ascWordStyleManagerUnderline" type="checkbox"> <span>Subrayado</span></label>
+        <label class="asc-word-style-checkbox"><input id="ascWordStyleManagerHighlight" type="checkbox"> <span>Resaltado</span></label>
+      </div>
+      <div class="asc-question-modal-actions">
+        <button type="button" id="ascWordStyleManagerReset" class="asc-editor-footer-btn is-secondary">Restablecer</button>
+        <button type="button" id="ascWordStyleManagerApply" class="asc-editor-footer-btn is-primary">Aplicar</button>
+      </div>
     </div>
   </div>
 
@@ -3856,8 +4027,8 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=20260316b"></script>
-  <script type="module" src="generarUnidad2.js"></script>
+  <script type="module" src="generarUnidad.js?v=2026-1.0.0.72"></script>
+  <script type="module" src="generarUnidad2.js?v=2026-1.0.0.72"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>
   <script type="module" src="estilosLiterarios.js"></script>

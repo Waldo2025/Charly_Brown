@@ -99,6 +99,27 @@ let sortableSubtemasInstances = [];
 const modulosCache = new Map();
 let geminiModelsSyncPromise = null;
 
+function resolveMoodleCollabPermissions(data = {}, uid = "") {
+    const safeUid = String(uid || "").trim();
+    const details = Array.isArray(data?.compartidoConDetalles) ? data.compartidoConDetalles : [];
+    const detail = details.find((item) => String(item?.userId || "").trim() === safeUid);
+    const raw = detail?.permisos || detail || {};
+    return {
+        editar: raw?.editar === true,
+        compartir: raw?.compartir === true,
+        eliminar: false
+    };
+}
+
+function isMoodleCourseSharedWithUser(data = {}, uid = "") {
+    const safeUid = String(uid || "").trim();
+    if (!safeUid) return false;
+    const sharedIds = Array.isArray(data?.compartidoCon) ? data.compartidoCon : [];
+    if (sharedIds.includes(safeUid)) return true;
+    const details = Array.isArray(data?.compartidoConDetalles) ? data.compartidoConDetalles : [];
+    return details.some((item) => String(item?.userId || "").trim() === safeUid);
+}
+
 function normalizeGeminiModelName(model = "") {
     return String(model || "")
         .trim()
@@ -2811,18 +2832,8 @@ async function cargarCursosUsuario() {
             let propietarioId = data.userId;
             
             if (data.compartidoConDetalles && Array.isArray(data.compartidoConDetalles)) {
-                const detalleUsuario = data.compartidoConDetalles.find(
-                    detalle => detalle.userId === currentUserId
-                );
-                
-                if (detalleUsuario) {
-                    permisosUsuario = {
-                        editar: detalleUsuario.permisos?.editar || false,
-                        compartir: detalleUsuario.permisos?.compartir || false,
-                        eliminar: false
-                    };
-                }
-                
+                permisosUsuario = resolveMoodleCollabPermissions(data, currentUserId);
+
                 // Obtener nombre del propietario
                 const propietarioDetalle = data.compartidoConDetalles.find(
                     detalle => detalle.userId === propietarioId
@@ -4342,8 +4353,7 @@ async function seleccionarCurso(id) {
                 
                 // Verificar acceso
                 const esPropietario = cursoData.userId === currentUserId;
-                const estaCompartido = cursoData.compartidoCon && 
-                                      cursoData.compartidoCon.includes(currentUserId);
+                const estaCompartido = isMoodleCourseSharedWithUser(cursoData, currentUserId);
                 
                 if (!esPropietario && !estaCompartido) {
                     mostrarNotificacion("No tienes acceso a este curso", "error");
@@ -4352,18 +4362,8 @@ async function seleccionarCurso(id) {
                 
                 // Determinar permisos
                 let permisosUsuario = { editar: false, compartir: false };
-                
-                if (!esPropietario && cursoData.compartidoConDetalles) {
-                    const detalleUsuario = cursoData.compartidoConDetalles.find(
-                        detalle => detalle.userId === currentUserId
-                    );
-                    
-                    if (detalleUsuario) {
-                        permisosUsuario = {
-                            editar: detalleUsuario.permisos?.editar || false,
-                            compartir: detalleUsuario.permisos?.compartir || false
-                        };
-                    }
+                if (!esPropietario) {
+                    permisosUsuario = resolveMoodleCollabPermissions(cursoData, currentUserId);
                 }
                 
                 // Crear objeto curso
@@ -5116,7 +5116,7 @@ window.guardarCursoFirebase = async function () {
             cursoId: curso.cursoId || cursoDocId,
             nombre: curso.nombre || "Curso sin nombre",
             descripcion: curso.descripcion || "",
-            userId: currentUserId,
+            userId: curso.userId || currentUserId,
             creado: curso.creado || new Date(),
             temas: Array.isArray(curso.temas) ? curso.temas : [],
             actualizado: new Date()
@@ -5129,6 +5129,15 @@ window.guardarCursoFirebase = async function () {
         
         if (cursoSnap.exists()) {
             const datosExistentes = cursoSnap.data();
+            if (datosExistentes.userId) {
+                cursoParaGuardar.userId = datosExistentes.userId;
+            }
+            if (datosExistentes.uid && !cursoParaGuardar.uid) {
+                cursoParaGuardar.uid = datosExistentes.uid;
+            }
+            if (datosExistentes.ownerUid && !cursoParaGuardar.ownerUid) {
+                cursoParaGuardar.ownerUid = datosExistentes.ownerUid;
+            }
             
             // Mantener datos de colaboración si existen
             if (datosExistentes.compartidoCon) {
@@ -5256,11 +5265,26 @@ let currentRange = null; // Para guardar la selección de texto
 const btnAddTema = document.getElementById("btnAddTema");
 btnAddTema.disabled = true; // sólo al inicio
 
+function resolveCursoActivoParaNuevoTema() {
+    if (curso && (curso.id || curso.cursoId)) return curso;
+    const activeId = String(cursoDocId || localStorage.getItem("cursoSeleccionado") || "").trim();
+    if (!activeId) return null;
+    const localCourse = cursosUsuario.find((item) => String(item?.id || item?.cursoId || "").trim() === activeId);
+    if (localCourse) {
+        curso = { ...localCourse };
+        window.curso = curso;
+        cursoDocId = activeId;
+        return curso;
+    }
+    return null;
+}
+
 
 /* AÑADIR TEMA */
 /* AÑADIR TEMA - MODAL EN LUGAR DE PROMPT */
 btnAddTema.addEventListener("click", async () => {
-    if (!curso) {
+    const cursoActivo = resolveCursoActivoParaNuevoTema();
+    if (!cursoActivo) {
         return alert("Primero selecciona un curso para añadir temas.");
     }
 
@@ -5270,7 +5294,7 @@ btnAddTema.addEventListener("click", async () => {
             <div id="modalAddTema" class="modal fixed inset-0 bg-black/45 backdrop-blur-sm z-50 hidden items-center justify-center">
                 <div class="bg-card text-foreground border border-border rounded-lg p-6 w-full max-w-md">
                     <h3 class="text-lg font-semibold mb-4 text-foreground">Nuevo Tema</h3>
-                    <p class="text-sm text-muted-foreground mb-2">Curso: ${curso.nombre}</p>
+                    <p class="text-sm text-muted-foreground mb-2">Curso: ${cursoActivo.nombre}</p>
                     <input 
                         type="text" 
                         id="inputNombreTema" 
@@ -5303,7 +5327,7 @@ btnAddTema.addEventListener("click", async () => {
     const btnConfirmar = document.getElementById("btnConfirmarTema");
 
     // Actualizar nombre del curso en el modal
-    modal.querySelector("p").textContent = `Curso: ${curso.nombre}`;
+    modal.querySelector("p").textContent = `Curso: ${cursoActivo.nombre}`;
     
     input.value = "";
     modal.classList.remove("hidden");
@@ -5365,11 +5389,14 @@ btnAddTema.addEventListener("click", async () => {
         }]
     };
 
-    curso.temas.push(tema);
+    cursoActivo.temas = Array.isArray(cursoActivo.temas) ? cursoActivo.temas : [];
+    cursoActivo.temas.push(tema);
+    curso = cursoActivo;
+    window.curso = cursoActivo;
 
     await guardarModulo(moduloTemarioId, {
         id: moduloTemarioId,
-        cursoId: curso.id,
+        cursoId: cursoActivo.id,
         subtemaId,
         tipo: "Temario",
         nombre: "Temario",
@@ -5385,7 +5412,7 @@ btnAddTema.addEventListener("click", async () => {
 
     await guardarModulo(moduloLecturaId, {
         id: moduloLecturaId,
-        cursoId: curso.id,
+        cursoId: cursoActivo.id,
         subtemaId,
         tipo: "Lectura",
         nombre: "Lectura",

@@ -602,6 +602,43 @@ function initPanelIzquierdoToggle() {
   btn.dataset.bound = "1";
 }
 
+function initPanelIzquierdoLastSection() {
+  const panel = document.getElementById("panel-izquierdo");
+  if (!panel || panel.dataset.sectionBound === "1") return;
+
+  const storageKey = "cb.panelIzquierdo.lastSection.v1";
+  const selector = ".btn-analisis[id]";
+  const ignored = new Set([
+    "btnToggleStudioWorkspace"
+  ]);
+
+  panel.querySelectorAll(selector).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = String(btn.id || "").trim();
+      if (!id || ignored.has(id)) return;
+      try {
+        localStorage.setItem(storageKey, id);
+      } catch (_) {
+        // noop
+      }
+    });
+  });
+
+  panel.dataset.sectionBound = "1";
+
+  setTimeout(() => {
+    let savedId = "";
+    try {
+      savedId = String(localStorage.getItem(storageKey) || "").trim();
+    } catch (_) {
+      savedId = "";
+    }
+    if (!savedId || ignored.has(savedId)) return;
+    const btn = document.getElementById(savedId);
+    if (btn && typeof btn.click === "function") btn.click();
+  }, 260);
+}
+
 function initStudioWorkspaceToggle() {
   const workspace = document.querySelector(".panel-analisis.studio-workspace");
   const panelChat = document.getElementById("panel-chat");
@@ -673,6 +710,7 @@ function initThemeCommandSettingsRelocation() {
 // Ejemplo: manejar envío de formulario del generador
 document.addEventListener("DOMContentLoaded", () => {
   initPanelIzquierdoToggle();
+  initPanelIzquierdoLastSection();
   initStudioWorkspaceToggle();
   initThemeCommandSettingsRelocation();
   const safeShow = (el) => { if (el) el.style.display = 'block'; };

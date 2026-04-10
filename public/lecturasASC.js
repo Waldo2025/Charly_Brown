@@ -1,5 +1,6 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
 import { buildApiUrl } from "./api-client.js";
+import { downloadStyledDocx, sanitizeFilename as sanitizeWordFilename, DEFAULT_STYLE_DEFINITIONS, normalizeStyleDefinitions } from "./word-export.js";
 // lecturas-asc-unificado.js
 // ------------------------------------------------------------
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
@@ -1529,13 +1530,22 @@ let ascTbody, ascVacio;
 let ascEditorModal, ascEditorBackdrop, ascEditorClose, ascBtnCancelar, ascForm;
 let ascEditorShell;
 let ascId, ascSerie, ascNivel, ascGrado, ascTrimestre, ascUnidad, ascTitulo, ascTexto;
+let ascTextoSingle, ascTextoAlumno, ascTextoMaestro, ascUnitDualCanvas;
+let ascBtnGuardar, ascBtnDescargarWord;
+let ascWordParagraphStyle, ascWordCharacterStyle;
 let ascEditorFontFamily, ascEditorFontSize, ascEditorSheetSize, ascEditorFontColor, ascEditorHighlightColor;
 let ascEditorZoomRange, ascEditorZoomLabel;
 let ascQuestionModal, ascQuestionModalClose, ascQuestionModalDone, ascQuestionModalTitle;
-let ascToggleMeta, ascToggleQuestions;
+let ascToggleMeta, ascToggleQuestions, ascToggleStyles;
 let ascOpenSynonymsPanel, ascSynonymsPanel, ascSynonymsClose, ascSynonymsDone, ascSynonymsBody;
 let ascAiAssistBtn, ascAiEditorModal, ascAiClose, ascAiPrompt, ascAiSend, ascAiChatList, ascAiScopePreview, ascAiRefreshScope, ascAiStatus;
 let ascQuestionAiBtn, ascQuestionAiPanel, ascQuestionAiPreview, ascQuestionAiChat, ascQuestionAiPrompt, ascQuestionAiSend, ascQuestionAiStatus;
+let ascUnitSubthemeList;
+let ascWordExportModal, ascWordExportClose, ascExportAlumnoWord, ascExportMaestroWord;
+let ascWordStylesList, ascWordStyleModifyBtn, ascWordStyleSelectAllBtn;
+let ascWordStyleManagerModal, ascWordStyleManagerClose, ascWordStyleManagerApply, ascWordStyleManagerReset, ascWordStyleManagerSubtitle;
+let ascWordStyleManagerName, ascWordStyleManagerSize, ascWordStyleManagerColor, ascWordStyleManagerAlign, ascWordStyleManagerBefore, ascWordStyleManagerAfter, ascWordStyleManagerIndent;
+let ascWordStyleManagerBold, ascWordStyleManagerItalic, ascWordStyleManagerUnderline, ascWordStyleManagerHighlight;
 
 let cache = [];
 let MODO = "new";
@@ -1549,6 +1559,10 @@ let ascAiBusy = false;
 let ascQuestionAiScope = "texto";
 let ascQuestionAiBusy = false;
 let ascSharedEditorContext = null;
+let ascUnitEditorState = null;
+let ascWordStyleDefinitions = normalizeStyleDefinitions(DEFAULT_STYLE_DEFINITIONS);
+let ascWordSelectedStyleKey = "";
+let ascWordSelectedStyleGroup = "paragraph";
 
 // INIT
 document.addEventListener("DOMContentLoaded", () => {
@@ -1575,6 +1589,13 @@ document.addEventListener("DOMContentLoaded", () => {
   ascEditorClose    = $("#ascEditorClose");
   ascBtnCancelar    = $("#ascBtnCancelar");
   ascForm           = $("#ascForm");
+  ascBtnGuardar     = $("#ascBtnGuardar");
+  ascBtnDescargarWord = $("#ascBtnDescargarWord");
+  ascWordParagraphStyle = $("#ascWordParagraphStyle");
+  ascWordCharacterStyle = $("#ascWordCharacterStyle");
+  ascWordStylesList = $("#ascWordStylesList");
+  ascWordStyleModifyBtn = $("#ascWordStyleModifyBtn");
+  ascWordStyleSelectAllBtn = $("#ascWordStyleSelectAllBtn");
 
   ascId        = $("#ascId");
   ascSerie     = $("#ascSerie");
@@ -1583,7 +1604,11 @@ document.addEventListener("DOMContentLoaded", () => {
   ascTrimestre = $("#ascTrimestre");
   ascUnidad    = $("#ascUnidad");
   ascTitulo    = $("#ascTitulo");
-  ascTexto     = $("#ascTexto");
+  ascTextoSingle = $("#ascTexto");
+  ascTextoAlumno = $("#ascTextoAlumno");
+  ascTextoMaestro = $("#ascTextoMaestro");
+  ascUnitDualCanvas = $("#ascUnitDualCanvas");
+  ascTexto     = ascTextoSingle;
   ascEditorFontFamily = $("#ascEditorFontFamily");
   ascEditorFontSize = $("#ascEditorFontSize");
   ascEditorSheetSize = $("#ascEditorSheetSize");
@@ -1597,6 +1622,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ascQuestionModalTitle = $("#ascQuestionModalTitle");
   ascToggleMeta = $("#ascToggleMeta");
   ascToggleQuestions = $("#ascToggleQuestions");
+  ascToggleStyles = $("#ascToggleStyles");
   ascOpenSynonymsPanel = $("#ascOpenSynonymsPanel");
   ascSynonymsPanel = $("#ascSynonymsPanel");
   ascSynonymsClose = $("#ascSynonymsClose");
@@ -1618,6 +1644,27 @@ document.addEventListener("DOMContentLoaded", () => {
   ascQuestionAiPrompt = $("#ascQuestionAiPrompt");
   ascQuestionAiSend = $("#ascQuestionAiSend");
   ascQuestionAiStatus = $("#ascQuestionAiStatus");
+  ascUnitSubthemeList = $("#ascUnitSubthemeList");
+  ascWordExportModal = $("#ascWordExportModal");
+  ascWordExportClose = $("#ascWordExportClose");
+  ascExportAlumnoWord = $("#ascExportAlumnoWord");
+  ascExportMaestroWord = $("#ascExportMaestroWord");
+  ascWordStyleManagerModal = $("#ascWordStyleManagerModal");
+  ascWordStyleManagerClose = $("#ascWordStyleManagerClose");
+  ascWordStyleManagerApply = $("#ascWordStyleManagerApply");
+  ascWordStyleManagerReset = $("#ascWordStyleManagerReset");
+  ascWordStyleManagerSubtitle = $("#ascWordStyleManagerSubtitle");
+  ascWordStyleManagerName = $("#ascWordStyleManagerName");
+  ascWordStyleManagerSize = $("#ascWordStyleManagerSize");
+  ascWordStyleManagerColor = $("#ascWordStyleManagerColor");
+  ascWordStyleManagerAlign = $("#ascWordStyleManagerAlign");
+  ascWordStyleManagerBefore = $("#ascWordStyleManagerBefore");
+  ascWordStyleManagerAfter = $("#ascWordStyleManagerAfter");
+  ascWordStyleManagerIndent = $("#ascWordStyleManagerIndent");
+  ascWordStyleManagerBold = $("#ascWordStyleManagerBold");
+  ascWordStyleManagerItalic = $("#ascWordStyleManagerItalic");
+  ascWordStyleManagerUnderline = $("#ascWordStyleManagerUnderline");
+  ascWordStyleManagerHighlight = $("#ascWordStyleManagerHighlight");
 
   // Botón externo que abre el modal lista
   document.getElementById("btnLecturasAsc")?.addEventListener("click", openAscModal);
@@ -1633,6 +1680,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (ascQuestionModal && !ascQuestionModal.classList.contains("hidden")) {
       closePreguntaModalAsc();
+      return;
+    }
+    if (ascWordExportModal && !ascWordExportModal.classList.contains("hidden")) {
+      closeAscWordExportModal();
+      return;
+    }
+    if (ascWordStyleManagerModal && !ascWordStyleManagerModal.classList.contains("hidden")) {
+      closeAscWordStyleManagerModal();
       return;
     }
     closeAscModal();
@@ -1657,12 +1712,34 @@ document.addEventListener("DOMContentLoaded", () => {
   ascEditorClose?.addEventListener("click", closeEditorModal);
   ascEditorBackdrop?.addEventListener("click", closeEditorModal);
   ascBtnCancelar?.addEventListener("click", closeEditorModal);
+  ascBtnDescargarWord?.addEventListener("click", onAscDescargarWordEditor);
+  ascWordStyleModifyBtn?.addEventListener("click", openAscWordStyleManagerModal);
+  ascWordStyleSelectAllBtn?.addEventListener("click", seleccionarTodoEstiloWordActual);
   ascQuestionModalClose?.addEventListener("click", closePreguntaModalAsc);
   ascQuestionModalDone?.addEventListener("click", closePreguntaModalAsc);
+  ascWordExportClose?.addEventListener("click", closeAscWordExportModal);
+  ascExportAlumnoWord?.addEventListener("click", () => {
+    closeAscWordExportModal();
+    exportarAscUnidadWord("alumno");
+  });
+  ascExportMaestroWord?.addEventListener("click", () => {
+    closeAscWordExportModal();
+    exportarAscUnidadWord("maestro");
+  });
+  ascWordExportModal?.addEventListener("click", (e) => {
+    if (e.target === ascWordExportModal) closeAscWordExportModal();
+  });
+  ascWordStyleManagerClose?.addEventListener("click", closeAscWordStyleManagerModal);
+  ascWordStyleManagerApply?.addEventListener("click", aplicarCambiosAscWordStyleManager);
+  ascWordStyleManagerReset?.addEventListener("click", restablecerAscWordStyleSeleccionado);
+  ascWordStyleManagerModal?.addEventListener("click", (e) => {
+    if (e.target === ascWordStyleManagerModal) closeAscWordStyleManagerModal();
+  });
   ascQuestionAiBtn?.addEventListener("click", toggleAscQuestionAiPanel);
   ascQuestionAiSend?.addEventListener("click", enviarAscQuestionAiPrompt);
   ascToggleMeta?.addEventListener("click", () => toggleMetaAsc());
   ascToggleQuestions?.addEventListener("click", () => togglePreguntasAsc());
+  ascToggleStyles?.addEventListener("click", () => toggleStylesAsc());
   ascOpenSynonymsPanel?.addEventListener("click", openAscSynonymsPanel);
   ascSynonymsClose?.addEventListener("click", closeAscSynonymsPanel);
   ascSynonymsDone?.addEventListener("click", closeAscSynonymsPanel);
@@ -1673,6 +1750,33 @@ document.addEventListener("DOMContentLoaded", () => {
     const idx = Number(wrap?.getAttribute("data-synonym-table-index") || 0);
     syncAscSynonymsTableToEditor(idx, table.outerHTML);
   });
+  ascEditorModal?.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("[data-unit-section-open]");
+    if (!btn) return;
+    e.preventDefault();
+    cambiarAscUnidadSeccion(btn.getAttribute("data-unit-section-open") || "alumno");
+  });
+  ascEditorModal?.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("[data-unit-subtheme-index]");
+    if (!btn) return;
+    e.preventDefault();
+    cambiarAscUnidadSubtema(Number(btn.getAttribute("data-unit-subtheme-index") || 0));
+  });
+  ascEditorModal?.addEventListener("click", (e) => {
+    const pane = e.target?.closest?.("[data-unit-dual-pane]");
+    if (!pane || !ascUnidadVistaDualActiva()) return;
+    const key = pane.getAttribute("data-unit-dual-pane") === "maestro" ? "maestro" : "alumno";
+    if (ascUnitEditorState?.primaryView !== key) {
+      persistirAscUnidadSeccionActual();
+      ascUnitEditorState.primaryView = key;
+      ascUnitEditorState.active = key;
+      renderAscUnidadCanvas();
+      actualizarBotonesAscUnidadSeccion();
+      requestAnimationFrame(() => {
+        try { ascTexto?.focus(); } catch (_) {}
+      });
+    }
+  });
   ascAiAssistBtn?.addEventListener("click", toggleAscAiEditor);
   ascAiClose?.addEventListener("click", closeAscAiEditor);
   ascAiSend?.addEventListener("click", enviarAscAiPrompt);
@@ -1681,6 +1785,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindAscEditorToolbar();
   bindPreguntasAsc();
   bindAscAiEditor();
+  bindAscStyleLiveRefresh();
   aplicarTamanoHojaEditor(ascEditorSheetSize?.value || "carta");
   renderResumenPreguntasAsc();
   actualizarBotonesPanelesAsc();
@@ -1728,6 +1833,7 @@ function openEditorModal(){
 function closeEditorModal(){
   if (!ascEditorModal) return;
   ascEditorModal.classList.add("hidden");
+  closeAscWordExportModal();
   closeAscSynonymsPanel();
   closePreguntaModalAsc();
   closeAscAiEditor();
@@ -1751,12 +1857,18 @@ function applyAscEditorSchema(schema = {}) {
   if (ascTitulo) {
     ascTitulo.placeholder = schema.titlePlaceholder || "Escribe un título editorial";
   }
+  if (ascBtnGuardar) {
+    ascBtnGuardar.textContent = schema.saveLabel || "Guardar lectura";
+  }
   ascEditorModal.dataset.editorMode = schema.mode || "asc";
 }
 
 function configureAscSharedEditor(context = null) {
   ascSharedEditorContext = context || null;
   if (!ascEditorModal) return;
+  ascUnitEditorState = null;
+  ascTexto = ascTextoSingle;
+  ascEditorShell?.classList.remove("is-unit-editor");
   if (!ascSharedEditorContext) {
     applyAscEditorSchema({
       mode: "asc",
@@ -1765,7 +1877,8 @@ function configureAscSharedEditor(context = null) {
       gradoLabel: "Grado",
       trimestreLabel: "Trimestre",
       unidadLabel: "Unidad",
-      titlePlaceholder: "Escribe un título editorial"
+      titlePlaceholder: "Escribe un título editorial",
+      saveLabel: "Guardar lectura"
     });
     ascEditorModal.classList.remove("is-shared-editor");
     togglePreguntasAsc(false);
@@ -1779,9 +1892,11 @@ function configureAscSharedEditor(context = null) {
     gradoLabel: ascSharedEditorContext.gradoLabel || "Grado",
     trimestreLabel: ascSharedEditorContext.trimestreLabel || "Trimestre",
     unidadLabel: ascSharedEditorContext.unidadLabel || "Unidad",
-    titlePlaceholder: ascSharedEditorContext.titlePlaceholder || "Escribe el título de la lectura"
+    titlePlaceholder: ascSharedEditorContext.titlePlaceholder || "Escribe el título de la lectura",
+    saveLabel: ascSharedEditorContext.saveLabel || (ascSharedEditorContext.mode === "unidad-generada" ? "Guardar unidad" : "Guardar lectura")
   });
   ascEditorModal.classList.add("is-shared-editor");
+  ascEditorShell?.classList.toggle("is-unit-editor", ascSharedEditorContext.mode === "unidad-generada");
   togglePreguntasAsc(true);
 }
 
@@ -1789,6 +1904,22 @@ function collectSharedEditorPayload() {
   const html = String(ascTexto?.innerHTML || "").trim();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
+  if (ascSharedEditorContext?.mode === "unidad-generada") {
+    persistirAscUnidadSeccionActual();
+    const contenidoHTML = reconstruirAscUnidadHtml();
+    tmp.innerHTML = contenidoHTML;
+    return {
+      id: String(ascId?.value || "").trim(),
+      titulo: String(ascTitulo?.value || "").trim(),
+      tema: String(ascSerie?.value || "").trim(),
+      nivel: String(ascNivel?.value || "").trim(),
+      grado: String(ascGrado?.value || "").trim(),
+      trimestre: String(ascTrimestre?.value || "").trim(),
+      unidad: String(ascUnidad?.value || "").trim(),
+      contenidoHTML,
+      contenidoPlano: String(tmp.textContent || tmp.innerText || "").trim()
+    };
+  }
   return {
     id: String(ascId?.value || "").trim(),
     titulo: String(ascTitulo?.value || "").trim(),
@@ -1802,12 +1933,310 @@ function collectSharedEditorPayload() {
   };
 }
 
+function ascExtraerTituloSubtemaDesdeNodo(node) {
+  if (!node) return "";
+  const candidates = [
+    Array.from(node.querySelectorAll("p")).find((p) => /subcategor/i.test(String(p.textContent || ""))),
+    node.querySelector("h3"),
+    node.querySelector("h4"),
+    node.querySelector("h5")
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const text = String(candidate.textContent || "")
+      .replace(/subcategor[ií]a\s*:\s*/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function ascConstruirPaginaUnidad(node, index = 0, fallbackPrefix = "Subtema") {
+  const html = String(node?.outerHTML || "").trim();
+  const titulo = ascExtraerTituloSubtemaDesdeNodo(node) || `${fallbackPrefix} ${index + 1}`;
+  return {
+    html,
+    titulo,
+    numero: index + 1
+  };
+}
+
+function extraerAscUnidadSecciones(html = "") {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = String(html || "");
+  const bloques = Array.from(wrap.querySelectorAll(".bloque-subtema"));
+  const pages = {
+    alumno: [],
+    maestro: []
+  };
+  if (bloques.length) {
+    bloques.forEach((bloque, index) => {
+      const alumnoNode = bloque.querySelector(".col-alumno");
+      const maestroNode = bloque.querySelector(".col-maestro");
+      if (alumnoNode) pages.alumno.push(ascConstruirPaginaUnidad(alumnoNode, index, "Alumno"));
+      if (maestroNode) pages.maestro.push(ascConstruirPaginaUnidad(maestroNode, index, "Maestro"));
+    });
+  }
+  const alumnos = Array.from(wrap.querySelectorAll(".col-alumno"));
+  const maestros = Array.from(wrap.querySelectorAll(".col-maestro"));
+  if (!alumnos.length && !maestros.length) {
+    return {
+      alumno: String(html || "").trim() || "<p></p>",
+      maestro: "",
+      hasColumns: false,
+      pages: {
+        alumno: [{ html: String(html || "").trim() || "<p></p>", titulo: "Contenido completo", numero: 1 }],
+        maestro: []
+      }
+    };
+  }
+  if (!pages.alumno.length && alumnos.length) {
+    pages.alumno = alumnos.map((node, index) => ascConstruirPaginaUnidad(node, index, "Alumno"));
+  }
+  if (!pages.maestro.length && maestros.length) {
+    pages.maestro = maestros.map((node, index) => ascConstruirPaginaUnidad(node, index, "Maestro"));
+  }
+  return {
+    alumno: alumnos.map((node) => node.outerHTML).join("\n"),
+    maestro: maestros.map((node) => node.outerHTML).join("\n"),
+    hasColumns: true,
+    pages
+  };
+}
+
+function inicializarAscUnidadEditor(html = "") {
+  const sections = extraerAscUnidadSecciones(html);
+  ascUnitEditorState = {
+    originalHtml: String(html || ""),
+    sections,
+    active: "alumno",
+    primaryView: "alumno",
+    visibleViews: {
+      alumno: true,
+      maestro: false
+    },
+    pageIndexBySection: {
+      alumno: 0,
+      maestro: 0
+    }
+  };
+}
+
+function persistirAscUnidadSeccionActual() {
+  if (!ascUnitEditorState) return;
+  const persistKey = (key, node) => {
+    if (!node) return;
+    const html = String(node.innerHTML || "").trim();
+    ascUnitEditorState.sections[key] = html;
+    const pages = ascUnitEditorState.sections?.pages?.[key];
+    const pageIndex = Number(ascUnitEditorState.pageIndexBySection?.[key] || 0);
+    if (Array.isArray(pages) && pages[pageIndex]) {
+      pages[pageIndex].html = html;
+      ascUnitEditorState.sections[key] = pages.map((page) => page.html).filter(Boolean).join("\n");
+    }
+  };
+  if (ascUnidadVistaDualActiva()) {
+    persistKey("alumno", ascTextoAlumno);
+    persistKey("maestro", ascTextoMaestro);
+    return;
+  }
+  const key = ascUnitEditorState.active === "maestro" ? "maestro" : "alumno";
+  persistKey(key, ascTextoSingle || ascTexto);
+}
+
+function actualizarBotonesAscUnidadSeccion() {
+  if (!ascEditorModal || !ascUnitEditorState) return;
+  ascEditorModal.querySelectorAll("[data-unit-section-open]").forEach((btn) => {
+    const key = btn.getAttribute("data-unit-section-open") === "maestro" ? "maestro" : "alumno";
+    btn.classList.toggle("is-active", !!ascUnitEditorState.visibleViews?.[key]);
+    btn.classList.toggle("is-primary-view", ascUnitEditorState.primaryView === key);
+  });
+}
+
+function ascUnidadVistaDualActiva() {
+  return !!(ascUnitEditorState?.visibleViews?.alumno && ascUnitEditorState?.visibleViews?.maestro);
+}
+
+function ascActualizarNodoEditableActivo() {
+  if (!ascUnitEditorState) {
+    ascTexto = ascTextoSingle;
+    return;
+  }
+  if (!ascUnidadVistaDualActiva()) {
+    ascTexto = ascTextoSingle;
+    return;
+  }
+  const primary = ascUnitEditorState.primaryView === "maestro" ? "maestro" : "alumno";
+  if (ascTextoAlumno) {
+    ascTextoAlumno.setAttribute("contenteditable", primary === "alumno" ? "true" : "false");
+    ascTextoAlumno.classList.toggle("is-readonly", primary !== "alumno");
+  }
+  if (ascTextoMaestro) {
+    ascTextoMaestro.setAttribute("contenteditable", primary === "maestro" ? "true" : "false");
+    ascTextoMaestro.classList.toggle("is-readonly", primary !== "maestro");
+  }
+  ascTexto = primary === "maestro" ? ascTextoMaestro : ascTextoAlumno;
+}
+
+function renderAscUnidadCanvas() {
+  if (!ascUnitEditorState) return;
+  const dual = ascUnidadVistaDualActiva();
+  const alumnoIndex = Number(ascUnitEditorState.pageIndexBySection?.alumno || 0);
+  const maestroIndex = Number(ascUnitEditorState.pageIndexBySection?.maestro || 0);
+  const alumnoHtml = ascUnitEditorState.sections?.pages?.alumno?.[alumnoIndex]?.html || ascUnitEditorState.sections?.alumno || "<p></p>";
+  const maestroHtml = ascUnitEditorState.sections?.pages?.maestro?.[maestroIndex]?.html || ascUnitEditorState.sections?.maestro || "<p></p>";
+  if (ascUnitDualCanvas) {
+    ascUnitDualCanvas.classList.toggle("hidden", !dual);
+    ascUnitDualCanvas.setAttribute("aria-hidden", dual ? "false" : "true");
+  }
+  if (ascTextoSingle) ascTextoSingle.classList.toggle("hidden", dual);
+  if (dual) {
+    if (ascTextoAlumno) ascTextoAlumno.innerHTML = normalizarContenidoAscEditor(alumnoHtml || "<p></p>");
+    if (ascTextoMaestro) ascTextoMaestro.innerHTML = normalizarContenidoAscEditor(maestroHtml || "<p></p>");
+  } else if (ascTextoSingle) {
+    const key = ascUnitEditorState.active === "maestro" ? "maestro" : "alumno";
+    const pageIndex = Number(ascUnitEditorState.pageIndexBySection?.[key] || 0);
+    const page = ascUnitEditorState.sections?.pages?.[key]?.[pageIndex];
+    ascTextoSingle.innerHTML = normalizarContenidoAscEditor(page?.html || ascUnitEditorState.sections[key] || "<p></p>");
+  }
+  normalizarEtiquetasEstiloWordAsc();
+  ascActualizarNodoEditableActivo();
+}
+
+function renderAscUnidadSubtemas() {
+  if (!ascUnitSubthemeList) return;
+  if (!ascUnitEditorState) {
+    ascUnitSubthemeList.innerHTML = "";
+    return;
+  }
+  const key = ascUnitEditorState.active === "maestro" ? "maestro" : "alumno";
+  const pages = Array.isArray(ascUnitEditorState.sections?.pages?.[key]) ? ascUnitEditorState.sections.pages[key] : [];
+  const activeIndex = Number(ascUnitEditorState.pageIndexBySection?.[key] || 0);
+  ascUnitSubthemeList.innerHTML = pages.map((page, index) => `
+    <button
+      type="button"
+      class="asc-question-summary asc-unit-subtheme-btn ${index === activeIndex ? "is-active" : ""}"
+      data-unit-subtheme-index="${index}"
+      title="${esc(page.titulo || `Subtema ${index + 1}`)}"
+    >
+      <span class="asc-question-summary-num">${String(index + 1).padStart(2, "0")}</span>
+      <span class="asc-question-summary-copy">
+        <strong>${esc(page.titulo || `Subtema ${index + 1}`)}</strong>
+        <small>${ascUnidadVistaDualActiva() ? "Alumno y maestro" : (key === "maestro" ? "Notas del maestro" : "Página del alumno")}</small>
+      </span>
+    </button>
+  `).join("");
+}
+
+function cambiarAscUnidadSeccion(section = "alumno") {
+  if (!ascUnitEditorState || !ascTexto) return;
+  persistirAscUnidadSeccionActual();
+  const key = section === "maestro" ? "maestro" : "alumno";
+  if (ascUnidadVistaDualActiva()) {
+    if (ascUnitEditorState.primaryView === key) {
+      ascUnitEditorState.visibleViews = {
+        alumno: key === "alumno",
+        maestro: key === "maestro"
+      };
+    } else {
+      ascUnitEditorState.primaryView = key;
+    }
+  } else if (ascUnitEditorState.visibleViews?.[key]) {
+    ascUnitEditorState.primaryView = key;
+  } else {
+    ascUnitEditorState.visibleViews[key] = true;
+    ascUnitEditorState.primaryView = key;
+  }
+  ascUnitEditorState.active = key;
+  renderAscUnidadCanvas();
+  actualizarBotonesAscUnidadSeccion();
+  renderAscUnidadSubtemas();
+  renderAscWordStylesPanel();
+  requestAnimationFrame(() => {
+    try { ascTexto?.focus(); } catch (_) {}
+  });
+}
+
+function cambiarAscUnidadSubtema(index = 0) {
+  if (!ascUnitEditorState || !ascTexto) return;
+  persistirAscUnidadSeccionActual();
+  const keys = ascUnidadVistaDualActiva()
+    ? ["alumno", "maestro"]
+    : [ascUnitEditorState.active === "maestro" ? "maestro" : "alumno"];
+  keys.forEach((key) => {
+    const pages = Array.isArray(ascUnitEditorState.sections?.pages?.[key]) ? ascUnitEditorState.sections.pages[key] : [];
+    const nextIndex = Math.max(0, Math.min(pages.length - 1, Number(index) || 0));
+    ascUnitEditorState.pageIndexBySection[key] = nextIndex;
+  });
+  renderAscUnidadCanvas();
+  renderAscUnidadSubtemas();
+  renderAscWordStylesPanel();
+  requestAnimationFrame(() => {
+    try { ascTexto?.focus(); } catch (_) {}
+  });
+}
+
+function reconstruirAscUnidadHtml() {
+  if (!ascUnitEditorState) return String(ascTexto?.innerHTML || "").trim();
+  const original = document.createElement("div");
+  original.innerHTML = ascUnitEditorState.originalHtml || "";
+  const bloques = Array.from(original.querySelectorAll(".bloque-subtema"));
+  if (bloques.length) {
+    bloques.forEach((bloque, index) => {
+      const alumnoNode = bloque.querySelector(".col-alumno");
+      const maestroNode = bloque.querySelector(".col-maestro");
+      const alumnoPage = ascUnitEditorState.sections?.pages?.alumno?.[index];
+      const maestroPage = ascUnitEditorState.sections?.pages?.maestro?.[index];
+      if (alumnoNode && alumnoPage?.html) {
+        const parsed = document.createElement("div");
+        parsed.innerHTML = alumnoPage.html;
+        const replacement = parsed.querySelector(".col-alumno");
+        if (replacement) alumnoNode.replaceWith(replacement.cloneNode(true));
+      }
+      if (maestroNode && maestroPage?.html) {
+        const parsed = document.createElement("div");
+        parsed.innerHTML = maestroPage.html;
+        const replacement = parsed.querySelector(".col-maestro");
+        if (replacement) maestroNode.replaceWith(replacement.cloneNode(true));
+      }
+    });
+    return original.innerHTML.trim();
+  }
+  const reemplazarSeccion = (selector, html) => {
+    const nodes = Array.from(original.querySelectorAll(selector));
+    if (!nodes.length) return false;
+    const parsed = document.createElement("div");
+    parsed.innerHTML = String(html || "").trim();
+    const replacements = Array.from(parsed.querySelectorAll(selector));
+    if (!replacements.length && parsed.innerHTML.trim()) {
+      nodes[0].innerHTML = parsed.innerHTML;
+      nodes.slice(1).forEach((node) => node.remove());
+      return true;
+    }
+    nodes.forEach((node, index) => {
+      const next = replacements[index];
+      if (next) node.replaceWith(next.cloneNode(true));
+      else node.remove();
+    });
+    return true;
+  };
+  const replacedAlumno = reemplazarSeccion(".col-alumno", ascUnitEditorState.sections.alumno);
+  const replacedMaestro = reemplazarSeccion(".col-maestro", ascUnitEditorState.sections.maestro);
+  if (replacedAlumno || replacedMaestro) return original.innerHTML.trim();
+  return [ascUnitEditorState.sections.alumno, ascUnitEditorState.sections.maestro].filter(Boolean).join("\n").trim();
+}
+
 function actualizarBotonesPanelesAsc() {
   const metaCollapsed = !!ascEditorShell?.classList.contains("is-meta-collapsed");
+  const stylesCollapsed = !!ascEditorShell?.classList.contains("is-styles-collapsed");
   const preguntasCollapsed = !!ascEditorShell?.classList.contains("is-questions-collapsed");
   if (ascToggleMeta) {
     ascToggleMeta.title = metaCollapsed ? "Expandir metadatos" : "Colapsar metadatos";
     ascToggleMeta.setAttribute("aria-label", ascToggleMeta.title);
+  }
+  if (ascToggleStyles) {
+    ascToggleStyles.title = stylesCollapsed ? "Expandir estilos" : "Colapsar estilos";
+    ascToggleStyles.setAttribute("aria-label", ascToggleStyles.title);
   }
   if (ascToggleQuestions) {
     ascToggleQuestions.title = preguntasCollapsed ? "Expandir preguntas" : "Colapsar preguntas";
@@ -1831,6 +2260,14 @@ function togglePreguntasAsc(force = null) {
   actualizarBotonesPanelesAsc();
 }
 
+function toggleStylesAsc(force = null) {
+  if (!ascEditorShell) return;
+  const next = typeof force === "boolean" ? force : !ascEditorShell.classList.contains("is-styles-collapsed");
+  ascEditorShell.classList.toggle("is-styles-collapsed", next);
+  aplicarTamanoHojaEditor(ascEditorSheetSizeActual);
+  actualizarBotonesPanelesAsc();
+}
+
 function focusAscTexto() {
   if (!ascTexto) return;
   try { ascTexto.focus(); } catch (_) {}
@@ -1850,6 +2287,501 @@ function aplicarBloqueEditor(tagName = "P") {
   const tag = String(tagName || "P").toUpperCase();
   const htmlTag = tag === "P" ? "<p>" : `<${tag.toLowerCase()}>`;
   ejecutarComandoEditor("formatBlock", htmlTag);
+}
+
+function _ascCurrentEditorRoot() {
+  return ascTexto || ascTextoSingle || null;
+}
+
+function _ascCurrentBlockElement() {
+  const root = _ascCurrentEditorRoot();
+  if (!root) return null;
+  const sel = window.getSelection?.();
+  const baseNode = sel?.rangeCount ? sel.getRangeAt(0).startContainer : root.firstChild;
+  const base = baseNode?.nodeType === Node.TEXT_NODE ? baseNode.parentElement : baseNode;
+  if (!(base instanceof Element)) return root.querySelector("p, h1, h2, h3, h4, h5, h6, li, blockquote, div");
+  return base.closest("p, h1, h2, h3, h4, h5, h6, li, blockquote, div") || root;
+}
+
+function _ascCurrentCharacterElement() {
+  const root = _ascCurrentEditorRoot();
+  if (!root) return null;
+  const sel = window.getSelection?.();
+  if (!sel?.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const baseNode = range.commonAncestorContainer || range.startContainer;
+  const base = baseNode?.nodeType === Node.TEXT_NODE ? baseNode.parentElement : baseNode;
+  if (!(base instanceof Element)) return null;
+  return base.closest("[data-word-char-style], strong, b, em, i, u, mark, span") || base;
+}
+
+function aplicarEstiloWordParrafo(styleId = "") {
+  const style = String(styleId || "").trim();
+  if (!style) return;
+  const block = _ascCurrentBlockElement();
+  if (!(block instanceof HTMLElement)) return;
+  block.setAttribute("data-word-style", style);
+}
+
+function aplicarEstiloWordCaracter(styleId = "") {
+  const style = String(styleId || "").trim();
+  if (!style) return;
+  const root = _ascCurrentEditorRoot();
+  const sel = window.getSelection?.();
+  if (!root || !sel || !sel.rangeCount || sel.isCollapsed || !root.contains(sel.anchorNode)) return;
+  if (style === "CBTextNormal") {
+    const container = sel.getRangeAt(0).commonAncestorContainer;
+    const base = container?.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    base?.closest?.("[data-word-char-style]")?.removeAttribute("data-word-char-style");
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  const span = document.createElement("span");
+  span.setAttribute("data-word-char-style", style);
+  try {
+    const fragment = range.extractContents();
+    span.appendChild(fragment);
+    range.insertNode(span);
+    sel.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    sel.addRange(newRange);
+  } catch (_) {
+    // noop
+  }
+}
+
+function syncAscWordStyleControls() {
+  if (!ascEditorModal || ascEditorModal.classList.contains("hidden")) return;
+  const root = _ascCurrentEditorRoot();
+  const sel = window.getSelection?.();
+  const insideEditor = !!(root && sel?.rangeCount && root.contains(sel.anchorNode));
+  if (!insideEditor) {
+    if (ascWordParagraphStyle) ascWordParagraphStyle.value = "";
+    if (ascWordCharacterStyle) ascWordCharacterStyle.value = "";
+    return;
+  }
+  const block = _ascCurrentBlockElement();
+  const charNode = _ascCurrentCharacterElement();
+  const paragraphStyle = block ? (_ascInferParagraphStyle(block) || "CBBody") : "";
+  const characterStyle = charNode ? (_ascInferCharacterStyle(charNode) || "CBTextNormal") : "CBTextNormal";
+  if (ascWordParagraphStyle) {
+    ascWordParagraphStyle.value = paragraphStyle && ascWordParagraphStyle.querySelector(`option[value="${paragraphStyle}"]`)
+      ? paragraphStyle
+      : "";
+  }
+  if (ascWordCharacterStyle) {
+    ascWordCharacterStyle.value = characterStyle && ascWordCharacterStyle.querySelector(`option[value="${characterStyle}"]`)
+      ? characterStyle
+      : "";
+  }
+}
+
+function _ascActiveEditorBodies() {
+  return [ascTextoSingle, ascTextoAlumno, ascTextoMaestro].filter(Boolean);
+}
+
+function _ascStyleBlockSelector() {
+  return "p, h1, h2, h3, h4, h5, h6, li, blockquote, div, td, th";
+}
+
+function _ascIsStylableBlock(node) {
+  if (!(node instanceof Element)) return false;
+  const tag = String(node.tagName || "").toLowerCase();
+  if (["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "td", "th"].includes(tag)) return true;
+  if (tag !== "div") return false;
+  if (node.matches(".col-alumno, .col-maestro, .bloque-subtema, .asc-editor-page, .asc-editor-sheet, .asc-editor-text, .asc-editor-text-dual, .asc-editor-body, [data-unit-dual-pane], [data-unit-dual-root]")) return false;
+  return !node.querySelector(_ascStyleBlockSelector());
+}
+
+function _ascInferParagraphStyle(el) {
+  if (!(el instanceof Element)) return "";
+  const declared = String(el.getAttribute("data-word-style") || "").trim();
+  if (declared) return declared;
+  const tag = String(el.tagName || "").toLowerCase();
+  
+  if (tag === "h1") return "CBTitle";
+  if (tag === "h2") return "CBHeading1";
+  if (tag === "h3") return "CBHeading2";
+  if (tag === "h4") return "CBHeading3";
+  if (tag === "h6") return "CBSubtopic";
+  
+  return ""; // Regresar vacío si no hay estilo explícito ni es encabezado
+}
+
+function _ascGuessParagraphStyle(el) {
+  if (!(el instanceof Element)) return null;
+  const cls = String(el.className || "");
+  const text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+  const ownText = Array.from(el.childNodes || [])
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent || "")
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Detección mejorada de Instrucciones y Subinstrucciones (basada en requerimientos de usuario)
+  const isLi = el.tagName === "LI";
+  const parent = el.parentElement;
+  const isInsideActivity = !!(el.closest(".activity") || el.classList.contains("activity"));
+  
+  if (isLi && parent && parent.tagName === "OL") {
+    const listType = parent.getAttribute("type") || window.getComputedStyle(parent).listStyleType || "";
+    const isAlpha = /alpha|lower-a|a\b/i.test(listType);
+    const hasBold = !!(el.querySelector("strong, b") || (el.style.fontWeight && parseInt(el.style.fontWeight) > 400));
+    
+    if (isAlpha) return "CBSubinstructions";
+    if (hasBold || isInsideActivity) return "CBInstructions";
+  }
+
+  // REQUERIMIENTO: Las instrucciones están dentro de .activity, a veces como párrafo con strong
+  if (isInsideActivity && (el.tagName === "P" || el.tagName === "DIV")) {
+    const hasStrong = !!el.querySelector("strong, b");
+    if (hasStrong) return "CBInstructions";
+  }
+
+  if (/^subcategor/i.test(text) || /^subtema\b/i.test(ownText)) return "CBSubtopic";
+  if (/^pregunta detonante/i.test(text) || /^lectura generadora/i.test(text) || /^titulo de la lectura relacionada/i.test(text)) return "CBHeading2";
+  if (/^bibliograf/i.test(text) || /^sin[oó]nimos/i.test(text) || /^notas del maestro/i.test(text)) return "CBHeading3";
+  
+  // Respuestas / Solucionarios
+  if (el.classList.contains("answer") || /^respuesta|^solucionario|^soluci[oó]n|^answer/i.test(text)) return "CBAnswer";
+  
+  if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return "CBInstructions";
+  if (/^subinstrucci[oó]n/i.test(text)) return "CBSubinstructions";
+  if (/^actividad\b/i.test(text) || /^consigna\b/i.test(text)) return "CBActivity";
+  if (/^nota\b/i.test(text) || /^orientaci[oó]n docente/i.test(text)) return "CBTeacherNote";
+  if (/col-maestro/i.test(cls) || el.closest(".col-maestro")) return "CBTeacherNote";
+  
+  return null;
+}
+
+function _ascInferCharacterStyle(el) {
+  if (!(el instanceof Element)) return "";
+  const declared = String(el.getAttribute("data-word-char-style") || "").trim();
+  if (declared) return declared;
+  const tag = String(el.tagName || "").toLowerCase();
+  if (tag === "strong" || tag === "b") return "CBStrong";
+  if (tag === "em" || tag === "i") return "CBEmphasis";
+  if (tag === "u") return "CBUnderline";
+  if (tag === "mark") return "CBHighlight";
+  return "";
+}
+
+function normalizarEtiquetasEstiloWordAsc(root = null) {
+  const targets = root ? [root] : _ascActiveEditorBodies();
+  targets.forEach((body) => {
+    if (!(body instanceof Element)) return;
+    Array.from(body.querySelectorAll(_ascStyleBlockSelector())).forEach((node) => {
+      if (!_ascIsStylableBlock(node)) return;
+      
+      const declared = node.getAttribute("data-word-style");
+      if (declared) return; // Si ya tiene estilo, no sobrescribir con guesses
+      
+      const guess = _ascGuessParagraphStyle(node);
+      const tagMap = _ascInferParagraphStyle(node);
+      
+      // Solo etiquetar explícitamente si es algo distinto a "Normal" o si es un encabezado mapeado
+      if (guess) node.setAttribute("data-word-style", guess);
+      else if (tagMap && tagMap !== "CBBody") node.setAttribute("data-word-style", tagMap);
+    });
+    // ... estilos de caracter se quedan como están (inferred live)
+  });
+}
+
+function _ascCollectDocumentStyleUsage() {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = ascSharedEditorContext?.mode === "unidad-generada"
+    ? reconstruirAscUnidadHtml()
+    : String(_ascCurrentEditorRoot()?.innerHTML || ascTextoSingle?.innerHTML || "");
+
+  const paragraphCounts = new Map();
+  const characterCounts = new Map();
+
+  Array.from(wrap.querySelectorAll(_ascStyleBlockSelector())).forEach((node) => {
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text && !node.querySelector("img, table, ul, ol")) return;
+    const key = _ascInferParagraphStyle(node);
+    if (!key) return;
+    paragraphCounts.set(key, (paragraphCounts.get(key) || 0) + 1);
+  });
+
+  Array.from(wrap.querySelectorAll("*")).forEach((node) => {
+    const key = _ascInferCharacterStyle(node);
+    if (!key) return;
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    characterCounts.set(key, (characterCounts.get(key) || 0) + 1);
+  });
+
+  return { paragraphCounts, characterCounts };
+}
+
+function _ascClearStyleMatches() {
+  _ascActiveEditorBodies().forEach((root) => {
+    root.querySelectorAll(".asc-word-style-match").forEach((node) => node.classList.remove("asc-word-style-match"));
+    root.querySelectorAll(".asc-word-char-style-match").forEach((node) => node.classList.remove("asc-word-char-style-match"));
+  });
+}
+
+function aplicarResaltadoEstiloWordAsc() {
+  _ascClearStyleMatches();
+  const key = String(ascWordSelectedStyleKey || "").trim();
+  const group = String(ascWordSelectedStyleGroup || "paragraph").trim();
+  if (!key) return;
+  let firstMatch = null;
+  _ascActiveEditorBodies().forEach((root) => {
+    if (!root || root.classList.contains("hidden")) return;
+    if (group === "character") {
+      Array.from(root.querySelectorAll("*")).forEach((node) => {
+        if (_ascInferCharacterStyle(node) === key) {
+          node.classList.add("asc-word-char-style-match");
+          if (!firstMatch) firstMatch = node;
+        }
+      });
+      return;
+    }
+    Array.from(root.querySelectorAll(_ascStyleBlockSelector())).forEach((node) => {
+      const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text && !node.querySelector("img, table, ul, ol")) return;
+      if (_ascInferParagraphStyle(node) === key) {
+        node.classList.add("asc-word-style-match");
+        if (!firstMatch) firstMatch = node;
+      }
+    });
+  });
+  if (firstMatch && typeof firstMatch.scrollIntoView === "function") {
+    firstMatch.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function _ascBuildStyleDefinitionsCss() {
+  const defs = ascWordStyleDefinitions || normalizeStyleDefinitions(DEFAULT_STYLE_DEFINITIONS);
+  const rules = [];
+  Object.entries(defs.paragraph || {}).forEach(([key, def]) => {
+    const parts = [];
+    if (def.fontSize) parts.push(`font-size:${Number(def.fontSize)}px`);
+    if (def.color) parts.push(`color:#${String(def.color).replace(/^#/, "")} !important`);
+    if (def.bold) parts.push("font-weight:700");
+    else parts.push("font-weight:400");
+    if (def.italic) parts.push("font-style:italic");
+    else parts.push("font-style:normal");
+    if (def.align) parts.push(`text-align:${def.align === "both" ? "justify" : def.align}`);
+    if (Number(def.spacingBefore || 0)) parts.push(`margin-top:${Math.max(0, Number(def.spacingBefore)) / 10}px`);
+    if (Number(def.spacingAfter || 0) || key === "CBBody") parts.push(`margin-bottom:${Math.max(0, Number(def.spacingAfter || 160)) / 10}px`);
+    if (Number(def.indentLeft || 0)) parts.push(`padding-left:${Math.max(0, Number(def.indentLeft)) / 20}px`);
+    rules.push(`.asc-editor-body [data-word-style="${key}"]{${parts.join(";")}}`);
+  });
+  Object.entries(defs.character || {}).forEach(([key, def]) => {
+    const parts = [];
+    if (def.fontSize) parts.push(`font-size:${Number(def.fontSize)}px`);
+    if (def.bold) parts.push("font-weight:700");
+    else parts.push("font-weight:400");
+    if (def.italic) parts.push("font-style:italic");
+    else parts.push("font-style:normal");
+    if (def.underline) parts.push("text-decoration:underline");
+    else parts.push("text-decoration:none");
+    if (def.highlight) parts.push("background:rgba(254,240,138,0.9) !important");
+    if (def.color) parts.push(`color:#${String(def.color).replace(/^#/, "")} !important`);
+    rules.push(`.asc-editor-body [data-word-char-style="${key}"]{${parts.join(";")}}`);
+  });
+  return rules.join("\n");
+}
+
+function aplicarPreviewEstilosWordAsc() {
+  if (!ascEditorModal) return;
+  normalizarEtiquetasEstiloWordAsc();
+  let styleEl = ascEditorModal.querySelector("#ascWordStylePreview");
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.id = "ascWordStylePreview";
+    ascEditorModal.appendChild(styleEl);
+  }
+  styleEl.textContent = _ascBuildStyleDefinitionsCss();
+}
+
+function recolectarEstilosWordEnUsoAsc() {
+  const entries = [];
+  const { paragraphCounts, characterCounts } = _ascCollectDocumentStyleUsage();
+  
+  // Incluimos todos los estilos para que la lista lateral coincida con el selector de la barra de herramientas
+  Object.entries(ascWordStyleDefinitions.paragraph || {}).forEach(([key, def]) => {
+    let count = paragraphCounts.get(key) || 0;
+    // Si buscamos Normal (CBBody), sumamos los que no tienen estilo asignado
+    if (key === "CBBody") count += (paragraphCounts.get("") || 0);
+    entries.push({ group: "paragraph", key, label: def.label || key, count });
+  });
+
+  Object.entries(ascWordStyleDefinitions.character || {}).forEach(([key, def]) => {
+    let count = characterCounts.get(key) || 0;
+    if (key === "CBTextNormal") count += (characterCounts.get("") || 0);
+    entries.push({ group: "character", key, label: def.label || key, count });
+  });
+
+  return entries;
+}
+
+function renderAscWordStylesPanel() {
+  if (!ascWordStylesList) return;
+  const entries = recolectarEstilosWordEnUsoAsc();
+  const paragraphs = entries.filter(e => e.group === "paragraph");
+  const characters = entries.filter(e => e.group === "character");
+
+  const buildItem = (entry, index) => `
+    <button type="button" class="asc-word-style-item ${entry.key === ascWordSelectedStyleKey && entry.group === ascWordSelectedStyleGroup ? "is-active" : ""} ${entry.count ? "" : "is-empty"}" data-word-style-item="${entry.key}" data-word-style-group="${entry.group}">
+      <span class="asc-word-style-badge">${String(index + 1)}</span>
+      <span class="asc-word-style-copy">
+        <strong>${esc(entry.label)}</strong>
+        <small>${entry.group === "paragraph" ? "Párrafo" : "Carácter"} · ${entry.count} uso(s)</small>
+      </span>
+      <span class="asc-word-style-copy"><small>${esc(entry.key)}</small></span>
+    </button>
+  `;
+
+  let html = "";
+  if (paragraphs.length) {
+    html += `<div class="asc-word-style-group-title">Párrafo</div>`;
+    html += paragraphs.map((e, i) => buildItem(e, i)).join("");
+  }
+  if (characters.length) {
+    html += `<div class="asc-word-style-group-title">Carácter</div>`;
+    html += characters.map((e, i) => buildItem(e, i + paragraphs.length)).join("");
+  }
+
+  ascWordStylesList.innerHTML = html;
+}
+
+function openAscWordStyleManagerModal() {
+  let group = ascWordSelectedStyleGroup || "paragraph";
+  let key = ascWordSelectedStyleKey;
+
+  // Si no hay selección explicita en la lista, inferir según el cursor
+  if (!key) {
+    const block = _ascCurrentBlockElement();
+    const charNode = _ascCurrentCharacterElement();
+    key = block ? (_ascInferParagraphStyle(block) || "CBBody") : "CBBody";
+    group = "paragraph"; 
+    // Si hay un estilo de caracter bajo el cursor y estamos en modo caracter (o por defecto), podrías priorizarlo. 
+    // Pero por simplicidad, si no hay selección de lista, usamos el bloque actual.
+  }
+
+  const def = ascWordStyleDefinitions?.[group]?.[key];
+  if (!def || !ascWordStyleManagerModal) return;
+  if (ascWordStyleManagerName) ascWordStyleManagerName.value = def.label || key;
+  if (ascWordStyleManagerSubtitle) ascWordStyleManagerSubtitle.textContent = `Editando ${group === "paragraph" ? "estilo de párrafo" : "estilo de carácter"}: ${def.label || key}`;
+  if (ascWordStyleManagerSize) ascWordStyleManagerSize.value = String(def.fontSize || 22);
+  if (ascWordStyleManagerColor) ascWordStyleManagerColor.value = `#${String(def.color || "1F2937").replace(/^#/, "")}`;
+  if (ascWordStyleManagerAlign) ascWordStyleManagerAlign.value = def.align || "left";
+  if (ascWordStyleManagerBefore) ascWordStyleManagerBefore.value = String(def.spacingBefore || 0);
+  if (ascWordStyleManagerAfter) ascWordStyleManagerAfter.value = String(def.spacingAfter || 0);
+  if (ascWordStyleManagerIndent) ascWordStyleManagerIndent.value = String(def.indentLeft || 0);
+  if (ascWordStyleManagerBold) ascWordStyleManagerBold.checked = !!def.bold;
+  if (ascWordStyleManagerItalic) ascWordStyleManagerItalic.checked = !!def.italic;
+  if (ascWordStyleManagerUnderline) ascWordStyleManagerUnderline.checked = !!def.underline;
+  if (ascWordStyleManagerHighlight) ascWordStyleManagerHighlight.checked = !!def.highlight;
+  const isParagraph = group === "paragraph";
+  [ascWordStyleManagerAlign, ascWordStyleManagerBefore, ascWordStyleManagerAfter, ascWordStyleManagerIndent].forEach((el) => {
+    if (el?.closest) el.closest(".asc-editor-field")?.classList.toggle("hidden", !isParagraph);
+  });
+  ascWordStyleManagerModal.classList.remove("hidden");
+  ascWordStyleManagerModal.setAttribute("aria-hidden", "false");
+}
+
+function closeAscWordStyleManagerModal() {
+  if (!ascWordStyleManagerModal) return;
+  ascWordStyleManagerModal.classList.add("hidden");
+  ascWordStyleManagerModal.setAttribute("aria-hidden", "true");
+}
+
+function aplicarCambiosAscWordStyleManager() {
+  const group = ascWordSelectedStyleGroup || "paragraph";
+  const key = ascWordSelectedStyleKey || "CBBody";
+  const current = ascWordStyleDefinitions?.[group]?.[key];
+  if (!current) return;
+  ascWordStyleDefinitions[group][key] = {
+    ...current,
+    fontSize: Number(ascWordStyleManagerSize?.value || current.fontSize || 22),
+    color: String(ascWordStyleManagerColor?.value || `#${current.color || "1F2937"}`).replace(/^#/, "").toUpperCase(),
+    align: String(ascWordStyleManagerAlign?.value || current.align || "left"),
+    spacingBefore: Number(ascWordStyleManagerBefore?.value || current.spacingBefore || 0),
+    spacingAfter: Number(ascWordStyleManagerAfter?.value || current.spacingAfter || 0),
+    indentLeft: Number(ascWordStyleManagerIndent?.value || current.indentLeft || 0),
+    bold: !!ascWordStyleManagerBold?.checked,
+    italic: !!ascWordStyleManagerItalic?.checked,
+    underline: !!ascWordStyleManagerUnderline?.checked,
+    highlight: !!ascWordStyleManagerHighlight?.checked
+  };
+  aplicarPreviewEstilosWordAsc();
+  renderAscWordStylesPanel();
+  aplicarResaltadoEstiloWordAsc();
+  closeAscWordStyleManagerModal();
+}
+
+function restablecerAscWordStyleSeleccionado() {
+  ascWordStyleDefinitions = normalizeStyleDefinitions(DEFAULT_STYLE_DEFINITIONS);
+  aplicarPreviewEstilosWordAsc();
+  renderAscWordStylesPanel();
+  aplicarResaltadoEstiloWordAsc();
+  openAscWordStyleManagerModal();
+}
+
+function seleccionarTodoEstiloWordActual() {
+  let key = ascWordSelectedStyleKey;
+  let group = ascWordSelectedStyleGroup || "paragraph";
+
+  if (!key) {
+    const block = _ascCurrentBlockElement();
+    key = block ? (_ascInferParagraphStyle(block) || "CBBody") : "CBBody";
+    group = "paragraph";
+  }
+
+  const roots = _ascActiveEditorBodies().filter((root) => root && !root.classList.contains("hidden"));
+  const nodes = [];
+  roots.forEach((root) => {
+    if (ascWordSelectedStyleGroup === "character") {
+      Array.from(root.querySelectorAll("*")).forEach((node) => {
+        if (_ascInferCharacterStyle(node) === ascWordSelectedStyleKey) nodes.push(node);
+      });
+      return;
+    }
+    Array.from(root.querySelectorAll(_ascStyleBlockSelector())).forEach((node) => {
+      const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text && !node.querySelector("img, table, ul, ol")) return;
+      
+      const nodeKey = _ascInferParagraphStyle(node) || "CBBody";
+      if (nodeKey === key) nodes.push(node);
+    });
+  });
+  if (!nodes.length) return;
+
+  // Para evitar seleccionar "todo" cuando los elementos están lejos, 
+  // buscamos el primer bloque contiguo de coincidencias.
+  const sel = window.getSelection?.();
+  if (!sel) return;
+  sel.removeAllRanges();
+
+  // Seleccionamos el PRIMER nodo encontrado para llevar el foco allí
+  const range = document.createRange();
+  range.setStartBefore(nodes[0]);
+  range.setEndAfter(nodes[0]);
+  sel.addRange(range);
+  
+  // Desplazamos a la vista
+  nodes[0].scrollIntoView({ block: "center", behavior: "smooth" });
+
+  aplicarResaltadoEstiloWordAsc();
+}
+
+function bindAscStyleLiveRefresh() {
+  _ascActiveEditorBodies().forEach((node) => {
+    if (!node || node.dataset.styleRefreshBound === "1") return;
+    node.addEventListener("input", () => {
+      normalizarEtiquetasEstiloWordAsc(node);
+      aplicarPreviewEstilosWordAsc();
+      renderAscWordStylesPanel();
+    });
+    node.dataset.styleRefreshBound = "1";
+  });
 }
 
 function aplicarFuenteEditor(fontFamily = "") {
@@ -2266,6 +3198,37 @@ function bindAscEditorToolbar() {
   ascEditorFontSize?.addEventListener("change", (e) => {
     aplicarTamanoEditor(e.currentTarget?.value || "");
   });
+  ascWordParagraphStyle?.addEventListener("change", (e) => {
+    const val = e.currentTarget?.value || "";
+    if (val) {
+      ascWordSelectedStyleKey = val;
+      ascWordSelectedStyleGroup = "paragraph";
+    }
+    aplicarEstiloWordParrafo(val);
+    renderAscWordStylesPanel();
+    aplicarPreviewEstilosWordAsc();
+    syncAscWordStyleControls();
+  });
+  ascWordCharacterStyle?.addEventListener("change", (e) => {
+    const val = e.currentTarget?.value || "";
+    if (val) {
+      ascWordSelectedStyleKey = val;
+      ascWordSelectedStyleGroup = "character";
+    }
+    aplicarEstiloWordCaracter(val);
+    renderAscWordStylesPanel();
+    aplicarPreviewEstilosWordAsc();
+    syncAscWordStyleControls();
+  });
+  ascWordStylesList?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-word-style-item]");
+    if (!btn) return;
+    ascWordSelectedStyleKey = String(btn.getAttribute("data-word-style-item") || "CBBody");
+    ascWordSelectedStyleGroup = String(btn.getAttribute("data-word-style-group") || "paragraph");
+    renderAscWordStylesPanel();
+    aplicarResaltadoEstiloWordAsc();
+    seleccionarTodoEstiloWordActual();
+  });
   ascEditorSheetSize?.addEventListener("change", (e) => {
     aplicarTamanoHojaEditor(e.currentTarget?.value || "");
   });
@@ -2282,6 +3245,11 @@ function bindAscEditorToolbar() {
     _refrescarPaletasColorAsc();
   });
   _refrescarPaletasColorAsc();
+  aplicarPreviewEstilosWordAsc();
+  document.addEventListener("selectionchange", syncAscWordStyleControls);
+  ascEditorModal.addEventListener("mouseup", syncAscWordStyleControls);
+  ascEditorModal.addEventListener("keyup", syncAscWordStyleControls);
+  ascEditorModal.addEventListener("click", syncAscWordStyleControls);
   ascEditorModal.dataset.toolbarBound = "1";
 }
 
@@ -2309,7 +3277,7 @@ function bindPreguntasAsc() {
 
 function renderResumenPreguntasAsc() {
   const refs = getPRefs();
-  $$(".asc-question-summary", ascEditorModal).forEach((btn, index) => {
+  $$("[data-question-open].asc-question-summary", ascEditorModal).forEach((btn, index) => {
     const ref = refs[index];
     const titulo = btn.querySelector("strong");
     const subtitulo = btn.querySelector("small");
@@ -2889,6 +3857,8 @@ function openEditorNew(){
 
   renderResumenPreguntasAsc();
   _refrescarPaletasColorAsc();
+  aplicarPreviewEstilosWordAsc();
+  renderAscWordStylesPanel();
   openEditorModal(); // 🔁 en lugar de toggleEditor(true)
 }
 
@@ -2939,6 +3909,8 @@ P.forEach((ref, i) => {
 });
   renderResumenPreguntasAsc();
   _refrescarPaletasColorAsc();
+  aplicarPreviewEstilosWordAsc();
+  renderAscWordStylesPanel();
   openEditorModal();
   requestAnimationFrame(() => {
     try { ascTexto.scrollIntoView({ block: "start", inline: "nearest" }); } catch (_) {}
@@ -3101,12 +4073,307 @@ async function onDownloadWordRow(e){
     ${preguntas}
   `.trim();
 
-  const blob = window.htmlDocx.asBlob(fullHTML);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${titulo.replace(/[^a-z0-9]/gi, "_").toLowerCase()}-${id}.docx`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  await downloadStyledDocx({
+    html: `${d.textoLectura || "<p>(Sin contenido)</p>"}<hr><h2>Preguntas de Comprensión</h2>${preguntas}`,
+    title: titulo,
+    subtitle: `${d.nivel || ""} · ${d.grado || ""}`.replace(/\s+/g, " ").trim(),
+    filename: `${sanitizeWordFilename(titulo, "lectura")}-${id}.docx`,
+    styleDefinitions: ascWordStyleDefinitions
+  });
+}
+
+function _ascSanitizeFilenamePart(value = "", fallback = "archivo") {
+  const cleaned = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .trim();
+  return cleaned || fallback;
+}
+
+function _ascDescargarBlobWord(html = "", filename = "documento.docx") {
+  if (!window.htmlDocx?.asBlob) {
+    alert("La librería para descargar Word no está disponible.");
+    return;
+  }
+  const documento = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+          h1, h2, h3, h4, h5 { color: #2c3e50; margin-top: 18px; margin-bottom: 10px; }
+          table { border-collapse: collapse; width: 100%; margin: 14px 0; }
+          table, th, td { border: 1px solid #d6d6d6; }
+          th, td { padding: 8px; text-align: left; }
+          hr { margin: 26px 0; border: none; border-top: 1px solid #cbd5e1; }
+        </style>
+      </head>
+      <body>${html}</body>
+    </html>
+  `;
+  Promise.resolve()
+    .then(() => window.htmlDocx.asBlob(documento))
+    .then((blob) => _ascInjectDocxThumbnail(blob, {
+      title: ascTitulo?.value || "Documento",
+      subtitle: ascSharedEditorContext?.mode === "unidad-generada"
+        ? `${ascNivel?.value || ""} · Trim ${ascTrimestre?.value || ""} · Unidad ${ascUnidad?.value || ""}`.replace(/\s+/g, " ").trim()
+        : `${ascNivel?.value || ""} · ${ascGrado?.value || ""}`.replace(/\s+/g, " ").trim()
+    }))
+    .catch(() => null)
+    .then((finalBlob) => {
+      const blob = finalBlob || window.htmlDocx.asBlob(documento);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+}
+
+async function _ascInjectDocxThumbnail(blob, options = {}) {
+  const JSZipCtor = window.htmlDocx?.JSZip || window.JSZip;
+  if (!blob || !JSZipCtor) return blob;
+  try {
+    const thumbnailBlob = await _ascBuildDocxThumbnailBlob(options);
+    if (!thumbnailBlob) return blob;
+    const zip = new JSZipCtor(await blob.arrayBuffer());
+    const relsPath = "_rels/.rels";
+    const contentTypesPath = "[Content_Types].xml";
+    const thumbnailPath = "docProps/thumbnail.jpeg";
+    zip.file(thumbnailPath, await thumbnailBlob.arrayBuffer(), { binary: true });
+
+    const relsXml = zip.file(relsPath)?.asText?.();
+    if (relsXml) {
+      const relsDoc = new DOMParser().parseFromString(relsXml, "application/xml");
+      const root = relsDoc.documentElement;
+      const relType = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
+      Array.from(root.getElementsByTagName("Relationship")).forEach((node) => {
+        if (node.getAttribute("Type") === relType) node.parentNode?.removeChild(node);
+      });
+      const ids = Array.from(root.getElementsByTagName("Relationship"))
+        .map((node) => Number(String(node.getAttribute("Id") || "").replace(/^rId/i, "")))
+        .filter((n) => Number.isFinite(n));
+      const nextId = `rId${(ids.length ? Math.max(...ids) : 0) + 1}`;
+      const rel = relsDoc.createElementNS(root.namespaceURI, "Relationship");
+      rel.setAttribute("Id", nextId);
+      rel.setAttribute("Type", relType);
+      rel.setAttribute("Target", "docProps/thumbnail.jpeg");
+      root.appendChild(rel);
+      zip.file(relsPath, new XMLSerializer().serializeToString(relsDoc));
+    }
+
+    const contentTypesXml = zip.file(contentTypesPath)?.asText?.();
+    if (contentTypesXml) {
+      const ctDoc = new DOMParser().parseFromString(contentTypesXml, "application/xml");
+      const root = ctDoc.documentElement;
+      const defaults = Array.from(root.getElementsByTagName("Default"));
+      const hasJpeg = defaults.some((node) => {
+        const ext = String(node.getAttribute("Extension") || "").toLowerCase();
+        return ext === "jpeg" || ext === "jpg";
+      });
+      if (!hasJpeg) {
+        const def = ctDoc.createElementNS(root.namespaceURI, "Default");
+        def.setAttribute("Extension", "jpeg");
+        def.setAttribute("ContentType", "image/jpeg");
+        root.appendChild(def);
+      }
+      zip.file(contentTypesPath, new XMLSerializer().serializeToString(ctDoc));
+    }
+
+    return zip.generate({ type: "blob" });
+  } catch (_) {
+    return blob;
+  }
+}
+
+function _ascWrapTextLines(ctx, text = "", maxWidth = 320) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let current = "";
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth || !current) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  });
+  if (current) lines.push(current);
+  return lines;
+}
+
+async function _ascBuildDocxThumbnailBlob(options = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const title = String(options.title || "Documento").trim();
+  const subtitle = String(options.subtitle || "").trim();
+
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, "#f8fbff");
+  gradient.addColorStop(1, "#e8eefb");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#d8e1f2";
+  ctx.lineWidth = 3;
+  _ascRoundRect(ctx, 42, 36, 428, 440, 28);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#2b3a67";
+  ctx.font = "700 20px Georgia";
+  ctx.fillText("Charly Brown", 72, 88);
+
+  ctx.fillStyle = "#1f2937";
+  ctx.font = "700 30px Arial";
+  const titleLines = _ascWrapTextLines(ctx, title, 360).slice(0, 5);
+  titleLines.forEach((line, index) => {
+    ctx.fillText(line, 72, 156 + index * 38);
+  });
+
+  if (subtitle) {
+    ctx.fillStyle = "#5b6475";
+    ctx.font = "500 18px Arial";
+    const subtitleLines = _ascWrapTextLines(ctx, subtitle, 360).slice(0, 3);
+    subtitleLines.forEach((line, index) => {
+      ctx.fillText(line, 72, 352 + index * 28);
+    });
+  }
+
+  ctx.fillStyle = "#7c8db5";
+  ctx.fillRect(72, 392, 120, 8);
+  ctx.fillRect(72, 416, 220, 8);
+  ctx.fillRect(72, 440, 176, 8);
+
+  return await new Promise((resolve) => {
+    canvas.toBlob((out) => resolve(out || null), "image/jpeg", 0.92);
+  });
+}
+
+function _ascRoundRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
+function _ascBuildUnidadWordFilename(tipo = "alumno") {
+  const nivel = _ascSanitizeFilenamePart(ascNivel?.value || "Nivel", "Nivel");
+  const trimestre = _ascSanitizeFilenamePart(`trim${ascTrimestre?.value || "x"}`, "trimx");
+  const unidad = _ascSanitizeFilenamePart(`unidad${ascUnidad?.value || "x"}`, "unidadx");
+  const sufijo = tipo === "maestro" ? "maestro" : "alumno";
+  return `${nivel}-${trimestre}-${unidad}-${sufijo}.docx`;
+}
+
+function _ascBuildLecturaWordFilename() {
+  return `${_ascSanitizeFilenamePart(ascTitulo?.value || "lectura", "lectura")}.docx`;
+}
+
+function _ascPrepararHtmlUnidadPorTipo(tipo = "alumno") {
+  persistirAscUnidadSeccionActual();
+  const html = reconstruirAscUnidadHtml();
+  const wrap = document.createElement("div");
+  wrap.innerHTML = html;
+  const selector = tipo === "maestro" ? ".col-maestro" : ".col-alumno";
+  const bloques = Array.from(wrap.querySelectorAll(".bloque-subtema"));
+  const partes = [];
+  if (bloques.length) {
+    bloques.forEach((bloque) => {
+      const columna = bloque.querySelector(selector);
+      if (columna) partes.push(columna.outerHTML);
+    });
+  } else {
+    Array.from(wrap.querySelectorAll(selector)).forEach((columna) => {
+      partes.push(columna.outerHTML);
+    });
+  }
+  return partes.join("<hr>");
+}
+
+function _ascPrepararHtmlLecturaCompleta() {
+  const payload = collectSharedEditorPayload();
+  const refs = getPRefs();
+  const preguntas = refs.some((ref) => String(ref?.t?.value || "").trim())
+    ? `
+      <hr>
+      <h2>Preguntas de Comprensión</h2>
+      <ol>
+        ${refs.map((ref) => {
+          const texto = String(ref?.t?.value || "").trim();
+          if (!texto) return "";
+          return `
+            <li>
+              <p><strong>${esc(texto)}</strong></p>
+              <p><strong>Nivel:</strong> ${esc(ref?.n?.value || "—")} <strong>Criterio:</strong> ${esc(ref?.c?.value || "—")}</p>
+              <p>${esc(ref?.r?.value || "")}</p>
+            </li>
+          `;
+        }).join("")}
+      </ol>
+    `
+    : "";
+  return `
+    <h1>${esc(payload.titulo || "Lectura")}</h1>
+    ${payload.contenidoHTML || "<p>(Sin contenido)</p>"}
+    ${preguntas}
+  `;
+}
+
+function openAscWordExportModal() {
+  if (!ascWordExportModal) return;
+  ascWordExportModal.classList.remove("hidden");
+  ascWordExportModal.setAttribute("aria-hidden", "false");
+}
+
+function closeAscWordExportModal() {
+  if (!ascWordExportModal) return;
+  ascWordExportModal.classList.add("hidden");
+  ascWordExportModal.setAttribute("aria-hidden", "true");
+}
+
+function exportarAscUnidadWord(tipo = "alumno") {
+  const html = _ascPrepararHtmlUnidadPorTipo(tipo);
+  if (!String(html || "").trim()) {
+    alert(`No hay contenido de ${tipo} para exportar.`);
+    return;
+  }
+  downloadStyledDocx({
+    html,
+    title: ascTitulo?.value || "Unidad",
+    subtitle: `${ascNivel?.value || ""} · Trim ${ascTrimestre?.value || ""} · Unidad ${ascUnidad?.value || ""}`.replace(/\s+/g, " ").trim(),
+    filename: _ascBuildUnidadWordFilename(tipo),
+    styleDefinitions: ascWordStyleDefinitions
+  });
+}
+
+function onAscDescargarWordEditor(e) {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  if (ascSharedEditorContext?.mode === "unidad-generada") {
+    openAscWordExportModal();
+    return;
+  }
+  downloadStyledDocx({
+    html: _ascPrepararHtmlLecturaCompleta(),
+    title: ascTitulo?.value || "Lectura",
+    subtitle: `${ascNivel?.value || ""} · ${ascGrado?.value || ""}`.replace(/\s+/g, " ").trim(),
+    filename: _ascBuildLecturaWordFilename(),
+    styleDefinitions: ascWordStyleDefinitions
+  });
 }
 
 window.addEventListener("cb:lectura-live-state", actualizarEstadoBotonesAscLive);
@@ -3156,7 +4423,7 @@ async function onSubmit(ev){
   ev.preventDefault();
   if (ascSharedEditorContext?.onSave) {
     const payload = collectSharedEditorPayload();
-    if (!payload.titulo || !payload.nivel || !payload.grado || !payload.contenidoHTML) {
+    if (!payload.titulo || !payload.contenidoHTML || (ascSharedEditorContext.mode !== "unidad-generada" && (!payload.nivel || !payload.grado))) {
       alert("Completa título, nivel, grado y texto de lectura.");
       return;
     }
@@ -3248,9 +4515,15 @@ window.cbOpenLecturaEditorCompartido = async function cbOpenLecturaEditorCompart
   if (ascTrimestre) ascTrimestre.value = String(options.trimestre || "");
   if (ascUnidad) ascUnidad.value = String(options.unidad || "");
   if (ascTitulo) ascTitulo.value = String(options.titulo || "");
-  if (ascTexto) {
-    ascTexto.innerHTML = normalizarContenidoAscEditor(options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>");
-    if (!String(ascTexto.innerHTML || "").trim()) ascTexto.innerHTML = "<p></p>";
+  if (context.mode === "unidad-generada") {
+    inicializarAscUnidadEditor(options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>");
+  }
+  if (ascTextoSingle) {
+    const contenidoInicial = context.mode === "unidad-generada"
+      ? (ascUnitEditorState?.sections?.pages?.alumno?.[0]?.html || ascUnitEditorState?.sections?.alumno || "<p></p>")
+      : (options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>");
+    ascTextoSingle.innerHTML = normalizarContenidoAscEditor(contenidoInicial);
+    if (!String(ascTextoSingle.innerHTML || "").trim()) ascTextoSingle.innerHTML = "<p></p>";
   }
   getPRefs().forEach((ref) => {
     if (ref.t) ref.t.value = "";
@@ -3267,6 +4540,16 @@ window.cbOpenLecturaEditorCompartido = async function cbOpenLecturaEditorCompart
   aplicarTamanoHojaEditor(ascEditorSheetSize?.value || "carta");
   toggleMetaAsc(false);
   togglePreguntasAsc(true);
+  renderAscUnidadCanvas();
+  actualizarBotonesAscUnidadSeccion();
+  renderAscUnidadSubtemas();
+  aplicarPreviewEstilosWordAsc();
+  ascWordSelectedStyleKey = "";
+  ascWordSelectedStyleGroup = "paragraph";
+  if (ascWordParagraphStyle) ascWordParagraphStyle.value = "";
+  if (ascWordCharacterStyle) ascWordCharacterStyle.value = "";
+  renderAscWordStylesPanel();
+  bindAscStyleLiveRefresh();
   openEditorModal();
   requestAnimationFrame(() => {
     try { ascTexto?.focus(); } catch (_) {}

@@ -884,7 +884,7 @@
       charlyVoiceLocale: CHARLY_LOCALE_OPTIONS.some((it) => it.value === raw.charlyVoiceLocale)
         ? raw.charlyVoiceLocale
         : DEFAULT_CHARLY_VOICE_LOCALE,
-      lecturaUseCharlyVoice: raw.lecturaUseCharlyVoice !== false,
+      lecturaUseCharlyVoice: raw.lecturaUseCharlyVoice === true,
       lecturaVoiceName: String(raw.lecturaVoiceName || DEFAULT_LECTURA_VOICE_NAME).trim() || DEFAULT_LECTURA_VOICE_NAME,
       lecturaVoiceSpeed: Number.isFinite(Number(raw.lecturaVoiceSpeed))
         ? clamp(Number(raw.lecturaVoiceSpeed), 0.75, 1.35)
@@ -958,7 +958,7 @@
       NEXT_STEP_COLUMNS_MAX
     );
     return {
-      agentEnabled: raw.agentEnabled !== false,
+      agentEnabled: raw.agentEnabled === true,
       customFunctions,
       nextActionPresets,
       nextStepColumns
@@ -3633,7 +3633,7 @@
                 <div class="theme-field command-compact-field command-toggle-field">
                   <label for="voiceAgentEnabledToggle">Agente de voz</label>
                   <label class="cmd-switch" title="Activar o desactivar agente de voz">
-                    <input type="checkbox" id="voiceAgentEnabledToggle" checked>
+                    <input type="checkbox" id="voiceAgentEnabledToggle">
                     <span class="cmd-switch-track"><span class="cmd-switch-thumb"></span></span>
                   </label>
                   <small>Activo: procesa comandos</small>
@@ -3667,7 +3667,7 @@
                 <div class="theme-field command-compact-field command-toggle-field">
                   <label for="commandLecturaUseCharlyVoice">Lecturas con voz del agente</label>
                   <label class="cmd-switch" title="Usar la misma voz configurada para Charly al leer lecturas">
-                    <input type="checkbox" id="commandLecturaUseCharlyVoice" checked>
+                    <input type="checkbox" id="commandLecturaUseCharlyVoice">
                     <span class="cmd-switch-track"><span class="cmd-switch-thumb"></span></span>
                   </label>
                   <small>Si se desactiva, puedes configurar una voz especial para lecturas.</small>
@@ -4360,7 +4360,7 @@
         }
       }
       if (commandControls.lecturaUseCharlyVoice) {
-        commandControls.lecturaUseCharlyVoice.checked = currentSettings.lecturaUseCharlyVoice !== false;
+        commandControls.lecturaUseCharlyVoice.checked = currentSettings.lecturaUseCharlyVoice === true;
       }
       if (commandControls.lecturaVoiceName) {
         commandControls.lecturaVoiceName.value = currentSettings.lecturaVoiceName || DEFAULT_LECTURA_VOICE_NAME;
@@ -4385,7 +4385,7 @@
           commandControls.lecturaVoicePitchValue.textContent = pLect.toFixed(2);
         }
       }
-      const lecturaDisabled = currentSettings.lecturaUseCharlyVoice !== false;
+      const lecturaDisabled = currentSettings.lecturaUseCharlyVoice === true;
       [
         commandControls.lecturaVoiceName,
         commandControls.lecturaVoiceMood,
@@ -6274,7 +6274,7 @@
         );
         if (commandControls.agentEnabled) {
           if (commandControls.agentEnabled instanceof HTMLInputElement && commandControls.agentEnabled.type === 'checkbox') {
-            commandControls.agentEnabled.checked = meta.agentEnabled !== false;
+            commandControls.agentEnabled.checked = meta.agentEnabled === true;
           } else {
             commandControls.agentEnabled.value = meta.agentEnabled ? 'on' : 'off';
           }
@@ -6550,7 +6550,7 @@
         renderVoiceCommandRows(defaults);
         if (commandControls.agentEnabled) {
           if (commandControls.agentEnabled instanceof HTMLInputElement && commandControls.agentEnabled.type === 'checkbox') {
-            commandControls.agentEnabled.checked = defaults?.meta?.agentEnabled !== false;
+            commandControls.agentEnabled.checked = defaults?.meta?.agentEnabled === true;
           } else {
             commandControls.agentEnabled.value = defaults?.meta?.agentEnabled === false ? 'off' : 'on';
           }

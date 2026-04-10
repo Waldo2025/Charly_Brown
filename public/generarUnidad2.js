@@ -1,6 +1,7 @@
 // generarUnidad.js
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, addDoc, collection, doc, getDoc, getDocs, updateDoc, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { sanitizeRichText, escapeHtml } from "./security-utils.js";
 
 // Configuración Firebase
@@ -16,6 +17,7 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 
 const btnVerUnidades = document.getElementById("btnListaUnidadesGuardadas");
@@ -23,47 +25,242 @@ const modalLista = document.getElementById("modalUnidadesGuardadas");
 const modalEditar = document.getElementById("modalEditarUnidad");
 const contenedorLista = document.getElementById("contenedorUnidadesGuardadas");
 const editorUnidad = document.getElementById("editorUnidadContenido");
+const UNIDADES_COLLECTION = "unidadesGeneradas";
 
 let unidadEditandoId = null;
+let unidadEditandoCollection = UNIDADES_COLLECTION;
 let autoSaveTimeout = null;
 let unidadCompartirId = null;
+
+function _valorAHtmlUnidadGuardada(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value.map(_valorAHtmlUnidadGuardada).filter(Boolean).join("\n");
+  }
+  if (typeof value === "object") {
+    const direct = obtenerContenidoUnidadGuardada(value);
+    if (direct) return direct;
+    return Object.entries(value)
+      .filter(([key]) => /contenido|html|respuesta|resultado|final|alumno|maestro|seccion|sección|categoria|categoría/i.test(key))
+      .map(([, child]) => _valorAHtmlUnidadGuardada(child))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+function obtenerContenidoUnidadGuardada(data = {}) {
+  const camposDirectos = [
+    "contenido",
+    "html",
+    "htmlContenido",
+    "contenidoHTML",
+    "htmlUnidad",
+    "unidadHTML",
+    "resultadoHTML",
+    "resultadoUnidad",
+    "resultadoUnidadHTML",
+    "respuestaFinal",
+    "contenidoAlumno",
+    "contenidoMaestro",
+    "htmlAlumno",
+    "htmlMaestro",
+    "alumnoHTML",
+    "maestroHTML"
+  ];
+
+  for (const key of camposDirectos) {
+    const html = _valorAHtmlUnidadGuardada(data?.[key]);
+    if (html) return html;
+  }
+
+  return Object.entries(data || {})
+    .filter(([key]) => /contenido|html|respuesta|resultado|final|alumno|maestro|seccion|sección|categoria|categoría/i.test(key))
+    .map(([, value]) => _valorAHtmlUnidadGuardada(value))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function obtenerTituloUnidadGuardada(data = {}, html = "") {
+  const limpiarTitulo = (value = "") => String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const esTituloValido = (value = "") => {
+    const text = limpiarTitulo(value);
+    if (!text) return false;
+    if (text.length > 140) return false;
+    if (/[.!?]\s/.test(text)) return false;
+    return true;
+  };
+
+  const candidatosExplicitos = [
+    data.tituloUnidad,
+    data.nombreUnidad,
+    data.titulo,
+    data.nombre
+  ];
+
+  for (const candidato of candidatosExplicitos) {
+    if (esTituloValido(candidato)) return limpiarTitulo(candidato);
+  }
+
+  try {
+    const parser = new DOMParser();
+    const docHTML = parser.parseFromString(html || "", "text/html");
+    const headings = Array.from(docHTML.querySelectorAll(".col-alumno h4, .col-alumno h3, h4, h3, h2, h1"));
+    const ignorar = [
+      /^subcategor/i,
+      /^secuencia y alcance/i,
+      /^pregunta detonante/i,
+      /^lectura generadora/i,
+      /^t[ií]tulo de la lectura/i,
+      /^p[aá]gina alumno/i
+    ];
+    const headingValido = headings
+      .map((node) => limpiarTitulo(node.textContent || ""))
+      .find((text) => esTituloValido(text) && !ignorar.some((rx) => rx.test(text)));
+    if (headingValido) return headingValido;
+
+    const lecturaTitulo = limpiarTitulo(data.lecturaTitulo || "");
+    if (esTituloValido(lecturaTitulo)) return lecturaTitulo;
+
+    return "Sin título";
+  } catch (_) {
+    return "Sin título";
+  }
+}
+
+async function abrirEditorUnidadCompartido({ id = "", collectionName = UNIDADES_COLLECTION, data = {}, html = "" } = {}) {
+  if (typeof window.cbOpenLecturaEditorCompartido !== "function") {
+    unidadEditandoId = id;
+    unidadEditandoCollection = collectionName || UNIDADES_COLLECTION;
+    const htmlLimpio = sanitizeRichText(String(html || "").replace(/<style[\s\S]*?<\/style>/gi, ""));
+    editorUnidad.innerHTML = htmlLimpio;
+    modalEditar.style.display = "block";
+    return;
+  }
+
+  await window.cbOpenLecturaEditorCompartido({
+    mode: "unidad-generada",
+    id,
+    titulo: obtenerTituloUnidadGuardada(data, html),
+    tema: data.lecturaTitulo || data.tituloUnidad || "",
+    nivel: data.nivel || "",
+    grado: data.grado || "",
+    trimestre: data.trimestre || "",
+    unidad: data.unidad || "",
+    contenidoHTML: html,
+    serieLabel: "Lectura",
+    nivelLabel: "Nivel",
+    gradoLabel: "Grado",
+    trimestreLabel: "Trimestre",
+    unidadLabel: "Unidad",
+    titlePlaceholder: "Título de la unidad",
+    onSave: async (payload) => {
+      await updateDoc(doc(db, collectionName || UNIDADES_COLLECTION, id), {
+        contenido: payload.contenidoHTML,
+        tituloUnidad: payload.titulo,
+        nivel: payload.nivel,
+        grado: payload.grado,
+        trimestre: payload.trimestre,
+        unidad: payload.unidad,
+        editadoEn: new Date()
+      });
+    }
+  });
+}
+
+function formatearFechaUnidadGuardada(value) {
+  if (!value) return "N/D";
+  if (typeof value?.toDate === "function") return value.toDate().toLocaleString();
+  if (value instanceof Date) return value.toLocaleString();
+  const fecha = new Date(value);
+  return Number.isNaN(fecha.getTime()) ? "N/D" : fecha.toLocaleString();
+}
+
+async function obtenerSnapUnidadesGuardadas(collectionName) {
+  try {
+    return await getDocs(query(collection(db, collectionName)));
+  } catch (error) {
+    const uid = auth.currentUser?.uid || "";
+    if (!uid) throw error;
+    return getDocs(query(collection(db, collectionName), where("userId", "==", uid)));
+  }
+}
+
+async function cargarDocsUnidadesGuardadas() {
+  const consultas = await Promise.allSettled([
+    obtenerSnapUnidadesGuardadas(UNIDADES_COLLECTION)
+  ]);
+
+  const docs = [];
+  const errores = [];
+  let totalLeidos = 0;
+  consultas.forEach((result, index) => {
+    const collectionName = UNIDADES_COLLECTION;
+    if (result.status !== "fulfilled") {
+      errores.push(`${collectionName}: ${result.reason?.message || "sin detalle"}`);
+      return;
+    }
+    totalLeidos += result.value.size || 0;
+    result.value.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const html = obtenerContenidoUnidadGuardada(data);
+      if (!html) return;
+      docs.push({
+        id: docSnap.id,
+        collectionName,
+        data,
+        html,
+        titulo: obtenerTituloUnidadGuardada(data, html)
+      });
+    });
+  });
+
+  docs.sort((a, b) => {
+    const fechaA = a.data.editadoEn?.toDate?.() || a.data.timestamp?.toDate?.() || a.data.createdAt?.toDate?.() || new Date(a.data.editadoEn || a.data.timestamp || a.data.createdAt || 0);
+    const fechaB = b.data.editadoEn?.toDate?.() || b.data.timestamp?.toDate?.() || b.data.createdAt?.toDate?.() || new Date(b.data.editadoEn || b.data.timestamp || b.data.createdAt || 0);
+    return fechaB.getTime() - fechaA.getTime();
+  });
+
+  return { docs, errores, totalLeidos };
+}
 
 btnVerUnidades?.addEventListener("click", async () => {
   window.cbUnidadDock?.openSection?.("modalUnidadesGuardadas");
   modalLista.style.display = "block";
-  contenedorLista.innerHTML = `<tr><td colspan="5"><i class="fas fa-spinner fa-spin"></i> Cargando unidades...</td></tr>`;
+  contenedorLista.innerHTML = `<tr><td colspan="8"><i class="fas fa-spinner fa-spin"></i> Cargando unidades...</td></tr>`;
 
   try {
-    const snap = await getDocs(query(collection(db, "unidadesGeneradas")));
+    const resultadoCarga = await cargarDocsUnidadesGuardadas();
+    const unidades = resultadoCarga.docs || [];
 
-    if (snap.empty) {
-      contenedorLista.innerHTML = "<tr><td colspan='5'>No hay unidades guardadas.</td></tr>";
+    if (!unidades.length) {
+      if (resultadoCarga.errores?.length && !resultadoCarga.totalLeidos) {
+        contenedorLista.innerHTML = `<tr><td colspan='8'>❌ No se pudieron cargar unidades guardadas.<br><small>${escapeHtml(resultadoCarga.errores.join(" | "))}</small></td></tr>`;
+      } else if (resultadoCarga.totalLeidos) {
+        contenedorLista.innerHTML = "<tr><td colspan='8'>No hay unidades generadas con contenido guardado. Solo se encontraron unidades plantilla sin HTML generado.</td></tr>";
+      } else {
+        contenedorLista.innerHTML = "<tr><td colspan='8'>No hay unidades guardadas.</td></tr>";
+      }
       return;
     }
 
-    contenedorLista.innerHTML = snap.docs.map(doc => {
-      const data = doc.data();
-      const docId = doc.id;
+    contenedorLista.innerHTML = unidades.map((unidadGuardada) => {
+      const data = unidadGuardada.data;
+      const docId = unidadGuardada.id;
+      const collectionName = unidadGuardada.collectionName;
+      const htmlUnidad = unidadGuardada.html;
       const compartido = !!data.sharewith && Object.keys(data.sharewith).length > 0;
-    
-      // Obtener el primer <h2> del contenido HTML
-      let tituloUnidad = data.tituloUnidad || "";
-
-      if (!tituloUnidad) {
-        try {
-          const parser = new DOMParser();
-          const docHTML = parser.parseFromString(data.contenido || "", "text/html");
-          const h2 = docHTML.querySelector("h2");
-          tituloUnidad = h2 ? h2.textContent.trim() : "Sin título";
-        } catch (e) {
-          tituloUnidad = "Sin título";
-        }
-      }
+      const tituloUnidad = unidadGuardada.titulo;
 
     
       // Formatear fecha de creación y edición
-      const fechaCreacion = data.timestamp?.toDate?.().toLocaleString?.() || "N/D";
-      const fechaEdicion = data.editadoEn?.toDate?.().toLocaleString?.() || "N/D";
+      const fechaCreacion = formatearFechaUnidadGuardada(data.timestamp || data.createdAt);
+      const fechaEdicion = formatearFechaUnidadGuardada(data.editadoEn);
     
       return `
         <tr>
@@ -78,16 +275,16 @@ btnVerUnidades?.addEventListener("click", async () => {
           <td>${escapeHtml(fechaCreacion)}</td>
           <td>${escapeHtml(fechaEdicion)}</td>
           <td>
-            <button class="btn-editar" data-id="${escapeHtml(docId)}" data-html="${encodeURIComponent(data.contenido || "")}" title="Editar">
+            <button class="btn-editar" data-id="${escapeHtml(docId)}" data-collection="${escapeHtml(collectionName)}" data-html="${encodeURIComponent(htmlUnidad)}" title="Editar">
               <i class="fas fa-edit"></i>
             </button>
-            <button class="btn-eliminar" data-id="${escapeHtml(docId)}" title="Eliminar">
+            <button class="btn-eliminar" data-id="${escapeHtml(docId)}" data-collection="${escapeHtml(collectionName)}" title="Eliminar">
               <i class="fas fa-trash-alt"></i>
             </button>
-            <button class="btn-compartir" data-id="${escapeHtml(docId)}" title="Compartir" style="color:${compartido ? '#28a745' : '#888'};">
+            <button class="btn-compartir" data-id="${escapeHtml(docId)}" data-collection="${escapeHtml(collectionName)}" title="Compartir" style="color:${compartido ? '#28a745' : '#888'};">
               <i class="fas fa-share-alt"></i>
             </button>
-            <button class="btn-copiar" data-html="${encodeURIComponent(data.contenido || "")}" title="Copiar contenido">
+            <button class="btn-copiar" data-html="${encodeURIComponent(htmlUnidad)}" title="Copiar contenido">
               <i class="fas fa-copy" style="color:#007bff;"></i>
             </button>
           </td>
@@ -107,12 +304,22 @@ btnVerUnidades?.addEventListener("click", async () => {
 
     // Editar
     document.querySelectorAll(".btn-editar").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const html = decodeURIComponent(btn.dataset.html);
-        unidadEditandoId = btn.dataset.id;
-        const htmlLimpio = sanitizeRichText(html.replace(/<style[\s\S]*?<\/style>/gi, ""));
-        editorUnidad.innerHTML = htmlLimpio;
-        modalEditar.style.display = "block";
+        const id = btn.dataset.id || "";
+        const collectionName = btn.dataset.collection || UNIDADES_COLLECTION;
+        try {
+          const unidadSnap = await getDoc(doc(db, collectionName, id));
+          const data = unidadSnap.exists() ? unidadSnap.data() : {};
+          await abrirEditorUnidadCompartido({
+            id,
+            collectionName,
+            data,
+            html: obtenerContenidoUnidadGuardada(data) || html
+          });
+        } catch (_) {
+          await abrirEditorUnidadCompartido({ id, collectionName, data: {}, html });
+        }
       });
     });
 
@@ -120,8 +327,9 @@ btnVerUnidades?.addEventListener("click", async () => {
     document.querySelectorAll(".btn-eliminar").forEach(btn => {
       btn.addEventListener("click", async () => {
         const id = btn.dataset.id;
+        const collectionName = btn.dataset.collection || UNIDADES_COLLECTION;
         if (confirm("¿Seguro que deseas eliminar esta unidad?")) {
-          await deleteDoc(doc(db, "unidadesGeneradas", id));
+          await deleteDoc(doc(db, collectionName, id));
           alert("✅ Unidad eliminada.");
           location.reload();
         }
@@ -146,14 +354,15 @@ btnVerUnidades?.addEventListener("click", async () => {
       }
 
       try {
-        const unidadRef = doc(db, "unidadesGeneradas", docId);
+        const collectionName = celda.closest("tr")?.querySelector(".btn-editar")?.dataset?.collection || UNIDADES_COLLECTION;
+        const unidadRef = doc(db, collectionName, docId);
         const unidadSnap = await getDoc(unidadRef);
         
         if (!unidadSnap.exists()) return;
 
         const unidadData = unidadSnap.data();
         const parser = new DOMParser();
-        const docHTML = parser.parseFromString(unidadData.contenido || "", "text/html");
+        const docHTML = parser.parseFromString(obtenerContenidoUnidadGuardada(unidadData), "text/html");
         
         // Actualizar título en el contenido HTML
         const h2 = docHTML.querySelector("h2");
@@ -207,6 +416,7 @@ btnVerUnidades?.addEventListener("click", async () => {
     document.querySelectorAll(".btn-compartir").forEach(btn => {
       btn.addEventListener("click", async () => {
         const unidadId = btn.dataset.id;
+        const collectionName = btn.dataset.collection || UNIDADES_COLLECTION;
         unidadCompartirId = unidadId;
     
         const modal = document.getElementById("modalCompartirUnidad");
@@ -217,7 +427,7 @@ btnVerUnidades?.addEventListener("click", async () => {
     
         try {
           const usuariosSnap = await getDocs(collection(db, "users"));
-          const unidadDoc = await getDoc(doc(db, "unidadesGeneradas", unidadId));
+          const unidadDoc = await getDoc(doc(db, collectionName, unidadId));
           const unidadData = unidadDoc.exists() ? unidadDoc.data() : {};
           const usuariosYaCompartidos = unidadData.sharewith || {};
     
@@ -253,7 +463,7 @@ btnVerUnidades?.addEventListener("click", async () => {
             seleccionados.forEach(uid => shareWith[uid] = true);
     
             try {
-              await updateDoc(doc(db, "unidadesGeneradas", unidadId), { sharewith: shareWith });
+              await updateDoc(doc(db, collectionName, unidadId), { sharewith: shareWith });
               alert("✅ Unidad compartida.");
               modal.style.display = "none";
     
@@ -301,7 +511,7 @@ btnVerUnidades?.addEventListener("click", async () => {
     
 
   } catch (e) {
-    contenedorLista.innerHTML = "<tr><td colspan='5'>❌ Error al cargar unidades guardadas.</td></tr>";
+    contenedorLista.innerHTML = `<tr><td colspan='8'>❌ Error al cargar unidades guardadas.${e?.message ? `<br><small>${escapeHtml(e.message)}</small>` : ""}</td></tr>`;
   }
 });
 
@@ -321,7 +531,7 @@ editorUnidad?.addEventListener("input", () => {
     if (!unidadEditandoId) return;
 
     const nuevoContenido = editorUnidad.innerHTML;
-    updateDoc(doc(db, "unidadesGeneradas", unidadEditandoId), {
+    updateDoc(doc(db, unidadEditandoCollection || UNIDADES_COLLECTION, unidadEditandoId), {
       contenido: nuevoContenido,
       editadoEn: new Date()
     }).then(() => {

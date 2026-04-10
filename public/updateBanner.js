@@ -8,6 +8,8 @@
   const DEFAULT_MESSAGE = 'Hay cambios nuevos en la aplicación. Revisa el resumen y recarga cuando estés listo.';
   const POST_CLEAR_REDIRECT_PATH = '/index.html';
   const WINDOW_NAME_PREFIX = '__cbAppliedVersion__:';
+  const HARD_RESET_PARAM = 'cbHardReset';
+  const HARD_RESET_DONE_PARAM = 'cbHardResetDone';
 
   function escapeHtml(value) {
     return String(value || '')
@@ -362,6 +364,14 @@
 
   async function clearOriginBrowsingData() {
     try {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all((registrations || []).map((registration) => registration.unregister().catch(() => false)));
+        } catch (_) {
+          // ignore service worker cleanup errors
+        }
+      }
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.map((k) => caches.delete(k)));
@@ -377,6 +387,8 @@
 
   async function hardRefresh(version) {
     const url = new URL(POST_CLEAR_REDIRECT_PATH, window.location.origin);
+    if (version) url.searchParams.set('v', version);
+    url.searchParams.set(HARD_RESET_PARAM, '1');
     try {
       window.name = version ? `${WINDOW_NAME_PREFIX}${version}` : '';
     } catch (_) {
@@ -384,6 +396,36 @@
     }
     await clearOriginBrowsingData();
     window.location.replace(url.toString());
+  }
+
+  async function runIndexHardResetIfRequested() {
+    let url;
+    try {
+      url = new URL(window.location.href);
+    } catch (_) {
+      return false;
+    }
+    const path = String(url.pathname || '').toLowerCase();
+    const isIndex = path === '/' || path.endsWith('/index.html');
+    if (!isIndex || url.searchParams.get(HARD_RESET_PARAM) !== '1') return false;
+
+    const version = String(url.searchParams.get('v') || '').trim();
+    if (url.searchParams.get(HARD_RESET_DONE_PARAM) === '1') {
+      try {
+        if (version) window.name = `${WINDOW_NAME_PREFIX}${version}`;
+      } catch (_) {}
+      return false;
+    }
+
+    try {
+      if (version) window.name = `${WINDOW_NAME_PREFIX}${version}`;
+    } catch (_) {}
+    await clearOriginBrowsingData();
+    const nextUrl = new URL(POST_CLEAR_REDIRECT_PATH, window.location.origin);
+    if (version) nextUrl.searchParams.set('v', version);
+    nextUrl.searchParams.set(HARD_RESET_DONE_PARAM, '1');
+    window.location.replace(nextUrl.toString());
+    return true;
   }
 
   async function fetchVersionInfo() {
@@ -405,6 +447,7 @@
 
   let latestInfoCache = null;
   let pendingLauncherInfo = null;
+  let banner = null;
   window.__cbUpdateDiagnostics = function getCbUpdateDiagnostics() {
     const url = new URL(window.location.href);
     return {
@@ -446,9 +489,10 @@
     }
   }
 
+  function startUpdateBanner() {
   persistAppliedVersionFromWindowName();
   ensureStyles();
-  const banner = ensureBanner();
+  banner = ensureBanner();
   const ensureLauncherBinding = () => {
     const btn = ensureLauncher();
     if (!btn || btn.dataset.boundUpdateBanner === '1') return;
@@ -536,5 +580,12 @@
         scheduleCheck();
       }, 1500);
     }, { passive: true });
+  });
+  }
+
+  runIndexHardResetIfRequested().then((redirecting) => {
+    if (!redirecting) startUpdateBanner();
+  }).catch(() => {
+    startUpdateBanner();
   });
 })();

@@ -43,16 +43,33 @@ service cloud.firestore {
       );
     }
 
+    function hasAnyRole(roles) {
+      return isSignedIn() && (
+        roles.hasAny([roleFromToken()]) ||
+        roles.hasAny([roleFromUserDoc()])
+      );
+    }
+
     function isAdmin() {
-      return hasRole("admin") || hasRole("superAdmin");
+      return hasAnyRole([
+        "admin", "Admin", "administrador", "Administrador", "administrator", "Administrator",
+        "superAdmin", "superadmin", "SuperAdmin", "owner", "Owner"
+      ]);
     }
 
     function isEditor() {
-      return isAdmin() || hasRole("author") || hasRole("developer");
+      return isAdmin() ||
+        hasAnyRole([
+          "author", "Author", "autor", "Autor", "autores", "autoria", "Autoria",
+          "editor", "Editor", "editorial", "Editorial",
+          "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev"
+        ]);
     }
 
     function isGameDeveloper() {
-      return isAdmin() || hasRole("developer");
+      return isAdmin() || hasAnyRole([
+        "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev"
+      ]);
     }
 
     function isOwner(uid) {
@@ -339,17 +356,27 @@ service cloud.firestore {
       }
     }
 
-    // Unidades por dueño.
+    // Unidades didácticas: autores/editores/admin ven el repositorio completo;
+    // usuarios autenticados conservan acceso a sus propias unidades.
     match /Unidades/{unidadId} {
-      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
-      allow write: if isSignedIn() && request.auth.uid == request.resource.data.userId;
+      allow read: if isEditor() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && (
+        isEditor() ||
+        request.resource.data.userId == request.auth.uid
+      );
+      allow update: if isEditor() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId
+      );
+      allow delete: if isEditor() || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
-    // audioTranslate por dueño o admin.
+    // audioTranslate: autores/editores/admin pueden revisar sesiones; el dueño conserva acceso propio.
     match /audioTranslate/{sessionId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow read: if isEditor() || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update, delete: if isEditor() || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
     // Users explícito.
@@ -405,7 +432,7 @@ service cloud.firestore {
 
     // Colecciones operativas (sin wildcard global).
     match /unidadesGeneradas/{docId} {
-      allow read: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+      allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
     }
