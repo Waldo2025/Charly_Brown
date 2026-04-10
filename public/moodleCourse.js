@@ -4484,12 +4484,7 @@ async function seleccionarCurso(id) {
             }
         }
 
-        const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
-        if (btnDescargarCursoWord) {
-            btnDescargarCursoWord.disabled = false;
-            btnDescargarCursoWord.title = "Descargar curso completo en Word";
-            btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
-        }
+        // btnDescargarCursoWord removido del UI
         
         // Renderizar temas
         renderTemas();
@@ -4679,11 +4674,7 @@ function limpiarUIError() {
         btnAddTema.disabled = true;
         btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
     }
-    const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
-    if (btnDescargarCursoWord) {
-        btnDescargarCursoWord.disabled = true;
-        btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
-    }
+    // btnDescargarCursoWord removido del UI
     
     // Limpiar variables globales
     cursoDocId = null;
@@ -4879,10 +4870,8 @@ function actualizarUIParaModoLectura() {
         
         // Deshabilitar todos los botones de edición
         contenidoEditor.querySelectorAll('button, .icon-btn').forEach(btn => {
-            if (btn.id !== 'btnDescargarCursoWord') {
-                btn.disabled = true;
-                btn.classList.add('opacity-50', 'cursor-not-allowed');
-            }
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
         });
     }
     
@@ -4901,12 +4890,7 @@ function actualizarUIParaModoEdicion() {
         btnAddTema.title = "Añadir nuevo tema";
     }
 
-    const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
-    if (btnDescargarCursoWord) {
-        btnDescargarCursoWord.disabled = false;
-        btnDescargarCursoWord.classList.remove('opacity-50', 'cursor-not-allowed');
-        btnDescargarCursoWord.title = "Descargar curso completo en Word";
-    }
+    // btnDescargarCursoWord removido del UI
     
     // Actualizar sidebar
     const sidebarTemas = document.getElementById("sidebarTemas");
@@ -12743,67 +12727,7 @@ async function exportarCursoCompletoWord(cursoActual) {
     }
 }
 
-let cbCursoWordExportBusy = false;
-const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
-if (btnDescargarCursoWord && btnDescargarCursoWord.dataset.cbBoundWordExport !== "1") {
-    btnDescargarCursoWord.dataset.cbBoundWordExport = "1";
-    btnDescargarCursoWord.addEventListener("click", async (e) => {
-        // Si por cualquier razón se dispara más de una vez, ignorar.
-        if (cbCursoWordExportBusy) return;
-        cbCursoWordExportBusy = true;
-        const prevDisabled = btnDescargarCursoWord.disabled;
-        btnDescargarCursoWord.disabled = true;
-
-        const contenidoEditor = document.getElementById("contenidoEditor");
-        if (!contenidoEditor) {
-            alert("No se encontró el editor de contenido para exportar.");
-            cbCursoWordExportBusy = false;
-            btnDescargarCursoWord.disabled = prevDisabled;
-            return;
-        }
-        const raw = String(contenidoEditor.innerHTML || "").trim();
-        if (!raw) {
-            alert("No hay contenido en el editor para exportar.");
-            cbCursoWordExportBusy = false;
-            btnDescargarCursoWord.disabled = prevDisabled;
-            return;
-        }
-
-        // Exporta exactamente lo que está en el editor (no el árbol de temas/subtemas).
-        // Nota: html-docx embebe imágenes sólo si están como data: URLs (o si ya vienen inline).
-        const html = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>${escapeHtml(window.curso?.nombre || "Contenido")}</title>
-<style>
-  ${crearEstilosWordCurso()}
-</style>
-</head>
-<body>
-${raw}
-</body>
-</html>
-`;
-
-        try {
-            const blob = window.htmlDocx.asBlob(html);
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = `${(window.curso?.nombre || "Contenido")}.docx`;
-            a.click();
-        } catch (e) {
-            alert("Error exportando el contenido a Word");
-        } finally {
-            // Pequeño delay para evitar doble click inmediato en Safari/Chrome.
-            setTimeout(() => {
-                cbCursoWordExportBusy = false;
-                btnDescargarCursoWord.disabled = prevDisabled;
-            }, 300);
-        }
-    });
-}
+// btnDescargarCursoWord eliminado del UI.
 
 
 /* ======================================================
