@@ -3156,6 +3156,12 @@ async function enviarAscAiPrompt() {
 
 function bindAscEditorToolbar() {
   if (!ascEditorModal || ascEditorModal.dataset.toolbarBound === "1") return;
+  const isEditorBodyTarget = (target) => {
+    const el = target instanceof Element ? target : null;
+    if (!el) return false;
+    return !!el.closest?.(".asc-editor-body");
+  };
+
   ascEditorModal.addEventListener("click", (e) => {
     const paletteToggle = e.target.closest("[data-palette-toggle]");
     if (paletteToggle) {
@@ -3187,6 +3193,25 @@ function bindAscEditorToolbar() {
     if (cmd) ejecutarComandoEditor(cmd);
     if (block) aplicarBloqueEditor(block);
   });
+
+  // Atajos tipo Word: Cmd/Ctrl+Z deshacer, Cmd/Ctrl+Y rehacer, Shift+Cmd/Ctrl+Z rehacer.
+  ascEditorModal.addEventListener("keydown", (e) => {
+    if (!ascEditorModal || ascEditorModal.classList.contains("hidden")) return;
+    if (!isEditorBodyTarget(e.target)) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+
+    const key = String(e.key || "").toLowerCase();
+    if (key !== "z" && key !== "y") return;
+
+    // Evitar que el navegador interfiera con historial/undo propio.
+    e.preventDefault();
+    e.stopPropagation();
+
+    const isRedo = key === "y" || (key === "z" && e.shiftKey);
+    ejecutarComandoEditor(isRedo ? "redo" : "undo");
+    syncAscWordStyleControls();
+  });
+
   document.addEventListener("click", (e) => {
     if (!ascEditorModal || ascEditorModal.classList.contains("hidden")) return;
     if (e.target.closest(".asc-editor-palette")) return;
