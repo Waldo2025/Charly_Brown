@@ -12746,11 +12746,44 @@ async function exportarCursoCompletoWord(cursoActual) {
 const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
 if (btnDescargarCursoWord) {
     btnDescargarCursoWord.addEventListener("click", async () => {
-        if (!window.curso) {
-            alert("No hay un curso activo para exportar.");
+        const contenidoEditor = document.getElementById("contenidoEditor");
+        if (!contenidoEditor) {
+            alert("No se encontró el editor de contenido para exportar.");
             return;
         }
-        await exportarCursoCompletoWord(window.curso);
+        const raw = String(contenidoEditor.innerHTML || "").trim();
+        if (!raw) {
+            alert("No hay contenido en el editor para exportar.");
+            return;
+        }
+
+        // Exporta exactamente lo que está en el editor (no el árbol de temas/subtemas).
+        // Nota: html-docx embebe imágenes sólo si están como data: URLs (o si ya vienen inline).
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(window.curso?.nombre || "Contenido")}</title>
+<style>
+  ${crearEstilosWordCurso()}
+</style>
+</head>
+<body>
+${raw}
+</body>
+</html>
+`;
+
+        try {
+            const blob = window.htmlDocx.asBlob(html);
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `${(window.curso?.nombre || "Contenido")}.docx`;
+            a.click();
+        } catch (e) {
+            alert("Error exportando el contenido a Word");
+        }
     });
 }
 
