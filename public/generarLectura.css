@@ -5861,6 +5861,11 @@ body.theme-dark {
   padding-bottom: 0;
 }
 
+.studio-shell .studio-main-stack.agents-footer-collapsed {
+  --studio-footer-height: 18px;
+  padding-bottom: 18px;
+}
+
 .studio-shell .studio-workspace.is-hidden {
   display: none !important;
 }
@@ -5894,6 +5899,11 @@ body.theme-dark {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
+}
+
+.studio-shell .studio-main-stack.agents-footer-collapsed .studio-workspace.unidad-mode .unidad-dock-host {
+  height: calc(100% + 56px);
+  min-height: calc(100% + 56px);
 }
 
 .studio-shell .studio-main-stack > .unidad-global-agents-footer {

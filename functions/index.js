@@ -68,6 +68,8 @@ const ROUTE_RATE_LIMITS = new Map([
   ["/api/gemini/models", {limit: 30, windowMs: 60 * 1000}],
   ["/api/gemini/live-token", {limit: 8, windowMs: 60 * 1000}],
   ["/api/moodle/module-graphics/generate", {limit: 12, windowMs: 60 * 1000}],
+  ["/api/moodle/module-graphics/generate-element", {limit: 20, windowMs: 60 * 1000}],
+  ["/api/moodle/module-graphics/analyze-element", {limit: 28, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/save", {limit: 30, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/share", {limit: 20, windowMs: 60 * 1000}],
   ["/api/podcaster/sessions/list", {limit: 30, windowMs: 60 * 1000}],
@@ -1563,13 +1565,18 @@ async function forwardMoodleModuleGraphicGenerate(req, res) {
     `Idioma principal del modulo: ${languageLabel}.`,
     instructions ? `Instrucciones del autor: ${instructions}` : "",
     content ? `Contenido final del modulo: ${content}` : "",
-    "La imagen debe ser coherente con el tema y servir como apoyo visual para responder actividades.",
+    "La imagen debe ser coherente con el tema y servir como apoyo visual comun para responder las actividades.",
     "Debe verse clara, didactica, moderna y lista para una plataforma educativa.",
-    "Puede ser ilustracion, esquema visual, escena educativa o grafico conceptual segun el contexto del modulo.",
+    "Debe resolverse como una sola pieza editorial integrada: infografia, diagrama explicativo, esquema visual o grafico conceptual unificado.",
+    "NO conviertas cada actividad o pregunta en una tarjeta, panel, bloque o mini-infografia separada.",
+    "NO escribas 'Actividad 1', 'Actividad 2', 'Pregunta 1', 'Pregunta 2' ni variantes similares dentro de la imagen.",
+    "NO hagas mapas mentales con ramas que representen actividades individuales del modulo.",
+    "La imagen debe sintetizar conceptos, relaciones, pasos, referencias o contexto util para resolver las actividades como un solo grafico de apoyo.",
     "No incluyas interfaz, capturas de pantalla, marcas de agua, logos ni texto largo incrustado.",
     "Si necesitas rotulos, usa solo etiquetas minimas y claras.",
     "Composicion horizontal o cuadrada, alta definicion, fondo limpio y contraste legible.",
     "La imagen debe poder introducir consignas como 'Analiza la imagen anterior y responde'.",
+    "Evita cuatro o cinco subgraficos independientes; prioriza una sola narrativa visual coherente.",
   ].filter(Boolean).join("\n");
 
   let lastStatus = 502;
@@ -1639,6 +1646,230 @@ async function forwardMoodleModuleGraphicGenerate(req, res) {
       model: resolvedModel,
       promptVersion: "moodle_graphic_v1",
       updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+async function forwardMoodleModuleGraphicGenerateElement(req, res) {
+  const uid = String(req.securityContext?.uid || "").trim();
+  if (!uid) return res.status(401).json({error: "AUTH_REQUIRED"});
+  const key = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+  if (!key) return res.status(500).json({error: "Falta GEMINI_API_KEY o GOOGLE_API_KEY."});
+
+  const courseId = clampText(req.body?.courseId || "", 180);
+  const moduleId = clampText(req.body?.moduleId || "", 180);
+  const moduleType = clampText(req.body?.moduleType || "", 80) || "Modulo";
+  const moduleName = clampText(req.body?.moduleName || "Grafico educativo", 180) || "Grafico educativo";
+  const languageCode = clampText(req.body?.languageCode || "", 24).toLowerCase();
+  const instructions = stripHtmlToPlain(clampText(req.body?.instructions || "", 8000));
+  const content = stripHtmlToPlain(clampText(req.body?.content || "", 12000));
+  const elementId = normalizeStorageSegment(req.body?.elementId || "element", "element");
+  const elementLabel = clampText(req.body?.elementLabel || "Elemento", 120) || "Elemento";
+  const elementPrompt = clampText(req.body?.elementPrompt || "", 2400);
+  const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
+  const regenerate = req.body?.regenerate === true;
+  const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
+  const imageModels = Array.from(new Set([
+    sanitizeModel(req.body?.model || DEFAULT_PODCASTER_IMAGE_MODEL),
+    ...requestedCandidates.map((item) => sanitizeModel(item || "")),
+    ...PODCASTER_IMAGE_MODEL_CANDIDATES,
+  ].filter(Boolean)));
+
+  if (!courseId) return res.status(400).json({error: "Falta courseId."});
+  if (!moduleId) return res.status(400).json({error: "Falta moduleId."});
+  if (!elementPrompt) return res.status(400).json({error: "Falta elementPrompt."});
+
+  const languageLabel = languageCode.startsWith("en") ? "english" : "espanol";
+  const contextBlock = [instructions, content].filter(Boolean).join(" ").toLowerCase();
+  const isMath = /recta|numero|número|algebra|ecuacion|ecuación|fraccion|fracción|operacion|operación|lobby|piso|positivo|negativo/.test(contextBlock);
+  const isLanguage = /language|grammar|vocabulary|prefijo|sufijo|word formation|clil|lenguaje/.test(contextBlock);
+  const isScience = /science|cientifico|científico|proceso|experimento|energia|energía|ecosistema/.test(contextBlock);
+  const styleDirective = isMath
+    ? "Estilo: infografía matemática vectorial, íconos geométricos, claridad didáctica."
+    : (isLanguage
+      ? "Estilo: gráfico editorial de lenguaje, iconografía semántica y visual limpio."
+      : (isScience
+        ? "Estilo: infografía científica clara con iconos técnicos y jerarquía visual."
+        : "Estilo: gráfico educativo editorial limpio, moderno y pedagógico."));
+  const prompt = [
+    "=== SYSTEM ART DIRECTION FOR LAYERED EDUCATIONAL GRAPHICS ===",
+    "Produce exactly ONE isolated visual asset for a layered composition workflow.",
+    `Module: ${moduleName} (${moduleType}).`,
+    `Primary language: ${languageLabel}.`,
+    `Target element: ${elementLabel}.`,
+    styleDirective,
+    "",
+    "=== AUTHOR CONTEXT ===",
+    instructions ? `Author instructions: ${instructions}` : "",
+    content ? `Module content context: ${content}` : "",
+    `Element brief: ${elementPrompt}.`,
+    "",
+    "=== HARD CONSTRAINTS (MANDATORY) ===",
+    "1) Transparent background only (real alpha channel).",
+    "2) No canvas/card/backdrop/checkerboard simulation.",
+    "3) No text, no typography, no numbers, no labels, no logos, no watermark, no UI.",
+    "4) The asset must contain only the target object(s) needed for this element.",
+    "5) Clean silhouette cutout, high edge quality, no halo artifacts.",
+    "6) Not a full scene; avoid room/studio/landscape backgrounds.",
+    "",
+    "=== COMPOSITION + READABILITY ===",
+    "Single focal subject with strong shape readability.",
+    "Educational clarity first: recognizable in under 2 seconds.",
+    "High contrast and balanced palette suitable for school content.",
+    "No clutter, no decorative noise.",
+    "",
+    "=== NEGATIVE PROMPT ===",
+    "forbidden: text overlays, letterforms, digits, subtitles, captions, infoboxes, app chrome, posters, signs, mockup frames.",
+    "forbidden: photoreal studio set, cinematic room shot, podcast booth, unrelated characters.",
+  ].filter(Boolean).join("\n");
+
+  let lastStatus = 502;
+  let lastError = "No se pudo generar el elemento gráfico.";
+  let base64 = "";
+  let mimeType = "image/png";
+  let resolvedModel = imageModels[0] || DEFAULT_PODCASTER_IMAGE_MODEL;
+  for (const imageModel of imageModels) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(key)}`;
+    const upstream = await fetch(endpoint, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        contents: [{role: "user", parts: [{text: prompt}]}],
+        generationConfig: {responseModalities: ["TEXT", "IMAGE"]},
+      }),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      const detail = String(data?.error?.message || data?.error || `HTTP ${upstream.status}`).trim();
+      lastStatus = Number(upstream.status || 502);
+      lastError = `${imageModel}: ${detail}`;
+      if ([400, 401, 403, 404].includes(lastStatus)) continue;
+      return res.status(lastStatus).json(data);
+    }
+    const parts = Array.isArray(data?.candidates?.[0]?.content?.parts) ? data.candidates[0].content.parts : [];
+    const inline = parts.find((part) => part?.inlineData?.data || part?.inline_data?.data) || null;
+    base64 = String(inline?.inlineData?.data || inline?.inline_data?.data || "").trim();
+    mimeType = String(inline?.inlineData?.mimeType || inline?.inline_data?.mimeType || "image/png").trim() || "image/png";
+    if (!base64) {
+      lastStatus = 502;
+      lastError = `${imageModel}: sin inlineData de imagen`;
+      continue;
+    }
+    resolvedModel = imageModel;
+    break;
+  }
+  if (!base64) return res.status(lastStatus >= 400 ? lastStatus : 502).json({error: lastError});
+
+  const buffer = Buffer.from(base64, "base64");
+  if (!buffer.length || buffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
+    return res.status(413).json({error: "La imagen generada del elemento excede el tamaño permitido."});
+  }
+
+  const ext = getScreenshotExtension(mimeType);
+  const storagePath = `moodle/courses/${normalizeStorageSegment(courseId, "course")}/owners/${normalizeStorageSegment(uid, "anon")}/modules/${normalizeStorageSegment(moduleId, "module")}/graphics/elements/${elementId}-${randomUUID()}.${ext}`;
+  const bucket = admin.storage().bucket();
+  const asset = await uploadScreenshotAsset({
+    bucket,
+    path: storagePath,
+    buffer,
+    mimeType,
+    metadata: {
+      uid,
+      courseId,
+      moduleId,
+      moduleType,
+      moduleName,
+      elementId,
+      elementLabel,
+      model: resolvedModel,
+      promptVersion: "moodle_graphic_element_v2",
+    },
+  });
+  if (regenerate && previousStoragePath && previousStoragePath !== storagePath) {
+    await deleteStoragePath(bucket, previousStoragePath).catch(() => {});
+  }
+  return res.status(200).json({
+    ok: true,
+    image: {
+      courseId,
+      moduleId,
+      elementId,
+      elementLabel,
+      downloadUrl: asset.downloadUrl,
+      storagePath: asset.path,
+      mimeType,
+      model: resolvedModel,
+      promptVersion: "moodle_graphic_element_v2",
+      updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+async function forwardMoodleModuleGraphicAnalyzeElement(req, res) {
+  const uid = String(req.securityContext?.uid || "").trim();
+  if (!uid) return res.status(401).json({error: "AUTH_REQUIRED"});
+  const key = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+  if (!key) return res.status(500).json({error: "Falta GEMINI_API_KEY o GOOGLE_API_KEY."});
+
+  const imageUrl = clampText(req.body?.imageUrl || "", 3200);
+  const moduleName = clampText(req.body?.moduleName || "Modulo", 180) || "Modulo";
+  const moduleType = clampText(req.body?.moduleType || "Modulo", 80) || "Modulo";
+  const elementLabel = clampText(req.body?.elementLabel || "Elemento", 120) || "Elemento";
+  const elementPrompt = clampText(req.body?.elementPrompt || "", 2400);
+
+  if (!imageUrl) return res.status(400).json({error: "Falta imageUrl."});
+  const image = await fetchImageBytesWithMime(imageUrl);
+  const prompt = [
+    "Evalúa la calidad de una capa gráfica para composición educativa por capas.",
+    `Modulo: ${moduleName} (${moduleType}).`,
+    `Elemento objetivo: ${elementLabel}.`,
+    elementPrompt ? `Prompt esperado: ${elementPrompt}.` : "",
+    "Devuelve SOLO JSON válido con esta estructura:",
+    "{",
+    '  "score": 0-100,',
+    '  "isTransparentBackgroundLikely": true|false,',
+    '  "matchesTarget": true|false,',
+    '  "issues": ["string"],',
+    '  "recommendation": "accept|regenerate"',
+    "}",
+    "Evalúa si parece fondo transparente real (sin lienzo visible ni patrón),",
+    "si el elemento corresponde al objetivo y si está limpio para superposición.",
+  ].join("\n");
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent("gemini-2.5-flash")}:generateContent?key=${encodeURIComponent(key)}`;
+  const upstream = await fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          {text: prompt},
+          {inline_data: {mime_type: image.mimeType, data: image.buffer.toString("base64")}},
+        ],
+      }],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    const detail = String(data?.error?.message || data?.error || `HTTP ${upstream.status}`).trim();
+    return res.status(upstream.status >= 500 ? 502 : upstream.status).json({error: detail || "No se pudo analizar la capa."});
+  }
+  const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  const parsed = parseJsonObjectFromModelText(text);
+  const score = clampNumber(parsed?.score, 0, 100, 0);
+  const recommendation = String(parsed?.recommendation || "").trim().toLowerCase() === "accept" ? "accept" : "regenerate";
+  return res.status(200).json({
+    ok: true,
+    analysis: {
+      score,
+      isTransparentBackgroundLikely: parsed?.isTransparentBackgroundLikely === true,
+      matchesTarget: parsed?.matchesTarget === true,
+      issues: Array.isArray(parsed?.issues) ? parsed.issues.map((item) => clampText(item, 200)).filter(Boolean).slice(0, 6) : [],
+      recommendation,
     },
   });
 }
@@ -2390,6 +2621,33 @@ function stripHtmlToPlain(html = "") {
       .trim();
 }
 
+async function fetchImageBytesWithMime(imageUrl = "") {
+  const url = String(imageUrl || "").trim();
+  if (!url) {
+    throw new HttpsError("invalid-argument", "imageUrl es obligatorio.");
+  }
+  const response = await fetch(url, {method: "GET"});
+  if (!response.ok) {
+    throw new HttpsError("invalid-argument", `No se pudo descargar imageUrl (${response.status}).`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const mimeType = String(response.headers.get("content-type") || "image/png").split(";")[0].trim().toLowerCase() || "image/png";
+  if (!mimeType.startsWith("image/")) {
+    throw new HttpsError("invalid-argument", "imageUrl no apunta a un recurso de imagen.");
+  }
+  if (!buffer.length || buffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
+    throw new HttpsError("invalid-argument", "La imagen para análisis excede tamaño permitido.");
+  }
+  return {buffer, mimeType};
+}
+
+function parseJsonObjectFromModelText(raw = "") {
+  const clean = String(raw || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  const match = clean.match(/\{[\s\S]*\}/);
+  const candidate = match ? match[0] : clean;
+  return JSON.parse(candidate);
+}
+
 function buildLyriaReadingPrompt(input = {}) {
   const title = String(input?.title || "").trim();
   const level = String(input?.level || "").trim();
@@ -3056,6 +3314,12 @@ async function routeApi(req, res) {
   }
   if (req.method === "POST" && path === "/api/moodle/module-graphics/generate") {
     return forwardMoodleModuleGraphicGenerate(req, res);
+  }
+  if (req.method === "POST" && path === "/api/moodle/module-graphics/generate-element") {
+    return forwardMoodleModuleGraphicGenerateElement(req, res);
+  }
+  if (req.method === "POST" && path === "/api/moodle/module-graphics/analyze-element") {
+    return forwardMoodleModuleGraphicAnalyzeElement(req, res);
   }
   if (req.method === "POST" && path === "/api/podcaster/speaker-portraits/generate") {
     return forwardPodcasterSpeakerPortraitGenerate(req, res);

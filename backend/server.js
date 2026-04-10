@@ -87,6 +87,14 @@ const fetchCompat = (...args) => {
 
 function parseAllowedOrigins() {
   const defaults = [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "https://127.0.0.1:*",
+    "https://localhost:*",
+    "http://127.0.0.1:5000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
     "https://charly-brown.web.app",
     "https://charly-brown.firebaseapp.com",
     "https://charly-brown-gemini-backend.onrender.com",
@@ -1178,7 +1186,8 @@ function buildMoodleModuleGraphicPrompt({
   moduleType = "",
   languageCode = "es",
   instructions = "",
-  content = ""
+  content = "",
+  hasReferenceImages = false
 } = {}) {
   const isEnglish = String(languageCode || "").toLowerCase().startsWith("en");
   return [
@@ -1187,12 +1196,71 @@ function buildMoodleModuleGraphicPrompt({
     `Idioma: ${isEnglish ? "English" : "Español"}`,
     instructions ? `Instrucciones: ${clampText(instructions, 2200)}` : "",
     content ? `Contenido: ${clampText(content, 2600)}` : "",
-    "Genera una imagen o grafico educativo que acompañe esta actividad y ayude a analizar, observar o responder el ejercicio.",
+    "Primero analiza las propuestas nuevas de actividades y detecta que informacion visual de apoyo ayuda mejor a resolverlas o comprenderlas.",
+    "Luego genera una sola imagen final, completa y profesional, que funcione como apoyo educativo comun del modulo.",
     "No generes escenarios de podcast, estudios, sets cinematograficos ni interfaces decorativas ajenas al contenido educativo.",
-    "Prefiere una infografia o diagrama claro, con iconos, flechas, formas y elementos visuales relacionados directamente con la actividad.",
-    "No incluyas palabras, letras, numeros, etiquetas ni texto incrustado dentro de la imagen final.",
-    "Usa composicion limpia, centrada, de alta legibilidad visual y adecuada para superponerse junto al contenido del modulo."
+    "Elige un unico formato visual integrado: infografia, diagrama explicativo, esquema comparativo, grafica educativa u organizador visual unificado.",
+    "NO conviertas cada actividad o pregunta en una tarjeta, panel, bloque o mini-infografia separada.",
+    "NO escribas 'Actividad 1', 'Actividad 2', 'Pregunta 1', 'Pregunta 2' ni variantes similares dentro de la imagen.",
+    "NO hagas mapas mentales con ramas que representen actividades individuales del modulo.",
+    "La imagen debe sintetizar conceptos, relaciones, pasos, referencias o contexto util para contestar las actividades como una sola pieza editorial integrada.",
+    hasReferenceImages ? "Hay imagenes de referencia adjuntas en las instrucciones. Sigue su misma linea visual, lenguaje grafico, composicion y atmosfera, sin copiar literalmente su texto." : "",
+    "Prioriza una estetica editorial elegante con jerarquia visual fuerte, composicion refinada y una sola narrativa grafica clara.",
+    "Prefiere un sistema visual coherente, no cuatro o cinco subgraficos independientes.",
+    "Usa paleta armonica, profesional y atractiva; evita combinaciones infantiles pobres, ruido visual, collage desordenado o elementos sueltos sin jerarquia.",
+    "Procura no colocar texto; si es indispensable, usa el minimo posible, solo labels cortos y nunca parrafos largos.",
+    "Fondo claro, limpio y profesional. Usa formas, reticulas suaves, patrones sutiles o decoracion editorial discreta solo si elevan la elegancia del diagrama.",
+    "El resultado debe sentirse como un unico grafico de apoyo, moderno, claro y listo para material educativo de alta calidad."
   ].filter(Boolean).join("\n");
+}
+
+function normalizeInlineInstructionImages(input = []) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => ({
+      mimeType: String(item?.mimeType || "").trim().toLowerCase(),
+      data: String(item?.data || "").trim()
+    }))
+    .filter((item) => item.mimeType.startsWith("image/") && item.data)
+    .slice(0, 2);
+}
+
+function stripHtmlToPlainLocal(html = "") {
+  return String(html || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+async function fetchImageBytesWithMimeLocal(imageUrl = "") {
+  const target = String(imageUrl || "").trim();
+  if (!target) {
+    throw new Error("Falta imageUrl.");
+  }
+  const upstream = await fetchCompat(target, { method: "GET" });
+  if (!upstream.ok) {
+    throw new Error(`No se pudo descargar la imagen (${upstream.status}).`);
+  }
+  const mimeType = String(upstream.headers.get("content-type") || "image/png").trim() || "image/png";
+  const buffer = Buffer.from(await upstream.arrayBuffer());
+  return { mimeType, buffer };
+}
+
+function parseJsonObjectFromModelTextLocal(raw = "") {
+  const clean = String(raw || "")
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const match = clean.match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : clean);
 }
 
 async function generateMoodleModuleGraphicAsset({
@@ -1204,6 +1272,7 @@ async function generateMoodleModuleGraphicAsset({
   languageCode = "es",
   instructions = "",
   content = "",
+  instructionImages = [],
   previousStoragePath = ""
 } = {}) {
   if (!hasGeminiKey()) {
@@ -1217,10 +1286,16 @@ async function generateMoodleModuleGraphicAsset({
     moduleType,
     languageCode,
     instructions,
-    content
+    content,
+    hasReferenceImages: Array.isArray(instructionImages) && instructionImages.length > 0
+  });
+  const promptParts = [{ text: prompt }];
+  normalizeInlineInstructionImages(instructionImages).forEach((image, index) => {
+    promptParts.push({ text: `Imagen de referencia ${index + 1}: usa esta referencia para mantener la misma linea grafica educativa.` });
+    promptParts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
   });
   const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts: promptParts }],
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
       imageConfig: {
@@ -1228,29 +1303,55 @@ async function generateMoodleModuleGraphicAsset({
       }
     }
   };
-  const upstream = await fetchCompat(
-    `${GEMINI_BASE}/models/${encodeURIComponent(DEFAULT_MOODLE_GRAPHIC_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+  const modelCandidates = Array.from(new Set([
+    DEFAULT_MOODLE_GRAPHIC_MODEL,
+    ...PODCASTER_IMAGE_MODEL_CANDIDATES
+  ].filter(Boolean)));
+
+  let inline = null;
+  let mimeType = "image/png";
+  let resolvedModel = DEFAULT_MOODLE_GRAPHIC_MODEL;
+  let lastError = "Gemini no devolvio una imagen utilizable para el modulo.";
+  let lastStatus = 502;
+
+  for (const modelName of modelCandidates) {
+    const upstream = await fetchCompat(
+      `${GEMINI_BASE}/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    );
+    const data = await safeJson(upstream);
+    if (!upstream.ok) {
+      lastStatus = Number(upstream.status || 502);
+      lastError = String(data?.error?.message || data?.error || `HTTP ${upstream.status}`);
+      if ([400, 401, 403, 404].includes(lastStatus)) {
+        continue;
+      }
+      const err = new Error(lastError);
+      err.status = lastStatus;
+      throw err;
     }
-  );
-  const data = await safeJson(upstream);
-  if (!upstream.ok) {
-    const err = new Error(String(data?.error?.message || data?.error || `HTTP ${upstream.status}`));
-    err.status = upstream.status;
-    throw err;
+
+    inline = extractGeminiInlineImage(data);
+    if (inline?.buffer?.length) {
+      mimeType = String(inline.mimeType || "image/png").trim() || "image/png";
+      resolvedModel = modelName;
+      break;
+    }
+
+    lastStatus = 502;
+    lastError = `${modelName}: respuesta sin inlineData de imagen`;
   }
 
-  const inline = extractGeminiInlineImage(data);
   if (!inline?.buffer?.length) {
-    const err = new Error("Gemini no devolvio una imagen utilizable para el modulo.");
-    err.status = 502;
+    const err = new Error(lastError || "Gemini no devolvio una imagen utilizable para el modulo.");
+    err.status = lastStatus >= 400 ? lastStatus : 502;
     throw err;
   }
 
-  const mimeType = String(inline.mimeType || "image/png").trim() || "image/png";
   const ext = getImageExtension(mimeType);
   const storagePath = `images/${normalizeStorageSegment(uid, "user")}/moodle-modules/${normalizeStorageSegment(courseId, "curso")}/${normalizeStorageSegment(moduleId, "modulo")}/${Date.now()}.${ext}`;
   if (previousStoragePath && previousStoragePath !== storagePath) {
@@ -1264,7 +1365,7 @@ async function generateMoodleModuleGraphicAsset({
       origin: "moodleCourse",
       courseId: String(courseId || "").trim(),
       moduleId: String(moduleId || "").trim(),
-      model: DEFAULT_MOODLE_GRAPHIC_MODEL,
+      model: resolvedModel,
       promptVersion: MOODLE_GRAPHIC_PROMPT_VERSION
     }
   });
@@ -1272,10 +1373,49 @@ async function generateMoodleModuleGraphicAsset({
     downloadUrl: asset.downloadUrl,
     storagePath: asset.path,
     mimeType,
-    model: DEFAULT_MOODLE_GRAPHIC_MODEL,
+    model: resolvedModel,
     promptVersion: MOODLE_GRAPHIC_PROMPT_VERSION,
     updatedAt: new Date().toISOString()
   };
+}
+
+async function generateMoodleModuleGraphicElementAsset({
+  uid = "",
+  courseId = "",
+  moduleId = "",
+  moduleType = "",
+  moduleName = "",
+  languageCode = "es",
+  instructions = "",
+  content = "",
+  elementId = "",
+  elementLabel = "",
+  elementPrompt = "",
+  previousStoragePath = ""
+} = {}) {
+  const enrichedInstructions = [
+    stripHtmlToPlainLocal(instructions),
+    `Elemento objetivo: ${clampText(elementLabel || "Elemento", 120)}`,
+    `Brief del elemento: ${clampText(elementPrompt || "", 2400)}`,
+    "Genera exactamente una imagen de capa para composicion manual.",
+    "Usa fondo blanco uniforme y limpio en toda la imagen.",
+    "No uses fondos de color distintos, degradados ni escenas completas.",
+    "Conserva solo el contexto visual minimo si realmente ayuda a entender el elemento.",
+    "Sin texto, sin numeros, sin etiquetas, sin UI, sin marca de agua.",
+    "No mezcles varias capas distintas en una sola imagen."
+  ].filter(Boolean).join("\n");
+
+  return generateMoodleModuleGraphicAsset({
+    uid,
+    courseId,
+    moduleId,
+    moduleType,
+    moduleName,
+    languageCode,
+    instructions: enrichedInstructions,
+    content: stripHtmlToPlainLocal(content),
+    previousStoragePath
+  });
 }
 
 async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metadata = {} }) {
@@ -2959,11 +3099,145 @@ app.post("/api/moodle/module-graphics/generate", async (req, res) => {
       languageCode: clampText(req.body?.languageCode || "es", 12) || "es",
       instructions: clampText(req.body?.instructions || "", 5000),
       content: clampText(req.body?.content || "", 8000),
+      instructionImages: normalizeInlineInstructionImages(req.body?.instructionImages),
       previousStoragePath: clampText(req.body?.previousStoragePath || "", 700)
     });
     return res.status(200).json({ ok: true, image });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar el gráfico del módulo.") });
+  }
+});
+
+app.post("/api/moodle/module-graphics/generate-element", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const courseId = clampText(req.body?.courseId || "", 180);
+    const moduleId = clampText(req.body?.moduleId || "", 180);
+    const elementId = clampText(req.body?.elementId || "", 120) || "element";
+    const elementLabel = clampText(req.body?.elementLabel || "", 180) || "Elemento";
+    const elementPrompt = clampText(req.body?.elementPrompt || "", 2400);
+    if (!uid || !courseId || !moduleId) {
+      return res.status(400).json({ error: "Faltan uid, courseId o moduleId para generar el elemento del gráfico." });
+    }
+    if (!elementPrompt) {
+      return res.status(400).json({ error: "Falta elementPrompt para generar el elemento del gráfico." });
+    }
+
+    const image = await generateMoodleModuleGraphicElementAsset({
+      uid,
+      courseId,
+      moduleId,
+      moduleType: clampText(req.body?.moduleType || "", 80),
+      moduleName: clampText(req.body?.moduleName || "", 220),
+      languageCode: clampText(req.body?.languageCode || "es", 12) || "es",
+      instructions: clampText(req.body?.instructions || "", 5000),
+      content: clampText(req.body?.content || "", 8000),
+      elementId,
+      elementLabel,
+      elementPrompt,
+      previousStoragePath: clampText(req.body?.previousStoragePath || "", 700)
+    });
+    return res.status(200).json({
+      ok: true,
+      image: {
+        ...image,
+        courseId,
+        moduleId,
+        elementId,
+        elementLabel
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar el elemento del gráfico.") });
+  }
+});
+
+app.post("/api/moodle/module-graphics/analyze-element", async (req, res) => {
+  try {
+    const imageUrl = clampText(req.body?.imageUrl || "", 3200);
+    if (!imageUrl) {
+      return res.status(400).json({ error: "Falta imageUrl para analizar el elemento." });
+    }
+    if (!ensureGeminiKey(res)) return;
+    const moduleName = clampText(req.body?.moduleName || "Modulo", 180) || "Modulo";
+    const moduleType = clampText(req.body?.moduleType || "Modulo", 80) || "Modulo";
+    const elementLabel = clampText(req.body?.elementLabel || "Elemento", 120) || "Elemento";
+    const elementPrompt = clampText(req.body?.elementPrompt || "", 2400);
+    const image = await fetchImageBytesWithMimeLocal(imageUrl);
+    const prompt = [
+      "Evalua una imagen PNG de un elemento para composicion grafica educativa.",
+      `Modulo: ${moduleName} (${moduleType}).`,
+      `Elemento esperado: ${elementLabel}.`,
+      elementPrompt ? `Brief esperado: ${elementPrompt}.` : "",
+      "",
+      "Devuelve SOLO JSON valido con esta estructura:",
+      "{",
+      '  "score": 0-100,',
+      '  "hasEmbeddedText": true|false,',
+      '  "hasFakeTransparencyOrCheckerboard": true|false,',
+      '  "matchesTarget": true|false,',
+      '  "issues": ["string"],',
+      '  "recommendation": "accept|regenerate"',
+      "}",
+      "",
+      "Reglas de evaluacion:",
+      "- Si ves letras, numeros, ecuaciones, etiquetas o texto incrustado: recommendation=regenerate.",
+      "- Si ves patron cuadriculado, fondo de tablero o falso transparente: recommendation=regenerate.",
+      "- Si la imagen mezcla demasiados elementos distintos o no corresponde al objetivo: recommendation=regenerate.",
+      "- El fondo normal SI esta permitido. No penalices una imagen solo por conservar fondo."
+    ].join("\n");
+
+    const upstream = await fetchCompat(
+      `${GEMINI_BASE}/models/${encodeURIComponent("gemini-2.5-flash")}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: image.mimeType, data: image.buffer.toString("base64") } }
+            ]
+          }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json"
+          }
+        })
+      }
+    );
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
+        error: String(data?.error?.message || data?.error || `HTTP ${upstream.status}`)
+      });
+    }
+    const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+    const parsed = parseJsonObjectFromModelTextLocal(text);
+    const score = clampNumber(parsed?.score, 0, 100, 0);
+    const hasEmbeddedText = parsed?.hasEmbeddedText === true;
+    const hasCheckerboard = parsed?.hasCheckerboardOrFakeTransparency === true || parsed?.hasFakeTransparencyOrCheckerboard === true;
+    const matchesTarget = parsed?.matchesTarget === true;
+    const recommendation = (
+      hasEmbeddedText ||
+      hasCheckerboard ||
+      !matchesTarget ||
+      score < 72
+    ) ? "regenerate" : "accept";
+    return res.status(200).json({
+      ok: true,
+      analysis: {
+        score,
+        hasEmbeddedText,
+        hasCheckerboardOrFakeTransparency: hasCheckerboard,
+        matchesTarget,
+        issues: Array.isArray(parsed?.issues) ? parsed.issues.map((item) => clampText(item, 200)).filter(Boolean).slice(0, 6) : [],
+        recommendation
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: String(error?.message || "No se pudo analizar el elemento del gráfico.") });
   }
 });
 

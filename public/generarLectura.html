@@ -685,9 +685,19 @@
         </div>
       </div>
       </div>
-      <div class="unidad-global-agents-footer" aria-label="Agentes disponibles">
+      <button
+        type="button"
+        id="unidadAgentsFooterToggle"
+        class="unidad-editor-tools-tab"
+        aria-controls="unidadGlobalAgentsFooter"
+        aria-expanded="true"
+        aria-label="Mostrar u ocultar panel de agentes"
+      >
+        <span class="unidad-editor-tools-tab-label">Agentes</span>
+        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+      </button>
+      <div id="unidadGlobalAgentsFooter" class="unidad-global-agents-footer" aria-label="Agentes disponibles">
         <div class="unidad-editor-tools-header">
-          <h3 class="unidad-editor-tools-title">Agentes</h3>
           <div id="themeCommandSettingsMount" class="unidad-editor-tools-slot" aria-label="Herramientas de comandos de voz">
             <a href="#" id="themeCommandSettingsBtn" class="sidebar-link gl-theme-command-link" aria-label="Comandos de voz" title="Comandos de voz">
               <i class="fas fa-head-side-cough" aria-hidden="true"></i>
@@ -2858,6 +2868,7 @@
           </div>
 
           <aside class="unidad-editor-side" aria-label="Configuracion de unidad">
+            <h4 class="unidad-card-title unidad-editor-side-title">Configurar unidad</h4>
             <div class="grid grid-cols-2 gap-2 unidad-editor-grid unidad-editor-grid-meta unidad-editor-grid-source">
               <div class="space-y-1">
                 <label for="unidadNivel" class="unidad-label">Nivel</label>

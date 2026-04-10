@@ -3,6 +3,17 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
 
+function getAlternateLocalApiUrl(url = "") {
+  const finalUrl = String(url || "").trim();
+  if (finalUrl.startsWith("http://127.0.0.1:8787")) {
+    return finalUrl.replace("http://127.0.0.1:8787", "http://localhost:8787");
+  }
+  if (finalUrl.startsWith("http://localhost:8787")) {
+    return finalUrl.replace("http://localhost:8787", "http://127.0.0.1:8787");
+  }
+  return "";
+}
+
 function getConfiguredApiBase() {
   return String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim();
 }
@@ -97,28 +108,43 @@ export async function authFetchJson(url, options = {}) {
     requestInit.body = JSON.stringify(body);
   }
 
+  const parseJsonSafe = async (response) => response.json().catch(() => ({}));
+  const buildHttpError = (response, data) => {
+    const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
+    const error = new Error(String(detail));
+    error.status = Number(response.status || 0);
+    error.detail = data;
+    return error;
+  };
+
   let response = null;
   try {
     response = await fetch(finalUrl, requestInit);
   } catch (err) {
-    const isLocalUrl = finalUrl.startsWith(DEFAULT_LOCAL_API_BASE);
-    if (isLocalUrl) {
-      const fallbackUrl = finalUrl.replace("http://127.0.0.1:8787", "http://localhost:8787");
+    const fallbackUrl = getAlternateLocalApiUrl(finalUrl);
+    if (fallbackUrl) {
       response = await fetch(fallbackUrl, requestInit);
     } else {
       throw err;
     }
   }
+  if (!response.ok && response.status === 404) {
+    const fallbackUrl = getAlternateLocalApiUrl(finalUrl);
+    if (fallbackUrl) {
+      const fallbackResponse = await fetch(fallbackUrl, requestInit).catch(() => null);
+      if (fallbackResponse && fallbackResponse.ok) {
+        response = fallbackResponse;
+      } else if (fallbackResponse && fallbackResponse.status !== 404) {
+        response = fallbackResponse;
+      }
+    }
+  }
   if (response.status === 401 || response.status === 403) {
     throw new Error("AUTH_FORBIDDEN");
   }
-  const data = await response.json().catch(() => ({}));
+  const data = await parseJsonSafe(response);
   if (!response.ok) {
-    const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
-    const error = new Error(String(detail));
-    error.status = Number(response.status || 0);
-    error.detail = data;
-    throw error;
+    throw buildHttpError(response, data);
   }
   return data;
 }

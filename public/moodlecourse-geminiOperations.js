@@ -1,5 +1,5 @@
-import { obtenerModulo, guardarModulo } from "./moodleCourse.js?v=2026-1.0.0.62";
-import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.0.62";
+import { obtenerModulo, guardarModulo } from "./moodleCourse.js?v=2026-1.0.0.65";
+import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.0.65";
 const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function getGeminiEndpoint() {
@@ -225,6 +225,19 @@ function setEstadoGeneracionModulo(moduloId, message = "", tone = "info", spinni
     return status;
 }
 
+const moduleGenerationInFlight = new Set();
+
+function setModuleGenerationBusy(moduloId = "", busy = false) {
+    const cleanId = String(moduloId || "").trim();
+    if (!cleanId) return;
+    document.querySelectorAll('[data-mc-action="ejecutar-generacion-modulo-gemini"]').forEach((button) => {
+        if (String(button?.dataset?.mcModuloId || "").trim() !== cleanId) return;
+        button.disabled = !!busy;
+        button.setAttribute("aria-disabled", busy ? "true" : "false");
+        button.classList.toggle("is-busy", !!busy);
+    });
+}
+
 function limpiarHtmlGraficoGenerado(html = "") {
     const raw = String(html || "").trim();
     if (!raw) return "";
@@ -253,14 +266,21 @@ function construirPromptGraficoModulo({ modulo = {}, instrucciones = "", conteni
         `Idioma: ${idiomaLabel}`,
         instrucciones ? `Instrucciones del autor: ${truncateText(stripHtmlToText(instrucciones), 1600)}` : "",
         contenido ? `Contenido generado: ${truncateText(stripHtmlToText(contenido), 2200)}` : "",
-        "Genera una imagen o grafico educativo que acompañe esta actividad y ayude a analizar, observar o responder el ejercicio.",
+        "Primero analiza las propuestas nuevas de actividades y detecta que informacion visual de apoyo necesitan para resolverse.",
+        "Genera una sola imagen o grafico educativo final que funcione como apoyo comun para realizar las actividades del modulo.",
         "No generes escenarios de podcast, estudios, sets cinematograficos ni interfaces decorativas ajenas al contenido educativo.",
-        "Prefiere una infografia o diagrama claro, con iconos, flechas, formas y elementos visuales relacionados directamente con la actividad.",
-        "La capa visual debe renderizarse con fondo transparente para poder mezclarse sobre un fondo separado.",
-        "No agregues marco, lienzo blanco, tarjeta, sombra exterior ni fondo sólido alrededor de los elementos visuales.",
-        "Compón solo los objetos visuales principales de la actividad, aislados y listos para superponerse en otra capa.",
-        "No incluyas palabras, letras, numeros, etiquetas ni texto incrustado dentro de la imagen final.",
-        "La capa de texto se renderizara despues como HTML separado fuera de la imagen."
+        "NO conviertas cada actividad o pregunta en una tarjeta, panel, bloque o mini-infografia separada.",
+        "NO escribas 'Actividad 1', 'Actividad 2', 'Pregunta 1', 'Pregunta 2' ni variantes similares dentro de la imagen.",
+        "NO hagas mapas mentales con ramas que representen actividades individuales del modulo.",
+        "La imagen debe sintetizar conceptos, relaciones, pasos, ejemplos visuales, referencias o contexto util para contestar las actividades, como una sola pieza editorial integrada.",
+        "Prefiere una sola infografia, diagrama explicativo, esquema visual o grafico editorial unificado con alta jerarquia.",
+        "Genera una sola imagen final, completa, de estilo infografía o diagrama educativo profesional.",
+        "Usa fondo claro y composición ordenada, lista para insertarse directamente en el módulo.",
+        "Prioriza un solo sistema visual coherente, no cuatro o cinco subgraficos independientes.",
+        "Usa una paleta armonica y profesional. Evita composiciones pobres, desbalanceadas o visualmente baratas.",
+        "No generes assets sueltos ni elementos aislados para edición posterior.",
+        "Procura no incluir palabras, letras, numeros ni etiquetas; si el modelo necesita texto, que sea minimo y solo labels breves.",
+        "El resultado debe sentirse como un unico grafico de apoyo, moderno, claro y pedagogicamente util."
     ].filter(Boolean).join("\n");
 }
 
@@ -269,6 +289,51 @@ function clampWords(value = "", maxWords = 8, maxChars = 80) {
     if (!clean) return "";
     const words = clean.split(" ").slice(0, Math.max(1, Number(maxWords) || 1)).join(" ");
     return words.slice(0, Math.max(1, Number(maxChars) || 1)).trim();
+}
+
+function sanitizeGraphicLayerText(value = "", maxWords = 8, maxChars = 80) {
+    const clean = String(value || "")
+        .replace(/&nbsp;|&#160;/gi, " ")
+        .replace(/&[a-z]+;/gi, " ")
+        .replace(/[<>`#]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    return clampWords(clean, maxWords, maxChars);
+}
+
+function tokenizeSemanticText(value = "") {
+    return String(value || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3);
+}
+
+function isLabelSemanticallyLinkedToAnchor(labelText = "", anchorText = "") {
+    const labelTokens = tokenizeSemanticText(labelText);
+    const anchorTokens = tokenizeSemanticText(anchorText);
+    if (!labelTokens.length || !anchorTokens.length) return false;
+    const labelSet = new Set(labelTokens);
+    return anchorTokens.some((token) => labelSet.has(token));
+}
+
+function inferCalloutPlacementFromAnchorPosition(anchorPosition = "", fallback = "right") {
+    const map = {
+        "top-left": "right",
+        "top-center": "bottom",
+        "top-right": "left",
+        "middle-left": "right",
+        center: "right",
+        "middle-right": "left",
+        "bottom-left": "right",
+        "bottom-center": "top",
+        "bottom-right": "left"
+    };
+    const key = String(anchorPosition || "").trim().toLowerCase();
+    return normalizeGraphicPosition(map[key] || fallback, fallback);
 }
 
 function extraerPrimerColorHex(value = "") {
@@ -317,7 +382,7 @@ function normalizarCapasGraficoModulo(payload = {}, modulo = {}, idioma = { code
     const rawAnchors = Array.isArray(rawGraphic.anchors) ? rawGraphic.anchors : [];
     const graphicAnchors = (rawAnchors.length ? rawAnchors : (rawGraphicItems.length ? rawGraphicItems : focus.map((item) => ({ label: item }))))
         .map((item, index) => {
-            const label = String(item?.label || item || "").trim();
+            const label = sanitizeGraphicLayerText(String(item?.label || item || "").trim(), 4, 26);
             if (!label) return null;
             return {
                 id: normalizeGraphicAnchorId(String(item?.id || "").trim(), `anchor-${index + 1}`),
@@ -341,24 +406,50 @@ function normalizarCapasGraficoModulo(payload = {}, modulo = {}, idioma = { code
         anchorId: graphicAnchors[index]?.id || "",
         position: String(item?.position || "").trim()
     }));
-    const labels = rawLabels.map((item, index) => ({
-        id: normalizeGraphicAnchorId(String(item?.id || "").trim(), `label-${index + 1}`),
-        text: clampWords(String(item?.text || item || "").trim(), 4, 32),
-        anchorId: normalizeGraphicAnchorId(String(item?.anchorId || graphicAnchors[index]?.id || "").trim(), graphicAnchors[index]?.id || `anchor-${index + 1}`),
-        position: normalizeGraphicPosition(String(item?.position || item?.placement || "").trim(), [
-            "top-left",
-            "top-right",
-            "middle-right",
-            "bottom-left"
-        ][index] || "bottom-right")
-    })).filter((item) => item.text).slice(0, 4);
+    let labels = rawLabels.map((item, index) => {
+        const fallbackAnchor = graphicAnchors[index] || null;
+        const anchorId = normalizeGraphicAnchorId(
+            String(item?.anchorId || fallbackAnchor?.id || "").trim(),
+            fallbackAnchor?.id || `anchor-${index + 1}`
+        );
+        const linkedAnchor = graphicAnchors.find((anchor) => String(anchor?.id || "").trim() === anchorId) || fallbackAnchor;
+        const anchorLabel = sanitizeGraphicLayerText(String(linkedAnchor?.label || "").trim(), 4, 26);
+        const rawText = sanitizeGraphicLayerText(String(item?.text || item || "").trim(), 4, 32);
+        const isGenericNoise = /\b(actividad|activity|pregunta|question|respuesta|answer|propuesta|proposal)\b/i.test(rawText);
+        const isRelated = isLabelSemanticallyLinkedToAnchor(rawText, anchorLabel);
+        const finalText = (!rawText || isGenericNoise || (!isRelated && anchorLabel)) ? anchorLabel : rawText;
+        return {
+            id: normalizeGraphicAnchorId(String(item?.id || "").trim(), `label-${index + 1}`),
+            text: finalText,
+            anchorId,
+            position: normalizeGraphicPosition(
+                String(item?.position || item?.placement || "").trim(),
+                inferCalloutPlacementFromAnchorPosition(
+                    linkedAnchor?.position,
+                    ["right", "left", "right", "top"][index] || "right"
+                )
+            )
+        };
+    }).filter((item) => item.text).slice(0, 4);
+
+    if (!labels.length && graphicAnchors.length) {
+        labels = graphicAnchors.slice(0, 4).map((anchor, index) => ({
+            id: `label-${index + 1}`,
+            text: sanitizeGraphicLayerText(String(anchor?.label || `Punto ${index + 1}`), 4, 32),
+            anchorId: String(anchor?.id || `anchor-${index + 1}`),
+            position: inferCalloutPlacementFromAnchorPosition(
+                anchor?.position,
+                ["right", "left", "right", "top"][index] || "right"
+            )
+        }));
+    }
 
     const legend = (Array.isArray(text.legend) ? text.legend : notes)
-        .map((item) => clampWords(String(item || "").trim(), 6, 52))
+        .map((item) => sanitizeGraphicLayerText(String(item || "").trim(), 6, 52))
         .filter(Boolean)
         .slice(0, 3);
 
-    const connectors = (Array.isArray(text.connectors) ? text.connectors : labels.map((item) => ({
+    let connectors = (Array.isArray(text.connectors) ? text.connectors : labels.map((item) => ({
         labelId: item.id,
         anchorId: item.anchorId
     }))).map((item, index) => ({
@@ -367,6 +458,14 @@ function normalizarCapasGraficoModulo(payload = {}, modulo = {}, idioma = { code
         anchorId: normalizeGraphicAnchorId(String(item?.anchorId || labels[index]?.anchorId || "").trim(), labels[index]?.anchorId || `anchor-${index + 1}`),
         style: String(item?.style || "arrow").trim() || "arrow"
     })).filter((item) => item.labelId && item.anchorId);
+    if (!connectors.length && labels.length) {
+        connectors = labels.map((item, index) => ({
+            id: `connector-${index + 1}`,
+            labelId: String(item.id || `label-${index + 1}`),
+            anchorId: String(item.anchorId || `anchor-${index + 1}`),
+            style: "arrow"
+        }));
+    }
 
     const backgroundColor = extraerPrimerColorHex(String(payload?.background?.color || "").trim())
         || extraerPrimerColorHex(String(payload?.background?.palette || "").trim())
@@ -396,6 +495,80 @@ function normalizarCapasGraficoModulo(payload = {}, modulo = {}, idioma = { code
             legendPosition: normalizeGraphicPosition(String(text.legendPosition || "").trim(), "bottom-right")
         }
     };
+}
+
+function construirCapasFallback({ modulo = {}, instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
+    const isEnglish = String(idioma?.code || "").toLowerCase().startsWith("en");
+    const plain = stripHtmlToText(`${instrucciones || ""}\n${contenido || ""}`);
+    const rawLines = plain
+        .split(/\r?\n+/)
+        .map((line) => String(line || "").trim())
+        .filter(Boolean)
+        .filter((line) => line.length >= 3)
+        .filter((line) => !/^(respuesta correcta|retroalimentaci[oó]n|opciones:|pregunta:|actividad original|propuesta)/i.test(line));
+    const dedup = Array.from(new Set(rawLines));
+    const seed = dedup.slice(0, 12);
+    const fallbackTitle = clampWords(
+        seed.find((line) => line.length >= 8 && line.length <= 42) || String(modulo?.nombre || "Grafico de apoyo"),
+        4,
+        34
+    );
+    const fallbackSubtitle = clampWords(
+        seed.find((line) => line.length >= 12 && line.length <= 56) || (isEnglish ? "Use the image to solve" : "Usa la imagen para resolver"),
+        6,
+        46
+    );
+    const anchorLabels = seed.filter((line) => line.length <= 28).slice(0, 4);
+    while (anchorLabels.length < 3) {
+        anchorLabels.push(isEnglish ? `Point ${anchorLabels.length + 1}` : `Punto ${anchorLabels.length + 1}`);
+    }
+    const anchors = anchorLabels.map((label, index) => ({
+        id: `anchor-${index + 1}`,
+        label: clampWords(label, 4, 24),
+        shape: "marker",
+        position: normalizeGraphicPosition("", ["middle-left", "top-right", "center", "bottom-left"][index] || "center")
+    }));
+    const labels = anchors.map((anchor, index) => ({
+        id: `label-${index + 1}`,
+        text: clampWords(String(anchor.label || ""), 4, 28),
+        anchorId: String(anchor.id || `anchor-${index + 1}`),
+        position: normalizeGraphicPosition("", ["top-left", "top-right", "middle-right", "bottom-left"][index] || "bottom-right")
+    }));
+    const legendSeed = seed.filter((line) => line.length >= 18 && line.length <= 56).slice(0, 3);
+    const legend = legendSeed.length
+        ? legendSeed.map((line) => clampWords(line, 6, 52))
+        : [
+            isEnglish ? "Locate each reference point." : "Ubica cada punto de referencia.",
+            isEnglish ? "Connect image and concept." : "Relaciona imagen y concepto."
+        ].slice(0, 3);
+    const payload = {
+        background: {
+            description: isEnglish ? "Flat neutral background for readability." : "Fondo plano neutro para legibilidad.",
+            palette: "#EAF3FF,#D8EAFE",
+            color: "#EAF3FF"
+        },
+        graphic: {
+            description: isEnglish ? "Main visual anchors for the activity." : "Anclas visuales principales de la actividad.",
+            focus: anchorLabels.slice(0, 4),
+            anchors
+        },
+        textLayer: {
+            title: fallbackTitle,
+            subtitle: fallbackSubtitle,
+            titlePosition: "top-left",
+            subtitlePosition: "top-left",
+            legendPosition: "bottom-right",
+            legend,
+            labels,
+            connectors: labels.map((item, index) => ({
+                id: `connector-${index + 1}`,
+                labelId: item.id,
+                anchorId: item.anchorId,
+                style: "arrow"
+            }))
+        }
+    };
+    return normalizarCapasGraficoModulo(payload, modulo, idioma);
 }
 
 async function generarCapasGraficoModuloMetadata({ modulo = {}, instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
@@ -559,7 +732,19 @@ function combinarContenidoConGrafico(image = {}, contenido = "", modulo = {}) {
     return insertarGraficoDespuesDeActividadOriginal(baseHtml, figureHtml);
 }
 
-async function generarGraficoComplementarioModulo({ modulo = {}, cursoId = "", instrucciones = "", contenido = "", idioma = { code: "es" } } = {}) {
+function construirPlaceholderGraficoEditor(moduleName = "") {
+    const title = String(moduleName || "Gráfico del módulo").replace(/</g, "").replace(/>/g, "").trim() || "Gráfico del módulo";
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+            <rect width="1024" height="1024" fill="#eef3ff"/>
+            <rect x="96" y="96" width="832" height="832" rx="48" fill="#dfe8ff" stroke="#9fb2de" stroke-width="4"/>
+            <text x="512" y="458" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" fill="#243b63" font-weight="700">${title}</text>
+            <text x="512" y="520" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#45608f">Abrir editor por capas para generar composición</text>
+        </svg>`
+    )}`;
+}
+
+async function generarGraficoComplementarioModulo({ modulo = {}, cursoId = "", instrucciones = "", contenido = "", idioma = { code: "es" }, instructionImages = [] } = {}) {
     const courseId = String(cursoId || modulo?.cursoId || window.curso?.id || "").trim();
     const moduleId = String(modulo?.id || "").trim();
     if (!courseId || !moduleId) {
@@ -579,6 +764,7 @@ async function generarGraficoComplementarioModulo({ modulo = {}, cursoId = "", i
             languageCode: String(idioma?.code || "es").trim(),
             instructions: instrucciones,
             content: contenido,
+            instructionImages: Array.isArray(instructionImages) ? instructionImages.slice(0, 2) : [],
             previousStoragePath,
             regenerate: Boolean(previousStoragePath)
         }
@@ -1095,10 +1281,23 @@ for (let intento = 0; intento < 3; intento++) {
    GENERAR CONTENIDO PARA MÓDULO ESPECÍFICO (QUIZ, PÁGINA, ETC)
 ============================================================ */
 export async function generarModuloGemini(moduloId) {
+    const moduloIdNormalizado = String(moduloId || "").trim();
+    if (!moduloIdNormalizado) {
+        alert("No se recibió el ID del módulo.");
+        return;
+    }
+    if (moduleGenerationInFlight.has(moduloIdNormalizado)) {
+        setEstadoGeneracionModulo(moduloIdNormalizado, "La generación de este módulo ya está en curso.", "warning", true);
+        return;
+    }
+    moduleGenerationInFlight.add(moduloIdNormalizado);
+    setModuleGenerationBusy(moduloIdNormalizado, true);
 
     // 1. Validar curso global (variable correcta: window.curso)
     if (!window.curso) {
         alert("Error interno: no hay curso activo cargado.");
+        moduleGenerationInFlight.delete(moduloIdNormalizado);
+        setModuleGenerationBusy(moduloIdNormalizado, false);
         return;
     }
 
@@ -1106,27 +1305,33 @@ export async function generarModuloGemini(moduloId) {
     const subtema = window.subtemaActivo;
     if (!subtema) {
         alert("No hay un subtema activo seleccionado.");
+        moduleGenerationInFlight.delete(moduloIdNormalizado);
+        setModuleGenerationBusy(moduloIdNormalizado, false);
         return;
     }
 
     const cursoIdModulo = String(window.curso?.id || "").trim() || null;
 
     // 3. Traer módulo
-    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+    const modulo = await obtenerModulo(moduloIdNormalizado, cursoIdModulo);
     if (!modulo) {
         alert("No se encontró el módulo en Firebase.");
+        moduleGenerationInFlight.delete(moduloIdNormalizado);
+        setModuleGenerationBusy(moduloIdNormalizado, false);
         return;
     }
 
     // 4. Validar instrucciones
     if (!modulo.instrucciones || modulo.instrucciones.trim() === "") {
         alert("❗ Primero debes añadir instrucciones con el ícono de comentarios.");
+        moduleGenerationInFlight.delete(moduloIdNormalizado);
+        setModuleGenerationBusy(moduloIdNormalizado, false);
         return;
     }
 
     // 5. Estado visual
-    const card = document.getElementById(`modulo-${moduloId}`);
-    setEstadoGeneracionModulo(moduloId, "Generando contenido del módulo...", "info", true);
+    const card = document.getElementById(`modulo-${moduloIdNormalizado}`);
+    setEstadoGeneracionModulo(moduloIdNormalizado, "Generando contenido del módulo...", "info", true);
 
     try {
         const instruccionesRaw = modulo.instrucciones || "";
@@ -1215,9 +1420,9 @@ export async function generarModuloGemini(moduloId) {
         ` : "";
 
         const bloqueGraficoComplementario = generarGrafico ? `
-        ===== GRÁFICO COMPLEMENTARIO (CAPAS) =====
-        - Este módulo debe quedar preparado para acompañarse con un gráfico o imagen nueva relacionada con la actividad.
-        - NO generes código ni instrucciones técnicas de capas dentro de la salida final.
+        ===== GRÁFICO COMPLEMENTARIO =====
+        - Este módulo debe quedar acompañado por una sola imagen final relacionada con la actividad.
+        - NO generes código ni instrucciones técnicas de edición dentro de la salida final.
         - Sí estructura el contenido para que la actividad pueda referirse de forma natural al gráfico.
         - Cuando el tipo sea Quizz o actividad guiada, puedes usar frases como:
           - "Analiza la imagen anterior y responde."
@@ -1462,48 +1667,33 @@ export async function generarModuloGemini(moduloId) {
         }
 
         let graficoGeneradoPayload = null;
-        let falloGrafico = false;
         if (generarGrafico) {
             try {
-                setEstadoGeneracionModulo(moduloId, "Generando gráfico del módulo...", "info", true);
-                const [image, layers] = await Promise.all([
-                    generarGraficoComplementarioModulo({
-                        modulo,
-                        cursoId: cursoIdPersistencia,
-                        instrucciones: instruccionesParaPrompt,
-                        contenido: contenidoParaGuardar,
-                        idioma: idiomaDetectadoModulo
-                    }),
-                    generarCapasGraficoModuloMetadata({
-                        modulo,
-                        instrucciones: instruccionesParaPrompt,
-                        contenido: contenidoParaGuardar,
-                        idioma: idiomaDetectadoModulo
-                    }).catch(() => null)
-                ]);
-                const imageWithLayers = layers ? { ...image, layers } : image;
+                setEstadoGeneracionModulo(moduloIdNormalizado, "Analizando actividades para diseñar el gráfico...", "info", true);
+                const image = await generarGraficoComplementarioModulo({
+                    modulo,
+                    cursoId: cursoIdPersistencia,
+                    instrucciones: instruccionesParaPrompt,
+                    contenido: contenidoParaGuardar,
+                    idioma: idiomaDetectadoModulo,
+                    instructionImages: imagenesLimitadas
+                });
                 contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
-                    ? window.normalizarContenidoModuloPersistible(combinarContenidoConGrafico(imageWithLayers, contenidoParaGuardar, {
+                    ? window.normalizarContenidoModuloPersistible(combinarContenidoConGrafico(image, contenidoParaGuardar, {
                         ...modulo,
                         cursoId: cursoIdPersistencia
                     }))
-                    : combinarContenidoConGrafico(imageWithLayers, contenidoParaGuardar, {
+                    : combinarContenidoConGrafico(image, contenidoParaGuardar, {
                         ...modulo,
                         cursoId: cursoIdPersistencia
                     });
                 graficoGeneradoPayload = {
-                    downloadUrl: String(image.downloadUrl || "").trim(),
-                    storagePath: String(image.storagePath || "").trim(),
-                    mimeType: String(image.mimeType || "image/png").trim() || "image/png",
-                    model: String(image.model || "").trim(),
-                    promptVersion: String(image.promptVersion || "").trim(),
-                    updatedAt: String(image.updatedAt || "").trim(),
-                    ...(layers ? { layers } : {})
+                    ...image,
+                    layers: {}
                 };
             } catch (graphicError) {
-                falloGrafico = true;
                 console.error("No se pudo generar el gráfico complementario del módulo:", graphicError);
-                setEstadoGeneracionModulo(moduloId, "El contenido se generó, pero el gráfico no se pudo crear.", "warning", false);
+                setEstadoGeneracionModulo(moduloIdNormalizado, "El contenido se generó, pero no se pudo crear el gráfico final.", "warning", false);
             }
         }
 
@@ -1520,15 +1710,15 @@ export async function generarModuloGemini(moduloId) {
             cambiosModulo.graficoGenerado = graficoGeneradoPayload;
         }
 
-        await guardarModulo(moduloId, cambiosModulo, cursoIdPersistencia);
-        const moduloGuardado = await obtenerModulo(moduloId, cursoIdPersistencia);
+        await guardarModulo(moduloIdNormalizado, cambiosModulo, cursoIdPersistencia);
+        const moduloGuardado = await obtenerModulo(moduloIdNormalizado, cursoIdPersistencia);
         const contenidoPersistido = String(moduloGuardado?.contenido || "").trim();
         if (!contenidoPersistido) {
             throw new Error("El contenido generado no quedó persistido en el módulo.");
         }
 
         // Pintar en UI
-        const cont = document.getElementById(`contenido-${moduloId}`);
+        const cont = document.getElementById(`contenido-${moduloIdNormalizado}`);
         if (cont) {
             cont.innerHTML = contenidoPersistido;
         }
@@ -1538,20 +1728,21 @@ export async function generarModuloGemini(moduloId) {
         syncModuloGeneradoEnEstadoLocal(moduloGuardado, cursoIdPersistencia);
 
         setEstadoGeneracionModulo(
-            moduloId,
+            moduloIdNormalizado,
             graficoGeneradoPayload
                 ? "Contenido y gráfico generados."
-                : falloGrafico
-                    ? "Contenido generado, pero el gráfico no se pudo crear."
-                    : "Contenido generado.",
-            falloGrafico ? "warning" : "success",
+                : "Contenido generado.",
+            "success",
             false
         );
 
     } catch (e) {
         console.error("Error en generarModuloGemini:", e);
-        setEstadoGeneracionModulo(moduloId, e?.message || "No se pudo generar el módulo.", "error", false);
+        setEstadoGeneracionModulo(moduloIdNormalizado, e?.message || "No se pudo generar el módulo.", "error", false);
         throw e;
+    } finally {
+        moduleGenerationInFlight.delete(moduloIdNormalizado);
+        setModuleGenerationBusy(moduloIdNormalizado, false);
     }
 }
 

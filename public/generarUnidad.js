@@ -154,6 +154,9 @@ function _geminiGenerateLocalFallbackUrl() {
   const host = String(window.location.hostname || "").toLowerCase();
   const isLocalHost = host === "127.0.0.1" || host === "localhost";
   if (!isLocalHost) return "";
+  const configuredApiBase = String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim();
+  const configuredIsLocalApi = /^https?:\/\/(?:127\.0\.0\.1|localhost):8787(?:\/api)?$/i.test(configuredApiBase);
+  if (configuredApiBase && !configuredIsLocalApi) return "";
   if (current.startsWith("http://127.0.0.1:8787/") || current.startsWith("http://localhost:8787/")) {
     return "";
   }
@@ -348,6 +351,115 @@ const GEMINI_FALLBACK_CONFIABLE = [
   ...GEMINI_MODELOS_PRIORIDAD_ESTABLE,
   ...GEMINI_MODELOS_PREVIEW_SECUNDARIOS
 ];
+let geminiModelsSyncPromise = null;
+
+function isUnidadSupportedGeminiTextModelName(model = "") {
+  const name = normalizeGeminiModel(model);
+  if (!name) return false;
+  if (!/^gemini-(2\.5|3(?:\.1)?)/i.test(name)) return false;
+  if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
+  if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
+  return true;
+}
+
+function isUnidadTextGeminiGenerationModel(modelInfo = {}) {
+  const name = normalizeGeminiModel(modelInfo?.name || "");
+  if (!name || !isUnidadSupportedGeminiTextModelName(name)) return false;
+  const methods = Array.isArray(modelInfo?.supportedGenerationMethods)
+    ? modelInfo.supportedGenerationMethods.map((method) => String(method || "").trim())
+    : [];
+  return methods.length === 0 || methods.includes("generateContent");
+}
+
+function formatUnidadGeminiModelOptionLabel(model = "") {
+  const normalized = normalizeGeminiModel(model);
+  const directMap = {
+    "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+    "gemini-2.5-flash": "Gemini 2.5 Flash",
+    "gemini-2.5-pro": "Gemini 2.5 Pro",
+    "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
+    "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
+    "gemini-3.1-pro-preview": "Gemini 3.1 Pro (Preview)",
+    "gemini-3.1-flash-preview": "Gemini 3.1 Flash (Preview)",
+    "gemini-3.1-flash-lite-preview": "Gemini 3.1 Flash Lite (Preview)"
+  };
+  if (directMap[normalized]) return directMap[normalized];
+  return normalized
+    .replace(/^gemini-/i, "Gemini ")
+    .replace(/-/g, " ")
+    .replace(/\bpreview\b/gi, "(Preview)")
+    .replace(/\bflash lite\b/gi, "Flash Lite")
+    .replace(/\bflash\b/gi, "Flash")
+    .replace(/\bpro\b/gi, "Pro")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function syncGeminiModelOptionsForUnidad() {
+  const select = document.getElementById("selectGeminiEndpoint");
+  if (!select || geminiModelsSyncPromise) return geminiModelsSyncPromise;
+
+  const currentValue = normalizeGeminiModel(select.value || "gemini-2.5-flash-lite") || "gemini-2.5-flash-lite";
+  const fallbackModels = Array.from(select.options || [])
+    .map((opt) => normalizeGeminiModel(opt.value || ""))
+    .filter(isUnidadSupportedGeminiTextModelName);
+
+  geminiModelsSyncPromise = (async () => {
+    try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : "";
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const response = await fetch(buildApiUrl("/api/gemini/models"), {
+        method: "GET",
+        headers
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(data?.error?.message || data?.error || `HTTP ${response.status}`));
+
+      const backendModels = Array.isArray(data?.models) ? data.models : [];
+      const filteredBackendModels = backendModels
+        .filter(isUnidadTextGeminiGenerationModel)
+        .map((modelInfo) => normalizeGeminiModel(modelInfo?.name || ""))
+        .filter(isUnidadSupportedGeminiTextModelName);
+
+      const mergedModels = Array.from(new Set([
+        ...filteredBackendModels,
+        ...fallbackModels
+      ]));
+
+      mergedModels.sort((a, b) => {
+        const aPreview = /\bpreview\b/i.test(a);
+        const bPreview = /\bpreview\b/i.test(b);
+        if (aPreview !== bPreview) return aPreview ? 1 : -1;
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      });
+
+      select.innerHTML = "";
+      mergedModels.forEach((modelName) => {
+        const option = document.createElement("option");
+        option.value = modelName;
+        option.textContent = formatUnidadGeminiModelOptionLabel(modelName);
+        if (modelName === "gemini-2.5-flash-lite") option.selected = true;
+        select.appendChild(option);
+      });
+
+      const preferredValue = mergedModels.includes(currentValue)
+        ? currentValue
+        : (mergedModels.includes("gemini-2.5-flash-lite") ? "gemini-2.5-flash-lite" : (mergedModels[0] || currentValue));
+
+      if (preferredValue) {
+        select.value = preferredValue;
+      }
+      actualizarEtiquetasGeminiEndpoint();
+    } catch (_) {
+      // Mantener catálogo hardcodeado si el backend no responde.
+    } finally {
+      geminiModelsSyncPromise = null;
+    }
+  })();
+
+  return geminiModelsSyncPromise;
+}
 
 function _selectTieneOpcion(el, valor) {
   return !!(el && Array.from(el.options || []).some(opt => opt.value === valor || opt.text === valor));
@@ -460,18 +572,8 @@ function aplicarValorSelect(id, valorGuardado) {
 }
 
 function guardarResultadoUnidadEnStorage() {
-  try {
-    const cont = document.getElementById("resultadoUnidadGenerada");
-    if (!cont) return;
-    const html = String(cont.innerHTML || "").trim();
-    if (!html) return;
-    localStorage.setItem(UNIDAD_RESULTADO_STORAGE_KEY, JSON.stringify({
-      savedAt: Date.now(),
-      html
-    }));
-  } catch (_) {
-    // noop
-  }
+  // El resultado no debe persistir entre cierres o recargas de página.
+  limpiarResultadoUnidadEnStorage();
 }
 
 function limpiarResultadoUnidadEnStorage() {
@@ -497,22 +599,8 @@ function adaptarTablasResultadoResponsive() {
 }
 
 function restaurarResultadoUnidadDesdeStorage() {
-  try {
-    const cont = document.getElementById("resultadoUnidadGenerada");
-    if (!cont) return false;
-    if (String(cont.innerHTML || "").trim()) return false;
-    const raw = localStorage.getItem(UNIDAD_RESULTADO_STORAGE_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const html = String(parsed?.html || "").trim();
-    if (!html) return false;
-    cont.innerHTML = html;
-    window.respuestaFinal = html;
-    adaptarTablasResultadoResponsive();
-    return true;
-  } catch (_) {
-    return false;
-  }
+  limpiarResultadoUnidadEnStorage();
+  return false;
 }
 
 function obtenerSemillaCreativa(categoria = "", subtema = "") {
@@ -1364,6 +1452,520 @@ function _lecturaCoincideConContexto(lectura = null, ctx = {}) {
   );
 }
 
+function _origenLecturaUnidad(lectura = null) {
+  const raw = String(
+    lectura?.sourceCollection
+    || lectura?.coleccion
+    || (String(lectura?.tipo || "").toLowerCase() === "asc" ? "lecturasASC" : "lecturasNuevas")
+  ).trim();
+  return raw || "lecturasNuevas";
+}
+
+function _tituloLecturaUnidad(lectura = {}) {
+  return String(lectura?.titulo || lectura?.tema || "Sin título").trim();
+}
+
+function _contenidoLecturaUnidad(lectura = {}) {
+  return String(
+    lectura?.contenidoHTML
+    || lectura?.contenidoPlano
+    || lectura?.textoLectura
+    || lectura?.lectura
+    || lectura?.contenido
+    || lectura?.texto
+    || ""
+  ).trim();
+}
+
+function _preguntasLecturaUnidad(lectura = {}) {
+  const preguntas = lectura?.preguntasComprension || lectura?.preguntas || lectura?.preguntas_comprension || [];
+  return Array.isArray(preguntas) ? preguntas.filter(Boolean) : [];
+}
+
+function _normalizarPreguntaLecturaUnidad(pregunta = null) {
+  if (!pregunta) return null;
+  if (typeof pregunta === "string") {
+    const texto = pregunta.trim();
+    return texto ? { pregunta: texto, respuesta: "" } : null;
+  }
+  const texto = String(pregunta?.pregunta || pregunta?.texto || "").trim();
+  const respuesta = String(pregunta?.respuesta || "").trim();
+  if (!texto && !respuesta) return null;
+  return { ...pregunta, pregunta: texto, respuesta };
+}
+
+function _fusionarPreguntasLecturaUnidad(lecturas = []) {
+  const usadas = new Set();
+  return lecturas.flatMap((lectura) => _preguntasLecturaUnidad(lectura))
+    .map(_normalizarPreguntaLecturaUnidad)
+    .filter((pregunta) => {
+      if (!pregunta?.pregunta) return false;
+      const key = _normalizarTexto(pregunta.pregunta);
+      if (!key || usadas.has(key)) return false;
+      usadas.add(key);
+      return true;
+    });
+}
+
+function _parseJsonObjectFromTextUnidad(raw = "") {
+  const clean = String(raw || "")
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const match = clean.match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : clean);
+}
+
+async function _generarLecturaUnificadaConGemini(lecturas = [], ctx = {}) {
+  const seleccionadas = Array.isArray(lecturas) ? lecturas.filter(Boolean) : [];
+  if (seleccionadas.length < 2) return null;
+
+  window.__lecturaUnidadFusionCache = window.__lecturaUnidadFusionCache || new Map();
+  const cacheKey = JSON.stringify({
+    ids: seleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean).sort(),
+    nivel: String(ctx?.nivel || "").trim(),
+    grado: String(ctx?.grado || "").trim(),
+    trimestre: String(ctx?.trimestre || "").trim(),
+    unidad: String(ctx?.unidad || "").trim()
+  });
+  if (window.__lecturaUnidadFusionCache.has(cacheKey)) {
+    return window.__lecturaUnidadFusionCache.get(cacheKey);
+  }
+
+  const lecturasFuente = seleccionadas.map((lectura, index) => {
+    const preguntas = _preguntasLecturaUnidad(lectura)
+      .map((pregunta) => {
+        const texto = typeof pregunta === "string"
+          ? pregunta
+          : String(pregunta?.pregunta || pregunta?.texto || "").trim();
+        return texto ? `- ${texto}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    return [
+      `LECTURA ${index + 1}: ${_tituloLecturaUnidad(lectura)}`,
+      _contenidoLecturaUnidad(lectura),
+      preguntas ? `Preguntas base:\n${preguntas}` : ""
+    ].filter(Boolean).join("\n\n");
+  }).join("\n\n---\n\n");
+
+  const promptFusion = `
+Eres especialista en literatura infantil y diseño didáctico.
+Analiza las dos lecturas proporcionadas y crea una lectura completamente nueva y original que fusione ambos temas en un solo hilo coherente.
+
+REGLAS OBLIGATORIAS:
+- NO concatenes párrafos de las lecturas originales.
+- NO copies frases textuales ni personajes tal como aparecen.
+- La nueva lectura debe sentirse totalmente nueva, pero conservar las ideas centrales de ambas.
+- Debe integrar ambos temas de forma natural en una sola historia o texto expositivo narrativo.
+- Mantén tono claro, escolar y apropiado para ${String(ctx?.grado || "Primero")} de ${String(ctx?.nivel || "Primaria")}.
+- Extensión aproximada: 320 a 480 palabras.
+- Devuelve SOLO JSON válido con esta forma:
+{
+  "titulo": "string",
+  "lecturaHtml": "<p>...</p><p>...</p>",
+  "preguntas": [
+    { "pregunta": "string", "respuesta": "string" }
+  ]
+}
+- Genera 4 preguntas de comprensión coherentes con la nueva lectura.
+- La lectura debe ser nueva también para proyectos: debe poder reutilizarse como lectura detonante o lectura generadora sin inventar otra adicional.
+
+CONTEXTO:
+Nivel: ${String(ctx?.nivel || "").trim() || "Primaria"}
+Grado: ${String(ctx?.grado || "").trim() || "Primero"}
+Trimestre: ${String(ctx?.trimestre || "").trim() || "1"}
+Unidad: ${String(ctx?.unidad || "").trim() || "1"}
+
+LECTURAS FUENTE:
+${lecturasFuente}
+  `.trim();
+
+  try {
+    const raw = await enviarPrompt([{ role: "user", text: promptFusion }]);
+    const parsed = _parseJsonObjectFromTextUnidad(raw);
+    const titulo = String(parsed?.titulo || "").trim() || `Lectura unificada: ${seleccionadas.map(_tituloLecturaUnidad).join(" + ")}`;
+    const lecturaHtml = String(parsed?.lecturaHtml || "").trim();
+    const preguntas = Array.isArray(parsed?.preguntas)
+      ? parsed.preguntas
+        .map(_normalizarPreguntaLecturaUnidad)
+        .filter((pregunta) => pregunta?.pregunta)
+      : [];
+
+    if (!lecturaHtml) {
+      throw new Error("LECTURA_FUSION_VACIA");
+    }
+
+    const fusion = {
+      id: seleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean).join("|"),
+      titulo,
+      tema: titulo,
+      contenidoHTML: lecturaHtml,
+      preguntasComprension: preguntas,
+      tipo: "fusion",
+      sourceCollection: "fusion",
+      coleccion: "fusion",
+      sourceLecturas: seleccionadas.map((lectura) => ({
+        id: String(lectura?.id || "").trim(),
+        titulo: _tituloLecturaUnidad(lectura),
+        origen: _origenLecturaUnidad(lectura)
+      }))
+    };
+    window.__lecturaUnidadFusionCache.set(cacheKey, fusion);
+    return fusion;
+  } catch (error) {
+    const motivo = String(error?.message || error || "").trim();
+    throw new Error(motivo || "No se pudo generar la lectura unificada con Gemini.");
+  }
+}
+
+function _contenidoLecturaUnificadaUnidad(lecturas = []) {
+  const partes = lecturas
+    .map((lectura) => {
+      const titulo = _tituloLecturaUnidad(lectura);
+      const contenido = _contenidoLecturaUnidad(lectura);
+      if (!contenido) return "";
+      return `
+        <section class="lectura-unificada-fragmento" style="margin-bottom:16px;">
+          <p style="margin:0 0 8px 0;"><strong>${titulo}</strong></p>
+          <div>${contenido}</div>
+        </section>
+      `;
+    })
+    .filter(Boolean);
+
+  if (!partes.length) return "";
+  if (partes.length === 1) return partes[0];
+
+  return `
+    <p style="margin:0 0 12px 0;">
+      <strong>Lectura unificada:</strong> integra ambas referencias en un solo hilo tematico coherente para trabajar las actividades.
+    </p>
+    ${partes.join('<div style="height:10px;"></div>')}
+  `;
+}
+
+function _limpiarDecisionLecturaUnidad() {
+  window.__unidadLecturaDecision = null;
+}
+
+function _activarRelacionLecturaProyectosUnidad() {
+  const headers = Array.from(document.querySelectorAll(".categoria-header"));
+  const proyectoHeaders = headers.filter((header) => {
+    const titulo = String(header.querySelector("h3")?.textContent || "").trim();
+    return titulo === "Proyectos";
+  });
+  const checkboxes = new Set();
+
+  proyectoHeaders.forEach((header) => {
+    const contenedor = header.parentElement || header.closest(".categoria-bloque") || header;
+    contenedor.querySelectorAll('input[name^="relacion_"]').forEach((chk) => checkboxes.add(chk));
+  });
+
+  document.querySelectorAll('input[name="relacion_Proyectos"], input[data-categoria="Proyectos"][name^="relacion_"]').forEach((chk) => {
+    checkboxes.add(chk);
+  });
+
+  checkboxes.forEach((chk) => {
+    if (!chk || chk.checked) return;
+    chk.checked = true;
+    chk.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function _asegurarModalDecisionLecturaUnidad() {
+  let modal = document.getElementById("unidadLecturaDecisionModal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "unidadLecturaDecisionModal";
+  modal.className = "unidad-lectura-decision-modal";
+  modal.setAttribute("aria-hidden", "true");
+  modal.inert = true;
+  modal.innerHTML = `
+    <div class="unidad-lectura-decision-backdrop" data-action="close"></div>
+    <section class="unidad-lectura-decision-panel" role="dialog" aria-modal="true" aria-labelledby="unidadLecturaDecisionTitle">
+      <div class="unidad-lectura-decision-header">
+        <h3 id="unidadLecturaDecisionTitle">¿Cómo quieres usar las dos lecturas?</h3>
+        <button type="button" class="unidad-lectura-decision-close" aria-label="Cerrar" data-action="close"></button>
+      </div>
+      <div class="unidad-lectura-decision-body">
+        <p class="unidad-lectura-decision-copy">Seleccionaste una lectura principal y una lectura alternativa. Elige cómo debe trabajar la unidad con ambas referencias.</p>
+        <div class="unidad-lectura-decision-options">
+          <button type="button" class="unidad-lectura-decision-option" data-mode="split">
+            <strong>Separar lecturas A</strong>
+            <span>Usar la lectura principal en <b>Proyectos</b> y la lectura ASC en las demás categorías.</span>
+          </button>
+          <button type="button" class="unidad-lectura-decision-option" data-mode="split-reverse">
+            <strong>Separar lecturas B</strong>
+            <span>Usar la lectura ASC en <b>Proyectos</b> y la lectura principal en las demás categorías.</span>
+          </button>
+          <button type="button" class="unidad-lectura-decision-option" data-mode="unify">
+            <strong>Crear lectura unificada</strong>
+            <span>Pedir a Gemini una lectura nueva y original a partir de ambas, para usarla en toda la unidad.</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function _abrirDecisionLecturaUnidad() {
+  const modal = _asegurarModalDecisionLecturaUnidad();
+  return new Promise((resolve) => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const cleanup = () => {
+      if (modal.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      modal.setAttribute("aria-hidden", "true");
+      modal.inert = true;
+      modal.classList.remove("is-open");
+      modal.querySelectorAll("[data-action='close'], .unidad-lectura-decision-option").forEach((node) => {
+        node.removeEventListener("click", onClick);
+      });
+      document.removeEventListener("keydown", onKeydown);
+      if (previousFocus && document.contains(previousFocus)) {
+        previousFocus.focus({ preventScroll: true });
+      }
+    };
+    const finish = (value) => {
+      cleanup();
+      resolve(value);
+    };
+    const onClick = (event) => {
+      const mode = event.currentTarget?.dataset?.mode || "";
+      if (mode === "split" || mode === "split-reverse" || mode === "unify") {
+        finish(mode);
+        return;
+      }
+      finish("");
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") finish("");
+    };
+
+    modal.querySelectorAll("[data-action='close'], .unidad-lectura-decision-option").forEach((node) => {
+      node.addEventListener("click", onClick);
+    });
+    document.addEventListener("keydown", onKeydown);
+    modal.inert = false;
+    modal.setAttribute("aria-hidden", "false");
+    modal.classList.add("is-open");
+    modal.querySelector(".unidad-lectura-decision-option")?.focus({ preventScroll: true });
+  });
+}
+
+async function _resolverModoLecturasUnidad(ctx = {}) {
+  const principalId = String(selectTema?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  if (!principalId || !ascId) return "";
+
+  const key = `${principalId}|${ascId}`;
+  const current = window.__unidadLecturaDecision;
+  if (current?.key === key && current?.mode) {
+    return current.mode;
+  }
+
+  const mode = await _abrirDecisionLecturaUnidad();
+  if (!mode) return "";
+
+  window.__unidadLecturaDecision = {
+    key,
+    mode,
+    categoria: String(ctx?.categoria || "").trim()
+  };
+  if (mode === "unify") {
+    _activarRelacionLecturaProyectosUnidad();
+  }
+  return mode;
+}
+
+async function _asegurarModoLecturasUnidad(ctx = {}) {
+  const principalId = String(selectTema?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  if (!principalId || !ascId) return true;
+  const mode = await _resolverModoLecturasUnidad(ctx);
+  return !!mode;
+}
+
+function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
+  const unicas = [];
+  const ids = new Set();
+  lecturas.filter(Boolean).forEach((lectura) => {
+    const id = String(lectura?.id || "").trim() || `sin-id-${unicas.length + 1}`;
+    if (ids.has(id)) return;
+    ids.add(id);
+    unicas.push(lectura);
+  });
+
+  if (!unicas.length) {
+    return {
+      modo: "sin_lectura",
+      lectura: null,
+      lecturas: [],
+      lecturaDisponible: false,
+      titulo: "",
+      contenido: "",
+      preguntas: [],
+      lecturaId: "",
+      lecturaIds: [],
+      lecturaOrigen: "",
+      lecturaOrigenes: []
+    };
+  }
+
+  if (unicas.length === 1) {
+    const lectura = unicas[0];
+    const lecturaId = String(lectura?.id || "").trim();
+    const lecturaOrigen = _origenLecturaUnidad(lectura);
+    return {
+      modo,
+      lectura: {
+        ...lectura,
+        titulo: _tituloLecturaUnidad(lectura),
+        tema: _tituloLecturaUnidad(lectura),
+        contenidoHTML: _contenidoLecturaUnidad(lectura),
+        preguntasComprension: _preguntasLecturaUnidad(lectura)
+      },
+      lecturas: [lectura],
+      lecturaDisponible: true,
+      titulo: _tituloLecturaUnidad(lectura),
+      contenido: _contenidoLecturaUnidad(lectura),
+      preguntas: _preguntasLecturaUnidad(lectura),
+      lecturaId,
+      lecturaIds: lecturaId ? [lecturaId] : [],
+      lecturaOrigen,
+      lecturaOrigenes: lecturaOrigen ? [lecturaOrigen] : []
+    };
+  }
+
+  const lecturaIds = unicas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean);
+  const lecturaOrigenes = Array.from(new Set(unicas.map(_origenLecturaUnidad).filter(Boolean)));
+  const titulo = `Lectura unificada: ${unicas.map(_tituloLecturaUnidad).filter(Boolean).join(" + ")}`;
+  const contenido = _contenidoLecturaUnificadaUnidad(unicas);
+  const preguntas = _fusionarPreguntasLecturaUnidad(unicas);
+
+  return {
+    modo: "fusion",
+    lectura: {
+      id: lecturaIds.join("|"),
+      titulo,
+      tema: titulo,
+      contenidoHTML: contenido,
+      preguntasComprension: preguntas,
+      tipo: "fusion",
+      sourceCollection: "fusion",
+      coleccion: "fusion"
+    },
+    lecturas: unicas,
+    lecturaDisponible: true,
+    titulo,
+    contenido,
+    preguntas,
+    lecturaId: lecturaIds.join("|"),
+    lecturaIds,
+    lecturaOrigen: "fusion",
+    lecturaOrigenes
+  };
+}
+
+async function _resolverLecturaUnidadActual(ctx = {}) {
+  const lecturaPrincipalId = String(selectTema?.value || "").trim();
+  const lecturaAlternaId = String(selectTemaASC?.value || "").trim();
+  const lecturasSeleccionadas = [];
+
+  if (lecturaPrincipalId) {
+    const lecturaPrincipal = await _resolverLecturaPorId(lecturaPrincipalId).catch(() => null);
+    if (lecturaPrincipal) lecturasSeleccionadas.push(lecturaPrincipal);
+  }
+
+  if (lecturaAlternaId) {
+    const lecturaAlterna = await _resolverLecturaPorId(lecturaAlternaId).catch(() => null);
+    if (lecturaAlterna) lecturasSeleccionadas.push(lecturaAlterna);
+  }
+
+  if (lecturasSeleccionadas.length) {
+    if (lecturasSeleccionadas.length > 1) {
+      const strategy = String(ctx?.lecturaStrategy || window.__unidadLecturaDecision?.mode || "").trim();
+      if (strategy === "split" || strategy === "split-reverse") {
+        const categoriaActual = String(ctx?.categoria || "").trim();
+        if (!categoriaActual) {
+          const lecturaIds = lecturasSeleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean);
+          const lecturaOrigenes = Array.from(new Set(lecturasSeleccionadas.map(_origenLecturaUnidad).filter(Boolean)));
+          const titulo = `Lecturas separadas: ${lecturasSeleccionadas.map(_tituloLecturaUnidad).filter(Boolean).join(" + ")}`;
+          return {
+            modo: "split",
+            lectura: {
+              id: lecturaIds.join("|"),
+              titulo,
+              tema: titulo,
+              contenidoHTML: "",
+              preguntasComprension: [],
+              tipo: "split",
+              sourceCollection: "split",
+              coleccion: "split"
+            },
+            lecturas: lecturasSeleccionadas,
+            lecturaDisponible: true,
+            titulo,
+            contenido: "",
+            preguntas: [],
+            lecturaId: lecturaIds.join("|"),
+            lecturaIds,
+            lecturaOrigen: "split",
+            lecturaOrigenes
+          };
+        }
+        const principalLectura = lecturasSeleccionadas[0] || null;
+        const ascLectura = lecturasSeleccionadas[1] || lecturasSeleccionadas[0] || null;
+        const proyectosUsaASC = strategy === "split-reverse";
+        const lecturaParaCategoria = categoriaActual === "Proyectos"
+          ? (proyectosUsaASC ? ascLectura : principalLectura)
+          : (proyectosUsaASC ? principalLectura : ascLectura);
+        const modoSeleccion = categoriaActual === "Proyectos"
+          ? (proyectosUsaASC ? "solo_asc" : "solo_principal")
+          : (proyectosUsaASC ? "solo_principal" : "solo_asc");
+        return _normalizarLecturaResueltaUnidad(lecturaParaCategoria ? [lecturaParaCategoria] : [], modoSeleccion);
+      }
+      const lecturaFusionada = await _generarLecturaUnificadaConGemini(lecturasSeleccionadas, ctx);
+      const lecturaIds = lecturasSeleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean);
+      const lecturaOrigenes = Array.from(new Set(lecturasSeleccionadas.map(_origenLecturaUnidad).filter(Boolean)));
+      return {
+        modo: "fusion",
+        lectura: lecturaFusionada,
+        lecturas: lecturasSeleccionadas,
+        lecturaDisponible: true,
+        titulo: _tituloLecturaUnidad(lecturaFusionada),
+        contenido: _contenidoLecturaUnidad(lecturaFusionada),
+        preguntas: _preguntasLecturaUnidad(lecturaFusionada),
+        lecturaId: lecturaIds.join("|"),
+        lecturaIds,
+        lecturaOrigen: "fusion",
+        lecturaOrigenes
+      };
+    }
+    const modoSeleccion = _origenLecturaUnidad(lecturasSeleccionadas[0]) === "lecturasASC" ? "solo_asc" : "solo_principal";
+    return _normalizarLecturaResueltaUnidad(lecturasSeleccionadas, modoSeleccion);
+  }
+
+  const poolLecturas = [
+    ...(Array.isArray(window.lecturasNuevas) ? window.lecturasNuevas : []),
+    ...(Array.isArray(window.lecturasASC) ? window.lecturasASC : []),
+    ...(Array.isArray(window.lecturasFiltradas) ? window.lecturasFiltradas : []),
+    ...(Array.isArray(window.todasLasLecturas) ? window.todasLasLecturas : []),
+    ...(_poolLecturasBusqueda() || [])
+  ];
+
+  const lecturaAutomatica = poolLecturas.find((lectura) => _lecturaCoincideConContexto(lectura, ctx)) || null;
+  return _normalizarLecturaResueltaUnidad(lecturaAutomatica ? [lecturaAutomatica] : [], "automatica");
+}
+
 
 
 
@@ -1380,14 +1982,16 @@ const selectUnidad = document.getElementById('unidadNumero');
 const contenedorCamposSecuencia = document.getElementById("camposSecuencia");
 const outputResultado = document.getElementById("resultadoUnidadGenerada");
 // Luego los event listeners
-selectTema.addEventListener("change", () => {
-  if (selectTema.value) selectTemaASC.value = "";
+selectTema?.addEventListener("change", () => {
+  _limpiarDecisionLecturaUnidad();
   _sincronizarInputTemaConSelect();
+  guardarSelectsUnidad();
 });
 
-selectTemaASC.addEventListener("change", () => {
-  if (selectTemaASC.value) selectTema.value = "";
+selectTemaASC?.addEventListener("change", () => {
+  _limpiarDecisionLecturaUnidad();
   _sincronizarInputTemaConSelect();
+  guardarSelectsUnidad();
 });
 
 if (inputTemaTexto) {
@@ -1930,6 +2534,7 @@ const CHARLY_TTS_FEMALE_VOICES = [
 ];
 const AGENT_PROFILES_STORAGE_KEY = "cb_unidad_agent_profiles_v1";
 const AGENT_MASTER_ENABLED_STORAGE_KEY = "cb_unidad_agent_enabled_v1";
+const AGENT_FOOTER_COLLAPSED_STORAGE_KEY = "cb_unidad_agents_footer_collapsed_v1";
 const AGENT_PROFILES_USER_FIELD = "agentProfiles";
 const CHARLY_VOICE_SPEED_DEFAULT = 1.0;
 const CHARLY_VOICE_PITCH_DEFAULT = 0.95;
@@ -9915,6 +10520,42 @@ function _guardarEstadoMasterAgenteStorage(enabled = true) {
   }
 }
 
+function _leerEstadoFooterAgentesColapsado() {
+  try {
+    return String(localStorage.getItem(AGENT_FOOTER_COLLAPSED_STORAGE_KEY) || "").trim() === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function _guardarEstadoFooterAgentesColapsado(collapsed = false) {
+  try {
+    localStorage.setItem(AGENT_FOOTER_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch (_) {
+    // noop
+  }
+}
+
+function _setEstadoFooterAgentesColapsado(collapsed = false, options = {}) {
+  const { persist = true } = options || {};
+  const value = collapsed === true;
+  const footer = document.querySelector(".unidad-global-agents-footer");
+  const tab = document.getElementById("unidadAgentsFooterToggle");
+  const mainStack = document.querySelector(".studio-shell .studio-main-stack");
+  if (footer) {
+    footer.classList.toggle("is-collapsed", value);
+    footer.setAttribute("data-collapsed", value ? "true" : "false");
+  }
+  if (mainStack) {
+    mainStack.classList.toggle("agents-footer-collapsed", value);
+  }
+  if (tab) {
+    tab.setAttribute("aria-expanded", value ? "false" : "true");
+    tab.setAttribute("title", value ? "Mostrar panel de agentes" : "Ocultar panel de agentes");
+  }
+  if (persist) _guardarEstadoFooterAgentesColapsado(value);
+}
+
 function _setEstadoUIAgentMaster(enabled = true) {
   const value = enabled === true;
   const root = document.querySelector(".unidad-global-agents-footer");
@@ -9930,10 +10571,17 @@ function _normalizarRolUnidad(value = "") {
 function _aplicarVisibilidadAdminUnidad(isAdmin = false) {
   const allow = isAdmin === true;
   const footer = document.querySelector(".unidad-global-agents-footer");
+  const footerTab = document.getElementById("unidadAgentsFooterToggle");
   const mainStack = document.querySelector(".studio-shell .studio-main-stack");
   if (footer) {
     footer.hidden = !allow;
     footer.setAttribute("aria-hidden", allow ? "false" : "true");
+  }
+  if (footerTab) {
+    footerTab.hidden = !allow;
+    footerTab.setAttribute("aria-hidden", allow ? "false" : "true");
+    if (!allow) footerTab.setAttribute("tabindex", "-1");
+    else footerTab.removeAttribute("tabindex");
   }
   if (mainStack) {
     mainStack.classList.toggle("no-agents-footer", !allow);
@@ -9945,6 +10593,20 @@ function _aplicarVisibilidadAdminUnidad(isAdmin = false) {
     if (!allow) commandBtn.setAttribute("tabindex", "-1");
     else commandBtn.removeAttribute("tabindex");
   }
+}
+
+function _inicializarToggleFooterAgentesUnidad() {
+  const tab = document.getElementById("unidadAgentsFooterToggle");
+  if (!tab || tab.dataset.boundAgentsFooter === "1") {
+    _setEstadoFooterAgentesColapsado(_leerEstadoFooterAgentesColapsado(), { persist: false });
+    return;
+  }
+  tab.dataset.boundAgentsFooter = "1";
+  _setEstadoFooterAgentesColapsado(_leerEstadoFooterAgentesColapsado(), { persist: false });
+  tab.addEventListener("click", () => {
+    const nextCollapsed = tab.getAttribute("aria-expanded") === "true";
+    _setEstadoFooterAgentesColapsado(nextCollapsed, { persist: true });
+  });
 }
 
 function _forzarEstadoAgenteVozNoAdmin(disabled = false) {
@@ -14149,7 +14811,6 @@ function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   selectTema.innerHTML = `<option value="${lectura.id}">${_labelLecturaPrincipal(lectura)}</option>`;
   selectTema.value = lectura.id;
   selectTema.dispatchEvent(new Event("change", { bubbles: true }));
-  if (selectTemaASC) selectTemaASC.value = "";
   _sincronizarInputTemaConSelect();
   guardarSelectsUnidad();
   return true;
@@ -14552,9 +15213,12 @@ function conectarBotonGenerarTodo() {
 
   btnActual.addEventListener("click", async () => {
     if (btnActual.disabled) return;
+    const estrategiaLista = await _asegurarModoLecturasUnidad({ categoria: "unidad-completa" });
+    if (!estrategiaLista) return;
 
     window.stopRequestedUnidad = false;
     window.cancelarProyectos = false;
+    prepararNuevoResultadoUnidad();
     btnActual.disabled = true;
     const originalText = btnActual.textContent;
     const originalBg = btnActual.style.background;
@@ -15332,26 +15996,29 @@ function generarCategoriaHandler(event) {
   }
 
   if (cat && !btn.disabled) {
-    window.stopRequestedUnidad = false;
-    window.cancelarProyectos = false;
+    (async () => {
+      const estrategiaLista = await _asegurarModoLecturasUnidad({ categoria: cat });
+      if (!estrategiaLista) return;
 
-    // Cambiar estado visual
-    btn.disabled = true;
-    btn.classList.add('disabled', 'active');
-    const originalIcon = btn.innerHTML;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-    const stopBtn = (cat === "Proyectos") ? document.getElementById("btn-detener-Proyectos") : null;
-    if (stopBtn) {
+      window.stopRequestedUnidad = false;
       window.cancelarProyectos = false;
-      stopBtn.style.display = "inline-flex";
-      stopBtn.disabled = false;
-    }
+      prepararNuevoResultadoUnidad();
 
-    // Llamar a la función de generación
-    generarSeccionCategoria(cat)
+      // Cambiar estado visual
+      btn.disabled = true;
+      btn.classList.add('disabled', 'active');
+      const originalIcon = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const stopBtn = (cat === "Proyectos") ? document.getElementById("btn-detener-Proyectos") : null;
+      if (stopBtn) {
+        window.cancelarProyectos = false;
+        stopBtn.style.display = "inline-flex";
+        stopBtn.disabled = false;
+      }
+
+      return generarSeccionCategoria(cat)
       .then(() => {
-        // Éxito: ícono de check por 2 segundos
         btn.innerHTML = '<i class="fas fa-check"></i>';
         setTimeout(() => {
           btn.innerHTML = originalIcon;
@@ -15376,6 +16043,7 @@ function generarCategoriaHandler(event) {
         window.cancelarProyectos = false;
         window.stopRequestedUnidad = false;
       });
+    })().catch(() => {});
   }
 }
 
@@ -16202,6 +16870,43 @@ const estructuraActividades = `
 // 🟢 También definir listaCriterios globalmente
 const listaCriterios = "Localización, Interpretación, Integración, Evaluación, Reflexión/Transferencia";
 
+function _bloqueLecturaGeneradoraProyectoExacta(contenidoLectura = "", tituloLectura = "") {
+  const contenido = String(contenidoLectura || "").trim();
+  if (!contenido) return "";
+  const titulo = String(tituloLectura || "").trim();
+  return `
+  <h3>Lectura generadora</h3>
+  ${titulo ? `<p><strong>Título de la lectura relacionada:</strong> ${titulo}</p>` : ""}
+  ${contenido}
+  `;
+}
+
+function _forzarLecturaGeneradoraProyecto(html = "", contenidoLectura = "", tituloLectura = "") {
+  const contenido = String(contenidoLectura || "").trim();
+  const original = String(html || "");
+  if (!contenido || !original) return original;
+
+  const bloqueExacto = _bloqueLecturaGeneradoraProyectoExacta(contenido, tituloLectura);
+  const lecturaHeading = /<h3[^>]*>\s*Lectura generadora\s*<\/h3>/i;
+  const siguienteHeading = /<h3[^>]*>/i;
+  const match = original.match(lecturaHeading);
+
+  if (!match) {
+    const preguntaMatch = original.match(/(<h3[^>]*>\s*Preguntas de comprensión\s*<\/h3>)/i);
+    if (preguntaMatch?.index >= 0) {
+      return `${original.slice(0, preguntaMatch.index)}${bloqueExacto}\n${original.slice(preguntaMatch.index)}`;
+    }
+    return `${bloqueExacto}\n${original}`;
+  }
+
+  const start = match.index;
+  const afterHeading = start + match[0].length;
+  const rest = original.slice(afterHeading);
+  const next = rest.match(siguienteHeading);
+  const end = next?.index >= 0 ? afterHeading + next.index : original.length;
+  return `${original.slice(0, start)}${bloqueExacto}${original.slice(end)}`;
+}
+
 // ===================== PROYECTOS (con PISA + RÚBRICA POR FASE + Fichas/Anexos/Video/Recortable) =====================
 window.construirPromptProyecto = function (
   objetivosDelSubtema,
@@ -16269,6 +16974,18 @@ window.construirPromptProyecto = function (
       ? `<ul>${preguntasComprension.map(p => `<li>${p.pregunta}<br><span style="color:mediumvioletred;">${p.respuesta || ""}</span></li>`).join("")}</ul>`
       : ""
     }`
+    : "";
+  const instruccionAnclajeLectura = bloqueLectura
+    ? `
+  La lectura detonante es el eje narrativo y conceptual del proyecto.
+  No la sustituyas por otra historia ni la diluyas con la secuencia curricular.
+  Integra T/AE/C/P dentro del mismo hilo de la lectura seleccionada o lectura unificada.
+  Si hubo dos lecturas seleccionadas, tratalas como una sola lectura coherente.
+  Debes reutilizar EXACTAMENTE la lectura detonante como lectura generadora del proyecto.
+  Copia el HTML de la lectura detonante sin reescribir, resumir, ampliar, cambiar nombres, cambiar personajes ni agregar ejemplos.
+  NO inventes una lectura adicional, alternativa ni paralela.
+  NO cambies personajes, tema central ni conflicto base de la lectura detonante.
+  `
     : "";
 
   // ============== NUEVO: detectar checkboxes de recursos para PROYECTOS ==============
@@ -16490,14 +17207,19 @@ window.construirPromptProyecto = function (
   - Procesos (P): ${P_resumen}
 
   ${bloqueLectura}
+  ${instruccionAnclajeLectura}
 
   📌 Pasos:
   1) Genera una **pregunta detonante** clara y contextual.
-  2) Escribe una **lectura generadora** (300–500 palabras) segmentada en párrafos cortos.
-      -IMPORTANTE: envuelve en bold <b>sinonimos</b> las palabras que puedan tener más de una sinónimo 
+  2) ${bloqueLectura
+    ? "Copia la **lectura detonante provista** como la única **lectura generadora** del proyecto. NO la edites, NO le agregues personajes, NO cambies nombres y NO generes otra lectura."
+    : "Escribe una **lectura generadora** (300–500 palabras) segmentada en párrafos cortos."}
+      ${bloqueLectura
+    ? "-IMPORTANTE: no agregues tabla de sinónimos dentro de la lectura generadora porque debe quedar exactamente igual a la lectura detonante."
+    : `-IMPORTANTE: envuelve en bold <b>sinonimos</b> las palabras que puedan tener más de una sinónimo
       -IMPORTANTE: los <b>sinonimos</b> deben ser palabras difíciles
       -crea una tabla al final de la lectura con las palabras en bold y sus sinónimos, 
-      -los sinónimos de la tabla deben ser sencillos para que los niños los comprendan
+      -los sinónimos de la tabla deben ser sencillos para que los niños los comprendan`}
   3) **Justo después de la lectura generadora, añade 6 preguntas de comprensión tipo PISA**, NO literales:
     - Al menos 1 metacognitiva.
     - Usa el formato EXACTO:
@@ -16662,7 +17384,9 @@ window.construirPromptProyecto = function (
   <p>[texto]</p>
 
   <h3>Lectura generadora</h3>
-  <p>[lectura completa en 300–500 palabras]</p>
+  ${bloqueLectura
+    ? "<p>[REUTILIZA EXACTAMENTE la lectura detonante proporcionada; no escribas una nueva.]</p>"
+    : "<p>[lectura completa en 300–500 palabras]</p>"}
 
   <!-- 👇 BLOQUE OBLIGATORIO INMEDIATAMENTE DESPUÉS DE LA LECTURA -->
   <h3>Preguntas de comprensión</h3>
@@ -17599,35 +18323,19 @@ async function generarSeccionCategoria(categoria) {
     const categoriasQueRequierenLectura = []; // añade más si lo necesitas
     const categoriaRequiereLectura = categoriasQueRequierenLectura.includes(categoria);
 
-    // === Lectura seleccionada (prioridad: principal -> alternativa) ===
-    const selectTema = document.getElementById("unidadTema");
-    const selectTemaASC = document.getElementById("unidadTemaASC");
-    const lecturaPrincipalId = selectTema?.value || "";
-    const lecturaAlternaId = selectTemaASC?.value || "";
-
     const nivelCtxLectura = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
     const gradoCtxLectura = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
     const trimestreCtxLectura = document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "";
     const unidadCtxLectura = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "";
-
-    const lecturaPrincipalRaw = lecturaPrincipalId ? await _resolverLecturaPorId(lecturaPrincipalId) : null;
-    const lecturaPrincipal = _lecturaCoincideConContexto(lecturaPrincipalRaw, {
+    const lecturaResuelta = await _resolverLecturaUnidadActual({
       nivel: nivelCtxLectura,
       grado: gradoCtxLectura,
       trimestre: trimestreCtxLectura,
-      unidad: unidadCtxLectura
-    }) ? lecturaPrincipalRaw : null;
-    const lecturaAlternaRaw = !lecturaPrincipal && lecturaAlternaId ? await _resolverLecturaPorId(lecturaAlternaId) : null;
-    const lecturaAlterna = _lecturaCoincideConContexto(lecturaAlternaRaw, {
-      nivel: nivelCtxLectura,
-      grado: gradoCtxLectura,
-      trimestre: trimestreCtxLectura,
-      unidad: unidadCtxLectura
-    }) ? lecturaAlternaRaw : null;
-    const lectura = lecturaPrincipal || lecturaAlterna || null;
-
-    const _contenidoLecturaLocal = (l = {}) =>
-      l.contenidoHTML || l.contenidoPlano || l.textoLectura || l.lectura || l.contenido || l.texto || "";
+      unidad: unidadCtxLectura,
+      categoria,
+      lecturaStrategy: window.__unidadLecturaDecision?.mode || ""
+    });
+    const lectura = lecturaResuelta.lectura;
 
     // Si la categoría LA REQUIERE y no hay lectura → se avisa y se detiene.
     if (categoriaRequiereLectura && !lectura) {
@@ -17636,11 +18344,9 @@ async function generarSeccionCategoria(categoria) {
     }
 
     // Si no la requiere → seguimos con lectura vacía
-    const lecturaDisponible = !!lectura;
-    const contenidoLecturaSeguro = lecturaDisponible ? _contenidoLecturaLocal(lectura) : "";
-    const preguntasComprensionSeguras = lecturaDisponible
-      ? (lectura.preguntasComprension || lectura.preguntas || [])
-      : [];
+    const lecturaDisponible = !!lecturaResuelta.lecturaDisponible;
+    const contenidoLecturaSeguro = lecturaDisponible ? lecturaResuelta.contenido : "";
+    const preguntasComprensionSeguras = lecturaDisponible ? lecturaResuelta.preguntas : [];
 
     // === Subtemas de la categoría - CORREGIDO: Verificar checkboxes de cada subtema ===
     const subtemasDeCategoria = Object
@@ -17758,12 +18464,6 @@ async function generarSeccionCategoria(categoria) {
     const gradoSeleccionado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
     const trimestreSeleccionado = document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "";
     const unidadSeleccionada = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "";
-    const lecturasNuevasActuales = window.lecturasNuevas || [];
-    const lecturasASCActuales = window.lecturasASC || [];
-
-    // ✅ CORRECCIÓN: Buscar en AMBAS colecciones: lecturasNuevas Y lecturasASC
-    let lecturaCoincidenteGlobal = null;
-
     // Verificar si ALGUNA categoría necesita lectura
     const algunaCategoriaNecesitaLectura =
       categoria === "Lenguaje y comunicación" ||
@@ -17771,125 +18471,11 @@ async function generarSeccionCategoria(categoria) {
         const chkRelacion = document.querySelector(`input[name='relacion_${sub}']`);
         return chkRelacion ? chkRelacion.checked : false;
       });
-
-    let lecturaCoincidente = null;
-    const poolLecturas = [
-      ...(Array.isArray(window.lecturasNuevas) ? window.lecturasNuevas : []),
-      ...(Array.isArray(window.lecturasASC) ? window.lecturasASC : []),
-      ...(Array.isArray(lecturasFiltradas) ? lecturasFiltradas : []),
-      ...(Array.isArray(todasLasLecturas) ? todasLasLecturas : [])
-    ];
-
-    // Lectura principal (usuario)
-    if (selectTema?.value) {
-      lecturaCoincidente = poolLecturas.find(l => l.id === selectTema.value) || null;
-      if (!lecturaCoincidente) {
-        lecturaCoincidente = await _resolverLecturaPorId(selectTema.value);
-      }
-      if (!_lecturaCoincideConContexto(lecturaCoincidente, {
-        nivel,
-        grado: gradoSeleccionado,
-        trimestre: trimestreSeleccionado,
-        unidad: unidadSeleccionada
-      })) {
-        lecturaCoincidente = null;
-      }
-    }
-
-    // Lectura alternativa (usuario)
-    if (!lecturaCoincidente && selectTemaASC?.value) {
-      lecturaCoincidente = poolLecturas.find(l => l.id === selectTemaASC.value) || null;
-      if (!lecturaCoincidente) {
-        lecturaCoincidente = await _resolverLecturaPorId(selectTemaASC.value);
-      }
-      if (!_lecturaCoincideConContexto(lecturaCoincidente, {
-        nivel,
-        grado: gradoSeleccionado,
-        trimestre: trimestreSeleccionado,
-        unidad: unidadSeleccionada
-      })) {
-        lecturaCoincidente = null;
-      }
-    }
-
-    // Normalizar grado
-    const mapaGrados = {
-      "primero": "1", "segundo": "2", "tercero": "3",
-      "cuarto": "4", "quinto": "5", "sexto": "6",
-      "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6"
-    };
-
-    const gradoNormalizado = mapaGrados[String(gradoSeleccionado).trim().toLowerCase()] || String(gradoSeleccionado).trim();
-
-
-
-
-    // PRIMERO: Buscar en lecturasNuevas
-    // 🔒 SOLO buscar automáticamente si el usuario NO eligió lectura
-    if (!lecturaCoincidente) {
-
-      // 🔍 Buscar en lecturasNuevas / lecturasFiltradas
-      lecturaCoincidente =
-        poolLecturas.find(l => {
-          const nivelLectura = String(l.nivel || "").trim().toLowerCase();
-          const nivelBuscado = String(nivel).trim().toLowerCase();
-
-          const gradoLectura = _normalizarGradoComparable(l.grado);
-          const gradoBuscado = _normalizarGradoComparable(gradoNormalizado);
-
-          const trimestreLectura = parseInt(l.trimestre || "0");
-          const trimestreBuscado = parseInt(trimestreSeleccionado || "0");
-
-          const unidadLectura = parseInt(l.unidad || "0");
-          const unidadBuscada = parseInt(unidadSeleccionada || "0");
-
-          return (
-            nivelLectura === nivelBuscado &&
-            gradoLectura === gradoBuscado &&
-            trimestreLectura === trimestreBuscado &&
-            unidadLectura === unidadBuscada
-          );
-        }) || null;
-
-      // 🔍 Si no se encontró, buscar en lecturasASC
-      if (!lecturaCoincidente && lecturasASCActuales.length > 0) {
-        lecturaCoincidente = poolLecturas.find(l => {
-          const nivelLectura = String(l.nivel || "").trim().toLowerCase();
-          const nivelBuscado = String(nivel).trim().toLowerCase();
-
-          const gradoLectura = _normalizarGradoComparable(l.grado);
-          const gradoBuscado = _normalizarGradoComparable(gradoNormalizado);
-
-          const trimestreLectura = parseInt(l.trimestre || "0");
-          const trimestreBuscado = parseInt(trimestreSeleccionado || "0");
-
-          const unidadLectura = parseInt(l.unidad || "0");
-          const unidadBuscada = parseInt(unidadSeleccionada || "0");
-
-          return (
-            nivelLectura === nivelBuscado &&
-            gradoLectura === gradoBuscado &&
-            trimestreLectura === trimestreBuscado &&
-            unidadLectura === unidadBuscada
-          );
-        }) || null;
-      }
-    }
-
-    window.lecturaNuevaCoincidenteGlobal = lecturaCoincidente || null;
+    window.lecturaNuevaCoincidenteGlobal = lectura || null;
 
 
 
     // ✅ CORRECCIÓN: CREAR BLOQUE DE LECTURA GLOBAL UNA SOLA VEZ
-    const _obtenerContenidoLectura = (lecturaObj = {}) =>
-      lecturaObj.contenidoHTML
-      || lecturaObj.contenidoPlano
-      || lecturaObj.textoLectura
-      || lecturaObj.lectura
-      || lecturaObj.contenido
-      || lecturaObj.texto
-      || "";
-
     let bloqueLecturaGlobal = "";
     if (window.lecturaNuevaCoincidenteGlobal) {
       // Tomar preguntas desde cualquiera de los dos formatos
@@ -17897,15 +18483,16 @@ async function generarSeccionCategoria(categoria) {
         window.lecturaNuevaCoincidenteGlobal.preguntasComprension ||
         window.lecturaNuevaCoincidenteGlobal.preguntas ||
         [];
-      const contenidoLecturaBase = _obtenerContenidoLectura(window.lecturaNuevaCoincidenteGlobal);
+      const contenidoLecturaBase = _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
       const tituloLecturaBase =
         window.lecturaNuevaCoincidenteGlobal.titulo ||
         window.lecturaNuevaCoincidenteGlobal.tema ||
         "Sin título";
+      const encabezadoLecturaBase = lecturaResuelta.modo === "fusion" ? "📚 Lectura unificada" : "📖 Lectura seleccionada";
 
       bloqueLecturaGlobal = `
             <div class="bloque-lectura-global" style="margin-bottom:30px; border: 2px solid #e0e0e0; padding: 20px; border-radius: 8px; background: #f9f9f9;">
-                <h3 style="color:#2c5aa0; margin-top:0;">📖 Lectura base</h3>
+                <h3 style="color:#2c5aa0; margin-top:0;">${encabezadoLecturaBase}</h3>
                 <p style="margin:0 0 10px 0;"><strong>Título de la lectura:</strong> ${tituloLecturaBase}</p>
                 <div class="contenido-lectura" style="line-height: 1.6;">
                     ${contenidoLecturaBase || "<em>Lectura sin contenido disponible</em>"}
@@ -18048,6 +18635,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
       const relacionada = !!document.querySelector(`input[name='relacion_${subtema}']`)?.checked;
       const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
+      const debeUsarLecturaProyecto = lecturaDisponible && (
+        relacionada ||
+        lecturaResuelta?.modo === "fusion" ||
+        window.__unidadLecturaDecision?.mode === "unify"
+      );
 
       // ✅ AQUÍ VA EL CÓDIGO PARA GENERAR RECURSOS DE PROYECTOS
       const recursos = {
@@ -18107,9 +18699,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         });
         assertProyectosActivo(tokenProy);
         const instruccionesProyecto = window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
-        const tituloLecturaRelacionada = relacionada
+        const tituloLecturaRelacionada = debeUsarLecturaProyecto
           ? (
-            String(document.getElementById("unidadTemaTexto")?.selectedOptions?.[0]?.textContent || "").trim()
+            String(lecturaResuelta?.titulo || "").trim()
             || String(window.lecturaNuevaCoincidenteGlobal?.titulo || window.lecturaNuevaCoincidenteGlobal?.tema || "").trim()
           )
           : "";
@@ -18118,12 +18710,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         assertProyectosActivo(tokenProy);
         const packProyecto = window.construirPromptProyecto(
             objetivosDelSubtema,
-            (relacionada && lecturaDisponible) ? contenidoLecturaSeguro : "",
-            (relacionada && lecturaDisponible) ? preguntasComprensionSeguras : [],
+            debeUsarLecturaProyecto ? contenidoLecturaSeguro : "",
+            debeUsarLecturaProyecto ? preguntasComprensionSeguras : [],
             subtema,
         tituloCreativoProyecto,
         instruccionesProyecto,
-        tituloLecturaRelacionada
+        debeUsarLecturaProyecto ? tituloLecturaRelacionada : ""
       );
 
         const { prompt: promptProyecto, T_global, AE_global, C_global, P_global, metodologia } = packProyecto;
@@ -18141,6 +18733,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             let htmlProyecto = (respuestaProyecto || "").replace(/```html|```/g, "").trim();
             const clean = s => s.replace(/<\/?(html|body|head)>/gi, "").trim();
             htmlProyecto = clean(htmlProyecto);
+            if (debeUsarLecturaProyecto) {
+              htmlProyecto = _forzarLecturaGeneradoraProyecto(
+                htmlProyecto,
+                contenidoLecturaSeguro,
+                tituloLecturaRelacionada
+              );
+            }
             htmlProyecto = htmlProyecto.replace(
               /<\/table>\s*(<h3[^>]*>\s*Preguntas de comprensión\s*<\/h3>)/i,
               '</table><div style="height:14px;"></div>$1'
@@ -18159,6 +18758,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               assertProyectosActivo(tokenProy);
               const retryClean = clean((retry || "").replace(/```html|```/g, "").trim());
               if (retryClean.length > htmlProyecto.length) htmlProyecto = retryClean;
+              if (debeUsarLecturaProyecto) {
+                htmlProyecto = _forzarLecturaGeneradoraProyecto(
+                  htmlProyecto,
+                  contenidoLecturaSeguro,
+                  tituloLecturaRelacionada
+                );
+              }
             }
 
         // 1) Mostrar primero SOLO col-alumno; col-maestro se agrega al terminar alumno.
@@ -18311,7 +18917,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       }
       else if (relacionadaFinal && window.lecturaNuevaCoincidenteGlobal) {
         // ✅ 2º fallback automático
-        contenidoLecturaParaPrompt = _obtenerContenidoLectura(window.lecturaNuevaCoincidenteGlobal);
+        contenidoLecturaParaPrompt = _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
 
         preguntasParaPrompt =
           window.lecturaNuevaCoincidenteGlobal.preguntasComprension || [];
@@ -18381,7 +18987,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           preguntasParaPrompt = preguntasComprensionSeguras;
         }
         else if (relacionadaFinal && window.lecturaNuevaCoincidenteGlobal) {
-          contenidoLecturaParaPrompt = _obtenerContenidoLectura(window.lecturaNuevaCoincidenteGlobal);
+          contenidoLecturaParaPrompt = _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
 
           preguntasParaPrompt =
             window.lecturaNuevaCoincidenteGlobal.preguntasComprension || [];
@@ -19988,6 +20594,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 document.getElementById("btnReiniciarFiltros")?.addEventListener("click", () => {
+  _limpiarDecisionLecturaUnidad();
 
   // Reiniciar selects principales
   selectNivel.value = "";
@@ -20024,13 +20631,15 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
   const grado = selectGrado?.value || "";
   const trimestre = selectTrimestre?.value || "";
   const unidad = selectUnidad?.value || "";
+  const lecturaResuelta = await _resolverLecturaUnidadActual({
+    nivel,
+    grado,
+    trimestre,
+    unidad,
+    lecturaStrategy: window.__unidadLecturaDecision?.mode || ""
+  });
 
-  // lecturaId: toma el que exista de forma segura
-  const lecturaId = (typeof selectTema !== "undefined" && selectTema?.value)
-    ? selectTema.value
-    : ((typeof selectTemaASC !== "undefined" && selectTemaASC?.value)
-      ? selectTemaASC.value
-      : "");
+  const lecturaId = lecturaResuelta.lecturaId || "";
 
   // contenido HTML: si respuestaFinal no existe/está vacía, cae al DOM
   const htmlContenido = (
@@ -20047,34 +20656,17 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
   let tituloLectura = "";
   let textoLectura = "";
   let preguntasLectura = [];
+  let lecturaIds = Array.isArray(lecturaResuelta.lecturaIds) ? lecturaResuelta.lecturaIds : [];
+  let lecturasOrigenes = Array.isArray(lecturaResuelta.lecturaOrigenes) ? lecturaResuelta.lecturaOrigenes : [];
 
   try {
-    // 👉 Desde lecturasNuevas (selectTema)
-    if (typeof selectTema !== "undefined" && selectTema?.value && Array.isArray(window.lecturasNuevas)) {
-      lecturaOrigen = window.lecturasNuevas.find(l => l.id === selectTema.value) || null;
-      if (lecturaOrigen) {
-        origenLectura = "lecturasNuevas";
-      }
-    }
-
-    // 👉 O desde lecturasASC (selectTemaASC)
-    if (!lecturaOrigen && typeof selectTemaASC !== "undefined" && selectTemaASC?.value && Array.isArray(window.lecturasASC || lecturasASC)) {
-      const arrASC = window.lecturasASC || lecturasASC || [];
-      lecturaOrigen = arrASC.find(l => l.id === selectTemaASC.value) || null;
-      if (lecturaOrigen) {
-        origenLectura = "lecturasASC";
-      }
-    }
+    lecturaOrigen = lecturaResuelta.lectura || null;
+    origenLectura = lecturaResuelta.lecturaOrigen || "";
 
     if (lecturaOrigen) {
-      tituloLectura = lecturaOrigen.tema || lecturaOrigen.titulo || "";
-      // campos típicos posibles
-      textoLectura = lecturaOrigen.lectura || lecturaOrigen.texto || lecturaOrigen.contenido || "";
-      preguntasLectura =
-        lecturaOrigen.preguntas ||
-        lecturaOrigen.preguntasComprension ||
-        lecturaOrigen.preguntas_comprension ||
-        [];
+      tituloLectura = _tituloLecturaUnidad(lecturaOrigen);
+      textoLectura = _contenidoLecturaUnidad(lecturaOrigen);
+      preguntasLectura = _preguntasLecturaUnidad(lecturaOrigen);
     }
 
     // ==============================
@@ -20140,9 +20732,11 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       trimestre,
       unidad,
       lecturaId,
+      lecturaIds,
       contenido: htmlContenido,
       // 🆕 Metadatos de la lectura
       lecturaOrigen: origenLectura || null,     // "lecturasNuevas" | "lecturasASC"
+      lecturasOrigenes: lecturasOrigenes || [],
       lecturaTitulo: tituloLectura || null,
       lecturaTexto: textoLectura || null,
       preguntasLectura: preguntasLectura || [],
@@ -21990,7 +22584,9 @@ function mostrarError(mensaje) {
 
 document.addEventListener('DOMContentLoaded', function () {
   _inicializarSincronizacionPerfilesAgentePorAuth();
+  _inicializarToggleFooterAgentesUnidad();
   _inicializarSwitchMasterAgenteUnidad();
+  syncGeminiModelOptionsForUnidad().catch(() => {});
   const ctrl = _asegurarControladorAgenteUnidad();
   ctrl.init();
   _aplicarPerfilesAgente(_obtenerPerfilesAgente(), { persist: false, syncRemote: false });

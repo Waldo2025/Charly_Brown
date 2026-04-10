@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.62";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.65";
 // Firebase imports
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
@@ -33,16 +33,28 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.62';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.65';
 
 import { 
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.62';
-import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.62';
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.62";
-import { authFetchJson } from "./api-client.js?v=2026-1.0.0.62";
+} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.65';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.65';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.65";
+import { authFetchJson, buildApiUrl } from "./api-client.js?v=2026-1.0.0.65";
+import {
+    applySimplePreviewStateFromLayers,
+    cleanupModuleGraphicInlinePreview,
+    getSimplePreviewState,
+    loadSelectedPreviewTextIntoEditor,
+    mergeSimplePreviewIntoLayers,
+    renderModuleGraphicInlinePreview,
+    renderSimplePreviewBackground,
+    renderSimplePreviewFooter,
+    renderSimplePreviewText,
+    upsertSelectedPreviewText
+} from "./moodleCourse-graphicPreview.js?v=2026-1.0.0.65";
 
 
 /* CONFIGURACIÓN FIREBASE */
@@ -221,60 +233,73 @@ function ensureModuleGraphicLightbox() {
     modal.className = "cb-module-graphic-lightbox hidden";
     modal.setAttribute("aria-hidden", "true");
     modal.inert = true;
+    modal.dataset.mode = "preview";
+    modal.dataset.section = "composition";
+    modal.dataset.zoom = "1";
     modal.innerHTML = `
         <div class="cb-module-graphic-lightbox__backdrop" data-mc-action="cerrar-galeria-grafico-modulo"></div>
-        <div class="cb-module-graphic-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Galería del gráfico del módulo">
+        <div class="cb-module-graphic-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Vista previa del gráfico del módulo">
             <header class="cb-module-graphic-lightbox__header">
-                <div>
-                    <div class="cb-module-graphic-lightbox__header-title">Galería del gráfico</div>
-                    <div class="cb-module-graphic-lightbox__header-subtitle">Canvas editable por capas</div>
+                <div class="cb-module-graphic-lightbox__header-copy">
+                    <div class="cb-module-graphic-lightbox__header-title-row">
+                        <div class="cb-module-graphic-lightbox__header-title">Vista previa del gráfico</div>
+                        <div class="cb-module-graphic-lightbox__caption"></div>
+                    </div>
                 </div>
                 <div class="cb-module-graphic-lightbox__header-actions">
-                    <button type="button" class="cb-module-graphic-lightbox__export" data-layer-command="download-svg" aria-label="Descargar SVG editable">
-                        <i class="fas fa-file-arrow-down"></i>
-                        <span>Descargar SVG</span>
-                    </button>
-                    <button type="button" class="cb-module-graphic-lightbox__close" data-mc-action="cerrar-galeria-grafico-modulo" aria-label="Cerrar galería">
+                    <button type="button" class="cb-module-graphic-lightbox__close" data-mc-action="cerrar-galeria-grafico-modulo" aria-label="Cerrar vista previa del gráfico">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </header>
             <div class="cb-module-graphic-lightbox__body">
-                <aside class="cb-module-graphic-lightbox__sidebar">
-                    <div class="cb-module-graphic-lightbox__inspector-header">
-                        <div>
-                            <div class="cb-module-graphic-lightbox__inspector-title">Capas</div>
-                            <div class="cb-module-graphic-lightbox__inspector-subtitle">Editor por capas del gráfico</div>
-                        </div>
-                        <button type="button" class="cb-module-graphic-lightbox__add-layer" data-layer-command="add">
-                            <i class="fas fa-plus"></i>
-                            <span>Nueva capa</span>
-                        </button>
-                    </div>
-                    <div class="cb-module-graphic-lightbox__canvas-meta"></div>
-                    <div class="cb-module-graphic-lightbox__layer-toggles">
-                        <label><input type="checkbox" data-layer-toggle="background" checked> Fondo</label>
-                        <label><input type="checkbox" data-layer-toggle="graphic" checked> Gráfico</label>
-                        <label><input type="checkbox" data-layer-toggle="text" checked> Texto</label>
-                    </div>
-                    <div class="cb-module-graphic-lightbox__layer-stack"></div>
-                </aside>
                 <section class="cb-module-graphic-lightbox__stage-wrap">
                     <div class="cb-module-graphic-lightbox__stage-scroll">
                         <div class="cb-module-graphic-lightbox__stage">
                             <div class="cb-module-graphic-lightbox__background-layer"></div>
+                            <div class="cb-module-graphic-lightbox__simple-preview-background-layer"></div>
                             <img class="cb-module-graphic-lightbox__image" src="" alt="">
                             <div class="cb-module-graphic-lightbox__graphic-layer"></div>
                             <div class="cb-module-graphic-lightbox__custom-layer"></div>
                             <div class="cb-module-graphic-lightbox__text-layer"></div>
+                            <div class="cb-module-graphic-lightbox__simple-preview-text-layer"></div>
                         </div>
                     </div>
-                    <div class="cb-module-graphic-lightbox__caption"></div>
                 </section>
             </div>
+            <footer class="cb-module-graphic-lightbox__footer"></footer>
         </div>
     `;
+    const applyPreviewInputValue = (previewInput) => {
+        if (!previewInput) return false;
+        const state = getSimplePreviewState(modal);
+        const key = String(previewInput.getAttribute("data-preview-input") || "").trim();
+        if (!key) return false;
+        if (key === "backgroundOpacity") state.backgroundOpacity = Math.max(0.06, Math.min(0.42, Number(previewInput.value || 18) / 100));
+        if (key === "text") {
+            state.text = String(previewInput.value || "");
+            if (state.text.trim()) state.textPanelOpen = true;
+        }
+        if (key === "fontFamily") state.fontFamily = String(previewInput.value || "Arial, sans-serif");
+        if (key === "fontSize") state.fontSize = Math.max(14, Math.min(64, Number(previewInput.value || 28)));
+        if (key === "fontWeight") state.fontWeight = String(previewInput.value || "700");
+        if (key === "color") state.color = String(previewInput.value || "#1f2937");
+        if (key === "backgroundColor") state.backgroundColor = `${String(previewInput.value || "#ffffff").trim()}CC`;
+        renderSimplePreviewBackground(modal);
+        renderSimplePreviewText(modal);
+        return true;
+    };
+    modal.addEventListener("input", (event) => {
+        const previewInput = event.target.closest("[data-preview-input]");
+        if (!previewInput) return;
+        applyPreviewInputValue(previewInput);
+    });
     modal.addEventListener("change", (event) => {
+        const previewInput = event.target.closest("[data-preview-input]");
+        if (previewInput) {
+            applyPreviewInputValue(previewInput);
+            return;
+        }
         const input = event.target.closest("[data-layer-toggle]");
         if (!input) return;
         const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
@@ -284,13 +309,260 @@ function ensureModuleGraphicLightbox() {
         stage.classList.toggle(`is-hidden-${layer}`, !shouldShow);
     });
     modal.addEventListener("click", async (event) => {
+        const dragSuppressUntil = Number(modal.dataset.suppressDragClickUntil || "0");
+        if (dragSuppressUntil > Date.now() && event.target.closest(".cb-module-graphic-lightbox__draggable")) {
+            event.preventDefault();
+            return;
+        }
+        const colorChip = event.target.closest(".cb-module-graphic-lightbox__color-chip");
+        if (colorChip && !(event.target instanceof HTMLInputElement && event.target.type === "color")) {
+            const colorInput = colorChip.querySelector('input[type="color"]');
+            if (colorInput instanceof HTMLInputElement) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof colorInput.showPicker === "function") {
+                    colorInput.showPicker();
+                } else {
+                    colorInput.click();
+                }
+                return;
+            }
+        }
+        const graphicElementNode = event.target.closest(".cb-module-graphic-lightbox__graphic-element");
+        const previewTextNode = event.target.closest(".cb-module-graphic-lightbox__preview-text-box");
+        if (previewTextNode) {
+            const textId = String(previewTextNode.getAttribute("data-text-id") || "").trim();
+            if (textId) {
+                const state = getSimplePreviewState(modal);
+                loadSelectedPreviewTextIntoEditor(modal, textId);
+                state.textPanelOpen = true;
+                state.backgroundPanelOpen = false;
+                renderSimplePreviewText(modal);
+                renderSimplePreviewFooter(modal);
+            }
+        }
+        if (graphicElementNode) {
+            const elementId = String(graphicElementNode.dataset.elementId || "").trim();
+            const elementKind = String(graphicElementNode.dataset.elementKind || "graphic").trim() || "graphic";
+            if (elementId) {
+                selectGraphicElement(modal, elementId, elementKind);
+                const state = getGraphicSelectionState(modal);
+                if (state.wandArmed && event.target instanceof HTMLImageElement) {
+                    const layers = normalizeEditableGraphicLayers(modal.__graphicLayers || {});
+                    const elementModel = findGraphicSelectionTarget(layers, state);
+                    if (elementModel?.imageUrl) {
+                        const rect = event.target.getBoundingClientRect();
+                        const relX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+                        const relY = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+                        const naturalWidth = event.target.naturalWidth || rect.width || 1;
+                        const naturalHeight = event.target.naturalHeight || rect.height || 1;
+                        const clickX = (relX / Math.max(1, rect.width)) * naturalWidth;
+                        const clickY = (relY / Math.max(1, rect.height)) * naturalHeight;
+                        try {
+                            const maskResult = await createMagicMaskFromImageUrl(
+                                String(elementModel.imageUrl || "").trim(),
+                                clickX,
+                                clickY,
+                                Number(elementModel.maskTolerance || state.tolerance || 26),
+                                elementModel.maskInvert === true || state.invert === true
+                            );
+                            elementModel.maskedImageUrl = maskResult.maskedImageUrl;
+                            elementModel.maskSelection = maskResult.selection;
+                            elementModel.maskTolerance = maskResult.selection.tolerance;
+                            elementModel.maskInvert = maskResult.selection.invert;
+                            state.wandArmed = false;
+                            modal.__graphicLayers = layers;
+                            renderEditableGraphicLayers(modal, layers);
+                        } catch (error) {
+                            reportEstadoGeneracionModulo(
+                                String(modal?.__graphicContext?.moduleId || "").trim(),
+                                String(error?.message || "No se pudo aplicar la varita mágica."),
+                                "warning",
+                                false
+                            );
+                        }
+                    }
+                }
+            }
+        }
         const action = event.target.closest("[data-layer-command]");
         if (!action) return;
         const command = String(action.getAttribute("data-layer-command") || "").trim();
         const layerId = String(action.getAttribute("data-layer-id") || "").trim();
         const layers = normalizeEditableGraphicLayers(modal.__graphicLayers || {});
+        if (command === "set-mode") {
+            setGraphicLightboxMode(modal, String(action.getAttribute("data-layer-mode") || "preview").trim() || "preview");
+            return;
+        }
+        if (command === "set-section") {
+            setGraphicLightboxSection(modal, String(action.getAttribute("data-layer-section") || "composition").trim() || "composition");
+            return;
+        }
+        if (command === "zoom-in") {
+            setGraphicLightboxZoom(modal, Number(modal.dataset.zoom || "1") + 0.1);
+            return;
+        }
+        if (command === "zoom-out") {
+            setGraphicLightboxZoom(modal, Number(modal.dataset.zoom || "1") - 0.1);
+            return;
+        }
+        if (command === "zoom-reset") {
+            setGraphicLightboxZoom(modal, 1);
+            return;
+        }
+        if (command === "preview-bg-preset") {
+            const state = getSimplePreviewState(modal);
+            state.backgroundPreset = String(action.getAttribute("data-preview-preset") || "none").trim() || "none";
+            renderSimplePreviewBackground(modal);
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-bg-panel") {
+            const state = getSimplePreviewState(modal);
+            state.backgroundPanelOpen = !state.backgroundPanelOpen;
+            if (state.backgroundPanelOpen) state.textPanelOpen = false;
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-panel") {
+            const state = getSimplePreviewState(modal);
+            state.textPanelOpen = !state.textPanelOpen;
+            if (state.textPanelOpen) state.backgroundPanelOpen = false;
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-toggle") {
+            const state = getSimplePreviewState(modal);
+            if (state.selectedTextId) {
+                state.texts = state.texts.filter((item) => String(item?.id || "").trim() !== String(state.selectedTextId || "").trim());
+                state.selectedTextId = "";
+            }
+            renderSimplePreviewText(modal);
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-new") {
+            const state = getSimplePreviewState(modal);
+            state.selectedTextId = "";
+            state.text = "";
+            state.textPosition = { x: 6, y: 68 };
+            state.fontFamily = "Arial, sans-serif";
+            state.fontSize = 28;
+            state.fontWeight = "700";
+            state.fontStyle = "normal";
+            state.color = "#1f2937";
+            state.backgroundColor = "transparent";
+            state.textPanelOpen = true;
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-italic") {
+            const state = getSimplePreviewState(modal);
+            state.fontStyle = state.fontStyle === "italic" ? "normal" : "italic";
+            renderSimplePreviewText(modal);
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-bg-none") {
+            const state = getSimplePreviewState(modal);
+            state.backgroundColor = state.backgroundColor === "transparent" ? "#ffffffcc" : "transparent";
+            renderSimplePreviewText(modal);
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-color-none") {
+            const state = getSimplePreviewState(modal);
+            state.color = state.color === "transparent" ? "#1f2937" : "transparent";
+            renderSimplePreviewText(modal);
+            renderSimplePreviewFooter(modal);
+            return;
+        }
+        if (command === "preview-text-apply") {
+            const applied = upsertSelectedPreviewText(modal);
+            renderSimplePreviewText(modal);
+            renderSimplePreviewFooter(modal);
+            if (!applied) {
+                reportEstadoGeneracionModulo(String(modal?.__graphicContext?.moduleId || "").trim(), "Escribe un texto antes de aplicar.", "warning", false);
+            }
+            return;
+        }
+        if (command === "preview-save") {
+            const previewState = getSimplePreviewState(modal);
+            if (String(previewState.text || "").trim()) {
+                upsertSelectedPreviewText(modal);
+            }
+            const mergedLayers = mergeSimplePreviewIntoLayers(modal, modal.__graphicLayers || {});
+            modal.__graphicLayers = mergedLayers;
+            persistRegeneratedModuleGraphic({ modal, image: null, layers: mergedLayers }).then(() => {
+                reportEstadoGeneracionModulo(String(modal?.__graphicContext?.moduleId || "").trim(), "Background y textos guardados.", "success", false);
+            }).catch((error) => {
+                reportEstadoGeneracionModulo(String(modal?.__graphicContext?.moduleId || "").trim(), String(error?.message || "No se pudo guardar la edición."), "warning", false);
+            });
+            return;
+        }
+        if (command === "arm-wand") {
+            const state = getGraphicSelectionState(modal);
+            state.wandArmed = !state.wandArmed;
+            renderGraphicSelectionPanel(modal, layers);
+            return;
+        }
+        if (command === "toggle-mask-invert") {
+            const state = getGraphicSelectionState(modal);
+            state.invert = !state.invert;
+            const selected = findGraphicSelectionTarget(layers, state);
+            if (selected) {
+                selected.maskInvert = state.invert;
+            }
+            modal.__graphicLayers = layers;
+            renderEditableGraphicLayers(modal, layers);
+            return;
+        }
+        if (command === "clear-mask") {
+            const state = getGraphicSelectionState(modal);
+            const selected = findGraphicSelectionTarget(layers, state);
+            if (selected) {
+                selected.maskedImageUrl = "";
+                selected.maskSelection = null;
+                selected.maskInvert = false;
+            }
+            state.invert = false;
+            modal.__graphicLayers = layers;
+            renderEditableGraphicLayers(modal, layers);
+            return;
+        }
         if (command === "download-svg") {
-            descargarGraficoModuloComoSvg(modal);
+            descargarGraficoModuloComoSvg(modal).catch((error) => {
+                reportEstadoGeneracionModulo(
+                    String(modal?.__graphicContext?.moduleId || "").trim(),
+                    String(error?.message || "No se pudo descargar el SVG."),
+                    "warning",
+                    false
+                );
+            });
+            return;
+        }
+        if (command === "generate-composition") {
+            const original = action.innerHTML;
+            action.disabled = true;
+            action.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Generando...</span>';
+            try {
+                await generarComposicionGraficaPorCapas(modal);
+            } finally {
+                action.disabled = false;
+                action.innerHTML = original;
+            }
+            return;
+        }
+        if (command === "mask-tolerance") {
+            const state = getGraphicSelectionState(modal);
+            const nextTolerance = Number(event.target?.value || 26);
+            state.tolerance = nextTolerance;
+            const selected = findGraphicSelectionTarget(layers, state);
+            if (selected) {
+                selected.maskTolerance = nextTolerance;
+            }
+            modal.__graphicLayers = layers;
+            renderGraphicSelectionPanel(modal, layers);
             return;
         }
         if (command === "add") {
@@ -298,7 +570,17 @@ function ensureModuleGraphicLightbox() {
                 id: `custom-${Date.now()}`,
                 label: `Capa extra ${layers.extraLayers.length + 1}`,
                 prompt: "Elemento adicional",
-                position: "center",
+                imageUrl: "",
+                maskedImageUrl: "",
+                storagePath: "",
+                mimeType: "image/png",
+                model: "",
+                manualPosition: null,
+                placed: false,
+                maskSelection: null,
+                maskTolerance: 26,
+                maskInvert: false,
+                validation: null,
                 kind: "custom"
             });
             modal.__graphicLayers = layers;
@@ -330,7 +612,7 @@ function ensureModuleGraphicLightbox() {
                 action.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Regenerando...</span>';
                 try {
                     if (layerId === "graphic") {
-                        await regenerateGraphicLayerImage(modal, layers, textarea.value);
+                        await generarComposicionGraficaPorCapas(modal);
                     } else if (layerId === "text") {
                         layers.textLayer = {
                             ...layers.textLayer,
@@ -342,6 +624,20 @@ function ensureModuleGraphicLightbox() {
                 } finally {
                     action.disabled = false;
                     action.innerHTML = original;
+                }
+            }
+            if (command === "regenerate" && layerId !== "graphic" && layerId !== "text" && layerId !== "background") {
+                const extraLayer = (Array.isArray(layers.extraLayers) ? layers.extraLayers : []).find((item) => String(item?.id || "").trim() === layerId);
+                if (extraLayer) {
+                    const original = action.innerHTML;
+                    action.disabled = true;
+                    action.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Generando capa...</span>';
+                    try {
+                        await generarCapaExtraGrafica(modal, extraLayer);
+                    } finally {
+                        action.disabled = false;
+                        action.innerHTML = original;
+                    }
                 }
             }
             renderEditableGraphicLayers(modal, layers);
@@ -368,6 +664,7 @@ function normalizeEditableGraphicLayers(layers = {}) {
     if (!normalized.graphic || typeof normalized.graphic !== "object") normalized.graphic = {};
     if (!normalized.textLayer || typeof normalized.textLayer !== "object") normalized.textLayer = {};
     if (!Array.isArray(normalized.graphic.anchors)) normalized.graphic.anchors = [];
+    if (!Array.isArray(normalized.graphic.elements)) normalized.graphic.elements = [];
     if (Array.isArray(normalized.graphic.items) && !normalized.graphic.anchors.length) {
         normalized.graphic.anchors = normalized.graphic.items.map((item, index) => ({
             id: String(item?.id || `anchor-${index + 1}`),
@@ -377,6 +674,40 @@ function normalizeEditableGraphicLayers(layers = {}) {
         })).filter((item) => item.label);
     }
     if (!Array.isArray(normalized.graphic.focus)) normalized.graphic.focus = [];
+    normalized.graphic.elements = normalized.graphic.elements.map((item, index) => ({
+        id: String(item?.id || `element-${index + 1}`),
+        anchorId: String(item?.anchorId || "").trim(),
+        label: String(item?.label || "").trim(),
+        prompt: String(item?.prompt || "").trim(),
+        imageUrl: String(item?.imageUrl || "").trim(),
+        maskedImageUrl: String(item?.maskedImageUrl || "").trim(),
+        storagePath: String(item?.storagePath || "").trim(),
+        mimeType: String(item?.mimeType || "image/png").trim() || "image/png",
+        model: String(item?.model || "").trim(),
+        manualPosition: item?.manualPosition && typeof item.manualPosition === "object" ? item.manualPosition : null,
+        placed: item?.placed === true,
+        maskSelection: item?.maskSelection && typeof item.maskSelection === "object" ? item.maskSelection : null,
+        maskTolerance: Number.isFinite(Number(item?.maskTolerance)) ? Number(item.maskTolerance) : 26,
+        maskInvert: item?.maskInvert === true,
+        validation: item?.validation && typeof item.validation === "object" ? item.validation : null
+    }));
+    normalized.extraLayers = normalized.extraLayers.map((item, index) => ({
+        id: String(item?.id || `custom-${index + 1}`),
+        label: String(item?.label || `Capa extra ${index + 1}`).trim(),
+        prompt: String(item?.prompt || "").trim(),
+        imageUrl: String(item?.imageUrl || "").trim(),
+        maskedImageUrl: String(item?.maskedImageUrl || "").trim(),
+        storagePath: String(item?.storagePath || "").trim(),
+        mimeType: String(item?.mimeType || "image/png").trim() || "image/png",
+        model: String(item?.model || "").trim(),
+        manualPosition: item?.manualPosition && typeof item.manualPosition === "object" ? item.manualPosition : null,
+        placed: item?.placed === true,
+        maskSelection: item?.maskSelection && typeof item.maskSelection === "object" ? item.maskSelection : null,
+        maskTolerance: Number.isFinite(Number(item?.maskTolerance)) ? Number(item.maskTolerance) : 26,
+        maskInvert: item?.maskInvert === true,
+        validation: item?.validation && typeof item.validation === "object" ? item.validation : null,
+        kind: "custom"
+    }));
     if (!Array.isArray(normalized.textLayer.labels)) {
         const callouts = Array.isArray(normalized.textLayer.callouts) ? normalized.textLayer.callouts : [];
         normalized.textLayer.labels = callouts.map((item, index) => ({
@@ -396,11 +727,139 @@ function normalizeEditableGraphicLayers(layers = {}) {
             anchorId: String(item?.anchorId || normalized.graphic.anchors[index]?.id || `anchor-${index + 1}`)
         }));
     }
-    if (!normalized.background.color) normalized.background.color = "#EAF3FF";
+    if (!normalized.background.color) normalized.background.color = "#FFFFFF";
     if (!normalized.textLayer.titlePosition) normalized.textLayer.titlePosition = "top-left";
     if (!normalized.textLayer.subtitlePosition) normalized.textLayer.subtitlePosition = "top-left";
     if (!normalized.textLayer.legendPosition) normalized.textLayer.legendPosition = "bottom-right";
     return normalized;
+}
+
+function getGraphicLightboxMode(modal) {
+    return String(modal?.dataset?.mode || "preview").trim() || "preview";
+}
+
+function getGraphicLightboxSection(modal) {
+    return String(modal?.dataset?.section || "composition").trim() || "composition";
+}
+
+function setGraphicLightboxMode(modal, mode = "preview") {
+    if (!modal) return;
+    const nextMode = mode === "edit" ? "edit" : "preview";
+    modal.dataset.mode = nextMode;
+    modal.classList.toggle("is-edit-mode", nextMode === "edit");
+    modal.classList.toggle("is-preview-mode", nextMode !== "edit");
+    modal.querySelectorAll('[data-layer-command="set-mode"]').forEach((button) => {
+        const active = String(button.getAttribute("data-layer-mode") || "").trim() === nextMode;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    const statusText = modal.querySelector(".cb-module-graphic-lightbox__stage-status-text");
+    if (statusText) {
+        statusText.textContent = nextMode === "edit" ? "Modo edición" : "Vista final";
+    }
+    renderGraphicItemsLayer(modal, normalizeEditableGraphicLayers(modal.__graphicLayers || {}).graphic || {});
+    renderCustomGraphicLayers(modal, normalizeEditableGraphicLayers(modal.__graphicLayers || {}));
+    renderGraphicTextLayer(modal, normalizeEditableGraphicLayers(modal.__graphicLayers || {}).textLayer || {});
+    requestAnimationFrame(() => updateGraphicConnectorLayout(modal));
+}
+
+function setGraphicLightboxSection(modal, section = "composition") {
+    if (!modal) return;
+    const allowed = new Set(["composition", "elements", "text", "export"]);
+    const nextSection = allowed.has(section) ? section : "composition";
+    modal.dataset.section = nextSection;
+    modal.querySelectorAll(".cb-module-graphic-lightbox__section-tab").forEach((button) => {
+        const active = String(button.getAttribute("data-layer-section") || "").trim() === nextSection;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    modal.querySelectorAll("[data-layer-panel]").forEach((panel) => {
+        panel.classList.toggle("hidden", String(panel.getAttribute("data-layer-panel") || "").trim() !== nextSection);
+    });
+}
+
+function setGraphicLightboxZoom(modal, value = 1) {
+    if (!modal) return;
+    const zoom = Math.min(1.75, Math.max(0.65, Number(value) || 1));
+    modal.dataset.zoom = String(zoom);
+    modal.querySelector(".cb-module-graphic-lightbox__stage")?.style.setProperty("--cb-stage-zoom", String(zoom));
+}
+
+function getGraphicSelectionState(modal) {
+    if (!modal.__graphicSelection || typeof modal.__graphicSelection !== "object") {
+        modal.__graphicSelection = {
+            elementId: "",
+            elementKind: "graphic",
+            wandArmed: false,
+            tolerance: 26,
+            invert: false
+        };
+    }
+    return modal.__graphicSelection;
+}
+
+function selectGraphicElement(modal, elementId = "", elementKind = "graphic") {
+    const state = getGraphicSelectionState(modal);
+    state.elementId = String(elementId || "").trim();
+    state.elementKind = String(elementKind || "graphic").trim() === "custom" ? "custom" : "graphic";
+    const layers = normalizeEditableGraphicLayers(modal.__graphicLayers || {});
+    const selected = findGraphicSelectionTarget(layers, state);
+    state.tolerance = Math.max(4, Number(selected?.maskTolerance || state.tolerance || 26));
+    state.invert = selected?.maskInvert === true;
+    modal.querySelectorAll(".cb-module-graphic-lightbox__graphic-element").forEach((node) => {
+        const matchesId = String(node.dataset.elementId || "").trim() === state.elementId;
+        const matchesKind = String(node.dataset.elementKind || "graphic").trim() === state.elementKind;
+        node.classList.toggle("is-selected", matchesId && matchesKind);
+    });
+    renderGraphicSelectionPanel(modal, layers);
+}
+
+function findGraphicSelectionTarget(layers = {}, state = {}) {
+    const elementId = String(state?.elementId || "").trim();
+    const elementKind = String(state?.elementKind || "graphic").trim() === "custom" ? "custom" : "graphic";
+    if (!elementId) return null;
+    if (elementKind === "custom") {
+        return (Array.isArray(layers?.extraLayers) ? layers.extraLayers : [])
+            .find((item) => String(item?.id || "").trim() === elementId) || null;
+    }
+    return (Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements : [])
+        .find((item) => String(item?.id || "").trim() === elementId) || null;
+}
+
+function getSafeGuidedElementPosition(anchorPos = { x: 50, y: 50 }, index = 0) {
+    const columnOffset = (index % 2 === 0) ? 12 : -12;
+    const rowOffset = Math.floor(index / 2) * 10;
+    let x = clampPercent(anchorPos.x + columnOffset, 16, 84);
+    let y = clampPercent(anchorPos.y + rowOffset, 18, 84);
+    if (x < 46 && y < 34) {
+        x = clampPercent(x + 24, 16, 84);
+        y = clampPercent(y + 12, 18, 84);
+    }
+    return { x, y };
+}
+
+function applyGuidedGraphicLayout(layers = {}) {
+    const next = normalizeEditableGraphicLayers(layers);
+    const anchors = Array.isArray(next.graphic?.anchors) ? next.graphic.anchors : [];
+    const labels = Array.isArray(next.textLayer?.labels) ? next.textLayer.labels : [];
+
+    if (!next.textLayer.titleManualPosition) next.textLayer.titleManualPosition = { x: 8, y: 8 };
+    if (!next.textLayer.subtitleManualPosition) next.textLayer.subtitleManualPosition = { x: 8, y: 15 };
+    if (!next.textLayer.legendManualPosition) next.textLayer.legendManualPosition = { x: 70, y: 79 };
+
+    labels.forEach((item, index) => {
+        if (item?.manualPosition && typeof item.manualPosition === "object") return;
+        const linkedAnchorIndex = anchors.findIndex((anchor) => String(anchor?.id || "").trim() === String(item?.anchorId || "").trim());
+        const anchorPos = getAnchorStagePosition(
+            linkedAnchorIndex >= 0 ? anchors[linkedAnchorIndex] : anchors[index] || {},
+            linkedAnchorIndex >= 0 ? linkedAnchorIndex : index,
+            anchors.length || labels.length || 1
+        );
+        const placement = String(item?.placement || item?.position || "").trim().toLowerCase() || inferLabelPlacementFromAnchor(anchorPos);
+        item.manualPosition = getLabelPositionFromAnchor(anchorPos, placement);
+    });
+
+    return next;
 }
 
 function getGraphicCanvasSpec() {
@@ -453,6 +912,13 @@ function getAnchorStagePosition(anchor = {}, index = 0, total = 1) {
     };
 }
 
+function getUnplacedGraphicLayerPosition(index = 0) {
+    return {
+        x: 87,
+        y: clampPercent(16 + (index * 14), 16, 84)
+    };
+}
+
 function inferLabelPlacementFromAnchor(anchorPos = { x: 50, y: 50 }) {
     const { x, y } = anchorPos;
     if (x < 32 && y < 36) return "right";
@@ -502,7 +968,7 @@ function sanitizeLayerPositionName(value = "", fallback = "center") {
 function setGraphicBackground(modal, background = {}) {
     const layer = modal?.querySelector(".cb-module-graphic-lightbox__background-layer");
     if (!layer) return;
-    const color = String(background?.color || "").trim() || "#EAF3FF";
+    const color = String(background?.color || "").trim() || "#FFFFFF";
     layer.style.background = color;
 }
 
@@ -556,10 +1022,11 @@ function updateGraphicConnectorLayout(modal) {
         if (placement === "right") endX -= (labelNode.offsetWidth / 2);
         if (placement === "top") endY += (labelNode.offsetHeight / 2);
         if (placement === "bottom") endY -= (labelNode.offsetHeight / 2);
-        line.setAttribute("x1", String(anchorPoint.x));
-        line.setAttribute("y1", String(anchorPoint.y));
-        line.setAttribute("x2", String(endX));
-        line.setAttribute("y2", String(endY));
+        line.setAttribute("x1", String(endX));
+        line.setAttribute("y1", String(endY));
+        line.setAttribute("x2", String(anchorPoint.x));
+        line.setAttribute("y2", String(anchorPoint.y));
+        line.setAttribute("marker-end", "url(#cbGraphicArrow)");
     });
 }
 
@@ -570,9 +1037,19 @@ function syncDraggedGraphicLayerState(modal, element) {
     const position = { x: left, y: top };
     const kind = String(element?.dataset?.dragKind || "").trim();
     if (kind === "graphic") {
-        const anchorId = String(element?.dataset?.anchorId || "").trim();
-        const anchor = layers.graphic.anchors.find((item) => String(item?.id || "").trim() === anchorId);
-        if (anchor) anchor.manualPosition = position;
+        const role = String(element?.dataset?.graphicRole || "anchor").trim();
+        if (role === "element") {
+            const elementId = String(element?.dataset?.elementId || "").trim();
+            const graphicElement = layers.graphic.elements.find((item) => String(item?.id || "").trim() === elementId);
+            if (graphicElement) {
+                graphicElement.manualPosition = position;
+                graphicElement.placed = true;
+            }
+        } else {
+            const anchorId = String(element?.dataset?.anchorId || "").trim();
+            const anchor = layers.graphic.anchors.find((item) => String(item?.id || "").trim() === anchorId);
+            if (anchor) anchor.manualPosition = position;
+        }
     } else if (kind === "text") {
         const labelId = String(element?.dataset?.labelId || "").trim();
         const role = String(element?.dataset?.textRole || "").trim();
@@ -586,10 +1063,23 @@ function syncDraggedGraphicLayerState(modal, element) {
         } else if (role === "legend") {
             layers.textLayer.legendManualPosition = position;
         }
+    } else if (kind === "preview-text") {
+        const state = getSimplePreviewState(modal);
+        const textId = String(element?.dataset?.textId || "").trim();
+        const previewText = state.texts.find((item) => String(item?.id || "").trim() === textId);
+        if (previewText) {
+            previewText.textPosition = position;
+            if (String(state.selectedTextId || "").trim() === textId) {
+                state.textPosition = position;
+            }
+        }
     } else if (kind === "custom") {
         const layerId = String(element?.dataset?.layerId || "").trim();
         const extra = layers.extraLayers.find((item) => String(item?.id || "").trim() === layerId);
-        if (extra) extra.manualPosition = position;
+        if (extra) {
+            extra.manualPosition = position;
+            extra.placed = true;
+        }
     }
     modal.__graphicLayers = layers;
 }
@@ -616,6 +1106,7 @@ function getLayerPromptValue(layers = {}, layerId = "") {
         return [
             layers.graphic?.description || "",
             ...(Array.isArray(layers.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
+            ...(Array.isArray(layers.graphic?.elements) ? layers.graphic.elements.map((item) => item?.prompt || "") : []),
             ...(Array.isArray(layers.graphic?.focus) ? layers.graphic.focus : [])
         ].filter(Boolean).join("\n");
     }
@@ -635,22 +1126,23 @@ function renderLayerStack(modal, layers = {}) {
     const stack = modal.querySelector(".cb-module-graphic-lightbox__layer-stack");
     if (!stack) return;
     const cards = [
-        { id: "background", title: layers.background?.label || "Capa 1 · Fondo", kind: "background", deletable: false },
-        { id: "graphic", title: layers.graphic?.label || "Capa 2 · Gráfico", kind: "graphic", deletable: false },
-        { id: "text", title: layers.textLayer?.label || "Capa 3 · Texto", kind: "text", deletable: false },
+        { id: "background", title: layers.background?.label || "Composición", kind: "background", deletable: false, section: "composition" },
+        { id: "graphic", title: layers.graphic?.label || "Elementos IA", kind: "graphic", deletable: false, section: "elements" },
+        { id: "text", title: layers.textLayer?.label || "Texto editorial", kind: "text", deletable: false, section: "text" },
         ...(Array.isArray(layers.extraLayers) ? layers.extraLayers.map((item) => ({
             id: item.id,
             title: item.label || "Capa extra",
             kind: "extra",
-            deletable: true
+            deletable: true,
+            section: "elements"
         })) : [])
     ];
     stack.innerHTML = cards.map((card) => `
-        <section class="cb-module-graphic-layer-card is-${card.kind}" data-layer-card="${escapeHtml(card.id)}">
+        <section class="cb-module-graphic-layer-card is-${card.kind}" data-layer-card="${escapeHtml(card.id)}" data-layer-panel="${escapeHtml(card.section)}">
             <div class="cb-module-graphic-layer-card__head">
                 <div>
                     <div class="cb-module-graphic-layer-card__title">${escapeHtml(card.title)}</div>
-                    <div class="cb-module-graphic-layer-card__meta">${card.kind === "extra" ? "Capa adicional" : "Capa principal"}</div>
+                    <div class="cb-module-graphic-layer-card__meta">${card.kind === "extra" ? "Capa adicional" : card.section === "composition" ? "Base visual" : card.section === "elements" ? "Assets y capas" : "Jerarquía editorial"}</div>
                 </div>
                 <div class="cb-module-graphic-layer-card__actions">
                     <button type="button" data-layer-command="edit" data-layer-id="${escapeHtml(card.id)}"><i class="fas fa-pen"></i><span>Editar prompt</span></button>
@@ -693,6 +1185,7 @@ function actualizarLayerDesdePrompt(layers = {}, layerId = "", prompt = "") {
             position: sanitizeLayerPositionName("", ["middle-left", "top-right", "center", "bottom-left"][index] || "center")
         }));
         layers.graphic.focus = itemLines.slice(0, 6);
+        layers.graphic.elements = [];
         return;
     }
     if (layerId === "text") {
@@ -724,7 +1217,16 @@ function renderCanvasMeta(modal) {
     const target = modal.querySelector(".cb-module-graphic-lightbox__canvas-meta");
     if (!target) return;
     const spec = getGraphicCanvasSpec();
-    target.textContent = `${spec.label} · Canvas scrollable`;
+    const context = modal?.__graphicContext || {};
+    const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
+    const invalidCount = (Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements : [])
+        .filter((item) => item?.validation?.recommendation === "regenerate")
+        .length;
+    target.innerHTML = `
+        <div class="cb-module-graphic-lightbox__meta-line">${escapeHtml(spec.label)}</div>
+        <div class="cb-module-graphic-lightbox__meta-line">${escapeHtml(String(context.moduleName || "Módulo gráfico").trim() || "Módulo gráfico")}</div>
+        <div class="cb-module-graphic-lightbox__meta-line">${invalidCount ? `${invalidCount} elemento(s) requieren regeneración` : "Composición lista para revisión"}</div>
+    `;
     const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
     if (stage) {
         stage.style.setProperty("--cb-stage-width", `${spec.width}px`);
@@ -735,34 +1237,70 @@ function renderCanvasMeta(modal) {
 function renderGraphicItemsLayer(modal, graphicLayer = {}) {
     const target = modal.querySelector(".cb-module-graphic-lightbox__graphic-layer");
     if (!target) return;
+    const isEditMode = getGraphicLightboxMode(modal) === "edit";
     const anchors = Array.isArray(graphicLayer?.anchors) ? graphicLayer.anchors : [];
-    target.innerHTML = anchors.map((item, index) => {
+    const elements = Array.isArray(graphicLayer?.elements) ? graphicLayer.elements : [];
+    const elementMarkup = elements.map((item, index) => {
+        const linkedAnchorIndex = anchors.findIndex((anchor) => String(anchor?.id || "").trim() === String(item?.anchorId || "").trim());
+        const anchor = linkedAnchorIndex >= 0 ? anchors[linkedAnchorIndex] : anchors[index];
+        const anchorPos = getAnchorStagePosition(anchor || {}, linkedAnchorIndex >= 0 ? linkedAnchorIndex : index, anchors.length || elements.length || 1);
+        const manual = item?.manualPosition && typeof item.manualPosition === "object" ? item.manualPosition : null;
+        const pos = manual || getUnplacedGraphicLayerPosition(index);
+        const src = String(item?.maskedImageUrl || item?.imageUrl || "").trim();
+        if (!src) return "";
+        const requiresFix = item?.validation?.recommendation === "regenerate";
+        const isPlaced = item?.placed === true || !!manual;
+        if (!isEditMode && !isPlaced) return "";
+        return `
+            <div class="cb-module-graphic-lightbox__graphic-element cb-module-graphic-lightbox__draggable ${requiresFix ? "is-invalid" : ""} ${isPlaced ? "is-placed" : "is-unplaced"}"
+                 data-drag-kind="graphic"
+                 data-graphic-role="element"
+                 data-element-id="${escapeHtml(String(item?.id || `element-${index + 1}`))}"
+                 style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
+                <img src="${escapeHtml(src)}" alt="${escapeHtml(String(item?.label || `Elemento ${index + 1}`))}">
+                ${requiresFix && isEditMode ? `<span class="cb-module-graphic-lightbox__asset-warning">Requiere regeneración</span>` : ""}
+                ${!isPlaced && isEditMode ? `<span class="cb-module-graphic-lightbox__asset-warning is-neutral">Sin colocar</span>` : ""}
+            </div>
+        `;
+    }).join("");
+    const anchorsMarkup = !isEditMode ? "" : anchors.map((item, index) => {
         const pos = getAnchorStagePosition(item, index, anchors.length);
         const shape = String(item?.shape || "marker").trim().toLowerCase() || "marker";
         return `
             <div class="cb-module-graphic-lightbox__graphic-anchor cb-module-graphic-lightbox__draggable is-${escapeHtml(shape)}"
                  data-drag-kind="graphic"
+                 data-graphic-role="anchor"
                  data-anchor-id="${escapeHtml(String(item?.id || `anchor-${index + 1}`))}"
                  style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
                 <span class="cb-module-graphic-lightbox__anchor-dot"></span>
             </div>
         `;
     }).join("");
+    target.innerHTML = `${elementMarkup}${anchorsMarkup}`;
 }
 
 function renderCustomGraphicLayers(modal, layers = {}) {
     const target = modal.querySelector(".cb-module-graphic-lightbox__custom-layer");
     if (!target) return;
+    const isEditMode = getGraphicLightboxMode(modal) === "edit";
     const items = Array.isArray(layers.extraLayers) ? layers.extraLayers : [];
     target.innerHTML = items.map((item, index) => {
         const manual = item?.manualPosition && typeof item.manualPosition === "object" ? item.manualPosition : null;
-        const pos = manual || getNamedLayerPosition(item?.position, index, items.length || 1);
+        const isPlaced = item?.placed === true || !!manual;
+        const pos = manual || getUnplacedGraphicLayerPosition(index + 1);
+        const src = String(item?.maskedImageUrl || item?.imageUrl || "").trim();
+        const requiresFix = item?.validation?.recommendation === "regenerate";
+        if (!isEditMode && !isPlaced) return "";
         return `
-            <div class="cb-module-graphic-lightbox__custom-item cb-module-graphic-lightbox__draggable"
+            <div class="cb-module-graphic-lightbox__custom-item cb-module-graphic-lightbox__graphic-element cb-module-graphic-lightbox__draggable ${requiresFix ? "is-invalid" : ""} ${isPlaced ? "is-placed" : "is-unplaced"}"
                  data-drag-kind="custom"
+                 data-element-kind="custom"
+                 data-element-id="${escapeHtml(String(item?.id || `custom-${index + 1}`))}"
                  data-layer-id="${escapeHtml(String(item?.id || `custom-${index + 1}`))}"
                  style="left:${clampPercent(pos.x, 2, 86)}%;top:${clampPercent(pos.y, 4, 84)}%;">
-                ${escapeHtml(item?.label || `Capa extra ${index + 1}`)}
+                ${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(String(item?.label || `Capa extra ${index + 1}`))}">` : `<div class="cb-module-graphic-lightbox__custom-placeholder">${escapeHtml(item?.label || `Capa extra ${index + 1}`)}</div>`}
+                ${requiresFix && isEditMode ? `<span class="cb-module-graphic-lightbox__asset-warning">Requiere regeneración</span>` : ""}
+                ${!isPlaced && isEditMode ? `<span class="cb-module-graphic-lightbox__asset-warning is-neutral">Sin colocar</span>` : ""}
             </div>
         `;
     }).join("");
@@ -772,6 +1310,7 @@ function renderGraphicTextLayer(modal, textLayer = {}) {
     const target = modal.querySelector(".cb-module-graphic-lightbox__text-layer");
     if (!target) return;
     const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+    const isEditMode = getGraphicLightboxMode(modal) === "edit";
     const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
     const anchors = Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors : [];
     const title = String(textLayer?.title || "").trim();
@@ -812,7 +1351,11 @@ function renderGraphicTextLayer(modal, textLayer = {}) {
             </div>
         `;
     }).join("");
-    renderGraphicConnectorOverlay(target, connectors);
+    if (isEditMode) {
+        renderGraphicConnectorOverlay(target, connectors);
+    } else {
+        target.innerHTML = "";
+    }
     target.insertAdjacentHTML("beforeend", `
         ${title ? `<div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__draggable is-title" data-drag-kind="text" data-text-role="title" style="left:${clampPercent(titlePosition.x, 2, 86)}%;top:${clampPercent(titlePosition.y, 4, 84)}%;"><div class="cb-module-graphic-lightbox__text-title">${escapeHtml(title)}</div></div>` : ""}
         ${subtitle ? `<div class="cb-module-graphic-lightbox__text-box cb-module-graphic-lightbox__draggable is-subtitle" data-drag-kind="text" data-text-role="subtitle" style="left:${clampPercent(subtitlePosition.x, 2, 86)}%;top:${clampPercent(subtitlePosition.y, 4, 84)}%;"><div class="cb-module-graphic-lightbox__text-subtitle">${escapeHtml(subtitle)}</div></div>` : ""}
@@ -826,24 +1369,102 @@ function renderGraphicTextLayer(modal, textLayer = {}) {
 
 function renderGraphicLayerSummaries(modal, layers = {}) {
     renderGraphicLayerCard(modal, "background", [
-        layers?.background?.label || "Capa 1 · Fondo",
-        layers?.background?.description || "",
+        layers?.background?.label || "Composición",
+        layers?.background?.description || "Base visual del gráfico final.",
         layers?.background?.color ? `Color plano: ${layers.background.color}` : "",
-        layers?.background?.palette ? `Paleta: ${layers.background.palette}` : ""
+        layers?.background?.palette ? `Paleta: ${layers.background.palette}` : "",
+        "La vista final oculta ayudas técnicas y muestra solo el resultado editorial."
     ]);
     renderGraphicLayerCard(modal, "graphic", [
-        layers?.graphic?.label || "Capa 2 · Gráfico",
-        layers?.graphic?.description || "",
+        layers?.graphic?.label || "Elementos IA",
+        layers?.graphic?.description || "Assets aislados ubicados sobre anchors de composición.",
         ...(Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
+        ...(Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements.map((item) => item?.label ? `Elemento: ${item.label}` : "").filter(Boolean) : []),
+        ...(Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements.map((item) => item?.validation?.recommendation === "regenerate" ? `Corregir: ${item.label || "asset"}` : "").filter(Boolean) : []),
         ...(Array.isArray(layers?.graphic?.focus) ? layers.graphic.focus : [])
     ]);
     renderGraphicLayerCard(modal, "text", [
-        layers?.textLayer?.label || "Capa 3 · Texto",
+        layers?.textLayer?.label || "Texto editorial",
         layers?.textLayer?.title || "",
         layers?.textLayer?.subtitle || "",
         ...(Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels.map((item) => item?.text || "") : []),
         ...(Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [])
     ]);
+    (Array.isArray(layers?.extraLayers) ? layers.extraLayers : []).forEach((item, index) => {
+        renderGraphicLayerCard(modal, String(item?.id || `custom-${index + 1}`), [
+            item?.label || `Capa extra ${index + 1}`,
+            item?.prompt || "Sin prompt definido para esta capa.",
+            item?.imageUrl ? "Imagen generada para esta capa." : "Esta capa todavía no tiene imagen generada.",
+            item?.validation?.recommendation === "regenerate" ? "Requiere regeneración antes de exportar." : "",
+            item?.placed === true || (item?.manualPosition && typeof item?.manualPosition === "object") ? "Colocada manualmente en el canvas." : "Pendiente de colocación manual."
+        ]);
+    });
+}
+
+function renderGraphicExportPanel(modal, layers = {}) {
+    const panel = modal.querySelector('.cb-module-graphic-lightbox__export-panel');
+    if (!panel) return;
+    const elements = [
+        ...(Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements : []),
+        ...(Array.isArray(layers?.extraLayers) ? layers.extraLayers : [])
+    ];
+    const invalid = elements.filter((item) => item?.validation?.recommendation === "regenerate");
+    const unplaced = elements.filter((item) => !(item?.placed === true || (item?.manualPosition && typeof item.manualPosition === "object")));
+    panel.innerHTML = `
+        <section class="cb-module-graphic-lightbox__export-card">
+            <h4>Salida final</h4>
+            <p>Cada elemento vive en su propia capa de imagen. La composición final solo se exporta cuando todas las capas válidas ya fueron colocadas manualmente.</p>
+            <div class="cb-module-graphic-lightbox__export-summary ${(invalid.length || unplaced.length) ? "is-warning" : "is-ready"}">
+                ${invalid.length
+                    ? `${invalid.length} elemento(s) deben regenerarse antes de exportar la composición.`
+                    : unplaced.length
+                        ? `${unplaced.length} capa(s) siguen sin colocar manualmente en el canvas.`
+                        : "La composición está lista para exportación SVG."}
+            </div>
+        </section>
+    `;
+}
+
+function renderGraphicSelectionPanel(modal, layers = {}) {
+    const panel = modal.querySelector(".cb-module-graphic-lightbox__selection-panel");
+    if (!panel) return;
+    const state = getGraphicSelectionState(modal);
+    const selected = findGraphicSelectionTarget(layers, state);
+    if (!selected) {
+        panel.innerHTML = `
+            <section class="cb-module-graphic-lightbox__selection-card">
+                <h4>Herramientas de capa</h4>
+                <p>Selecciona un asset en el canvas para aplicar varita mágica, invertir selección y crear máscara de recorte.</p>
+            </section>
+        `;
+        return;
+    }
+    panel.innerHTML = `
+        <section class="cb-module-graphic-lightbox__selection-card">
+            <h4>${escapeHtml(selected.label || "Capa seleccionada")}</h4>
+            <p>La varita mágica trabaja sobre esta imagen sin quitar el fondo de origen. La máscara se aplica solo a la capa seleccionada.</p>
+            <div class="cb-module-graphic-lightbox__selection-tools">
+                <button type="button" class="cb-module-graphic-lightbox__tool-btn ${state.wandArmed ? "is-active" : ""}" data-layer-command="arm-wand">
+                    <i class="fas fa-wand-magic-sparkles"></i><span>Varita mágica</span>
+                </button>
+                <button type="button" class="cb-module-graphic-lightbox__tool-btn ${state.invert ? "is-active" : ""}" data-layer-command="toggle-mask-invert">
+                    <i class="fas fa-circle-notch"></i><span>Seleccionar inverso</span>
+                </button>
+                <button type="button" class="cb-module-graphic-lightbox__tool-btn" data-layer-command="clear-mask">
+                    <i class="fas fa-eraser"></i><span>Quitar máscara</span>
+                </button>
+            </div>
+            <label class="cb-module-graphic-lightbox__slider">
+                <span>Tolerancia</span>
+                <input type="range" min="4" max="80" step="1" value="${Math.round(Number(selected.maskTolerance || state.tolerance || 26))}" data-layer-command="mask-tolerance">
+            </label>
+            <div class="cb-module-graphic-lightbox__selection-meta">
+                <span>${selected.maskedImageUrl ? "Máscara activa" : "Sin máscara aplicada"}</span>
+                <span>${selected.placed ? "Capa colocada" : "Capa sin colocar"}</span>
+                <span>${state.elementKind === "custom" ? "Capa extra" : "Elemento IA"}</span>
+            </div>
+        </section>
+    `;
 }
 
 function blobToDataUrl(blob) {
@@ -855,11 +1476,74 @@ function blobToDataUrl(blob) {
     });
 }
 
+function loadImageFromUrlForMask(src = "") {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("No se pudo cargar la imagen para la máscara."));
+        image.src = src;
+    });
+}
+
+function colorDistanceSq(data, index, target) {
+    const dr = data[index] - target.r;
+    const dg = data[index + 1] - target.g;
+    const db = data[index + 2] - target.b;
+    return (dr * dr) + (dg * dg) + (db * db);
+}
+
+async function createMagicMaskFromImageUrl(imageUrl = "", clickX = 0, clickY = 0, tolerance = 26, invert = false) {
+    const imageDataUrl = await resolveImageHrefForSvg(imageUrl);
+    const image = await loadImageFromUrlForMask(imageDataUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("No se pudo inicializar el canvas de máscara.");
+    ctx.drawImage(image, 0, 0);
+    const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const mask = ctx.createImageData(canvas.width, canvas.height);
+    const px = Math.max(0, Math.min(canvas.width - 1, Math.round(clickX)));
+    const py = Math.max(0, Math.min(canvas.height - 1, Math.round(clickY)));
+    const targetIndex = ((py * canvas.width) + px) * 4;
+    const target = {
+        r: source.data[targetIndex],
+        g: source.data[targetIndex + 1],
+        b: source.data[targetIndex + 2]
+    };
+    const limit = Math.pow(Math.max(4, Number(tolerance) || 26), 2) * 3;
+
+    for (let index = 0; index < source.data.length; index += 4) {
+        const similar = colorDistanceSq(source.data, index, target) <= limit;
+        const keep = invert ? !similar : similar;
+        mask.data[index] = source.data[index];
+        mask.data[index + 1] = source.data[index + 1];
+        mask.data[index + 2] = source.data[index + 2];
+        mask.data[index + 3] = keep ? source.data[index + 3] : 0;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(mask, 0, 0);
+    return {
+        maskedImageUrl: canvas.toDataURL("image/png"),
+        selection: {
+            x: px,
+            y: py,
+            tolerance: Math.max(4, Number(tolerance) || 26),
+            invert: invert === true
+        }
+    };
+}
+
 async function resolveImageHrefForSvg(imageHref = "") {
     const src = String(imageHref || "").trim();
     if (!src) return "";
     if (/^data:/i.test(src)) return src;
-    const response = await fetch(src, { mode: "cors" });
+    let requestUrl = src;
+    if (/^https?:\/\//i.test(src)) {
+        requestUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(src)}`);
+    }
+    const response = await fetch(requestUrl, { mode: "cors" });
     if (!response.ok) {
         throw new Error(`No se pudo descargar la imagen para el SVG (${response.status}).`);
     }
@@ -875,27 +1559,45 @@ async function buildGraphicSvgMarkup(modal) {
     const width = 1024;
     const height = 1024;
     const anchors = Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors : [];
-    const labels = Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels : [];
-    const connectors = Array.isArray(layers?.textLayer?.connectors) ? layers.textLayer.connectors : [];
+    const elements = Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements : [];
+    const extraLayers = Array.isArray(layers?.extraLayers) ? layers.extraLayers : [];
+    const validElements = [
+        ...elements,
+        ...extraLayers
+    ].filter((item) => item?.validation?.recommendation !== "regenerate" && (item?.placed === true || (item?.manualPosition && typeof item?.manualPosition === "object")));
     const title = String(layers?.textLayer?.title || "").trim();
     const subtitle = String(layers?.textLayer?.subtitle || "").trim();
+    const labels = Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels : [];
     const legend = Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [];
-    const titlePos = layers?.textLayer?.titleManualPosition || { x: 6, y: 5 };
-    const subtitlePos = layers?.textLayer?.subtitleManualPosition || { x: 6, y: 11 };
-    const legendPos = layers?.textLayer?.legendManualPosition || { x: 70, y: 74 };
+    const titlePos = layers?.textLayer?.titleManualPosition || { x: 8, y: 8 };
+    const subtitlePos = layers?.textLayer?.subtitleManualPosition || { x: 8, y: 15 };
+    const legendPos = layers?.textLayer?.legendManualPosition || { x: 70, y: 79 };
 
     const anchorMap = new Map();
-    const anchorMarkup = anchors.map((anchor, index) => {
+    anchors.forEach((anchor, index) => {
         const pos = getAnchorStagePosition(anchor, index, anchors.length || 1);
-        const point = {
+        anchorMap.set(String(anchor?.id || `anchor-${index + 1}`), {
             x: (pos.x / 100) * width,
             y: (pos.y / 100) * height
-        };
-        anchorMap.set(String(anchor?.id || `anchor-${index + 1}`), point);
-        return `<circle cx="${point.x}" cy="${point.y}" r="8" fill="#0f172a" stroke="rgba(255,255,255,0.94)" stroke-width="4" />`;
-    }).join("");
+        });
+    });
 
-    const labelMap = new Map();
+    const graphicElementMarkupParts = await Promise.all(validElements.map(async (item, index) => {
+        const src = String(item?.maskedImageUrl || item?.imageUrl || "").trim();
+        if (!src) return "";
+        const anchor = anchorMap.get(String(item?.anchorId || "").trim()) || { x: width / 2, y: height / 2 };
+        const anchorPercent = { x: (anchor.x / width) * 100, y: (anchor.y / height) * 100 };
+        const pos = item?.manualPosition && typeof item.manualPosition === "object"
+            ? item.manualPosition
+            : anchorPercent;
+        const x = (clampPercent(pos.x, 0, 100) / 100) * width;
+        const y = (clampPercent(pos.y, 0, 100) / 100) * height;
+        const embedded = await resolveImageHrefForSvg(src).catch(() => "");
+        if (!embedded) return "";
+        const size = 150;
+        return `<image href="${escapeHtml(embedded)}" x="${x - (size / 2)}" y="${y - (size / 2)}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />`;
+    }));
+    const graphicElementMarkup = graphicElementMarkupParts.join("");
     const labelMarkup = labels.map((label, index) => {
         const anchor = anchorMap.get(String(label?.anchorId || "").trim()) || { x: width / 2, y: height / 2 };
         const anchorPercent = { x: (anchor.x / width) * 100, y: (anchor.y / height) * 100 };
@@ -903,62 +1605,28 @@ async function buildGraphicSvgMarkup(modal) {
         const pos = label?.manualPosition && typeof label.manualPosition === "object"
             ? label.manualPosition
             : getLabelPositionFromAnchor(anchorPercent, placement);
-        const point = {
-            x: (pos.x / 100) * width,
-            y: (pos.y / 100) * height
-        };
-        labelMap.set(String(label?.id || `label-${index + 1}`), { point, placement });
-        return `<text x="${point.x}" y="${point.y}" font-family="Arial, sans-serif" font-size="24" font-weight="800" fill="#0f172a">${escapeHtml(String(label?.text || "").trim())}</text>`;
+        return `<text x="${(pos.x / 100) * width}" y="${(pos.y / 100) * height}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#10203a">${escapeHtml(String(label?.text || "").trim())}</text>`;
     }).join("");
-
-    const connectorMarkup = connectors.map((connector, index) => {
-        const anchor = anchorMap.get(String(connector?.anchorId || "").trim());
-        const label = labelMap.get(String(connector?.labelId || "").trim());
-        if (!anchor || !label) return "";
-        let endX = label.point.x;
-        let endY = label.point.y;
-        if (label.placement === "left") endX += 42;
-        if (label.placement === "right") endX -= 42;
-        if (label.placement === "top") endY += 14;
-        if (label.placement === "bottom") endY -= 14;
-        return `<line x1="${anchor.x}" y1="${anchor.y}" x2="${endX}" y2="${endY}" stroke="#0f172a" stroke-width="3" marker-end="url(#cbSvgArrow)" />`;
-    }).join("");
-
     const legendMarkup = legend.map((item, index) => {
         const x = (legendPos.x / 100) * width;
-        const y = (legendPos.y / 100) * height + (index * 34);
-        return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#0f172a">• ${escapeHtml(String(item || "").trim())}</text>`;
+        const y = ((legendPos.y / 100) * height) + (index * 28);
+        return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="21" font-weight="600" fill="#29405f">${escapeHtml(String(item || "").trim())}</text>`;
     }).join("");
-
-    const titleMarkup = title
-        ? `<text x="${(titlePos.x / 100) * width}" y="${(titlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="38" font-weight="800" fill="#0f172a">${escapeHtml(title)}</text>`
-        : "";
-    const subtitleMarkup = subtitle
-        ? `<text x="${(subtitlePos.x / 100) * width}" y="${(subtitlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#334155">${escapeHtml(subtitle)}</text>`
-        : "";
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <defs>
-    <marker id="cbSvgArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L12,6 L0,12 z" fill="#0f172a" />
-    </marker>
-  </defs>
   <g id="layer-background">
-    <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeHtml(String(layers?.background?.color || "#EAF3FF"))}" />
+    <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeHtml(String(layers?.background?.color || "#FFFFFF"))}" />
   </g>
   <g id="layer-image">
     ${embeddedImageHref ? `<image href="${escapeHtml(embeddedImageHref)}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" />` : ""}
   </g>
-  <g id="layer-connectors">
-    ${connectorMarkup}
+  <g id="layer-graphic-elements">
+    ${graphicElementMarkup}
   </g>
-  <g id="layer-anchors">
-    ${anchorMarkup}
-  </g>
-  <g id="layer-text">
-    ${titleMarkup}
-    ${subtitleMarkup}
+  <g id="layer-editorial-text">
+    ${title ? `<text x="${(titlePos.x / 100) * width}" y="${(titlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="42" font-weight="800" fill="#10203a">${escapeHtml(title)}</text>` : ""}
+    ${subtitle ? `<text x="${(subtitlePos.x / 100) * width}" y="${(subtitlePos.y / 100) * height}" font-family="Arial, sans-serif" font-size="24" font-weight="600" fill="#29405f">${escapeHtml(subtitle)}</text>` : ""}
     ${labelMarkup}
     ${legendMarkup}
   </g>
@@ -966,6 +1634,21 @@ async function buildGraphicSvgMarkup(modal) {
 }
 
 async function descargarGraficoModuloComoSvg(modal) {
+    const layers = normalizeEditableGraphicLayers(modal?.__graphicLayers || {});
+    const exportableLayers = [
+        ...(Array.isArray(layers?.graphic?.elements) ? layers.graphic.elements : []),
+        ...(Array.isArray(layers?.extraLayers) ? layers.extraLayers : [])
+    ];
+    const invalid = exportableLayers
+        .filter((item) => item?.validation?.recommendation === "regenerate");
+    const unplaced = exportableLayers
+        .filter((item) => !(item?.placed === true || (item?.manualPosition && typeof item.manualPosition === "object")));
+    if (invalid.length) {
+        throw new Error("No se puede descargar el SVG mientras existan elementos pendientes de regeneración.");
+    }
+    if (unplaced.length) {
+        throw new Error("Coloca manualmente todas las capas antes de descargar el SVG.");
+    }
     const markup = await buildGraphicSvgMarkup(modal);
     const blob = new Blob([markup], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1039,11 +1722,21 @@ async function persistRegeneratedModuleGraphic({ modal, image, layers }) {
     const currentImage = figure.querySelector("img");
     const downloadUrl = String(image?.downloadUrl || currentImage?.dataset?.mcImageSrc || currentImage?.getAttribute("src") || "").trim();
     if (!downloadUrl) return;
-    const encodedLayers = encodeURIComponent(JSON.stringify(layers || {}));
+    const mergedLayers = mergeSimplePreviewIntoLayers(modal, layers || {});
+    const encodedLayers = encodeURIComponent(JSON.stringify(mergedLayers || {}));
     const alt = String(modal.querySelector(".cb-module-graphic-lightbox__image")?.alt || "Gráfico del módulo").trim();
     figure.setAttribute("data-storage-path", String(image?.storagePath || figure.getAttribute("data-storage-path") || "").trim());
     figure.setAttribute("data-mime-type", String(image?.mimeType || figure.getAttribute("data-mime-type") || "image/png").trim() || "image/png");
     figure.setAttribute("data-model", String(image?.model || figure.getAttribute("data-model") || "").trim());
+    applyGraphicDatasetsToNode(currentImage, {
+        src: downloadUrl,
+        alt,
+        layers: encodedLayers,
+        moduleId,
+        courseId,
+        moduleName: String(context.moduleName || "").trim(),
+        moduleType: String(context.moduleType || "").trim()
+    });
     figure.querySelectorAll('[data-mc-action="abrir-galeria-grafico-modulo"]').forEach((node) => {
         applyGraphicDatasetsToNode(node, {
             src: downloadUrl,
@@ -1055,9 +1748,12 @@ async function persistRegeneratedModuleGraphic({ modal, image, layers }) {
             moduleType: String(context.moduleType || "").trim()
         });
     });
+    renderModuleGraphicInlinePreview(figure, mergedLayers);
+    const contentNodeForSave = contentNode.cloneNode(true);
+    contentNodeForSave.querySelectorAll(".cb-module-generated-graphic").forEach((node) => cleanupModuleGraphicInlinePreview(node));
     const saveHtml = typeof window.normalizarContenidoModuloPersistible === "function"
-        ? window.normalizarContenidoModuloPersistible(contentNode.innerHTML)
-        : contentNode.innerHTML;
+        ? window.normalizarContenidoModuloPersistible(contentNodeForSave.innerHTML)
+        : contentNodeForSave.innerHTML;
     await guardarModulo(moduleId, {
         contenido: saveHtml,
         graficoGenerado: {
@@ -1067,7 +1763,7 @@ async function persistRegeneratedModuleGraphic({ modal, image, layers }) {
             model: String(image?.model || figure.getAttribute("data-model") || "").trim(),
             promptVersion: String(image?.promptVersion || "").trim(),
             updatedAt: String(image?.updatedAt || new Date().toISOString()).trim(),
-            layers
+            layers: mergedLayers
         }
     }, courseId);
 }
@@ -1106,6 +1802,381 @@ async function regenerateGraphicLayerImage(modal, layers = {}, prompt = "") {
         imageNode.src = image.downloadUrl;
     }
     await persistRegeneratedModuleGraphic({ modal, image, layers });
+}
+
+function buildPromptForGraphicElement(anchor = {}, basePrompt = "", modulo = {}) {
+    const anchorLabel = String(anchor?.label || "").trim();
+    const moduloNombre = String(modulo?.nombre || "Módulo").trim();
+    const moduloTipo = String(modulo?.tipo || "Módulo").trim();
+    const rawContext = String(basePrompt || "").trim();
+    const normalizedContext = rawContext.toLowerCase();
+    const isMath = /\b(recta|n[uú]mero|números|algebra|ecuaci[oó]n|fracci[oó]n|operaci[oó]n|piso|lobby|positivo|negativo)\b/i.test(rawContext);
+    const isLanguage = /\b(language|grammar|vocabulary|prefijo|sufijo|word formation|clil|funciones del lenguaje)\b/i.test(rawContext);
+    const isScience = /\b(science|cient[ií]fico|proceso|laboratorio|experimento|energ[ií]a|ecosistema)\b/i.test(rawContext);
+    const visualStyle = isMath
+        ? "infografía matemática vectorial, didáctica, clara, geométrica"
+        : (isLanguage
+            ? "ilustración editorial educativa con iconografía lingüística y símbolos claros"
+            : (isScience
+                ? "infografía científica limpia con iconos técnicos y jerarquía visual"
+                : "gráfico educativo editorial limpio, moderno y didáctico"));
+    const compositionHint = /top|left|right|bottom|middle|center/i.test(String(anchor?.position || ""))
+        ? `Composición sugerida: ubica el sujeto principal con peso visual hacia ${String(anchor?.position || "").trim().toLowerCase()}.`
+        : "Composición sugerida: sujeto único centrado con margen amplio para etiquetas externas.";
+    const subjectDirective = anchorLabel
+        ? `Sujeto principal obligatorio: "${anchorLabel}". Representarlo de forma inequívoca y reconocible.`
+        : "Sujeto principal obligatorio: un único elemento visual claramente identificable.";
+    const avoidDirective = normalizedContext.includes("hotel") || normalizedContext.includes("lobby")
+        ? "Evita ambientes complejos de estudio, oficinas o sets cinematográficos."
+        : "Evita escenas narrativas completas: produce un asset aislado para composición por capas.";
+
+    return [
+        "=== BRIEF DE DIRECCIÓN DE ARTE ===",
+        `Proyecto: ${moduloNombre} (${moduloTipo}).`,
+        subjectDirective,
+        `Estilo visual objetivo: ${visualStyle}.`,
+        compositionHint,
+        rawContext ? `Contexto pedagógico del módulo: ${rawContext}` : "",
+        "",
+        "=== ESPECIFICACIÓN TÉCNICA DEL ASSET ===",
+        "Generar UNA imagen por capa para pipeline de composición manual.",
+        "Usa fondo blanco uniforme y limpio en toda la imagen de la capa.",
+        "No uses fondos de color distintos, degradados ni escenas ambientadas.",
+        "Mantén solo el contexto visual minimo necesario sobre ese fondo blanco.",
+        "La separación fina se hará manualmente con máscaras dentro del editor.",
+        "",
+        "=== CALIDAD VISUAL ===",
+        "Lectura inmediata en 2 segundos.",
+        "Contorno limpio, contraste alto, detalle medio/alto.",
+        "Paleta controlada y consistente con material escolar.",
+        "Sin ruido visual, sin artefactos, sin deformaciones.",
+        "",
+        "=== NEGATIVOS (PROHIBIDO) ===",
+        "No texto, no letras, no números, no etiquetas, no watermarks, no logos, no UI.",
+        "No compongas varias capas diferentes en una sola imagen.",
+        avoidDirective,
+        "",
+        "=== OBJETIVO DE USO ===",
+        "Este asset vivirá en su propia capa y se posicionará manualmente.",
+        "Debe conservar suficiente información visual para usar varita mágica, selección inversa y máscaras de recorte."
+    ].filter(Boolean).join("\n");
+}
+
+async function generarElementoGraficoCapa({ modal, modulo, anchor, prompt, previousStoragePath = "" }) {
+    const context = modal?.__graphicContext || {};
+    const courseId = String(context.courseId || "").trim();
+    const moduleId = String(context.moduleId || "").trim();
+    const moduleName = String(context.moduleName || modulo?.nombre || "").trim();
+    const moduleType = String(context.moduleType || modulo?.tipo || "").trim();
+    return authFetchJson("/api/moodle/module-graphics/generate-element", {
+        method: "POST",
+        body: {
+            courseId,
+            moduleId,
+            moduleName,
+            moduleType,
+            languageCode: "es",
+            instructions: String(modulo?.instrucciones || "").trim(),
+            content: String(modulo?.contenido || "").trim(),
+            elementId: String(anchor?.id || "").trim(),
+            elementLabel: String(anchor?.label || "").trim(),
+            elementPrompt: String(prompt || "").trim(),
+            previousStoragePath: String(previousStoragePath || "").trim(),
+            regenerate: !!previousStoragePath
+        }
+    });
+}
+
+async function analizarElementoGraficoCapa({ modal, anchor, prompt, imageUrl }) {
+    const context = modal?.__graphicContext || {};
+    return authFetchJson("/api/moodle/module-graphics/analyze-element", {
+        method: "POST",
+        body: {
+            moduleName: String(context.moduleName || "").trim(),
+            moduleType: String(context.moduleType || "").trim(),
+            elementLabel: String(anchor?.label || "").trim(),
+            elementPrompt: String(prompt || "").trim(),
+            imageUrl: String(imageUrl || "").trim()
+        }
+    });
+}
+
+async function generarCapaExtraGrafica(modal, extraLayer = {}) {
+    const context = modal?.__graphicContext || {};
+    const courseId = String(context.courseId || "").trim();
+    const moduleId = String(context.moduleId || "").trim();
+    if (!courseId || !moduleId) {
+        throw new Error("Falta el contexto del módulo para generar la capa extra.");
+    }
+    const modulo = await obtenerModulo(moduleId, courseId);
+    if (!modulo) {
+        throw new Error("No se encontró el módulo para generar la capa extra.");
+    }
+    const prompt = String(extraLayer?.prompt || extraLayer?.label || "Elemento adicional").trim();
+    const response = await authFetchJson("/api/moodle/module-graphics/generate-element", {
+        method: "POST",
+        body: {
+            courseId,
+            moduleId,
+            moduleName: String(context.moduleName || modulo?.nombre || "").trim(),
+            moduleType: String(context.moduleType || modulo?.tipo || "").trim(),
+            languageCode: "es",
+            instructions: String(modulo?.instrucciones || "").trim(),
+            content: String(modulo?.contenido || "").trim(),
+            elementId: String(extraLayer?.id || "").trim(),
+            elementLabel: String(extraLayer?.label || "Capa extra").trim(),
+            elementPrompt: prompt,
+            previousStoragePath: String(extraLayer?.storagePath || "").trim(),
+            regenerate: !!String(extraLayer?.storagePath || "").trim()
+        }
+    });
+    const image = response?.image && typeof response.image === "object" ? response.image : null;
+    if (!image?.downloadUrl) {
+        throw new Error("No se pudo generar una imagen utilizable para la capa extra.");
+    }
+    extraLayer.prompt = prompt;
+    extraLayer.imageUrl = String(image.downloadUrl || "").trim();
+    extraLayer.maskedImageUrl = "";
+    extraLayer.storagePath = String(image.storagePath || "").trim();
+    extraLayer.mimeType = String(image.mimeType || "image/png").trim() || "image/png";
+    extraLayer.model = String(image.model || "").trim();
+    extraLayer.placed = false;
+    extraLayer.manualPosition = null;
+    extraLayer.maskSelection = null;
+    extraLayer.maskInvert = false;
+    const analysisResponse = await analizarElementoGraficoCapa({
+        modal,
+        anchor: { label: String(extraLayer?.label || "Capa extra").trim() },
+        prompt,
+        imageUrl: extraLayer.imageUrl
+    }).catch(() => null);
+    extraLayer.validation = analysisResponse?.analysis && typeof analysisResponse.analysis === "object"
+        ? analysisResponse.analysis
+        : null;
+    if (extraLayer.validation?.recommendation === "regenerate" || Number(extraLayer.validation?.score || 0) < 62) {
+        const retryResponse = await authFetchJson("/api/moodle/module-graphics/generate-element", {
+            method: "POST",
+            body: {
+                courseId,
+                moduleId,
+                moduleName: String(context.moduleName || modulo?.nombre || "").trim(),
+                moduleType: String(context.moduleType || modulo?.tipo || "").trim(),
+                languageCode: "es",
+                instructions: String(modulo?.instrucciones || "").trim(),
+                content: String(modulo?.contenido || "").trim(),
+                elementId: String(extraLayer?.id || "").trim(),
+                elementLabel: String(extraLayer?.label || "Capa extra").trim(),
+                elementPrompt: `${prompt}\nRegenera esta capa como una sola imagen limpia sobre fondo blanco uniforme, sin texto incrustado, sin numeros, sin patron checkerboard, sin UI, sin collage y sin mezclar multiples capas en la misma imagen.`,
+                previousStoragePath: String(extraLayer?.storagePath || "").trim(),
+                regenerate: true
+            }
+        });
+        const retryImage = retryResponse?.image && typeof retryResponse.image === "object" ? retryResponse.image : null;
+        if (retryImage?.downloadUrl) {
+            extraLayer.imageUrl = String(retryImage.downloadUrl || "").trim();
+            extraLayer.storagePath = String(retryImage.storagePath || "").trim();
+            extraLayer.mimeType = String(retryImage.mimeType || "image/png").trim() || "image/png";
+            extraLayer.model = String(retryImage.model || "").trim();
+            const retryAnalysis = await analizarElementoGraficoCapa({
+                modal,
+                anchor: { label: String(extraLayer?.label || "Capa extra").trim() },
+                prompt,
+                imageUrl: extraLayer.imageUrl
+            }).catch(() => null);
+            extraLayer.validation = retryAnalysis?.analysis && typeof retryAnalysis.analysis === "object"
+                ? retryAnalysis.analysis
+                : {
+                    recommendation: "regenerate",
+                    score: 0,
+                    issues: ["No se pudo validar la capa extra regenerada."]
+                };
+        }
+    }
+    modal.__graphicLayers = normalizeEditableGraphicLayers(modal.__graphicLayers || {});
+    renderEditableGraphicLayers(modal, modal.__graphicLayers);
+    const moduleName = String(context.moduleId || "").trim();
+    if (extraLayer.validation?.recommendation === "regenerate") {
+        reportEstadoGeneracionModulo(moduleName, "La capa extra se generó, pero requiere corrección antes de exportar.", "warning", false);
+    } else {
+        reportEstadoGeneracionModulo(moduleName, "La capa extra quedó lista para colocarse manualmente.", "success", false);
+    }
+}
+
+async function subirComposicionSvgAFirebase({ modal, svgMarkup = "" }) {
+    const context = modal?.__graphicContext || {};
+    const moduleId = String(context.moduleId || "").trim();
+    const courseId = String(context.courseId || "").trim();
+    const user = auth.currentUser;
+    if (!user?.uid || !moduleId || !courseId) {
+        throw new Error("Falta contexto para guardar la composición SVG.");
+    }
+    const blob = new Blob([String(svgMarkup || "")], { type: "image/svg+xml;charset=utf-8" });
+    const path = `images/${user.uid}/moodle-module-graphics/${courseId}/${moduleId}/composite_${Date.now()}.svg`;
+    const ref = storageRef(storage, path);
+    await uploadBytes(ref, blob, {
+        contentType: "image/svg+xml",
+        customMetadata: {
+            origin: "moodleModuleGraphicComposer",
+            courseId,
+            moduleId
+        }
+    });
+    const downloadUrl = await getDownloadURL(ref);
+    return {
+        downloadUrl,
+        storagePath: path,
+        mimeType: "image/svg+xml",
+        model: "editor-layered-v1",
+        promptVersion: "moodle_graphic_editor_layered_v2",
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function reportEstadoGeneracionModulo(moduleId = "", message = "", tone = "info", spinning = false) {
+    if (typeof window.setEstadoGeneracionModulo === "function") {
+        window.setEstadoGeneracionModulo(moduleId, message, tone, spinning);
+        return;
+    }
+    if (typeof mostrarNotificacion === "function" && String(message || "").trim()) {
+        const normalizedTone = String(tone || "info").trim().toLowerCase();
+        const notifyType = (normalizedTone === "error" || normalizedTone === "warning" || normalizedTone === "success")
+            ? normalizedTone
+            : "info";
+        mostrarNotificacion(String(message || "").trim(), notifyType);
+    }
+}
+
+async function generarComposicionGraficaPorCapas(modal) {
+    const context = modal?.__graphicContext || {};
+    const moduleId = String(context.moduleId || "").trim();
+    const courseId = String(context.courseId || "").trim();
+    if (!moduleId || !courseId) {
+        throw new Error("Falta el contexto del módulo para generar por capas.");
+    }
+    const modulo = await obtenerModulo(moduleId, courseId);
+    if (!modulo) {
+        throw new Error("No se encontró el módulo para generar por capas.");
+    }
+
+    const layers = applyGuidedGraphicLayout(modal.__graphicLayers || modulo?.graficoGenerado?.layers || {});
+    const anchors = Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors : [];
+    if (!anchors.length) {
+        throw new Error("No hay anchors disponibles para generar elementos del gráfico.");
+    }
+
+    const moduloPrompt = String(modal.querySelector('textarea[data-layer-editor="graphic"]')?.value || "").trim();
+    const existingElements = Array.isArray(layers.graphic.elements) ? layers.graphic.elements : [];
+    const elementsByAnchor = new Map(existingElements.map((item) => [String(item?.anchorId || "").trim(), item]));
+
+    reportEstadoGeneracionModulo(moduleId, "Generando elementos del gráfico por capas...", "info", true);
+
+    const generationTasks = anchors.map(async (anchor) => {
+        const anchorId = String(anchor?.id || "").trim();
+        const previous = elementsByAnchor.get(anchorId) || null;
+        const elementPrompt = buildPromptForGraphicElement(anchor, moduloPrompt, modulo);
+        const generated = await generarElementoGraficoCapa({
+            modal,
+            modulo,
+            anchor,
+            prompt: elementPrompt,
+            previousStoragePath: String(previous?.storagePath || "").trim()
+        });
+        const image = generated?.image && typeof generated.image === "object" ? generated.image : null;
+        if (!image?.downloadUrl) {
+            throw new Error(`No se pudo generar el elemento para ${anchor?.label || anchorId}.`);
+        }
+        return {
+            id: `element-${anchorId || Date.now()}`,
+            anchorId,
+            label: String(anchor?.label || "").trim(),
+            prompt: elementPrompt,
+            imageUrl: String(image.downloadUrl || "").trim(),
+            maskedImageUrl: String(previous?.maskedImageUrl || "").trim(),
+            storagePath: String(image.storagePath || "").trim(),
+            mimeType: String(image.mimeType || "image/png").trim() || "image/png",
+            model: String(image.model || "").trim(),
+            manualPosition: previous?.manualPosition && typeof previous.manualPosition === "object" ? previous.manualPosition : null,
+            placed: previous?.placed === true,
+            maskSelection: previous?.maskSelection && typeof previous.maskSelection === "object" ? previous.maskSelection : null,
+            maskTolerance: Number.isFinite(Number(previous?.maskTolerance)) ? Number(previous.maskTolerance) : 26,
+            maskInvert: previous?.maskInvert === true,
+            validation: null
+        };
+    });
+
+    const generatedElements = await Promise.all(generationTasks);
+
+    for (const item of generatedElements) {
+        const anchor = anchors.find((anchorItem) => String(anchorItem?.id || "").trim() === String(item.anchorId || "").trim()) || {};
+        const analysisResponse = await analizarElementoGraficoCapa({
+            modal,
+            anchor,
+            prompt: item.prompt,
+            imageUrl: item.imageUrl
+        }).catch(() => null);
+        const analysis = analysisResponse?.analysis && typeof analysisResponse.analysis === "object" ? analysisResponse.analysis : null;
+        item.validation = analysis || null;
+        if (analysis?.recommendation === "regenerate" || (Number(analysis?.score || 0) < 62)) {
+            const regenerated = await generarElementoGraficoCapa({
+                modal,
+                modulo,
+                anchor,
+                prompt: `${item.prompt}\nRegenera esta capa como una sola imagen limpia sobre fondo blanco uniforme, sin texto incrustado, sin numeros, sin patron checkerboard, sin canvas visible, sin UI y sin collage.`,
+                previousStoragePath: item.storagePath
+            });
+            const image = regenerated?.image && typeof regenerated.image === "object" ? regenerated.image : null;
+            if (image?.downloadUrl) {
+                item.imageUrl = String(image.downloadUrl || "").trim();
+                item.maskedImageUrl = "";
+                item.maskSelection = null;
+                item.storagePath = String(image.storagePath || "").trim();
+                item.mimeType = String(image.mimeType || "image/png").trim() || "image/png";
+                item.model = String(image.model || "").trim();
+                const secondAnalysisResponse = await analizarElementoGraficoCapa({
+                    modal,
+                    anchor,
+                    prompt: item.prompt,
+                    imageUrl: item.imageUrl
+                }).catch(() => null);
+                item.validation = secondAnalysisResponse?.analysis && typeof secondAnalysisResponse.analysis === "object"
+                    ? secondAnalysisResponse.analysis
+                    : {
+                        recommendation: "regenerate",
+                        score: 0,
+                        issues: ["No se pudo validar el asset regenerado."]
+                    };
+            }
+        }
+    }
+
+    layers.graphic.elements = generatedElements;
+    modal.__graphicLayers = layers;
+    renderEditableGraphicLayers(modal, layers);
+    const invalidElements = generatedElements.filter((item) => item?.validation?.recommendation === "regenerate");
+    if (invalidElements.length) {
+        reportEstadoGeneracionModulo(moduleId, "Hay elementos inválidos. Corrígelos desde la sección Elementos.", "warning", false);
+        throw new Error("La composición no se puede exportar mientras existan elementos inválidos.");
+    }
+    const unplacedElements = generatedElements.filter((item) => !(item?.placed === true || (item?.manualPosition && typeof item.manualPosition === "object")));
+    if (unplacedElements.length) {
+        reportEstadoGeneracionModulo(moduleId, "Las capas se generaron por separado. Colócalas manualmente antes de componer.", "info", false);
+        return;
+    }
+    const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
+    stage?.classList.remove("is-hidden-graphic", "is-hidden-text", "is-hidden-background");
+    requestAnimationFrame(() => updateGraphicConnectorLayout(modal));
+
+    const imageNode = modal.querySelector(".cb-module-graphic-lightbox__image");
+    if (imageNode) {
+        imageNode.removeAttribute("src");
+    }
+    const svgMarkup = await buildGraphicSvgMarkup(modal);
+    const composedImage = await subirComposicionSvgAFirebase({ modal, svgMarkup });
+    if (imageNode) {
+        imageNode.src = String(composedImage.downloadUrl || "").trim();
+    }
+    await persistRegeneratedModuleGraphic({ modal, image: composedImage, layers });
+    reportEstadoGeneracionModulo(moduleId, "Composición por capas generada y guardada.", "success", false);
 }
 
 function parseJsonObjectFromText(raw = "") {
@@ -1242,9 +2313,10 @@ JSON:
 function ensureGraphicLightboxDrag(modal) {
     if (!modal || modal.dataset.dragReady === "1") return;
     modal.dataset.dragReady = "1";
-    const state = { target: null, stage: null, offsetX: 0, offsetY: 0 };
+    const state = { target: null, stage: null, offsetX: 0, offsetY: 0, pointerId: null, startX: 0, startY: 0, dragMoved: false };
 
     modal.addEventListener("pointerdown", (event) => {
+        if (typeof event.button === "number" && event.button !== 0) return;
         const handle = event.target.closest(".cb-module-graphic-lightbox__draggable");
         const stage = modal.querySelector(".cb-module-graphic-lightbox__stage");
         if (!handle || !stage) return;
@@ -1252,6 +2324,10 @@ function ensureGraphicLightboxDrag(modal) {
         const handleRect = handle.getBoundingClientRect();
         state.target = handle;
         state.stage = stage;
+        state.pointerId = event.pointerId;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.dragMoved = false;
         state.offsetX = event.clientX - handleRect.left;
         state.offsetY = event.clientY - handleRect.top;
         handle.setPointerCapture?.(event.pointerId);
@@ -1262,8 +2338,14 @@ function ensureGraphicLightboxDrag(modal) {
 
     modal.addEventListener("pointermove", (event) => {
         if (!state.target || !state.stage) return;
+        if (state.pointerId !== null && event.pointerId !== state.pointerId) return;
         const stageRect = state.stage.getBoundingClientRect();
         const targetRect = state.target.getBoundingClientRect();
+        if (!state.dragMoved) {
+            const deltaX = Math.abs(event.clientX - state.startX);
+            const deltaY = Math.abs(event.clientY - state.startY);
+            if (deltaX > 3 || deltaY > 3) state.dragMoved = true;
+        }
         const nextLeft = ((event.clientX - stageRect.left - state.offsetX) / stageRect.width) * 100;
         const nextTop = ((event.clientY - stageRect.top - state.offsetY) / stageRect.height) * 100;
         const maxLeft = 100 - ((targetRect.width / stageRect.width) * 100);
@@ -1278,8 +2360,13 @@ function ensureGraphicLightboxDrag(modal) {
         syncDraggedGraphicLayerState(modal, state.target);
         updateGraphicConnectorLayout(modal);
         state.target.classList.remove("is-dragging");
+        if (state.dragMoved) {
+            modal.dataset.suppressDragClickUntil = String(Date.now() + 250);
+        }
         state.target = null;
         state.stage = null;
+        state.pointerId = null;
+        state.dragMoved = false;
     };
 
     modal.addEventListener("pointerup", release);
@@ -1291,23 +2378,25 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
     const figureEl = sourceEl?.closest?.(".cb-module-generated-graphic") || null;
     const fallbackImg = sourceEl?.matches?.("img") ? sourceEl : figureEl?.querySelector?.("img");
     const cleanSrc = String(
-        sourceEl?.dataset?.mcImageSrc ||
+        fallbackImg?.dataset?.mcImageSrc ||
         fallbackImg?.getAttribute?.("src") ||
+        sourceEl?.dataset?.mcImageSrc ||
         sourceOrSrc ||
         ""
     ).trim();
     if (!cleanSrc) return;
     moduleGraphicLightboxLastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : sourceEl;
     const cleanAlt = String(
-        sourceEl?.dataset?.mcImageAlt ||
+        fallbackImg?.dataset?.mcImageAlt ||
         fallbackImg?.getAttribute?.("alt") ||
+        sourceEl?.dataset?.mcImageAlt ||
         alt ||
         ""
     ).trim();
-    const layers = normalizeEditableGraphicLayers(
+    const layers = applyGuidedGraphicLayout(
         decodeGraphicLayers(String(
-            sourceEl?.dataset?.mcImageLayers ||
             fallbackImg?.dataset?.mcImageLayers ||
+            sourceEl?.dataset?.mcImageLayers ||
             layersRaw ||
             ""
         ).trim()) || {}
@@ -1317,7 +2406,11 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
     const image = modal.querySelector(".cb-module-graphic-lightbox__image");
     const caption = modal.querySelector(".cb-module-graphic-lightbox__caption");
     const backgroundLayer = modal.querySelector(".cb-module-graphic-lightbox__background-layer");
+    const simplePreviewBackgroundLayer = modal.querySelector(".cb-module-graphic-lightbox__simple-preview-background-layer");
+    const simplePreviewTextLayer = modal.querySelector(".cb-module-graphic-lightbox__simple-preview-text-layer");
+    const statusText = modal.querySelector(".cb-module-graphic-lightbox__stage-status-text");
     modal.__graphicLayers = layers;
+    applySimplePreviewStateFromLayers(modal, layers);
     modal.__graphicContext = {
         moduleId: String(sourceEl?.dataset?.mcModuloId || fallbackImg?.dataset?.mcModuloId || inferred.moduleId || "").trim(),
         courseId: String(sourceEl?.dataset?.mcCourseId || fallbackImg?.dataset?.mcCourseId || inferred.courseId || "").trim(),
@@ -1325,6 +2418,10 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
         moduleType: String(sourceEl?.dataset?.mcModuleType || fallbackImg?.dataset?.mcModuleType || inferred.moduleType || "").trim()
     };
     ensureGraphicLightboxDrag(modal);
+    setGraphicLightboxZoom(modal, 1);
+    setGraphicLightboxMode(modal, "preview");
+    setGraphicLightboxSection(modal, "composition");
+    modal.classList.add("is-simple-preview");
     renderCanvasMeta(modal);
     renderLayerStack(modal, layers);
     modal.querySelectorAll("[data-layer-toggle]").forEach((input) => {
@@ -1338,32 +2435,30 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
     if (caption) {
         caption.textContent = cleanAlt || "Gráfico del módulo";
     }
+    if (statusText) {
+        statusText.textContent = "Gráfico final";
+    }
     if (backgroundLayer) {
         backgroundLayer.innerHTML = "";
     }
+    if (simplePreviewBackgroundLayer) {
+        simplePreviewBackgroundLayer.innerHTML = "";
+    }
+    if (simplePreviewTextLayer) {
+        simplePreviewTextLayer.innerHTML = "";
+    }
     setGraphicBackground(modal, layers?.background || {});
-    renderGraphicLayerCard(modal, "background", [
-        layers?.background?.label || "Capa 1 · Fondo",
-        layers?.background?.description || "",
-        layers?.background?.color ? `Color plano: ${layers.background.color}` : "",
-        layers?.background?.palette ? `Paleta: ${layers.background.palette}` : ""
-    ]);
-    renderGraphicLayerCard(modal, "graphic", [
-        layers?.graphic?.label || "Capa 2 · Gráfico",
-        layers?.graphic?.description || "",
-        ...(Array.isArray(layers?.graphic?.anchors) ? layers.graphic.anchors.map((item) => item?.label || "") : []),
-        ...(Array.isArray(layers?.graphic?.focus) ? layers.graphic.focus : [])
-    ]);
-    renderGraphicLayerCard(modal, "text", [
-        layers?.textLayer?.label || "Capa 3 · Texto",
-        layers?.textLayer?.title || "",
-        layers?.textLayer?.subtitle || "",
-        ...(Array.isArray(layers?.textLayer?.labels) ? layers.textLayer.labels.map((item) => item?.text || "") : []),
-        ...(Array.isArray(layers?.textLayer?.legend) ? layers.textLayer.legend : [])
-    ]);
+    renderGraphicLayerSummaries(modal, layers);
     renderGraphicItemsLayer(modal, layers?.graphic || {});
     renderCustomGraphicLayers(modal, layers);
     renderGraphicTextLayer(modal, layers?.textLayer || {});
+    renderGraphicSelectionPanel(modal, layers);
+    renderGraphicExportPanel(modal, layers);
+    renderSimplePreviewBackground(modal);
+    renderSimplePreviewText(modal);
+    renderSimplePreviewFooter(modal);
+    setGraphicLightboxSection(modal, "composition");
+    setGraphicLightboxMode(modal, "preview");
     modal.inert = false;
     modal.removeAttribute("inert");
     modal.setAttribute("aria-hidden", "false");
@@ -1374,12 +2469,18 @@ window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRa
 };
 
 function renderEditableGraphicLayers(modal, layers = {}) {
+    renderCanvasMeta(modal);
     setGraphicBackground(modal, layers?.background || {});
     renderLayerStack(modal, layers);
     renderGraphicLayerSummaries(modal, layers);
+    renderGraphicSelectionPanel(modal, layers);
+    renderGraphicExportPanel(modal, layers);
     renderGraphicItemsLayer(modal, layers.graphic || {});
     renderCustomGraphicLayers(modal, layers);
     renderGraphicTextLayer(modal, layers.textLayer || {});
+    setGraphicLightboxSection(modal, getGraphicLightboxSection(modal));
+    setGraphicLightboxMode(modal, getGraphicLightboxMode(modal));
+    requestAnimationFrame(() => updateGraphicConnectorLayout(modal));
 }
 
 window.cerrarGaleriaGraficoModulo = function() {
@@ -6470,16 +7571,34 @@ function crearModalInstruccionesSubtema() {
 
 // Después de las importaciones, agrega:
 window.ejecutarGeneracionModuloGemini = async function (moduloId) {
+    const cleanModuloId = String(moduloId || "").trim();
+    if (!cleanModuloId) return;
+    const triggerButtons = Array.from(document.querySelectorAll('[data-mc-action="ejecutar-generacion-modulo-gemini"]'))
+        .filter((button) => String(button?.dataset?.mcModuloId || "").trim() === cleanModuloId);
+    if (triggerButtons.some((button) => button.dataset.cbGenerating === "1")) {
+        return;
+    }
+    triggerButtons.forEach((button) => {
+        button.dataset.cbGenerating = "1";
+        button.disabled = true;
+        button.setAttribute("aria-disabled", "true");
+    });
     try {
-        await generarModuloGemini(moduloId);   // ← SOLO 1 parámetro
-        const subtemaParaRefrescar = resolverSubtemaParaModulo(moduloId);
+        await generarModuloGemini(cleanModuloId);
+        const subtemaParaRefrescar = resolverSubtemaParaModulo(cleanModuloId);
         if (!subtemaParaRefrescar?.id) {
             throw new Error("El contenido se generó, pero no se pudo localizar el subtema activo para refrescar la vista.");
         }
-        await cargarSubtema(subtemaParaRefrescar, moduloId);          // refrescar UI con el mismo módulo activo
+        await cargarSubtema(subtemaParaRefrescar, cleanModuloId);
     } catch (err) {
         console.error("Error al generar contenido con IA:", err);
         alert(`Error al generar contenido con IA.\n${err?.message || "Revisa la consola o los logs del backend para más detalle."}`);
+    } finally {
+        triggerButtons.forEach((button) => {
+            delete button.dataset.cbGenerating;
+            button.disabled = false;
+            button.setAttribute("aria-disabled", "false");
+        });
     }
 };
 
@@ -7796,6 +8915,10 @@ function decorarContenidoModuloRenderizado(html = "", tipoModulo = "") {
         if (currentQuestionBlock) {
             currentQuestionBlock.appendChild(node);
         }
+    });
+
+    root.querySelectorAll(".cb-module-generated-graphic").forEach((figure) => {
+        renderModuleGraphicInlinePreview(figure);
     });
 
     return root.innerHTML;
@@ -12596,7 +13719,7 @@ if (document.readyState === "loading") {
 
 // === GESTIÓN DE CACHE EN DEPLOY ===
 
-const APP_VERSION = "2025.01.18-02"; // ⬅️ cambia en cada deploy
+const APP_VERSION = "2026.04.10-01";
 
 const storedVersion = localStorage.getItem("APP_VERSION");
 
