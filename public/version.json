@@ -1,5 +1,5 @@
 {
-  "version": "2026-1.0.0.72",
+  "version": "2026-1.0.0.73",
   "title": "Nuevas actualizaciones",
   "message": "Se reforzó el hard reset al aplicar actualizaciones desde el banner. Da click en Actualizar ahora.",
   "forceClearCache": true,
