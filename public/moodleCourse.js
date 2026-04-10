@@ -12743,17 +12743,29 @@ async function exportarCursoCompletoWord(cursoActual) {
     }
 }
 
+let cbCursoWordExportBusy = false;
 const btnDescargarCursoWord = document.getElementById("btnDescargarCursoWord");
-if (btnDescargarCursoWord) {
-    btnDescargarCursoWord.addEventListener("click", async () => {
+if (btnDescargarCursoWord && btnDescargarCursoWord.dataset.cbBoundWordExport !== "1") {
+    btnDescargarCursoWord.dataset.cbBoundWordExport = "1";
+    btnDescargarCursoWord.addEventListener("click", async (e) => {
+        // Si por cualquier razón se dispara más de una vez, ignorar.
+        if (cbCursoWordExportBusy) return;
+        cbCursoWordExportBusy = true;
+        const prevDisabled = btnDescargarCursoWord.disabled;
+        btnDescargarCursoWord.disabled = true;
+
         const contenidoEditor = document.getElementById("contenidoEditor");
         if (!contenidoEditor) {
             alert("No se encontró el editor de contenido para exportar.");
+            cbCursoWordExportBusy = false;
+            btnDescargarCursoWord.disabled = prevDisabled;
             return;
         }
         const raw = String(contenidoEditor.innerHTML || "").trim();
         if (!raw) {
             alert("No hay contenido en el editor para exportar.");
+            cbCursoWordExportBusy = false;
+            btnDescargarCursoWord.disabled = prevDisabled;
             return;
         }
 
@@ -12783,6 +12795,12 @@ ${raw}
             a.click();
         } catch (e) {
             alert("Error exportando el contenido a Word");
+        } finally {
+            // Pequeño delay para evitar doble click inmediato en Safari/Chrome.
+            setTimeout(() => {
+                cbCursoWordExportBusy = false;
+                btnDescargarCursoWord.disabled = prevDisabled;
+            }, 300);
         }
     });
 }
