@@ -1,16 +1,14 @@
 {
-  "version": "2026-1.0.1.08",
+  "version": "2026-1.0.1.09",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
-    "Fix: SyA ahora se guarda en la colección raíz syaOverrides para evitar problemas de subcolección y collectionGroup.",
-    "Fix: el editor SyA conserva cambios de celda aunque cierres el submodal antes de guardar el borrador.",
-    "Nuevo: botón Modificar SyA por categoría con edición desde Firebase.",
-    "Nuevo: publicación opcional de SyA para que otros usuarios autenticados puedan seleccionarla.",
-    "Fix: consulta de overrides SyA compartidos con reglas e índice de Firestore ya listos.",
-    "Fix: el botón Modificar SyA ahora usa el mismo diseño visual que los demás botones de categoría.",
-    "Mejora: la generación toma la SyA efectiva seleccionada en lugar de depender solo de la secuencia base."
+    "Nuevo: Generación de lecturas por IA vía Prompt si no hay selección previa.",
+    "Mejora: Integración de lecturas generadas por IA como contexto global de la unidad.",
+    "Fix: Robustez en el parseo JSON de respuestas de IA (evita caracteres de escape inválidos).",
+    "Fix: Corrección de interacción y selección de texto en modo pantalla completa.",
+    "Mejora: Estandarización de respuestas cortas y etiquetas unificadas para el maestro."
   ]
 }
