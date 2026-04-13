@@ -1,10 +1,11 @@
 {
-  "version": "2026-1.0.1.12",
+  "version": "2026-1.0.1.13",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
+    "Fix: moodleCourse ya recarga de inmediato las instrucciones Gemini editadas sin reiniciar la página.",
     "Fix: El botón de actualización ahora termina en /index.html sin parámetros de caché en la URL.",
     "Mejora: Combinación real de estilos educativos, incluyendo ASC + otros formatos.",
     "Fix: Restaurada la estructura ASC original en actividades generadas.",

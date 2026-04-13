@@ -9705,9 +9705,10 @@ async function duplicarSubtema(tema, subtemaOriginal) {
 
 
 
-export async function obtenerModulo(moduloId, cursoIdEspecifico = null) {
+export async function obtenerModulo(moduloId, cursoIdEspecifico = null, options = {}) {
     // Determinar cursoId
     let cursoIdParaBuscar = cursoIdEspecifico || (curso ? curso.id : null);
+    const forceRefresh = options?.forceRefresh === true;
     
     if (!cursoIdParaBuscar) {
         return null;
@@ -9717,7 +9718,7 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null) {
     if (!idParaBuscar) return null;
 
     const cached = modulosCache.get(idParaBuscar);
-    if (cached) {
+    if (cached && !forceRefresh) {
         return cached;
     }
     
@@ -9814,6 +9815,47 @@ function quitarUndefinedPlano(obj = {}) {
         if (v !== undefined) out[k] = v;
     });
     return out;
+}
+
+function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
+    const moduloIdSafe = String(moduloId || "").trim();
+    const cursoIdSafe = String(cursoId || "").trim();
+    if (!moduloIdSafe || !payload || typeof payload !== "object") return;
+
+    const syncArray = (items) => {
+        if (!Array.isArray(items)) return false;
+        let updated = false;
+        items.forEach((item) => {
+            if (!item || typeof item !== "object") return;
+            if (String(item.id || "").trim() === moduloIdSafe) {
+                Object.assign(item, payload);
+                updated = true;
+            }
+        });
+        return updated;
+    };
+
+    if (window.subtemaActivo?.modulos) {
+        syncArray(window.subtemaActivo.modulos);
+    }
+
+    if (curso?.temas && Array.isArray(curso.temas)) {
+        curso.temas.forEach((tema) => {
+            if (!Array.isArray(tema?.subtemas)) return;
+            tema.subtemas.forEach((subtema) => {
+                if (!Array.isArray(subtema?.modulos)) return;
+                syncArray(subtema.modulos);
+            });
+        });
+    }
+
+    if (cursoIdSafe) {
+        const docId = construirDocIdModulo(moduloIdSafe, cursoIdSafe);
+        if (docId) {
+            const current = modulosCache.get(docId) || {};
+            modulosCache.set(docId, { ...current, ...payload });
+        }
+    }
 }
 
 async function reintentarGuardadoModuloReduciendoTamano({
@@ -9934,10 +9976,12 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
         
         if (snap.exists()) {
             await updateDoc(docRef, datosActualizados);
-            modulosCache.set(docId, {
+            const payloadLocal = {
                 ...snap.data(),
                 ...datosActualizados
-            });
+            };
+            modulosCache.set(docId, payloadLocal);
+            sincronizarModuloLocal(moduloId, cursoIdParaGuardar, payloadLocal);
         } else {
             // Si no existe, crear con datos básicos
             const dataNuevo = {
@@ -9948,6 +9992,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
             };
             await setDoc(docRef, dataNuevo);
             modulosCache.set(docId, dataNuevo);
+            sincronizarModuloLocal(moduloId, cursoIdParaGuardar, dataNuevo);
         }
         
         return true;
@@ -9972,6 +10017,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
                 ...(snap.exists() ? snap.data() : {}),
                 ...payloadRescate
             });
+            sincronizarModuloLocal(moduloId, cursoIdParaGuardar, payloadRescate);
             return true;
         }
         throw error;
@@ -13558,7 +13604,7 @@ document.addEventListener('DOMContentLoaded', function() {
 window.abrirInstruccionesGemini = async function(moduloId) {
     inicializarToolbarInstruccionesGemini();
     const cursoIdModulo = String(curso?.id || "").trim() || null;
-    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+    const modulo = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
     if (!modulo) return;
 
     // Guardamos referencia al ID, no el objeto
@@ -13685,6 +13731,14 @@ function inicializarEventosModalInstruccionesGemini() {
                 ignorarContextoPersistido !== ignorarContextoChecked
             ) {
                 throw new Error("Las instrucciones o sus opciones no quedaron persistidas en Firebase.");
+            }
+
+            if (docId) {
+                modulosCache.delete(docId);
+                const moduloRefrescado = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
+                if (moduloRefrescado) {
+                    sincronizarModuloLocal(moduloId, cursoIdModulo, moduloRefrescado);
+                }
             }
 
             window.__moduloEditandoInstruccionesId = null;
