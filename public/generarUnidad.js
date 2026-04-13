@@ -24620,6 +24620,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         }
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
+        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio);
         let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
@@ -25340,6 +25341,61 @@ function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
     });
   }
   return out;
+}
+
+/**
+ * Scans every .activity block and appends resource-type icon chips
+ * at the END of the first <p> (main instruction only, not sub-instructions).
+ * Detects: Ficha, Anexo, Recortable, Video by keyword match in the block text.
+ */
+function _unidadInjectResourceIconsInActivities(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const ICONS = [
+    { key: "ficha",      regex: /\bficha\s+[p]?\d+\w*/i,        label: "IC. Fichas",    icon: "fa-solid fa-pen-nib",   color: "#2563eb", bg: "#dbeafe" },
+    { key: "anexo",      regex: /\banexo\s+[p]?\d+\w*/i,         label: "IC. Anexo",     icon: "fa-solid fa-paperclip", color: "#d97706", bg: "#fef3c7" },
+    { key: "recortable", regex: /\brecortable\s+[p]?\d+\w*/i,    label: "IC. Recortable",icon: "fa-solid fa-scissors",  color: "#7c3aed", bg: "#ede9fe" },
+    { key: "video",      regex: /\bvideo\b|guion\s+de\s+video/i, label: "IC. Video",     icon: "fa-solid fa-film",      color: "#dc2626", bg: "#fee2e2" }
+  ];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas"));
+  if (!activities.length) return source;
+
+  activities.forEach((activity) => {
+    const blockText = activity.textContent || "";
+    const detected = ICONS.filter(ic => ic.regex.test(blockText));
+    if (!detected.length) return;
+
+    // Only target the first <p> — the main instruction
+    const firstP = activity.querySelector("p");
+    if (!firstP) return;
+
+    // Avoid injecting twice
+    if (firstP.querySelector(".unidad-ic-resource-badge")) return;
+
+    const badgeContainer = doc.createElement("span");
+    badgeContainer.className = "unidad-ic-resource-badges";
+    badgeContainer.style.cssText = "display:inline-flex;gap:5px;align-items:center;margin-left:8px;vertical-align:middle;flex-wrap:wrap;";
+
+    detected.forEach(ic => {
+      const chip = doc.createElement("span");
+      chip.className = "unidad-ic-resource-badge";
+      chip.title = ic.label;
+      chip.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;background:${ic.bg};color:${ic.color};font-size:10px;font-weight:700;border:1px solid ${ic.color}33;white-space:nowrap;`;
+      chip.innerHTML = `<i class="${ic.icon}" style="font-size:9px;"></i> ${ic.label}`;
+      badgeContainer.appendChild(chip);
+    });
+
+    firstP.appendChild(badgeContainer);
+  });
+
+  return root.innerHTML;
 }
 
 function _unidadInferGeneratedResourcesFromHtml(html = "") {
