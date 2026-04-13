@@ -2445,10 +2445,12 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
   const ejeLectura = _unidadRenderEjeArticuladorHTML("ComprensionLectora", categoriaLectura, { lectura: true });
   return `
     <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;">
-      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaLectura}</p>
-      ${competenciasLectura}
-      ${competenciaLectura}
-      ${ejeLectura}
+      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaLectura}</span>
+        ${competenciasLectura}
+        ${competenciaLectura}
+        ${ejeLectura}
+      </div>
       <h4 style="margin:0 0 10px;">Apoyo de la lectura</h4>
       ${tabla ? `<h5 style="margin:10px 0 6px;">Tabla de sinónimos</h5>${tabla}` : ""}
       ${bibliografia ? `<h5 style="margin:10px 0 6px;">Bibliografía</h5><div class="lectura-bibliografia-lista">${bibliografia}</div>` : ""}
@@ -22925,12 +22927,11 @@ function _unidadCompetenciasAscPorSubtema(subtema = "", categoria = "", { lectur
 function _unidadRenderCompetenciasAscHTML(subtema = "", categoria = "", options = {}) {
   const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
   if (!chips.length) return "";
-  const html = chips.map((chip) => `
-    <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(44,90,160,0.22);background:#f5f8ff;color:#426b35;font-size:12px;font-weight:800;letter-spacing:.02em;">
+  return chips.map((chip) => `
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid rgba(44,90,160,0.22);background:#f5f8ff;color:#426b35;font-size:11px;font-weight:700;letter-spacing:.02em;">
       [${_escapeHtmlUnidad(chip)}]
     </span>
   `).join(" ");
-  return `<div class="unidad-asc-competencias" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px 0;">${html}</div>`;
 }
 
 function _unidadAscThemePorChip(chip = "") {
@@ -23008,11 +23009,9 @@ function _unidadRenderCompetenciaPrimariaHTML(subtema = "", categoria = "", opti
   const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
   const theme = _unidadAscThemePorChip(chips[0] || "");
   return `
-    <div class="unidad-competencia-primaria" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px 0;">
-      <span style="display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.bg};color:${theme.text};font-size:12px;font-weight:800;letter-spacing:.01em;">
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.bg};color:${theme.text};font-size:11px;font-weight:700;letter-spacing:.01em;">
         ${_escapeHtmlUnidad(etiqueta)} - Competencia: ${_escapeHtmlUnidad(competencia)}
       </span>
-    </div>
   `;
 }
 
@@ -23052,11 +23051,7 @@ function _unidadEjeArticuladorPorSubtema(subtema = "", categoria = "", { lectura
 function _unidadRenderEjeArticuladorHTML(subtema = "", categoria = "", options = {}) {
   const eje = _unidadEjeArticuladorPorSubtema(subtema, categoria, options);
   if (!eje?.nombre || !eje?.sello) return "";
-  return `
-    <p class="unidad-eje-articulador" style="margin:0 0 12px 0; font-size:13px; color:#355e3b;">
-      <strong>Eje articulador:</strong> ${_escapeHtmlUnidad(eje.nombre)} [SELLO EJE ARTICULADOR ${_escapeHtmlUnidad(eje.sello)}]
-    </p>
-  `;
+  return `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bbf7d0;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Eje articulador: ${_escapeHtmlUnidad(eje.nombre)} [${_escapeHtmlUnidad(eje.sello)}]</span>`;
 }
 
 window.generarProgramaSintetico = function (secuenciaActual) {
@@ -24434,23 +24429,27 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
-                      ${competenciasSubcategoriaAlumno}
-                      ${competenciaSubcategoriaAlumno}
-                      ${ejeSubcategoriaAlumno}
-                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${ejeSubcategoriaAlumno}
+                        ${competenciasSubcategoriaAlumno}
+                        ${competenciaSubcategoriaAlumno}
+                      </div>
                       <h4>${tituloCreativoLimpioBase}</h4>
                       <h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
-                      ${competenciasSubcategoriaMaestro}
-                      ${competenciaSubcategoriaMaestro}
-                      ${ejeSubcategoriaMaestro}
-                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${ejeSubcategoriaMaestro}
+                        ${competenciasSubcategoriaMaestro}
+                        ${competenciaSubcategoriaMaestro}
+                      </div>
                       <h4>Notas del maestro</h4>
                       <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido del alumno...</p>
                   </div>
@@ -24589,10 +24588,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const lecturaNomenclaturaHTML = esPrimerSubtemaLenguaje
           ? `
               <div class="lectura-global-categoria" style="margin-bottom:30px;">
-                <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</p>
-                ${_unidadRenderCompetenciasAscHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
-                ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
-                ${_unidadRenderEjeArticuladorHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</span>
+                  ${_unidadRenderCompetenciasAscHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                  ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
+                  ${_unidadRenderEjeArticuladorHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                </div>
                 ${window.bloqueLecturaGlobalParaLenguaje}
               </div>`
           : "";
@@ -24617,24 +24618,28 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
                     ${lecturaNomenclaturaHTML}
                     ${tablaInicialHTML}
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
-                    ${competenciasSubcategoriaAlumno}
-                    ${competenciaSubcategoriaAlumno}
-                    ${ejeSubcategoriaAlumno}
-                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
+                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${ejeSubcategoriaAlumno}
+                        ${competenciasSubcategoriaAlumno}
+                        ${competenciaSubcategoriaAlumno}
+                    </div>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${etiquetaInterdisc}
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
-                    ${competenciasSubcategoriaMaestro}
-                    ${competenciaSubcategoriaMaestro}
-                    ${ejeSubcategoriaMaestro}
-                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
+                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${ejeSubcategoriaMaestro}
+                        ${competenciasSubcategoriaMaestro}
+                        ${competenciaSubcategoriaMaestro}
+                    </div>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${soporteLecturaMaestroHTML}
