@@ -14554,6 +14554,7 @@ async function _analizarComandoConGeminiPlanner(texto = "") {
 
   const controles = _resumenControlesGemini();
   const modelo = "gemini-2.5-flash";
+
   const prompt = `
 Eres un planificador de acciones de UI. Convierte la petición del usuario en JSON estricto.
 Devuelve SOLO un objeto JSON con esta forma:
@@ -21728,10 +21729,22 @@ window.construirPromptProyecto = function (
 
   🎯 Reglas estrictas para **cada actividad**:
   - Cada actividad va en **<div class="activity">**.
-  - La estructura interna debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
-  - Solo si no existe contrato de formato adicional, usa el fallback ASC tradicional.
+  - Si las instrucciones específicas del usuario traen un contrato alternativo de formato, síguelo literalmente.
+  - Si NO traen un contrato alternativo, usa la estructura ASC original:
+    <div class="activity">
+      <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
+      <ol type="a" class="steps">
+        <li>[Subactividad 1]</li>
+        <li>[Subactividad 2 opcional]</li>
+        <li>[Subactividad 3 opcional]</li>
+        <li>[Subactividad 4 opcional]</li>
+      </ol>
+      <div class="answer">
+        <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
+      </div>
+    </div>
   - Si el formato rector NO es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con "Respuesta:" final.
-  - Si el formato rector sí es ASC, puedes usar de 1 a 4 subactividades útiles según lo requiera cada actividad.
+  - Si el formato rector sí es ASC, conserva exactamente la estructura anterior.
 
      ${estructuraActividades}
 
@@ -22443,6 +22456,31 @@ function generarBloqueHabilidad(habilidadClave) {
     - Incluye vocabulario matemático preciso y respuestas verificables.
   ` : "";
 
+  const hasExplicitFormatContract = /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""));
+  const estructuraBaseActividad = hasExplicitFormatContract
+    ? `
+    ESTRUCTURA BASE OBLIGATORIA POR ACTIVIDAD NORMAL:
+    - Cada actividad debe ir dentro de <div class="activity">.
+    - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
+    - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
+    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones + bloque final con etiqueta "Respuesta:".
+    `
+    : `
+    ESTRUCTURA OBLIGATORIA POR ACTIVIDAD NORMAL:
+    <div class="activity">
+      <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
+      <ol type="a" class="steps">
+        <li>[Subactividad 1]</li>
+        <li>[Subactividad 2 opcional]</li>
+        <li>[Subactividad 3 opcional]</li>
+        <li>[Subactividad 4 opcional]</li>
+      </ol>
+      <div class="answer">
+        <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
+      </div>
+    </div>
+    `;
+
   const prompt = `
     <h1><strong>${subtemaFormateado}</strong></h1>
     Genera SOLO HTML final, sin comentarios externos, sin markdown, sin bloques de código.
@@ -22470,10 +22508,7 @@ function generarBloqueHabilidad(habilidadClave) {
     - Cada actividad debe activar pensamiento de nivel alto: analizar, evaluar o crear.
     - Evita ejercicios mecánicos o triviales.
 
-    ESTRUCTURA BASE OBLIGATORIA POR ACTIVIDAD NORMAL:
-    - Cada actividad debe ir dentro de <div class="activity">.
-    - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
-    - Solo si no existe un contrato de formato adicional, usa el fallback ASC: instrucción principal + subinstrucciones + respuesta esperada.
+    ${estructuraBaseActividad}
 
     CANTIDAD:
     - Genera EXACTAMENTE ${cantidad} actividades normales para el subtema.
@@ -23852,7 +23887,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               ? `- Evita: ${lecturaAnalysis.didacticWarnings.join("; ")}`
               : ""
           ].filter(Boolean).join("\n");
-          instruccionesAdicionales = [instruccionesAdicionalesBase, extraLectura].filter(Boolean).join("\n\n");
+          instruccionesAdicionales = [instruccionesAdicionalesBase, stylePromptCategoria, extraLectura].filter(Boolean).join("\n\n");
         }
 
         // Imagen de apoyo: se genera DESPUÉS de tener las actividades para analizar qué mostrar.
@@ -23938,7 +23973,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
         let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
+        htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
         let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
+        htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados);
+        recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
 
         if (generarImagenApoyo) {
@@ -24766,6 +24805,149 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}) {
     cursor += 1;
     return block?.full || "";
   });
+}
+
+function _unidadNormalizeActivityLeadStrong(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const activities = Array.from(doc.querySelectorAll(".activity"));
+  if (!activities.length) return source;
+
+  activities.forEach((activity) => {
+    const firstParagraph = activity.querySelector("p");
+    const leadStrong = firstParagraph?.querySelector("strong");
+    if (!firstParagraph || !leadStrong) return;
+
+    const strongText = String(leadStrong.textContent || "").replace(/\s+/g, " ").trim();
+    if (!strongText) return;
+
+    const splitMatch = strongText.match(/^([\s\S]*?\.)\s+([\s\S]+)$/);
+    if (!splitMatch) return;
+
+    const [, boldPart, plainPart] = splitMatch;
+    leadStrong.textContent = boldPart.trim();
+
+    const trailingNodes = Array.from(firstParagraph.childNodes);
+    const strongIndex = trailingNodes.indexOf(leadStrong);
+    const afterStrong = strongIndex >= 0 ? trailingNodes.slice(strongIndex + 1) : [];
+    const trailingText = afterStrong.map((node) => node.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+    const normalizedTail = [plainPart.trim(), trailingText].filter(Boolean).join(" ").trim();
+
+    afterStrong.forEach((node) => node.remove());
+    if (normalizedTail) {
+      firstParagraph.appendChild(doc.createTextNode(` ${normalizedTail}`));
+    }
+  });
+
+  return doc.body.innerHTML.replace(/^<div>|<\/div>$/g, "");
+}
+
+function _unidadEnsureFichaTitles(html = "", recursos = {}) {
+  const source = String(html || "");
+  const fichaClave = String(recursos?.fichas?.clave || "").trim();
+  if (!source.trim() || !fichaClave || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const fichaBlocks = Array.from(root.querySelectorAll(".activity-fichas"));
+  if (!fichaBlocks.length) return source;
+
+  const hasGeneralHeading = Array.from(root.children).some((node) => {
+    if (!/^H[1-6]$/.test(node.tagName || "")) return false;
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    return text.toLowerCase().includes(fichaClave.toLowerCase());
+  });
+
+  if (!hasGeneralHeading) {
+    const heading = doc.createElement("h3");
+    heading.className = "unidad-ficha-heading";
+    heading.style.marginTop = "24px";
+    heading.textContent = fichaClave;
+    root.insertBefore(heading, fichaBlocks[0]);
+  }
+
+  fichaBlocks.forEach((block, index) => {
+    const firstMeaningful = Array.from(block.children).find((node) => {
+      const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      return text.length > 0;
+    });
+    const firstText = String(firstMeaningful?.textContent || "").replace(/\s+/g, " ").trim();
+    if (/^ficha\b/i.test(firstText)) return;
+
+    const title = doc.createElement("p");
+    title.className = "unidad-ficha-item-title";
+    title.innerHTML = `<strong>${fichaClave} - Actividad ${index + 1}.</strong>`;
+    block.insertBefore(title, block.firstChild);
+  });
+
+  return root.innerHTML;
+}
+
+function _unidadEnsureFinalResourceTitles(html = "", recursos = {}) {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const configs = [
+    {
+      key: "anexos",
+      title: String(recursos?.anexos?.clave || "").trim(),
+      match: /\banexo\s+[Pp]?\d+\w*/i,
+      headingClass: "unidad-anexo-heading"
+    },
+    {
+      key: "recortables",
+      title: String(recursos?.recortables?.clave || "").trim(),
+      match: /\brecortable\s+[Pp]?\d+\w*/i,
+      headingClass: "unidad-recortable-heading"
+    },
+    {
+      key: "videos",
+      title: String(recursos?.videos?.clave || "").trim() ? `Guion de video: "${String(recursos?.videos?.clave || "").trim()}"` : "",
+      match: /guion de video:\s*"[^"]+"|video\s+"[^"]+"/i,
+      headingClass: "unidad-video-heading"
+    }
+  ].filter((item) => item.title);
+
+  if (!configs.length) return source;
+
+  const activityBlocks = Array.from(root.querySelectorAll(".activity"));
+  activityBlocks.forEach((block) => {
+    const blockText = String(block.textContent || "").replace(/\s+/g, " ").trim();
+    const isRegularActivity = /\[IC\s*T\./i.test(blockText) || !!block.querySelector(".answer, ol.steps");
+    if (isRegularActivity) return;
+
+    const titleNode = Array.from(block.children).find((node) => /^H[1-6]$/.test(node.tagName || "") || (node.tagName || "") === "STRONG" || ((node.tagName || "") === "P" && node.querySelector("strong")));
+    const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim();
+
+    configs.forEach((config) => {
+      if (!config.match.test(blockText)) return;
+      if (titleText && titleText.toLowerCase().includes(config.title.toLowerCase())) return;
+
+      const heading = doc.createElement("strong");
+      heading.className = config.headingClass;
+      heading.textContent = config.title;
+
+      if (block.firstChild) {
+        block.insertBefore(heading, block.firstChild);
+        block.insertBefore(doc.createTextNode(" "), heading.nextSibling);
+      } else {
+        block.appendChild(heading);
+      }
+    });
+  });
+
+  return root.innerHTML;
 }
 
 

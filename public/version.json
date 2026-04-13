@@ -1,10 +1,14 @@
 {
-  "version": "2026-1.0.1.09",
+  "version": "2026-1.0.1.11",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
+    "Mejora: Combinación real de estilos educativos, incluyendo ASC + otros formatos.",
+    "Fix: Restaurada la estructura ASC original en actividades generadas.",
+    "Fix: Títulos automáticos para fichas, anexos, recortables y guiones de video cuando la IA los omite.",
+    "Fix: El título de recortable ya no se inyecta por error en actividades normales.",
     "Nuevo: Generación de lecturas por IA vía Prompt si no hay selección previa.",
     "Mejora: Integración de lecturas generadas por IA como contexto global de la unidad.",
     "Fix: Robustez en el parseo JSON de respuestas de IA (evita caracteres de escape inválidos).",

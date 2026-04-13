@@ -355,6 +355,12 @@ function buildUnidadCombinedStylePromptBlock(styleIds = []) {
   return [
     `ESTILOS PEDAGÓGICOS ACTIVOS: ${styleLabels.join(" + ")}.`,
     `ESTILO RECTOR DE FORMATO: ${dominant.label}.`,
+    safeStyleIds.includes("asc") && safeStyleIds.length > 1
+      ? "ASC se combina con los demás estilos como capa editorial: claridad, secuencia visible y evaluación verificable, pero NO monopoliza la estructura."
+      : "",
+    safeStyleIds.includes("asc") && safeStyleIds.length > 1
+      ? "Cuando ASC se mezcle con otros estilos, el formato puede fusionar rasgos estructurales reales: pasos, bloques, retos, hipótesis, reactivos o productos, siempre que el resultado sea coherente."
+      : "",
     "Combina los estilos sin mezclar sus funciones de forma caótica.",
     "Mantén coherencia metodológica en todas las actividades del bloque.",
     ...blocks
@@ -365,6 +371,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
   const active = normalizeStyleIds(styleIds);
   const dominantId = getUnidadDominantStyleId(active);
   const dominant = STYLE_CATALOG[dominantId];
+  const hasAscMix = active.includes("asc") && active.length > 1;
 
   const commonIntro = [
     `CONTRATO DE FORMATO OBLIGATORIO: usa ${dominant.label} como estructura rectora.`,
@@ -372,7 +379,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     "Cada actividad debe ir dentro de <div class=\"activity\">.",
     "REGLA DE NUMERACIÓN CRÍTICA: Cada actividad DEBE comenzar con su número correlativo seguido de un punto y un espacio (ej: 1. , 2. , 3. ).",
     "El número debe estar al inicio del primer párrafo (<p>) de la actividad, antes de cualquier etiqueta <strong>.",
-    "REGLA DE RESPUESTA CONCISA: En el bloque <div class=\"answer\">, sé extremadamente breve y directo. Solo la respuesta esperada y un comentario mínimo si es necesario.",
+    "REGLA DE RESPUESTA: En el bloque <div class=\"answer\">, coloca la respuesta esperada de forma clara, útil y revisable, sin sacar la solución fuera de ese bloque.",
     "REGLA DE BLOQUE DE RESPUESTA ÚNICO: NO escribas la respuesta ni la clave fuera del bloque <div class=\"answer\">. Todo lo relacionado con la solución o el criterio de evaluación debe ir EXCLUSIVAMENTE dentro de <div class=\"answer\">.",
     "Puedes variar el contenido pedagógico entre actividades, pero NO cambiar el formato rector a mitad del bloque."
   ];
@@ -381,6 +388,8 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     asc: [
       ...commonIntro,
       "Formato ASC obligatorio: instrucción principal + subinstrucciones + respuesta esperada.",
+      "REGLA ASC CRÍTICA: NO sustituyas este formato por bloques tipo challenge, inquiry-block, quiz-block, diagnostic-block, assessment-block, project-block, sel-block, structured-block, hybrid-block o ai-block.",
+      "REGLA ASC CRÍTICA: cada actividad debe conservar párrafo inicial numerado + lista <ol type=\"a\" class=\"steps\"> + bloque final <div class=\"answer\">.",
       "Usa esta plantilla exacta como referencia estructural:",
       `<div class="activity">
   <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
@@ -391,10 +400,12 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     <li>[Subinstrucción 4 opcional]</li>
   </ol>
   <div class="answer">
-    <span style="color:mediumvioletred;">Respuesta esperada (directa): [respuesta breve y retroalimentación mínima]</span>
+    <span style="color:mediumvioletred;">Respuesta: [respuesta esperada clara y verificable]</span>
   </div>
 </div>`,
-      "En ASC sí debes usar subinstrucciones y etiqueta final 'Respuesta:'."
+      "En ASC sí debes usar subinstrucciones y la etiqueta final EXACTA 'Respuesta:'.",
+      "No cambies 'Respuesta:' por 'Respuesta esperada', 'Clave', 'Criterio' ni otras variantes cuando el estilo rector sea ASC.",
+      "Si el usuario seleccionó solo ASC, TODO el bloque debe quedar en formato ASC sin excepciones."
     ],
     competencial: [
       ...commonIntro,
@@ -594,12 +605,51 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ]
   };
 
+  if (hasAscMix) {
+    return [
+      ...commonIntro,
+      `FORMATO MIXTO OBLIGATORIO: combina la claridad editorial de ASC con la estructura principal de ${dominant.label}.`,
+      "La mezcla debe ser real, no superficial: no basta con cambiar vocabulario; debe cambiar la arquitectura interna de la actividad.",
+      "Puedes fusionar componentes estructurales como pasos ASC, bloques de situación, hipótesis, reactivos, producto, reflexión o verificación dentro de una misma actividad.",
+      "NO dejes ASC como molde único si hay otros estilos activos; cada actividad debe evidenciar al menos 2 rasgos estructurales del estilo combinado.",
+      "Mantén siempre: número correlativo, consigna clara, modalidad visible y bloque final <div class=\"answer\">.",
+      "Puedes conservar listas de pasos cuando ayuden, pero también integrar bloques como <div class=\"challenge\">, <div class=\"inquiry-block\">, <div class=\"diagnostic-block\">, <div class=\"assessment-block\">, <div class=\"project-block\">, <div class=\"sel-block\">, <div class=\"structured-block\">, <div class=\"hybrid-block\"> o <div class=\"ai-block\"> según la combinación elegida.",
+      "Ejemplo de mezcla válida ASC + Competencial:",
+      `<div class="activity">
+  <p>1. <strong>[Reto aplicado o situación-problema].</strong> [IC T. IND]</p>
+  <div class="challenge"><strong>Situación:</strong> [contexto real o verosímil]</div>
+  <ol type="a" class="steps">
+    <li><strong>Decide:</strong> [qué debe elegir o planear el alumno]</li>
+    <li><strong>Resuelve:</strong> [acción o procedimiento principal]</li>
+    <li><strong>Justifica:</strong> [por qué su solución funciona]</li>
+  </ol>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Respuesta: [evidencia o solución verificable]</span>
+  </div>
+</div>`,
+      "Ejemplo de mezcla válida ASC + Indagación:",
+      `<div class="activity">
+  <p>1. <strong>[Pregunta guía investigable].</strong> [IC T. IND]</p>
+  <div class="inquiry-block"><strong>Hipótesis:</strong> [anticipación razonada]</div>
+  <ol type="a" class="steps">
+    <li>Observa o revisa la evidencia indicada.</li>
+    <li>Contrasta tu hipótesis con los datos.</li>
+    <li>Explica tu conclusión final.</li>
+  </ol>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Respuesta: [conclusión breve y comprobable]</span>
+  </div>
+</div>`
+    ].join("\n");
+  }
+
   return contracts[dominantId].join("\n");
 }
 
 function buildUnidadStyleExecutionContract(styleIds = [], options = {}) {
   const active = normalizeStyleIds(styleIds);
   const dominantId = getUnidadDominantStyleId(active);
+  const hasAscMix = active.includes("asc") && active.length > 1;
   const relatedReading = options.relatedReading === true;
   const withResources = options.withResources === true;
   const lines = [
@@ -627,6 +677,12 @@ function buildUnidadStyleExecutionContract(styleIds = [], options = {}) {
     active.includes("quiz")
       ? "Asegura reactivos cortos, opciones claras y retroalimentación rápida."
       : "",
+    active.includes("asc") && !hasAscMix
+      ? "Si ASC es el formato rector, conserva exactamente la secuencia: instrucción principal + subinstrucciones + bloque final con etiqueta 'Respuesta:'."
+      : "",
+    hasAscMix
+      ? "Si ASC está combinado con otros estilos, úsalo para reforzar claridad editorial, secuenciación visible y respuesta verificable, pero permite mezcla estructural real."
+      : "",
     active.includes("diagnostico")
       ? "Asegura un examen diagnóstico de entrada con reactivos breves y lectura útil del punto de partida."
       : "",
@@ -650,7 +706,9 @@ function buildUnidadStyleExecutionContract(styleIds = [], options = {}) {
       : ""
   ];
   if (dominantId !== "asc") {
-    lines.push("PROHIBIDO volver al molde ASC tradicional de instrucción + lista a,b,c,d + Respuesta:, salvo que el estilo rector sea ASC.");
+    lines.push(hasAscMix
+      ? "NO dejes la mezcla reducida al molde ASC tradicional; integra de verdad la estructura del estilo rector complementario."
+      : "PROHIBIDO volver al molde ASC tradicional de instrucción + lista a,b,c,d + Respuesta:, salvo que el estilo rector sea ASC.");
   }
   return lines.filter(Boolean).join("\n");
 }

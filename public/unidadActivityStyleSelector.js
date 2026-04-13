@@ -14,6 +14,11 @@ const STYLE_STORAGE_KEY = "cb_unidad_activity_style_selections_v1";
 let ACTIVE_STYLE_MENU_ROOT = null;
 let ACTIVE_STYLE_MENU_FRAME = 0;
 
+function _normalizeEducationalStyleSelection(styleIds = []) {
+  const safe = _sanitizePersistedStyleIds(styleIds || []);
+  return safe.length ? safe : ["asc"];
+}
+
 function _getCatalogIds() {
   return new Set(getUnidadStyleCatalog().map((item) => String(item?.id || "").trim()).filter(Boolean));
 }
@@ -63,7 +68,7 @@ function _categoriaKey(categoria = "") {
 function _ensureLoadedSelections() {
   const persisted = _readPersistedSelections();
   Object.keys(persisted || {}).forEach((categoria) => {
-    STYLE_SELECTIONS[categoria] = _sanitizePersistedStyleIds(persisted[categoria] || []);
+    STYLE_SELECTIONS[categoria] = _normalizeEducationalStyleSelection(persisted[categoria] || []);
   });
 }
 
@@ -74,14 +79,14 @@ function getSelectedUnidadActivityStyles(categoria = "") {
   if (!Object.prototype.hasOwnProperty.call(STYLE_SELECTIONS, key)) {
     STYLE_SELECTIONS[key] = getUnidadDefaultStylesForCategory(key);
   }
-  return _sanitizePersistedStyleIds(STYLE_SELECTIONS[key] || []);
+  return _normalizeEducationalStyleSelection(STYLE_SELECTIONS[key] || []);
 }
 
 function setSelectedUnidadActivityStyles(categoria = "", styleIds = []) {
   _ensureLoadedSelections();
   const key = _categoriaKey(categoria);
   if (!key) return [];
-  STYLE_SELECTIONS[key] = _sanitizePersistedStyleIds(styleIds || []);
+  STYLE_SELECTIONS[key] = _normalizeEducationalStyleSelection(styleIds || []);
   _writePersistedSelections(STYLE_SELECTIONS);
   return [...STYLE_SELECTIONS[key]];
 }
@@ -93,6 +98,7 @@ function getDominantUnidadActivityStyle(categoria = "") {
 function buildUnidadActivityStylePromptContext(categoria = "", options = {}) {
   const active = getSelectedUnidadActivityStyles(categoria);
   if (!active.length) return "";
+  if (active.length === 1 && active[0] === "asc") return "";
   return [
     buildUnidadCombinedStylePromptBlock(active),
     buildUnidadStyleFormatContract(active),
