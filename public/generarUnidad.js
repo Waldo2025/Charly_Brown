@@ -24767,9 +24767,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   ${competenciasSubcategoriaMaestro}
                   ${competenciaSubcategoriaMaestro}
               </div>
-              <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                  ${categoriaEditorial}
-              </h3>
               <h4>${tituloCreativoLimpioBase}</h4>
               <h5 style="color:#666;font-weight:normal;">${T}</h5>
               <div id="${colMaestroId}-contenido"></div>
