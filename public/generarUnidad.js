@@ -22,7 +22,8 @@ import {
   buildUnidadActivityStyleSelectorHtml,
   attachUnidadActivityStyleSelectors,
   getSelectedUnidadActivityStyles,
-  getDominantUnidadActivityStyle
+  getDominantUnidadActivityStyle,
+  setSelectedUnidadActivityStyles
 } from "./unidadActivityStyleSelector.js";
 
 // Configuración Firebase
@@ -52,7 +53,13 @@ function _unidadReadStyleToggleMap() {
   try {
     const raw = localStorage.getItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const normalized = {};
+    if (parsed && typeof parsed === "object") {
+      Object.keys(parsed).forEach(k => {
+        normalized[String(k).trim().normalize("NFC")] = parsed[k];
+      });
+    }
+    return normalized;
   } catch (_) {
     return {};
   }
@@ -60,19 +67,23 @@ function _unidadReadStyleToggleMap() {
 
 function _unidadWriteStyleToggleMap(next = {}) {
   try {
-    localStorage.setItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY, JSON.stringify(next || {}));
+    const normalized = {};
+    Object.keys(next || {}).forEach(k => {
+      normalized[String(k).trim().normalize("NFC")] = next[k];
+    });
+    localStorage.setItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY, JSON.stringify(normalized));
   } catch (_) { }
 }
 
 function _unidadIsStyleSelectorEnabled(categoria = "") {
-  const key = String(categoria || "").trim();
+  const key = String(categoria || "").trim().normalize("NFC");
   if (!key) return false;
   const map = _unidadReadStyleToggleMap();
   return map[key] === true;
 }
 
 function _unidadSetStyleSelectorEnabled(categoria = "", enabled = false) {
-  const key = String(categoria || "").trim();
+  const key = String(categoria || "").trim().normalize("NFC");
   if (!key) return false;
   const map = _unidadReadStyleToggleMap();
   map[key] = enabled === true;
@@ -85,7 +96,12 @@ function _unidadBuildCategoryStyleUi(categoria = "") {
   return `
     <div class="cb-unidad-style-toolbar" data-categoria="${_unidadEscapeHtml(categoria)}">
       <label class="cb-unidad-style-toggle">
-        <input type="checkbox" class="cb-unidad-style-toggle-input" data-action="toggle-style-selector" data-categoria="${_unidadEscapeHtml(categoria)}" ${enabled ? "checked" : ""}>
+        <input type="checkbox" 
+               class="cb-unidad-style-toggle-input" 
+               data-action="toggle-style-selector" 
+               data-cb-persist="false"
+               data-categoria="${_unidadEscapeHtml(categoria)}" 
+               ${enabled ? "checked" : ""}>
         <span class="cb-unidad-style-toggle-track"></span>
         <span class="cb-unidad-style-toggle-label">Estilo educativo</span>
       </label>
@@ -101,12 +117,15 @@ function _unidadBindCategoryStyleUi(root = document) {
   scope.querySelectorAll(".cb-unidad-style-toolbar[data-categoria]").forEach((toolbar) => {
     if (toolbar.dataset.boundStyleToolbar === "1") return;
     toolbar.dataset.boundStyleToolbar = "1";
-    const categoria = String(toolbar.getAttribute("data-categoria") || "").trim();
+    const categoria = String(toolbar.dataset.categoria || "").trim().normalize("NFC");
     const toggle = toolbar.querySelector(".cb-unidad-style-toggle-input[data-action='toggle-style-selector']");
     const host = toolbar.querySelector("[data-role='style-selector-host']");
     toggle?.addEventListener("change", () => {
       const enabled = toggle.checked === true;
       _unidadSetStyleSelectorEnabled(categoria, enabled);
+      if (!enabled && typeof setSelectedUnidadActivityStyles === "function") {
+        setSelectedUnidadActivityStyles(categoria, []);
+      }
       if (host) host.style.display = enabled ? "" : "none";
     });
   });
@@ -685,6 +704,11 @@ const LECTURAS_CATALOG_CACHE_STORAGE_KEY = "cb_lecturas_catalog_cache_v1";
 const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
 const UNIDAD_RESULTADO_STORAGE_KEY = "cb_unidad_resultado_html_v1";
 const UNIDAD_CREATIVE_SEED_STORAGE_KEY = "cb_unidad_creative_seed_v1";
+const UNIDAD_SERIES_COLLECTION = "unidadSeriesCatalogo";
+const UNIDAD_SERIE_OTRA_VALUE = "__otra_serie__";
+const UNIDAD_SERIE_PRESETS = [
+  "Primaria en Forma 10rev"
+];
 const UNIDAD_META_SELECT_IDS = [
   "unidadNivel",
   "unidadGrado",
@@ -696,12 +720,14 @@ const UNIDAD_SELECT_IDS = [
   "unidadGrado",
   "unidadTrimestre",
   "unidadNumero",
+  "unidadSerie",
   "unidadTema",
   "unidadTemaASC",
   "selectGeminiEndpoint"
 ];
 const UNIDAD_TEXT_FIELD_IDS = [
-  "unidadTemaTexto"
+  "unidadTemaTexto",
+  "unidadSerieOtra"
 ];
 const UNIDAD_PERSIST_FIELD_IDS = [
   ...UNIDAD_SELECT_IDS,
@@ -730,6 +756,8 @@ const GEMINI_FALLBACK_CONFIABLE = [
   ...GEMINI_MODELOS_PREVIEW_SECUNDARIOS
 ];
 let geminiModelsSyncPromise = null;
+let unidadSeriesCatalogoCache = [];
+let unidadSeriesCatalogoPromise = null;
 
 function isUnidadSupportedGeminiTextModelName(model = "") {
   const name = normalizeGeminiModel(model);
@@ -841,6 +869,142 @@ async function syncGeminiModelOptionsForUnidad() {
 
 function _selectTieneOpcion(el, valor) {
   return !!(el && Array.from(el.options || []).some(opt => opt.value === valor || opt.text === valor));
+}
+
+function _normalizarSerieUnidadValor(valor = "") {
+  return String(valor || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _slugSerieUnidad(valor = "") {
+  const base = _normalizarTexto(valor)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || `serie-${Date.now().toString(36)}`;
+}
+
+function _obtenerOpcionesSerieUnidad() {
+  const merged = new Set(
+    [
+      ...UNIDAD_SERIE_PRESETS,
+      ...(Array.isArray(unidadSeriesCatalogoCache) ? unidadSeriesCatalogoCache : [])
+    ].map((item) => _normalizarSerieUnidadValor(item)).filter(Boolean)
+  );
+  return Array.from(merged).sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+}
+
+function _renderOpcionesSerieUnidad(valorSeleccionado = "") {
+  const select = document.getElementById("unidadSerie");
+  if (!select) return;
+  const opciones = _obtenerOpcionesSerieUnidad();
+  const defaultSerie = _normalizarSerieUnidadValor(UNIDAD_SERIE_PRESETS[0] || "");
+  const current = _normalizarSerieUnidadValor(valorSeleccionado || select.value || defaultSerie);
+  select.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Selecciona serie";
+  select.appendChild(placeholder);
+
+  opciones.forEach((serie) => {
+    const opt = document.createElement("option");
+    opt.value = serie;
+    opt.textContent = serie;
+    select.appendChild(opt);
+  });
+
+  const otra = document.createElement("option");
+  otra.value = UNIDAD_SERIE_OTRA_VALUE;
+  otra.textContent = "Otro";
+  select.appendChild(otra);
+
+  if (current && !_selectTieneOpcion(select, current)) {
+    const opt = document.createElement("option");
+    opt.value = current;
+    opt.textContent = current;
+    select.insertBefore(opt, otra);
+  }
+
+  select.value = _selectTieneOpcion(select, current)
+    ? current
+    : (_selectTieneOpcion(select, defaultSerie) ? defaultSerie : "");
+}
+
+function _actualizarVisibilidadSerieOtra() {
+  const select = document.getElementById("unidadSerie");
+  const wrap = document.getElementById("unidadSerieOtraWrap");
+  const input = document.getElementById("unidadSerieOtra");
+  const activaOtra = String(select?.value || "") === UNIDAD_SERIE_OTRA_VALUE;
+  if (wrap) wrap.style.display = activaOtra ? "" : "none";
+  if (!activaOtra && input) input.value = "";
+}
+
+async function _cargarCatalogoSeriesUnidad({ forceRefresh = false } = {}) {
+  if (!forceRefresh && Array.isArray(unidadSeriesCatalogoCache) && unidadSeriesCatalogoCache.length) {
+    _renderOpcionesSerieUnidad();
+    return [...unidadSeriesCatalogoCache];
+  }
+  if (!forceRefresh && unidadSeriesCatalogoPromise) return unidadSeriesCatalogoPromise;
+
+  unidadSeriesCatalogoPromise = (async () => {
+    try {
+      const snap = await getDocs(collection(db, UNIDAD_SERIES_COLLECTION));
+      const series = snap.docs
+        .map((docSnap) => _normalizarSerieUnidadValor(docSnap.data()?.label || docSnap.data()?.value || docSnap.id || ""))
+        .filter(Boolean);
+      unidadSeriesCatalogoCache = Array.from(new Set(series));
+    } catch (err) {
+      console.warn("[unidad] No se pudo cargar el catálogo de series:", err);
+    } finally {
+      _renderOpcionesSerieUnidad();
+      unidadSeriesCatalogoPromise = null;
+    }
+    return [...unidadSeriesCatalogoCache];
+  })();
+
+  return unidadSeriesCatalogoPromise;
+}
+
+async function _guardarSeriePersonalizadaUnidad(valor = "") {
+  const serie = _normalizarSerieUnidadValor(valor);
+  if (!serie) return "";
+
+  if (!_obtenerOpcionesSerieUnidad().some((item) => _normalizarTexto(item) === _normalizarTexto(serie))) {
+    unidadSeriesCatalogoCache = [...unidadSeriesCatalogoCache, serie];
+  }
+
+  try {
+    const user = await _unidadGetAuthUser();
+    const payload = {
+      label: serie,
+      value: serie,
+      normalized: _normalizarTexto(serie),
+      createdByUid: String(user?.uid || "").trim(),
+      createdByEmail: String(user?.email || "").trim().toLowerCase(),
+      updatedAt: new Date(),
+      active: true
+    };
+    await setDoc(doc(db, UNIDAD_SERIES_COLLECTION, _slugSerieUnidad(serie)), payload, { merge: true });
+  } catch (err) {
+    console.warn("[unidad] No se pudo guardar la serie personalizada:", err);
+  }
+
+  _renderOpcionesSerieUnidad(serie);
+  _actualizarVisibilidadSerieOtra();
+  guardarSelectsUnidad();
+  return serie;
+}
+
+async function _resolverSerieUnidadSeleccionada() {
+  const select = document.getElementById("unidadSerie");
+  const inputOtra = document.getElementById("unidadSerieOtra");
+  const value = _normalizarSerieUnidadValor(select?.value || "");
+  if (!value) return "";
+  if (value !== UNIDAD_SERIE_OTRA_VALUE) return value;
+  const otra = _normalizarSerieUnidadValor(inputOtra?.value || "");
+  if (!otra) return "";
+  return await _guardarSeriePersonalizadaUnidad(otra);
 }
 
 function guardarSelectsUnidad() {
@@ -2259,14 +2423,32 @@ function _tablaSinonimosLecturaUnidadHTML(sinonimos = []) {
   `;
 }
 
+function _unidadStripDuplicatedLectureBlocksFromHtml(html = "") {
+  const raw = String(html || "").trim();
+  if (!raw || typeof document === "undefined") return raw;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = raw;
+  tmp.querySelectorAll(".bloque-lectura-global, .lectura-global-categoria").forEach((node) => node.remove());
+  return tmp.innerHTML.trim();
+}
+
 function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
   if (!lectura) return "";
   const sinonimos = _extraerSinonimosLecturaUnidad(lectura);
   const tabla = _tablaSinonimosLecturaUnidadHTML(sinonimos);
   const bibliografia = _extraerBibliografiaLecturaUnidad(lectura);
   if (!tabla && !bibliografia) return "";
+  const categoriaLectura = "Lenguaje y comunicación";
+  const subcategoriaLectura = _unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: categoriaLectura, columna: "maestro" });
+  const competenciasLectura = _unidadRenderCompetenciasAscHTML("ComprensionLectora", categoriaLectura, { lectura: true });
+  const competenciaLectura = _unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", categoriaLectura, { lectura: true, label: "Lectura" });
+  const ejeLectura = _unidadRenderEjeArticuladorHTML("ComprensionLectora", categoriaLectura, { lectura: true });
   return `
     <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;">
+      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaLectura}</p>
+      ${competenciasLectura}
+      ${competenciaLectura}
+      ${ejeLectura}
       <h4 style="margin:0 0 10px;">Apoyo de la lectura</h4>
       ${tabla ? `<h5 style="margin:10px 0 6px;">Tabla de sinónimos</h5>${tabla}` : ""}
       ${bibliografia ? `<h5 style="margin:10px 0 6px;">Bibliografía</h5><div class="lectura-bibliografia-lista">${bibliografia}</div>` : ""}
@@ -3220,6 +3402,8 @@ const selectTrimestre = document.getElementById("unidadTrimestre");
 const selectTema = document.getElementById("unidadTema");
 const inputTemaTexto = document.getElementById("unidadTemaTexto");
 const selectTemaASC = document.getElementById("unidadTemaASC");
+const selectSerieUnidad = document.getElementById("unidadSerie");
+const inputSerieUnidadOtra = document.getElementById("unidadSerieOtra");
 const selectUnidad = document.getElementById('unidadNumero');
 
 const contenedorCamposSecuencia = document.getElementById("camposSecuencia");
@@ -3239,6 +3423,22 @@ selectTemaASC?.addEventListener("change", () => {
   _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   _sincronizarInputTemaConSelect();
   guardarSelectsUnidad();
+});
+
+selectSerieUnidad?.addEventListener("change", () => {
+  _actualizarVisibilidadSerieOtra();
+  guardarSelectsUnidad();
+});
+
+inputSerieUnidadOtra?.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  await _resolverSerieUnidadSeleccionada();
+});
+
+inputSerieUnidadOtra?.addEventListener("blur", async () => {
+  if (String(selectSerieUnidad?.value || "") !== UNIDAD_SERIE_OTRA_VALUE) return;
+  await _resolverSerieUnidadSeleccionada();
 });
 
 if (inputTemaTexto) {
@@ -21106,6 +21306,7 @@ async function verificarSecuencia() {
     setTimeout(() => {
       const inputs = contenedorCamposSecuencia.querySelectorAll("input, select");
       inputs.forEach(input => {
+        if (input.dataset.cbPersist === "false") return;
         const fieldKey = String(input.name || input.id || "").trim();
         if (!fieldKey) return;
         const key = `unidad_${fieldKey}`;
@@ -22561,102 +22762,416 @@ function generarBloqueHabilidad(habilidadClave) {
   return prompt;
 };
 
-window.generarProgramaSintetico = function (secuenciaActual) {
-  // Columnas para cada campo formativo (Set evita duplicados)
-  const columnas = {
-    "Lenguajes": { contenido: new Set(), proceso: new Set(), ambiente: "Áulico" },
-    "Saberes y Pensamiento Científico": { contenido: new Set(), proceso: new Set(), ambiente: "Comunitario" },
-    "Ética, Naturaleza y Sociedades": { contenido: new Set(), proceso: new Set(), ambiente: "Áulico" },
-    "De lo Humano y lo Comunitario": { contenido: new Set(), proceso: new Set(), ambiente: "Comunitario" }
-  };
+function _unidadNormalizarSubtemaKey(subtema = "") {
+  return String(subtema || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
 
-  // ✅ Mapeo EXACTO categoría → columna del campo formativo
+function _unidadCampoFormativoDeCategoria(categoria = "") {
   const mapeoCampoFormativo = {
     "Lenguaje y comunicación": "Lenguajes",
     "Ciencias experimentales": "Saberes y Pensamiento Científico",
-    "Conocimientos del medio": "Saberes y Pensamiento Científico", // ← nuevo
+    "Conocimientos del medio": "Saberes y Pensamiento Científico",
     "Ciencias sociales": "Ética, Naturaleza y Sociedades",
-    "Formación socioemocional": "De lo Humano y lo Comunitario"
+    "Formación socioemocional": "De lo Humano y lo Comunitario",
+    "Matemáticas": "Saberes y Pensamiento Científico"
   };
+  return mapeoCampoFormativo[String(categoria || "").trim()] || "";
+}
 
-  // ✅ Recorrer la secuencia filtrada por unidad/trim/nivel
-  for (const key in secuenciaActual) {
-    // solo procesamos Contenido (_C)
-    if (key.endsWith("_C")) {
-      const subtema = key.replace("_C", "");
-      const categoria = categoriaPorSubtema[subtema]; // ej: Lenguaje y comunicación
-      const campoFormativo = mapeoCampoFormativo[categoria];
+function _unidadSerieEditorialCodigo() {
+  const select = document.getElementById("unidadSerie");
+  const inputOtra = document.getElementById("unidadSerieOtra");
+  const rawValue = String(select?.value || "").trim();
+  const rawOtra = String(inputOtra?.value || "").trim();
+  const serie = _normalizarSerieUnidadValor(
+    rawValue === UNIDAD_SERIE_OTRA_VALUE ? rawOtra : rawValue
+  );
+  const normalized = _normalizarTexto(serie);
+  if (!normalized) return "SERIE";
+  if (normalized === _normalizarTexto("Primaria en Forma 10rev")) return "EEFESPPRIM_10REV";
+  return normalized
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
 
-      // solo si el subtema tiene categoría reconocida
-      if (campoFormativo && columnas[campoFormativo]) {
-        const contenido = secuenciaActual[`${subtema}_C`] || "";
-        const proceso = secuenciaActual[`${subtema}_P`] || "";
+function _unidadNivelGradoEditorialCodigo() {
+  const nivel = String(document.getElementById("unidadNivel")?.value || selectNivel?.value || "").trim();
+  const grado = String(document.getElementById("unidadGrado")?.value || selectGrado?.value || "").trim();
+  const trimestre = String(document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "").trim() || "1";
+  const gradoMap = {
+    Primero: "1",
+    Segundo: "2",
+    Tercero: "3",
+    Cuarto: "4",
+    Quinto: "5",
+    Sexto: "6"
+  };
+  const nivelPrefix = /preescolar/i.test(nivel) ? "PRE" : /secundaria/i.test(nivel) ? "S" : "P";
+  const gradoCode = `${nivelPrefix}${gradoMap[grado] || String(grado || "").replace(/\D+/g, "") || "X"}`;
+  return `TRIM${trimestre}_${gradoCode}`;
+}
 
-        if (contenido.trim()) columnas[campoFormativo].contenido.add(contenido.trim());
-        if (proceso.trim()) columnas[campoFormativo].proceso.add(proceso.trim());
-      }
-    }
+function _unidadLibroEditorialCodigo(columna = "alumno") {
+  return String(columna || "").toLowerCase() === "maestro" ? "LM" : "LA";
+}
+
+function _unidadSubcategoriaEditorialCodigo(subtema = "", categoria = "") {
+  const metodologiaPorTrimestre = { "1": "ABP", "2": "STEAM", "3": "AS" };
+  const trim = String(document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "1").trim() || "1";
+  const normalized = _unidadNormalizarSubtemaKey(subtema);
+  const mapa = {
+    Artes: "ARTES",
+    Ortografia: "ORTOGRAFIA",
+    Gramatica: "GRAMATICA",
+    ExpresionEscrita: "EXPRESION_ESCRITA",
+    ExpresionOral: "EXPRESION_ORAL",
+    Habilidades: "HABILIDADES_MAPA_MENTAL_Y_DICTADO",
+    ComprensionLectora: "LECTURA",
+    Naturales: "CIENCIAS_NATURALES",
+    ConocimientoDelMedio: "CONOCIMIENTO_DEL_MEDIO",
+    MiLocalidad: "HISTORIAS_PAISAJES_Y_CONVIVENCIA_EN_MI_LOCALIDAD",
+    Historia: "HISTORIA",
+    Geografia: "GEOGRAFIA",
+    CivicaEtica: "FORMACION_CIVICA_Y_ETICA",
+    Socioemocional: "EDUCACION_SOCIOEMOCIONAL",
+    Matematicas: "MATEMATICAS"
+  };
+  if (String(categoria || "").trim() === "Proyectos") {
+    const metodologia = metodologiaPorTrimestre[trim] || "ABP";
+    return `${metodologia}_PROYECTO`;
+  }
+  return mapa[normalized] || _normalizarTexto(formatearSubtema(subtema))
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function _unidadSubtemasPaginablesOrdenados() {
+  const canonical = [
+    "Artes",
+    "Ortografía",
+    "Gramatica",
+    "ExpresionEscrita",
+    "ExpresionOral",
+    "Habilidades",
+    "Naturales",
+    "ConocimientoDelMedio",
+    "MiLocalidad",
+    "Historia",
+    "Geografia",
+    "CivicaEtica",
+    "Socioemocional",
+    "Matematicas"
+  ];
+  const disponibles = new Set(Object.keys(window.categoriaPorSubtema || categoriaPorSubtema || {}).map(_unidadNormalizarSubtemaKey));
+  return canonical.filter((subtema) => disponibles.has(_unidadNormalizarSubtemaKey(subtema)));
+}
+
+function _unidadPaginaEditorialPorSubtema(subtema = "", categoria = "") {
+  if (String(categoria || "").trim() === "Proyectos") return "";
+  const orden = _unidadSubtemasPaginablesOrdenados();
+  const idx = orden.findIndex((item) => _unidadNormalizarSubtemaKey(item) === _unidadNormalizarSubtemaKey(subtema));
+  if (idx < 0) return "9";
+  return String(12 + idx);
+}
+
+function _unidadEtiquetaEditorialSubcategoria({ subtema = "", categoria = "", columna = "alumno" } = {}) {
+  const partes = [
+    _unidadSerieEditorialCodigo(),
+    _unidadNivelGradoEditorialCodigo(),
+    _unidadLibroEditorialCodigo(columna),
+    _unidadSubcategoriaEditorialCodigo(subtema, categoria)
+  ].filter(Boolean);
+  return partes.join("_");
+}
+
+function _unidadEtiquetaCategoriaCampo(categoria = "", subtema = "") {
+  const campo = _unidadCampoFormativoDeCategoria(categoria) || _unidadCampoFormativoDeCategoria(categoriaPorSubtema?.[subtema] || "");
+  return campo ? `${categoria} · ${campo}` : categoria;
+}
+
+function _unidadCompetenciasAscPorSubtema(subtema = "", categoria = "", { lectura = false } = {}) {
+  if (lectura) {
+    return ["IC E. SACÁDICOS", "IC COMP. LECTORA"];
   }
 
-  // ✅ Convertimos Sets → texto limpio
-  const columnasFinales = {};
-  for (const campo in columnas) {
-    columnasFinales[campo] = {
-      contenido: Array.from(columnas[campo].contenido).join("<br>") || "-",
-      proceso: Array.from(columnas[campo].proceso).join("<br>") || "-",
-      ambiente: columnas[campo].ambiente
+  const normalized = _unidadNormalizarSubtemaKey(subtema);
+  const mapa = {
+    Artes: ["IC E. ORAL"],
+    Ortografia: ["IC E. LINGÜÍSTICAS"],
+    Gramatica: ["IC E. LINGÜÍSTICAS"],
+    ExpresionEscrita: ["IC E. ESCRITA"],
+    ExpresionOral: ["IC E. ORAL"],
+    Habilidades: ["IC COMP. LECTORA"],
+    Naturales: ["IC CON. CIEN", "IC EXPERIMENTACIÓN", "IC P. CIENTÍFICO"],
+    ConocimientoDelMedio: ["IC CON. CIEN", "IC INTERD."],
+    MiLocalidad: ["IC C. SOCIALES", "IC G. DE LA INF"],
+    Historia: ["IC F. CULTURAL", "IC C. SOCIALES"],
+    Geografia: ["IC G. DE LA INF", "IC C. SOCIALES"],
+    CivicaEtica: ["IC ACT. Y V", "IC F. CULTURAL"],
+    Socioemocional: ["IC ACT. Y V"],
+    Matematicas: ["IC C. MATEMÁTICOS", "IC RETOS MATEMÁTICOS", "IC LÓGICA MATEMÁTICA", "IC EXP. MATEMÁTICA"]
+  };
+  if (mapa[normalized]) return mapa[normalized];
+
+  const categoriaNorm = String(categoria || "").trim();
+  if (categoriaNorm === "Ciencias sociales") return ["IC C. SOCIALES"];
+  if (categoriaNorm === "Ciencias experimentales") return ["IC CON. CIEN"];
+  if (categoriaNorm === "Matemáticas") return ["IC C. MATEMÁTICOS"];
+  if (categoriaNorm === "Lenguaje y comunicación") return ["IC COMP. LECTORA"];
+  return [];
+}
+
+function _unidadRenderCompetenciasAscHTML(subtema = "", categoria = "", options = {}) {
+  const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
+  if (!chips.length) return "";
+  const html = chips.map((chip) => `
+    <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(44,90,160,0.22);background:#f5f8ff;color:#426b35;font-size:12px;font-weight:800;letter-spacing:.02em;">
+      [${_escapeHtmlUnidad(chip)}]
+    </span>
+  `).join(" ");
+  return `<div class="unidad-asc-competencias" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px 0;">${html}</div>`;
+}
+
+function _unidadAscThemePorChip(chip = "") {
+  const code = String(chip || "").trim().toUpperCase();
+  if (/^IC E\.|LECTORA|LINGÜÍSTICAS|LINGUISTICAS|SACÁDICOS|SACADICOS/.test(code)) {
+    return {
+      text: "#2563eb",
+      bg: "#e8f0ff",
+      border: "rgba(37,99,235,0.30)"
     };
   }
+  if (/C\. SOCIALES|G\. DE LA INF|F\. CULTURAL|ACT\. Y V/.test(code)) {
+    return {
+      text: "#16a34a",
+      bg: "#ebf9ef",
+      border: "rgba(22,163,74,0.30)"
+    };
+  }
+  if (/CON\. CIEN|EXPERIMENTACI[ÓO]N|P\. CIENT[ÍI]FICO|INTERD\./.test(code)) {
+    return {
+      text: "#d97706",
+      bg: "#fff4e5",
+      border: "rgba(217,119,6,0.30)"
+    };
+  }
+  if (/C\. MATEM[ÁA]TICOS|RETOS MATEM[ÁA]TICOS|L[ÓO]GICA MATEM[ÁA]TICA|EXP\. MATEM[ÁA]TICA/.test(code)) {
+    return {
+      text: "#e11d48",
+      bg: "#fff0f4",
+      border: "rgba(225,29,72,0.28)"
+    };
+  }
+  return {
+    text: "#2f3b52",
+    bg: "#f4f7fb",
+    border: "rgba(47,59,82,0.18)"
+  };
+}
 
-  // ✅ Tabla con formato Fase 5
+function _unidadCompetenciaPrimariaTexto(subtema = "", categoria = "", { lectura = false } = {}) {
+  if (lectura) return "Comprensión lectora";
+
+  const normalized = _unidadNormalizarSubtemaKey(subtema);
+  const mapa = {
+    Artes: "Expresión oral",
+    Ortografia: "Estructuras lingüísticas",
+    Gramatica: "Estructuras lingüísticas",
+    ExpresionEscrita: "Expresión escrita",
+    ExpresionOral: "Expresión oral",
+    Habilidades: "Comprensión lectora",
+    ComprensionLectora: "Comprensión lectora",
+    Naturales: "Conceptos científicos",
+    ConocimientoDelMedio: "Interdisciplinariedad",
+    MiLocalidad: "Gestión de la información",
+    Historia: "Formación cultural",
+    Geografia: "Gestión de la información",
+    CivicaEtica: "Actitudes y valores",
+    Socioemocional: "Actitudes y valores",
+    Matematicas: "Conceptos matemáticos"
+  };
+  if (mapa[normalized]) return mapa[normalized];
+
+  const categoriaNorm = String(categoria || "").trim();
+  if (categoriaNorm === "Lenguaje y comunicación") return "Comprensión lectora";
+  if (categoriaNorm === "Ciencias sociales") return "Conceptos sociales";
+  if (categoriaNorm === "Ciencias experimentales") return "Conceptos científicos";
+  if (categoriaNorm === "Matemáticas") return "Conceptos matemáticos";
+  return "";
+}
+
+function _unidadRenderCompetenciaPrimariaHTML(subtema = "", categoria = "", options = {}) {
+  const competencia = _unidadCompetenciaPrimariaTexto(subtema, categoria, options);
+  if (!competencia) return "";
+  const etiqueta = String(options?.label || formatearSubtema(subtema || "Subcategoría")).trim();
+  const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
+  const theme = _unidadAscThemePorChip(chips[0] || "");
+  return `
+    <div class="unidad-competencia-primaria" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px 0;">
+      <span style="display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.bg};color:${theme.text};font-size:12px;font-weight:800;letter-spacing:.01em;">
+        ${_escapeHtmlUnidad(etiqueta)} - Competencia: ${_escapeHtmlUnidad(competencia)}
+      </span>
+    </div>
+  `;
+}
+
+function _unidadEjeArticuladorPorSubtema(subtema = "", categoria = "", { lectura = false } = {}) {
+  if (lectura) {
+    return { nombre: "Fomento a la lectura y la escritura", sello: "V" };
+  }
+
+  const normalized = _unidadNormalizarSubtemaKey(subtema);
+  const mapa = {
+    Artes: { nombre: "Educación estética", sello: "VI" },
+    Ortografia: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    Gramatica: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    ExpresionEscrita: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    ExpresionOral: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    Habilidades: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    ComprensionLectora: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    Naturales: { nombre: "Pensamiento crítico", sello: "II" },
+    ConocimientoDelMedio: { nombre: "Pensamiento crítico", sello: "II" },
+    MiLocalidad: { nombre: "Interculturalidad crítica", sello: "III" },
+    Historia: { nombre: "Interculturalidad crítica", sello: "III" },
+    Geografia: { nombre: "Interculturalidad crítica", sello: "III" },
+    CivicaEtica: { nombre: "Igualdad de género", sello: "IV" },
+    Socioemocional: { nombre: "Educación socioemocional", sello: "VIII" },
+    Matematicas: { nombre: "Pensamiento crítico", sello: "II" }
+  };
+  if (mapa[normalized]) return mapa[normalized];
+
+  const categoriaNorm = String(categoria || "").trim();
+  if (categoriaNorm === "Lenguaje y comunicación") return { nombre: "Fomento a la lectura y la escritura", sello: "V" };
+  if (categoriaNorm === "Ciencias sociales") return { nombre: "Interculturalidad crítica", sello: "III" };
+  if (categoriaNorm === "Ciencias experimentales") return { nombre: "Pensamiento crítico", sello: "II" };
+  if (categoriaNorm === "Matemáticas") return { nombre: "Pensamiento crítico", sello: "II" };
+  return { nombre: "Inclusión", sello: "I" };
+}
+
+function _unidadRenderEjeArticuladorHTML(subtema = "", categoria = "", options = {}) {
+  const eje = _unidadEjeArticuladorPorSubtema(subtema, categoria, options);
+  if (!eje?.nombre || !eje?.sello) return "";
+  return `
+    <p class="unidad-eje-articulador" style="margin:0 0 12px 0; font-size:13px; color:#355e3b;">
+      <strong>Eje articulador:</strong> ${_escapeHtmlUnidad(eje.nombre)} [SELLO EJE ARTICULADOR ${_escapeHtmlUnidad(eje.sello)}]
+    </p>
+  `;
+}
+
+window.generarProgramaSintetico = function (secuenciaActual) {
+  const filas = [
+    {
+      color: "Amarillo",
+      colorBg: "#fde08a",
+      campo: "Lenguajes",
+      campoBg: "#fff5cc",
+      campoColor: "#b58900",
+      asignaturas: ["Artes", "Lenguaje de señas", "Español como primera lengua"],
+      secciones: [
+        "Trazos y letras",
+        "Convenciones lingüísticas: Ortografía",
+        "Convenciones lingüísticas: Gramática",
+        "Expresión escrita",
+        "Expresión oral",
+        "Comprensión lectora",
+        "Habilidades, mapa mental y dictado"
+      ]
+    },
+    {
+      color: "Azul",
+      colorBg: "#b7caf1",
+      campo: "Saberes y Pensamiento Científico",
+      campoBg: "#dbe7fb",
+      campoColor: "#2857c5",
+      asignaturas: ["Matemáticas", "Ciencias naturales", "Conocimiento del medio"],
+      secciones: ["Matemáticas", "Ciencias naturales", "Conocimiento del medio"]
+    },
+    {
+      color: "Verde",
+      colorBg: "#b9d8a0",
+      campo: "Ética, Naturaleza y Sociedades",
+      campoBg: "#dcead1",
+      campoColor: "#487a2b",
+      asignaturas: ["Historia", "Geografía", "Formación cívica y ética", "Historias, paisajes y convivencia en mi localidad"],
+      secciones: ["Historia", "Geografía", "Formación cívica y ética", "Historias, paisajes y convivencia en mi localidad"]
+    },
+    {
+      color: "Rosa",
+      colorBg: "#d8b3c9",
+      campo: "De lo Humano y lo Comunitario",
+      campoBg: "#f0dce8",
+      campoColor: "#9b4f7d",
+      asignaturas: ["Ciencias naturales", "Formación cívica y ética", "Educación socioemocional", "Historias, paisajes y convivencia en mi localidad"],
+      secciones: ["Ciencias naturales", "Formación cívica y ética", "Educación socioemocional", "Historias, paisajes y convivencia en mi localidad"]
+    }
+  ];
+
+  const activos = new Set();
+  Object.keys(secuenciaActual || {}).forEach((key) => {
+    if (!/_C$/.test(key)) return;
+    const subtema = key.replace(/_C$/, "");
+    if (String(secuenciaActual?.[key] || "").trim()) activos.add(_unidadNormalizarSubtemaKey(subtema));
+  });
+
+  const aliasSecciones = {
+    Trazosyletras: "Artes",
+    ConvencioneslinguisticasOrtografia: "Ortografia",
+    ConvencioneslinguisticasGramatica: "Gramatica",
+    Expresionescrita: "ExpresionEscrita",
+    Expresionoral: "ExpresionOral",
+    Comprensionlectora: "ComprensionLectora",
+    Habilidadesmapamentalydictado: "Habilidades",
+    Cienciasnaturales: "Naturales",
+    Conocimientodelmedio: "ConocimientoDelMedio",
+    Historiaspaisajesyconvivenciaenmilocalidad: "MiLocalidad",
+    Formacioncivicayetica: "CivicaEtica",
+    Educacionsocioemocional: "Socioemocional",
+    Matematicas: "Matematicas",
+    Historia: "Historia",
+    Geografia: "Geografia"
+  };
+
+  const rowsHtml = filas.map((fila) => {
+    const rowCount = Math.max(fila.asignaturas.length, fila.secciones.length);
+    return Array.from({ length: rowCount }, (_, idx) => {
+      const asignatura = fila.asignaturas[idx] || "";
+      const seccion = fila.secciones[idx] || "";
+      const alias = aliasSecciones[_unidadNormalizarSubtemaKey(seccion)] || "";
+      const activa = alias && activos.has(_unidadNormalizarSubtemaKey(alias));
+      const activaBadge = activa ? ` <span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#e8f5e9;color:#256029;font-size:11px;font-weight:700;margin-left:6px;">Activa</span>` : "";
+      return `
+        <tr>
+          ${idx === 0 ? `<td rowspan="${rowCount}" style="background:${fila.colorBg}; font-weight:800; text-align:center;">${fila.color}</td>` : ""}
+          ${idx === 0 ? `<td rowspan="${rowCount}" style="background:${fila.campoBg}; color:${fila.campoColor}; font-weight:900; text-align:center;">${fila.campo}</td>` : ""}
+          <td>${asignatura || "&nbsp;"}</td>
+          <td>${seccion || "&nbsp;"}${activaBadge}</td>
+        </tr>
+      `;
+    }).join("");
+  }).join("");
+
   return `
     <div id="programa-sintetico" style="margin-bottom:20px;">
-     <p>Puede realizar el codiseño curricular a partir de la siguiente contextualización pedagógica vinculada a los contenidos relevantes de los cuatro Campos Formativos:</p>
-      <h3 style="text-align:center; background:#AEEEEE; margin-bottom:10px;">Fase 5</h3>
+      <p>Relación base entre campo formativo, asignaturas puente y secciones ASC activas para distinguir las actividades de la unidad.</p>
       <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; width:100%; text-align:center; font-size:14px;">
         <thead>
-          <tr style="background:#f2f2f2; font-weight:bold;">
-            <th style="background:#ddebf7;"></th>
-            <th style="background:#ddebf7;">Campos Formativos</th>
-            <th style="background:#fff2cc;">Lenguajes</th>
-            <th style="background:#CFEDEA;">Saberes y Pensamiento Científico</th>
-            <th style="background:#e2efda;">Ética, Naturaleza y Sociedades</th>
-            <th style="background:#f4cccc;">De lo Humano y lo Comunitario</th>
+          <tr style="background:#2f4d90; color:#fff; font-weight:800;">
+            <th>Color de identificación</th>
+            <th>Campos formativos NEM</th>
+            <th>Asignaturas</th>
+            <th>Secciones ASC</th>
           </tr>
         </thead>
         <tbody>
-          <!-- Contenidos -->
-          <tr>
-            <td rowspan="3" style="background:#CFEDEA; font-weight:bold; writing-mode: vertical-rl; transform: rotate(180deg);">
-              Programa<br>Sintético
-            </td>
-            <td style="background:#ebf1de; font-weight:bold;">Contenidos</td>
-            <td>${columnasFinales["Lenguajes"].contenido}</td>
-            <td>${columnasFinales["Saberes y Pensamiento Científico"].contenido}</td>
-            <td>${columnasFinales["Ética, Naturaleza y Sociedades"].contenido}</td>
-            <td>${columnasFinales["De lo Humano y lo Comunitario"].contenido}</td>
-          </tr>
-          <!-- Procesos -->
-          <tr>
-            <td style="background:#ebf1de; font-weight:bold;">Procesos</td>
-            <td>${columnasFinales["Lenguajes"].proceso}</td>
-            <td>${columnasFinales["Saberes y Pensamiento Científico"].proceso}</td>
-            <td>${columnasFinales["Ética, Naturaleza y Sociedades"].proceso}</td>
-            <td>${columnasFinales["De lo Humano y lo Comunitario"].proceso}</td>
-          </tr>
-          <!-- Ambientes -->
-          <tr>
-            <td style="background:#CFEDEA; font-weight:bold;">Ambientes</td>
-            <td>${columnasFinales["Lenguajes"].ambiente}</td>
-            <td>${columnasFinales["Saberes y Pensamiento Científico"].ambiente}</td>
-            <td>${columnasFinales["Ética, Naturaleza y Sociedades"].ambiente}</td>
-            <td>${columnasFinales["De lo Humano y lo Comunitario"].ambiente}</td>
-          </tr>
+          ${rowsHtml}
         </tbody>
       </table>
-      <p><strong>Contextualización pedagógica de Lenguaje y comunicación</strong></p>
-      <p>En la presente Unidad los alumnos lograrán un nivel taxonómico de Comprensión, Análisis y Aplicación en el Campo Formativo de
-        Lenguajes. Los aprendizajes esperados se encuentran señalados en el Temario del Libro del Alumno.</p>
     </div>
   `;
 };
@@ -22733,7 +23248,7 @@ function _unidadBuildMathStrategyMeta(subtema = "", categoria = "Matemáticas") 
     ? getDominantUnidadActivityStyle(categoria)
     : "asc";
   const safeSubtema = String(subtema || "Matemáticas").trim() || "Matemáticas";
-  const chips = (activeStyles.length ? activeStyles : ["asc"]).map((styleId) => `
+  const chips = activeStyles.map((styleId) => `
     <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:#e8eefc;color:#2c5aa0;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;">
       ${styleLabels[styleId] || styleId}
     </span>
@@ -23140,7 +23655,9 @@ async function generarSeccionCategoria(categoria) {
     _insertarContenedorCategoriaResultadoUnidad(resultadoUnidad, contenedor, categoria);
 
     // ✅ NUEVO: Agregar título de categoría con badge de estilo debajo
-    const activeStyles = typeof getSelectedUnidadActivityStyles === "function" ? getSelectedUnidadActivityStyles(categoria) : [];
+    const activeStyles = _unidadIsStyleSelectorEnabled(categoria) && typeof getSelectedUnidadActivityStyles === "function"
+      ? getSelectedUnidadActivityStyles(categoria)
+      : [];
     const catalog = typeof getUnidadStyleCatalog === "function" ? getUnidadStyleCatalog() : [];
     const styleLabels = activeStyles.map(id => {
       const s = catalog.find(item => item.id === id);
@@ -23616,11 +24133,14 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           }
         }
 
+        const categoriaEditorialProyecto = _unidadEtiquetaCategoriaCampo(categoria, subtema);
+        const subcategoriaEditorialAlumnoProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
         document.getElementById(bloqueId).innerHTML = `
                 <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;" id="${bloqueId}-layout">
                     <div id="${proyectoAlumnoColId}" class="col-alumno" style="flex:1; min-width:300px;">
                         ${tablaInicialProyectoHTML}
-                        <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                        <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorialProyecto}</p>
+                        <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumnoProyecto}</p>
                         <h4>${tituloProyectoParcial}</h4>
                         <div id="${proyectoAlumnoContenidoId}"></div>
                     </div>
@@ -23700,9 +24220,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colMaestroProyecto = document.getElementById(proyectoMaestroColId);
         const layoutProyecto = document.getElementById(`${bloqueId}-layout`);
         if (layoutProyecto && !colMaestroProyecto) {
+          const subcategoriaEditorialMaestroProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
           layoutProyecto.insertAdjacentHTML("beforeend", `
                 <div id="${proyectoMaestroColId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorialProyecto}</p>
+                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestroProyecto}</p>
                   <h4>${tituloMostrar || "Notas del maestro"}</h4>
                   ${soporteLecturaMaestroProyectoHTML || ""}
                   <div id="${proyectoMaestroColId}-contenido"></div>
@@ -23913,15 +24435,20 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         actualizarSpinnerProceso(statusId, `Generando actividades para <strong>${formatearSubtema(subtema)}</strong>...`);
         const previewAlumnoId = `${bloqueId}-preview-alumno`;
+        const categoriaEditorial = _unidadEtiquetaCategoriaCampo(categoria, subtema);
+        const subcategoriaEditorialAlumno = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
+        const subcategoriaEditorialMaestro = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
                       <h4>${tituloCreativoLimpioBase}</h4>
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
                       <h4>Notas del maestro</h4>
                       <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido del alumno...</p>
                   </div>
@@ -24057,11 +24584,19 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.bloqueLecturaGlobalParaLenguaje
         );
 
-        const lecturaHTML = esPrimerSubtemaLenguaje ?
-          `<div class="lectura-global-categoria" style="margin-bottom:30px;">
-                  ${window.bloqueLecturaGlobalParaLenguaje}
-              </div>` :
-          "";
+        const lecturaNomenclaturaHTML = esPrimerSubtemaLenguaje
+          ? `
+              <div class="lectura-global-categoria" style="margin-bottom:30px;">
+                <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</p>
+                ${_unidadRenderCompetenciasAscHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
+                ${_unidadRenderEjeArticuladorHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                ${window.bloqueLecturaGlobalParaLenguaje}
+              </div>`
+          : "";
+        if (esPrimerSubtemaLenguaje) {
+          htmlAlumnoConApoyoVisual = _unidadStripDuplicatedLectureBlocksFromHtml(htmlAlumnoConApoyoVisual);
+        }
         const soporteLecturaMaestroHTML = esPrimerSubtemaLenguaje
           ? _bloqueMaestroLecturaSoporteUnidad(window.lecturaNuevaCoincidenteGlobal)
           : "";
@@ -24071,6 +24606,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.debeInsertarLecturaLenguaje = false; // Prevenir duplicados
         }
 
+        const competenciasSubcategoriaAlumno = _unidadRenderCompetenciasAscHTML(subtema, categoria);
+        const competenciasSubcategoriaMaestro = _unidadRenderCompetenciasAscHTML(subtema, categoria);
+        const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
+        const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
+        const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria);
+        const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria);
+
         // Render parcial en tiempo real: primero columna alumno.
         const colAlumnoId = `${bloqueId}-alumno`;
         const colMaestroId = `${bloqueId}-maestro`;
@@ -24078,21 +24620,29 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         document.getElementById(bloqueId).innerHTML = `
             <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                 <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
+                    ${lecturaNomenclaturaHTML}
                     ${tablaInicialHTML}
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
+                    ${competenciasSubcategoriaAlumno}
+                    ${competenciaSubcategoriaAlumno}
+                    ${ejeSubcategoriaAlumno}
                     <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                        ${formatearSubtema(subtema)}
+                        ${categoriaEditorial}
                     </h3>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${etiquetaInterdisc}
-                    ${lecturaHTML}
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
+                    ${competenciasSubcategoriaMaestro}
+                    ${competenciaSubcategoriaMaestro}
+                    ${ejeSubcategoriaMaestro}
                     <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                        ${formatearSubtema(subtema)}
+                        ${categoriaEditorial}
                     </h3>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
@@ -24137,9 +24687,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colMaestro = document.getElementById(colMaestroId);
         if (colMaestro) {
           colMaestro.innerHTML = `
-              <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
+              <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+              <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
+              ${competenciasSubcategoriaMaestro}
+              ${competenciaSubcategoriaMaestro}
+              ${ejeSubcategoriaMaestro}
               <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                  ${formatearSubtema(subtema)}
+                  ${categoriaEditorial}
               </h3>
               <h4>${tituloCreativoLimpioBase}</h4>
               <h5 style="color:#666;font-weight:normal;">${T}</h5>
@@ -24869,10 +25423,20 @@ function _unidadEnsureFichaTitles(html = "", recursos = {}) {
     heading.className = "unidad-ficha-heading";
     heading.style.marginTop = "24px";
     heading.textContent = fichaClave;
-    root.insertBefore(heading, fichaBlocks[0]);
+
+    let anchor = fichaBlocks[0] || null;
+    while (anchor && anchor.parentNode !== root) {
+      anchor = anchor.parentNode;
+    }
+    if (anchor && anchor.parentNode === root) {
+      root.insertBefore(heading, anchor);
+    } else {
+      root.appendChild(heading);
+    }
   }
 
   fichaBlocks.forEach((block, index) => {
+    if (!(block instanceof Element)) return;
     const firstMeaningful = Array.from(block.children).find((node) => {
       const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
       return text.length > 0;
@@ -24880,10 +25444,12 @@ function _unidadEnsureFichaTitles(html = "", recursos = {}) {
     const firstText = String(firstMeaningful?.textContent || "").replace(/\s+/g, " ").trim();
     if (/^ficha\b/i.test(firstText)) return;
 
+    if (block.querySelector(":scope > .unidad-ficha-item-title")) return;
+
     const title = doc.createElement("p");
     title.className = "unidad-ficha-item-title";
     title.innerHTML = `<strong>${fichaClave} - Actividad ${index + 1}.</strong>`;
-    block.insertBefore(title, block.firstChild);
+    block.prepend(title);
   });
 
   return root.innerHTML;
@@ -25683,7 +26249,13 @@ document.getElementById("btnReiniciarFiltros")?.addEventListener("click", () => 
   try {
     localStorage.removeItem(UNIDAD_SELECTS_STORAGE_KEY);
     localStorage.removeItem(UNIDAD_SELECTS_STORAGE_LEGACY_KEY);
-    ["unidadNivel", "unidadGrado", "unidadTrimestre", "unidadNumero", "unidadTema", "unidadTemaASC", "unidadTemaTexto", "selectGeminiEndpoint"].forEach((id) => {
+    if (selectSerieUnidad) {
+      _renderOpcionesSerieUnidad("");
+      selectSerieUnidad.value = "";
+    }
+    if (inputSerieUnidadOtra) inputSerieUnidadOtra.value = "";
+    _actualizarVisibilidadSerieOtra();
+    ["unidadNivel", "unidadGrado", "unidadTrimestre", "unidadNumero", "unidadSerie", "unidadTema", "unidadTemaASC", "unidadTemaTexto", "selectGeminiEndpoint"].forEach((id) => {
       localStorage.removeItem(`unidad_${id}`);
     });
   } catch (_) { }
@@ -25697,6 +26269,7 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
   const grado = selectGrado?.value || "";
   const trimestre = selectTrimestre?.value || "";
   const unidad = selectUnidad?.value || "";
+  const serie = await _resolverSerieUnidadSeleccionada();
   const lecturaResuelta = await _resolverLecturaUnidadActual({
     nivel,
     grado,
@@ -25825,6 +26398,7 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       grado,
       trimestre,
       unidad,
+      serie,
       userId: user.uid,
       uid: user.uid,
       email: String(user.email || "").trim().toLowerCase(),
@@ -27853,6 +28427,9 @@ document.addEventListener('DOMContentLoaded', function () {
   _inicializarToggleFooterAgentesUnidad();
   _inicializarSwitchMasterAgenteUnidad();
   syncGeminiModelOptionsForUnidad().catch(() => {});
+  _renderOpcionesSerieUnidad();
+  _cargarCatalogoSeriesUnidad().catch(() => {});
+  _actualizarVisibilidadSerieOtra();
   const ctrl = _asegurarControladorAgenteUnidad();
   ctrl.init();
   _aplicarPerfilesAgente(_obtenerPerfilesAgente(), { persist: false, syncRemote: false });
