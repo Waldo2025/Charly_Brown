@@ -2453,10 +2453,16 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
     "Elaboración de una interpretación: NIVEL 3",
     "Reflexión y valoración: NIVEL 3"
   ];
-  const preguntasHTML = preguntasArr.map((q, idx) => {
-    const cleanQ = q.replace(/^¿*|(\?)*$/g, "");
+  const preguntasHTML = preguntasArr.map((qObj, idx) => {
+    let qStr = "";
+    if (typeof qObj === "string") {
+      qStr = qObj;
+    } else if (qObj && typeof qObj === "object") {
+      qStr = qObj.texto || qObj.text || qObj.pregunta || qObj.question || JSON.stringify(qObj);
+    }
+    const cleanQ = String(qStr || "").replace(/^¿*|(\?)*$/g, "");
     if (!cleanQ.trim()) return "";
-    const hasLevel = q.toUpperCase().includes("NIVEL");
+    const hasLevel = cleanQ.toUpperCase().includes("NIVEL");
     const levelStr = hasLevel ? "" : `<strong>${indicadores[idx % indicadores.length]}</strong><br>`;
     return `<p style="margin: 0 0 10px 0; font-size:14px;">${levelStr}<span style="color:#2ba2b4;">¿${cleanQ}?</span></p>`;
   }).join("");
