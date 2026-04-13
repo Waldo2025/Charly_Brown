@@ -19,6 +19,7 @@ import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-confi
 const STORAGE_KEY_BASE = "cb_podcaster_sessions_v2";
 const LEGACY_STORAGE_KEY = "cb_podcaster_sessions_v1";
 const PANEL_MUSIC_STORAGE_KEY_BASE = "cb_podcaster_panel_music_v1";
+const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
 const PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY = "cb_podcast_studio_inspector_collapsed_v1";
 const PODCAST_STUDIO_INSPECTOR_WIDTH_KEY = "cb_podcast_studio_inspector_width_v1";
 const PODCAST_STUDIO_INSPECTOR_WIDTH_MIN = 320;
@@ -4320,6 +4321,45 @@ function pcm16Base64ToFloat32(base64 = "") {
   } catch (_) {
     return new Float32Array(0);
   }
+}
+
+function consumeImportedVideoPromptBridge(options = {}) {
+  const {
+    renderAfter = false,
+    clearAfterRead = true
+  } = options;
+  let payload = null;
+  try {
+    payload = JSON.parse(localStorage.getItem(PODCASTER_VIDEO_IMPORT_STORAGE_KEY) || "null");
+  } catch (_) {
+    payload = null;
+  }
+  const prompt = String(payload?.prompt || "").trim();
+  if (!prompt) return false;
+  ensureSession();
+  upsertActiveSession((session) => ({
+    ...session,
+    prompt
+  }), { render: false });
+  if (els.promptInput) {
+    els.promptInput.value = prompt;
+  }
+  setComposerGenerationMode(String(payload?.mode || "").trim() === "video" ? "video" : "script");
+  if (els.generationStatus) {
+    els.generationStatus.textContent = "Guion importado";
+  }
+  autoResizePrompt();
+  if (clearAfterRead) {
+    try {
+      localStorage.removeItem(PODCASTER_VIDEO_IMPORT_STORAGE_KEY);
+    } catch (_) {
+      // noop
+    }
+  }
+  if (renderAfter) {
+    render();
+  }
+  return true;
 }
 
 function geminiLivePendingPlaybackMs() {
@@ -14017,6 +14057,11 @@ function attachEvents() {
     autoResizePrompt();
   });
 
+  window.addEventListener("storage", (event) => {
+    if (event.key !== PODCASTER_VIDEO_IMPORT_STORAGE_KEY || !event.newValue) return;
+    consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
+  });
+
   els.chatFeed.addEventListener("click", async (event) => {
     const deleteBtn = event.target.closest("[data-action='delete-chat-message']");
     if (deleteBtn) {
@@ -14350,6 +14395,7 @@ function init() {
     state.activeSessionId = null;
     ensureSession();
     render();
+    consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
   });
   window.addEventListener("beforeunload", () => {
     stopPanelMusic();

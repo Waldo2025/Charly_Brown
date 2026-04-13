@@ -1,12 +1,16 @@
 {
-  "version": "2026-1.0.0.73",
+  "version": "2026-1.0.1.08",
   "title": "Nuevas actualizaciones",
-  "message": "Se reforzó el hard reset al aplicar actualizaciones desde el banner. Da click en Actualizar ahora.",
-  "forceClearCache": true,
-  "forceClearCacheReason": "Actualizacion para forzar la recarga y ejecutar hard reset también al llegar a index.html.",
+  "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
+  "forceClearCache": false,
+  "forceClearCacheReason": "",
   "updates": [
-    "Corregido: el banner ejecuta limpieza antes de redirigir a index.html.",
-    "Corregido: index.html ejecuta una segunda limpieza controlada y recarga con cache-bust.",
-    "Corregido: se desregistran service workers durante el hard reset."
+    "Fix: SyA ahora se guarda en la colección raíz syaOverrides para evitar problemas de subcolección y collectionGroup.",
+    "Fix: el editor SyA conserva cambios de celda aunque cierres el submodal antes de guardar el borrador.",
+    "Nuevo: botón Modificar SyA por categoría con edición desde Firebase.",
+    "Nuevo: publicación opcional de SyA para que otros usuarios autenticados puedan seleccionarla.",
+    "Fix: consulta de overrides SyA compartidos con reglas e índice de Firestore ya listos.",
+    "Fix: el botón Modificar SyA ahora usa el mismo diseño visual que los demás botones de categoría.",
+    "Mejora: la generación toma la SyA efectiva seleccionada en lugar de depender solo de la secuencia base."
   ]
 }

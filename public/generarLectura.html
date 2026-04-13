@@ -32,6 +32,27 @@
   <link rel="stylesheet" href="secuenciayalcance.css">
   <link rel="stylesheet" href="generarUnidad.css">
   <link rel="stylesheet" href="generarUnidadSecundaria.css">
+  <link rel="stylesheet" href="moodleCourse-graphicPreview.css?v=2026-1.0.0.65">
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+    crossorigin="anonymous"
+  >
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/mhchem.min.js"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    defer
+    src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    crossorigin="anonymous"
+  ></script>
 
   <style>
     .modal-lecturas {
@@ -1751,7 +1772,7 @@
             <div class="asc-editor-toolbar-group asc-editor-toolbar-group--ribbon asc-editor-toolbar-group--footer">
               <label class="asc-editor-tool-select asc-editor-tool-select--zoom">
                 <span id="ascEditorZoomLabel">Zoom 100%</span>
-                <input id="ascEditorZoomRange" type="range" min="80" max="170" step="5" value="100">
+                <input id="ascEditorZoomRange" type="range" min="10" max="170" step="5" value="100">
               </label>
               <span class="asc-editor-toolbar-group-title">Vista</span>
             </div>
@@ -3025,6 +3046,7 @@
                         <th class="px-3 py-2 font-medium w-20 text-center" title="Ficha" aria-label="Ficha"><i class="fa-solid fa-pen-nib unidad-th-icon"></i></th>
                         <th class="px-3 py-2 font-medium w-20 text-center" title="Anexo" aria-label="Anexo"><i class="fa-solid fa-paperclip unidad-th-icon"></i></th>
                         <th class="px-3 py-2 font-medium w-20 text-center" title="Video" aria-label="Video"><i class="fa-solid fa-film unidad-th-icon"></i></th>
+                        <th class="px-3 py-2 font-medium w-20 text-center" title="Imagen de apoyo" aria-label="Imagen de apoyo"><i class="fa-regular fa-image unidad-th-icon"></i></th>
                         <th class="px-3 py-2 font-medium w-16 text-center">#</th>
                       </tr>
                     </thead>
@@ -3121,6 +3143,8 @@
                 </select>
               </div>
 
+              <div class="unidad-editor-field--full" id="cbLecturaFusionToggleHost" style="display:none;"></div>
+
               <div class="space-y-1 unidad-editor-field--full">
                 <label for="selectGeminiEndpoint" class="unidad-label">Modelo IA</label>
                 <select id="selectGeminiEndpoint" class="unidad-input">
@@ -3145,80 +3169,107 @@
     <div class="unidad-panel">
       <div class="unidad-content">
         <div class="unidad-header">
-          <div class="unidad-title-block unidad-title-block-editor">
-            <h3 class="unidad-title">Resultado de la Unidad</h3>
-          </div>
+          <button id="toggleFullscreenResultadoUnidad" class="unidad-close unidad-fullscreen-toggle" aria-label="Pantalla completa" title="Pantalla completa">
+            <i class="fas fa-expand" aria-hidden="true"></i>
+          </button>
           <button id="cerrarModalResultadoUnidad" class="unidad-close" aria-label="Cerrar">
             &times;
           </button>
         </div>
 
-        <div class="unidad-result-toolbar" role="group" aria-label="Controles de generación">
-          <button type="button" id="btnDetenerGeneracionUnidad"
-            class="unidad-btn unidad-btn-outline unidad-action-btn"
-            title="Detener generación en curso" aria-label="Detener generación en curso">
-            <i class="fa-solid fa-stop"></i><span class="unidad-btn-text">Detener</span>
-          </button>
-          <button type="button" id="btnRegenerarResultadoUnidad"
-            class="unidad-btn unidad-btn-secondary unidad-action-btn"
-            title="Regenerar resultado de la unidad" aria-label="Regenerar resultado de la unidad">
-            <i class="fa-solid fa-rotate"></i><span class="unidad-btn-text">Regenerar</span>
-          </button>
-          <button type="button" id="btnToggleTablaUnidad" class="unidad-btn unidad-btn-secondary unidad-action-btn"
-            title="Ocultar o mostrar secuencia" aria-label="Ocultar o mostrar secuencia"
-            data-tooltip="Mostrar secuencia">
-            <i class="fa-regular fa-eye"></i><span class="unidad-btn-text">Mostrar secuencia</span>
-          </button>
-        </div>
+        <div id="resultadoUnidadGenerada" class="unidad-result"></div>
 
-        <div id="resultadoUnidadGenerada" class="unidad-result mt-4"></div>
-
-        <div class="mt-6 pt-4 unidad-divider unidad-footer">
+        <div class="unidad-divider unidad-footer">
           <div class="unidad-footer-row">
+            <div class="unidad-footer-group unidad-footer-group--controls" role="group" aria-label="Controles de generación">
+              <button type="button" id="btnDetenerGeneracionUnidad"
+                class="unidad-btn unidad-btn-outline unidad-action-btn"
+                title="Detener generación en curso" aria-label="Detener generación en curso">
+                <i class="fa-solid fa-stop"></i><span class="unidad-btn-text">Detener</span>
+              </button>
+              <button type="button" id="btnRegenerarResultadoUnidad"
+                class="unidad-btn unidad-btn-secondary unidad-action-btn"
+                title="Regenerar resultado de la unidad" aria-label="Regenerar resultado de la unidad">
+                <i class="fa-solid fa-rotate"></i><span class="unidad-btn-text">Regenerar</span>
+              </button>
+              <button type="button" id="btnToggleUnidadSyaPanel"
+                class="unidad-btn unidad-btn-secondary unidad-action-btn"
+                title="Abrir panel de secuencia y alcance" aria-label="Abrir panel de secuencia y alcance" aria-pressed="false">
+                <i class="fa-solid fa-table-cells-large"></i><span class="unidad-btn-text">Secuencia</span>
+              </button>
+            </div>
+
+            <div class="unidad-footer-group unidad-footer-group--copy" role="group" aria-label="Copiar resultados">
             <button type="button" id="btnContinuarUnidad" class="unidad-btn unidad-btn-outline unidad-action-btn"
               style="display: none;">
               <i class="fa-solid fa-rotate-right"></i><span class="unidad-btn-text">Continuar</span>
             </button>
 
-            <button id="btnCopiarHTML" class="unidad-btn unidad-btn-secondary unidad-action-btn" title="Copiar unidad"
-              aria-label="Copiar unidad">
-              <i class="fa-regular fa-copy"></i><span class="unidad-btn-text">Copiar</span>
+            <button id="btnCopiarHTMLAlumno" class="unidad-btn unidad-btn-secondary unidad-action-btn" title="Copiar unidad del alumno"
+              aria-label="Copiar unidad del alumno">
+              <i class="fa-regular fa-copy"></i><span class="unidad-btn-text">Alumno</span>
             </button>
 
+            <button id="btnCopiarHTMLMaestro" class="unidad-btn unidad-btn-secondary unidad-action-btn" title="Copiar unidad del maestro"
+              aria-label="Copiar unidad del maestro">
+              <i class="fa-regular fa-copy"></i><span class="unidad-btn-text">Maestro</span>
+            </button>
+            </div>
+
+            <div class="unidad-footer-group unidad-footer-group--download" role="group" aria-label="Descargar resultados">
             <button id="btnDescargarWord" class="unidad-btn unidad-btn-secondary unidad-action-btn"
               title="Descargar unidad del alumno" aria-label="Descargar unidad del alumno">
-              <i class="fa-regular fa-file-lines"></i><span class="unidad-btn-text">Alumno</span>
+              <i class="fa-solid fa-download"></i><span class="unidad-btn-text">Alumno</span>
             </button>
 
             <button id="btnDescargarMaestro" class="unidad-btn unidad-btn-secondary unidad-action-btn"
               title="Descargar unidad del maestro" aria-label="Descargar unidad del maestro">
-              <i class="fa-solid fa-book"></i><span class="unidad-btn-text">Maestro</span>
+              <i class="fa-solid fa-download"></i><span class="unidad-btn-text">Maestro</span>
             </button>
+            </div>
 
-            <button type="button" id="btnGuardarUnidad" class="unidad-btn unidad-btn-primary unidad-action-btn"
-              title="Guardar en BD" aria-label="Guardar en BD">
-              <i class="fa-regular fa-floppy-disk"></i><span class="unidad-btn-text">Guardar en BD</span>
-            </button>
             <div class="unidad-footer-spacer"></div>
-            <button id="scrollTopBtn" title="Ir arriba" class="quick-nav-btn" aria-label="Ir arriba">
-              <i class="fa-solid fa-angles-up text-xs"></i>
+            <div class="unidad-footer-group unidad-footer-group--save" role="group" aria-label="Guardar unidad">
+            <button type="button" id="btnGuardarUnidad" class="unidad-btn unidad-btn-primary unidad-action-btn"
+              title="Guardar unidad" aria-label="Guardar unidad">
+              <i class="fa-regular fa-floppy-disk"></i><span class="unidad-btn-text">Guardar unidad</span>
             </button>
-            <button id="scrollPrevCatBtn" title="Categoría anterior" class="quick-nav-btn"
-              aria-label="Ir a la categoría anterior">
-              <i class="fa-solid fa-arrow-up-short-wide text-xs"></i>
-            </button>
-            <button id="scrollMiddleBtn" title="Ir al medio" class="quick-nav-btn" aria-label="Ir al medio">
-              <i class="fa-solid fa-grip-lines text-xs"></i>
-            </button>
-            <button id="scrollNextCatBtn" title="Siguiente categoría" class="quick-nav-btn"
-              aria-label="Ir a la siguiente categoría">
-              <i class="fa-solid fa-arrow-down-short-wide text-xs"></i>
-            </button>
-            <button id="scrollBottomBtn" title="Ir abajo" class="quick-nav-btn" aria-label="Ir abajo">
-              <i class="fa-solid fa-angles-down text-xs"></i>
-            </button>
+            </div>
           </div>
         </div>
+
+        <div class="unidad-result-nav-float" role="group" aria-label="Navegación rápida">
+          <button id="scrollTopBtn" title="Ir arriba" class="quick-nav-btn" aria-label="Ir arriba">
+            <i class="fa-solid fa-angles-up text-xs"></i>
+          </button>
+          <button id="scrollPrevCatBtn" title="Categoría anterior" class="quick-nav-btn"
+            aria-label="Ir a la categoría anterior">
+            <i class="fa-solid fa-arrow-up-short-wide text-xs"></i>
+          </button>
+          <button id="scrollMiddleBtn" title="Ir al medio" class="quick-nav-btn" aria-label="Ir al medio">
+            <i class="fa-solid fa-grip-lines text-xs"></i>
+          </button>
+          <button id="scrollNextCatBtn" title="Siguiente categoría" class="quick-nav-btn"
+            aria-label="Ir a la siguiente categoría">
+            <i class="fa-solid fa-arrow-down-short-wide text-xs"></i>
+          </button>
+          <button id="scrollBottomBtn" title="Ir abajo" class="quick-nav-btn" aria-label="Ir abajo">
+            <i class="fa-solid fa-angles-down text-xs"></i>
+          </button>
+        </div>
+
+        <aside id="unidadResultadoSyaPanel" class="unidad-result-sya-panel" aria-hidden="true">
+          <div class="unidad-result-sya-panel-header">
+            <div>
+              <strong>Secuencia y alcance</strong>
+              <p>Categorías generadas en esta unidad</p>
+            </div>
+            <button type="button" id="btnCerrarUnidadSyaPanel" class="unidad-result-sya-panel-close" aria-label="Cerrar panel">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div id="unidadResultadoSyaPanelBody" class="unidad-result-sya-panel-body"></div>
+        </aside>
       </div>
     </div>
   </div>
@@ -4027,7 +4078,7 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=2026-1.0.0.72"></script>
+  <script type="module" src="generarUnidad.js?v=2026-1.0.1.08"></script>
   <script type="module" src="generarUnidad2.js?v=2026-1.0.0.72"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>

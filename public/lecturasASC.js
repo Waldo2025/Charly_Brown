@@ -2560,21 +2560,21 @@ function _ascBuildStyleDefinitionsCss() {
   const rules = [];
   Object.entries(defs.paragraph || {}).forEach(([key, def]) => {
     const parts = [];
-    if (def.fontSize) parts.push(`font-size:${Number(def.fontSize)}px`);
+    if (def.fontSize) parts.push(`font-size:calc(${Number(def.fontSize)}px * var(--asc-editor-style-scale, 1))`);
     if (def.color) parts.push(`color:#${String(def.color).replace(/^#/, "")} !important`);
     if (def.bold) parts.push("font-weight:700");
     else parts.push("font-weight:400");
     if (def.italic) parts.push("font-style:italic");
     else parts.push("font-style:normal");
     if (def.align) parts.push(`text-align:${def.align === "both" ? "justify" : def.align}`);
-    if (Number(def.spacingBefore || 0)) parts.push(`margin-top:${Math.max(0, Number(def.spacingBefore)) / 10}px`);
-    if (Number(def.spacingAfter || 0) || key === "CBBody") parts.push(`margin-bottom:${Math.max(0, Number(def.spacingAfter || 160)) / 10}px`);
-    if (Number(def.indentLeft || 0)) parts.push(`padding-left:${Math.max(0, Number(def.indentLeft)) / 20}px`);
+    if (Number(def.spacingBefore || 0)) parts.push(`margin-top:calc(${Math.max(0, Number(def.spacingBefore)) / 10}px * var(--asc-editor-style-scale, 1))`);
+    if (Number(def.spacingAfter || 0) || key === "CBBody") parts.push(`margin-bottom:calc(${Math.max(0, Number(def.spacingAfter || 160)) / 10}px * var(--asc-editor-style-scale, 1))`);
+    if (Number(def.indentLeft || 0)) parts.push(`padding-left:calc(${Math.max(0, Number(def.indentLeft)) / 20}px * var(--asc-editor-style-scale, 1))`);
     rules.push(`.asc-editor-body [data-word-style="${key}"]{${parts.join(";")}}`);
   });
   Object.entries(defs.character || {}).forEach(([key, def]) => {
     const parts = [];
-    if (def.fontSize) parts.push(`font-size:${Number(def.fontSize)}px`);
+    if (def.fontSize) parts.push(`font-size:calc(${Number(def.fontSize)}px * var(--asc-editor-style-scale, 1))`);
     if (def.bold) parts.push("font-weight:700");
     else parts.push("font-weight:400");
     if (def.italic) parts.push("font-style:italic");
@@ -2895,6 +2895,7 @@ function aplicarTamanoHojaEditor(sheetSize = "") {
   styleTarget.style.setProperty("--asc-editor-page-font-size", `${fontSizeFinal}px`);
   styleTarget.style.setProperty("--asc-editor-page-title-size", `${titleSizeFinal}px`);
   styleTarget.style.setProperty("--asc-editor-page-line-height", `${lineHeight}`);
+  styleTarget.style.setProperty("--asc-editor-style-scale", `${Number((fontSizeFinal / conf.fontSize).toFixed(4))}`);
   styleTarget.style.setProperty("--asc-editor-page-padding-x", `${Math.round((conf.paddingX + paddingExtra) * zoomFactor)}px`);
   styleTarget.style.setProperty("--asc-editor-page-padding-top", `${Math.round((conf.paddingTop + paddingExtra) * zoomFactor)}px`);
   styleTarget.style.setProperty("--asc-editor-page-padding-bottom", `${Math.round((conf.paddingBottom + paddingExtra) * zoomFactor)}px`);

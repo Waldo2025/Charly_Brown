@@ -3,11 +3,27 @@ import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-confi
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { initializeFirestore, getFirestore, addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { getStorage, ref as storageRef, uploadString, getDownloadURL, listAll } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, listAll } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { createUnidadAgentController } from "./unidadAgentController.js";
 import { buildApiUrl } from "./api-client.js";
 import { sanitizeHtml } from "./security-utils.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
+import {
+  getSimplePreviewState,
+  applySimplePreviewStateFromLayers,
+  renderSimplePreviewBackground,
+  renderSimplePreviewText,
+  renderSimplePreviewFooter,
+  upsertSelectedPreviewText,
+  serializeSimplePreviewState
+} from "./moodleCourse-graphicPreview.js";
+import {
+  buildUnidadActivityStylePromptContext,
+  buildUnidadActivityStyleSelectorHtml,
+  attachUnidadActivityStyleSelectors,
+  getSelectedUnidadActivityStyles,
+  getDominantUnidadActivityStyle
+} from "./unidadActivityStyleSelector.js";
 
 // Configuración Firebase
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
@@ -29,6 +45,73 @@ const storage = getStorage(app);
 let runtimeConfigLoadPromise = null;
 let geminiBackendUnavailable = false;
 let geminiBackendUnavailableAt = 0;
+const UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY = "cb_unidad_activity_style_toggle_v1";
+let _unidadLecturasCanReadAllCache = { uid: "", value: false, ts: 0 };
+
+function _unidadReadStyleToggleMap() {
+  try {
+    const raw = localStorage.getItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _unidadWriteStyleToggleMap(next = {}) {
+  try {
+    localStorage.setItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY, JSON.stringify(next || {}));
+  } catch (_) { }
+}
+
+function _unidadIsStyleSelectorEnabled(categoria = "") {
+  const key = String(categoria || "").trim();
+  if (!key) return false;
+  const map = _unidadReadStyleToggleMap();
+  return map[key] === true;
+}
+
+function _unidadSetStyleSelectorEnabled(categoria = "", enabled = false) {
+  const key = String(categoria || "").trim();
+  if (!key) return false;
+  const map = _unidadReadStyleToggleMap();
+  map[key] = enabled === true;
+  _unidadWriteStyleToggleMap(map);
+  return map[key] === true;
+}
+
+function _unidadBuildCategoryStyleUi(categoria = "") {
+  const enabled = _unidadIsStyleSelectorEnabled(categoria);
+  return `
+    <div class="cb-unidad-style-toolbar" data-categoria="${_unidadEscapeHtml(categoria)}">
+      <label class="cb-unidad-style-toggle">
+        <input type="checkbox" class="cb-unidad-style-toggle-input" data-action="toggle-style-selector" data-categoria="${_unidadEscapeHtml(categoria)}" ${enabled ? "checked" : ""}>
+        <span class="cb-unidad-style-toggle-track"></span>
+        <span class="cb-unidad-style-toggle-label">Estilo educativo</span>
+      </label>
+      <div class="cb-unidad-style-selector-host" data-role="style-selector-host" style="${enabled ? "" : "display:none;"}">
+        ${buildUnidadActivityStyleSelectorHtml(categoria)}
+      </div>
+    </div>
+  `;
+}
+
+function _unidadBindCategoryStyleUi(root = document) {
+  const scope = root && typeof root.querySelectorAll === "function" ? root : document;
+  scope.querySelectorAll(".cb-unidad-style-toolbar[data-categoria]").forEach((toolbar) => {
+    if (toolbar.dataset.boundStyleToolbar === "1") return;
+    toolbar.dataset.boundStyleToolbar = "1";
+    const categoria = String(toolbar.getAttribute("data-categoria") || "").trim();
+    const toggle = toolbar.querySelector(".cb-unidad-style-toggle-input[data-action='toggle-style-selector']");
+    const host = toolbar.querySelector("[data-role='style-selector-host']");
+    toggle?.addEventListener("change", () => {
+      const enabled = toggle.checked === true;
+      _unidadSetStyleSelectorEnabled(categoria, enabled);
+      if (host) host.style.display = enabled ? "" : "none";
+    });
+  });
+  attachUnidadActivityStyleSelectors(scope);
+}
 const GEMINI_BACKEND_UNAVAILABLE_TTL_MS = 45000;
 
 function markGeminiBackendUnavailable(reason = "") {
@@ -38,7 +121,13 @@ function markGeminiBackendUnavailable(reason = "") {
   logVisual(`⚠️ Backend Gemini deshabilitado en sesión (${reason || "sin detalle"}).`);
 }
 
+function clearGeminiBackendUnavailable() {
+  geminiBackendUnavailable = false;
+  geminiBackendUnavailableAt = 0;
+}
+
 function shouldShortCircuitGeminiBackendFetch() {
+  if (isGeminiBackendLocalTarget()) return false;
   if (!geminiBackendUnavailable) return false;
   if (!geminiBackendUnavailableAt) return false;
   return (Date.now() - geminiBackendUnavailableAt) <= GEMINI_BACKEND_UNAVAILABLE_TTL_MS;
@@ -47,6 +136,38 @@ function shouldShortCircuitGeminiBackendFetch() {
 function isGeminiBackendLocalTarget() {
   const url = String(buildApiUrl("/api/gemini/generate") || "").trim();
   return /^https?:\/\/(?:127\.0\.0\.1|localhost):8787\//i.test(url) || url === "/api/gemini/generate";
+}
+
+async function _unidadGetAuthUser({ maxMs = 2500 } = {}) {
+  try {
+    if (auth?.currentUser) return auth.currentUser;
+  } catch (_) { }
+  if (!auth || typeof onAuthStateChanged !== "function") return null;
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (user) => {
+      if (settled) return;
+      settled = true;
+      resolve(user || null);
+    };
+    let unsub = null;
+    try {
+      unsub = onAuthStateChanged(auth, (user) => {
+        try { if (typeof unsub === "function") unsub(); } catch (_) { }
+        done(user);
+      }, () => {
+        try { if (typeof unsub === "function") unsub(); } catch (_) { }
+        done(null);
+      });
+    } catch (_) {
+      done(null);
+      return;
+    }
+    setTimeout(() => {
+      try { if (typeof unsub === "function") unsub(); } catch (_) { }
+      done(null);
+    }, Math.max(0, Number(maxMs) || 0));
+  });
 }
 
 function mergeRuntimeConfig(base = {}, incoming = {}) {
@@ -240,10 +361,218 @@ async function geminiGenerateViaApi(model, payload, signal = null) {
     }
   }
   const data = await response.json().catch(() => ({}));
+  if (response?.ok) {
+    clearGeminiBackendUnavailable();
+  }
   if (isGeminiBackendLocalTarget() && !response.ok && (response.status === 404 || response.status === 405 || response.status >= 500)) {
-    markGeminiBackendUnavailable(`api_http_${response.status}`);
+    clearGeminiBackendUnavailable();
   }
   return { response, data };
+}
+
+function buildGeminiImageGenerationConfig({
+  aspectRatio = "4:3",
+  imageSize = "512",
+  temperature = null
+} = {}) {
+  const config = {
+    responseModalities: ["TEXT", "IMAGE"],
+    imageConfig: {
+      aspectRatio: String(aspectRatio || "4:3").trim() || "4:3",
+      imageSize: String(imageSize || "512").trim() || "512"
+    }
+  };
+  const temp = Number(temperature);
+  if (Number.isFinite(temp)) config.temperature = temp;
+  return config;
+}
+
+function _unidadNormalizarAspectRatio(value = "") {
+  const raw = String(value || "").trim();
+  const allowed = new Set(["1:1", "4:3", "3:4", "16:9", "9:16", "21:9"]);
+  return allowed.has(raw) ? raw : "4:3";
+}
+
+function _unidadNormalizarImageSize(value = "") {
+  const raw = String(value || "").trim().toUpperCase();
+  const allowed = new Set(["512", "1K", "2K", "4K"]);
+  return allowed.has(raw) ? raw : "512";
+}
+
+function _unidadAspectRatioDescripcion(value = "") {
+  const ratio = _unidadNormalizarAspectRatio(value);
+  const map = {
+    "1:1": "cuadrado",
+    "4:3": "horizontal clásico",
+    "3:4": "vertical clásico",
+    "16:9": "horizontal panorámico",
+    "9:16": "vertical móvil",
+    "21:9": "panorámico ancho"
+  };
+  return map[ratio] || "personalizado";
+}
+
+function _unidadImageSizeDescripcion(value = "") {
+  const size = _unidadNormalizarImageSize(value);
+  const map = {
+    "512": "borrador o referencia rápida",
+    "1K": "estándar",
+    "2K": "alta calidad",
+    "4K": "máxima calidad"
+  };
+  return map[size] || "estándar";
+}
+
+function _unidadBuildImageSizeFallbackChain(requestedSize = "") {
+  const requested = _unidadNormalizarImageSize(requestedSize);
+  const orders = {
+    "512": ["512", "1K", "2K", "4K"],
+    "1K": ["1K", "2K", "4K", "512"],
+    "2K": ["2K", "4K", "1K", "512"],
+    "4K": ["4K", "2K", "1K", "512"]
+  };
+  return Array.from(new Set(orders[requested] || [requested, "1K", "2K"]));
+}
+
+function _unidadIsUnsupportedImageSizeError(status = 0, detail = "") {
+  const code = Number(status || 0);
+  const text = String(detail || "").toLowerCase();
+  if (code !== 400) return false;
+  return text.includes("image size") && text.includes("not supported");
+}
+
+function _unidadBuildLecturaAnalysisFallback({
+  contenidoLectura = "",
+  preguntasComprension = []
+} = {}) {
+  const plain = _unidadStripHtmlToPlain(contenidoLectura).slice(0, 700);
+  const questionHints = (Array.isArray(preguntasComprension) ? preguntasComprension : [])
+    .map((item) => typeof item === "string" ? item : String(item?.pregunta || item?.texto || "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  const centralIdea = plain
+    ? plain.split(/[.!?]\s+/).map((s) => s.trim()).filter(Boolean)[0] || plain.slice(0, 180)
+    : "";
+  return {
+    centralIdea,
+    keyConcepts: questionHints.slice(0, 3),
+    activityAnchors: questionHints.slice(0, 3),
+    visualCues: [],
+    didacticWarnings: []
+  };
+}
+
+async function _unidadAnalizarLecturaRelacionada({
+  categoria = "",
+  subtema = "",
+  nivel = "",
+  grado = "",
+  contenidoLectura = "",
+  preguntasComprension = [],
+  statusId = ""
+} = {}) {
+  const lecturaPlain = _unidadStripHtmlToPlain(contenidoLectura).slice(0, 2200);
+  if (!lecturaPlain) {
+    return _unidadBuildLecturaAnalysisFallback({ contenidoLectura, preguntasComprension });
+  }
+  const preguntasFmt = (Array.isArray(preguntasComprension) ? preguntasComprension : [])
+    .map((item) => {
+      const q = typeof item === "string" ? item : String(item?.pregunta || item?.texto || "").trim();
+      const a = typeof item === "object" ? String(item?.respuesta || "").trim() : "";
+      return q ? `- ${q}${a ? ` | respuesta esperada: ${a}` : ""}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 5)
+    .join("\n");
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  const prompt = [
+    "Eres diseñador instruccional para primaria.",
+    "Analiza una lectura relacionada antes de crear actividades e imagen de apoyo visual.",
+    `Contexto: ${String(categoria || "").trim()} · ${subtemaFmt} · ${String(nivel || "").trim()} ${String(grado || "").trim()}.`,
+    "",
+    "Devuelve SOLO JSON válido, sin markdown, con esta forma:",
+    '{"centralIdea":"...","keyConcepts":["..."],"activityAnchors":["..."],"visualCues":["..."],"didacticWarnings":["..."]}',
+    "",
+    "Reglas:",
+    "- centralIdea: una sola idea central muy concreta.",
+    "- keyConcepts: 3 a 5 conceptos clave de la lectura que sí deben aparecer en las actividades.",
+    "- activityAnchors: 3 a 5 formas concretas de obligar a usar la lectura para responder.",
+    "- visualCues: 3 a 5 elementos que servirían para un apoyo visual coherente con la lectura.",
+    "- didacticWarnings: errores a evitar para no desconectarse de la lectura.",
+    "- No inventes temas ajenos al texto.",
+    "",
+    "Lectura base:",
+    lecturaPlain,
+    preguntasFmt ? "\nPreguntas de comprensión existentes:\n" + preguntasFmt : ""
+  ].join("\n");
+  if (statusId) {
+    actualizarSpinnerProceso(statusId, `Analizando lectura relacionada para <strong>${_escapeHtmlUnidad(subtemaFmt)}</strong>...`);
+  }
+  try {
+    const raw = await enviarPrompt([{ role: "user", text: prompt }]);
+    const cleaned = String(raw || "").trim().replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      centralIdea: String(parsed?.centralIdea || "").trim(),
+      keyConcepts: Array.isArray(parsed?.keyConcepts) ? parsed.keyConcepts.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 5) : [],
+      activityAnchors: Array.isArray(parsed?.activityAnchors) ? parsed.activityAnchors.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 5) : [],
+      visualCues: Array.isArray(parsed?.visualCues) ? parsed.visualCues.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 5) : [],
+      didacticWarnings: Array.isArray(parsed?.didacticWarnings) ? parsed.didacticWarnings.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 4) : []
+    };
+  } catch (err) {
+    console.warn("Analisis de lectura invalido, usando fallback:", err);
+    return _unidadBuildLecturaAnalysisFallback({ contenidoLectura, preguntasComprension });
+  }
+}
+
+function _unidadInferGraphicCategoryFromCacheKey(key = "") {
+  const raw = String(key || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("__LECTURA__:")) {
+    return raw.slice("__LECTURA__:".length).trim();
+  }
+  if (raw.startsWith("__PROY_PHASE__:")) {
+    const parts = raw.split(":");
+    return String(parts[1] || "").trim();
+  }
+  return "";
+}
+
+function _unidadEnsureUppercaseTextInstruction(prompt = "") {
+  const raw = String(prompt || "").trim();
+  const instruction = "IMPORTANTE: ANALIZAR EL TEXTO SIEMPRE ANTES DE IMPRIMIRLO, IMPRIMIRLO CON CALMA Y BIEN HECHO, TEXTO SIEMPRE EN MAYÚSCULAS SEGÚN EL IDIOMA DEL PROMPT.";
+  if (!raw) return instruction;
+  const normalized = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const alreadyIncluded =
+    normalized.includes("analizar el texto siempre antes de imprimirlo") &&
+    normalized.includes("texto siempre en mayusculas segun el idioma del prompt");
+  if (alreadyIncluded) return raw;
+  return `${raw}\n\n${instruction}`;
+}
+
+function _unidadGetGraphicRenderSettingsForCategory(categoria = "") {
+  const categoriaFmt = String(categoria || "").trim();
+  window.__unidadGraficoRenderSettingsPorCategoria = window.__unidadGraficoRenderSettingsPorCategoria || {};
+  const saved = categoriaFmt ? window.__unidadGraficoRenderSettingsPorCategoria[categoriaFmt] : null;
+  return {
+    aspectRatio: _unidadNormalizarAspectRatio(saved?.aspectRatio || "4:3"),
+    imageSize: _unidadNormalizarImageSize(saved?.imageSize || "512")
+  };
+}
+
+function _unidadSetGraphicRenderSettingsForCategory(categoria = "", settings = {}) {
+  const categoriaFmt = String(categoria || "").trim();
+  if (!categoriaFmt) return _unidadGetGraphicRenderSettingsForCategory(categoriaFmt);
+  window.__unidadGraficoRenderSettingsPorCategoria = window.__unidadGraficoRenderSettingsPorCategoria || {};
+  const next = {
+    aspectRatio: _unidadNormalizarAspectRatio(settings?.aspectRatio || "4:3"),
+    imageSize: _unidadNormalizarImageSize(settings?.imageSize || "512")
+  };
+  window.__unidadGraficoRenderSettingsPorCategoria[categoriaFmt] = next;
+  return next;
 }
 
 async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = "") {
@@ -290,6 +619,7 @@ async function requestGeminiLiveTokenViaApi(modelLive = "", systemInstruction = 
     }
     throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
   }
+  clearGeminiBackendUnavailable();
   return data;
 }
 
@@ -305,11 +635,54 @@ function logVisual(msg) {
   }
 }
 
+function contieneSintaxisStemRenderizableUnidad(texto = "") {
+  const value = String(texto || "");
+  if (!value) return false;
+  return /(\${1,2}[\s\S]+?\${1,2}|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\\ce\{[\s\S]+?\}|\\pu\{[\s\S]+?\}|\\frac\{[\s\S]+?\}\{[\s\S]+?\}|\\[a-zA-Z]+(?:\{|\s))/m.test(value);
+}
+
+function renderizarStemEnElementoUnidad(root) {
+  if (!root || typeof window === "undefined") return;
+  if (!contieneSintaxisStemRenderizableUnidad(root.textContent || root.innerHTML || "")) return;
+  const renderMath = window.renderMathInElement;
+  if (typeof renderMath !== "function") return;
+  try {
+    renderMath(root, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\(", right: "\\)", display: false }
+      ],
+      throwOnError: false,
+      strict: "ignore",
+      trust: true,
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"]
+    });
+  } catch (_) {
+    // noop
+  }
+}
+
+function renderizarStemPendienteUnidad(root) {
+  if (!root) return;
+  const attempt = () => renderizarStemEnElementoUnidad(root);
+  if (typeof window !== "undefined" && typeof window.renderMathInElement === "function") {
+    attempt();
+    return;
+  }
+  setTimeout(attempt, 120);
+  setTimeout(attempt, 450);
+  setTimeout(attempt, 900);
+}
+
 const UNIDAD_SELECTS_STORAGE_KEY = "cb_unidad_selects_v2";
 const UNIDAD_SELECTS_STORAGE_LEGACY_KEY = "unidadDidactica_selects_v1";
 const UNIDAD_META_STORAGE_KEY = "cb_unidad_meta_selects_v1";
 const LECTURA_CACHE_STORAGE_KEY = "cb_lectura_cache_v1";
 const LECTURAS_CACHE_LIST_STORAGE_KEY = "cb_lecturas_cache_list_v1";
+const LECTURAS_CATALOG_CACHE_STORAGE_KEY = "cb_lecturas_catalog_cache_v1";
+const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
 const UNIDAD_RESULTADO_STORAGE_KEY = "cb_unidad_resultado_html_v1";
 const UNIDAD_CREATIVE_SEED_STORAGE_KEY = "cb_unidad_creative_seed_v1";
 const UNIDAD_META_SELECT_IDS = [
@@ -563,7 +936,7 @@ function aplicarValorSelect(id, valorGuardado) {
   }
 
   // Para lecturas, crear opción temporal si aún no se cargó el catálogo remoto
-  if (id === "unidadTema" || id === "unidadTemaASC") {
+  if (id === "unidadTema" || id === "unidadTemaASC" || id === "unidadTemaTexto") {
     const opt = document.createElement("option");
     opt.value = v;
     opt.textContent = text || "Selección restaurada";
@@ -600,6 +973,100 @@ function adaptarTablasResultadoResponsive() {
     wrap.className = "unidad-table-scroll";
     table.parentNode.insertBefore(wrap, table);
     wrap.appendChild(table);
+  });
+  _unidadInjectPodcasterButtons(cont);
+}
+
+function _unidadEsTablaGuionVideo(table) {
+  if (!table) return false;
+  const activity = table.closest(".activity");
+  const strongText = String(activity?.querySelector("strong")?.textContent || "").trim();
+  const activityText = String(activity?.textContent || "").trim();
+  return /guion de video/i.test(strongText) || /guion de video/i.test(activityText);
+}
+
+function _unidadSerializeVideoScriptActivity(table) {
+  if (!table) return "";
+  const activity = table.closest(".activity");
+  if (!activity) return "";
+  const title = String(activity.querySelector("strong")?.textContent || "Guion de video").trim();
+  const rows = Array.from(table.querySelectorAll("tr")).map((tr) =>
+    Array.from(tr.querySelectorAll("th, td"))
+      .map((cell) => String(cell.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" | ")
+  ).filter(Boolean);
+  const extraText = Array.from(activity.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+  return [
+    title,
+    extraText,
+    rows.length ? "\nTabla del guion:\n" + rows.join("\n") : ""
+  ].filter(Boolean).join("\n\n").trim();
+}
+
+function _unidadOpenVideoScriptInPodcaster(table) {
+  const prompt = _unidadSerializeVideoScriptActivity(table);
+  if (!prompt) {
+    alert("⚠️ No se pudo leer el contenido del guion de video.");
+    return;
+  }
+  const payload = {
+    prompt,
+    mode: "video",
+    source: "generarUnidad",
+    savedAt: Date.now(),
+    nonce: `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  };
+  try {
+    localStorage.removeItem(PODCASTER_VIDEO_IMPORT_STORAGE_KEY);
+    localStorage.setItem(PODCASTER_VIDEO_IMPORT_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_) {
+    alert("❌ No se pudo preparar el contenido para Podcaster.");
+    return;
+  }
+  const targetUrl = new URL("podcaster.html", window.location.href).toString();
+  const win = window.open(targetUrl, "_blank", "noopener");
+  if (!win) {
+    alert("⚠️ El navegador bloqueó la nueva pestaña de Podcaster.");
+    return;
+  }
+  try {
+    win.focus();
+  } catch (_) {
+    // noop
+  }
+}
+
+function _unidadInjectPodcasterButtons(root = null) {
+  const scope = root && typeof root.querySelectorAll === "function"
+    ? root
+    : document.getElementById("resultadoUnidadGenerada");
+  if (!scope) return;
+  const wraps = scope.querySelectorAll(".unidad-table-scroll");
+  wraps.forEach((wrap) => {
+    const table = wrap.querySelector("table");
+    if (!table || !_unidadEsTablaGuionVideo(table)) return;
+    let actionWrap = wrap.nextElementSibling;
+    if (!actionWrap || !actionWrap.classList.contains("unidad-video-podcaster-actions")) {
+      actionWrap = document.createElement("div");
+      actionWrap.className = "unidad-video-podcaster-actions";
+      wrap.insertAdjacentElement("afterend", actionWrap);
+    }
+    if (!actionWrap.querySelector("[data-action='send-video-script-podcaster']")) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "unidad-btn unidad-btn-secondary unidad-video-podcaster-btn";
+      btn.dataset.action = "send-video-script-podcaster";
+      btn.innerHTML = `<i class="fa-solid fa-clapperboard" aria-hidden="true"></i><span>Enviar a Podcaster</span>`;
+      btn.addEventListener("click", () => {
+        _unidadOpenVideoScriptInPodcaster(table);
+      });
+      actionWrap.appendChild(btn);
+    }
   });
 }
 
@@ -778,6 +1245,43 @@ function actualizarSpinnerProceso(statusId, texto) {
   const el = document.getElementById(statusId);
   if (!el) return;
   el.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${texto}`;
+}
+
+function _unidadEnsureSpinnerElement(container, statusId, initialHtml = "") {
+  if (!container || !statusId) return null;
+  let el = document.getElementById(statusId);
+  if (el) {
+    if (initialHtml) el.innerHTML = initialHtml;
+    return el;
+  }
+  el = document.createElement("p");
+  el.id = statusId;
+  if (initialHtml) el.innerHTML = initialHtml;
+  container.appendChild(el);
+  return el;
+}
+
+function _unidadGetPromptLocks() {
+  if (!window.__unidadPromptLocks || typeof window.__unidadPromptLocks !== "object") {
+    window.__unidadPromptLocks = {};
+  }
+  return window.__unidadPromptLocks;
+}
+
+function _unidadTryAcquirePromptLock(key = "") {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) return true;
+  const locks = _unidadGetPromptLocks();
+  if (locks[safeKey]) return false;
+  locks[safeKey] = true;
+  return true;
+}
+
+function _unidadReleasePromptLock(key = "") {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) return;
+  const locks = _unidadGetPromptLocks();
+  delete locks[safeKey];
 }
 
 function finalizarSpinnerProceso(statusId, ok = true, textoFinal = "") {
@@ -1088,11 +1592,103 @@ function _guardarLecturaEnListaCache(lecturaCache = {}) {
   }
 }
 
+function _serializarLecturaCatalogoCache(lectura = {}) {
+  return {
+    id: String(lectura?.id || "").trim(),
+    titulo: String(lectura?.titulo || lectura?.tema || "").trim(),
+    tema: String(lectura?.tema || lectura?.titulo || "").trim(),
+    nivel: String(lectura?.nivel || "").trim(),
+    grado: String(lectura?.grado || "").trim(),
+    trimestre: String(lectura?.trimestre || "").trim(),
+    unidad: String(lectura?.unidad || "").trim(),
+    tipo: String(lectura?.tipo || "").trim() || "principal",
+    sourceCollection: String(
+      lectura?.sourceCollection
+      || lectura?.coleccion
+      || (String(lectura?.tipo || "").toLowerCase() === "asc" ? "lecturasASC" : "lecturasNuevas")
+    ).trim(),
+    coleccion: String(
+      lectura?.coleccion
+      || lectura?.sourceCollection
+      || (String(lectura?.tipo || "").toLowerCase() === "asc" ? "lecturasASC" : "lecturasNuevas")
+    ).trim()
+  };
+}
+
+function _guardarCatalogoLecturasCache(items = []) {
+  try {
+    const payload = Array.isArray(items)
+      ? items
+          .map(_serializarLecturaCatalogoCache)
+          .filter((it) => it && it.id)
+          .slice(0, 2500)
+      : [];
+    localStorage.setItem(LECTURAS_CATALOG_CACHE_STORAGE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      items: payload
+    }));
+  } catch (_) {
+    // noop
+  }
+}
+
+function _leerCatalogoLecturasCache() {
+  try {
+    const raw = localStorage.getItem(LECTURAS_CATALOG_CACHE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.items)) return [];
+    return parsed.items
+      .filter((it) => it && typeof it === "object" && it.id)
+      .slice(0, 2500);
+  } catch (_) {
+    return [];
+  }
+}
+
+function _hidratarLecturasUnidadDesdeCacheLocal() {
+  const cacheCatalogo = _leerCatalogoLecturasCache();
+  const cacheRecientes = _leerLecturasCacheLista().map((it) => ({
+    id: String(it?.id || "").trim(),
+    titulo: String(it?.titulo || "").trim(),
+    tema: String(it?.tema || it?.titulo || "").trim(),
+    nivel: String(it?.nivel || "").trim(),
+    grado: String(it?.grado || "").trim(),
+    trimestre: String(it?.trimestre || "").trim(),
+    unidad: String(it?.unidad || "").trim(),
+    tipo: String(it?.tipo || "").trim() || "principal",
+    sourceCollection: String(
+      it?.coleccion
+      || (it?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas")
+    ).trim(),
+    coleccion: String(
+      it?.coleccion
+      || (it?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas")
+    ).trim()
+  }));
+  const merged = _mezclarLecturasPorKey(cacheRecientes, cacheCatalogo);
+  if (!merged.length) return false;
+  const principales = merged.filter((it) => String(it?.sourceCollection || it?.coleccion || "").trim() !== "lecturasASC");
+  const asc = merged.filter((it) => String(it?.sourceCollection || it?.coleccion || "").trim() === "lecturasASC");
+  if (!Array.isArray(window.lecturasNuevas) || !window.lecturasNuevas.length) {
+    window.lecturasNuevas = principales.map((it) => ({ ...it, tipo: "principal" }));
+  }
+  if (!Array.isArray(window.lecturasASC) || !window.lecturasASC.length) {
+    window.lecturasASC = asc.map((it) => ({ ...it, tipo: "asc" }));
+    lecturasASC = Array.isArray(window.lecturasASC) ? [...window.lecturasASC] : [];
+  }
+  if (!Array.isArray(todasLasLecturas) || !todasLasLecturas.length) {
+    todasLasLecturas = _mezclarLecturasPorKey(window.lecturasNuevas || [], window.lecturasASC || []);
+  }
+  return true;
+}
+
 async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop = null) {
   if (!targetEl) return;
   const texto = _htmlAPlainText(htmlFinal);
   if (!texto) {
     targetEl.innerHTML = htmlFinal || "";
+    renderizarStemPendienteUnidad(targetEl);
     return;
   }
 
@@ -1120,6 +1716,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   targetEl.style.whiteSpace = "";
   targetEl.style.wordBreak = "";
   targetEl.innerHTML = htmlFinal || "";
+  renderizarStemPendienteUnidad(targetEl);
 }
 
 function getSelectedModel() {
@@ -1510,11 +2107,22 @@ function _normalizarContenidoLecturaHTMLUnidad(contenido = "") {
   const raw = String(contenido || "").trim();
   if (!raw) return "";
   if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
+  const applyInlineMarkdown = (text = "") => {
+    // Input ya viene escapado => seguro convertir *marcas* a tags HTML.
+    // Bold: **texto** o __texto__
+    let out = String(text || "");
+    out = out.replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/__([^_]+?)__/g, "<strong>$1</strong>");
+    return out;
+  };
   return raw
     .split(/\n{2,}/)
     .map((parrafo) => parrafo.trim())
     .filter(Boolean)
-    .map((parrafo) => `<p>${_escapeHtmlUnidad(parrafo).replace(/\n+/g, "<br>")}</p>`)
+    .map((parrafo) => {
+      const escaped = _escapeHtmlUnidad(parrafo).replace(/\n+/g, "<br>");
+      return `<p>${applyInlineMarkdown(escaped)}</p>`;
+    })
     .join("\n");
 }
 
@@ -1722,37 +2330,28 @@ async function _generarLecturaUnificadaConGemini(lecturas = [], ctx = {}) {
   const seleccionadas = Array.isArray(lecturas) ? lecturas.filter(Boolean) : [];
   if (seleccionadas.length < 2) return null;
 
-  window.__lecturaUnidadFusionCache = window.__lecturaUnidadFusionCache || new Map();
-  const cacheKey = JSON.stringify({
-    ids: seleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean).sort(),
+  ensureFusionCacheGlobals();
+  const principalId = String(selectTema?.value || ctx?.principalId || "").trim();
+  const ascId = String(selectTemaASC?.value || ctx?.ascId || "").trim();
+  const cacheKey = buildFusionCacheKey({
+    principalId,
+    ascId,
     nivel: String(ctx?.nivel || "").trim(),
     grado: String(ctx?.grado || "").trim(),
     trimestre: String(ctx?.trimestre || "").trim(),
-    unidad: String(ctx?.unidad || "").trim()
+    unidad: String(ctx?.unidad || "").trim(),
+    mode: "unify"
   });
-  if (window.__lecturaUnidadFusionCache.has(cacheKey)) {
-    const cached = window.__lecturaUnidadFusionCache.get(cacheKey);
-    if (_extraerSinonimosLecturaUnidad(cached).length || _extraerBibliografiaLecturaUnidad(cached)) {
-      return cached;
-    }
-    window.__lecturaUnidadFusionCache.delete(cacheKey);
+  const force = ctx?.forceRegenerateFusion === true;
+  if (!force && window.__unidadLecturaFusionCache.has(cacheKey)) {
+    return window.__unidadLecturaFusionCache.get(cacheKey);
   }
 
   const lecturasFuente = seleccionadas.map((lectura, index) => {
-    const preguntas = _preguntasLecturaUnidad(lectura)
-      .map((pregunta) => {
-        const texto = typeof pregunta === "string"
-          ? pregunta
-          : String(pregunta?.pregunta || pregunta?.texto || "").trim();
-        return texto ? `- ${texto}` : "";
-      })
-      .filter(Boolean)
-      .join("\n");
-
+    const plain = _unidadStripHtmlToPlain(_contenidoLecturaUnidad(lectura)).slice(0, 1200);
     return [
       `LECTURA ${index + 1}: ${_tituloLecturaUnidad(lectura)}`,
-      _contenidoLecturaUnidad(lectura),
-      preguntas ? `Preguntas base:\n${preguntas}` : ""
+      plain
     ].filter(Boolean).join("\n\n");
   }).join("\n\n---\n\n");
 
@@ -1770,21 +2369,8 @@ REGLAS OBLIGATORIAS:
 - Devuelve SOLO JSON válido con esta forma:
 {
   "titulo": "string",
-  "lecturaHtml": "<p>...</p><p>...</p>",
-  "sinonimos": [
-    { "palabra": "string", "sinonimos": "string" }
-  ],
-  "bibliografia": [
-    "string"
-  ],
-  "preguntas": [
-    { "pregunta": "string", "respuesta": "string" }
-  ]
+  "lecturaHtml": "<p>...</p><p>...</p>"
 }
-- Genera 4 preguntas de comprensión coherentes con la nueva lectura.
-- Genera 6 a 10 palabras difíciles de la nueva lectura para la tabla de sinónimos.
-- Genera 2 referencias bibliográficas o fuentes sugeridas apropiadas para el docente.
-- La lectura debe ser nueva también para proyectos: debe poder reutilizarse como lectura detonante o lectura generadora sin inventar otra adicional.
 
 CONTEXTO:
 Nivel: ${String(ctx?.nivel || "").trim() || "Primaria"}
@@ -1801,13 +2387,45 @@ ${lecturasFuente}
     const parsed = _parseJsonObjectFromTextUnidad(raw);
     const titulo = String(parsed?.titulo || "").trim() || `Lectura unificada: ${seleccionadas.map(_tituloLecturaUnidad).join(" + ")}`;
     const lecturaHtml = String(parsed?.lecturaHtml || "").trim();
-    const preguntas = Array.isArray(parsed?.preguntas)
-      ? parsed.preguntas
-        .map(_normalizarPreguntaLecturaUnidad)
-        .filter((pregunta) => pregunta?.pregunta)
-      : [];
-    const sinonimos = _extraerSinonimosLecturaUnidad(parsed);
-    const bibliografia = parsed?.bibliografia || parsed?.bibliografía || parsed?.fuentes || [];
+    // Metadatos sin Gemini: reusar/combinar desde lecturas fuente para ahorrar tokens.
+    const preguntas = _fusionarPreguntasLecturaUnidad(seleccionadas).slice(0, 6);
+    const sinonimos = (() => {
+      const all = seleccionadas.flatMap((l) => _extraerSinonimosLecturaUnidad(l));
+      const seen = new Set();
+      const out = [];
+      for (const item of all) {
+        const palabra = String(item?.palabra || "").trim();
+        if (!palabra) continue;
+        const key = palabra.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ palabra, sinonimos: String(item?.sinonimos || "").trim() });
+        if (out.length >= 10) break;
+      }
+      return out;
+    })();
+    const bibliografia = (() => {
+      const htmlA = _extraerBibliografiaLecturaUnidad(seleccionadas[0] || null);
+      const htmlB = _extraerBibliografiaLecturaUnidad(seleccionadas[1] || null);
+      const raw = `${htmlA || ""}\n${htmlB || ""}`.trim();
+      if (!raw) return [];
+      if (typeof document === "undefined") {
+        return raw
+          .replace(/<[^>]+>/g, "\n")
+          .split(/\n|;/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .slice(0, 4);
+      }
+      const tmp = document.createElement("div");
+      tmp.innerHTML = raw;
+      const items = Array.from(tmp.querySelectorAll("li"))
+        .map((li) => String(li.textContent || "").trim())
+        .filter(Boolean);
+      const unique = Array.from(new Set(items));
+      return unique.slice(0, 4);
+    })();
 
     if (!lecturaHtml) {
       throw new Error("LECTURA_FUSION_VACIA");
@@ -1830,7 +2448,8 @@ ${lecturasFuente}
         origen: _origenLecturaUnidad(lectura)
       }))
     };
-    window.__lecturaUnidadFusionCache.set(cacheKey, fusion);
+    window.__unidadLecturaFusionCache.set(cacheKey, fusion);
+    window.__lecturaUnidadFusionCache = window.__unidadLecturaFusionCache;
     return fusion;
   } catch (error) {
     const motivo = String(error?.message || error || "").trim();
@@ -1866,6 +2485,391 @@ function _contenidoLecturaUnificadaUnidad(lecturas = []) {
 
 function _limpiarDecisionLecturaUnidad() {
   window.__unidadLecturaDecision = null;
+  try {
+    invalidateFusionCacheAndToggle();
+  } catch (_) { }
+}
+
+function ensureFusionCacheGlobals() {
+  if (typeof window === "undefined") return;
+  if (typeof window.__cbNextGenForceFusionRegenerate !== "boolean") {
+    window.__cbNextGenForceFusionRegenerate = false;
+  }
+  const legacy = window.__lecturaUnidadFusionCache instanceof Map ? window.__lecturaUnidadFusionCache : null;
+  if (!(window.__unidadLecturaFusionCache instanceof Map)) {
+    window.__unidadLecturaFusionCache = legacy || new Map();
+  }
+  if (!(window.__lecturaUnidadFusionCache instanceof Map)) {
+    window.__lecturaUnidadFusionCache = window.__unidadLecturaFusionCache;
+  }
+}
+
+function _unidadInferImageExtensionFromMime(mime = "") {
+  const m = String(mime || "").toLowerCase();
+  if (m.includes("png")) return "png";
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("gif")) return "gif";
+  return "png";
+}
+
+async function _unidadSha256Hex(text = "") {
+  const input = String(text || "");
+  try {
+    if (typeof crypto === "undefined" || !crypto.subtle) return "";
+    const enc = new TextEncoder();
+    const hash = await crypto.subtle.digest("SHA-256", enc.encode(input));
+    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) {
+    return "";
+  }
+}
+
+function _unidadDataUrlToBlob(dataUrl = "") {
+  const info = _lecturasAgentExtractDataUrlInfo(dataUrl);
+  if (!info?.base64) throw new Error("invalid_data_url");
+  const binary = atob(info.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: info.mimeType || "image/png" });
+}
+
+function _unidadBlobToObjectUrl(blob = null) {
+  if (!(blob instanceof Blob)) return "";
+  try {
+    return URL.createObjectURL(blob);
+  } catch (_) {
+    return "";
+  }
+}
+
+async function _unidadBlobToBase64(blob = null) {
+  if (!(blob instanceof Blob)) throw new Error("invalid_blob");
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const info = _lecturasAgentExtractDataUrlInfo(String(reader.result || ""));
+      if (info?.base64) resolve(info.base64);
+      else reject(new Error("blob_base64_failed"));
+    };
+    reader.onerror = () => reject(new Error("blob_base64_failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function _unidadRevokeObjectUrl(url = "") {
+  const raw = String(url || "").trim();
+  if (!raw || !/^blob:/i.test(raw)) return;
+  try {
+    URL.revokeObjectURL(raw);
+  } catch (_) {}
+}
+
+function _unidadGetCurrentSupportGraphicContext() {
+  const pick = (selector) => {
+    try {
+      return String(document.querySelector(selector)?.value || "").trim();
+    } catch (_) {
+      return "";
+    }
+  };
+  return {
+    nivel: pick("#nivelSelect"),
+    grado: pick("#gradoSelect"),
+    trimestre: pick("#trimestreSelect"),
+    unidad: pick("#unidadSelect")
+  };
+}
+
+function _unidadBuildSupportGraphicFolder({ nivel = "", grado = "", trimestre = "", unidad = "" } = {}) {
+  return `unidadesGeneradasAssets/${_unidadSafePathSegment(nivel, "nivel")}/${_unidadSafePathSegment(grado, "grado")}/${_unidadSafePathSegment(trimestre, "tri")}/${_unidadSafePathSegment(unidad, "unidad")}`;
+}
+
+function _unidadSupportGraphicSrc(entry = null) {
+  if (!entry || typeof entry !== "object") return "";
+  return String(entry.imageUrl || entry.objectUrl || entry.imageDataUrl || "").trim();
+}
+
+async function _unidadUploadSupportGraphicViaBackend({
+  blob = null,
+  path = "",
+  mimeType = "image/png",
+  metadata = {}
+} = {}) {
+  if (!(blob instanceof Blob)) throw new Error("support_graphic_invalid_blob");
+  const user = await _unidadGetAuthUser();
+  if (!user?.uid) throw new Error("support_graphic_requires_auth");
+  const token = await user.getIdToken();
+  if (!token) throw new Error("support_graphic_requires_auth");
+  const base64 = await _unidadBlobToBase64(blob);
+  const response = await fetch(buildApiUrl("/api/unidades/support-graphics/upload"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      path: String(path || "").trim(),
+      mimeType: String(mimeType || "image/png").trim() || "image/png",
+      dataBase64: base64,
+      metadata: metadata && typeof metadata === "object" ? metadata : {}
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
+  }
+  return {
+    imageUrl: String(data?.downloadUrl || "").trim(),
+    storagePath: String(data?.storagePath || data?.path || "").trim(),
+    mimeType: String(data?.mimeType || mimeType || "image/png").trim() || "image/png"
+  };
+}
+
+async function _unidadPersistSupportGraphicAsset({
+  blob = null,
+  subtema = "",
+  prompt = "",
+  simplePreview = null,
+  context = {}
+} = {}) {
+  if (!(blob instanceof Blob) || !String(blob.type || "").startsWith("image/")) {
+    throw new Error("support_graphic_invalid_blob");
+  }
+  const user = await _unidadGetAuthUser();
+  if (!user?.uid) throw new Error("support_graphic_requires_auth");
+
+  const folder = _unidadBuildSupportGraphicFolder(context);
+  const safeBase = String(subtema || "apoyo-visual")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42) || "apoyo-visual";
+  const ext = _unidadInferImageExtensionFromMime(String(blob.type || "image/png"));
+  const fingerprint = `${safeBase}:${blob.size}:${blob.type}:${Date.now()}`;
+  const hash = (await _unidadSha256Hex(fingerprint)) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const path = `${folder}/${user.uid}/${safeBase}-${hash.slice(0, 16)}.${ext}`;
+  const backendAsset = await _unidadUploadSupportGraphicViaBackend({
+    blob,
+    path,
+    mimeType: String(blob.type || "image/png"),
+    metadata: {
+      uid: user.uid,
+      subtema: String(subtema || "").trim().slice(0, 180)
+    }
+  });
+  return {
+    imageUrl: backendAsset.imageUrl,
+    storagePath: backendAsset.storagePath || path,
+    mimeType: backendAsset.mimeType || String(blob.type || "image/png"),
+    prompt: String(prompt || "").trim(),
+    simplePreview: simplePreview && typeof simplePreview === "object" ? simplePreview : undefined
+  };
+}
+
+async function _unidadPersistGeneratedSupportGraphic({
+  dataUrl = "",
+  subtema = "",
+  prompt = "",
+  simplePreview = null,
+  context = null
+} = {}) {
+  const blob = _unidadDataUrlToBlob(dataUrl);
+  return await _unidadPersistSupportGraphicAsset({
+    blob,
+    subtema,
+    prompt,
+    simplePreview,
+    context: context || _unidadGetCurrentSupportGraphicContext()
+  });
+}
+
+async function _unidadUploadImageDataUrlToStorage({
+  dataUrl = "",
+  uid = "",
+  folder = "unidadesGeneradas",
+  filenameBase = "apoyo-visual"
+} = {}) {
+  const src = String(dataUrl || "").trim();
+  if (!src.startsWith("data:image/")) {
+    throw new Error("not_data_image");
+  }
+  if (!uid) throw new Error("missing_uid");
+
+  const mime = (src.match(/^data:([^;]+);base64,/i)?.[1] || "image/png").trim();
+  const ext = _unidadInferImageExtensionFromMime(mime);
+  const hash = (await _unidadSha256Hex(src.slice(0, 2048))) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const safeBase = String(filenameBase || "imagen").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 42) || "imagen";
+  const path = `${folder}/${uid}/${safeBase}-${hash.slice(0, 16)}.${ext}`;
+  const refObj = storageRef(storage, path);
+  const blob = _unidadDataUrlToBlob(src);
+  await uploadBytes(refObj, blob, {
+    contentType: mime,
+    cacheControl: "public,max-age=31536000,immutable"
+  });
+  const url = await getDownloadURL(refObj);
+  return { path, url };
+}
+
+function _unidadSafePathSegment(value = "", fallback = "x") {
+  const raw = String(value ?? "").trim();
+  const safe = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return (safe || fallback).slice(0, 42);
+}
+
+async function _unidadMaterializeHtmlImagesToStorage({
+  html = "",
+  uid = "",
+  nivel = "",
+  grado = "",
+  trimestre = "",
+  unidad = ""
+} = {}) {
+  const input = String(html || "").trim();
+  if (!input) return { html: "", uploads: [] };
+  if (typeof document === "undefined") return { html: input, uploads: [] };
+
+  const tmp = document.createElement("div");
+  tmp.innerHTML = input;
+  const imgs = Array.from(tmp.querySelectorAll("img"));
+  const targets = imgs
+    .map((img) => ({ img, src: String(img.getAttribute("src") || "").trim() }))
+    .filter((it) => it.src.startsWith("data:image/"));
+  if (!targets.length) return { html: input, uploads: [] };
+
+  const uploadCache = new Map(); // dataUrl -> Promise<{path,url}>
+  const uploads = [];
+  const folder = `unidadesGeneradasAssets/${_unidadSafePathSegment(nivel, "nivel")}/${_unidadSafePathSegment(grado, "grado")}/${_unidadSafePathSegment(trimestre, "tri")}/${_unidadSafePathSegment(unidad, "unidad")}`;
+
+  for (let i = 0; i < targets.length; i += 1) {
+    const { img, src } = targets[i];
+    if (!uploadCache.has(src)) {
+      uploadCache.set(src, _unidadUploadImageDataUrlToStorage({
+        dataUrl: src,
+        uid,
+        folder,
+        filenameBase: `unidad-img-${i + 1}`
+      }));
+    }
+    const out = await uploadCache.get(src);
+    if (out?.url) {
+      img.setAttribute("src", out.url);
+      img.setAttribute("data-cb-storage-path", out.path);
+      uploads.push(out);
+    }
+  }
+
+  return { html: tmp.innerHTML, uploads };
+}
+
+function _unidadSetSupportGraphicCache(key = "", next = null) {
+  const cacheKey = String(key || "").trim();
+  if (!cacheKey) return null;
+  window.__unidadApoyoVisualPorSubtema = window.__unidadApoyoVisualPorSubtema || {};
+  const prev = window.__unidadApoyoVisualPorSubtema[cacheKey] || null;
+  const incoming = next && typeof next === "object" ? { ...next } : {};
+  const objectUrl = String(incoming.objectUrl || "").trim();
+  if (prev?.objectUrl && prev.objectUrl !== objectUrl) {
+    _unidadRevokeObjectUrl(prev.objectUrl);
+  }
+  const merged = {
+    ...(prev || {}),
+    ...incoming
+  };
+  if (!merged.imageUrl && merged.objectUrl) merged.imageUrl = merged.objectUrl;
+  window.__unidadApoyoVisualPorSubtema[cacheKey] = merged;
+  return merged;
+}
+
+function buildFusionCacheKey({
+  principalId = "",
+  ascId = "",
+  nivel = "",
+  grado = "",
+  trimestre = "",
+  unidad = "",
+  mode = "unify"
+} = {}) {
+  const ids = [String(principalId || "").trim(), String(ascId || "").trim()].filter(Boolean).sort();
+  return JSON.stringify({
+    mode: String(mode || "unify").trim(),
+    ids,
+    nivel: String(nivel || "").trim(),
+    grado: String(grado || "").trim(),
+    trimestre: String(trimestre || "").trim(),
+    unidad: String(unidad || "").trim()
+  });
+}
+
+function invalidateFusionCacheAndToggle() {
+  ensureFusionCacheGlobals();
+  try { window.__unidadLecturaFusionCache?.clear?.(); } catch (_) { }
+  try { window.__lecturaUnidadFusionCache?.clear?.(); } catch (_) { }
+  window.__cbNextGenForceFusionRegenerate = false;
+  renderFusionToggleUI();
+}
+
+function shouldShowFusionToggle() {
+  const principalId = String(selectTema?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  if (!principalId || !ascId) return false;
+  const mode = String(window.__unidadLecturaDecision?.mode || "").trim();
+  return mode === "unify";
+}
+
+function renderFusionToggleUI() {
+  ensureFusionCacheGlobals();
+  const host = document.getElementById("cbLecturaFusionToggleHost");
+  if (!host) return;
+  if (!shouldShowFusionToggle()) {
+    host.style.display = "none";
+    host.innerHTML = "";
+    delete host.dataset.boundFusionToggle;
+    return;
+  }
+  host.style.display = "block";
+  if (host.dataset.boundFusionToggle === "1") {
+    const btn = host.querySelector("#cbFusionToggleBtn");
+    const hint = host.querySelector("#cbFusionToggleHint");
+    const on = window.__cbNextGenForceFusionRegenerate === true;
+    if (btn) {
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.textContent = on ? "Regenerar en próxima generación" : "Mantener lectura fusionada";
+    }
+    if (hint) {
+      hint.textContent = on ? "Se aplicará en la próxima generación." : "Ahorra tokens reutilizando la lectura fusionada.";
+    }
+    return;
+  }
+
+  host.dataset.boundFusionToggle = "1";
+  host.innerHTML = `
+    <div class="cb-fusion-toggle" role="group" aria-label="Lectura fusionada">
+      <div class="cb-fusion-toggle__meta">
+        <div class="cb-fusion-toggle__title">Lectura fusionada</div>
+        <div class="cb-fusion-toggle__hint" id="cbFusionToggleHint">Ahorra tokens reutilizando la lectura fusionada.</div>
+      </div>
+      <button type="button" class="unidad-btn unidad-btn-secondary cb-fusion-toggle__btn" id="cbFusionToggleBtn" aria-pressed="false">
+        Mantener lectura fusionada
+      </button>
+    </div>
+  `;
+  const btn = host.querySelector("#cbFusionToggleBtn");
+  if (btn) {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      window.__cbNextGenForceFusionRegenerate = !(window.__cbNextGenForceFusionRegenerate === true);
+      renderFusionToggleUI();
+    });
+  }
+  renderFusionToggleUI();
 }
 
 function _activarRelacionLecturaProyectosUnidad() {
@@ -2000,6 +3004,7 @@ async function _resolverModoLecturasUnidad(ctx = {}) {
   if (mode === "unify" || mode === "split" || mode === "split-reverse") {
     _activarRelacionLecturaProyectosUnidad();
   }
+  renderFusionToggleUI();
   return mode;
 }
 
@@ -2154,7 +3159,16 @@ async function _resolverLecturaUnidadActual(ctx = {}) {
           : (proyectosUsaASC ? "solo_principal" : "solo_asc");
         return _normalizarLecturaResueltaUnidad(lecturaParaCategoria ? [lecturaParaCategoria] : [], modoSeleccion);
       }
-      const lecturaFusionada = await _generarLecturaUnificadaConGemini(lecturasSeleccionadas, ctx);
+      ensureFusionCacheGlobals();
+      const force = ctx?.forceRegenerateFusion === true && (strategy === "unify" || !strategy);
+      if (force && ctx?.statusId) {
+        actualizarSpinnerProceso(String(ctx.statusId), "Regenerando lectura fusionada...");
+      }
+      const lecturaFusionada = await _generarLecturaUnificadaConGemini(lecturasSeleccionadas, { ...ctx, forceRegenerateFusion: force });
+      if (force) {
+        window.__cbNextGenForceFusionRegenerate = false;
+        renderFusionToggleUI();
+      }
       const lecturaIds = lecturasSeleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean);
       const lecturaOrigenes = Array.from(new Set(lecturasSeleccionadas.map(_origenLecturaUnidad).filter(Boolean)));
       return {
@@ -2205,12 +3219,16 @@ const outputResultado = document.getElementById("resultadoUnidadGenerada");
 // Luego los event listeners
 selectTema?.addEventListener("change", () => {
   _limpiarDecisionLecturaUnidad();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   _sincronizarInputTemaConSelect();
   guardarSelectsUnidad();
 });
 
 selectTemaASC?.addEventListener("change", () => {
   _limpiarDecisionLecturaUnidad();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   _sincronizarInputTemaConSelect();
   guardarSelectsUnidad();
 });
@@ -2228,7 +3246,12 @@ if (inputTemaTexto) {
     }
   });
   inputTemaTexto.addEventListener("click", async () => {
-    if (!_poolLecturasBusqueda().length) {
+    if (_hidratarLecturasUnidadDesdeCacheLocal()) {
+      _refrescarOpcionesInputTema("");
+    }
+    if (!unidadLecturasCatalogoRemotoCargado) {
+      try { await cargarTodasLasLecturas({ forceRefresh: true }); } catch (_) { }
+    } else if (!_poolLecturasBusqueda().length) {
       try { await cargarTodasLasLecturas({ forceRefresh: true }); } catch (_) { }
     }
     _refrescarOpcionesInputTema("");
@@ -2238,34 +3261,47 @@ if (inputTemaTexto) {
 // Y AHORA SÍ los event listeners que usan selectUnidad
 selectUnidad?.addEventListener('change', function () {
   verificarUnidadActual();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   verificarSecuencia();
+  invalidateFusionCacheAndToggle();
 });
 
 selectNivel?.addEventListener('change', function () {
   verificarUnidadActual();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   verificarSecuencia();
+  invalidateFusionCacheAndToggle();
 });
 
 selectGrado?.addEventListener('change', function () {
   verificarUnidadActual();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   verificarSecuencia();
+  invalidateFusionCacheAndToggle();
 });
 
 selectTrimestre?.addEventListener('change', function () {
   verificarUnidadActual();
+  _unidadCloseSyaModal();
+  _unidadGetSyaState().modal.pendingGenerateCategoria = "";
   verificarSecuencia();
+  invalidateFusionCacheAndToggle();
 });
 
 // 🔎 Reúne T/AE/C/P del MISMO grado y trimestre (ya filtrados por tu query) desde secuenciaActual (objeto con claves ..._T, ..._AE, etc.)
 function getResumenCurricularDelGradoTrimestre() {
   const T_global = [], AE_global = [], C_global = [], P_global = [];
+  const effectiveFlat = _unidadBuildEffectiveSecuenciaFlatAllCategories();
 
   Object.entries(categoriaPorSubtema).forEach(([subtema, categoria]) => {
     const clave = subtema.replace(/\s+/g, "_");
-    if (secuenciaActual?.[`${clave}_T`]) T_global.push(secuenciaActual[`${clave}_T`]);
-    if (secuenciaActual?.[`${clave}_AE`]) AE_global.push(secuenciaActual[`${clave}_AE`]);
-    if (secuenciaActual?.[`${clave}_C`]) C_global.push(secuenciaActual[`${clave}_C`]);
-    if (secuenciaActual?.[`${clave}_P`]) P_global.push(secuenciaActual[`${clave}_P`]);
+    if (effectiveFlat?.[`${clave}_T`]) T_global.push(effectiveFlat[`${clave}_T`]);
+    if (effectiveFlat?.[`${clave}_AE`]) AE_global.push(effectiveFlat[`${clave}_AE`]);
+    if (effectiveFlat?.[`${clave}_C`]) C_global.push(effectiveFlat[`${clave}_C`]);
+    if (effectiveFlat?.[`${clave}_P`]) P_global.push(effectiveFlat[`${clave}_P`]);
   });
 
   return { T_global, AE_global, C_global, P_global };
@@ -2437,13 +3473,23 @@ const modalUnidad = document.getElementById("modalGenerarUnidad");
 const cerrarModal = document.getElementById("cerrarModalUnidad");
 const modalResultadoUnidad = document.getElementById("modalResultadoUnidad");
 const cerrarModalResultadoUnidad = document.getElementById("cerrarModalResultadoUnidad");
+const toggleFullscreenResultadoUnidad = document.getElementById("toggleFullscreenResultadoUnidad");
 const btnAbrirResultadoUnidad = document.getElementById("btnAbrirResultadoUnidad");
 const btnAbrirResultadoUnidadTop = document.getElementById("btnAbrirResultadoUnidadTop");
 const btnDetenerGeneracionUnidad = document.getElementById("btnDetenerGeneracionUnidad");
 const btnRegenerarResultadoUnidad = document.getElementById("btnRegenerarResultadoUnidad");
+const btnToggleUnidadSyaPanel = document.getElementById("btnToggleUnidadSyaPanel");
+const btnCerrarUnidadSyaPanel = document.getElementById("btnCerrarUnidadSyaPanel");
+const unidadResultadoSyaPanel = document.getElementById("unidadResultadoSyaPanel");
+const unidadResultadoSyaPanelBody = document.getElementById("unidadResultadoSyaPanelBody");
 const btnVozUnidad = document.getElementById("btnVozUnidad");
 const studioWorkspaceUnidad = document.querySelector(".panel-analisis.studio-workspace");
 const unidadDockHost = document.getElementById("unidadDockHost");
+let unidadResultadoHeaderScrollBound = false;
+let unidadResultadoHeaderLastScrollTop = 0;
+let unidadResultadoHeaderTicking = false;
+let unidadResultadoFullscreenHandlerBound = false;
+let unidadResultadoSyaPanelRenderToken = 0;
 const SECTION_STATE_STORAGE_KEY = "cb.studio.active.section.v1";
 const UNIDAD_SIDE_COLLAPSE_KEY = "cb.unidad.side.collapsed.v1";
 const MODALES_ACOPLADOS_UNIDAD = [
@@ -6637,6 +7683,7 @@ function _resolverNombreColumnaSecuencia(target = "", textoNorm = "") {
   if (/\b(ficha|fichas)\b/.test(t)) return "ficha";
   if (/\b(anexo|anexos)\b/.test(t)) return "anexo";
   if (/\b(video|videos)\b/.test(t)) return "video";
+  if (/\b(imagen|imagenes|imágenes)\b/.test(t)) return "imagen";
   return "";
 }
 
@@ -6649,6 +7696,7 @@ function _resolverColumnasSecuenciaDesdeTexto(textoNorm = "", target = "") {
   if (/\b(ficha|fichas)\b/.test(t)) columnas.push("ficha");
   if (/\b(anexo|anexos)\b/.test(t)) columnas.push("anexo");
   if (/\b(video|videos)\b/.test(t)) columnas.push("video");
+  if (/\b(imagen|imagenes|imágenes)\b/.test(t)) columnas.push("imagen");
   return columnas;
 }
 
@@ -6663,7 +7711,7 @@ function _limpiarConsultaTablaSecuencia(query = "") {
   return _normalizarTexto(String(query || ""))
     .replace(/[()]/g, " ")
     .replace(/\b(agrega|anade|añade|pon|poner|activa|activar|marca|marcar|quita|quitar|desactiva|desactivar|desmarca|desmarcar)\b/g, " ")
-    .replace(/\b(anexo|anexos|ficha|fichas|recortable|recortables|video|videos|relacion|relacionar|lectura|generar|categoria|categoría|subtema|actividad|actividades)\b/g, " ")
+    .replace(/\b(anexo|anexos|ficha|fichas|recortable|recortables|video|videos|imagen|imagenes|imágenes|relacion|relacionar|lectura|generar|categoria|categoría|subtema|actividad|actividades)\b/g, " ")
     .replace(/\b(a|en|de|del|la|el|los|las|para)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -6677,7 +7725,8 @@ function _obtenerCheckboxFilaPorColumna(row, columna = "") {
     recortable: "recortable_",
     ficha: "ficha_",
     anexo: "anexo_",
-    video: "video_"
+    video: "video_",
+    imagen: "imagen_"
   };
   const prefix = nameByColumn[columna];
   if (!prefix) return null;
@@ -9418,6 +10467,1537 @@ function _lecturasAgentBuildImagePrompt(payload = {}, slide = {}, index = 0, ref
   ].filter(Boolean).join("\n");
 }
 
+async function _unidadTryGenerateSupportImageNanobanana({ prompt = "", aspectRatio = "4:3", imageSize = "512" } = {}) {
+  const cleanedPrompt = String(prompt || "").trim();
+  if (!cleanedPrompt) throw new Error("Prompt vacío para imagen de apoyo.");
+  return _unidadGenerateSupportImagePartsNanobanana({
+    parts: [{ text: cleanedPrompt }],
+    aspectRatio,
+    imageSize,
+    temperature: 0.52
+  });
+}
+
+async function _unidadGenerateSupportImagePartsNanobanana({ parts = [], aspectRatio = "4:3", imageSize = "512", temperature = 0.52 } = {}) {
+  const safeParts = Array.isArray(parts) ? parts.filter(Boolean) : [];
+  if (!safeParts.length) throw new Error("Contenido vacío para imagen de apoyo.");
+
+  // Evita múltiples intentos/modelos para no duplicar costos ni spamear el backend.
+  // Si falla, se omite la imagen (el caller lo maneja) y se deja el error claro.
+  const modelName = "gemini-2.5-flash-image";
+  const normalizedAspectRatio = _unidadNormalizarAspectRatio(aspectRatio);
+  const sizeAttempts = _unidadBuildImageSizeFallbackChain(imageSize);
+  let lastError = null;
+
+  for (let i = 0; i < sizeAttempts.length; i++) {
+    const currentSize = sizeAttempts[i];
+    const generationConfig = buildGeminiImageGenerationConfig({
+      aspectRatio: normalizedAspectRatio,
+      imageSize: currentSize,
+      temperature
+    });
+
+    const { response: res, data } = await geminiGenerateViaApi(modelName, {
+      contents: [{ role: "user", parts: safeParts }],
+      generationConfig
+    });
+    if (!res.ok) {
+      const detail = String(data?.error?.message || data?.error || "").trim();
+      const trimmed = detail.length > 520 ? `${detail.slice(0, 520)}…` : detail;
+      lastError = new Error(`Gemini image HTTP ${res.status} (${modelName}): ${trimmed || res.statusText || "error"}`);
+      if (_unidadIsUnsupportedImageSizeError(res.status, detail) && i + 1 < sizeAttempts.length) {
+        console.warn(`[unidad] Gemini no soportó imageSize=${currentSize} para apoyo visual; reintentando con ${sizeAttempts[i + 1]}.`);
+        continue;
+      }
+      throw lastError;
+    }
+    const image = _lecturasAgentExtractImageInlineFromGenerateData(data);
+    if (image?.dataUrl) {
+      image.requestedImageSize = _unidadNormalizarImageSize(imageSize);
+      image.resolvedImageSize = currentSize;
+      return image;
+    }
+    lastError = new Error("No se recibió imagen en la respuesta.");
+    break;
+  }
+  throw lastError || new Error("No se recibió imagen en la respuesta.");
+}
+
+function _unidadStripHtmlToPlain(html = "") {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _unidadEncodeAttr(value = "") {
+  return encodeURIComponent(String(value ?? ""));
+}
+
+function _unidadEnsureApoyoPreviewWrapper(imgEl) {
+  if (!imgEl || typeof imgEl.closest !== "function") return null;
+  const figure = imgEl.closest("figure.cb-apoyo-visual, figure.cb-apoyo-lectura");
+  if (!figure) return null;
+  const existing = imgEl.closest(".cb-apoyo-preview");
+  if (existing) {
+    const hasOverlay = !!existing.querySelector?.(".cb-apoyo-preview__overlay");
+    if (!hasOverlay) {
+      const overlay = document.createElement("div");
+      overlay.className = "cb-apoyo-preview__overlay";
+      overlay.style.display = "none";
+      overlay.innerHTML = `<div class="cb-apoyo-preview__spinner" aria-hidden="true"></div>`;
+      existing.appendChild(overlay);
+    }
+    return existing;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "cb-apoyo-preview";
+
+  const overlay = document.createElement("div");
+  overlay.className = "cb-apoyo-preview__overlay";
+  overlay.innerHTML = `<div class="cb-apoyo-preview__spinner" aria-hidden="true"></div>`;
+
+  const parent = imgEl.parentElement;
+  if (!parent) return null;
+  parent.insertBefore(wrapper, imgEl);
+  wrapper.appendChild(imgEl);
+  wrapper.appendChild(overlay);
+  return wrapper;
+}
+
+function _unidadSetApoyoPreviewLoading(imgEl, isLoading) {
+  if (!imgEl) return;
+  const wrapper = _unidadEnsureApoyoPreviewWrapper(imgEl);
+  const figure = imgEl.closest?.("figure.cb-apoyo-visual, figure.cb-apoyo-lectura") || null;
+  if (figure) figure.classList.toggle("is-loading", !!isLoading);
+  const overlay = wrapper?.querySelector?.(".cb-apoyo-preview__overlay") || null;
+  if (overlay) overlay.style.display = isLoading ? "grid" : "none";
+}
+
+function ensureUnidadGaleriaImagenModal() {
+  let modal = document.getElementById("cbUnidadGaleriaImagenModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "cbUnidadGaleriaImagenModal";
+  modal.style.cssText = "position:fixed; inset:0; z-index:2147483647; display:none; align-items:center; justify-content:center; padding:14px;";
+  modal.innerHTML = `
+    <div style="position:absolute; inset:0; background:rgba(2,6,23,0.76); backdrop-filter: blur(6px);" data-action="close"></div>
+    <div style="position:relative; width:min(1100px, 96vw); max-height:min(90vh, 920px); background:#0b1220; border:1px solid rgba(148,163,184,0.25); border-radius:18px; box-shadow:0 36px 120px rgba(0,0,0,0.65); overflow:hidden; display:flex; flex-direction:column;">
+      <header style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; background:rgba(15,23,42,0.75); border-bottom:1px solid rgba(148,163,184,0.2);">
+        <div id="cbUnidadGaleriaImagenTitle" style="color:#e2e8f0; font-weight:900; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a id="cbUnidadGaleriaImagenDownload" class="unidad-btn unidad-btn-ghost" href="#" download="apoyo-visual.png" style="text-decoration:none;">Descargar</a>
+          <button type="button" class="unidad-btn unidad-btn-ghost" data-action="close" aria-label="Cerrar" style="min-width:auto; padding:8px 12px;">Cerrar</button>
+        </div>
+      </header>
+      <div style="padding:12px; overflow:auto; display:grid; place-items:center; background: radial-gradient(800px 520px at 50% 30%, rgba(59,130,246,0.12) 0%, rgba(2,6,23,0.92) 70%);">
+        <img id="cbUnidadGaleriaImagenImg" src="" alt="" style="max-width:100%; height:auto; border-radius:14px; background:#ffffff; box-shadow:0 18px 60px rgba(0,0,0,0.55);" />
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const onClick = (ev) => {
+    const btn = ev.target.closest("[data-action]");
+    if (!btn) return;
+    const action = String(btn.getAttribute("data-action") || "");
+    if (action === "close") {
+      modal.style.display = "none";
+    }
+  };
+  modal.addEventListener("click", onClick);
+  return modal;
+}
+
+function openUnidadGaleriaImagen({ src = "", title = "", alt = "" } = {}) {
+  const modal = ensureUnidadGaleriaImagenModal();
+  const img = modal.querySelector("#cbUnidadGaleriaImagenImg");
+  const titleEl = modal.querySelector("#cbUnidadGaleriaImagenTitle");
+  const dl = modal.querySelector("#cbUnidadGaleriaImagenDownload");
+  const safeSrc = String(src || "").trim();
+  if (!safeSrc) return;
+  if (img) {
+    img.src = safeSrc;
+    img.alt = String(alt || title || "Imagen");
+  }
+  if (titleEl) titleEl.textContent = String(title || "").trim();
+  if (dl) {
+    dl.href = safeSrc;
+    const base = String(title || "apoyo-visual").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    dl.download = `${base || "apoyo-visual"}.png`;
+  }
+  modal.style.display = "flex";
+}
+
+function _unidadInsertAfterLecturaGeneradora(html = "", snippet = "") {
+  const source = String(html || "");
+  const insert = String(snippet || "").trim();
+  if (!insert) return source;
+  const re = /(<h3[^>]*>\s*Lectura generadora\s*<\/h3>)/i;
+  if (!re.test(source)) return source;
+  return source.replace(re, `$1\n${insert}\n`);
+}
+
+function _unidadInsertAfterPreguntasComprension(html = "", snippet = "") {
+  const source = String(html || "");
+  const insert = String(snippet || "").trim();
+  if (!insert) return source;
+
+  // Preferir insertar después del bloque <h3>Preguntas de comprensión</h3>... </ol>
+  const reOl = /(<h3[^>]*>\s*Preguntas de comprensión\s*<\/h3>[\s\S]*?<\/ol>)/i;
+  if (reOl.test(source)) {
+    return source.replace(reOl, `$1\n${insert}\n`);
+  }
+
+  // Fallback: antes de las fases del proyecto.
+  const rePhases = /(<div[^>]*class=["']project-phases["'][^>]*>)/i;
+  if (rePhases.test(source)) {
+    return source.replace(rePhases, `${insert}\n$1`);
+  }
+
+  return `${insert}\n${source}`;
+}
+
+function _unidadExtractProyectoPhases(html = "") {
+  const source = String(html || "");
+  const phasesWrapper = source.match(/<div[^>]*class=["']project-phases["'][^>]*>([\s\S]*?)<\/div>\s*<!-- ======/i);
+  const scope = phasesWrapper?.[1] || source;
+  const phaseMatches = [...scope.matchAll(/<div[^>]*class=["']phase["'][^>]*>([\s\S]*?)<\/div>/gi)];
+  if (!phaseMatches.length) return [];
+  const phases = [];
+  for (const m of phaseMatches) {
+    const chunk = String(m?.[1] || "");
+    const title = (chunk.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i)?.[1] || "").replace(/<[^>]+>/g, " ").trim();
+    const activities = chunk.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    phases.push({ title: title || "Fase", activities: activities.slice(0, 800) });
+  }
+  return phases.slice(0, 6);
+}
+
+function _unidadBuildProjectPhasePlan({ titleUpper = "", phases = [], formatType = "" } = {}) {
+  const safeTitle = String(titleUpper || "").trim().slice(0, 60).toUpperCase();
+  const safeFormat = String(formatType || "").trim().toLowerCase();
+  const phaseTitles = phases
+    .map((p) => String(p?.title || "").replace(/^\d+\.\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const brief = phaseTitles.length
+    ? `Centro: ${safeTitle || "PROYECTO"}. Ramas por fases: ${phaseTitles.join(" → ")}. En cada fase: 1 icono + 1 etiqueta (1–3 palabras) + flecha de avance.`
+    : `Centro: ${safeTitle || "PROYECTO"}. Ramas: Indagar → Planear → Crear → Evaluar → Compartir. Iconos simples por fase.`;
+  return {
+    formatType: safeFormat || "diagrama de flujo por fases",
+    imageBrief: brief,
+    titleUpper: safeTitle || ""
+  };
+}
+
+async function _unidadCrearPlanApoyoVisualProyectoFase({
+  categoria = "",
+  subtema = "",
+  faseTitulo = "",
+  faseActividadesTexto = "",
+  nivel = "",
+  grado = "",
+  T = "",
+  statusId = ""
+} = {}) {
+  const categoriaFmt = String(categoria || "").trim();
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  const faseFmt = String(faseTitulo || "").replace(/^\d+\.\s*/, "").trim();
+  const tipoElegido = String(window.__unidadGraficoTipoSeleccionadoPorCategoria?.[categoriaFmt] || "").trim();
+  const tipoNorm = tipoElegido ? tipoElegido.toLowerCase() : "";
+  const tipoForzado = (tipoNorm && tipoNorm !== "auto") ? tipoElegido : "";
+
+  const prompt = [
+    "Eres diseñador instruccional para primaria.",
+    "Vas a planear UN apoyo visual SOLO para UNA FASE de un proyecto (NO para todo el subtema).",
+    `Contexto: ${String(nivel || "").trim()} ${String(grado || "").trim()}. Categoría: ${categoriaFmt}. Subtema: ${subtemaFmt}.`,
+    faseFmt ? `Fase: ${faseFmt}.` : "",
+    T ? `Objetivo/Título del proyecto: ${String(T).trim().slice(0, 160)}` : "",
+    "",
+    tipoForzado
+      ? `Tipo de organizador elegido por el usuario: ${tipoForzado}. Respétalo.`
+      : "Tipo recomendado: diagrama/organizador simple (3–5 ideas) con flechas e iconos.",
+    "",
+    "Actividades de ESTA fase (usa esto para decidir qué mostrar en la imagen):",
+    String(faseActividadesTexto || "").trim().slice(0, 1400),
+    "",
+    "Devuelve SOLO JSON válido, sin markdown, con esta forma:",
+    `{"formatType":"...","imageBrief":"...","titleUpper":"..."}`,
+    "",
+    "Reglas:",
+    "- Enfócate en 3–5 elementos CLAVE que el alumno necesite ver para resolver actividades de esta fase.",
+    "- imageBrief: describe secciones/iconos/flechas y SOLO etiquetas cortas (1–3 palabras), en español.",
+    "- Evita texto largo; sin marcas de agua."
+  ].filter(Boolean).join("\n");
+
+  if (statusId) {
+    actualizarSpinnerProceso(statusId, `Planificando apoyo visual de la fase <strong>${_escapeHtmlUnidad(faseFmt || "fase")}</strong>...`);
+  }
+  const raw = await enviarPrompt([{ role: "user", text: prompt }]);
+  const cleaned = String(raw || "").trim().replace(/```json|```/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const formatType = tipoForzado || String(parsed?.formatType || "").trim();
+    const imageBrief = String(parsed?.imageBrief || "").trim();
+    const titleUpper = String(parsed?.titleUpper || faseFmt || "").trim();
+    return {
+      formatType: formatType || tipoForzado || "organizador visual",
+      imageBrief,
+      titleUpper
+    };
+  } catch (_) {
+    return _unidadBuildProjectPhasePlan({
+      titleUpper: faseFmt || T || subtemaFmt,
+      phases: [],
+      formatType: tipoForzado || "Diagrama de flujo"
+    });
+  }
+}
+
+async function _unidadGenerarApoyoVisualFaseProyectoHTML({
+  categoria = "",
+  subtema = "",
+  faseIndex = 0,
+  faseTitulo = "",
+  faseActividadesTexto = "",
+  nivel = "",
+  grado = "",
+  statusId = "",
+  objetivos = {}
+} = {}) {
+  const categoriaFmt = String(categoria || "").trim();
+  const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[categoriaFmt] || "").trim().toLowerCase();
+  if (usoGrafico === "lectura") return "";
+
+  window.__unidadApoyoVisualPorSubtema = window.__unidadApoyoVisualPorSubtema || {};
+  const faseKey = `__PROY_PHASE__:${categoriaFmt}:${String(subtema || "").trim()}:${faseIndex}`;
+  const renderSettings = _unidadGetGraphicRenderSettingsForCategory(categoriaFmt);
+  const cached = window.__unidadApoyoVisualPorSubtema[faseKey] || null;
+  const faseFmt = String(faseTitulo || "").replace(/^\d+\.\s*/, "").trim();
+  const label = faseFmt || `Fase ${faseIndex + 1}`;
+
+  const cachedSrc = _unidadSupportGraphicSrc(cached);
+  if (cachedSrc) {
+    return `
+      <figure class="cb-apoyo-visual" style="margin: 14px 0 18px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;">
+        <figcaption style="font-size: 12px; color: #374151; margin-bottom: 10px;">
+          <strong>Apoyo visual</strong> · ${_escapeHtmlUnidad(label)}
+        </figcaption>
+        <img src="${cachedSrc}" alt="Apoyo visual de ${_escapeHtmlUnidad(label)}" style="width: 100%; max-width: 820px; border-radius: 10px; display: block; margin: 0 auto;" loading="lazy">
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-editar" data-apoyo-subtema="${_unidadEncodeAttr(faseKey)}" title="Editar apoyo visual">
+            <i class="fa-solid fa-pen-to-square"></i><span class="unidad-btn-text"> Editar</span>
+          </button>
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-descargar" data-apoyo-subtema="${_unidadEncodeAttr(faseKey)}" title="Descargar apoyo visual">
+            <i class="fa-solid fa-download"></i><span class="unidad-btn-text"> Descargar</span>
+          </button>
+        </div>
+      </figure>
+    `;
+  }
+
+  const plan = await _unidadCrearPlanApoyoVisualProyectoFase({
+    categoria,
+    subtema,
+    faseTitulo: faseFmt,
+    faseActividadesTexto,
+    nivel,
+    grado,
+    T: objetivos?.T || "",
+    statusId
+  });
+  const promptImg = _unidadBuildMindmapSupportImagePrompt({
+    categoria,
+    subtema: `${String(subtema || "").trim()} · ${faseFmt || `Fase ${faseIndex + 1}`}`,
+    nivel,
+    grado,
+    objetivos,
+    plan,
+    renderSettings
+  });
+  if (statusId) {
+    actualizarSpinnerProceso(statusId, `Creando apoyo visual de la fase <strong>${_escapeHtmlUnidad(label)}</strong>...`);
+  }
+  const generated = await _unidadTryGenerateSupportImageNanobanana({
+    prompt: promptImg,
+    aspectRatio: renderSettings.aspectRatio,
+    imageSize: renderSettings.imageSize
+  });
+  const persisted = await _unidadPersistGeneratedSupportGraphic({
+    dataUrl: String(generated?.dataUrl || "").trim(),
+    subtema: faseKey,
+    prompt: promptImg
+  });
+  _unidadSetSupportGraphicCache(faseKey, persisted);
+  return `
+      <figure class="cb-apoyo-visual" style="margin: 14px 0 18px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;">
+        <figcaption style="font-size: 12px; color: #374151; margin-bottom: 10px;">
+          <strong>Apoyo visual</strong> · ${_escapeHtmlUnidad(label)}
+        </figcaption>
+        <img src="${String(persisted?.imageUrl || "")}" alt="Apoyo visual de ${_escapeHtmlUnidad(label)}" style="width: 100%; max-width: 820px; border-radius: 10px; display: block; margin: 0 auto;" loading="lazy">
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-editar" data-apoyo-subtema="${_unidadEncodeAttr(faseKey)}" title="Editar apoyo visual">
+            <i class="fa-solid fa-pen-to-square"></i><span class="unidad-btn-text"> Editar</span>
+          </button>
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-descargar" data-apoyo-subtema="${_unidadEncodeAttr(faseKey)}" title="Descargar apoyo visual">
+            <i class="fa-solid fa-download"></i><span class="unidad-btn-text"> Descargar</span>
+          </button>
+        </div>
+      </figure>
+  `;
+}
+
+function _unidadBuildMindmapSupportImagePrompt({
+  categoria = "",
+  subtema = "",
+  nivel = "",
+  grado = "",
+  objetivos = {},
+  plan = null,
+  renderSettings = null,
+  lecturaAnalysis = null
+} = {}) {
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  const categoriaFmt = String(categoria || "").trim();
+  const nivelFmt = String(nivel || "").trim();
+  const gradoFmt = String(grado || "").trim();
+
+  const T = String(objetivos?.T || "").trim().slice(0, 240);
+  const AE = String(objetivos?.AE || "").trim().slice(0, 240);
+  const C = String(objetivos?.C || "").trim().slice(0, 240);
+  const P = String(objetivos?.P || "").trim().slice(0, 240);
+  const planText = plan ? String(plan?.imageBrief || plan?.brief || "").trim().slice(0, 1400) : "";
+  const planFormat = plan ? String(plan?.formatType || "").trim().toLowerCase() : "";
+  const ratio = _unidadNormalizarAspectRatio(renderSettings?.aspectRatio || "4:3");
+  const imageSize = _unidadNormalizarImageSize(renderSettings?.imageSize || "512");
+  const lecturaIdea = String(lecturaAnalysis?.centralIdea || "").trim().slice(0, 240);
+  const lecturaConcepts = Array.isArray(lecturaAnalysis?.keyConcepts) ? lecturaAnalysis.keyConcepts.filter(Boolean).slice(0, 5) : [];
+  const lecturaVisualCues = Array.isArray(lecturaAnalysis?.visualCues) ? lecturaAnalysis.visualCues.filter(Boolean).slice(0, 5) : [];
+  const formatHint = planFormat
+    ? `Formato preferido del gráfico: ${planFormat}.`
+    : "";
+  const titleUpper = String(plan?.titleUpper || subtemaFmt || "").trim().slice(0, 60).toUpperCase();
+
+  return [
+    "Crea una imagen educativa para NIÑOS DE PRIMARIA: infografía estilo ilustración infantil (limpia, amigable, colores suaves, iconos simples).",
+    "La imagen NO debe ser un mapa mental de TODO el subtema. Debe enfocarse solo en los elementos necesarios para las actividades didácticas.",
+    `Contexto: ${nivelFmt} ${gradoFmt}. Área/categoría: ${categoriaFmt}. Subtema: ${subtemaFmt}.`,
+    T ? `Objetivo T: ${T}` : "",
+    AE ? `Objetivo AE: ${AE}` : "",
+    C ? `Objetivo C: ${C}` : "",
+    P ? `Objetivo P: ${P}` : "",
+    lecturaIdea ? `Idea central de la lectura relacionada: ${lecturaIdea}` : "",
+    lecturaConcepts.length ? `Conceptos clave derivados de la lectura: ${lecturaConcepts.join("; ")}` : "",
+    lecturaVisualCues.length ? `Elementos visuales sugeridos por la lectura: ${lecturaVisualCues.join("; ")}` : "",
+    formatHint,
+    planText ? `Brief del apoyo visual (usa esto como guía principal): ${planText}` : "",
+    "Requisitos del diseño:",
+    `- Relación de aspecto solicitada: ${ratio} (${_unidadAspectRatioDescripcion(ratio)}).`,
+    `- Resolución solicitada: ${imageSize} (${_unidadImageSizeDescripcion(imageSize)}).`,
+    titleUpper ? `- TÍTULO: ${titleUpper}` : "- TÍTULO: (EN MAYÚSCULAS)",
+    "- Estilo: ilustración educativa infantil, tipo póster escolar, con flechas/diagramas claros.",
+    "- Estructura: organizador visual con 3–5 ideas clave máximo (no más).",
+    "- Propósito pedagógico: que el alumno necesite mirar la imagen para resolver preguntas/actividades.",
+    "- Texto: etiquetas MUY cortas (1–3 palabras). Si aparece texto, debe ir SIEMPRE EN MAYÚSCULAS. Sin párrafos. Sin marcas de agua. Idioma Español; analiza bien y con calma antes de crear el texto para hacerlo bien.",
+    "IMPORTANTE: ANALIZAR EL TEXTO SIEMPRE ANTES DE IMPRIMIRLO, IMPRIMIRLO CON CALMA Y BIEN HECHO, TEXTO SIEMPRE EN MAYÚSCULAS SEGÚN EL IDIOMA DEL PROMPT.",
+    "- No marcas de agua, no firmas, no logos.",
+    "- fondo blanco"
+  ].filter(Boolean).join("\n");
+}
+
+async function _unidadCrearPlanApoyoVisual({ categoria = "", subtema = "", nivel = "", grado = "", T = "", AE = "", C = "", P = "", statusId = "", lecturaAnalysis = null } = {}) {
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  const categoriaFmt = String(categoria || "").trim();
+  const formatoSugerido = (() => {
+    const cat = categoriaFmt.toLowerCase();
+    if (cat.includes("matem")) return "organizador de pasos + ejemplo resuelto (mini) + tabla";
+    if (cat.includes("lenguaje")) return "organizador 5W+H (quién/qué/cuándo/dónde/por qué/cómo) o mapa de ideas (3-5)";
+    if (cat.includes("ciencias experimentales")) return "diagrama de proceso (pasos) + causa-efecto + iconos";
+    if (cat.includes("ciencias sociales")) return "línea del tiempo simple o mapa de comparación antes/después";
+    if (cat.includes("socioemocional")) return "semáforo emocional / rueda simple / pasos de resolución de conflicto";
+    if (cat.includes("artes")) return "guía visual de técnica (materiales→pasos→resultado) con iconos";
+    if (cat.includes("proyectos")) return "ruta del proyecto (fases) + roles + checklist";
+    return "organizador visual (3-5 ideas) con flechas e iconos";
+  })();
+  const tipoElegido = String(window.__unidadGraficoTipoSeleccionadoPorCategoria?.[categoriaFmt] || "").trim();
+  const tipoNormalizado = tipoElegido ? tipoElegido.toLowerCase() : "";
+  const tipoForzado = (tipoNormalizado && tipoNormalizado !== "auto")
+    ? tipoElegido
+    : "";
+  const lecturaIdea = String(lecturaAnalysis?.centralIdea || "").trim();
+  const lecturaConcepts = Array.isArray(lecturaAnalysis?.keyConcepts) ? lecturaAnalysis.keyConcepts.filter(Boolean).slice(0, 5) : [];
+  const lecturaVisualCues = Array.isArray(lecturaAnalysis?.visualCues) ? lecturaAnalysis.visualCues.filter(Boolean).slice(0, 5) : [];
+  const prompt = [
+    "Eres diseñador instruccional para primaria. Vas a planear un apoyo visual (infografía/diagrama) que se usará para crear actividades.",
+    `Contexto: ${String(nivel || "").trim()} ${String(grado || "").trim()}. Categoría: ${categoriaFmt}. Subtema: ${subtemaFmt}.`,
+    T ? `Objetivo T: ${T}` : "",
+    AE ? `Objetivo AE: ${AE}` : "",
+    C ? `Objetivo C: ${C}` : "",
+    P ? `Objetivo P: ${P}` : "",
+    lecturaIdea ? `Idea central de la lectura relacionada: ${lecturaIdea}` : "",
+    lecturaConcepts.length ? `Conceptos que deben conectarse con la lectura: ${lecturaConcepts.join("; ")}` : "",
+    lecturaVisualCues.length ? `Pistas visuales sugeridas por la lectura: ${lecturaVisualCues.join("; ")}` : "",
+    tipoForzado
+      ? `Formato elegido por el usuario: ${tipoForzado}. Debes respetarlo.`
+      : `Formato recomendado según categoría: ${formatoSugerido}.`,
+    "",
+    "Devuelve SOLO JSON válido, sin markdown, con esta forma:",
+    `{"formatType":"...","imageBrief":"...","activityHooks":["...","...","..."]}`,
+    "",
+    "Reglas:",
+    "- NO resumas todo el subtema: enfócate en 3–5 ideas clave que sirvan para actividades.",
+    "- formatType: una frase corta que describa el tipo de gráfico (ej. 'diagrama de proceso', 'comparación', 'tabla + flechas', 'línea del tiempo').",
+    "- imageBrief debe describir qué aparece en la imagen (objetos, iconos, flechas, secciones) y SOLO etiquetas cortas (1–3 palabras).",
+    "- activityHooks: 3 ideas de actividades donde el alumno NECESITA mirar la imagen para responder (comparar, identificar, ordenar, completar, encontrar pistas).",
+    "- Estilo: ilustración infantil escolar, limpia, amigable, sin texto largo."
+  ].filter(Boolean).join("\n");
+  if (statusId) actualizarSpinnerProceso(statusId, `Planificando apoyo visual para <strong>${subtemaFmt}</strong>...`);
+  const raw = await enviarPrompt([{ role: "user", text: prompt }]);
+  const cleaned = String(raw || "").trim().replace(/```json|```/g, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const formatType = tipoForzado || String(parsed?.formatType || "").trim();
+    const imageBrief = String(parsed?.imageBrief || "").trim();
+    const hooks = Array.isArray(parsed?.activityHooks) ? parsed.activityHooks.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 6) : [];
+    if (!imageBrief) throw new Error("plan_missing_imageBrief");
+    return { formatType, imageBrief, activityHooks: hooks };
+  } catch (err) {
+    console.warn("Plan apoyo visual inválido, usando fallback:", err);
+    return {
+      formatType: tipoForzado || formatoSugerido,
+      imageBrief: `Infografía infantil para ${subtemaFmt}: 1 diagrama central + 3–5 iconos con flechas. Etiquetas cortas.`,
+      activityHooks: [
+        "Identifica 3 elementos en la imagen y explica su función.",
+        "Ordena los pasos según las flechas del diagrama.",
+        "Completa una tabla usando información de la imagen."
+      ]
+    };
+  }
+}
+
+async function _unidadAjustarActividadesConApoyoVisual({
+  categoria = "",
+  subtema = "",
+  nivel = "",
+  grado = "",
+  statusId = "",
+  htmlAlumno = "",
+  apoyoPlan = null,
+  lecturaAnalysis = null
+} = {}) {
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  const planText = apoyoPlan ? String(apoyoPlan?.imageBrief || "").trim() : "";
+  const formatType = apoyoPlan ? String(apoyoPlan?.formatType || "").trim() : "";
+  const inputHtml = String(htmlAlumno || "").trim();
+  if (!inputHtml) return "";
+  if (!planText) return inputHtml;
+  if (statusId) {
+    actualizarSpinnerProceso(statusId, `Ajustando actividades para usar el apoyo visual de <strong>${subtemaFmt}</strong>...`);
+  }
+
+  const prompt = [
+    "Eres diseñador instruccional para primaria.",
+    `Categoría: ${String(categoria || "").trim()}. Subtema: ${subtemaFmt}. Contexto: ${String(nivel || "").trim()} ${String(grado || "").trim()}.`,
+    lecturaAnalysis?.centralIdea ? `Idea central de la lectura relacionada: ${String(lecturaAnalysis.centralIdea || "").trim()}` : "",
+    Array.isArray(lecturaAnalysis?.activityAnchors) && lecturaAnalysis.activityAnchors.length
+      ? `Anclajes obligatorios con la lectura: ${lecturaAnalysis.activityAnchors.join("; ")}`
+      : "",
+    formatType ? `Tipo de gráfico: ${formatType}.` : "",
+    `Brief del gráfico (lo que verá el alumno): ${planText}`,
+    "",
+    "Tarea: recibe el HTML de actividades del alumno y devuélvelo actualizado.",
+    "Reglas:",
+    "- Mantén el mismo HTML/estructura general; SOLO edita el texto interno de actividades e instrucciones.",
+    "- En AL MENOS LA MITAD de las actividades, añade una instrucción explícita que obligue a mirar el gráfico (ej. identificar, comparar, ordenar por flechas, completar tabla usando la imagen).",
+    "- No inventes información que no esté en el brief del gráfico.",
+    "- No agregues la imagen (solo referencias textuales a 'el organizador visual' / 'la infografía' / 'el diagrama').",
+    "- Devuelve SOLO HTML (sin ```).",
+    "",
+    "HTML a editar:",
+    inputHtml
+  ].filter(Boolean).join("\n");
+
+  const resp = await enviarPrompt([{ role: "user", text: prompt }]);
+  const cleaned = String(resp || "").replace(/```html|```/g, "").trim();
+  return cleaned || inputHtml;
+}
+
+async function _unidadGenerarApoyoVisualHTML({
+  categoria = "",
+  subtema = "",
+  nivel = "",
+  grado = "",
+  statusId = "",
+  objetivos = {},
+  actividadesNormales = null,
+  plan = null,
+  lecturaAnalysis = null
+} = {}) {
+  try {
+    const categoriaFmt = String(categoria || "").trim();
+    const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[categoriaFmt] || "").trim().toLowerCase();
+    if (usoGrafico === "lectura") {
+      // En modo "Usar en Lectura" no generamos apoyos por subtema para actividades.
+      return "";
+    }
+    window.__unidadApoyoVisualPorSubtema = window.__unidadApoyoVisualPorSubtema || {};
+    const cacheKey = String(subtema || "").trim();
+    const renderSettings = _unidadGetGraphicRenderSettingsForCategory(categoria);
+    const cached = cacheKey ? window.__unidadApoyoVisualPorSubtema[cacheKey] : null;
+    const cachedSrc = _unidadSupportGraphicSrc(cached);
+    if (cachedSrc) {
+      const subtemaFmtCached = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+      if (statusId) {
+        actualizarSpinnerProceso(statusId, `Usando apoyo visual existente para <strong>${subtemaFmtCached}</strong>...`);
+      }
+      const subtemaFmt = subtemaFmtCached;
+      return `
+      <figure class="cb-apoyo-visual" style="margin: 14px 0 18px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;">
+        <figcaption style="font-size: 12px; color: #374151; margin-bottom: 10px;">
+          <strong>Apoyo visual</strong> · Mapa mental para realizar las actividades de “${subtemaFmt}”
+        </figcaption>
+        <div class="cb-apoyo-preview" title="Ver imagen completa">
+          <img src="${cachedSrc}" alt="Mapa mental de apoyo para ${subtemaFmt}" style="width: 100%; max-width: 820px; border-radius: 10px; display: block; margin: 0 auto;" loading="lazy">
+          <div class="cb-apoyo-preview__overlay" style="display:none;"><div class="cb-apoyo-preview__spinner" aria-hidden="true"></div></div>
+        </div>
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-editar" data-apoyo-subtema="${_unidadEncodeAttr(subtema)}" title="Editar apoyo visual">
+            <i class="fa-solid fa-pen-to-square"></i><span class="unidad-btn-text"> Editar</span>
+          </button>
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-descargar" data-apoyo-subtema="${_unidadEncodeAttr(subtema)}" title="Descargar apoyo visual">
+            <i class="fa-solid fa-download"></i><span class="unidad-btn-text"> Descargar</span>
+          </button>
+        </div>
+      </figure>
+    `;
+    }
+
+    const promptImg = _unidadBuildMindmapSupportImagePrompt({
+      categoria,
+      subtema,
+      nivel,
+      grado,
+      objetivos: { ...objetivos },
+      plan,
+      renderSettings,
+      lecturaAnalysis
+    });
+    if (statusId) {
+      actualizarSpinnerProceso(statusId, `Creando imagen de apoyo (mindmap) para <strong>${formatearSubtema(subtema)}</strong>...`);
+    }
+    const generated = await _unidadTryGenerateSupportImageNanobanana({
+      prompt: promptImg,
+      aspectRatio: renderSettings.aspectRatio,
+      imageSize: renderSettings.imageSize
+    });
+    const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+    if (cacheKey) {
+      const persisted = await _unidadPersistGeneratedSupportGraphic({
+        dataUrl: String(generated?.dataUrl || "").trim(),
+        subtema: cacheKey,
+        prompt: promptImg,
+        simplePreview: window.__unidadApoyoVisualPorSubtema[cacheKey]?.simplePreview || (plan ? { formatType: String(plan?.formatType || "").trim(), imageBrief: String(plan?.imageBrief || "").trim() } : {})
+      });
+      _unidadSetSupportGraphicCache(cacheKey, persisted);
+    }
+    const finalSrc = _unidadSupportGraphicSrc(window.__unidadApoyoVisualPorSubtema?.[cacheKey]) || "";
+    return `
+      <figure class="cb-apoyo-visual" style="margin: 14px 0 18px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;">
+        <figcaption style="font-size: 12px; color: #374151; margin-bottom: 10px;">
+          <strong>Apoyo visual</strong> · Mapa mental para realizar las actividades de “${subtemaFmt}”
+        </figcaption>
+        <div class="cb-apoyo-preview" title="Ver imagen completa">
+          <img src="${finalSrc}" alt="Mapa mental de apoyo para ${subtemaFmt}" style="width: 100%; max-width: 820px; border-radius: 10px; display: block; margin: 0 auto;" loading="lazy">
+          <div class="cb-apoyo-preview__overlay" style="display:none;"><div class="cb-apoyo-preview__spinner" aria-hidden="true"></div></div>
+        </div>
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-editar" data-apoyo-subtema="${_unidadEncodeAttr(subtema)}" title="Editar apoyo visual">
+            <i class="fa-solid fa-pen-to-square"></i><span class="unidad-btn-text"> Editar</span>
+          </button>
+          <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-visual-descargar" data-apoyo-subtema="${_unidadEncodeAttr(subtema)}" title="Descargar apoyo visual">
+            <i class="fa-solid fa-download"></i><span class="unidad-btn-text"> Descargar</span>
+          </button>
+        </div>
+      </figure>
+    `;
+  } catch (err) {
+    const rawMsg = String(err?.message || "No se pudo generar la imagen de apoyo.");
+    const msg = rawMsg.startsWith("support_graphic_storage_forbidden:")
+      ? `Tu usuario no puede escribir imágenes de apoyo en Firebase Storage. Rol detectado: ${rawMsg.split(":").pop() || "sin_rol"}.`
+      : rawMsg.startsWith("support_graphic_role_blocked:")
+        ? `Tu usuario no tiene un rol habilitado para crear imágenes de apoyo. Rol detectado: ${rawMsg.split(":").pop() || "sin_rol"}.`
+        : rawMsg;
+    console.warn("No se pudo generar imagen de apoyo:", err);
+    if (statusId) {
+      actualizarSpinnerProceso(statusId, `⚠️ Imagen de apoyo no disponible para <strong>${formatearSubtema(subtema)}</strong>: ${msg}`);
+    }
+    return "";
+  }
+}
+
+const UNIDAD_SUPPORT_GRAPHIC_LIGHTBOX_ID = "cbUnidadSupportGraphicLightbox";
+let unidadSupportGraphicLightboxLastFocus = null;
+
+function _unidadNormalizarTipoGrafico(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "auto";
+  const v = raw.toLowerCase();
+  if (v.includes("auto")) return "auto";
+  if (v.includes("infografia") || v.includes("infografía")) return "Infografía";
+  if (v.includes("ilustracion") || v.includes("ilustración")) return "Ilustración";
+  if (v.includes("mapa mental") || v.includes("mind")) return "Mapa Mental";
+  if (v.includes("mapa conceptual") || v.includes("concept")) return "Mapa Conceptual";
+  if (v.includes("mapa de ideas") || v.includes("telaraña") || v.includes("telarana") || v.includes("web")) return "Mapa de Ideas";
+  if (v.includes("flujo") || v.includes("flow")) return "Diagrama de Flujo";
+  if (v.includes("sinoptico") || v.includes("sinóptico") || v.includes("esquema")) return "Cuadro Sinóptico";
+  if (v.includes("venn")) return "Diagrama de Venn";
+  if (v.includes("tiempo") || v.includes("timeline")) return "Línea de Tiempo";
+  return raw;
+}
+
+async function _unidadGenerarGraficoDesdeLecturaHTML({
+  categoria = "",
+  lecturaResuelta = null,
+  statusId = ""
+} = {}) {
+  const lectura = lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
+  const titulo = String(lecturaResuelta?.titulo || lectura?.titulo || lectura?.tema || "Lectura").trim();
+  const contenidoHtml = String(lecturaResuelta?.contenido || (lectura ? _contenidoLecturaUnidad(lectura) : "") || "").trim();
+  const contenidoPlain = _unidadStripHtmlToPlain(contenidoHtml).slice(0, 1400);
+  const categoriaFmt = String(categoria || "").trim();
+  const tipo = String(window.__unidadGraficoTipoLecturaPorCategoria?.[categoriaFmt] || window.__unidadGraficoTipoSeleccionadoPorCategoria?.[categoriaFmt] || "Ilustración").trim();
+  const tipoNorm = _unidadNormalizarTipoGrafico(tipo);
+  const renderSettings = _unidadGetGraphicRenderSettingsForCategory(categoriaFmt);
+  const aspectRatio = renderSettings.aspectRatio;
+  const imageSize = renderSettings.imageSize;
+
+  if (!contenidoPlain) return "";
+  if (statusId) {
+    actualizarSpinnerProceso(statusId, `Creando apoyo visual para la lectura (<strong>${titulo}</strong>)...`);
+  }
+
+  const prompt = [
+    "Crea una imagen para NIÑOS DE PRIMARIA basada en una lectura tipo cuento.",
+    `Tipo elegido: ${tipoNorm}.`,
+    `Título: ${titulo}.`,
+    `Texto base (resumen/fragmento): ${contenidoPlain}`,
+    "Reglas visuales:",
+    "- Estilo: ilustración infantil editorial, cálida, sin texto incrustado.",
+    `- Relación de aspecto: ${aspectRatio} (${_unidadAspectRatioDescripcion(aspectRatio)}).`,
+    `- Resolución objetivo: ${imageSize} (${_unidadImageSizeDescripcion(imageSize)}).`,
+    "- Si el tipo es 'Ilustración', crea UNA escena clave del cuento (personajes + ambiente) que ayude a comprender la lectura.",
+    "- Si el tipo es un organizador (Venn/flujo/timeline/etc.), basa el gráfico en personajes, escenario, problema/solución o secuencia de eventos, con etiquetas cortas (1–3 palabras) SIEMPRE EN MAYÚSCULAS.",
+    "IMPORTANTE: ANALIZAR EL TEXTO SIEMPRE ANTES DE IMPRIMIRLO, IMPRIMIRLO CON CALMA Y BIEN HECHO, TEXTO SIEMPRE EN MAYÚSCULAS SEGÚN EL IDIOMA DEL PROMPT.",
+    "- Sin marcas de agua ni firmas."
+  ].join("\n");
+
+  const generated = await _unidadTryGenerateSupportImageNanobanana({
+    prompt,
+    aspectRatio,
+    imageSize
+  });
+  const categoriaFmtKey = String(categoria || "").trim();
+  const cacheKey = `__LECTURA__:${categoriaFmtKey || "categoria"}`;
+  const persisted = await _unidadPersistGeneratedSupportGraphic({
+    dataUrl: String(generated?.dataUrl || "").trim(),
+    subtema: cacheKey,
+    prompt
+  });
+  _unidadSetSupportGraphicCache(cacheKey, persisted);
+  return `
+    <figure class="cb-apoyo-lectura" style="margin: 0 0 14px 0; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff;">
+      <figcaption style="font-size: 12px; color: #374151; margin-bottom: 10px;">
+        <strong>Apoyo visual</strong> · Antes de la lectura
+      </figcaption>
+      <div class="cb-apoyo-preview" title="Ver imagen completa">
+        <img src="${String(persisted?.imageUrl || "")}" alt="Apoyo visual para la lectura ${titulo}" style="width: 100%; max-width: 820px; border-radius: 10px; display: block; margin: 0 auto;" loading="lazy">
+        <div class="cb-apoyo-preview__overlay" style="display:none;"><div class="cb-apoyo-preview__spinner" aria-hidden="true"></div></div>
+      </div>
+      <div style="display:flex; justify-content:center; gap:10px; margin-top:10px;">
+        <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-lectura-editar" data-apoyo-lectura="${_unidadEncodeAttr(cacheKey)}" title="Editar apoyo visual">
+          <i class="fa-solid fa-pen-to-square"></i><span class="unidad-btn-text"> Editar</span>
+        </button>
+        <button type="button" class="unidad-btn unidad-btn-ghost unidad-icon-btn cb-apoyo-lectura-descargar" data-apoyo-lectura="${_unidadEncodeAttr(cacheKey)}" title="Descargar apoyo visual">
+          <i class="fa-solid fa-download"></i><span class="unidad-btn-text"> Descargar</span>
+        </button>
+      </div>
+    </figure>
+  `;
+}
+
+function ensureUnidadTipoGraficoModal() {
+  let modal = document.getElementById("cbUnidadTipoGraficoModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "cbUnidadTipoGraficoModal";
+  modal.className = "cb-unidad-grafico-modal";
+  modal.innerHTML = `
+    <div class="cb-unidad-grafico-modal__backdrop" data-action="close"></div>
+    <div class="cb-unidad-grafico-modal__dialog" role="dialog" aria-modal="true" aria-label="Tipo de organizador visual">
+      <header class="cb-unidad-grafico-modal__header">
+        <div class="cb-unidad-grafico-modal__title-wrap">
+          <div class="cb-unidad-grafico-modal__title">Tipo de organizador visual</div>
+          <div class="cb-unidad-grafico-modal__subtitle">Se usará para generar el apoyo visual de esta categoría (primaria).</div>
+        </div>
+        <button type="button" class="cb-unidad-grafico-modal__close" data-action="close" aria-label="Cerrar">×</button>
+      </header>
+      <div class="cb-unidad-grafico-modal__body" id="cbUnidadTipoGraficoModalBody"></div>
+      <footer class="cb-unidad-grafico-modal__footer">
+        <button type="button" data-action="cancel" class="unidad-btn unidad-btn-ghost">Cancelar</button>
+        <button type="button" data-action="use-reading" class="unidad-btn unidad-btn-secondary">Usar en Lectura</button>
+        <button type="button" data-action="use-both" class="unidad-btn unidad-btn-secondary">Lectura + Actividades</button>
+        <button type="button" data-action="use-activities" class="unidad-btn unidad-btn-primary">Usar en Actividades</button>
+      </footer>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+async function _unidadSolicitarTipoGraficoParaCategoriaSiAplica({ categoria = "", subtemas = [] } = {}) {
+  const categoriaFmt = String(categoria || "").trim();
+  if (!categoriaFmt) return "auto";
+  const list = Array.isArray(subtemas) ? subtemas : [];
+  const hayImagen = list.some((sub) => !!document.querySelector(`input[name='imagen_${sub}']`)?.checked);
+  if (!hayImagen) return "auto";
+
+  window.__unidadGraficoTipoSeleccionadoPorCategoria = window.__unidadGraficoTipoSeleccionadoPorCategoria || {};
+  window.__unidadGraficoUsoSeleccionadoPorCategoria = window.__unidadGraficoUsoSeleccionadoPorCategoria || {};
+  window.__unidadGraficoTipoLecturaPorCategoria = window.__unidadGraficoTipoLecturaPorCategoria || {};
+  window.__unidadGraficoRenderSettingsPorCategoria = window.__unidadGraficoRenderSettingsPorCategoria || {};
+  if (window.__unidadGraficoTipoSeleccionadoPorCategoria[categoriaFmt]) {
+    return window.__unidadGraficoTipoSeleccionadoPorCategoria[categoriaFmt];
+  }
+
+  const modal = ensureUnidadTipoGraficoModal();
+  const body = modal.querySelector("#cbUnidadTipoGraficoModalBody");
+  if (body) {
+    const savedSettings = _unidadGetGraphicRenderSettingsForCategory(categoriaFmt);
+    const ratioOptions = [
+      { value: "1:1", label: "1:1", desc: "Cuadrado", previewClass: "is-square" },
+      { value: "4:3", label: "4:3", desc: "Horizontal clásico", previewClass: "is-4-3" },
+      { value: "3:4", label: "3:4", desc: "Vertical clásico", previewClass: "is-3-4" },
+      { value: "16:9", label: "16:9", desc: "Panorámico", previewClass: "is-16-9" },
+      { value: "9:16", label: "9:16", desc: "Vertical móvil", previewClass: "is-9-16" },
+      { value: "21:9", label: "21:9", desc: "Panorámico ancho", previewClass: "is-21-9" }
+    ];
+    const sizeOptions = [
+      { value: "512", label: "512", desc: "Referencia rápida" },
+      { value: "1K", label: "1K", desc: "Estándar" },
+      { value: "2K", label: "2K", desc: "Alta calidad" },
+      { value: "4K", label: "4K", desc: "Máxima calidad" }
+    ];
+    const opciones = [
+      { value: "auto", label: "Auto (varía por categoría)", desc: "El sistema elige el organizador más adecuado." },
+      { value: "Infografía", label: "Infografía", desc: "Póster educativo con iconos y bloques." },
+      { value: "Ilustración", label: "Ilustración (cuento)", desc: "Escena ilustrada tipo cuento para comprensión lectora." },
+      { value: "Mapa Mental", label: "Mapa Mental", desc: "Radial, creativo, palabras clave." },
+      { value: "Mapa Conceptual", label: "Mapa Conceptual", desc: "Jerárquico con flechas y palabras enlace." },
+      { value: "Mapa de Ideas", label: "Mapa de Ideas / Telaraña", desc: "Simple, relaciones alrededor de una idea." },
+      { value: "Diagrama de Flujo", label: "Diagrama de Flujo", desc: "Pasos/proceso con flechas." },
+      { value: "Cuadro Sinóptico", label: "Cuadro Sinóptico", desc: "Llaves/esquema de ideas principales/secundarias." },
+      { value: "Diagrama de Venn", label: "Diagrama de Venn", desc: "Comparar similitudes/diferencias." },
+      { value: "Línea de Tiempo", label: "Línea de Tiempo", desc: "Secuencia temporal." }
+    ];
+    body.innerHTML = `
+      <div class="cb-unidad-grafico-modal__section">
+        <div class="cb-unidad-grafico-modal__section-title">Tipo de imagen</div>
+        <div class="cb-unidad-grafico-modal__list" role="radiogroup" aria-label="Lista de tipos de organizador visual">
+          ${opciones.map((o, idx) => `
+            <label class="cb-unidad-grafico-modal__option">
+              <input class="cb-unidad-grafico-modal__radio" type="radio" name="cbUnidadTipoGrafico" value="${o.value}" ${idx === 0 ? "checked" : ""}>
+              <span class="cb-unidad-grafico-modal__option-copy">
+                <span class="cb-unidad-grafico-modal__option-title">${o.label}</span>
+                <span class="cb-unidad-grafico-modal__option-desc">${o.desc}</span>
+              </span>
+            </label>
+          `).join("")}
+        </div>
+      </div>
+      <div class="cb-unidad-grafico-modal__section">
+        <div class="cb-unidad-grafico-modal__section-title">Salida de imagen</div>
+        <div class="cb-unidad-grafico-modal__settings-grid">
+          <label class="cb-unidad-grafico-modal__field">
+            <span class="cb-unidad-grafico-modal__field-label">Formato / Ratio</span>
+            <div class="cb-unidad-grafico-modal__ratio-grid" role="radiogroup" aria-label="Formato y ratio de imagen">
+              ${ratioOptions.map((o) => `
+                <label class="cb-unidad-grafico-modal__ratio-option">
+                  <input class="cb-unidad-grafico-modal__radio cb-unidad-grafico-modal__ratio-radio" type="radio" name="cbUnidadAspectRatio" value="${o.value}" ${o.value === savedSettings.aspectRatio ? "checked" : ""}>
+                  <span class="cb-unidad-grafico-modal__ratio-preview ${o.previewClass}" aria-hidden="true">
+                    <span class="cb-unidad-grafico-modal__ratio-frame"></span>
+                  </span>
+                  <span class="cb-unidad-grafico-modal__ratio-copy">
+                    <span class="cb-unidad-grafico-modal__ratio-title">${o.label}</span>
+                    <span class="cb-unidad-grafico-modal__ratio-desc">${o.desc}</span>
+                  </span>
+                </label>
+              `).join("")}
+            </div>
+          </label>
+          <label class="cb-unidad-grafico-modal__field">
+            <span class="cb-unidad-grafico-modal__field-label">Calidad / Resolución</span>
+            <select class="cb-unidad-grafico-modal__select" name="cbUnidadImageSize">
+              ${sizeOptions.map((o) => `<option value="${o.value}" ${o.value === savedSettings.imageSize ? "selected" : ""}>${o.label} · ${o.desc}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div class="cb-unidad-grafico-modal__hint">
+          Usa <strong>512</strong> o <strong>1K</strong> si la imagen solo será referencia rápida. Usa <strong>2K</strong> o <strong>4K</strong> si quieres más detalle final.
+        </div>
+      </div>
+    `;
+  }
+
+  return await new Promise((resolve) => {
+    const close = () => { modal.style.display = "none"; };
+    const cleanup = () => {
+      try { modal.removeEventListener("click", onClick); } catch (_) {}
+    };
+    const pick = (uso = "actividades") => {
+      const selected = modal.querySelector("input[name='cbUnidadTipoGrafico']:checked");
+      const value = _unidadNormalizarTipoGrafico(String(selected?.value || "auto"));
+      const ratioNode = modal.querySelector("input[name='cbUnidadAspectRatio']:checked");
+      const sizeNode = modal.querySelector("select[name='cbUnidadImageSize']");
+      const renderSettings = _unidadSetGraphicRenderSettingsForCategory(categoriaFmt, {
+        aspectRatio: String(ratioNode?.value || "4:3"),
+        imageSize: String(sizeNode?.value || "512")
+      });
+      window.__unidadGraficoTipoSeleccionadoPorCategoria[categoriaFmt] = value;
+      window.__unidadGraficoUsoSeleccionadoPorCategoria[categoriaFmt] = uso;
+      if (uso === "lectura" || uso === "ambos") {
+        window.__unidadGraficoTipoLecturaPorCategoria[categoriaFmt] = "Ilustración";
+      }
+      modal.__renderSettings = renderSettings;
+      close();
+      cleanup();
+      resolve(value);
+    };
+    const cancel = () => { close(); cleanup(); resolve("auto"); };
+    modal.style.display = "flex";
+    const onClick = (ev) => {
+      const btn = ev.target.closest("[data-action]");
+      if (!btn) return;
+      const action = String(btn.getAttribute("data-action") || "");
+      if (action === "use-reading") pick("lectura");
+      else if (action === "use-both") pick("ambos");
+      else if (action === "use-activities") pick("actividades");
+      else if (action === "cancel" || action === "close") cancel();
+    };
+    modal.addEventListener("click", onClick);
+  });
+}
+
+function ensureUnidadSupportGraphicLightbox() {
+  let modal = document.getElementById(UNIDAD_SUPPORT_GRAPHIC_LIGHTBOX_ID);
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = UNIDAD_SUPPORT_GRAPHIC_LIGHTBOX_ID;
+  modal.className = "cb-module-graphic-lightbox hidden";
+  modal.setAttribute("aria-hidden", "true");
+  modal.inert = true;
+  modal.dataset.mode = "preview";
+  modal.dataset.section = "composition";
+  modal.dataset.zoom = "1";
+  modal.__supportContext = { subtema: "", imgEl: null, originalSrc: "" };
+  modal.__graphicLayers = { simplePreview: {} };
+  modal.innerHTML = `
+    <div class="cb-module-graphic-lightbox__backdrop" data-unidad-action="close-support-graphic"></div>
+    <div class="cb-module-graphic-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Editor de imagen de apoyo">
+      <header class="cb-module-graphic-lightbox__header">
+        <div class="cb-module-graphic-lightbox__header-copy">
+          <div class="cb-module-graphic-lightbox__header-title-row">
+            <div class="cb-module-graphic-lightbox__header-title">Editar imagen de apoyo</div>
+            <div class="cb-module-graphic-lightbox__caption"></div>
+          </div>
+        </div>
+        <div class="cb-module-graphic-lightbox__header-actions">
+          <button type="button" class="cb-module-graphic-lightbox__close" data-unidad-action="close-support-graphic" aria-label="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </header>
+      <div class="cb-module-graphic-lightbox__body">
+        <section class="cb-module-graphic-lightbox__stage-wrap">
+          <div class="cb-module-graphic-lightbox__stage-scroll">
+            <div class="cb-module-graphic-lightbox__stage">
+              <div class="cb-module-graphic-lightbox__simple-preview-background-layer"></div>
+              <img class="cb-module-graphic-lightbox__image" src="" alt="">
+              <div class="cb-module-graphic-lightbox__simple-preview-text-layer"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <footer class="cb-module-graphic-lightbox__footer"></footer>
+    </div>
+  `;
+
+  const close = () => {
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    modal.inert = true;
+    document.body.classList.remove("cb-module-graphic-lightbox-open");
+    if (unidadSupportGraphicLightboxLastFocus && typeof unidadSupportGraphicLightboxLastFocus.focus === "function") {
+      unidadSupportGraphicLightboxLastFocus.focus();
+    }
+  };
+
+  modal.addEventListener("click", async (event) => {
+    const actionNode = event.target.closest("[data-unidad-action]");
+    if (!actionNode) return;
+    const action = String(actionNode.getAttribute("data-unidad-action") || "").trim();
+    if (action === "close-support-graphic") {
+      close();
+      return;
+    }
+    if (action === "support-text-apply") {
+      const applied = upsertSelectedPreviewText(modal);
+      renderSimplePreviewText(modal);
+      renderSimplePreviewFooter(modal);
+      if (!applied) alert("Escribe un texto antes de aplicar.");
+      return;
+    }
+    if (action === "support-save") {
+      try {
+        const previewState = getSimplePreviewState(modal);
+        if (String(previewState.text || "").trim()) upsertSelectedPreviewText(modal);
+        const merged = { ...(modal.__graphicLayers || {}), simplePreview: serializeSimplePreviewState(modal) };
+        modal.__graphicLayers = merged;
+        await _unidadExportSupportGraphicAndApply(modal);
+        close();
+      } catch (err) {
+        console.warn("No se pudo guardar imagen de apoyo:", err);
+        alert("No se pudo guardar la imagen de apoyo.");
+      }
+      return;
+    }
+    if (action === "support-download") {
+      try {
+        const previewState = getSimplePreviewState(modal);
+        if (String(previewState.text || "").trim()) upsertSelectedPreviewText(modal);
+        modal.__graphicLayers = { ...(modal.__graphicLayers || {}), simplePreview: serializeSimplePreviewState(modal) };
+        const out = await _unidadExportSupportGraphic(modal);
+        if (out?.objectUrl) {
+          const a = document.createElement("a");
+          a.href = out.objectUrl;
+          a.download = `apoyo-visual-${String(modal.__supportContext?.subtema || "subtema").replace(/\s+/g, "-")}.png`;
+          a.click();
+          setTimeout(() => _unidadRevokeObjectUrl(out.objectUrl), 1000);
+        }
+      } catch (err) {
+        console.warn("No se pudo descargar imagen de apoyo:", err);
+        alert("No se pudo descargar la imagen de apoyo.");
+      }
+      return;
+    }
+  });
+
+  modal.addEventListener("input", (event) => {
+    const previewInput = event.target.closest("[data-preview-input]");
+    if (!previewInput) return;
+    const state = getSimplePreviewState(modal);
+    const key = String(previewInput.getAttribute("data-preview-input") || "").trim();
+    if (!key) return;
+    if (key === "backgroundOpacity") state.backgroundOpacity = Math.max(0.06, Math.min(0.42, Number(previewInput.value || 18) / 100));
+    if (key === "text") state.text = String(previewInput.value || "");
+    if (key === "fontFamily") state.fontFamily = String(previewInput.value || "Arial, sans-serif");
+    if (key === "fontSize") state.fontSize = Math.max(14, Math.min(64, Number(previewInput.value || 28)));
+    if (key === "fontWeight") state.fontWeight = String(previewInput.value || "700");
+    if (key === "color") state.color = String(previewInput.value || "#1f2937");
+    if (key === "backgroundColor") state.backgroundColor = `${String(previewInput.value || "#ffffff").trim()}CC`;
+    renderSimplePreviewBackground(modal);
+    renderSimplePreviewText(modal);
+  });
+
+  modal.addEventListener("click", (event) => {
+    const cmd = event.target.closest("[data-layer-command]");
+    if (!cmd) return;
+    const command = String(cmd.getAttribute("data-layer-command") || "").trim();
+    const state = getSimplePreviewState(modal);
+    if (command === "preview-bg-preset") {
+      state.backgroundPreset = String(cmd.getAttribute("data-preview-preset") || "none").trim() || "none";
+      renderSimplePreviewBackground(modal);
+      renderSimplePreviewFooter(modal);
+      return;
+    }
+    if (command === "preview-bg-panel") {
+      state.backgroundPanelOpen = !state.backgroundPanelOpen;
+      if (state.backgroundPanelOpen) state.textPanelOpen = false;
+      renderSimplePreviewFooter(modal);
+      return;
+    }
+    if (command === "preview-text-panel") {
+      state.textPanelOpen = !state.textPanelOpen;
+      if (state.textPanelOpen) state.backgroundPanelOpen = false;
+      renderSimplePreviewFooter(modal);
+      return;
+    }
+    if (command === "preview-text-new") {
+      state.selectedTextId = "";
+      state.text = "";
+      state.textPosition = { x: 6, y: 68 };
+      state.fontFamily = "Arial, sans-serif";
+      state.fontSize = 28;
+      state.fontWeight = "700";
+      state.fontStyle = "normal";
+      state.color = "#1f2937";
+      state.backgroundColor = "transparent";
+      state.textPanelOpen = true;
+      renderSimplePreviewFooter(modal);
+      return;
+    }
+    if (command === "preview-text-apply") {
+      const applied = upsertSelectedPreviewText(modal);
+      renderSimplePreviewText(modal);
+      renderSimplePreviewFooter(modal);
+      if (!applied) alert("Escribe un texto antes de aplicar.");
+      return;
+    }
+  });
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openUnidadSupportGraphicEditor({ subtema = "", imgEl = null, caption = "" } = {}) {
+  const modal = ensureUnidadSupportGraphicLightbox();
+  unidadSupportGraphicLightboxLastFocus = document.activeElement;
+  const imgNode = modal.querySelector(".cb-module-graphic-lightbox__image");
+  const captionNode = modal.querySelector(".cb-module-graphic-lightbox__caption");
+  const resolvedSrc = String(imgEl?.getAttribute?.("src") || "").trim();
+  if (imgNode) imgNode.src = resolvedSrc;
+  if (captionNode) captionNode.textContent = caption || (typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || ""));
+  modal.__supportContext = { subtema: String(subtema || ""), imgEl, originalSrc: resolvedSrc };
+
+  window.__unidadApoyoVisualPorSubtema = window.__unidadApoyoVisualPorSubtema || {};
+  const saved = window.__unidadApoyoVisualPorSubtema[String(subtema || "")] || null;
+  modal.__graphicLayers = { simplePreview: saved?.simplePreview || {} };
+  applySimplePreviewStateFromLayers(modal, modal.__graphicLayers);
+  renderSimplePreviewBackground(modal);
+  renderSimplePreviewText(modal);
+  renderSimplePreviewFooter(modal);
+
+  // Footer custom actions (Save/Download)
+  const footer = modal.querySelector(".cb-module-graphic-lightbox__footer");
+  if (footer) {
+    footer.querySelectorAll(".cb-module-graphic-lightbox__footer-actions").forEach((n) => n.remove());
+    footer.insertAdjacentHTML("beforeend", `
+      <div class="cb-module-graphic-lightbox__footer-actions">
+        <button type="button" class="cb-module-graphic-lightbox__footer-btn" data-unidad-action="support-download" title="Descargar PNG">
+          <i class="fas fa-download"></i><span>Descargar</span>
+        </button>
+        <button type="button" class="cb-module-graphic-lightbox__footer-btn cb-module-graphic-lightbox__footer-btn--primary" data-unidad-action="support-save" title="Guardar cambios">
+          <i class="fas fa-check"></i><span>Guardar</span>
+        </button>
+      </div>
+    `);
+  }
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  modal.inert = false;
+  document.body.classList.add("cb-module-graphic-lightbox-open");
+}
+
+async function _unidadLoadImageForCanvas(src = "") {
+  const url = String(src || "").trim();
+  if (!url) throw new Error("missing_image_src");
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image_load_failed"));
+    img.src = url;
+  });
+}
+
+function _unidadDrawBackgroundPreset(ctx, preset = "none", w = 1024, h = 1024, opacity = 0.18) {
+  const p = String(preset || "none").trim() || "none";
+  const a = Math.max(0.06, Math.min(0.42, Number(opacity) || 0.18));
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = "#0f172a";
+  ctx.fillStyle = "#0f172a";
+  if (p === "grid") {
+    const step = 64;
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= h; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+  } else if (p === "reticula") {
+    const step = 48;
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= h; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+  } else if (p === "dots") {
+    const step = 44;
+    for (let y = step / 2; y < h; y += step) {
+      for (let x = step / 2; x < w; x += step) {
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function _unidadCanvasDrawTextBox(ctx, item = {}, w = 1024, h = 1024) {
+  const text = String(item?.text || "").trim();
+  if (!text) return;
+  const pos = item?.textPosition && typeof item.textPosition === "object" ? item.textPosition : { x: 6, y: 68 };
+  const xPct = Math.max(0, Math.min(100, Number(pos.x) || 0));
+  const yPct = Math.max(0, Math.min(100, Number(pos.y) || 0));
+  const x = (xPct / 100) * w;
+  const y = (yPct / 100) * h;
+
+  const fontSize = Math.max(14, Math.min(64, Number(item?.fontSize) || 28));
+  const fontWeight = String(item?.fontWeight || "700");
+  const fontStyle = String(item?.fontStyle || "normal");
+  const fontFamily = String(item?.fontFamily || "Arial, sans-serif");
+  const color = String(item?.color || "#1f2937");
+  const bg = String(item?.backgroundColor || "transparent");
+
+  ctx.save();
+  ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+  ctx.textBaseline = "top";
+
+  // Simple wrap
+  const maxWidth = Math.min(w * 0.82, w - 40);
+  const words = text.split(/\s+/g);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    const metrics = ctx.measureText(test);
+    if (metrics.width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+
+  const lineH = Math.round(fontSize * 1.22);
+  const padX = 14;
+  const padY = 10;
+  const boxW = Math.min(maxWidth, Math.max(...lines.map((l) => ctx.measureText(l).width)) + padX * 2);
+  const boxH = lines.length * lineH + padY * 2;
+
+  if (bg !== "transparent") {
+    ctx.fillStyle = bg;
+    const r = 14;
+    const bx = Math.max(10, Math.min(w - boxW - 10, x));
+    const by = Math.max(10, Math.min(h - boxH - 10, y));
+    ctx.beginPath();
+    ctx.moveTo(bx + r, by);
+    ctx.lineTo(bx + boxW - r, by);
+    ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r);
+    ctx.lineTo(bx + boxW, by + boxH - r);
+    ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH);
+    ctx.lineTo(bx + r, by + boxH);
+    ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r);
+    ctx.lineTo(bx, by + r);
+    ctx.quadraticCurveTo(bx, by, bx + r, by);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = color;
+    let ty = by + padY;
+    for (const l of lines) {
+      ctx.fillText(l, bx + padX, ty);
+      ty += lineH;
+    }
+  } else {
+    ctx.fillStyle = color;
+    let ty = y;
+    for (const l of lines) {
+      ctx.fillText(l, x, ty);
+      ty += lineH;
+    }
+  }
+  ctx.restore();
+}
+
+async function _unidadExportSupportGraphic(modal) {
+  const imgNode = modal?.querySelector?.(".cb-module-graphic-lightbox__image");
+  const src = String(imgNode?.getAttribute?.("src") || "").trim();
+  const base = await _unidadLoadImageForCanvas(src);
+  const w = 1024;
+  const h = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no_canvas_ctx");
+  ctx.clearRect(0, 0, w, h);
+  // Cover fit
+  const scale = Math.max(w / base.width, h / base.height);
+  const dw = base.width * scale;
+  const dh = base.height * scale;
+  const dx = (w - dw) / 2;
+  const dy = (h - dh) / 2;
+  ctx.drawImage(base, dx, dy, dw, dh);
+
+  const state = getSimplePreviewState(modal);
+  _unidadDrawBackgroundPreset(ctx, state.backgroundPreset, w, h, state.backgroundOpacity);
+  const items = Array.isArray(state.texts) ? state.texts : [];
+  for (const item of items) _unidadCanvasDrawTextBox(ctx, item, w, h);
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) resolve(result);
+      else reject(new Error("blob_export_failed"));
+    }, "image/png");
+  });
+  const objectUrl = _unidadBlobToObjectUrl(blob);
+  return {
+    blob,
+    objectUrl,
+    mimeType: "image/png"
+  };
+}
+
+async function _unidadExportSupportGraphicAndApply(modal) {
+  const out = await _unidadExportSupportGraphic(modal);
+  if (!(out?.blob instanceof Blob)) throw new Error("export_failed");
+  const subtema = String(modal?.__supportContext?.subtema || "").trim();
+  const imgEl = modal?.__supportContext?.imgEl || null;
+  const simplePreview = serializeSimplePreviewState(modal);
+  const persisted = await _unidadPersistSupportGraphicAsset({
+    blob: out.blob,
+    subtema,
+    simplePreview,
+    context: _unidadGetCurrentSupportGraphicContext()
+  });
+  if (imgEl && typeof imgEl.setAttribute === "function") {
+    imgEl.setAttribute("src", String(persisted?.imageUrl || ""));
+  }
+  _unidadSetSupportGraphicCache(subtema, persisted);
+  _unidadRevokeObjectUrl(out.objectUrl);
+  return { ...out, ...persisted };
+}
+
+function ensureUnidadApoyoPromptModal() {
+  let modal = document.getElementById("cbUnidadApoyoPromptModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "cbUnidadApoyoPromptModal";
+  modal.style.cssText = "position:fixed; inset:0; z-index:2147483647; display:none; align-items:center; justify-content:center; padding:16px;";
+  modal.innerHTML = `
+    <div style="position:absolute; inset:0; background:rgba(3,7,18,0.62); backdrop-filter: blur(4px);" data-action="close"></div>
+    <div style="position:relative; width:min(920px,96vw); max-height:min(86vh,820px); overflow:hidden; border-radius:18px; background:#fff; border:1px solid rgba(148,163,184,0.35); box-shadow:0 28px 86px rgba(0,0,0,0.42); display:flex; flex-direction:column;">
+      <header style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:14px 16px 10px; border-bottom:1px solid rgba(226,232,240,0.9); background:linear-gradient(180deg, rgba(248,250,252,0.98), rgba(255,255,255,0.96));">
+        <div>
+          <div style="font-weight:900; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:#0f172a;">Editar prompt del apoyo visual</div>
+          <div id="cbUnidadApoyoPromptSubtitle" style="margin-top:4px; font-size:12px; color:#64748b; font-weight:600;"></div>
+        </div>
+        <button type="button" data-action="close" aria-label="Cerrar" style="border:1px solid rgba(148,163,184,0.45); background:rgba(248,250,252,0.9); width:38px; height:38px; border-radius:999px; cursor:pointer; font-size:22px; line-height:1; display:grid; place-items:center; color:#0f172a;">×</button>
+      </header>
+      <div style="padding:12px 14px; overflow:auto; background:#f8fafc; display:grid; gap:10px;">
+        <div style="display:grid; grid-template-columns: 1fr; gap:10px;">
+          <label style="display:grid; gap:6px;">
+            <span style="font-size:12px; font-weight:800; color:#0f172a;">Prompt usado (editable)</span>
+            <textarea id="cbUnidadApoyoPromptTextarea" rows="10" style="width:100%; resize:vertical; padding:10px 12px; border-radius:12px; border:1px solid rgba(226,232,240,0.9); font-size:12px; line-height:1.4; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+          </label>
+          <div id="cbUnidadApoyoPromptStatus" style="font-size:12px; color:#64748b; font-weight:600;"></div>
+        </div>
+      </div>
+      <footer style="padding:12px 14px 14px; border-top:1px solid rgba(226,232,240,0.9); background:#fff; display:flex; justify-content:flex-end; gap:10px;">
+        <button type="button" class="unidad-btn unidad-btn-ghost" data-action="cancel">Cancelar</button>
+        <button type="button" class="unidad-btn unidad-btn-primary" data-action="regenerate">Regenerar imagen</button>
+      </footer>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+async function _unidadRegenerarApoyoVisualDesdePrompt({ subtema = "", prompt = "", imgSrc = "" } = {}) {
+  const cleanedPrompt = _unidadEnsureUppercaseTextInstruction(prompt);
+  if (!cleanedPrompt) throw new Error("Prompt vacío.");
+  const refPart = await _lecturasAgentUrlToInlinePart(String(imgSrc || "").trim(), { compactForReference: true, maxSide: 448, jpegQuality: 0.66 });
+  const styleInstruction = [
+    "Vas a REGENERAR una imagen nueva (NO copies la imagen anterior ni la reescalés).",
+    "Usa la imagen adjunta SOLO como referencia de estilo (paleta, trazo, iconos, personajes, composición general).",
+    "Debes volver a dibujar desde cero y aplicar el PROMPT actualizado.",
+    "Evita texto incrustado ilegible; si necesitas texto, usa etiquetas MUY cortas (1–3 palabras), legibles en español y SIEMPRE EN MAYÚSCULAS.",
+    "Sin marcas de agua ni firmas."
+  ].join("\n");
+  const parts = refPart
+    ? [{ text: styleInstruction }, refPart, { text: `PROMPT ACTUALIZADO:\n${cleanedPrompt}` }]
+    : [{ text: `${styleInstruction}\n\nPROMPT ACTUALIZADO:\n${cleanedPrompt}` }];
+  const modelName = "gemini-2.5-flash-image";
+  const categoria = _unidadInferGraphicCategoryFromCacheKey(subtema);
+  const renderSettings = _unidadGetGraphicRenderSettingsForCategory(categoria);
+  const image = await _unidadGenerateSupportImagePartsNanobanana({
+    parts,
+    aspectRatio: renderSettings.aspectRatio,
+    imageSize: renderSettings.imageSize,
+    temperature: 0.66
+  });
+  if (!image?.dataUrl) throw new Error("No se recibió imagen en la respuesta.");
+  const key = String(subtema || "").trim();
+  if (key) {
+    const persisted = await _unidadPersistGeneratedSupportGraphic({
+      dataUrl: image.dataUrl,
+      subtema: key,
+      prompt: cleanedPrompt,
+      simplePreview: window.__unidadApoyoVisualPorSubtema?.[key]?.simplePreview || null
+    });
+    _unidadSetSupportGraphicCache(key, persisted);
+    return String(persisted?.imageUrl || "");
+  }
+  return "";
+}
+
+function openUnidadApoyoPromptEditor({ subtema = "", imgEl = null } = {}) {
+  const modal = ensureUnidadApoyoPromptModal();
+  const subtitle = modal.querySelector("#cbUnidadApoyoPromptSubtitle");
+  const textarea = modal.querySelector("#cbUnidadApoyoPromptTextarea");
+  const status = modal.querySelector("#cbUnidadApoyoPromptStatus");
+  const subtemaFmt = typeof formatearSubtema === "function" ? formatearSubtema(subtema) : String(subtema || "");
+  if (subtitle) subtitle.textContent = subtemaFmt ? `Subtema: ${subtemaFmt}` : "";
+  window.__unidadApoyoVisualPorSubtema = window.__unidadApoyoVisualPorSubtema || {};
+  const cached = window.__unidadApoyoVisualPorSubtema[String(subtema || "").trim()] || {};
+  if (textarea) textarea.value = _unidadEnsureUppercaseTextInstruction(String(cached?.prompt || "").trim());
+  if (status) status.textContent = "";
+  modal.__ctx = { subtema: String(subtema || ""), imgEl };
+
+  const close = () => {
+    modal.style.display = "none";
+    modal.__ctx = null;
+  };
+
+  const onClick = async (ev) => {
+    const btn = ev.target.closest("[data-action]");
+    if (!btn) return;
+    const action = String(btn.getAttribute("data-action") || "");
+    if (action === "close" || action === "cancel") {
+      close();
+      modal.removeEventListener("click", onClick);
+      return;
+    }
+    if (action === "regenerate") {
+      const ctx = modal.__ctx || {};
+      const prompt = String(textarea?.value || "").trim();
+      const src = String(ctx?.imgEl?.getAttribute?.("src") || "").trim();
+      btn.disabled = true;
+      if (status) status.textContent = "Regenerando imagen (Gemini)...";
+      _unidadSetApoyoPreviewLoading(ctx?.imgEl, true);
+      try {
+        const next = await _unidadRegenerarApoyoVisualDesdePrompt({ subtema: ctx.subtema, prompt, imgSrc: src });
+        if (ctx?.imgEl && next) ctx.imgEl.setAttribute("src", next);
+        if (status) status.textContent = "Listo. Imagen regenerada.";
+        close();
+        modal.removeEventListener("click", onClick);
+      } catch (err) {
+        if (status) status.textContent = `Error: ${String(err?.message || err)}`;
+      } finally {
+        _unidadSetApoyoPreviewLoading(ctx?.imgEl, false);
+        btn.disabled = false;
+      }
+      return;
+    }
+  };
+
+  modal.addEventListener("click", onClick);
+  modal.style.display = "flex";
+}
+
+document.addEventListener("click", (event) => {
+  const preview = event.target.closest(".cb-apoyo-preview");
+  if (preview && !event.target.closest("button, a")) {
+    const imgEl = preview.querySelector("img") || event.target.closest("img");
+    const src = String(imgEl?.getAttribute?.("src") || "").trim();
+    if (src) {
+      const figure = preview.closest("figure.cb-apoyo-visual, figure.cb-apoyo-lectura");
+      const cap = figure?.querySelector?.("figcaption")?.textContent || "";
+      const title = String(cap || "").trim() || "Apoyo visual";
+      openUnidadGaleriaImagen({ src, title, alt: imgEl?.getAttribute?.("alt") || "" });
+      event.preventDefault();
+      return;
+    }
+  }
+
+  const editBtn = event.target.closest(".cb-apoyo-visual-editar");
+  if (editBtn) {
+    event.preventDefault();
+    const encoded = String(editBtn.getAttribute("data-apoyo-subtema") || "").trim();
+    const subtema = encoded ? decodeURIComponent(encoded) : "";
+    const figure = editBtn.closest("figure.cb-apoyo-visual");
+    const imgEl = figure?.querySelector?.("img") || null;
+    if (!subtema || !imgEl) return;
+    openUnidadApoyoPromptEditor({ subtema, imgEl });
+    return;
+  }
+
+  const dlBtn = event.target.closest(".cb-apoyo-visual-descargar");
+  if (dlBtn) {
+    event.preventDefault();
+    const encoded = String(dlBtn.getAttribute("data-apoyo-subtema") || "").trim();
+    const subtema = encoded ? decodeURIComponent(encoded) : "";
+    const figure = dlBtn.closest("figure.cb-apoyo-visual");
+    const imgEl = figure?.querySelector?.("img") || null;
+    const src = String(imgEl?.getAttribute?.("src") || "").trim();
+    if (!src) return;
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = `apoyo-visual-${String(subtema || "subtema").replace(/\s+/g, "-")}.png`;
+    a.click();
+  }
+
+  const lecturaEditBtn = event.target.closest(".cb-apoyo-lectura-editar");
+  if (lecturaEditBtn) {
+    event.preventDefault();
+    const encoded = String(lecturaEditBtn.getAttribute("data-apoyo-lectura") || "").trim();
+    const key = encoded ? decodeURIComponent(encoded) : "";
+    const figure = lecturaEditBtn.closest("figure.cb-apoyo-lectura");
+    const imgEl = figure?.querySelector?.("img") || null;
+    if (!key || !imgEl) return;
+    openUnidadApoyoPromptEditor({ subtema: key, imgEl });
+    return;
+  }
+
+  const lecturaDlBtn = event.target.closest(".cb-apoyo-lectura-descargar");
+  if (lecturaDlBtn) {
+    event.preventDefault();
+    const encoded = String(lecturaDlBtn.getAttribute("data-apoyo-lectura") || "").trim();
+    const key = encoded ? decodeURIComponent(encoded) : "";
+    const figure = lecturaDlBtn.closest("figure.cb-apoyo-lectura");
+    const imgEl = figure?.querySelector?.("img") || null;
+    const src = String(imgEl?.getAttribute?.("src") || "").trim();
+    if (!src) return;
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = `apoyo-lectura-${String(key || "lectura").replace(/\s+/g, "-")}.png`;
+    a.click();
+  }
+});
+
 async function _lecturasAgentGenerateImage(payload = {}, slide = {}, index = 0, token = 0) {
   if (window.__geminiImageGenerationBlocked === true) {
     throw new Error(String(window.__geminiImageGenerationBlockedReason || "Generación de imágenes Gemini bloqueada."));
@@ -9435,27 +12015,21 @@ async function _lecturasAgentGenerateImage(payload = {}, slide = {}, index = 0, 
   ];
   let lastErr = null;
   const generationConfigVariants = (temperature = 0.58) => ([
-    {
-      responseModalities: ["TEXT", "IMAGE"],
-      temperature,
-      imageConfig: {
-        aspectRatio: "16:9",
-        imageSize: "2K",
-        mimeType: "image/png"
-      }
-    },
-    {
-      responseModalities: ["TEXT", "IMAGE"],
-      temperature,
-      imageConfig: {
-        aspectRatio: "16:9",
-        imageSize: "2K"
-      }
-    },
-    {
-      responseModalities: ["TEXT", "IMAGE"],
+    buildGeminiImageGenerationConfig({
+      aspectRatio: "16:9",
+      imageSize: "512",
       temperature
-    }
+    }),
+    buildGeminiImageGenerationConfig({
+      aspectRatio: "16:9",
+      imageSize: "1K",
+      temperature
+    }),
+    buildGeminiImageGenerationConfig({
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      temperature
+    })
   ]);
 
   for (let attempt = 0; attempt < attemptConfigs.length; attempt++) {
@@ -9580,7 +12154,11 @@ async function _lecturasAgentPersistImageToStorage(slide = {}, dataUrl = "") {
   const src = String(dataUrl || "").trim();
   if (!path || !src) return "";
   try {
-    await uploadString(storageRef(storage, path), src, "data_url");
+    const blob = _unidadDataUrlToBlob(src);
+    await uploadBytes(storageRef(storage, path), blob, {
+      contentType: String(blob.type || "image/png"),
+      cacheControl: "public,max-age=31536000,immutable"
+    });
     const url = await getDownloadURL(storageRef(storage, path));
     if (url) {
       lecturasAgentViewerState.storageUrlCache.set(path, url);
@@ -11798,6 +14376,7 @@ function _setCheckboxEnFila(row, tipo = "", checked = true) {
     ficha: "ficha_",
     anexo: "anexo_",
     video: "video_",
+    imagen: "imagen_",
     recortable: "recortable_",
     generar: "generar_",
     relacion: "relacion_"
@@ -14833,17 +17412,60 @@ function _asegurarControladorAgenteUnidad() {
 function abrirModalResultadoUnidad() {
   restaurarResultadoUnidadDesdeStorage();
   adaptarTablasResultadoResponsive();
-  if (modalResultadoUnidad) modalResultadoUnidad.style.display = "block";
+  if (modalResultadoUnidad) {
+    modalResultadoUnidad.style.display = "block";
+  }
+  _inicializarFullscreenResultadoUnidad();
+  _actualizarBotonFullscreenResultadoUnidad();
+  _unidadRenderResultSyaPanel().catch(() => {});
 }
 
 function prepararNuevoResultadoUnidad() {
   const cont = document.getElementById("resultadoUnidadGenerada");
   if (cont) cont.innerHTML = "";
   limpiarResultadoUnidadEnStorage();
+  _unidadToggleResultSyaPanel(false);
   window.tablaInicialInsertada = false;
   window.rutaYTablaInsertadasEnNotas = false;
   window.notasMaestroAcumuladas = "";
   window.respuestaFinal = "";
+}
+
+function _resultadoUnidadFullscreenActivo() {
+  const panel = modalResultadoUnidad?.querySelector(".unidad-panel");
+  return !!(panel && document.fullscreenElement === panel);
+}
+
+function _actualizarBotonFullscreenResultadoUnidad() {
+  if (!toggleFullscreenResultadoUnidad) return;
+  const active = _resultadoUnidadFullscreenActivo();
+  const icon = toggleFullscreenResultadoUnidad.querySelector("i");
+  toggleFullscreenResultadoUnidad.setAttribute("aria-label", active ? "Salir de pantalla completa" : "Pantalla completa");
+  toggleFullscreenResultadoUnidad.setAttribute("title", active ? "Salir de pantalla completa" : "Pantalla completa");
+  if (icon) {
+    icon.className = `fas ${active ? "fa-compress" : "fa-expand"}`;
+  }
+}
+
+function _inicializarFullscreenResultadoUnidad() {
+  if (!toggleFullscreenResultadoUnidad || unidadResultadoFullscreenHandlerBound) return;
+  unidadResultadoFullscreenHandlerBound = true;
+  const panel = modalResultadoUnidad?.querySelector(".unidad-panel");
+  toggleFullscreenResultadoUnidad.addEventListener("click", async () => {
+    if (!panel || !document.fullscreenEnabled) return;
+    try {
+      if (document.fullscreenElement === panel) {
+        await document.exitFullscreen();
+      } else {
+        await panel.requestFullscreen();
+      }
+    } catch (_) {
+      // noop
+    } finally {
+      _actualizarBotonFullscreenResultadoUnidad();
+    }
+  });
+  document.addEventListener("fullscreenchange", _actualizarBotonFullscreenResultadoUnidad);
 }
 
 function abrirGenerarUnidadNuevaSeccion() {
@@ -14895,6 +17517,140 @@ async function regenerarResultadoUnidadDesdeToolbar() {
   await generarSeccionCategoria(categoriaObjetivo);
 }
 
+function _unidadGetResultContentNode() {
+  return modalResultadoUnidad?.querySelector(".unidad-content") || null;
+}
+
+function _unidadGetGeneratedCategoryNamesFromResult() {
+  const container = document.getElementById("resultadoUnidadGenerada");
+  if (!container) return [];
+  const names = Array.from(container.querySelectorAll(".bloque-categoria"))
+    .map((node) => String(node?.dataset?.categoria || node.querySelector("h2")?.childNodes?.[0]?.textContent || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(names));
+}
+
+function _unidadBuildResultSyaMetaLabel(version = null) {
+  if (!version) return "Original";
+  if (version.sourceType === "own") return version.isPublished ? "Mi versión publicada" : "Mi borrador";
+  if (version.sourceType === "shared") return `Compartida por ${version.ownerName || version.ownerEmail || version.ownerUid || "otro usuario"}`;
+  return "Original";
+}
+
+function _unidadBuildResultSyaSummary(entries = []) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  if (!safeEntries.length) {
+    return `<div class="unidad-result-sya-empty">No hay información de secuencia disponible para esta categoría.</div>`;
+  }
+  return safeEntries.slice(0, 3).map((entry) => {
+    const subtema = formatearSubtema(entry?.subtema || "");
+    const summary = String(entry?.T || entry?.AE || entry?.C || entry?.P || "").trim() || "Sin descripción.";
+    return `
+      <div class="unidad-result-sya-entry">
+        <strong>${_unidadEscapeHtml(subtema)}</strong>
+        <p>${_unidadEscapeHtml(summary)}</p>
+      </div>
+    `;
+  }).join("");
+}
+
+async function _unidadRenderResultSyaPanel() {
+  if (!unidadResultadoSyaPanelBody) return;
+  const token = ++unidadResultadoSyaPanelRenderToken;
+  const categorias = _unidadGetGeneratedCategoryNamesFromResult();
+  if (!categorias.length) {
+    unidadResultadoSyaPanelBody.innerHTML = `<div class="unidad-result-sya-empty">Genera al menos una categoría para ver aquí su secuencia y alcance activa.</div>`;
+    return;
+  }
+
+  unidadResultadoSyaPanelBody.innerHTML = `<div class="unidad-result-sya-empty">Cargando secuencias activas…</div>`;
+  const cards = [];
+  for (const categoria of categorias) {
+    const { context, versions } = await _unidadLoadSyaVersionsForCategoria(categoria);
+    if (token !== unidadResultadoSyaPanelRenderToken) return;
+    const selected = _unidadGetSelectedSyaVersionForContext(context, versions)
+      || versions.find((version) => version.sourceType === "original")
+      || null;
+    const entries = selected?.entries?.length
+      ? _unidadNormalizeSyaEntries(selected.entries, categoria)
+      : _unidadBuildSyaEntriesFromFlat(categoria, secuenciaActual || {});
+    const subtemasCount = Array.isArray(entries) ? entries.length : 0;
+    cards.push(`
+      <section class="unidad-result-sya-card" data-categoria="${_unidadEscapeHtml(categoria)}">
+        <div class="unidad-result-sya-card-head">
+          <div>
+            <h3 class="unidad-result-sya-card-title">${_unidadEscapeHtml(categoria)}</h3>
+            <p class="unidad-result-sya-card-meta">${subtemasCount} subtema${subtemasCount === 1 ? "" : "s"} · ${_unidadEscapeHtml(_unidadBuildResultSyaMetaLabel(selected))}</p>
+          </div>
+          <span class="unidad-result-sya-card-badge">SyA activa</span>
+        </div>
+        <div class="unidad-result-sya-summary">
+          ${_unidadBuildResultSyaSummary(entries)}
+        </div>
+        <div class="unidad-result-sya-actions">
+          <button type="button" class="unidad-result-sya-btn" data-action="edit-sya" data-categoria="${_unidadEscapeHtml(categoria)}">Editar SyA</button>
+          <button type="button" class="unidad-result-sya-btn is-primary" data-action="regen-category" data-categoria="${_unidadEscapeHtml(categoria)}">Regenerar</button>
+        </div>
+      </section>
+    `);
+  }
+
+  if (token !== unidadResultadoSyaPanelRenderToken) return;
+  unidadResultadoSyaPanelBody.innerHTML = cards.join("");
+  unidadResultadoSyaPanelBody.querySelectorAll("[data-action='edit-sya']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const categoria = String(button.dataset.categoria || "").trim();
+      if (!categoria) return;
+      await _unidadOpenSyaModal(categoria);
+    });
+  });
+  unidadResultadoSyaPanelBody.querySelectorAll("[data-action='regen-category']").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const categoria = String(button.dataset.categoria || "").trim();
+      if (!categoria) return;
+      await _unidadRegenerateCategoryFromResultPanel(categoria);
+    });
+  });
+}
+
+function _unidadToggleResultSyaPanel(force = null) {
+  const content = _unidadGetResultContentNode();
+  if (!content || !unidadResultadoSyaPanel) return;
+  const nextState = typeof force === "boolean"
+    ? force
+    : !content.classList.contains("is-sya-panel-open");
+  content.classList.toggle("is-sya-panel-open", nextState);
+  unidadResultadoSyaPanel.setAttribute("aria-hidden", nextState ? "false" : "true");
+  if (btnToggleUnidadSyaPanel) {
+    btnToggleUnidadSyaPanel.setAttribute("aria-pressed", nextState ? "true" : "false");
+  }
+  if (nextState) {
+    _unidadRenderResultSyaPanel().catch(() => {});
+  }
+}
+
+async function _unidadRegenerateCategoryFromResultPanel(categoria = "") {
+  const categoriaObjetivo = String(categoria || "").trim();
+  if (!categoriaObjetivo) return;
+  if (window.generandoCategoria && window.generandoCategoria !== categoriaObjetivo) {
+    alert(`Ya se está generando la categoría "${window.generandoCategoria}". Espera a que termine.`);
+    return;
+  }
+  detenerGeneracionUnidadGlobal();
+  for (let i = 0; i < 30 && window.generandoCategoria; i++) {
+    await sleep(150);
+  }
+  limpiarResultadoCategoria(categoriaObjetivo);
+  window.stopRequestedUnidad = false;
+  window.cancelarProyectos = false;
+  window.categoriaEnProceso = "";
+  window.generandoCategoria = null;
+  abrirModalResultadoUnidad();
+  window.ultimaCategoriaIntentada = categoriaObjetivo;
+  await generarSeccionCategoria(categoriaObjetivo);
+  _unidadRenderResultSyaPanel().catch(() => {});
+}
+
 
 // Modal
 btnAbrirModal?.addEventListener("click", () => {
@@ -14928,8 +17684,19 @@ btnAbrirResultadoUnidadTop?.addEventListener("click", () => {
 });
 
 cerrarModalResultadoUnidad?.addEventListener("click", () => {
-  if (modalResultadoUnidad) modalResultadoUnidad.style.display = "none";
+  if (modalResultadoUnidad) {
+    modalResultadoUnidad.style.display = "none";
+  }
+  _unidadToggleResultSyaPanel(false);
   mantenerEscuchaPasivaCharly();
+});
+
+btnToggleUnidadSyaPanel?.addEventListener("click", () => {
+  _unidadToggleResultSyaPanel();
+});
+
+btnCerrarUnidadSyaPanel?.addEventListener("click", () => {
+  _unidadToggleResultSyaPanel(false);
 });
 
 window.addEventListener("cb-ui-modal-closed", () => {
@@ -15004,14 +17771,34 @@ function _refrescarOpcionesInputTema(filtro = "") {
   const filtradas = q
     ? lecturas.filter((l) => _normalizarTexto(l.titulo || l.tema || "").includes(q))
     : lecturas;
-  const prev = String(inputTemaTexto.value || "");
+  const persistidos = cargarSelectsUnidad();
+  const savedTemaTexto = persistidos?.unidadTemaTexto || {};
+  const prev = String(inputTemaTexto.value || savedTemaTexto.value || "");
   inputTemaTexto.innerHTML = '<option value="">Selecciona una lectura</option>';
-  filtradas.slice(0, 250).forEach((l) => {
+  const MAX_OPTS = 2000;
+  const visible = filtradas.slice(0, MAX_OPTS);
+  visible.forEach((l) => {
     const opt = document.createElement("option");
     opt.value = String(l.id || "");
     opt.textContent = String(l.titulo || l.tema || "Sin título");
     inputTemaTexto.appendChild(opt);
   });
+  if (filtradas.length > visible.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.disabled = true;
+    opt.textContent = `Mostrando ${visible.length} de ${filtradas.length}. Usa “Buscar” o escribe para filtrar.`;
+    inputTemaTexto.appendChild(opt);
+  }
+  if (prev && !Array.from(inputTemaTexto.options || []).some((o) => String(o.value) === prev)) {
+    const lecturaPersistida = lecturas.find((l) => String(l?.id || "") === prev) || null;
+    const opt = document.createElement("option");
+    opt.value = prev;
+    opt.textContent = lecturaPersistida
+      ? String(lecturaPersistida.titulo || lecturaPersistida.tema || "Selección restaurada")
+      : String(savedTemaTexto.text || localStorage.getItem("unidad_unidadTemaTexto_label") || "Selección restaurada");
+    inputTemaTexto.appendChild(opt);
+  }
   if (prev && Array.from(inputTemaTexto.options || []).some((o) => String(o.value) === prev)) {
     inputTemaTexto.value = prev;
   }
@@ -15030,6 +17817,91 @@ function _sincronizarInputTemaConSelect() {
   inputTemaTexto.value = id;
 }
 
+function _obtenerLecturaPersistidaUnidad() {
+  const persistidos = cargarSelectsUnidad();
+  const savedTemaTexto = persistidos?.unidadTemaTexto || {};
+  const savedTema = persistidos?.unidadTema || {};
+  const id = String(
+    savedTemaTexto?.value
+    || savedTema?.value
+    || localStorage.getItem("unidad_unidadTemaTexto")
+    || localStorage.getItem("unidad_unidadTema")
+    || localStorage.getItem("ultimaLecturaSeleccionada")
+    || ""
+  ).trim();
+  const label = String(
+    savedTemaTexto?.text
+    || localStorage.getItem("unidad_unidadTemaTexto_label")
+    || ""
+  ).trim();
+  if (!id) return null;
+  return { id, label };
+}
+
+function _restaurarUltimaLecturaSeleccionadaUnidad() {
+  const saved = _obtenerLecturaPersistidaUnidad();
+  if (!saved?.id) return false;
+
+  const pool = _poolLecturasBusqueda();
+  const lecturaDesdePool = pool.find((l) => String(l?.id || "").trim() === saved.id) || null;
+  const lecturaCache = _leerLecturaCache();
+  const lectura = lecturaDesdePool
+    || (String(lecturaCache?.id || "").trim() === saved.id
+      ? {
+          id: saved.id,
+          titulo: lecturaCache?.titulo || saved.label,
+          tema: lecturaCache?.tema || lecturaCache?.titulo || saved.label,
+          nivel: lecturaCache?.nivel || "",
+          grado: lecturaCache?.grado || "",
+          trimestre: lecturaCache?.trimestre || "",
+          unidad: lecturaCache?.unidad || "",
+          tipo: lecturaCache?.tipo || "principal",
+          sourceCollection: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
+          coleccion: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas")
+        }
+      : null);
+
+  if (inputTemaTexto) {
+    if (!Array.from(inputTemaTexto.options || []).some((o) => String(o.value) === saved.id)) {
+      const opt = document.createElement("option");
+      opt.value = saved.id;
+      opt.textContent = String(lectura?.titulo || lectura?.tema || saved.label || "Selección restaurada");
+      inputTemaTexto.appendChild(opt);
+    }
+    inputTemaTexto.value = saved.id;
+  }
+
+  if (lectura && (!selectTema || String(selectTema.value || "").trim() !== saved.id)) {
+    _aplicarLecturaPrincipalSeleccionada(lectura);
+    return true;
+  }
+
+  return !!lectura;
+}
+
+async function _restaurarUltimaLecturaSeleccionadaPostCarga() {
+  if (unidadLecturaRestoreBootDone) return;
+  const contextoListo = () => !!(
+    String(selectNivel?.value || "").trim() &&
+    String(selectGrado?.value || "").trim() &&
+    String(selectTrimestre?.value || "").trim() &&
+    String(selectUnidad?.value || "").trim()
+  );
+  for (let i = 0; i < 12; i++) {
+    if (contextoListo()) break;
+    await sleep(200);
+  }
+  unidadLecturaRestoreBootDone = true;
+  try {
+    _hidratarLecturasUnidadDesdeCacheLocal();
+    _refrescarOpcionesInputTema("");
+    await cargarTodasLasLecturas({ forceRefresh: true });
+    _restaurarUltimaLecturaSeleccionadaUnidad();
+  } catch (_) {
+    _restaurarUltimaLecturaSeleccionadaUnidad();
+  }
+}
+
 function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   if (!lectura || !lectura.id) return false;
   if (!selectTema) return false;
@@ -15038,6 +17910,12 @@ function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   selectTema.value = lectura.id;
   selectTema.dispatchEvent(new Event("change", { bubbles: true }));
   _sincronizarInputTemaConSelect();
+  try {
+    localStorage.setItem("unidad_unidadTemaTexto", String(lectura.id || ""));
+    localStorage.setItem("unidad_unidadTemaTexto_label", String(lectura.titulo || lectura.tema || ""));
+  } catch (_) {
+    // noop
+  }
   guardarSelectsUnidad();
   return true;
 }
@@ -15301,7 +18179,8 @@ async function actualizarTemasLecturas() {
   const gradoTexto = selectGrado.value;
   const gradoNumero = gradoMap[gradoTexto];
   const selectTema = document.getElementById('unidadTema');
-  const temaActual = selectTema?.value || "";
+  const lecturaPersistida = _obtenerLecturaPersistidaUnidad();
+  const temaActual = String(selectTema?.value || lecturaPersistida?.id || "").trim();
 
   // Verificar si hay una selección bloqueada por el usuario
   const seleccionModal = localStorage.getItem('lecturaSeleccionadaDesdeModal') === 'true';
@@ -15324,6 +18203,9 @@ async function actualizarTemasLecturas() {
       unidad: selectUnidad?.value || ""
     });
     if (coincide) {
+      if (!String(selectTema?.value || "").trim()) {
+        _restaurarUltimaLecturaSeleccionadaUnidad();
+      }
       return; // Mantener selección manual solo si coincide con el contexto actual
     }
     // Si cambió el contexto, liberar bloqueo y limpiar lectura obsoleta.
@@ -15337,9 +18219,10 @@ async function actualizarTemasLecturas() {
     if (selectTema) {
       selectTema.innerHTML = '<option value="">Selecciona nivel y grado primero</option>';
     }
-    _sincronizarInputTemaConSelect();
+    if (!lecturaPersistida?.id) {
+      _sincronizarInputTemaConSelect();
+    }
     _refrescarOpcionesInputTema("");
-    guardarSelectsUnidad();
     return;
   }
 
@@ -15362,9 +18245,33 @@ async function actualizarTemasLecturas() {
     if (!coincide) {
       if (selectTema) selectTema.value = "";
       if (inputTemaTexto) inputTemaTexto.value = "";
+    } else if (!String(selectTema?.value || "").trim() && lecturaActual?.id) {
+      _aplicarLecturaPrincipalSeleccionada(lecturaActual);
     }
     guardarSelectsUnidad();
     if (coincide) return;
+  }
+
+  if (lecturaPersistida?.id) {
+    let lecturaPersistidaCompleta = _poolLecturasBusqueda().find((l) => String(l?.id || "") === String(lecturaPersistida.id)) || null;
+    if (!lecturaPersistidaCompleta) {
+      try {
+        lecturaPersistidaCompleta = await _resolverLecturaPorId(lecturaPersistida.id);
+      } catch (_) {
+        lecturaPersistidaCompleta = null;
+      }
+    }
+    const coincidePersistida = _lecturaCoincideConContexto(lecturaPersistidaCompleta, {
+      nivel,
+      grado: gradoNumero || gradoTexto,
+      trimestre: selectTrimestre?.value || "",
+      unidad: selectUnidad?.value || ""
+    });
+    if (coincidePersistida && lecturaPersistidaCompleta?.id) {
+      _aplicarLecturaPrincipalSeleccionada(lecturaPersistidaCompleta);
+      guardarSelectsUnidad();
+      return;
+    }
   }
 
   // Si llegamos aquí, limpiar el bloqueo
@@ -15376,9 +18283,10 @@ async function actualizarTemasLecturas() {
       <option value="">Usa el botón "Buscar" para seleccionar lectura</option>
     `;
   }
-  _sincronizarInputTemaConSelect();
+  if (!lecturaPersistida?.id) {
+    _sincronizarInputTemaConSelect();
+  }
   _refrescarOpcionesInputTema("");
-  guardarSelectsUnidad();
 }
 
 
@@ -16176,6 +19084,1356 @@ async function proponerSecuenciaIA(nivel, grado, trimestre, unidad, categorias) 
 // 2) Conectar botones “Generar sección” (helper seguro)
 // =========================
 
+const UNIDAD_SYA_MODAL_ID = "unidadSyaModal";
+const UNIDAD_SYA_MODAL_STYLE_ID = "unidadSyaModalStyle";
+const UNIDAD_SYA_MAX_Z_INDEX = 2147483000;
+const UNIDAD_SYA_CELL_MODAL_ID = "unidadSyaCellModal";
+const UNIDAD_SYA_CELL_MODAL_Z_INDEX = 2147483010;
+const UNIDAD_SYA_SELECTIONS_STORAGE_KEY = "unidad_sya_selections_v1";
+
+function _unidadLoadPersistedSyaSelections() {
+  try {
+    const raw = localStorage.getItem(UNIDAD_SYA_SELECTIONS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _unidadPersistSyaSelections(selections = {}) {
+  try {
+    localStorage.setItem(UNIDAD_SYA_SELECTIONS_STORAGE_KEY, JSON.stringify(selections || {}));
+  } catch (_) {
+    // noop
+  }
+}
+
+function _unidadGetSyaState() {
+  if (!window.__unidadSyaState || typeof window.__unidadSyaState !== "object") {
+    window.__unidadSyaState = {
+      selectionsByContext: _unidadLoadPersistedSyaSelections(),
+      versionsByContext: {},
+      modal: {
+        categoria: "",
+        context: null,
+        versions: [],
+        selectedVersionKey: "original",
+        editorEntries: [],
+        cellEditor: null,
+        pendingGenerateCategoria: ""
+      }
+    };
+  }
+  return window.__unidadSyaState;
+}
+
+function _unidadCloneJson(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return Array.isArray(value) ? [...value] : (value && typeof value === "object" ? { ...value } : value);
+  }
+}
+
+function _unidadEscapeHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function _unidadHashString(input = "") {
+  const text = String(input || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function _unidadSlug(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "na";
+}
+
+function _unidadGetCategoriaSubtemasFallback() {
+  return {
+    "Proyectos": ["Proyectos"],
+    "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
+    "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"],
+    "Ciencias sociales": ["Historia", "Geografia"],
+    "Formación socioemocional": ["CivicaEtica", "Socioemocional"],
+    "Matemáticas": ["Matematicas"]
+  };
+}
+
+function _unidadGetCategoriaSubtemas(categoria = "") {
+  const safeCategory = String(categoria || "").trim();
+  const fromRuntime = {};
+  Object.entries(window.categoriaPorSubtema || {}).forEach(([subtema, cat]) => {
+    if (!fromRuntime[cat]) fromRuntime[cat] = [];
+    fromRuntime[cat].push(subtema);
+  });
+  const source = Object.keys(fromRuntime).length ? fromRuntime : _unidadGetCategoriaSubtemasFallback();
+  return Array.isArray(source[safeCategory]) ? [...source[safeCategory]] : [];
+}
+
+function _unidadResolveCategoriaForSubtema(subtema = "") {
+  const direct = window.categoriaPorSubtema?.[subtema];
+  if (direct) return direct;
+  const byFallback = Object.entries(_unidadGetCategoriaSubtemasFallback()).find(([, list]) => list.includes(subtema));
+  return byFallback?.[0] || "";
+}
+
+function _unidadBuildLecturaContextSnapshot() {
+  const principalId = String(selectTema?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  const principalText = String(selectTema?.selectedOptions?.[0]?.textContent || "").trim();
+  const ascText = String(selectTemaASC?.selectedOptions?.[0]?.textContent || "").trim();
+  const manualText = String(inputTemaTexto?.value || "").trim();
+  const mode = String(window.__unidadLecturaDecision?.mode || "").trim() || "auto";
+  const ids = [principalId, ascId].filter(Boolean);
+  return {
+    mode,
+    principalId,
+    ascId,
+    principalText,
+    ascText,
+    manualText,
+    ids,
+    signature: JSON.stringify({
+      mode,
+      principalId,
+      ascId,
+      manualText: _unidadSlug(manualText)
+    })
+  };
+}
+
+function _unidadBuildSyaContext(categoria = "") {
+  const safeCategory = String(categoria || "").trim();
+  const nivel = String(document.getElementById("unidadNivel")?.value || selectNivel?.value || "").trim();
+  const grado = String(document.getElementById("unidadGrado")?.value || selectGrado?.value || "").trim();
+  const trimestre = String(document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "").trim();
+  const unidad = String(document.getElementById("unidadNumero")?.value || selectUnidad?.value || "").trim();
+  const lecturaContext = _unidadBuildLecturaContextSnapshot();
+  const contextKeyBase = JSON.stringify({
+    nivel,
+    grado,
+    trimestre,
+    unidad,
+    categoria: safeCategory
+  });
+  return {
+    nivel,
+    grado,
+    trimestre,
+    unidad,
+    categoria: safeCategory,
+    lecturaContext,
+    contextKey: _unidadHashString(contextKeyBase),
+    contextLabel: `${nivel || "-"} · ${grado || "-"} · T${trimestre || "-"} · U${unidad || "-"}`
+  };
+}
+
+function _unidadBuildSyaDocId(context = null) {
+  const ctx = context || {};
+  const ownerUid = String(ctx?.ownerUid || "").trim() || "anon";
+  const contextKey = String(ctx?.contextKey || _unidadHashString(JSON.stringify(ctx || {}))).trim();
+  return `sya-${_unidadSlug(ownerUid)}-${contextKey}`;
+}
+
+function _unidadBuildSyaEntriesFromFlat(categoria = "", flat = {}) {
+  return _unidadGetCategoriaSubtemas(categoria).map((subtema) => {
+    const key = String(subtema || "").replace(/\s+/g, "_");
+    return {
+      subtema,
+      T: String(flat?.[`${key}_T`] || "").trim(),
+      AE: String(flat?.[`${key}_AE`] || "").trim(),
+      C: String(flat?.[`${key}_C`] || "").trim(),
+      P: String(flat?.[`${key}_P`] || "").trim()
+    };
+  });
+}
+
+function _unidadNormalizeSyaEntries(entries = [], categoria = "") {
+  const fallbackEntries = _unidadBuildSyaEntriesFromFlat(categoria, secuenciaActual || {});
+  const fallbackMap = new Map(fallbackEntries.map((entry) => [String(entry.subtema || ""), entry]));
+  return _unidadGetCategoriaSubtemas(categoria).map((subtema) => {
+    const found = Array.isArray(entries)
+      ? entries.find((entry) => String(entry?.subtema || "") === String(subtema))
+      : null;
+    const base = found || fallbackMap.get(String(subtema)) || { subtema, T: "", AE: "", C: "", P: "" };
+    return {
+      subtema,
+      T: String(base?.T || "").trim(),
+      AE: String(base?.AE || "").trim(),
+      C: String(base?.C || "").trim(),
+      P: String(base?.P || "").trim()
+    };
+  });
+}
+
+function _unidadApplyEntriesToFlat(baseFlat = {}, categoria = "", entries = []) {
+  const next = { ...(baseFlat || {}) };
+  _unidadNormalizeSyaEntries(entries, categoria).forEach((entry) => {
+    const key = String(entry.subtema || "").replace(/\s+/g, "_");
+    next[`${key}_T`] = String(entry.T || "").trim();
+    next[`${key}_AE`] = String(entry.AE || "").trim();
+    next[`${key}_C`] = String(entry.C || "").trim();
+    next[`${key}_P`] = String(entry.P || "").trim();
+  });
+  return next;
+}
+
+function _unidadVersionSelectionKey(version = null) {
+  if (!version || version.sourceType === "original") return "original";
+  return `${String(version.sourceType || "own")}:${String(version.ownerUid || "")}:${String(version.docId || "")}`;
+}
+
+function _unidadNormalizeSyaVersion(source = {}, options = {}) {
+  const categoria = String(options.categoria || source?.categoria || "").trim();
+  const currentUid = String(options.currentUid || "").trim();
+  const ownerUid = String(source?.ownerUid || currentUid || "").trim();
+  const sourceType = options.sourceType || source?.sourceType || (ownerUid && ownerUid !== currentUid ? "shared" : "own");
+  const entries = _unidadNormalizeSyaEntries(source?.entries || options.entries || [], categoria);
+  const label = options.label || source?.label || (
+    sourceType === "original"
+      ? "Original"
+      : sourceType === "own"
+        ? "Mi versión"
+        : `Compartida por ${String(source?.ownerName || source?.ownerEmail || ownerUid || "otro usuario").trim()}`
+  );
+  const version = {
+    sourceType,
+    ownerUid,
+    ownerName: String(source?.ownerName || "").trim(),
+    ownerEmail: String(source?.ownerEmail || "").trim(),
+    docId: String(source?.docId || "").trim(),
+    categoria,
+    contextKey: String(source?.contextKey || options.contextKey || "").trim(),
+    isPublished: source?.isPublished === true || source?.publicContextKey === String(options.contextKey || source?.contextKey || "").trim(),
+    publicContextKey: String(source?.publicContextKey || "").trim(),
+    createdAt: source?.createdAt || "",
+    updatedAt: source?.updatedAt || "",
+    entries,
+    editable: sourceType !== "shared",
+    label
+  };
+  version.selectionKey = _unidadVersionSelectionKey(version);
+  return version;
+}
+
+function _unidadGetSelectedSyaVersionForContext(context = null, versions = []) {
+  const ctx = context || {};
+  const state = _unidadGetSyaState();
+  const selected = state.selectionsByContext?.[String(ctx.contextKey || "")];
+  if (selected?.selectionKey) {
+    const found = (versions || []).find((version) => version.selectionKey === selected.selectionKey);
+    if (found) return found;
+  }
+  const ownVersion = (versions || []).find((version) => version.sourceType === "own");
+  if (ownVersion) return ownVersion;
+  const sharedVersion = (versions || []).find((version) => version.sourceType === "shared");
+  if (sharedVersion) return sharedVersion;
+  return (versions || []).find((version) => version.sourceType === "original") || versions?.[0] || null;
+}
+
+function _unidadGetEffectiveSyaEntriesForCategoria(categoria = "") {
+  const context = _unidadBuildSyaContext(categoria);
+  const state = _unidadGetSyaState();
+  const versions = Array.isArray(state.versionsByContext?.[context.contextKey]) ? state.versionsByContext[context.contextKey] : [];
+  const selected = _unidadGetSelectedSyaVersionForContext(context, versions);
+  if (selected?.entries?.length) return _unidadNormalizeSyaEntries(selected.entries, categoria);
+  return _unidadBuildSyaEntriesFromFlat(categoria, secuenciaActual || {});
+}
+
+function _unidadBuildEffectiveSecuenciaFlatForCategoria(categoria = "") {
+  const entries = _unidadGetEffectiveSyaEntriesForCategoria(categoria);
+  return _unidadApplyEntriesToFlat(secuenciaActual || {}, categoria, entries);
+}
+
+function _unidadBuildEffectiveSecuenciaFlatAllCategories() {
+  let next = { ...(secuenciaActual || {}) };
+  Object.keys(_unidadGetCategoriaSubtemasFallback()).forEach((categoria) => {
+    next = _unidadApplyEntriesToFlat(next, categoria, _unidadGetEffectiveSyaEntriesForCategoria(categoria));
+  });
+  return next;
+}
+
+function _unidadGetSyAValueForSubtema(subtema = "", field = "T") {
+  const safeField = String(field || "").trim().toUpperCase();
+  const categoria = _unidadResolveCategoriaForSubtema(subtema);
+  const entries = _unidadGetEffectiveSyaEntriesForCategoria(categoria);
+  const found = entries.find((entry) => String(entry?.subtema || "") === String(subtema || ""));
+  if (found && Object.prototype.hasOwnProperty.call(found, safeField)) {
+    return String(found?.[safeField] || "").trim();
+  }
+  const key = String(subtema || "").replace(/\s+/g, "_");
+  return String(secuenciaActual?.[`${key}_${safeField}`] || "").trim();
+}
+
+function _unidadApplySyaSelection(context = null, version = null) {
+  const ctx = context || {};
+  if (!ctx?.contextKey || !version?.selectionKey) return;
+  const state = _unidadGetSyaState();
+  state.selectionsByContext[ctx.contextKey] = {
+    selectionKey: version.selectionKey,
+    categoria: String(ctx.categoria || "").trim(),
+    ownerUid: String(version.ownerUid || "").trim(),
+    docId: String(version.docId || "").trim(),
+    sourceType: String(version.sourceType || "original").trim(),
+    label: String(version.label || "").trim(),
+    updatedAt: Date.now()
+  };
+  _unidadPersistSyaSelections(state.selectionsByContext);
+  if (typeof refrescarTablaInicial === "function") {
+    try { refrescarTablaInicial(); } catch (_) { }
+  }
+  if (_unidadGetResultContentNode()?.classList?.contains("is-sya-panel-open")) {
+    _unidadRenderResultSyaPanel().catch(() => {});
+  }
+}
+
+function _unidadResetSyaRuntimeCaches() {
+  const state = _unidadGetSyaState();
+  state.versionsByContext = {};
+  state.modal = {
+    categoria: "",
+    context: null,
+    versions: [],
+    selectedVersionKey: "original",
+    editorEntries: [],
+    cellEditor: null,
+    pendingGenerateCategoria: ""
+  };
+}
+
+async function _unidadLoadSyaVersionsForCategoria(categoria = "") {
+  const safeCategory = String(categoria || "").trim();
+  const context = _unidadBuildSyaContext(safeCategory);
+  const state = _unidadGetSyaState();
+  if (Array.isArray(state.versionsByContext?.[context.contextKey]) && state.versionsByContext[context.contextKey].length) {
+    return { context, versions: state.versionsByContext[context.contextKey] };
+  }
+
+  const baseEntries = _unidadBuildSyaEntriesFromFlat(safeCategory, secuenciaActual || {});
+  const currentUser = await _unidadGetAuthUser();
+  if (!currentUser?.uid) {
+    const onlyOriginal = [_unidadNormalizeSyaVersion({ entries: baseEntries }, { categoria: safeCategory, sourceType: "original", label: "Original", contextKey: context.contextKey })];
+    state.versionsByContext[context.contextKey] = onlyOriginal;
+    return { context, versions: onlyOriginal };
+  }
+
+  const versions = [
+    _unidadNormalizeSyaVersion({ entries: baseEntries }, { categoria: safeCategory, sourceType: "original", label: "Original", currentUid: currentUser.uid, contextKey: context.contextKey })
+  ];
+
+  const ownDocId = _unidadBuildSyaDocId({ ...context, ownerUid: currentUser.uid });
+  const ownRef = doc(db, "syaOverrides", ownDocId);
+  try {
+    const ownSnap = await getDoc(ownRef);
+    if (ownSnap?.exists?.()) {
+      versions.push(_unidadNormalizeSyaVersion({
+        docId: ownSnap.id,
+        ...(ownSnap.data() || {})
+      }, {
+        categoria: safeCategory,
+        sourceType: "own",
+        currentUid: currentUser.uid,
+        contextKey: context.contextKey
+      }));
+    }
+  } catch (error) {
+    console.warn("[unidad] No se pudo leer override SyA propio", error);
+  }
+
+  try {
+    const sharedSnap = await getDocs(query(
+      collection(db, "syaOverrides"),
+      where("publicContextKey", "==", context.contextKey),
+      limit(25)
+    ));
+    sharedSnap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const ownerUid = String(data?.ownerUid || "").trim();
+      if (!ownerUid || ownerUid === String(currentUser.uid || "").trim()) return;
+      versions.push(_unidadNormalizeSyaVersion({
+        docId: docSnap.id,
+        ...data
+      }, {
+        categoria: safeCategory,
+        sourceType: "shared",
+        currentUid: currentUser.uid,
+        contextKey: context.contextKey
+      }));
+    });
+  } catch (error) {
+    console.warn("[unidad] No se pudieron consultar overrides SyA compartidos", error);
+  }
+
+  const dedup = [];
+  const seen = new Set();
+  versions.forEach((version) => {
+    if (!version?.selectionKey || seen.has(version.selectionKey)) return;
+    seen.add(version.selectionKey);
+    dedup.push(version);
+  });
+  state.versionsByContext[context.contextKey] = dedup;
+  return { context, versions: dedup };
+}
+
+function _unidadEnsureSyaModalStyles() {
+  if (document.getElementById(UNIDAD_SYA_MODAL_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = UNIDAD_SYA_MODAL_STYLE_ID;
+  style.textContent = `
+    #${UNIDAD_SYA_MODAL_ID} {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      background:
+        radial-gradient(circle at top, rgba(255,255,255,0.08), transparent 24%),
+        rgba(15, 23, 42, 0.58);
+      z-index: ${UNIDAD_SYA_MAX_Z_INDEX};
+      backdrop-filter: blur(8px);
+    }
+    #${UNIDAD_SYA_MODAL_ID}.is-open {
+      display: flex;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-panel {
+      width: min(1080px, calc(100vw - 20px));
+      max-height: min(88vh, 860px);
+      overflow: auto;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%);
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 1px 0 rgba(255,255,255,0.82) inset;
+      padding: 14px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.92);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-header h3 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 15px;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      font-weight: 700;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-context {
+      margin-top: 3px;
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.4;
+      max-width: 840px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-close,
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-close {
+      border: 1px solid rgba(203, 213, 225, 0.92);
+      background: rgba(255,255,255,0.9);
+      color: #334155;
+      border-radius: 10px;
+      min-width: 34px;
+      height: 34px;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-layout {
+      display: grid;
+      grid-template-columns: minmax(240px, 292px) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-card {
+      border: 1px solid rgba(226, 232, 240, 0.92);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 34%),
+        linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      padding: 12px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-card h4 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #334155;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-versions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-versions-empty {
+      border: 1px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.72);
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version {
+      position: relative;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px 11px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      overflow: hidden;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version.is-selected {
+      border-color: #2563eb;
+      box-shadow:
+        0 0 0 2px rgba(37, 99, 235, 0.12),
+        0 10px 22px rgba(37, 99, 235, 0.08);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version label {
+      display: flex;
+      gap: 10px;
+      cursor: pointer;
+      align-items: stretch;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-radio {
+      width: 24px;
+      min-width: 24px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 3px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-body {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-meta {
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-owner {
+      color: #334155;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-version-preview {
+      color: #64748b;
+      font-size: 11px;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-badge.shared {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-badge.own {
+      background: #dcfce7;
+      color: #166534;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-badge.original {
+      background: #f1f5f9;
+      color: #334155;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-actions-inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-actions-inline .unidad-sya-btn {
+      flex: 1 1 100%;
+      justify-content: center;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-actions-inline .unidad-sya-btn.compact {
+      padding-top: 8px;
+      padding-bottom: 8px;
+      min-height: 34px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-versions-summary {
+      margin: 0 0 8px;
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editor-note {
+      margin: 0 0 8px;
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table th,
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table td {
+      border: 1px solid #dbe4f0;
+      padding: 7px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table th {
+      background: #f8fafc;
+      color: #334155;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-subtema-cell {
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 11px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-height: 84px;
+      padding: 8px;
+      border-radius: 10px;
+      background: rgba(248, 250, 252, 0.78);
+      border: 1px solid #e2e8f0;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-field-tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 26px;
+      height: 20px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-edit-btn {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      width: 26px;
+      height: 26px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-edit-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(37, 99, 235, 0.16);
+      background: #dbeafe;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-edit-btn i {
+      pointer-events: none;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable-value {
+      color: #1e293b;
+      font-size: 11px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable-value.is-empty {
+      color: #94a3b8;
+      font-style: italic;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable-hint {
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table-wrap {
+      border: 1px solid #dbe4f0;
+      border-radius: 12px;
+      overflow: auto;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.94));
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(4px);
+      z-index: ${UNIDAD_SYA_CELL_MODAL_Z_INDEX};
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID}.is-open {
+      display: flex;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-panel {
+      width: min(680px, calc(100vw - 24px));
+      max-height: min(84vh, 820px);
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid #cbd5e1;
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 36%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+      padding: 14px;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-header h4 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 14px;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-subtitle {
+      margin-top: 3px;
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-textarea {
+      width: 100%;
+      min-height: 220px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 12px;
+      resize: vertical;
+      font: inherit;
+      color: #0f172a;
+      background: #ffffff;
+      box-sizing: border-box;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-textarea:focus {
+      outline: 2px solid rgba(37, 99, 235, 0.22);
+      border-color: #2563eb;
+    }
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-cell-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer-actions,
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer-secondary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-btn,
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-btn {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #0f172a;
+      border-radius: 10px;
+      padding: 8px 11px;
+      min-height: 34px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 12px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      transition: all 0.18s ease;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-btn:hover,
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10);
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-btn.primary,
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-btn.primary {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #ffffff;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-btn.success,
+    #${UNIDAD_SYA_CELL_MODAL_ID} .unidad-sya-btn.success {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #ffffff;
+    }
+    #${UNIDAD_SYA_MODAL_ID} .unidad-sya-status {
+      color: #475569;
+      font-size: 11px;
+      min-height: 18px;
+    }
+    @media (max-width: 980px) {
+      #${UNIDAD_SYA_MODAL_ID} .unidad-sya-layout {
+        grid-template-columns: 1fr;
+      }
+      #${UNIDAD_SYA_MODAL_ID} .unidad-sya-table {
+        min-width: 700px;
+      }
+      #${UNIDAD_SYA_MODAL_ID} .unidad-sya-editable {
+        min-height: 74px;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function _unidadEnsureSyaModalDom() {
+  _unidadEnsureSyaModalStyles();
+  let modal = document.getElementById(UNIDAD_SYA_MODAL_ID);
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = UNIDAD_SYA_MODAL_ID;
+  modal.innerHTML = `
+    <div class="unidad-sya-panel" role="dialog" aria-modal="true" aria-labelledby="unidadSyaModalTitle">
+      <div class="unidad-sya-header">
+        <div>
+          <h3 id="unidadSyaModalTitle">Modificar SyA</h3>
+          <div class="unidad-sya-context" id="unidadSyaModalContext"></div>
+        </div>
+        <button type="button" class="unidad-sya-close" id="unidadSyaModalClose" aria-label="Cerrar">×</button>
+      </div>
+      <div class="unidad-sya-layout">
+        <section class="unidad-sya-card">
+          <h4>Versiones disponibles</h4>
+          <p class="unidad-sya-versions-summary">Elige la fuente completa de SyA que quieres usar para esta categoría. La original sigue intacta y tus cambios viven como versión separada.</p>
+          <div class="unidad-sya-versions" id="unidadSyaVersions"></div>
+          <div class="unidad-sya-actions-inline">
+            <button type="button" class="unidad-sya-btn compact" id="unidadSyaUseOriginal">Usar original</button>
+            <button type="button" class="unidad-sya-btn compact" id="unidadSyaRestoreOriginal">Restaurar desde original</button>
+          </div>
+        </section>
+        <section class="unidad-sya-card">
+          <h4>Editor de secuencia y alcance</h4>
+          <p class="unidad-sya-editor-note">Puedes cargar una versión existente, ajustarla y guardarla como tu versión. Nunca se altera la SyA oficial original.</p>
+          <div id="unidadSyaEditorTable"></div>
+        </section>
+      </div>
+      <div class="unidad-sya-footer">
+        <div class="unidad-sya-footer-secondary">
+          <button type="button" class="unidad-sya-btn" id="unidadSyaSaveDraft">Guardar borrador</button>
+          <button type="button" class="unidad-sya-btn success" id="unidadSyaPublish">Publicar para otros usuarios</button>
+        </div>
+        <div class="unidad-sya-footer-actions">
+          <div class="unidad-sya-status" id="unidadSyaStatus"></div>
+          <button type="button" class="unidad-sya-btn primary" id="unidadSyaApply">Aplicar esta versión para generar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  _unidadEnsureSyaCellEditorDom();
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      _unidadCloseSyaModal();
+    }
+  });
+  modal.querySelector("#unidadSyaModalClose")?.addEventListener("click", () => _unidadCloseSyaModal());
+  modal.querySelector("#unidadSyaUseOriginal")?.addEventListener("click", () => {
+    _unidadSelectVersionInSyaModal("original", { loadIntoEditor: true });
+  });
+  modal.querySelector("#unidadSyaRestoreOriginal")?.addEventListener("click", () => {
+    const state = _unidadGetSyaState();
+    const original = (state.modal.versions || []).find((version) => version.sourceType === "original");
+    if (!original) return;
+    state.modal.editorEntries = _unidadCloneJson(original.entries || []);
+    _unidadRenderSyaEditorTable();
+    _unidadSetSyaModalStatus("Editor restaurado desde la versión original.");
+  });
+  modal.querySelector("#unidadSyaSaveDraft")?.addEventListener("click", () => {
+    _unidadSaveSyaOverrideFromModal({ publish: false }).catch((error) => {
+      _unidadSetSyaModalStatus(`No se pudo guardar el borrador: ${error?.message || "sin detalle"}`, true);
+    });
+  });
+  modal.querySelector("#unidadSyaPublish")?.addEventListener("click", () => {
+    _unidadSaveSyaOverrideFromModal({ publish: true }).catch((error) => {
+      _unidadSetSyaModalStatus(`No se pudo publicar la versión: ${error?.message || "sin detalle"}`, true);
+    });
+  });
+  modal.querySelector("#unidadSyaApply")?.addEventListener("click", () => {
+    _unidadApplySyaSelectionFromModal();
+  });
+  return modal;
+}
+
+function _unidadEnsureSyaCellEditorDom() {
+  let modal = document.getElementById(UNIDAD_SYA_CELL_MODAL_ID);
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = UNIDAD_SYA_CELL_MODAL_ID;
+  modal.innerHTML = `
+    <div class="unidad-sya-cell-panel" role="dialog" aria-modal="true" aria-labelledby="unidadSyaCellTitle">
+      <div class="unidad-sya-cell-header">
+        <div>
+          <h4 id="unidadSyaCellTitle">Editar campo SyA</h4>
+          <div class="unidad-sya-cell-subtitle" id="unidadSyaCellSubtitle"></div>
+        </div>
+        <button type="button" class="unidad-sya-close" id="unidadSyaCellClose" aria-label="Cerrar">×</button>
+      </div>
+      <textarea class="unidad-sya-cell-textarea" id="unidadSyaCellTextarea"></textarea>
+      <div class="unidad-sya-cell-actions">
+        <button type="button" class="unidad-sya-btn" id="unidadSyaCellCancel">Cancelar</button>
+        <button type="button" class="unidad-sya-btn primary" id="unidadSyaCellSave">Guardar cambio</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector("#unidadSyaCellTextarea")?.addEventListener("input", () => {
+    _unidadSyncSyaCellEditorDraft();
+  });
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) _unidadCloseSyaCellEditor();
+  });
+  modal.querySelector("#unidadSyaCellClose")?.addEventListener("click", () => _unidadCloseSyaCellEditor());
+  modal.querySelector("#unidadSyaCellCancel")?.addEventListener("click", () => _unidadCloseSyaCellEditor());
+  modal.querySelector("#unidadSyaCellSave")?.addEventListener("click", () => _unidadCommitSyaCellEditor());
+  return modal;
+}
+
+function _unidadCloseSyaModal() {
+  const modal = document.getElementById(UNIDAD_SYA_MODAL_ID);
+  if (modal) modal.classList.remove("is-open");
+  _unidadCloseSyaCellEditor();
+}
+
+function _unidadSetSyaModalStatus(message = "", isError = false) {
+  const node = document.getElementById("unidadSyaStatus");
+  if (!node) return;
+  node.textContent = String(message || "").trim();
+  node.style.color = isError ? "#b91c1c" : "#475569";
+}
+
+function _unidadGetSelectedVersionKeyFromModal() {
+  const checked = document.querySelector(`#${UNIDAD_SYA_MODAL_ID} input[name="unidad-sya-version"]:checked`);
+  return String(checked?.value || "original").trim() || "original";
+}
+
+function _unidadReadSyaEditorEntries() {
+  const state = _unidadGetSyaState();
+  const current = _unidadNormalizeSyaEntries(state.modal.editorEntries || [], state.modal.categoria);
+  state.modal.editorEntries = current;
+  return current;
+}
+
+function _unidadOpenSyaCellEditor(index, field) {
+  const state = _unidadGetSyaState();
+  const entries = _unidadReadSyaEditorEntries();
+  const safeIndex = Number(index);
+  const safeField = String(field || "").trim().toUpperCase();
+  const entry = entries[safeIndex];
+  if (!entry || !["T", "AE", "C", "P"].includes(safeField)) return;
+  const modal = _unidadEnsureSyaCellEditorDom();
+  state.modal.cellEditor = {
+    index: safeIndex,
+    field: safeField
+  };
+  const title = document.getElementById("unidadSyaCellTitle");
+  const subtitle = document.getElementById("unidadSyaCellSubtitle");
+  const textarea = document.getElementById("unidadSyaCellTextarea");
+  if (title) title.textContent = `Editar ${safeField}`;
+  if (subtitle) subtitle.textContent = `${formatearSubtema(entry.subtema)} · Campo ${safeField}`;
+  if (textarea) {
+    textarea.value = String(entry[safeField] || "");
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 10);
+  }
+  modal.classList.add("is-open");
+}
+
+function _unidadSyncSyaCellEditorDraft() {
+  const state = _unidadGetSyaState();
+  const cellEditor = state.modal.cellEditor;
+  if (!cellEditor) return false;
+  const textarea = document.getElementById("unidadSyaCellTextarea");
+  const entries = _unidadReadSyaEditorEntries();
+  if (!entries[cellEditor.index]) return false;
+  entries[cellEditor.index][cellEditor.field] = String(textarea?.value || "").trim();
+  state.modal.editorEntries = entries;
+  return true;
+}
+
+function _unidadCloseSyaCellEditor() {
+  const state = _unidadGetSyaState();
+  const didSync = _unidadSyncSyaCellEditorDraft();
+  const modal = document.getElementById(UNIDAD_SYA_CELL_MODAL_ID);
+  if (modal) modal.classList.remove("is-open");
+  if (didSync) {
+    _unidadRenderSyaEditorTable();
+  }
+  state.modal.cellEditor = null;
+}
+
+function _unidadCommitSyaCellEditor() {
+  const state = _unidadGetSyaState();
+  const cellEditor = state.modal.cellEditor;
+  if (!cellEditor) return;
+  const didSync = _unidadSyncSyaCellEditorDraft();
+  if (!didSync) return;
+  _unidadRenderSyaEditorTable();
+  _unidadSetSyaModalStatus(`Campo ${cellEditor.field} actualizado.`);
+  _unidadCloseSyaCellEditor();
+}
+
+function _unidadRenderSyaEditorTable() {
+  const state = _unidadGetSyaState();
+  const container = document.getElementById("unidadSyaEditorTable");
+  if (!container) return;
+  const entries = _unidadReadSyaEditorEntries();
+  const renderCell = (entry, field, index) => {
+    const value = String(entry?.[field] || "").trim();
+    const preview = value
+      ? _unidadEscapeHtml(value)
+      : "Sin contenido todavía. Haz clic en editar para escribir este campo.";
+    return `
+      <div class="unidad-sya-editable">
+        <div class="unidad-sya-editable-top">
+          <span class="unidad-sya-field-tag">${field}</span>
+          <button
+            type="button"
+            class="unidad-sya-edit-btn"
+            data-sya-edit-index="${index}"
+            data-sya-edit-field="${field}"
+            aria-label="Editar ${field} de ${_unidadEscapeHtml(formatearSubtema(entry?.subtema || ""))}"
+            title="Editar ${field}"
+          >
+            <i class="fa-solid fa-pen"></i>
+          </button>
+        </div>
+        <div class="unidad-sya-editable-value ${value ? "" : "is-empty"}">${preview}</div>
+        <div class="unidad-sya-editable-hint">Edición puntual en ventana emergente</div>
+      </div>
+    `;
+  };
+  container.innerHTML = `
+    <div class="unidad-sya-table-wrap">
+      <table class="unidad-sya-table">
+        <thead>
+          <tr>
+            <th style="width: 170px;">Subtema</th>
+            <th>T</th>
+            <th>AE</th>
+            <th>C</th>
+            <th>P</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map((entry, index) => `
+            <tr>
+              <td class="unidad-sya-subtema-cell">${formatearSubtema(entry.subtema)}</td>
+              <td>${renderCell(entry, "T", index)}</td>
+              <td>${renderCell(entry, "AE", index)}</td>
+              <td>${renderCell(entry, "C", index)}</td>
+              <td>${renderCell(entry, "P", index)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+  container.querySelectorAll("[data-sya-edit-index][data-sya-edit-field]").forEach((button) => {
+    button.addEventListener("click", () => {
+      _unidadOpenSyaCellEditor(button.dataset.syaEditIndex, button.dataset.syaEditField);
+    });
+  });
+}
+
+function _unidadSelectVersionInSyaModal(selectionKey = "original", options = {}) {
+  const { loadIntoEditor = true } = options || {};
+  const state = _unidadGetSyaState();
+  const version = (state.modal.versions || []).find((item) => item.selectionKey === selectionKey)
+    || (state.modal.versions || []).find((item) => item.sourceType === "original")
+    || null;
+  if (!version) return;
+  state.modal.selectedVersionKey = version.selectionKey;
+  const radio = document.querySelector(`#${UNIDAD_SYA_MODAL_ID} input[name="unidad-sya-version"][value="${version.selectionKey}"]`);
+  if (radio) radio.checked = true;
+  document.querySelectorAll(`#${UNIDAD_SYA_MODAL_ID} .unidad-sya-version`).forEach((node) => {
+    node.classList.toggle("is-selected", node.dataset.selectionKey === version.selectionKey);
+  });
+  if (loadIntoEditor) {
+    state.modal.editorEntries = _unidadCloneJson(version.entries || []);
+    _unidadRenderSyaEditorTable();
+  }
+}
+
+function _unidadRenderSyaVersions() {
+  const state = _unidadGetSyaState();
+  const container = document.getElementById("unidadSyaVersions");
+  if (!container) return;
+  const selectedKey = state.modal.selectedVersionKey || "original";
+  const versions = state.modal.versions || [];
+  if (!versions.length) {
+    container.innerHTML = `<div class="unidad-sya-versions-empty">No hay versiones disponibles para este contexto. La SyA original seguirá siendo la fuente activa.</div>`;
+    return;
+  }
+  container.innerHTML = versions.map((version) => {
+    const badgeClass = version.sourceType === "shared" ? "shared" : (version.sourceType === "own" ? "own" : "original");
+    const metaBits = [];
+    const previewText = String(
+      version?.entries?.find((entry) => String(entry?.T || "").trim() || String(entry?.AE || "").trim() || String(entry?.C || "").trim() || String(entry?.P || "").trim())?.T
+      || version?.entries?.[0]?.AE
+      || version?.entries?.[0]?.C
+      || version?.entries?.[0]?.P
+      || ""
+    ).trim();
+    if (version.sourceType === "shared") {
+      metaBits.push(`Autor: ${version.ownerName || version.ownerEmail || version.ownerUid || "desconocido"}`);
+    }
+    if (version.sourceType === "own") {
+      metaBits.push(version.isPublished ? "Publicado para otros usuarios" : "Privado");
+    }
+    if (version.sourceType === "original") {
+      metaBits.push("Base oficial leída desde secuenciaAlcance");
+    }
+    return `
+      <div class="unidad-sya-version ${version.selectionKey === selectedKey ? "is-selected" : ""}" data-selection-key="${version.selectionKey}">
+        <label>
+          <div class="unidad-sya-version-radio">
+            <input type="radio" name="unidad-sya-version" value="${version.selectionKey}" ${version.selectionKey === selectedKey ? "checked" : ""}>
+          </div>
+          <div class="unidad-sya-version-body">
+            <div class="unidad-sya-version-title">
+              <span>${version.label}</span>
+              <span class="unidad-sya-badge ${badgeClass}">${version.sourceType === "shared" ? "Compartida" : version.sourceType === "own" ? "Mía" : "Original"}</span>
+            </div>
+            ${version.sourceType !== "original" ? `<div class="unidad-sya-version-owner">${_unidadEscapeHtml(version.ownerName || version.ownerEmail || version.ownerUid || "")}</div>` : ""}
+            <div class="unidad-sya-version-meta">${metaBits.join(" · ")}</div>
+            ${previewText ? `<div class="unidad-sya-version-preview">${_unidadEscapeHtml(previewText)}</div>` : ""}
+          </div>
+        </label>
+      </div>
+    `;
+  }).join("");
+
+  container.querySelectorAll('input[name="unidad-sya-version"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      _unidadSelectVersionInSyaModal(String(radio.value || "original"), { loadIntoEditor: true });
+      _unidadSetSyaModalStatus("");
+    });
+  });
+}
+
+async function _unidadOpenSyaModal(categoria = "", options = {}) {
+  const { forcePrompt = false } = options || {};
+  const modal = _unidadEnsureSyaModalDom();
+  const state = _unidadGetSyaState();
+  const { context, versions } = await _unidadLoadSyaVersionsForCategoria(categoria);
+  const selected = _unidadGetSelectedSyaVersionForContext(context, versions);
+  state.modal.categoria = String(categoria || "").trim();
+  state.modal.context = context;
+  state.modal.versions = versions;
+  state.modal.selectedVersionKey = selected?.selectionKey || "original";
+  state.modal.editorEntries = _unidadCloneJson(selected?.entries || _unidadBuildSyaEntriesFromFlat(categoria, secuenciaActual || {}));
+  const contextNode = document.getElementById("unidadSyaModalContext");
+  if (contextNode) {
+    const lecturaInfo = [
+      context.contextLabel,
+      context.categoria,
+      "Alcance del guardado: nivel, grado, trimestre y unidad"
+    ].filter(Boolean).join(" · ");
+    contextNode.textContent = lecturaInfo;
+  }
+  _unidadRenderSyaVersions();
+  _unidadRenderSyaEditorTable();
+  _unidadSetSyaModalStatus(forcePrompt ? "Selecciona la fuente de SyA que quieres usar para esta categoría." : "");
+  modal.classList.add("is-open");
+}
+
+async function _unidadSaveSyaOverrideFromModal({ publish = false } = {}) {
+  const state = _unidadGetSyaState();
+  const context = state.modal.context;
+  const categoria = state.modal.categoria;
+  const user = await _unidadGetAuthUser();
+  if (!user?.uid) throw new Error("Necesitas iniciar sesión para guardar una SyA modificada.");
+  _unidadSyncSyaCellEditorDraft();
+  const entries = _unidadReadSyaEditorEntries();
+  const docId = _unidadBuildSyaDocId({ ...context, ownerUid: user.uid });
+  const docRef = doc(db, "syaOverrides", docId);
+  const existingOwn = (state.modal.versions || []).find((version) => version.sourceType === "own");
+  const preservePublished = existingOwn?.isPublished === true;
+  const isPublished = publish ? true : preservePublished;
+  const nowIso = new Date().toISOString();
+  const payload = {
+    docId,
+    ownerUid: user.uid,
+    ownerName: String(await obtenerNombreUsuarioAutenticadoUnidad().catch(() => user.displayName || "") || "").trim(),
+    ownerEmail: String(user.email || "").trim(),
+    categoria,
+    contextKey: String(context?.contextKey || "").trim(),
+    publicContextKey: isPublished ? String(context?.contextKey || "").trim() : "",
+    isPublished,
+    nivel: String(context?.nivel || "").trim(),
+    grado: String(context?.grado || "").trim(),
+    trimestre: String(context?.trimestre || "").trim(),
+    unidad: String(context?.unidad || "").trim(),
+    lecturaContext: _unidadCloneJson(context?.lecturaContext || {}),
+    subtemas: _unidadGetCategoriaSubtemas(categoria),
+    entries,
+    updatedAt: nowIso,
+    createdAt: existingOwn?.docId ? (existingOwn.createdAt || nowIso) : nowIso
+  };
+  console.info("[unidad][SyA] Guardando override", {
+    categoria,
+    uid: user.uid,
+    docId,
+    contextKey: payload.contextKey,
+    publicContextKey: payload.publicContextKey,
+    entries: Array.isArray(entries) ? entries.length : 0
+  });
+  await setDoc(docRef, payload, { merge: true });
+  const verifySnap = await getDoc(docRef);
+  if (!verifySnap?.exists?.()) {
+    throw new Error("Firestore no confirmó la persistencia del override SyA.");
+  }
+  console.info("[unidad][SyA] Override persistido", {
+    path: `syaOverrides/${docId}`,
+    savedKeys: Object.keys(verifySnap.data() || {})
+  });
+  delete _unidadGetSyaState().versionsByContext[String(context?.contextKey || "")];
+  const { versions } = await _unidadLoadSyaVersionsForCategoria(categoria);
+  state.modal.versions = versions;
+  const ownVersion = versions.find((version) => version.sourceType === "own") || versions[0] || null;
+  if (ownVersion) {
+    _unidadApplySyaSelection(context, ownVersion);
+    state.modal.selectedVersionKey = ownVersion.selectionKey;
+    state.modal.editorEntries = _unidadCloneJson(ownVersion.entries || []);
+  }
+  _unidadRenderSyaVersions();
+  _unidadRenderSyaEditorTable();
+  _unidadSetSyaModalStatus(publish ? "SyA publicada y lista para que otros usuarios la seleccionen." : "Borrador guardado correctamente.");
+  if (_unidadGetResultContentNode()?.classList?.contains("is-sya-panel-open")) {
+    _unidadRenderResultSyaPanel().catch(() => {});
+  }
+}
+
+function _unidadApplySyaSelectionFromModal() {
+  const state = _unidadGetSyaState();
+  const context = state.modal.context;
+  const selectionKey = _unidadGetSelectedVersionKeyFromModal();
+  const version = (state.modal.versions || []).find((item) => item.selectionKey === selectionKey)
+    || (state.modal.versions || []).find((item) => item.sourceType === "original")
+    || null;
+  if (!context || !version) {
+    _unidadSetSyaModalStatus("No se pudo resolver la versión seleccionada.", true);
+    return;
+  }
+  _unidadApplySyaSelection(context, version);
+  _unidadCloseSyaModal();
+  const pendingCategoria = String(state.modal.pendingGenerateCategoria || "").trim();
+  state.modal.pendingGenerateCategoria = "";
+  if (pendingCategoria && pendingCategoria === String(context.categoria || "").trim()) {
+    setTimeout(() => {
+      document.querySelector(`.btn-icono-categoria.generar[data-categoria="${pendingCategoria}"]`)?.click();
+    }, 60);
+  }
+}
+
+async function _unidadEnsureSyaSelectionReady(categoria = "", options = {}) {
+  const { openModalIfNeeded = true } = options || {};
+  const { context, versions } = await _unidadLoadSyaVersionsForCategoria(categoria);
+  const state = _unidadGetSyaState();
+  const currentSelection = _unidadGetSelectedSyaVersionForContext(context, versions);
+  if (versions.length <= 1) {
+    if (currentSelection) _unidadApplySyaSelection(context, currentSelection);
+    return true;
+  }
+  if (currentSelection && state.selectionsByContext?.[context.contextKey]?.selectionKey) {
+    return true;
+  }
+  if (openModalIfNeeded) {
+    state.modal.pendingGenerateCategoria = String(categoria || "").trim();
+    await _unidadOpenSyaModal(categoria, { forcePrompt: true });
+  }
+  return false;
+}
+
+async function modificarSyaCategoriaHandler(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const btn = event.currentTarget;
+  const categoria = String(btn?.dataset?.categoria || "").trim();
+  if (!categoria) return;
+  await _unidadOpenSyaModal(categoria);
+}
+
 
 function wireCategoriaButtons() {
   // Limpiar event listeners previos
@@ -16192,6 +20450,16 @@ function wireCategoriaButtons() {
     // Prevenir múltiples event listeners
     btn.removeEventListener("click", generarCategoriaHandler);
     btn.addEventListener("click", generarCategoriaHandler);
+  });
+
+  const botonesSya = document.querySelectorAll(".btn-icono-categoria.sya");
+  botonesSya.forEach((btn) => {
+    const nuevoBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(nuevoBtn, btn);
+  });
+  document.querySelectorAll(".btn-icono-categoria.sya").forEach((btn) => {
+    btn.removeEventListener("click", modificarSyaCategoriaHandler);
+    btn.addEventListener("click", modificarSyaCategoriaHandler);
   });
 
   const btnDetenerProyectos = document.getElementById("btn-detener-Proyectos");
@@ -16225,6 +20493,8 @@ function generarCategoriaHandler(event) {
     (async () => {
       const estrategiaLista = await _asegurarModoLecturasUnidadManual({ categoria: cat });
       if (!estrategiaLista) return;
+      const syaReady = await _unidadEnsureSyaSelectionReady(cat, { openModalIfNeeded: true });
+      if (!syaReady) return;
 
       window.stopRequestedUnidad = false;
       window.cancelarProyectos = false;
@@ -16386,6 +20656,7 @@ async function verificarSecuencia() {
 
     // Mantén ambas referencias en sync para el resto del código que usa una u otra
     window.secuenciaActual = secuenciaActual;
+    _unidadResetSyaRuntimeCaches();
 
     // 🟢 CORREGIDO: Mapeo subtema → categoría (global) - INCLUIR "Ciencias experimentales"
     window.categoriaPorSubtema = {
@@ -16441,6 +20712,7 @@ async function verificarSecuencia() {
             <th title="Fichas" aria-label="Fichas"><i class="fa-solid fa-pen-nib unidad-th-icon"></i></th>
             <th title="Anexos" aria-label="Anexos"><i class="fa-solid fa-paperclip unidad-th-icon"></i></th>
             <th title="Videos" aria-label="Videos"><i class="fa-solid fa-film unidad-th-icon"></i></th>
+            <th title="Imagen de apoyo" aria-label="Imagen de apoyo"><i class="fa-regular fa-image unidad-th-icon"></i></th>
             <th title="Actividades" aria-label="Actividades"><i class="fa-solid fa-list-ol unidad-th-icon"></i></th>
           </tr>
         </thead>
@@ -16640,6 +20912,7 @@ async function verificarSecuencia() {
         const chkFichas = Object.assign(document.createElement("input"), { type: "checkbox", name: `ficha_${subtema}` });
         const chkAnexos = Object.assign(document.createElement("input"), { type: "checkbox", name: `anexo_${subtema}` });
         const chkVideos = Object.assign(document.createElement("input"), { type: "checkbox", name: `video_${subtema}` });
+        const chkImagenApoyo = Object.assign(document.createElement("input"), { type: "checkbox", name: `imagen_${subtema}` });
 
         [
           chkGenerar,
@@ -16647,7 +20920,8 @@ async function verificarSecuencia() {
           chkRecortable,
           chkFichas,
           chkAnexos,
-          chkVideos
+          chkVideos,
+          chkImagenApoyo
         ].forEach((chk) => chk.classList.add("categoria-switch"));
 
         // Cantidad
@@ -16689,10 +20963,13 @@ async function verificarSecuencia() {
         const tdVideo = document.createElement("td");
         tdVideo.appendChild(chkVideos);
 
+        const tdImagen = document.createElement("td");
+        tdImagen.appendChild(chkImagenApoyo);
+
         const tdCantidad = document.createElement("td");
         tdCantidad.appendChild(inputCantidad);
 
-        fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdCantidad);
+        fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad);
         tbody.appendChild(fila);
       });
 
@@ -16704,6 +20981,7 @@ async function verificarSecuencia() {
 
       encabezado.innerHTML = `
         <h3>${categoria}</h3>
+        ${_unidadBuildCategoryStyleUi(categoria)}
         <div class="botones-categoria">
             <div class="tooltip">
                 <button type="button" 
@@ -16717,6 +20995,17 @@ async function verificarSecuencia() {
                 <span class="tooltiptext">Instrucciones para Gemini</span>
             </div>
             
+            <div class="tooltip">
+                <button type="button"
+                        class="btn-icono-categoria sya btn-categoria-sya"
+                        data-categoria="${categoria}"
+                        title="Modificar SyA de esta categoría"
+                        id="btn-sya-${categoria.replace(/\s+/g, '-')}">
+                    <i class="fas fa-table-cells-large"></i>
+                </button>
+                <span class="tooltiptext">Modificar SyA</span>
+            </div>
+
             <div class="tooltip">
                 <button type="button" 
                         class="btn-icono-categoria generar" 
@@ -16739,6 +21028,7 @@ async function verificarSecuencia() {
       tablaWrap.className = "tabla-secuencia-wrap unidad-editor-table-wrap";
       tablaWrap.appendChild(tabla);
       contenedorCamposSecuencia.appendChild(tablaWrap);
+      _unidadBindCategoryStyleUi(encabezado);
 
       // Agrega los event listeners
       setTimeout(() => {
@@ -16856,16 +21146,23 @@ async function verificarSecuencia() {
     setTimeout(() => {
       const inputs = contenedorCamposSecuencia.querySelectorAll("input, select");
       inputs.forEach(input => {
-        const key = `unidad_${input.name || input.id || ""}`;
+        const fieldKey = String(input.name || input.id || "").trim();
+        if (!fieldKey) return;
+        const key = `unidad_${fieldKey}`;
         const saved = localStorage.getItem(key);
 
         if (input.type === "checkbox") {
           if (saved !== null) input.checked = (saved === "true");
 
           // CORRECCIÓN: Remover event listeners previos y agregar nuevos
-          input.replaceWith(input.cloneNode(true));
-          const newInput = contenedorCamposSecuencia.querySelector(`[name="${input.name}"]`);
-
+          const clonedInput = input.cloneNode(true);
+          input.replaceWith(clonedInput);
+          const selector = clonedInput.name
+            ? `[name="${(window.CSS && typeof window.CSS.escape === "function") ? window.CSS.escape(clonedInput.name) : clonedInput.name.replace(/"/g, '\\"')}"]`
+            : (clonedInput.id ? `#${(window.CSS && typeof window.CSS.escape === "function") ? window.CSS.escape(clonedInput.id) : clonedInput.id.replace(/"/g, '\\"')}` : "");
+          const newInput = selector ? contenedorCamposSecuencia.querySelector(selector) : clonedInput;
+          if (!newInput) return;
+          if (saved !== null) newInput.checked = (saved === "true");
           newInput.addEventListener("change", function () {
             localStorage.setItem(key, this.checked.toString());
           });
@@ -17203,8 +21500,12 @@ window.construirPromptProyecto = function (
   const instruccionAnclajeLectura = bloqueLectura
     ? `
   La lectura detonante es el eje narrativo y conceptual del proyecto.
+  El proyecto debe usar SIEMPRE Lectura + Secuencia al mismo tiempo.
   No la sustituyas por otra historia ni la diluyas con la secuencia curricular.
+  La secuencia curricular efectiva del contexto actual puede ser la original o la modificada por el usuario, y sigue siendo obligatoria.
   Integra T/AE/C/P dentro del mismo hilo de la lectura seleccionada o lectura unificada.
+  La lectura NO sustituye a T/AE/C/P y T/AE/C/P NO sustituyen a la lectura.
+  Cada fase y actividad debe reflejar simultáneamente la lectura y la secuencia curricular.
   Si hubo dos lecturas seleccionadas, tratalas como una sola lectura coherente.
   Debes reutilizar EXACTAMENTE la lectura detonante como lectura generadora del proyecto.
   Copia el HTML de la lectura detonante sin reescribir, resumir, ampliar, cambiar nombres, cambiar personajes ni agregar ejemplos.
@@ -17237,12 +21538,10 @@ window.construirPromptProyecto = function (
   const claveVideo = generarVideosFinal ? obtenerClaveVideoSafe(unidadActual) : "";
   // Generación dinámica del título del video según subtema + T/AE/C/P
   function generarTituloVideo(subtema) {
-    const clave = subtema.replace(/\s+/g, "_");
-
-    const T = secuenciaActual?.[`${clave}_T`] || "";
-    const AE = secuenciaActual?.[`${clave}_AE`] || "";
-    const C = secuenciaActual?.[`${clave}_C`] || "";
-    const P = secuenciaActual?.[`${clave}_P`] || "";
+    const T = _unidadGetSyAValueForSubtema(subtema, "T");
+    const AE = _unidadGetSyAValueForSubtema(subtema, "AE");
+    const C = _unidadGetSyAValueForSubtema(subtema, "C");
+    const P = _unidadGetSyAValueForSubtema(subtema, "P");
 
     // Construcción dinámica del título
     let base = subtema;
@@ -17359,7 +21658,7 @@ window.construirPromptProyecto = function (
 <div class="activity" style="margin-top:30px;">
   <strong>${claveVideo} - Guion de video educativo basado en el subtema: "${subtema}"</strong>
   <p style="margin:0; font-size:13px; color:#555;">
-    Integrado con T/AE/C/P: ${secuenciaActual?.[`${subtema.replace(/\s+/g, "_")}_T`] || ""}
+    Integrado con T/AE/C/P: ${_unidadGetSyAValueForSubtema(subtema, "T") || ""}
   </p>
   <table border="1" cellpadding="6" style="width:100%; margin-top:10px;">
     <tr style="background:#eaeaea;">
@@ -17414,6 +21713,10 @@ window.construirPromptProyecto = function (
   Importante: devuelve SOLO HTML final, sin comentarios extra ni marcas de código.
 
   Genera un **proyecto trimestral** para primaria, basado en los **T/AE/C/P globales** del mismo grado y trimestre, aplicando **${metodologia}**.
+  CONTRATO OBLIGATORIO:
+  - Usa SIEMPRE la secuencia curricular efectiva como fuente disciplinar principal.
+  - Si existe lectura detonante o lectura relacionada, usa SIEMPRE Lectura + Secuencia al mismo tiempo.
+  - No permitas que una sola fuente domine y borre a la otra.
 
   📊 Datos base:
 
@@ -17430,6 +21733,7 @@ window.construirPromptProyecto = function (
   - Aprendizajes esperados (AE): ${AE_resumen}
   - Contenidos (C): ${C_resumen}
   - Procesos (P): ${P_resumen}
+  - Esta es la secuencia curricular efectiva del contexto actual: original o modificada, según la selección activa del usuario.
 
   ${bloqueLectura}
   ${instruccionAnclajeLectura}
@@ -17455,7 +21759,8 @@ window.construirPromptProyecto = function (
           <p style="color:#c970d6;">…respuesta esperada…</p>
         </li>
       </ol>
-  4) Diseña el **proyecto por fases** de ${metodologia}. En **cada fase** genera actividades con **el mismo formato unificado** que usamos en otras categorías.
+  4) Diseña el **proyecto por fases** de ${metodologia}. En **cada fase** genera actividades con un formato consistente.
+     Si las instrucciones específicas del usuario activan un estilo pedagógico, ese estilo define el formato interno de las actividades de fase.
   5) Tras las actividades de **cada fase**, añade una **RÚBRICA DE FASE** (4 niveles) basada en el producto y desempeño que esa fase exige.
   6) Cierra con **criterios de evaluación global**.
 
@@ -17464,80 +21769,10 @@ window.construirPromptProyecto = function (
 
   🎯 Reglas estrictas para **cada actividad**:
   - Cada actividad va en **<div class="activity">**.
-  - Estructura EXACTA:
-  - Importante: colocar de una a cuatro subactividades (li) según lo requiera por cada, Importante en modo singular, ej: "Recorta la imagen de la página 54 y pegala en el espacio en correspondiente"<div class="activity">
-
-      **NUEVO FORMATO UNIFICADO PARA ACTIVIDADES:**
-      IMPORTANTE: El número de subactividades (li) debe ser VARIABLE según lo requiera cada actividad:
-      - Algunas actividades pueden tener solo 1 subactividad si es suficiente
-      - Otras pueden tener 2, 3 o hasta 4 subactividades si la complejidad lo requiere
-      - NO siempre deben ser 3 subactividades
-      
-      <div class="activity">
-      <p>1. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-        <ol type="a" class="steps">
-          <li>Subactividad a) describe cómo hacerlo</li>
-          <!-- AQUÍ PUEDEN IR DE 1 A 4 SUBACTIVIDADES SEGÚN SEA NECESARIO -->
-          <li>Subactividad b) amplía o aplica lo anterior (OPCIONAL)</li>
-          <li>Subactividad c) concluye o reflexiona (OPCIONAL)</li>
-          <li>Subactividad d) pregunta metacognitiva solo si se requiere (OPCIONAL)</li>
-        </ol>
-        <div class="answer">
-          <span style="color:mediumvioletred;">Respuesta: [Breve ejemplo de respuesta esperada]</span>
-        </div>
-      </div>
-
-      EJEMPLOS DE ESTRUCTURAS VÁLIDAS:
-      
-      // ✅ Actividad con 1 sola subactividad:
-      <div class="activity">
-      <p>1. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-        <ol type="a" class="steps">
-          <li>Explica paso a paso tu procedimiento</li>
-        </ol>
-        <div class="answer">
-          <span style="color:mediumvioletred;">Respuesta: [ejemplo de respuesta]</span>
-        </div>
-      </div>
-      
-      // ✅ Actividad con 2 subactividades:
-      <div class="activity">
-      <p>2. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-        <ol type="a" class="steps">
-          <li>Identifica las ideas principales</li>
-          <li>Explica con tus palabras el mensaje del autor</li>
-        </ol>
-        <div class="answer">
-          <span style="color:mediumvioletred;">Respuesta: [ejemplo de respuesta]</span>
-        </div>
-      </div>
-      
-      // ✅ Actividad con 3 subactividades:
-      <div class="activity">
-      <p>3. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-        <ol type="a" class="steps">
-          <li>Busca información en diferentes fuentes</li>
-          <li>Organiza la información encontrada</li>
-          <li>Prepara una breve presentación</li>
-        </ol>
-        <div class="answer">
-          <span style="color:mediumvioletred;">Respuesta: [ejemplo de respuesta]</span>
-        </div>
-      </div>
-      
-      // ✅ Actividad con 4 subactividades (para casos complejos):
-      <div class="activity">
-      <p>4. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-        <ol type="a" class="steps">
-          <li>Formula tu hipótesis</li>
-          <li>Diseña el procedimiento experimental</li>
-          <li>Registra tus observaciones</li>
-          <li>Analiza los resultados y saca conclusiones</li>
-        </ol>
-        <div class="answer">
-          <span style="color:mediumvioletred;">Respuesta: [ejemplo de respuesta]</span>
-        </div>
-      </div>
+  - La estructura interna debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
+  - Solo si no existe contrato de formato adicional, usa el fallback ASC tradicional.
+  - Si el formato rector NO es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con "Respuesta:" final.
+  - Si el formato rector sí es ASC, puedes usar de 1 a 4 subactividades útiles según lo requiera cada actividad.
 
      ${estructuraActividades}
 
@@ -17617,32 +21852,32 @@ window.construirPromptProyecto = function (
   <h3>Preguntas de comprensión</h3>
   <ol>
     <li>
-      <p>1.<strong>¿…texto de la pregunta 1…?</strong></p>
+      <p><strong>¿…texto de la pregunta 1…?</strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
     <li>
-      <p>2.<strong>¿…texto de la pregunta 2…?</strong></p>
+      <p><strong>¿…texto de la pregunta 2…?</strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
     <li>
-      <p>3.<strong>¿…texto de la pregunta 3…?</strong></p>
+      <p><strong>¿…texto de la pregunta 3…?</strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
     <li>
-      <p>4.<strong>¿…texto de la pregunta 4…?</strong></p>
+      <p><strong>¿…texto de la pregunta 4…?</strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
     <li>
-      <p>5.<strong><em>¿…pregunta metacognitiva…?</em></strong></p>
+      <p><strong><em>¿…pregunta metacognitiva…?</em></strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
     <li>
-      <p>6.<strong><em>¿…pregunta metacognitiva…?</em></strong></p>
+      <p><strong><em>¿…pregunta metacognitiva…?</em></strong></p>
       <p><strong>Nivel:</strong> Nivel 1|2|3 — <strong>Criterio:</strong> uno de: ${criteriosCadena}</p>
       <p style="color:#c970d6;">…respuesta esperada…</p>
     </li>
@@ -17749,6 +21984,21 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
           `
       : "";
 
+  const instruccionRelacionLectura = relacionadaConLectura && contenidoLectura?.trim()
+    ? `
+    - REGLA CENTRAL: usa SIEMPRE Lectura + Secuencia al mismo tiempo.
+    - La secuencia curricular efectiva para este subtema puede ser la original o la modificada por el usuario, y debe respetarse siempre.
+    - La lectura relacionada y la secuencia curricular deben convivir en la misma actividad o en el mismo bloque didáctico.
+    - La lectura NO sustituye a T/AE/C/P y T/AE/C/P NO sustituyen a la lectura.
+    - Antes de redactar actividades, analiza la lectura relacionada y úsala como base contextual real.
+    - No uses la lectura solo como ambientación. Debe influir en el contenido de las actividades.
+    - TODAS las actividades deben mantenerse alineadas con la secuencia curricular del subtema.
+    - TODAS las actividades o bloques principales deben usar información de la lectura de forma real, no decorativa.
+    - Si existen preguntas de comprensión previas, reutiliza ese foco cognitivo al diseñar nuevas actividades.
+    - Evita actividades genéricas que podrían existir aunque la lectura no estuviera presente.
+    `
+    : "";
+
 
   const nivel = selectNivel.value;
   const grado = selectGrado.value;
@@ -17782,9 +22032,8 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   const P = objetivosAgrupados[subtemaClave]?.P?.descripcion || "Proceso no disponible";
 
   const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtemaClave}']`)?.value || "";
-  const claveInterdisc = String(subtemaRelacionado || "").replace(/\s+/g, "_");
-  const interdiscT = claveInterdisc ? (secuenciaActual?.[`${claveInterdisc}_T`] || "") : "";
-  const interdiscAE = claveInterdisc ? (secuenciaActual?.[`${claveInterdisc}_AE`] || "") : "";
+  const interdiscT = subtemaRelacionado ? _unidadGetSyAValueForSubtema(subtemaRelacionado, "T") : "";
+  const interdiscAE = subtemaRelacionado ? _unidadGetSyAValueForSubtema(subtemaRelacionado, "AE") : "";
   const semillaCreativa = obtenerSemillaCreativa(categoria, subtemaClave);
   const notaInterdisc = subtemaRelacionado
     ? `Este subtema debe relacionarse de forma EXPLÍCITA con "${formatearSubtema(subtemaRelacionado)}".
@@ -17920,6 +22169,10 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   ${recursosOrdenados.map((r, idx) => `- Actividad ${idx + 1}: usa ${r}`).join("\n")}
 
   No vuelvas a mencionar estos recursos en otras actividades.
+  REGLA CRÍTICA: la mención del recurso debe quedar escrita DENTRO del contenido de la actividad normal, no solo inferida ni reservada para el bloque final.
+  REGLA CRÍTICA: cada recurso debe quedar anclado en una actividad normal DIFERENTE.
+  REGLA CRÍTICA: si el estilo rector no usa pasos ASC, de todos modos debes mencionar el recurso dentro del bloque del estilo activo.
+  REGLA CRÍTICA: ficha, anexo, recortable y video no pueden quedar "huérfanos"; si existen al final, deben haber sido mencionados antes en actividades normales.
   - Ejemplos correctos:
     * "Usa el recortable ${recursos.recortables.clave} para apoyar la actividad..."
     * "Refuerza tu aprendizaje usando la ${recursos.fichas.clave}..."
@@ -18106,8 +22359,8 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     return ejemplos[clave] || 'Actividad diseñada para desarrollar esta combinación de habilidades.';
   }
 
-  function generarBloqueHabilidad(habilidadClave) {
-    return `
+function generarBloqueHabilidad(habilidadClave) {
+  return `
       <div class="habilidad-contexto" style="margin-top:20px; margin-bottom:30px; padding:12px; background:#f0f7ff; border-left:4px solid #4a90e2;">
         <h4>Habilidad Cognitiva Asociada ${habilidadClave}</h4>
         <p> → 
@@ -18118,6 +22371,39 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
         <p style="font-size:0.95em; color:#555;"><em>Ejemplo de aplicación:</em> ${generarEjemploHabilidad(habilidadClave)}</p>
       </div>
     `;
+  }
+
+  function _unidadExtraerAnclasCurriculares(...texts) {
+    const raw = texts
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const normalized = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const candidates = [
+      { label: "raíz cuadrada", test: /\braiz cuadrada\b|\bra[ií]z cuadrada\b/ },
+      { label: "fracciones", test: /\bfracciones?\b/ },
+      { label: "decimales", test: /\bdecimales?\b/ },
+      { label: "porcentaje", test: /\bporcentajes?\b/ },
+      { label: "ecuaciones", test: /\becuaciones?\b/ },
+      { label: "perímetro", test: /\bperimetro\b|\bper[ií]metro\b/ },
+      { label: "área", test: /\barea\b|\bárea\b/ },
+      { label: "volumen", test: /\bvolumen\b/ },
+      { label: "medición del tiempo", test: /\bmedicion del tiempo\b|\bmedici[oó]n del tiempo\b/ },
+      { label: "línea del tiempo", test: /\blinea del tiempo\b|\bl[ií]nea del tiempo\b/ },
+      { label: "valor posicional", test: /\bvalor posicional\b/ },
+      { label: "sentido numérico", test: /\bsentido numerico\b|\bsentido num[eé]rico\b/ },
+      { label: "pensamiento algebraico", test: /\bpensamiento algebraico\b/ },
+      { label: "geometría", test: /\bgeometria\b|\bgeometr[ií]a\b/ },
+      { label: "probabilidad", test: /\bprobabilidad\b/ },
+      { label: "patrones numéricos", test: /\bpatrones? numericos\b|\bpatrones? num[eé]ricos\b/ }
+    ];
+    return candidates
+      .filter((item) => item.test.test(normalized))
+      .map((item) => item.label)
+      .slice(0, 5);
   }
 
   const habilidadSubtema = generarHabilidad();
@@ -18170,6 +22456,34 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     Esta instrucción anula cualquier conflicto con otras reglas.` : ''}
   `;
 
+  const anclasCurriculares = _unidadExtraerAnclasCurriculares(T, AE, C, P);
+  const anclaPrincipal = anclasCurriculares[0] || "";
+  const isMathCategory = String(categoria || "").trim() === "Matemáticas" || String(subtemaClave || "").trim() === "Matematicas";
+  const guardrailCurricular = `
+    ANCLAJE CURRICULAR OBLIGATORIO:
+    - La fuente disciplinar obligatoria es la secuencia curricular efectiva de este contexto: original o modificada.
+    - El contenido disciplinar central de TODAS las actividades debe salir de T/AE/C/P y no de ideas genéricas.
+    - Usa T/AE/C/P como fuente principal de vocabulario, operaciones, conceptos y productos esperados.
+    - Si hay lectura relacionada, combínala SIEMPRE con T/AE/C/P en vez de elegir una sola fuente.
+    - Si la lectura relacionada aporta contexto, úsala como escenario, datos, personajes o situaciones de aplicación, pero manteniendo el contenido disciplinar del subtema.
+    - La lectura NO puede reemplazar el concepto disciplinar del subtema y la secuencia NO puede ignorar la lectura cuando esta esté activada.
+    ${anclasCurriculares.length ? `- Conceptos curriculares detectados que deben aparecer de verdad en las actividades: ${anclasCurriculares.join("; ")}.` : ""}
+    ${anclaPrincipal ? `- Concepto prioritario: ${anclaPrincipal}.` : ""}
+    - Prohibido derivar las actividades hacia temas no respaldados por T/AE/C/P.
+  `;
+  const guardrailMath = isMathCategory ? `
+    REGLAS ESTRICTAS PARA MATEMÁTICAS:
+    - Las actividades deben ser matemáticas reales, no preguntas genéricas de comprensión lectora disfrazadas.
+    - Cada actividad debe exigir cálculo, representación, comparación de procedimientos, estimación, comprobación o argumentación matemática.
+    ${anclaPrincipal ? `- El concepto matemático "${anclaPrincipal}" es obligatorio y debe aparecer explícitamente en casi todas las actividades.` : ""}
+    ${anclasCurriculares.includes("raíz cuadrada") ? `
+    - Si aparece "raíz cuadrada" en T/AE/C/P, las actividades deben trabajar explícitamente con √, raíces cuadradas exactas o aproximadas, relación con cuadrados perfectos, estimación en recta numérica, descomposición o verificación.
+    - No sustituyas "raíz cuadrada" por temas vagos como mapas, patrimonio, fronteras, naturaleza o descripciones generales.
+    - La lectura relacionada solo puede servir como contexto para problemas con raíz cuadrada; no como tema central de las respuestas.
+    ` : ""}
+    - Incluye vocabulario matemático preciso y respuestas verificables.
+  ` : "";
+
   const prompt = `
     <h1><strong>${subtemaFormateado}</strong></h1>
     Genera SOLO HTML final, sin comentarios externos, sin markdown, sin bloques de código.
@@ -18190,26 +22504,17 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     REGLA DE CALIDAD UNIFICADA (APLICA A ACTIVIDADES NORMALES Y FICHAS):
     - Todas las actividades deben tener la misma calidad didáctica, profundidad y claridad.
     - Cada actividad debe incluir:
-      1) instrucción principal accionable en negritas,
-      2) de 1 a 4 subactividades útiles (sin relleno),
-      3) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-      4) respuesta esperada concreta en color magenta.
+      1) una consigna principal accionable en negritas,
+      2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
+      3) una evidencia, criterio, síntesis, verificación o cierre esperado en color magenta,
+      4) una organización interna coherente con el estilo pedagógico activo.
     - Cada actividad debe activar pensamiento de nivel alto: analizar, evaluar o crear.
     - Evita ejercicios mecánicos o triviales.
 
-    ESTRUCTURA OBLIGATORIA POR ACTIVIDAD NORMAL:
-    <div class="activity">
-      <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
-      <ol type="a" class="steps">
-        <li>[Subactividad 1]</li>
-        <li>[Subactividad 2 opcional]</li>
-        <li>[Subactividad 3 opcional]</li>
-        <li>[Subactividad 4 opcional]</li>
-      </ol>
-      <div class="answer">
-        <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
-      </div>
-    </div>
+    ESTRUCTURA BASE OBLIGATORIA POR ACTIVIDAD NORMAL:
+    - Cada actividad debe ir dentro de <div class="activity">.
+    - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
+    - Solo si no existe un contrato de formato adicional, usa el fallback ASC: instrucción principal + subinstrucciones + respuesta esperada.
 
     CANTIDAD:
     - Genera EXACTAMENTE ${cantidad} actividades normales para el subtema.
@@ -18219,9 +22524,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
     RELACIÓN CON LECTURA:
     ${relacionadaConLectura
-      ? `- Las actividades deben basarse o relacionarse con la lectura proporcionada.`
+      ? `- Las actividades deben construirse SIEMPRE con Lectura + Secuencia en conjunto.`
       : `- Las actividades NO deben referirse a una lectura específica.`}
+    ${instruccionRelacionLectura}
     ${relacionadaConLectura && contenidoLectura ? `- Contexto de lectura: ${contenidoLectura}` : ""}
+    ${guardrailCurricular}
+    ${guardrailMath}
 
     RECURSOS DIDÁCTICOS:
     ${instruccionRecursos}
@@ -18237,6 +22545,13 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
     INSTRUCCIONES ESPECÍFICAS DEL USUARIO:
     ${instruccionesAdicionales || "Sin instrucciones adicionales."}
+
+    VALIDACIÓN INTERNA ANTES DE RESPONDER:
+    - Revisa cada actividad y confirma que sí depende de la secuencia curricular efectiva del subtema.
+    - Si una actividad podría servir igual para otra materia o para otra lectura sin cambiar nada, reescríbela.
+    ${relacionadaConLectura ? `- Si la lectura está activada, revisa que cada actividad use simultáneamente información de la lectura y metas de la secuencia.` : ""}
+    ${anclaPrincipal ? `- Revisa que el concepto "${anclaPrincipal}" no aparezca solo decorativamente, sino como operación o idea central del trabajo escolar.` : ""}
+    ${recursosOrdenados.length ? `- Revisa que ${recursosOrdenados.join(", ")} queden mencionados explícitamente dentro de actividades normales distintas antes de aparecer en los bloques finales.` : ""}
 
     BLOQUES FINALES OBLIGATORIOS (si están activados):
     ${bloqueDespuesActividades}
@@ -18402,7 +22717,165 @@ window.generarRutaSugerida = function (subtemasOrdenados) {
   `;
 };
 
+function _unidadBuildMathStrategyMeta(subtema = "", categoria = "Matemáticas") {
+  const styleLabels = {
+    asc: "ASC",
+    competencial: "Competencial",
+    indagacion: "Indagación",
+    dinamico: "Dinámico",
+    quiz: "Quiz",
+    diagnostico: "Diagnóstico",
+    evaluacion: "Evaluación",
+    proyecto: "Proyecto",
+    sel: "SEL",
+    estructurado: "Estructurado",
+    hibrido: "Híbrido",
+    ia_critica: "IA Crítica"
+  };
+  const activeStyles = _unidadIsStyleSelectorEnabled(categoria)
+    ? getSelectedUnidadActivityStyles(categoria)
+    : [];
+  const dominantStyle = _unidadIsStyleSelectorEnabled(categoria)
+    ? getDominantUnidadActivityStyle(categoria)
+    : "asc";
+  const safeSubtema = String(subtema || "Matemáticas").trim() || "Matemáticas";
+  const chips = (activeStyles.length ? activeStyles : ["asc"]).map((styleId) => `
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:#e8eefc;color:#2c5aa0;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;">
+      ${styleLabels[styleId] || styleId}
+    </span>
+  `).join("");
+
+  const strategies = {
+    asc: {
+      title: `Ruta visual guiada para ${safeSubtema}`,
+      lead: `Esta estrategia trabaja ${safeSubtema} con secuencia editorial clara, pasos visibles y una respuesta verificable al final.`,
+      blocks: [
+        { label: "Observa", text: `Reconoce la representación, ejemplo o problema base antes de iniciar.` },
+        { label: "Resuelve paso a paso", text: `Avanza con una instrucción principal y subpasos breves que ordenen el procedimiento.` },
+        { label: "Comprueba", text: `Cierra con una respuesta exacta o criterio verificable para revisar si el resultado es correcto.` }
+      ],
+      close: `El estilo ASC funciona mejor cuando la ruta de trabajo está claramente guiada y el alumno puede revisar cada paso.`
+    },
+    competencial: {
+      title: `Aplicación real de ${safeSubtema}`,
+      lead: `La estrategia competencial convierte ${safeSubtema} en una situación auténtica donde el alumno decide, aplica y justifica.`,
+      blocks: [
+        { label: "Situación", text: `Presenta un reto cercano a la vida real donde el subtema sea útil para resolver algo concreto.` },
+        { label: "Decisión", text: `El alumno elige procedimiento, herramienta o camino de solución y explica su elección.` },
+        { label: "Evidencia", text: `La respuesta debe mostrar aplicación correcta, razonamiento y criterio de logro.` }
+      ],
+      close: `No basta con calcular: el alumno debe demostrar que sabe transferir el aprendizaje a otra situación.`
+    },
+    indagacion: {
+      title: `Indagación matemática en ${safeSubtema}`,
+      lead: `La estrategia de indagación usa ${safeSubtema} como una pregunta investigable que exige hipótesis, evidencia y conclusión.`,
+      blocks: [
+        { label: "Pregunta guía", text: `Empieza con una duda matemática que pueda comprobarse con ejemplos, datos o representaciones.` },
+        { label: "Hipótesis", text: `El alumno anticipa qué cree que ocurrirá y por qué.` },
+        { label: "Conclusión", text: `Después de revisar evidencias, contrasta su hipótesis y redacta una explicación sustentada.` }
+      ],
+      close: `El foco está en descubrir patrones y justificar conclusiones, no solo en repetir un algoritmo.`
+    },
+    dinamico: {
+      title: `Práctica dinámica de ${safeSubtema}`,
+      lead: `La estrategia dinámica trabaja ${safeSubtema} con ejercicios ágiles, cambios de formato y ritmo alto para sostener atención y práctica.`,
+      blocks: [
+        { label: "Activa", text: `Empieza con un mini reto de entrada que se resuelva rápido.` },
+        { label: "Varía", text: `Cambia el tipo de ejercicio: completar, elegir, relacionar, corregir o resolver contrarreloj.` },
+        { label: "Cierra", text: `Termina con una comprobación breve para confirmar aciertos y errores clave.` }
+      ],
+      close: `La clave es variedad con foco: mucho movimiento intelectual, pero siempre alineado al mismo concepto matemático.`
+    },
+    quiz: {
+      title: `Quiz matemático sobre ${safeSubtema}`,
+      lead: `Esta estrategia presenta ${safeSubtema} como batería de preguntas cortas, opciones claras y retroalimentación rápida.`,
+      blocks: [
+        { label: "Pregunta", text: `Formula reactivos breves que obliguen a elegir, detectar o completar.` },
+        { label: "Respuesta", text: `El alumno marca opción, relaciona columnas o corrige un error puntual.` },
+        { label: "Retro", text: `Se valida la clave y se explica en una frase por qué esa respuesta funciona.` }
+      ],
+      close: `Es útil para repaso rápido, chequeo de comprensión y práctica con muchas preguntas en poco tiempo.`
+    },
+    diagnostico: {
+      title: `Diagnóstico inicial de ${safeSubtema}`,
+      lead: `La estrategia diagnóstica presenta ${safeSubtema} como una evaluación de entrada para medir qué conocimientos previos traen los estudiantes antes de desarrollar el tema.`,
+      blocks: [
+        { label: "Reactivos", text: `Usa preguntas tipo examen breve, completar, opción múltiple, clasificación o respuesta corta para revelar saberes previos.` },
+        { label: "Evidencia", text: `Cada respuesta debe permitir detectar si el alumno domina, confunde o apenas reconoce el contenido.` },
+        { label: "Decisión docente", text: `La información obtenida sirve para ajustar el arranque: repaso, modelado inicial o avance más retador.` }
+      ],
+      close: `No es examen final ni castigo: es una evaluación diagnóstica de entrada para medir el punto real de partida.`
+    },
+    evaluacion: {
+      title: `Evaluación de logro en ${safeSubtema}`,
+      lead: `La estrategia de evaluación usa ${safeSubtema} para comprobar si el alumno ya domina el contenido con evidencia clara y criterios de corrección.`,
+      blocks: [
+        { label: "Demuestra", text: `El alumno resuelve un reactivo que exige aplicar correctamente el contenido trabajado.` },
+        { label: "Justifica", text: `Debe explicar o mostrar procedimiento, no solo escribir el resultado.` },
+        { label: "Valora", text: `La respuesta se compara con un criterio visible de logro, error parcial o dominio completo.` }
+      ],
+      close: `Aquí importa medir con claridad qué tanto se aprendió y qué parte todavía requiere refuerzo.`
+    },
+    proyecto: {
+      title: `Proyecto matemático para ${safeSubtema}`,
+      lead: `La estrategia de proyecto organiza ${safeSubtema} alrededor de un reto con fases, producto y evidencias visibles.`,
+      blocks: [
+        { label: "Reto", text: `Define una meta concreta que exija usar el subtema para diseñar, construir, medir o resolver.` },
+        { label: "Fases", text: `Divide el trabajo en planeación, desarrollo y presentación con tareas claras.` },
+        { label: "Producto", text: `Cierra con un entregable observable: esquema, tablero, maqueta, cartel, registro o explicación pública.` }
+      ],
+      close: `La matemática se convierte en herramienta para producir algo con sentido, no en una actividad aislada.`
+    },
+    sel: {
+      title: `Confianza matemática y SEL en ${safeSubtema}`,
+      lead: `Esta estrategia integra ${safeSubtema} con regulación emocional, diálogo académico y reflexión sobre la propia forma de aprender.`,
+      blocks: [
+        { label: "Reconoce", text: `El alumno identifica qué siente al resolver: seguridad, duda, frustración o curiosidad.` },
+        { label: "Dialoga", text: `Comparte estrategias, escucha otras respuestas y acuerda mejoras sin descalificar.` },
+        { label: "Reflexiona", text: `Explica qué le ayudó a perseverar y qué cambiará para aprender mejor.` }
+      ],
+      close: `Aquí la meta es resolver y, al mismo tiempo, fortalecer confianza, escucha y convivencia académica.`
+    },
+    estructurado: {
+      title: `Fundamento y precisión para ${safeSubtema}`,
+      lead: `La estrategia estructurada prioriza modelado, práctica guiada, práctica autónoma y verificación para consolidar ${safeSubtema}.`,
+      blocks: [
+        { label: "Modela", text: `Primero observa un ejemplo claro donde el procedimiento esté completamente ordenado.` },
+        { label: "Practica", text: `Luego resuelve con apoyo y después de manera autónoma.` },
+        { label: "Verifica", text: `Comprueba el resultado, corrige errores típicos y compara procedimientos.` }
+      ],
+      close: `Es la mejor ruta cuando el objetivo es dominio técnico, precisión conceptual y control del procedimiento.`
+    },
+    hibrido: {
+      title: `Comprensión multimodal de ${safeSubtema}`,
+      lead: `La estrategia híbrida conecta lectura, imagen, video y anexo para que ${safeSubtema} se entienda desde varios soportes coordinados.`,
+      blocks: [
+        { label: "Observa", text: `Relaciona una representación visual con la explicación escrita o lectura vinculada.` },
+        { label: "Cruza", text: `Compara lo que muestra el video o anexo con el procedimiento matemático trabajado.` },
+        { label: "Sintetiza", text: `Produce una conclusión breve que una información visual, verbal y numérica.` }
+      ],
+      close: `Cada recurso debe aportar una función específica: representar, explicar, ejemplificar o sintetizar.`
+    },
+    ia_critica: {
+      title: `Pensamiento crítico con IA en ${safeSubtema}`,
+      lead: `Esta estrategia usa ${safeSubtema} para revisar una propuesta de IA, verificarla con criterio humano y mejorarla.`,
+      blocks: [
+        { label: "Revisa", text: `Parte de una explicación o solución inicial generada por IA sobre el subtema.` },
+        { label: "Verifica", text: `El alumno detecta errores, pasos incompletos o afirmaciones dudosas.` },
+        { label: "Mejora", text: `Corrige la solución y explica por qué su versión final es más confiable.` }
+      ],
+      close: `La IA no sustituye el razonamiento matemático: solo sirve como borrador para analizar y corregir.`
+    }
+  };
+
+  return {
+    chips,
+    strategy: strategies[dominantStyle] || strategies.asc
+  };
+}
+
 window.generarEstrategiaMatematica = function (subtema) {
+  const { chips, strategy } = _unidadBuildMathStrategyMeta(subtema, "Matemáticas");
   const personajeSvg = encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
       <rect width="120" height="120" rx="16" fill="#e2e8f0"/>
@@ -18428,25 +22901,30 @@ window.generarEstrategiaMatematica = function (subtema) {
 
   return `
     <div class="estrategia-box" style="border:2px solid #cce4ff; padding:20px; margin:20px 0; border-radius:10px; background:#f9fcff;">
-      <div style="display:flex; align-items:center; margin-bottom:15px;">
-        <img src="${personajeSrc}" alt="Personaje Estrategia" style="width:80px; height:auto; margin-right:15px;">
-        <div style="background:#ffeecf; padding:8px 15px; border-radius:20px; font-weight:bold; color:#555;">Estrategia</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:15px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center;">
+          <img src="${personajeSrc}" alt="Personaje Estrategia" style="width:80px; height:auto; margin-right:15px;">
+          <div style="background:#ffeecf; padding:8px 15px; border-radius:20px; font-weight:bold; color:#555;">Estrategia</div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">${chips}</div>
       </div>
 
-      <p style="font-weight:bold; margin-bottom:10px;">Estrategia visual para ${subtema}</p>
+      <p style="font-weight:bold; margin-bottom:10px;">${strategy.title}</p>
       
       <div style="text-align:center; margin-bottom:15px;">
-        <!-- Imagen ilustrativa -->
         <img src="${graficoSrc}" alt="Gráfico explicativo" style="width:100%; max-width:500px;">
       </div>
 
-      <p>Esta estrategia ayuda a comprender ${subtema} de forma visual. Observa cómo se representan los valores y comenta con un compañero.</p>
-
-      <p>Para resolver este tipo de problemas, primero debes 
-        <span style="border-bottom:1px solid #000; display:inline-block; min-width:200px;"></span>
-      </p>
-
-      <p style="margin-top:10px;">Observa el video <em>“${subtema}”</em> que te mostrará tu profesor(a).</p>
+      <p>${strategy.lead}</p>
+      <div style="display:grid; gap:10px; margin-top:14px;">
+        ${strategy.blocks.map((block) => `
+          <div style="padding:12px 14px; border-radius:12px; background:#ffffff; border:1px solid #d9e8fb;">
+            <strong style="display:block; color:#2c5aa0; margin-bottom:4px;">${block.label}</strong>
+            <span>${block.text}</span>
+          </div>
+        `).join("")}
+      </div>
+      <p style="margin-top:14px;">${strategy.close}</p>
     </div>
   `;
 };
@@ -18515,6 +22993,7 @@ function debeRelacionarConLectura(subtema) {
 // 🟢 CORRECCIÓN: Modificar la función generarSeccionCategoria
 async function generarSeccionCategoria(categoria) {
   let categoriaConErrores = false;
+  const effectiveSecuenciaCategoria = _unidadBuildEffectiveSecuenciaFlatForCategoria(categoria);
 
   // ✅ CORRECCIÓN: Obtener unidadActual de forma segura
   const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
@@ -18537,9 +23016,6 @@ async function generarSeccionCategoria(categoria) {
   setCategoriaSpinnerUI(categoria, true);
   const statusCategoriaId = `spinner-categoria-${categoria.replace(/\s+/g, "-")}`;
   try {
-    // Abrir primero el modal de resultado para ver la generación en tiempo real.
-    abrirModalResultadoUnidad();
-
     // Verificar si ya existe este contenedor
     const contenedorCategoriaId = `contenedor-${categoria.replace(/\s/g, "-")}`;
     const viejoContenedor = document.getElementById(contenedorCategoriaId);
@@ -18558,7 +23034,9 @@ async function generarSeccionCategoria(categoria) {
       trimestre: trimestreCtxLectura,
       unidad: unidadCtxLectura,
       categoria,
-      lecturaStrategy: window.__unidadLecturaDecision?.mode || ""
+      lecturaStrategy: window.__unidadLecturaDecision?.mode || "",
+      forceRegenerateFusion: window.__cbNextGenForceFusionRegenerate === true,
+      statusId: statusCategoriaId
     });
     const lectura = lecturaResuelta.lectura;
 
@@ -18594,6 +23072,12 @@ async function generarSeccionCategoria(categoria) {
       alert(`⚠️ Por favor selecciona al menos un subtema en la categoría "${categoria}" marcando los checkboxes en la columna "Generar".`);
       return;
     }
+
+    // Si hay apoyo visual activado, pedir el tipo de organizador (una sola vez por categoría).
+    await _unidadSolicitarTipoGraficoParaCategoriaSiAplica({ categoria, subtemas: subtemasDeCategoria });
+
+    // Abrir el modal de resultado DESPUÉS de elegir el tipo de gráfico y ANTES de iniciar prompts.
+    abrirModalResultadoUnidad();
 
     // ✅ CORRECCIÓN: MOVER la verificación de "algún subtema seleccionado" AQUÍ, después de definir subtemasDeCategoria
     const algunSubtemaSeleccionado = subtemasDeCategoria.some(sub => {
@@ -18636,10 +23120,10 @@ async function generarSeccionCategoria(categoria) {
         P: `Proceso simple para trabajar ${catSub}`
       };
 
-      const descripcionSecuencia = secuenciaActual?.[`${claveBase}_T`] || fallbackCategoria.T || `Tema no definido para ${subtema}`;
-      const descripcionAE = secuenciaActual?.[`${claveBase}_AE`] || fallbackCategoria.AE || `Aprendizaje esperado no definido para ${subtema}`;
-      const descripcionC = secuenciaActual?.[`${claveBase}_C`] || fallbackCategoria.C || `Contenido no definido para ${subtema}`;
-      const descripcionP = secuenciaActual?.[`${claveBase}_P`] || fallbackCategoria.P || `Proceso no definido para ${subtema}`;
+      const descripcionSecuencia = effectiveSecuenciaCategoria?.[`${claveBase}_T`] || fallbackCategoria.T || `Tema no definido para ${subtema}`;
+      const descripcionAE = effectiveSecuenciaCategoria?.[`${claveBase}_AE`] || fallbackCategoria.AE || `Aprendizaje esperado no definido para ${subtema}`;
+      const descripcionC = effectiveSecuenciaCategoria?.[`${claveBase}_C`] || fallbackCategoria.C || `Contenido no definido para ${subtema}`;
+      const descripcionP = effectiveSecuenciaCategoria?.[`${claveBase}_P`] || fallbackCategoria.P || `Proceso no definido para ${subtema}`;
 
       objetivos.push({ subtema, tipo: "T", cantidad, descripcion: descripcionSecuencia, relacionada, interdisciplinariedad, recortable });
       objetivos.push({ subtema, tipo: "AE", cantidad, descripcion: descripcionAE, relacionada, interdisciplinariedad, recortable });
@@ -18675,12 +23159,6 @@ async function generarSeccionCategoria(categoria) {
 
     // ✅ CORRECCIÓN: Insertar título de categoría al inicio del contenedor
     contenedor.innerHTML = tituloCategoriaHTML;
-    if (categoria !== "Proyectos") {
-      contenedor.insertAdjacentHTML(
-        "beforeend",
-        `<p id="${statusCategoriaId}"><i class="fas fa-spinner fa-spin"></i> Generando <strong>${categoria}</strong>...</p>`
-      );
-    }
     // Llevar la vista al bloque de la categoría que se está generando.
     contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -18717,12 +23195,19 @@ async function generarSeccionCategoria(categoria) {
         window.lecturaNuevaCoincidenteGlobal.titulo ||
         window.lecturaNuevaCoincidenteGlobal.tema ||
         "Sin título";
-      const encabezadoLecturaBase = lecturaResuelta.modo === "fusion" ? "📚 Lectura unificada" : "📖 Lectura seleccionada";
+      const encabezadoLecturaBase = "Lectura";
+      const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
+      const wantsReadingGraphic = usoGrafico === "lectura" || usoGrafico === "ambos";
+      const hayImagenLectura = subtemasDeCategoria.some((sub) => !!document.querySelector(`input[name='imagen_${sub}']`)?.checked);
+      let apoyoLecturaHTML = "";
+      if (wantsReadingGraphic && hayImagenLectura) {
+        apoyoLecturaHTML = await _unidadGenerarGraficoDesdeLecturaHTML({ categoria, lecturaResuelta, statusId: statusCategoriaId }).catch(() => "");
+      }
 
       bloqueLecturaGlobal = `
-            <div class="bloque-lectura-global" style="margin-bottom:30px; border: 2px solid #e0e0e0; padding: 20px; border-radius: 8px; background: #f9f9f9;">
-                <h3 style="color:#2c5aa0; margin-top:0;">${encabezadoLecturaBase}</h3>
-                <p style="margin:0 0 10px 0;"><strong>Título de la lectura:</strong> ${tituloLecturaBase}</p>
+            <div class="bloque-lectura-global" style="margin-bottom:22px; padding: 0; border: none; border-radius: 0; background: transparent;">
+                <h3 style="color:#2c5aa0; margin-top:0;">${encabezadoLecturaBase}: ${tituloLecturaBase}</h3>
+                ${apoyoLecturaHTML}
                 <div class="contenido-lectura" style="line-height: 1.6;">
                     ${contenidoLecturaBase || "<em>Lectura sin contenido disponible</em>"}
                 </div>
@@ -18857,11 +23342,16 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
+      const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
+      const objetivoAE = objetivosDelSubtema.find(o => o.tipo === "AE")?.descripcion || "N/A";
+      const objetivoC = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
+      const objetivoP = objetivosDelSubtema.find(o => o.tipo === "P")?.descripcion || "N/A";
 
       // Flags/checkboxes del subtema
       const generarFichas = !!document.querySelector(`input[name='ficha_${subtema}']`)?.checked;
       const generarAnexos = !!document.querySelector(`input[name='anexo_${subtema}']`)?.checked;
       const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
+      const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${subtema}']`)?.checked;
       const relacionada = !!document.querySelector(`input[name='relacion_${subtema}']`)?.checked;
       const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
       const modoDecisionLecturas = String(window.__unidadLecturaDecision?.mode || "").trim();
@@ -18888,7 +23378,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         fichas: { generado: false, clave: "" },
         anexos: { generado: false, clave: "" },
         recortables: { generado: false, clave: "" },
-        videos: { generado: false, clave: "" }
+        videos: { generado: false, clave: "" },
+        imagenes: { generado: false, clave: "" }
       };
 
       // ✅ GENERAR CLAVES PARA RECURSOS DE PROYECTOS
@@ -18911,15 +23402,24 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         recursos.videos.clave = obtenerClaveProyectoVideo();
         recursos.videos.generado = true;
       }
+      if (generarImagenApoyo) {
+        recursos.imagenes.clave = `IMG-${Date.now()}`;
+        recursos.imagenes.generado = true;
+      }
 
       // Si ya existe, regenerar en el mismo lugar de la categoría
       const bloqueExistente = document.getElementById(bloqueId);
       if (bloqueExistente) bloqueExistente.remove();
+      document.getElementById(statusCategoriaId)?.remove();
 
-      contenedor.innerHTML += `
-            <p id="${statusId}"><i class="fas fa-spinner fa-spin"></i> Generando proyecto para <strong>${formatearSubtema(subtema)}</strong>...</p>
-            <div id="${bloqueId}"></div>
-        `;
+      _unidadEnsureSpinnerElement(
+        contenedor,
+        statusId,
+        `<i class="fas fa-spinner fa-spin"></i> Generando proyecto para <strong>${formatearSubtema(subtema)}</strong>...`
+      );
+      if (!document.getElementById(bloqueId)) {
+        contenedor.insertAdjacentHTML("beforeend", `<div id="${bloqueId}"></div>`);
+      }
 
       const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value;
       const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value;
@@ -18940,7 +23440,14 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           maxIntentos: 3
         });
         assertProyectosActivo(tokenProy);
-        const instruccionesProyecto = window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
+        const instruccionesProyectoBase = window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
+        const stylePromptProyecto = _unidadIsStyleSelectorEnabled(categoria)
+          ? buildUnidadActivityStylePromptContext(categoria, {
+            relatedReading: debeUsarLecturaProyecto,
+            withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
+          })
+          : "";
+        const instruccionesProyecto = [instruccionesProyectoBase, stylePromptProyecto].filter(Boolean).join("\n\n");
         const tituloLecturaRelacionada = debeUsarLecturaProyecto
           ? (
             String(lecturaResuelta?.titulo || "").trim()
@@ -18964,12 +23471,17 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         let proyectoGeneradoOK = false;
         try {
+            const projectPromptLockKey = `contenido:${categoria}:${subtema}`;
+            if (!_unidadTryAcquirePromptLock(projectPromptLockKey)) {
+              throw new Error(`Generación duplicada bloqueada para ${categoria}/${subtema}`);
+            }
             actualizarSpinnerProceso(statusId, `Generando contenido del proyecto <strong>${formatearSubtema(subtema)}</strong>...`);
             verificarCancelacionProyectos();
             assertProyectosActivo(tokenProy);
             window.onGeminiStatus = (msg) => actualizarSpinnerProceso(statusId, msg);
             const respuestaProyecto = await enviarPrompt([{ role: "user", text: promptProyecto }]);
             window.onGeminiStatus = null;
+            _unidadReleasePromptLock(projectPromptLockKey);
             assertProyectosActivo(tokenProy);
             actualizarSpinnerProceso(statusId, `Procesando respuesta del proyecto <strong>${formatearSubtema(subtema)}</strong>...`);
             let htmlProyecto = (respuestaProyecto || "").replace(/```html|```/g, "").trim();
@@ -19017,6 +23529,81 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const tablaInicialProyectoHTML = !window.tablaInicialInsertada
           ? (typeof generarTablaInicialTodasCategorias === "function" ? generarTablaInicialTodasCategorias() : "")
           : "";
+        actualizarSpinnerProceso(statusId, `Preparando vista del alumno para <strong>${formatearSubtema(subtema)}</strong>...`);
+        const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
+        const wantsReadingGraphic = usoGrafico === "lectura" || usoGrafico === "ambos";
+        const wantsActivityGraphic = usoGrafico === "actividades" || usoGrafico === "ambos" || !usoGrafico;
+        // Si el usuario eligió Lectura+Actividades, siempre debe haber ilustración en lectura (no depender del switch de actividades).
+        const hayImagenLectura = wantsReadingGraphic;
+
+        // Insertar ilustración/imagen de lectura (si aplica) DENTRO del HTML del proyecto, justo después del encabezado de lectura.
+        let htmlProyectoRender = htmlProyecto;
+        if (wantsReadingGraphic && hayImagenLectura) {
+          const apoyoLecturaHTML = await _unidadGenerarGraficoDesdeLecturaHTML({ categoria, lecturaResuelta, statusId }).catch(() => "");
+          if (apoyoLecturaHTML) {
+            htmlProyectoRender = _unidadInsertAfterLecturaGeneradora(htmlProyectoRender, apoyoLecturaHTML);
+          }
+        }
+
+        // Apoyo visual para actividades: elegir SOLO 2–3 fases que realmente lo ameriten.
+        if (generarImagenApoyo && wantsActivityGraphic) {
+          const phases = _unidadExtractProyectoPhases(htmlProyectoRender);
+          const scored = phases.map((phase, index) => {
+            const title = String(phase?.title || "").replace(/^\d+\.\s*/, "").trim();
+            const text = String(phase?.activities || "").trim();
+            const norm = (title + " " + text).toLowerCase();
+            const hasSteps = /\b(pasos|secuencia|orden(a|ar)|primero|despu[eé]s|luego|finalmente)\b/.test(norm);
+            const hasMaterials = /\b(material(es)?|recursos|herramientas|lista|insumos)\b/.test(norm);
+            const hasCompare = /\b(compar(a|ar)|clasific(a|ar)|diferenci(a|ar)|similitud|venn)\b/.test(norm);
+            const hasDiagram = /\b(diagrama|flujo|mapa|organizador|infograf[ií]a|cuadro|esquema|timeline|l[ií]nea del tiempo)\b/.test(norm);
+            const hasProduct = /\b(producto|evidencia|entregable|borrador|prototipo|maqueta)\b/.test(norm);
+            const isClosing = /\b(presentemos|socializaci[oó]n|cierre|producto final|presentaci[oó]n)\b/.test(norm);
+            const lengthScore = Math.min(5, Math.floor(text.length / 180));
+            let score = 0;
+            score += lengthScore;
+            if (hasSteps) score += 3;
+            if (hasMaterials) score += 2;
+            if (hasCompare) score += 2;
+            if (hasDiagram) score += 2;
+            if (hasProduct) score += 1;
+            if (isClosing) score -= 2;
+            return { index, score, title, text };
+          });
+
+          const candidates = scored
+            .filter((p) => p.score >= 3)
+            .sort((a, b) => (b.score - a.score) || (a.index - b.index));
+          const picked = (candidates.length >= 2 ? candidates.slice(0, 3) : scored.sort((a, b) => (b.score - a.score) || (a.index - b.index)).slice(0, Math.min(2, scored.length)))
+            .map((p) => p.index)
+            .sort((a, b) => a - b);
+
+          for (const i of picked) {
+            const phase = phases[i] || {};
+            const phaseTitle = String(phase?.title || "").trim() || `Fase ${i + 1}`;
+            const phaseText = String(phase?.activities || "").trim();
+            const phaseSupport = await _unidadGenerarApoyoVisualFaseProyectoHTML({
+              categoria,
+              subtema,
+              faseIndex: i,
+              faseTitulo: phaseTitle,
+              faseActividadesTexto: phaseText,
+              nivel,
+              grado: gradoTexto,
+              statusId,
+              objetivos: { T: tituloCreativoProyecto || "", AE: "", C: "", P: "" }
+            }).catch(() => "");
+            if (!phaseSupport) continue;
+
+            // Insertar después del <h3> de la fase correspondiente (por índice).
+            let phaseCounter = -1;
+            htmlProyectoRender = String(htmlProyectoRender || "").replace(/(<div[^>]*class=["']phase["'][^>]*>[\s\S]*?<h3[^>]*>[\s\S]*?<\/h3>)/gi, (m) => {
+              phaseCounter += 1;
+              if (phaseCounter !== i) return m;
+              return `${m}\n${phaseSupport}\n`;
+            });
+          }
+        }
+
         document.getElementById(bloqueId).innerHTML = `
                 <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;" id="${bloqueId}-layout">
                     <div id="${proyectoAlumnoColId}" class="col-alumno" style="flex:1; min-width:300px;">
@@ -19028,9 +23615,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 </div>
             `;
         if (!window.tablaInicialInsertada) window.tablaInicialInsertada = true;
+        actualizarSpinnerProceso(statusId, `Renderizando contenido del alumno para <strong>${formatearSubtema(subtema)}</strong>...`);
         await renderContenidoEnTiempoReal(
           document.getElementById(proyectoAlumnoContenidoId),
-          htmlProyecto,
+          htmlProyectoRender,
           () => window.cancelarProyectos || tokenProy !== window.cancelTokenProyectos
         );
         assertProyectosActivo(tokenProy);
@@ -19091,6 +23679,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           C_global,
           P_global
         );
+        const lecturaParaSoporteProyecto = lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
+        const soporteLecturaMaestroProyectoHTML = (debeUsarLecturaProyecto && lecturaParaSoporteProyecto)
+          ? _bloqueMaestroLecturaSoporteUnidad(lecturaParaSoporteProyecto)
+          : "";
 
         actualizarSpinnerProceso(statusId, `Renderizando proyecto <strong>${formatearSubtema(subtema)}</strong>...`);
         const colMaestroProyecto = document.getElementById(proyectoMaestroColId);
@@ -19100,6 +23692,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 <div id="${proyectoMaestroColId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
                   <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${formatearSubtema(subtema)}</p>
                   <h4>${tituloMostrar || "Notas del maestro"}</h4>
+                  ${soporteLecturaMaestroProyectoHTML || ""}
                   <div id="${proyectoMaestroColId}-contenido"></div>
                 </div>
               `);
@@ -19113,6 +23706,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         proyectoGeneradoOK = true;
 
       } catch (err) {
+        _unidadReleasePromptLock(`contenido:${categoria}:${subtema}`);
         if (err?.message === "CANCELADO_PROYECTOS") {
           document.getElementById(bloqueId).innerHTML = `<p style="color:#b45309;">⏹ Generación cancelada por el usuario.</p>`;
           actualizarSpinnerProceso(statusId, "⏹ Generación cancelada");
@@ -19179,10 +23773,15 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
+      const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
+      const objetivoAE = objetivosDelSubtema.find(o => o.tipo === "AE")?.descripcion || "N/A";
+      const objetivoC = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
+      const objetivoP = objetivosDelSubtema.find(o => o.tipo === "P")?.descripcion || "N/A";
 
       // Flags/checkboxes del subtema - AGREGAR ESTAS LÍNEAS
       const generarAnexos = !!document.querySelector(`input[name='anexo_${subtema}']`)?.checked;
       const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
+      const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${subtema}']`)?.checked;
       const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
 
       // Si existe, reemplazarlo (regeneración en sitio)
@@ -19190,11 +23789,16 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       if (bloqueExistente) {
         bloqueExistente.remove();
       }
+      document.getElementById(statusCategoriaId)?.remove();
 
-      contenedor.innerHTML += `
-            <p id="${statusId}"><i class="fas fa-spinner fa-spin"></i> Generando actividades para <strong>${formatearSubtema(subtema)}</strong>...</p>
-            <div id="${bloqueId}"></div>
-        `;
+      _unidadEnsureSpinnerElement(
+        contenedor,
+        statusId,
+        `<i class="fas fa-spinner fa-spin"></i> Generando actividades para <strong>${formatearSubtema(subtema)}</strong>...`
+      );
+      if (!document.getElementById(bloqueId)) {
+        contenedor.insertAdjacentHTML("beforeend", `<div id="${bloqueId}"></div>`);
+      }
 
       const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value;
       const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value;
@@ -19238,7 +23842,45 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         }
 
         // Obtener instrucciones adicionales para esta categoría
-        const instruccionesAdicionales = window.instruccionesGeminiPorCategoria?.[categoria] || '';
+        const instruccionesAdicionalesBase = window.instruccionesGeminiPorCategoria?.[categoria] || '';
+        const stylePromptCategoria = _unidadIsStyleSelectorEnabled(categoria)
+          ? buildUnidadActivityStylePromptContext(categoria, {
+            relatedReading: relacionadaFinal,
+            withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
+          })
+          : "";
+        let instruccionesAdicionales = [instruccionesAdicionalesBase, stylePromptCategoria].filter(Boolean).join("\n\n");
+        let lecturaAnalysis = null;
+
+        if (relacionadaFinal && String(contenidoLecturaParaPrompt || "").trim()) {
+          lecturaAnalysis = await _unidadAnalizarLecturaRelacionada({
+            categoria,
+            subtema,
+            nivel,
+            grado: gradoTexto,
+            contenidoLectura: contenidoLecturaParaPrompt,
+            preguntasComprension: preguntasParaPrompt,
+            statusId
+          });
+          const extraLectura = [
+            "ANCLAJE OBLIGATORIO CON LECTURA RELACIONADA:",
+            lecturaAnalysis?.centralIdea ? `- Idea central de la lectura: ${lecturaAnalysis.centralIdea}` : "",
+            Array.isArray(lecturaAnalysis?.keyConcepts) && lecturaAnalysis.keyConcepts.length
+              ? `- Conceptos que deben aparecer en actividades: ${lecturaAnalysis.keyConcepts.join("; ")}`
+              : "",
+            Array.isArray(lecturaAnalysis?.activityAnchors) && lecturaAnalysis.activityAnchors.length
+              ? `- Formas obligatorias de usar la lectura en actividades: ${lecturaAnalysis.activityAnchors.join("; ")}`
+              : "",
+            Array.isArray(lecturaAnalysis?.didacticWarnings) && lecturaAnalysis.didacticWarnings.length
+              ? `- Evita: ${lecturaAnalysis.didacticWarnings.join("; ")}`
+              : ""
+          ].filter(Boolean).join("\n");
+          instruccionesAdicionales = [instruccionesAdicionalesBase, extraLectura].filter(Boolean).join("\n\n");
+        }
+
+        // Imagen de apoyo: se genera DESPUÉS de tener las actividades para analizar qué mostrar.
+        let apoyoPlan = null;
+        let apoyoHTML = "";
 
 
         const promptCategoria = construirPromptDeCategoria(
@@ -19273,7 +23915,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   </div>
               </div>
             `;
+        const promptLockKey = `contenido:${categoria}:${subtema}`;
+        if (!_unidadTryAcquirePromptLock(promptLockKey)) {
+          throw new Error(`Generación duplicada bloqueada para ${categoria}/${subtema}`);
+        }
         const respuestaAlumno = await enviarPrompt([{ role: "user", text: promptCategoria }]);
+        _unidadReleasePromptLock(promptLockKey);
         logVisual(`✅ Respuesta alumno recibida (${(respuestaAlumno || "").length} caracteres)`);
         let htmlAlumno = (respuestaAlumno || "").replace(/```html|```/g, "").trim();
 
@@ -19289,10 +23936,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           .replace(/Actividad\s*\d+\.?\s*(Ficha\s+[Pp]?\d+\w*:)/gi, '$1');
 
         // ---- Datos del bloque (T/AE/C/P) ----
-        const T = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
-        const AE = objetivosDelSubtema.find(o => o.tipo === "AE")?.descripcion || "N/A";
-        const C = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
-        const P = objetivosDelSubtema.find(o => o.tipo === "P")?.descripcion || "N/A";
+        const T = objetivoT;
+        const AE = objetivoAE;
+        const C = objetivoC;
+        const P = objetivoP;
 
         // ---- Notas del Maestro ----
         const { actividadesNormales, actividadesFichas } = extraerActividades(htmlAlumno);
@@ -19313,7 +23960,52 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         }
 
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
-        const htmlAlumnoLimpio = cleanHTML(htmlAlumno);
+        let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
+        let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
+
+        if (generarImagenApoyo) {
+          apoyoPlan = await _unidadCrearPlanApoyoVisual({
+            categoria,
+            subtema,
+            nivel,
+            grado: gradoTexto,
+            T,
+            AE,
+            C,
+            P,
+            statusId,
+            lecturaAnalysis
+          });
+          apoyoHTML = await _unidadGenerarApoyoVisualHTML({
+            categoria,
+            subtema,
+            nivel,
+            grado: gradoTexto,
+            statusId,
+            objetivos: { T, AE, C, P },
+            actividadesNormales,
+            plan: apoyoPlan,
+            lecturaAnalysis
+          });
+          const ajustado = await _unidadAjustarActividadesConApoyoVisual({
+            categoria,
+            subtema,
+            nivel,
+            grado: gradoTexto,
+            statusId,
+            htmlAlumno: htmlAlumnoLimpio,
+            apoyoPlan,
+            lecturaAnalysis
+          }).catch(() => "");
+          if (ajustado) htmlAlumnoLimpio = cleanHTML(ajustado);
+        }
+        recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
+        let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
+        if (apoyoHTML) {
+          htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
+        }
 
         const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtema}']`)?.value;
         const etiquetaInterdisc = subtemaRelacionado
@@ -19327,7 +24019,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         if (!window.rutaYTablaInsertadasEnNotas) {
           const todosSubtemasOrdenados = Object.keys(window.categoriaPorSubtema || {});
           bloqueRutaHTML = generarRutaSugerida(todosSubtemasOrdenados);
-          bloqueRutaHTML += generarProgramaSintetico(secuenciaActual);
+          bloqueRutaHTML += generarProgramaSintetico(_unidadBuildEffectiveSecuenciaFlatAllCategories());
           window.rutaYTablaInsertadasEnNotas = true;
         }
 
@@ -19395,7 +24087,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 </div>
             </div>
           `;
-        await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoLimpio);
+        await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoConApoyoVisual);
 
         const promptNotas = construirPromptNotasMaestro(
           htmlAlumno,
@@ -19457,17 +24149,27 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         window.notasMaestroAcumuladas = (window.notasMaestroAcumuladas || "") + notasFinalesColMaestro + "<hr>";
         logVisual(`🎉 Subtema ${subtema} renderizado completamente`);
+        finalizarSpinnerProceso(statusId, true, `${formatearSubtema(subtema)} completado`);
         } catch (err) {
+            _unidadReleasePromptLock(`contenido:${categoria}:${subtema}`);
             if (err?.message === "CANCELADO_PROYECTOS") {
                 actualizarSpinnerProceso(statusId, `⏹ Cancelado por el usuario.`);
                 document.getElementById(bloqueId)?.remove();
+                finalizarSpinnerProceso(statusId, false, "⏹ Cancelado");
             } else {
-                document.getElementById(bloqueId).innerHTML = `<p style="color:red;">❌ Error al generar contenido para "${formatearSubtema(subtema)}"</p>`;
+                const detail = String(err?.message || err?.error?.message || err?.error || "").trim();
+                console.error(`Error al generar subtema ${categoria}/${subtema}:`, err);
+                document.getElementById(bloqueId).innerHTML = `
+                  <p style="color:red;">❌ Error al generar contenido para "${formatearSubtema(subtema)}"</p>
+                  ${detail ? `<pre style="white-space:pre-wrap; font-size:12px; background:#fff7ed; border:1px solid #fed7aa; padding:10px; border-radius:10px; color:#7c2d12;">${detail}</pre>` : ""}
+                  <p style="font-size:12px; color:#6b7280;">Abre DevTools → Console/Network para ver el detalle.</p>
+                `;
                 categoriaConErrores = true;
+                finalizarSpinnerProceso(statusId, false, `❌ Error en ${formatearSubtema(subtema)}`);
             }
         }
 
-        finalizarSpinnerProceso(statusId, true, `${formatearSubtema(subtema)} completado`);
+        // Nota: finalizarSpinnerProceso ahora se llama dentro del try/catch para reflejar éxito real.
     }
 
     logVisual(`🎯 Categoría "${categoria}" TERMINADA Y RENDERIZADA!`);
@@ -19711,122 +24413,20 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 function generarTablaInicialTodasCategorias() {
-  const categoriasOrden = [
-    "Proyectos",
-    "Lenguaje y comunicación",
-    "Matemáticas",
-    "Ciencias experimentales",
-    "Ciencias sociales",
-    "Formación socioemocional",
-  ];
-
-  const mapaCategoriaASubtemas = {
-    "Proyectos": ["Proyectos"],
-    "Lenguaje y comunicación": [
-      "Artes",
-      "Ortografía",
-      "Gramatica",
-      "ExpresionEscrita",
-      "ExpresionOral",
-      "Habilidades",
-    ],
-    "Ciencias experimentales": [
-      "Naturales",
-      "ConocimientoDelMedio",
-      "MiLocalidad"
-    ],
-    "Ciencias sociales": [
-      "Historia",
-      "Geografia"
-    ],
-    "Formación socioemocional": [
-      "CivicaEtica",
-      "Socioemocional"
-    ],
-    "Matemáticas": ["Matematicas"]
-  };
-
-
-
-  const filas = [];
-  categoriasOrden.forEach(cat => {
-    (mapaCategoriaASubtemas[cat] || []).forEach(sub => {
-      const clave = sub.replace(/\s+/g, "_");
-      const T = secuenciaActual?.[`${clave}_T`] || "-";
-      const AE = secuenciaActual?.[`${clave}_AE`] || "-";
-      const C = secuenciaActual?.[`${clave}_C`] || "-";
-      const P = secuenciaActual?.[`${clave}_P`] || "-";
-
-      const freq = frecuenciaSemanalPorCategoria[cat] || 1;
-
-      filas.push(`
-        <tr>
-          <td>${cat}</td>
-          <td>${formatearSubtema(sub)}</td>
-          <td>${T}</td>
-          <td>${AE}</td>
-          <td>${P}</td>
-          <td>${C}</td>
-          <td style="text-align:center;">${freq}</td>
-        </tr>
-      `);
-    });
-  });
-
-  return `
-    <div id="tabla-inicial-unidad" style="margin-bottom:16px;">
-      <div style="display:flex; align-items:center; gap:10px; margin:8px 0;">
-        <h3 style="margin:0;">Secuencia y alcance de la unidad (incluye Proyectos)</h3>
-      </div>
-      <div id="tabla-inicial-unidad-body" style="display:none;">
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:14px;">
-        <thead style="background:#f2f2f2;">
-          <tr>
-            <th title="Categoría" aria-label="Categoría"><i class="fa-solid fa-tags unidad-th-icon"></i></th>
-            <th title="Subtema" aria-label="Subtema"><i class="fa-solid fa-bookmark unidad-th-icon"></i></th>
-            <th title="Tema" aria-label="Tema"><i class="fa-solid fa-book-open unidad-th-icon"></i></th>
-            <th title="Aprendizaje esperado" aria-label="Aprendizaje esperado"><i class="fa-solid fa-bullseye unidad-th-icon"></i></th>
-            <th title="Proceso" aria-label="Proceso"><i class="fa-solid fa-gears unidad-th-icon"></i></th>
-            <th title="Contenido" aria-label="Contenido"><i class="fa-solid fa-layer-group unidad-th-icon"></i></th>
-            <th title="Frecuencia semanal" aria-label="Frecuencia semanal"><i class="fa-solid fa-calendar-week unidad-th-icon"></i></th>
-          </tr>
-        </thead>
-        <tbody>${filas.join("")}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  return "";
 }
 
 window.toggleTablaInicialUnidad = function toggleTablaInicialUnidad() {
-  const body = document.getElementById("tabla-inicial-unidad-body");
   const btn = document.getElementById("btnToggleTablaUnidad");
-  if (!body || !btn) return;
-  const oculto = body.style.display === "none";
-  body.style.display = oculto ? "" : "none";
-  const label = btn.querySelector(".unidad-btn-text");
-  if (label) {
-    label.textContent = oculto ? "Ocultar secuencia" : "Mostrar secuencia";
-  } else {
-    btn.textContent = oculto ? "Ocultar secuencia" : "Mostrar secuencia";
-  }
+  if (btn) btn.style.display = "none";
 };
 
 function refrescarTablaInicial() {
-  const cont = document.getElementById("resultadoUnidadGenerada");
-  if (!cont) return;
-  const tablaHTML = generarTablaInicialTodasCategorias();
-  // Inserta/actualiza al inicio
   const viejo = document.getElementById("tabla-inicial-unidad");
-  if (viejo) {
-    viejo.outerHTML = tablaHTML;
-  } else {
-    cont.insertAdjacentHTML("afterbegin", tablaHTML);
-  }
+  if (viejo) viejo.remove();
   const btn = document.getElementById("btnToggleTablaUnidad");
-  const label = btn?.querySelector(".unidad-btn-text");
-  if (label) label.textContent = "Mostrar secuencia";
-  window.tablaInicialInsertada = true;
+  if (btn) btn.style.display = "none";
+  window.tablaInicialInsertada = false;
 }
 
 
@@ -19881,9 +24481,7 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
 
   const fallbackChain = chain || buildModeloFallbackChain();
   const modeloActual = fallbackChain[modeloIndex] || "gemini-2.5-flash-lite";
-  if (typeof window.onGeminiStatus === "function") {
-    window.onGeminiStatus(`Modelo ${modeloActual} · intento ${intentos + 1}`);
-  }
+  // Nota: evitamos spamear el UI con logs tipo "Modelo X · intento Y".
 
   const generationConfig = buildGenerationConfig(modeloActual);
 
@@ -19932,18 +24530,12 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
     const isRetriable = [429, 500, 503].includes(response.status);
     if (isRetriable && intentos < MAX_RETRIES_PER_MODEL) {
       const backoff = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, intentos)) + Math.floor(Math.random() * 400);
-      if (typeof window.onGeminiStatus === "function") {
-        window.onGeminiStatus(`Reintentando ${modeloActual} (${response.status})`);
-      }
       await sleep(backoff);
       return ejecutarPrompt(mensajes, intentos + 1, modeloIndex, fallbackChain);
     }
 
     if (modeloIndex + 1 < fallbackChain.length) {
       const siguiente = fallbackChain[modeloIndex + 1];
-      if (typeof window.onGeminiStatus === "function") {
-        window.onGeminiStatus(`Cambio de ${modeloActual} a ${siguiente} (${response.status})`);
-      }
       return ejecutarPrompt(mensajes, 0, modeloIndex + 1, fallbackChain);
     }
 
@@ -19984,7 +24576,7 @@ async function ejecutarPrompt(mensajes, intentos = 0, modeloIndex = 0, chain = n
         window.onGeminiStatus(localTarget ? "Backend Gemini local offline (puerto 8787)" : "Backend Gemini remoto no disponible");
       }
       throw new Error(localTarget
-        ? "Backend Gemini local offline. Inicia `npm run api:dev`."
+        ? "Backend Gemini local offline o reiniciándose. Si usas `npm run dev:local`, espera unos segundos y reintenta."
         : "Backend Gemini remoto no disponible. Intenta nuevamente o revisa el backend configurado."
       );
     }
@@ -20071,6 +24663,132 @@ function extraerActividades(contenidoActividades) {
     actividadesNormales: actividadesMatch,
     actividadesFichas: fichasMatch
   };
+}
+
+function _unidadEscapeRegExp(text = "") {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
+  const out = [];
+  if (recursos?.fichas?.generado && recursos.fichas.clave) {
+    out.push({
+      key: "ficha",
+      match: new RegExp(_unidadEscapeRegExp(recursos.fichas.clave), "i"),
+      sentence: `Refuerza tu aprendizaje con la ${recursos.fichas.clave} al cerrar esta actividad.`
+    });
+  }
+  if (recursos?.anexos?.generado && recursos.anexos.clave) {
+    out.push({
+      key: "anexo",
+      match: new RegExp(_unidadEscapeRegExp(recursos.anexos.clave), "i"),
+      sentence: `Consulta el anexo visual ${recursos.anexos.clave} como apoyo para resolver esta actividad.`
+    });
+  }
+  if (recursos?.recortables?.generado && recursos.recortables.clave) {
+    out.push({
+      key: "recortable",
+      match: new RegExp(_unidadEscapeRegExp(recursos.recortables.clave), "i"),
+      sentence: `Usa el ${recursos.recortables.clave} como material manipulativo en esta actividad.`
+    });
+  }
+  if (recursos?.videos?.generado && recursos.videos.clave) {
+    out.push({
+      key: "video",
+      match: new RegExp(_unidadEscapeRegExp(recursos.videos.clave), "i"),
+      sentence: `Mira el video "${recursos.videos.clave}" y luego responde esta actividad.`
+    });
+  }
+  return out;
+}
+
+function _unidadInferGeneratedResourcesFromHtml(html = "") {
+  const source = String(html || "");
+  const out = {
+    fichas: { generado: false, clave: "" },
+    anexos: { generado: false, clave: "" },
+    recortables: { generado: false, clave: "" },
+    videos: { generado: false, clave: "" }
+  };
+
+  if (!source.trim()) return out;
+
+  const fichaMatch = source.match(/\bFicha\s+[Pp]?\d+\w*/i);
+  if (fichaMatch?.[0]) {
+    out.fichas.generado = true;
+    out.fichas.clave = String(fichaMatch[0]).trim();
+  }
+
+  const anexoMatch = source.match(/\bAnexo\s+[Pp]?\d+\w*/i);
+  if (anexoMatch?.[0]) {
+    out.anexos.generado = true;
+    out.anexos.clave = String(anexoMatch[0]).trim();
+  }
+
+  const recortableMatch = source.match(/\bRecortable\s+[Pp]?\d+\w*/i);
+  if (recortableMatch?.[0]) {
+    out.recortables.generado = true;
+    out.recortables.clave = String(recortableMatch[0]).trim();
+  }
+
+  const videoQuotedMatch = source.match(/Guion de video:\s*"([^"]+)"/i);
+  const videoInlineMatch = source.match(/video\s+"([^"]+)"/i);
+  const videoValue = videoQuotedMatch?.[1] || videoInlineMatch?.[1] || "";
+  if (videoValue) {
+    out.videos.generado = true;
+    out.videos.clave = String(videoValue).trim();
+  }
+
+  return out;
+}
+
+function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}) {
+  const source = String(html || "");
+  if (!source.trim()) return source;
+  const matches = [...source.matchAll(/<div class="activity">([\s\S]*?)<\/div>/g)];
+  if (!matches.length) return source;
+
+  const resources = _unidadBuildMissingResourceMentionsConfig(recursos);
+  if (!resources.length) return source;
+
+  const blocks = matches.map((match) => ({
+    full: match[0],
+    inner: String(match[1] || "")
+  }));
+  const usedIndexes = new Set();
+  let changed = false;
+
+  resources.forEach((resource) => {
+    const alreadyMentioned = blocks.some((block) => resource.match.test(block.inner));
+    if (alreadyMentioned) return;
+
+    const targetIndex = blocks.findIndex((block, index) => {
+      if (usedIndexes.has(index)) return false;
+      return String(block.inner || "").trim().length > 0;
+    });
+    if (targetIndex === -1) return;
+
+    usedIndexes.add(targetIndex);
+    const block = blocks[targetIndex];
+    if (/<div class="answer">/i.test(block.inner)) {
+      block.inner = block.inner.replace(
+        /<div class="answer">/i,
+        `<p>${resource.sentence}</p><div class="answer">`
+      );
+    } else {
+      block.inner = `${block.inner}\n<p>${resource.sentence}</p>`;
+    }
+    block.full = `<div class="activity">${block.inner}</div>`;
+    changed = true;
+  });
+
+  if (!changed) return source;
+  let cursor = 0;
+  return source.replace(/<div class="activity">([\s\S]*?)<\/div>/g, () => {
+    const block = blocks[cursor];
+    cursor += 1;
+    return block?.full || "";
+  });
 }
 
 
@@ -20676,69 +25394,6 @@ let agrupados = {};
 let categoriasGeneradas = {}; // { "Lenguaje y comunicación": "<bloque HTML generado>" }
 let primeraCategoriaConLectura = null;
 
-
-
-// Función para guardar en localStorage
-// Ayuda: verificar si un <select> tiene una opción con ese value
-function selectTieneOpcion(el, value) {
-  return !!(el && Array.from(el.options).some(o => o.value === value));
-}
-
-// Función para guardar en localStorage (igual que la tuya)
-function setupSelectChangeListeners() {
-  ["unidadNivel", "unidadGrado", "unidadTrimestre", "unidadNumero", "unidadTema", "unidadTemaASC", "unidadTemaTexto"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      const save = () => {
-        localStorage.setItem(`unidad_${id}`, el.value);
-      };
-      el.addEventListener("change", save);
-      if (id === "unidadTemaTexto") el.addEventListener("input", save);
-    }
-  });
-}
-
-// Función para restaurar valores con manejo especial para unidadTema
-function restoreSelectValues() {
-  ["unidadNivel", "unidadGrado", "unidadTrimestre", "unidadNumero", "unidadTemaASC"].forEach(id => {
-    const el = document.getElementById(id);
-    const val = localStorage.getItem(`unidad_${id}`);
-    if (el && val && selectTieneOpcion(el, val)) {
-      el.value = val;
-    }
-  });
-
-  // Manejo especial para unidadTema con retraso (verifica que exista la opción)
-  const unidadTemaEl = document.getElementById('unidadTema');
-  const unidadTemaVal = localStorage.getItem('unidad_unidadTema');
-  if (unidadTemaEl && unidadTemaVal) {
-    setTimeout(() => {
-      if (selectTieneOpcion(unidadTemaEl, unidadTemaVal)) {
-        unidadTemaEl.value = unidadTemaVal;
-        _sincronizarInputTemaConSelect();
-      }
-    }, 1000);
-  }
-  const unidadTemaTextoEl = document.getElementById('unidadTemaTexto');
-  const unidadTemaTextoVal = localStorage.getItem('unidad_unidadTemaTexto');
-  if (unidadTemaTextoEl && unidadTemaTextoVal) {
-    unidadTemaTextoEl.value = unidadTemaTextoVal;
-  }
-}
-
-// Función para disparar eventos de cambio (tuya)
-function triggerChangeEvents() {
-  const selectNivel = document.getElementById('unidadNivel');
-  const selectGrado = document.getElementById('unidadGrado');
-  const selectTrimestre = document.getElementById('unidadTrimestre');
-
-
-  if (selectNivel && selectNivel.value) selectNivel.dispatchEvent(new Event("change"));
-  if (selectGrado && selectGrado.value) selectGrado.dispatchEvent(new Event("change"));
-  if (selectTrimestre && selectTrimestre.value) selectTrimestre.dispatchEvent(new Event("change"));
-  if (selectUnidad && selectUnidad.value) selectUnidad.dispatchEvent(new Event("change"));
-}
-
 // ------- Scroll suave dentro del modalGenerarUnidad -------
 function setupScrollButtonsForModal({
   modalSelector = '#modalGenerarUnidad',
@@ -20841,6 +25496,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
   });
   enlazarBotonesRecursosUnidad();
+  renderFusionToggleUI();
 });
 
 
@@ -20887,7 +25543,8 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
     grado,
     trimestre,
     unidad,
-    lecturaStrategy: window.__unidadLecturaDecision?.mode || ""
+    lecturaStrategy: window.__unidadLecturaDecision?.mode || "",
+    forceRegenerateFusion: false
   });
 
   const lecturaId = lecturaResuelta.lecturaId || "";
@@ -20977,9 +25634,30 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
   }
 
   try {
-    const user = auth.currentUser;
+    const user = await _unidadGetAuthUser();
     if (!user?.uid) {
       alert("❌ Debes iniciar sesión para guardar la unidad.");
+      return;
+    }
+
+    // Si el HTML trae imágenes dataURL (base64), subirlas a Firebase Storage y guardar SOLO las URLs.
+    let htmlContenidoParaGuardar = htmlContenido;
+    let uploadsContenido = [];
+    try {
+      const out = await _unidadMaterializeHtmlImagesToStorage({
+        html: htmlContenido,
+        uid: user.uid,
+        nivel,
+        grado,
+        trimestre,
+        unidad
+      });
+      htmlContenidoParaGuardar = String(out?.html || htmlContenidoParaGuardar || "");
+      uploadsContenido = Array.isArray(out?.uploads) ? out.uploads : [];
+    } catch (uploadErr) {
+      console.warn("[unidad] No se pudieron subir imágenes a Storage:", uploadErr);
+      // Si no se pudo, NO intentamos guardar el HTML con base64 porque rompe Firestore por tamaño.
+      alert(`❌ No se pudo subir las imágenes a Storage.\nDetalle: ${String(uploadErr?.message || uploadErr)}`);
       return;
     }
 
@@ -21000,6 +25678,8 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       lecturaTitulo: tituloLectura || null,
       lecturaTexto: textoLectura || null,
       preguntasLectura: preguntasLectura || [],
+      // Activos subidos para evitar contenido base64 en Firestore
+      contenidoAssets: uploadsContenido || [],
       tipoDocumento: "unidad_generada",
       origen: "generarUnidadDidactica",
       timestamp: new Date()
@@ -21007,12 +25687,25 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       // timestamp: serverTimestamp()
     };
 
+    // Guardar el HTML final (con URLs de Storage)
+    unidadDoc.contenido = htmlContenidoParaGuardar;
     await addDoc(collection(db, "unidadesGeneradas"), unidadDoc);
     alert("✅ Unidad guardada correctamente en Firestore.");
     // Mantener el estado actual para continuar editando/regenerando sin recargar.
     guardarSelectsUnidad();
   } catch (err) {
-    alert("❌ No se pudo guardar la unidad.");
+    console.warn("[unidad] No se pudo guardar la unidad:", err);
+    const code = String(err?.code || "").trim();
+    const msg = String(err?.message || err || "").trim();
+    if (code.includes("permission") || msg.toLowerCase().includes("permission")) {
+      alert("❌ No se pudo guardar la unidad (permisos). Verifica reglas de Firestore para `unidadesGeneradas`.");
+      return;
+    }
+    if (code.includes("unauth") || msg.toLowerCase().includes("auth")) {
+      alert("❌ No se pudo guardar la unidad (sesión). Cierra sesión e inicia de nuevo.");
+      return;
+    }
+    alert(`❌ No se pudo guardar la unidad.\n${code ? `Código: ${code}\n` : ""}${msg ? `Detalle: ${msg}` : ""}`.trim());
   }
 });
 
@@ -21063,37 +25756,66 @@ function limpiarHTML(html = "") {
   return tmp.innerHTML;
 }
 
-
-
-document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
+function _unidadBuildAlumnoHtmlDesdeResultado() {
   const contenedor = document.getElementById("resultadoUnidadGenerada");
-  if (!contenedor) {
-    alert("⚠️ No hay contenido para exportar.");
-    return;
-  }
-
+  if (!contenedor) return "";
   const bloques = contenedor.querySelectorAll(".bloque-subtema");
   let htmlAlumno = "";
 
-  bloques.forEach(bloque => {
-    // Tomamos la columna del alumno completa (lado izquierdo)
+  bloques.forEach((bloque) => {
     const colAlumno = bloque.querySelector(".col-alumno") || bloque.children[0];
     if (!colAlumno) return;
-
-    // Clonamos para manipular sin tocar el DOM visible
     const clone = colAlumno.cloneNode(true);
-
-    // Extraemos y mantenemos TODOS los elementos importantes
     const tituloNode = clone.querySelector("h4");
     const tituloSubtema = tituloNode ? tituloNode.outerHTML : "";
-
-    // Mantenemos todo el contenido incluyendo h3, h5, actividades, etc.
     const contenidoAlumno = clone.innerHTML;
-
     if (contenidoAlumno.trim()) {
       htmlAlumno += `<div class="subtema-completo">${tituloSubtema}${contenidoAlumno}</div><hr>`;
     }
   });
+
+  return htmlAlumno.trim();
+}
+
+function _unidadBuildMaestroHtmlDesdeResultado() {
+  const bloques = document.querySelectorAll(".bloque-subtema");
+  let htmlMaestro = "";
+  bloques.forEach((bloque) => {
+    const columnaDerecha = bloque.children[1];
+    if (columnaDerecha) {
+      htmlMaestro += columnaDerecha.outerHTML + "<hr>";
+    }
+  });
+  return htmlMaestro.trim();
+}
+
+async function _unidadCopiarHtmlPlano(html = "", emptyMessage = "No hay contenido para copiar.") {
+  const limpio = limpiarHTML(html || "");
+  const texto = String(limpio || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<li>/gi, "• ")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!texto) {
+    alert(`⚠️ ${emptyMessage}`);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(texto);
+    alert("✅ Contenido copiado al portapapeles.");
+  } catch (_) {
+    alert("❌ No se pudo copiar el contenido.");
+  }
+}
+
+
+document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
+  const htmlAlumno = _unidadBuildAlumnoHtmlDesdeResultado();
 
   if (!htmlAlumno.trim()) {
     alert("❌ No hay contenido del alumno para exportar.");
@@ -21184,15 +25906,7 @@ document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
 
 
 document.getElementById("btnDescargarMaestro")?.addEventListener("click", () => {
-  const bloques = document.querySelectorAll(".bloque-subtema");
-  let htmlMaestro = "";
-
-  bloques.forEach(bloque => {
-    const columnaDerecha = bloque.children[1]; // columna de notas del maestro
-    if (columnaDerecha) {
-      htmlMaestro += columnaDerecha.outerHTML + "<hr>";
-    }
-  });
+  const htmlMaestro = _unidadBuildMaestroHtmlDesdeResultado();
 
   if (!htmlMaestro.trim()) {
     alert("❌ No hay notas del maestro para exportar.");
@@ -21214,6 +25928,14 @@ document.getElementById("btnDescargarMaestro")?.addEventListener("click", () => 
   enlace.href = URL.createObjectURL(blob);
   enlace.download = "notas_maestro.docx";
   enlace.click();
+});
+
+document.getElementById("btnCopiarHTMLAlumno")?.addEventListener("click", async () => {
+  await _unidadCopiarHtmlPlano(_unidadBuildAlumnoHtmlDesdeResultado(), "No hay contenido del alumno para copiar.");
+});
+
+document.getElementById("btnCopiarHTMLMaestro")?.addEventListener("click", async () => {
+  await _unidadCopiarHtmlPlano(_unidadBuildMaestroHtmlDesdeResultado(), "No hay contenido del maestro para copiar.");
 });
 
 
@@ -22084,6 +26806,70 @@ estiloIconos.textContent = `
         flex-grow: 1;
         text-transform: uppercase;
     }
+
+    .cb-unidad-style-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .cb-unidad-style-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .cb-unidad-style-toggle-input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .cb-unidad-style-toggle-track {
+        position: relative;
+        width: 42px;
+        height: 24px;
+        border-radius: 999px;
+        background: #cbd5e1;
+        transition: background-color 0.2s ease;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.16);
+    }
+
+    .cb-unidad-style-toggle-track::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+        transition: transform 0.2s ease;
+    }
+
+    .cb-unidad-style-toggle-input:checked + .cb-unidad-style-toggle-track {
+        background: #2563eb;
+    }
+
+    .cb-unidad-style-toggle-input:checked + .cb-unidad-style-toggle-track::after {
+        transform: translateX(18px);
+    }
+
+    .cb-unidad-style-toggle-label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #334155;
+        letter-spacing: 0.02em;
+    }
+
+    .cb-unidad-style-selector-host {
+        display: flex;
+        align-items: center;
+    }
     
     .botones-categoria {
         display: flex;
@@ -22128,6 +26914,12 @@ estiloIconos.textContent = `
         color: #1e40af !important;
         border-color: #c7d2fe !important;
     }
+
+    .btn-icono-categoria.sya:hover {
+        background-color: #ecfeff !important;
+        color: #0f766e !important;
+        border-color: #99f6e4 !important;
+    }
     
     .btn-icono-categoria.instrucciones.active {
         background-color: #0f172a !important;
@@ -22146,7 +26938,7 @@ estiloIconos.textContent = `
         cursor: not-allowed !important;
         transform: none !important;
     }
-    
+
     .tooltip {
         position: relative;
         display: inline-block;
@@ -22154,21 +26946,29 @@ estiloIconos.textContent = `
     
     .tooltip .tooltiptext {
         visibility: hidden;
-        width: 140px;
-        background-color: #555;
-        color: #fff;
+        min-width: 140px;
+        max-width: 220px;
+        background: rgba(15, 23, 42, 0.96);
+        color: #ffffff !important;
         text-align: center;
-        border-radius: 6px;
-        padding: 5px;
+        border-radius: 10px;
+        padding: 7px 10px;
         position: absolute;
-        z-index: 1;
+        z-index: 1000;
         bottom: 125%;
         left: 50%;
-        margin-left: -70px;
+        transform: translateX(-50%) translateY(6px);
+        margin-left: 0;
         opacity: 0;
-        transition: opacity 0.3s;
+        transition: opacity 0.18s ease, transform 0.18s ease;
         font-size: 12px;
-        font-weight: normal;
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: 0.01em;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        box-shadow: 0 14px 34px rgba(2, 6, 23, 0.34);
+        pointer-events: none;
+        white-space: nowrap;
     }
     
     .tooltip .tooltiptext::after {
@@ -22176,15 +26976,22 @@ estiloIconos.textContent = `
         position: absolute;
         top: 100%;
         left: 50%;
-        margin-left: -5px;
-        border-width: 5px;
-        border-style: solid;
-        border-color: #555 transparent transparent transparent;
+        margin-left: -6px;
+        width: 12px;
+        height: 12px;
+        transform: rotate(45deg);
+        background: rgba(15, 23, 42, 0.96);
+        border-right: 1px solid rgba(148, 163, 184, 0.28);
+        border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+        border-width: 0;
+        border-style: none;
+        border-color: transparent;
     }
     
     .tooltip:hover .tooltiptext {
         visibility: visible;
         opacity: 1;
+        transform: translateX(-50%) translateY(0);
     }
     
     .badge-instrucciones {
@@ -22218,6 +27025,8 @@ document.head.appendChild(estiloIconos);
 // Variables globales
 let todasLasLecturas = []; // Todas las lecturas cargadas
 let lecturasFiltradas = []; // Solo cuando el usuario usa filtros del modal
+let unidadLecturasCatalogoRemotoCargado = false;
+let unidadLecturaRestoreBootDone = false;
 let paginaActual = 1;
 const lecturasPorPagina = 20;
 let lecturaSeleccionadaModal = null;
@@ -22349,21 +27158,31 @@ function _mezclarLecturasPorKey(...groups) {
   return Array.from(merged.values());
 }
 
-async function _usuarioPuedeLeerTodasLasLecturasUnidad() {
-  const user = auth.currentUser;
+async function _usuarioPuedeLeerTodasLasLecturasUnidad(userOverride = null) {
+  const user = userOverride || auth.currentUser;
   if (!user) return false;
+  const uid = String(user.uid || "").trim();
+  const now = Date.now();
+  if (_unidadLecturasCanReadAllCache.uid === uid && (now - _unidadLecturasCanReadAllCache.ts) < 120000) {
+    return _unidadLecturasCanReadAllCache.value === true;
+  }
   try {
     const role = String(await _resolverRolUsuarioUnidad(user) || "").trim().toLowerCase();
-    return role === "admin" || role === "superadmin" || role === "author" || role === "developer";
+    const value = role === "admin" || role === "superadmin" || role === "author" || role === "editor" || role === "developer";
+    _unidadLecturasCanReadAllCache = { uid, value, ts: now };
+    return value;
   } catch (_) {
+    _unidadLecturasCanReadAllCache = { uid, value: false, ts: now };
     return false;
   }
 }
 
-async function _cargarLecturasPermitidasUnidad(collectionName, tipo = "principal") {
+async function _cargarLecturasPermitidasUnidad(collectionName, tipo = "principal", opts = {}) {
   const colRef = collection(db, collectionName);
-  const uid = String(auth.currentUser?.uid || "").trim();
-  const email = String(auth.currentUser?.email || "").trim().toLowerCase();
+  const user = opts.user || auth.currentUser || null;
+  const uid = String(user?.uid || "").trim();
+  const email = String(user?.email || "").trim().toLowerCase();
+  const canReadAll = opts.canReadAll === true;
   const format = (docs = []) => docs.map((docSnap) => ({
     id: docSnap.id,
     sourceCollection: collectionName,
@@ -22372,7 +27191,7 @@ async function _cargarLecturasPermitidasUnidad(collectionName, tipo = "principal
     tipo
   }));
 
-  if (await _usuarioPuedeLeerTodasLasLecturasUnidad()) {
+  if (canReadAll) {
     try {
       const snap = await getDocs(query(colRef));
       return format(snap.docs);
@@ -22416,14 +27235,25 @@ async function cargarTodasLasLecturas(opts = {}) {
   const forceRefresh = !!opts.forceRefresh;
 
   try {
+    const hydratedFromCache = _hidratarLecturasUnidadDesdeCacheLocal();
+    if (hydratedFromCache) {
+      _refrescarOpcionesInputTema(inputTemaTexto?.value || "");
+    }
     // Comprobar si ya tenemos lecturas en cache
     if (!forceRefresh && window.lecturasNuevas && window.lecturasASC) {
+      unidadLecturasCatalogoRemotoCargado = true;
     } else {
-      const lecturasLegacy = await _cargarLecturasPermitidasUnidad("lecturas", "principal");
-      const lecturasNuevas = await _cargarLecturasPermitidasUnidad("lecturasNuevas", "principal");
+      const authUser = await _unidadGetAuthUser({ maxMs: 3500 });
+      const canReadAll = await _usuarioPuedeLeerTodasLasLecturasUnidad(authUser);
+      const [lecturasLegacy, lecturasNuevas, lecturasAscLoaded] = await Promise.all([
+        _cargarLecturasPermitidasUnidad("lecturas", "principal", { canReadAll, user: authUser }),
+        _cargarLecturasPermitidasUnidad("lecturasNuevas", "principal", { canReadAll, user: authUser }),
+        _cargarLecturasPermitidasUnidad("lecturasASC", "asc", { canReadAll, user: authUser })
+      ]);
       window.lecturasNuevas = _mezclarLecturasPorKey(lecturasLegacy, lecturasNuevas);
-      window.lecturasASC = await _cargarLecturasPermitidasUnidad("lecturasASC", "asc");
+      window.lecturasASC = lecturasAscLoaded;
       lecturasASC = Array.isArray(window.lecturasASC) ? [...window.lecturasASC] : [];
+      unidadLecturasCatalogoRemotoCargado = true;
 
     }
 
@@ -22432,6 +27262,7 @@ async function cargarTodasLasLecturas(opts = {}) {
     const asc = (window.lecturasASC || []).map(l => ({ ...l, tipo: 'asc' }));
 
     todasLasLecturas = [...principales, ...asc];
+    _guardarCatalogoLecturasCache(todasLasLecturas);
     _refrescarOpcionesInputTema(inputTemaTexto?.value || "");
 
 
@@ -22442,6 +27273,7 @@ async function cargarTodasLasLecturas(opts = {}) {
     return todasLasLecturas;
 
   } catch (error) {
+    unidadLecturasCatalogoRemotoCargado = false;
     todasLasLecturas = [];
     return [];
   }
@@ -22692,6 +27524,7 @@ function abrirVistaLecturaDesdeSeleccion(lectura) {
 
   vistaTitulo.textContent = titulo;
   vistaTexto.innerHTML = sanitizeHtml(contenido);
+  renderizarStemPendienteUnidad(vistaTexto);
   vistaPreguntas.replaceChildren();
   if (Array.isArray(preguntas) && preguntas.length) {
     const fragment = document.createDocumentFragment();
@@ -22854,12 +27687,33 @@ document.addEventListener('DOMContentLoaded', function () {
   _aplicarPerfilesAgente(_obtenerPerfilesAgente(), { persist: false, syncRemote: false });
   _inicializarModalConfigAgentes();
   inicializarModalLecturas();
+  _hidratarLecturasUnidadDesdeCacheLocal();
   _sincronizarInputTemaConSelect();
   _refrescarOpcionesInputTema("");
+  if (auth && typeof onAuthStateChanged === "function") {
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      if (unidadLecturasCatalogoRemotoCargado && _poolLecturasBusqueda().length > 10) return;
+      try {
+        await cargarTodasLasLecturas({ forceRefresh: true });
+        _restaurarUltimaLecturaSeleccionadaUnidad();
+      } catch (_) {
+        // noop
+      }
+    });
+  }
+});
+
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    _restaurarUltimaLecturaSeleccionadaPostCarga().catch(() => {});
+  }, 120);
 });
 
 window.addEventListener('lecturasNuevasActualizadas', () => {
   window.lecturasNuevas = null;
+  unidadLecturasCatalogoRemotoCargado = false;
+  unidadLecturaRestoreBootDone = false;
 });
 
 window.cbVoiceWorkflowBridge = window.cbVoiceWorkflowBridge || {};

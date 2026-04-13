@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 API_PORT="${API_PORT:-8787}"
-WEB_PORT="${WEB_PORT:-5000}"
+WEB_PORT="${WEB_PORT:-5010}"
 export API_PORT
 export WEB_PORT
 BACKEND_LOG="${BACKEND_LOG:-/tmp/charlybrown-backend-${API_PORT}.log}"

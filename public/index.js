@@ -48,6 +48,15 @@ try {
   alert(`Error de configuración: ${msg}`);
 }
 
+async function waitAuthPersistence(maxMs = 1800) {
+  try {
+    const timeout = new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(maxMs) || 0)));
+    await Promise.race([authPersistenceReady, timeout]);
+  } catch (_) {
+    // ignore
+  }
+}
+
 function normalizeArea(area = "") {
   return String(area || "")
     .trim()
@@ -92,6 +101,49 @@ function isFirestorePermissionError(error) {
   return code === "permission-denied"
     || code === "firestore/permission-denied"
     || message.includes("missing or insufficient permissions");
+}
+
+function buildFriendlyAuthErrorMessage(error) {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").trim();
+
+  switch (code) {
+    case "auth/api-key-not-valid":
+      return "Error de configuración de inicio de sesión. Contacta al administrador.";
+    case "auth/invalid-credential":
+    case "auth/invalid-login-credentials":
+      return "Correo o contraseña incorrectos.";
+    case "auth/user-not-found":
+      return "El correo no está registrado.";
+    case "auth/wrong-password":
+      return "Contraseña incorrecta.";
+    case "auth/invalid-email":
+      return "Correo inválido.";
+    case "auth/operation-not-allowed":
+      return "El método Email/Password no está habilitado en Firebase Auth.";
+    case "auth/too-many-requests":
+      return "Demasiados intentos. Espera un momento e intenta nuevamente.";
+    case "auth/network-request-failed":
+      return "No se pudo conectar con Firebase. Revisa tu conexión o si el navegador está bloqueando la solicitud.";
+    case "auth/unauthorized-domain":
+      return `Este dominio no está autorizado en Firebase Auth. Agrega "${window.location.hostname}" en Authentication > Settings > Authorized domains.`;
+    case "auth/invalid-app-credential":
+      return "Firebase rechazó la credencial de la app. Revisa App Check, dominio autorizado o recarga completa la página.";
+    case "auth/app-deleted":
+    case "auth/invalid-api-key":
+      return "La configuración de Firebase Auth no es válida en esta página. Recarga y verifica la configuración.";
+    case "permission-denied":
+    case "firestore/permission-denied":
+      return auth.currentUser
+        ? ""
+        : "No se pudo validar el perfil por permisos de Firestore. Intenta de nuevo.";
+    default:
+      if (isFirestorePermissionError(error) && auth.currentUser) return "";
+      if (code) {
+        return `No se pudo iniciar sesión. Código: ${code}${message ? `\nDetalle: ${message}` : ""}`;
+      }
+      return `No se pudo iniciar sesión. ${message || "Verifica tus datos e intenta nuevamente."}`;
+  }
 }
 
 function hydrateProfile(data = {}) {
@@ -253,50 +305,26 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       try {
-        await authPersistenceReady;
+        userLoginBtn.disabled = true;
+        await waitAuthPersistence();
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         await routeAuthenticatedUser(userCredential.user);
 
       } catch (error) {
         console.warn("[index] Error al iniciar sesión:", error);
-        switch (error.code) {
-          case "auth/api-key-not-valid":
-            alert("Error de configuración de inicio de sesión. Contacta al administrador.");
-            break;
-          case "auth/invalid-credential":
-          case "auth/invalid-login-credentials":
-            alert("Correo o contraseña incorrectos.");
-            break;
-          case "auth/user-not-found":
-            alert("El correo no está registrado.");
-            break;
-          case "auth/wrong-password":
-            alert("Contraseña incorrecta.");
-            break;
-          case "auth/invalid-email":
-            alert("Correo inválido.");
-            break;
-          case "auth/operation-not-allowed":
-            alert("El método Email/Password no está habilitado en Firebase Auth.");
-            break;
-          case "auth/too-many-requests":
-            alert("Demasiados intentos. Espera un momento e intenta nuevamente.");
-            break;
-          case "permission-denied":
-          case "firestore/permission-denied":
-            if (auth.currentUser) {
-              window.location.href = "generarLectura.html";
-              return;
-            }
-            alert("No se pudo validar el perfil por permisos de Firestore. Intenta de nuevo.");
-            break;
-          default:
-            if (isFirestorePermissionError(error) && auth.currentUser) {
-              window.location.href = "generarLectura.html";
-              return;
-            }
-            alert("No se pudo iniciar sesión. Verifica tus datos e intenta nuevamente.");
+        if (
+          error?.code === "permission-denied" ||
+          error?.code === "firestore/permission-denied" ||
+          (isFirestorePermissionError(error) && auth.currentUser)
+        ) {
+          if (auth.currentUser) {
+            window.location.href = "generarLectura.html";
+            return;
+          }
         }
+        alert(buildFriendlyAuthErrorMessage(error));
+      } finally {
+        userLoginBtn.disabled = false;
       }
     });
   }
@@ -317,7 +345,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       try {
-        await authPersistenceReady;
+        registerUserBtn.disabled = true;
+        await waitAuthPersistence();
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const uid = userCredential.user.uid;
 
@@ -368,6 +397,8 @@ document.addEventListener("DOMContentLoaded", () => {
           default:
             alert("No se pudo completar el registro. Intenta nuevamente.");
         }
+      } finally {
+        registerUserBtn.disabled = false;
       }
     });
   }

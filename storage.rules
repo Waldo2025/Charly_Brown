@@ -34,16 +34,29 @@ service firebase.storage {
         : "";
     }
 
+    function hasAnyRole(roles) {
+      return isSignedIn() && roles.hasAny([roleFromToken()]);
+    }
+
     function hasRole(role) {
       return isSignedIn() && roleFromToken() == role;
     }
 
     function isAdmin() {
-      return hasRole("admin") || hasRole("superAdmin");
+      return hasAnyRole([
+        "admin", "Admin", "administrador", "Administrador", "administrator", "Administrator",
+        "superAdmin", "superadmin", "SuperAdmin", "owner", "Owner"
+      ]);
     }
 
     function isEditor() {
-      return isAdmin() || hasRole("author") || hasRole("developer");
+      return isAdmin() ||
+        hasAnyRole([
+          "author", "Author", "autor", "Autor", "autores", "autoria", "Autoria",
+          "editor", "Editor", "editorial", "Editorial",
+          "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev",
+          "designer", "Designer", "diseno", "Diseño", "disenador", "Diseñador"
+        ]);
     }
 
     function isOwner(uid) {
@@ -86,6 +99,13 @@ service firebase.storage {
     match /mindmap/{allPaths=**} {
       allow read: if true;
       allow write: if isSignedIn() && hasAllowedPublicContentType();
+    }
+
+    // Assets de unidades generadas (para evitar base64 en Firestore).
+    // Estructura: unidadesGeneradasAssets/{nivel}/{grado}/{trimestre}/{unidad}/{uid}/{fileName}
+    match /unidadesGeneradasAssets/{nivel}/{grado}/{trimestre}/{unidad}/{uid}/{fileName} {
+      allow read: if isSignedIn() && isSafePublicAsset(fileName);
+      allow write: if isSignedIn() && isSafePublicAsset(fileName);
     }
 
     // Adjuntos de chat.

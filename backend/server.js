@@ -57,6 +57,7 @@ const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
 const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_GEMINI_IMAGE_SIZE = "2K";
 const MOODLE_GRAPHIC_PROMPT_VERSION = "moodle_graphic_render_v1";
 const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
   "gemini-3.1-flash-image-preview",
@@ -93,6 +94,8 @@ function parseAllowedOrigins() {
     "https://localhost:*",
     "http://127.0.0.1:5000",
     "http://localhost:5000",
+    "http://127.0.0.1:5010",
+    "http://localhost:5010",
     "http://127.0.0.1:5500",
     "http://localhost:5500",
     "https://charly-brown.web.app",
@@ -220,7 +223,11 @@ function ensureGeminiKey(res) {
 }
 
 function normalizeModel(input = "") {
-  const raw = String(input || "").trim().replace(/^models\//i, "");
+  const raw = String(input || "")
+    .trim()
+    .replace(/^models\//i, "")
+    // Algunos clientes mandan el endpoint (como en la REST API), pero aquí lo agregamos nosotros.
+    .replace(/:(generateContent|streamGenerateContent)$/i, "");
   return raw || "gemini-2.5-flash";
 }
 
@@ -1181,6 +1188,23 @@ function extractGeminiInlineImage(data = {}) {
   };
 }
 
+function buildGeminiImageGenerationConfig({
+  aspectRatio = "1:1",
+  imageSize = DEFAULT_GEMINI_IMAGE_SIZE,
+  temperature = null
+} = {}) {
+  const config = {
+    responseModalities: ["TEXT", "IMAGE"],
+    imageConfig: {
+      aspectRatio: String(aspectRatio || "1:1").trim() || "1:1",
+      imageSize: String(imageSize || DEFAULT_GEMINI_IMAGE_SIZE).trim() || DEFAULT_GEMINI_IMAGE_SIZE
+    }
+  };
+  const temp = Number(temperature);
+  if (Number.isFinite(temp)) config.temperature = temp;
+  return config;
+}
+
 function buildMoodleModuleGraphicPrompt({
   moduleName = "",
   moduleType = "",
@@ -1296,12 +1320,10 @@ async function generateMoodleModuleGraphicAsset({
   });
   const payload = {
     contents: [{ parts: promptParts }],
-    generationConfig: {
-      responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: {
-        aspectRatio: "1:1"
-      }
-    }
+    generationConfig: buildGeminiImageGenerationConfig({
+      aspectRatio: "1:1",
+      imageSize: DEFAULT_GEMINI_IMAGE_SIZE
+    })
   };
   const modelCandidates = Array.from(new Set([
     DEFAULT_MOODLE_GRAPHIC_MODEL,
@@ -1437,6 +1459,60 @@ async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metada
     downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${storageBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
   };
 }
+
+app.post("/api/unidades/support-graphics/upload", async (req, res) => {
+  try {
+    const { uid } = await verifyFirebaseBearer(req);
+    const storagePath = clampText(req.body?.path || "", 900);
+    const mimeType = clampText(req.body?.mimeType || "image/png", 120) || "image/png";
+    const dataBase64 = String(req.body?.dataBase64 || "").trim();
+    const metadataRaw = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
+
+    if (!storagePath.startsWith("unidadesGeneradasAssets/")) {
+      return res.status(400).json({ error: "Ruta de storage inválida." });
+    }
+    if (!/^image\//i.test(mimeType)) {
+      return res.status(400).json({ error: "mimeType inválido para apoyo visual." });
+    }
+    if (!dataBase64) {
+      return res.status(400).json({ error: "Falta dataBase64." });
+    }
+    if (!storagePath.includes(`/${uid}/`)) {
+      return res.status(403).json({ error: "La ruta no corresponde al usuario autenticado." });
+    }
+
+    const buffer = Buffer.from(dataBase64, "base64");
+    if (!buffer.length || buffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
+      return res.status(413).json({ error: "La imagen excede el tamaño permitido." });
+    }
+
+    const metadata = {
+      uid,
+      feature: "unidades_support_graphic",
+      subtema: clampText(metadataRaw?.subtema || "", 180),
+      role: clampText(metadataRaw?.role || "", 80)
+    };
+
+    const asset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer,
+      mimeType,
+      metadata
+    });
+
+    return res.status(200).json({
+      ok: true,
+      storagePath: asset.path,
+      path: asset.path,
+      downloadUrl: asset.downloadUrl,
+      mimeType
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    const message = String(error?.message || "No se pudo subir el apoyo visual.").trim();
+    return res.status(status >= 400 && status <= 599 ? status : 500).json({ error: message });
+  }
+});
 
 async function deleteStoragePath(storagePath = "") {
   if (!storagePath) return;

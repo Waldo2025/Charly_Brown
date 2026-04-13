@@ -416,6 +416,36 @@ service cloud.firestore {
       );
 
       allow delete: if isAdmin() || isOwner(uid);
+
+    }
+
+    match /syaOverrides/{overrideId} {
+      allow read: if (
+        isSignedIn() &&
+        (
+          isEditor() ||
+          resource.data.ownerUid == request.auth.uid ||
+          (
+            resource.data.publicContextKey is string &&
+            resource.data.publicContextKey != ""
+          )
+        )
+      );
+      allow create: if isSignedIn() && (
+        isEditor() ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update: if isSignedIn() && (
+        isEditor() ||
+        (
+          resource.data.ownerUid == request.auth.uid &&
+          request.resource.data.ownerUid == resource.data.ownerUid
+        )
+      );
+      allow delete: if isSignedIn() && (
+        isEditor() ||
+        resource.data.ownerUid == request.auth.uid
+      );
     }
 
     // Chat/messages.
@@ -434,7 +464,7 @@ service cloud.firestore {
     match /unidadesGeneradas/{docId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isEditor() || (isSignedIn() && isDocOwner(resource.data));
+      allow update, delete: if isSignedIn();
     }
 
     match /analisisLecturas/{docId} {
