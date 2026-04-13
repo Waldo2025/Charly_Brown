@@ -25761,10 +25761,22 @@ function construirPromptNotasMaestro(
     const bloqueNotasFicha = generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo);
   }
 
+  // Label mapping for activity type
+  const getTipoActividad = (textoPlano, idx, total) => {
+    if (/ficha\s*\d+/i.test(textoPlano)) return "Refuerzo";
+    if (/recortable\s*\d+|anexo\s*\d+|video/i.test(textoPlano)) return "Ampliación";
+    // If there are ≥3 activities: last is Ampliación, second-to-last is Refuerzo, rest are General
+    if (total >= 3) {
+      if (idx === total - 1) return "Ampliación";
+      if (idx === total - 2) return "Refuerzo";
+    }
+    return "General";
+  };
+
   // ✅ Procesar actividades normales
   const listaNormales = actividadesNormales.map((a, i) => {
     const textoPlano = a.replace(/<[^>]*>/g, "").trim();
-    const tipoActividad = detectarTipoActividad(textoPlano);
+    const tipo = getTipoActividad(textoPlano, i, actividadesNormales.length);
 
     // Extraer recursos específicos
     const fichaMatch = textoPlano.match(/ficha\s+(\d+\w*)/i);
@@ -25786,8 +25798,7 @@ function construirPromptNotasMaestro(
 
     const tituloCorto = textoPlano.split(".")[0];
 
-    return `[ACTIVIDAD ${i + 1}]  
-      Tipo de Actividad: ${i + 1} ${tipoActividad}
+    return `[ACTIVIDAD ${i + 1}] — TIPO: ${tipo}
       Título: ${tituloCorto}.
       Modalidad: ${modalidad}
       ${recursosTexto}`;
@@ -25977,12 +25988,20 @@ function construirPromptNotasMaestro(
 
   <h2 style="margin-top:20px; margin-bottom:20px;">${tituloCreativo}</h2>
 
-  Estas son las actividades detectadas para el subtema (nivel **${nivel}**, grado **${grado}**):
+  Estas son las actividades detectadas para el subtema (nivel **${nivel}**, grado **${grado}**).
+  Cada actividad ya tiene su TIPO asignado — debes respetarlo exactamente:
 
   ${listaNormales}
 
-  📌 **Tu tarea como IA**  
-  Genera un conjunto completo de **Notas para el Maestro**, en formato HTML, para cada actividad.  
+  📌 **Tu tarea como IA**
+  Genera un conjunto completo de **Notas para el Maestro**, en formato HTML, para cada actividad.
+
+  ✅ ESTRUCTURA OBLIGATORIA — agrupa las actividades bajo sus encabezados de tipo:
+
+  1. Primero, coloca un encabezado <h3 style="color:#1d4ed8;">Actividades generales</h3> y lista todas las actividades de TIPO "General".
+  2. Luego, coloca <h3 style="color:#7c3aed;">Actividad de ampliación</h3> y la(s) actividad(es) de TIPO "Ampliación".
+  3. Por último, coloca <h3 style="color:#dc2626;">Actividades de refuerzo</h3> y la(s) actividad(es) de TIPO "Refuerzo".
+  4. Si solo hay 1 o 2 actividades en total, omite los encabezados de tipo y simplemente escribe las notas.
 
   ✅ PARA CADA ACTIVIDAD:
     - Comienza mencionando a qué actividad corresponde: "En la actividad X..."
@@ -25992,34 +26011,38 @@ function construirPromptNotasMaestro(
     - Incluye la modalidad de trabajo naturalmente en el texto
     - Agrega estrategia para estudiantes con barreras de aprendizaje
 
-  📌 **Distribución del tiempo para este subtema:**  
-  - Tema: "${tituloCreativo}"  
-  - Actividades detectadas: ${totalActividades}  
-  - Tiempo total sugerido: ${minutosTotales} minutos  
+  📌 **Distribución del tiempo para este subtema:**
+  - Tema: "${tituloCreativo}"
+  - Actividades detectadas: ${totalActividades}
+  - Tiempo total sugerido: ${minutosTotales} minutos
 
-  📌 **Formato exacto de cada bloque en las Notas para el Maestro:**  
+  📌 **Formato exacto de cada bloque en las Notas para el Maestro:**
 
   <h1>${tituloCreativo}</h1>
 
-  <p><strong>Actividad [General / Refuerzo / Ampliación]</strong></p>
-  <p style="margin-bottom:20px;">Actividad 1, Estrategias de gestión del aula, **incluyendo modalidad** y un ejemplo/reflexión.</p>
-  <p style="margin-bottom:20px;">Actividad 2, Estrategias de gestión del aula, **incluyendo modalidad** y un ejemplo/reflexión.</p>
+  <h3 style="color:#1d4ed8;">Actividades generales</h3>
+  <p style="margin-bottom:20px;">Actividad 1 (General): Estrategias de gestión del aula, <strong>incluyendo modalidad</strong> y un ejemplo/reflexión.</p>
+
+  <h3 style="color:#7c3aed;">Actividad de ampliación</h3>
+  <p style="margin-bottom:20px;">Actividad N (Ampliación): Estrategias de gestión del aula, incluyendo modalidad y recurso asociado.</p>
+
+  <h3 style="color:#dc2626;">Actividades de refuerzo</h3>
+  <p style="margin-bottom:20px;">Actividad N (Refuerzo): Estrategias de gestión del aula, ficha/anexo/recortable asociado.</p>
   <p style="margin-bottom:20px;">Estrategia simplificada para estudiantes con barreras de aprendizaje.</p>
 
-
-
-  📌 **Reflexión global al final:**  
+  📌 **Reflexión global al final:**
   Una sola reflexión de cierre sobre el aprendizaje esperado de las actividades para el maestro.
 
-  **Al final de TODAS las notas, agrega obligatoriamente esta tabla HTML sin cambios:**  
+  **Al final de TODAS las notas, agrega obligatoriamente esta tabla HTML sin cambios:**
   ${tablaCandelarizacion}
 
 
-  ⚠️ **Restricciones:**  
-  - NO copies ni reformules las actividades del alumno.  
-  - Máximo 1 párrafo por actividad, detallando al profesor lo que debe hacer para realizar la actividad y cómo llevar una correcta gestión del aula para lograr una actividad exitosa.  
-  - Una sola reflexión de cierre sobre el aprendizaje esperado de las actividades para el maestro. 
+  ⚠️ **Restricciones:**
+  - NO copies ni reformules las actividades del alumno.
+  - Máximo 1 párrafo por actividad, detallando al profesor lo que debe hacer para realizar la actividad y cómo llevar una correcta gestión del aula para lograr una actividad exitosa.
+  - Una sola reflexión de cierre sobre el aprendizaje esperado de las actividades para el maestro.
   - NO elimines la tabla de candelarización.
+  - RESPETA exactamente los tipos de actividad asignados en la lista (General / Ampliación / Refuerzo).
   `;
 }
 
