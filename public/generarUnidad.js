@@ -2434,25 +2434,74 @@ function _unidadStripDuplicatedLectureBlocksFromHtml(html = "") {
 
 function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
   if (!lectura) return "";
-  const sinonimos = _extraerSinonimosLecturaUnidad(lectura);
+  const sinonimos = _extraerSinonimosLecturaUnidad(lectura) || [];
   const tabla = _tablaSinonimosLecturaUnidadHTML(sinonimos);
   const bibliografia = _extraerBibliografiaLecturaUnidad(lectura);
-  if (!tabla && !bibliografia) return "";
-  const categoriaLectura = "Lenguaje y comunicación";
-  const subcategoriaLectura = _unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: categoriaLectura, columna: "maestro" });
-  const competenciasLectura = _unidadRenderCompetenciasAscHTML("ComprensionLectora", categoriaLectura, { lectura: true });
-  const competenciaLectura = _unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", categoriaLectura, { lectura: true, label: "Lectura" });
-  const ejeLectura = _unidadRenderEjeArticuladorHTML("ComprensionLectora", categoriaLectura, { lectura: true });
+  const tituloLectura = lectura?.titulo || lectura?.tema || "Lectura generadora";
+  const categoriasLecturaStr = "Lenguaje y comunicación";
+  const subcategoriaLectura = _unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: categoriasLecturaStr, columna: "maestro" });
+  
+  const competenciasLectura = _unidadRenderCompetenciasAscHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true });
+  const competenciaLectura = _unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true, label: "Lectura" });
+  const ejeLectura = _unidadRenderEjeArticuladorHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true });
+
+  const preguntasArr = _preguntasLecturaUnidad(lectura) || [];
+  const indicadores = [
+    "Obtención de la información: NIVEL 1",
+    "Obtención de la información: NIVEL 2",
+    "Reflexión y valoración: NIVEL 2",
+    "Elaboración de una interpretación: NIVEL 3",
+    "Reflexión y valoración: NIVEL 3"
+  ];
+  const preguntasHTML = preguntasArr.map((q, idx) => {
+    const cleanQ = q.replace(/^¿*|(\?)*$/g, "");
+    if (!cleanQ.trim()) return "";
+    const hasLevel = q.toUpperCase().includes("NIVEL");
+    const levelStr = hasLevel ? "" : `<strong>${indicadores[idx % indicadores.length]}</strong><br>`;
+    return `<p style="margin: 0 0 10px 0; font-size:14px;">${levelStr}<span style="color:#2ba2b4;">¿${cleanQ}?</span></p>`;
+  }).join("");
+
+  let dictadoWordsArr = sinonimos.map(s => s.palabra).filter(Boolean);
+  if (dictadoWordsArr.length === 0) {
+    const htmlContenido = lectura.contenidoFormateado || lectura.contenido || "";
+    const bolds = [...htmlContenido.matchAll(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/ig)]
+       .map(m => m[1].replace(/<[^>]+>/g, "").trim())
+       .filter(w => w.length > 3);
+    dictadoWordsArr = [...new Set(bolds)];
+  }
+  const dictadoWordsStr = dictadoWordsArr.slice(0, 10).join(", ");
+
   return `
     <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;">
-      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaLectura}</span>
         ${competenciasLectura}
         ${competenciaLectura}
         ${ejeLectura}
       </div>
-      <h4 style="margin:0 0 10px;">Apoyo de la lectura</h4>
-      ${tabla ? `<h5 style="margin:10px 0 6px;">Tabla de sinónimos</h5>${tabla}` : ""}
+      
+      <h3 style="color:#4a90e2; margin-top:20px; margin-bottom:12px;">${tituloLectura}</h3>
+      
+      <h4 style="margin-top:16px; margin-bottom:6px; color:#5c7099;">Ejercicios sacádicos</h4>
+      <p style="font-size:14px; margin-bottom:16px; line-height:1.5;">Solicite a los alumnos que, antes de la lectura, realicen ejercicios sacádicos llamados "En vertical". Indique a los alumnos que se sienten correctamente y que dirijan la mirada hacia el techo, sin mover la cabeza; parpadeen varias veces y digan "uno"; luego, que dirijan la mirada hacia el suelo, parpadeen de nuevo y digan "uno"; por último, solicite que mantengan la mirada en cada posición por tres segundos.</p>
+      
+      <h4 style="margin-top:16px; margin-bottom:6px; color:#5c7099;">Actividad general</h4>
+      <p style="font-size:14px; margin-bottom:12px; line-height:1.5;">Modele la lectura y después realice lectura coral con ellos. El énfasis en un principio es la lectura mecánica y coral.<br>
+      Los niños que aún no dominan la fluidez lectora pueden seguir la lectura con su dedo índice; es más importante lograr la mecanización, pues dejarán de usarla cuando ya no lo necesiten.<br>
+      Plantee a los alumnos, después de hacer la lectura, las siguientes preguntas con el fin de favorecer la comprensión lectora. Como referencia, cada una está ubicada en un nivel de la rúbrica de las pruebas PISA:</p>
+      
+      <div class="lectura-pisa-preguntas" style="margin-bottom:20px;">
+        ${preguntasHTML}
+      </div>
+      
+      <p style="font-size:14px; margin-bottom:12px; line-height:1.5;"><strong>Favorezca la ampliación de léxico organizando la búsqueda de sinónimos.</strong> Organice un juego de memoria con estas palabras con juego de imágenes y palabras escritas; a los alumnos les será más fácil recordar cada una.</p>
+      
+      ${tabla ? `<div style="margin-bottom:20px;">${tabla}</div>` : ""}
+
+      <p style="font-size:14px; margin-bottom:12px; line-height:1.5;">Utilice, para la sección de dictado, las palabras más sobresalientes de la Unidad didáctica. Por ejemplo:<br>
+      <span style="color:#2ba2b4;">${dictadoWordsStr || "conversar, cañaveral, huevecillos, oxígeno, renacuajo, estanque, achicando, croar, trepar, tropical"}</span><br>
+      Una vez que los alumnos las memoricen visualmente y conozcan su significado, realice el dictado en voz alta.</p>
+
       ${bibliografia ? `<h5 style="margin:10px 0 6px;">Bibliografía</h5><div class="lectura-bibliografia-lista">${bibliografia}</div>` : ""}
     </div>
   `;
@@ -24429,7 +24478,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
-                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
                         ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
@@ -24442,7 +24491,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
                         ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
@@ -24588,7 +24637,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const lecturaNomenclaturaHTML = esPrimerSubtemaLenguaje
           ? `
               <div class="lectura-global-categoria" style="margin-bottom:30px;">
-                <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</span>
                   ${_unidadRenderCompetenciasAscHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
                   ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
@@ -24618,7 +24667,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
                     ${lecturaNomenclaturaHTML}
                     ${tablaInicialHTML}
-                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
                         ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
@@ -24632,7 +24681,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; align-items:center;">
+                    <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
                         ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
