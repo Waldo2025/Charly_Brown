@@ -1,10 +1,13 @@
 {
-  "version": "2026-1.0.1.13",
+  "version": "2026-1.0.1.14",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
+    "Fix: moodleCourse ahora refleja de inmediato el resultado nuevo al generar módulos con IA, incluido Temario.",
+    "Fix: Notas del maestro ya usa la estructura editorial fija también cuando se genera como módulo.",
+    "Fix: Temario vuelve a generarse como tabla con columnas CLIL, Lengua/Language Arts y Funciones del lenguaje.",
     "Fix: moodleCourse ya recarga de inmediato las instrucciones Gemini editadas sin reiniciar la página.",
     "Fix: El botón de actualización ahora termina en /index.html sin parámetros de caché en la URL.",
     "Mejora: Combinación real de estilos educativos, incluyendo ASC + otros formatos.",

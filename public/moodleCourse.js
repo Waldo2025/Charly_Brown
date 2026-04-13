@@ -1,4 +1,4 @@
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.65";
+import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.1.14";
 // Firebase imports
 import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
 import {
@@ -33,16 +33,16 @@ import {
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.0.65';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.14';
 
 import { 
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
-} from './moodleClurse-extraFunctions.js?v=2026-1.0.0.65';
-import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.0.65';
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.65";
-import { authFetchJson, buildApiUrl } from "./api-client.js?v=2026-1.0.0.65";
+} from './moodleClurse-extraFunctions.js?v=2026-1.0.1.14';
+import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.1.14';
+import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.1.14";
+import { authFetchJson, buildApiUrl } from "./api-client.js?v=2026-1.0.1.14";
 import {
     applySimplePreviewStateFromLayers,
     cleanupModuleGraphicInlinePreview,
@@ -54,7 +54,7 @@ import {
     renderSimplePreviewFooter,
     renderSimplePreviewText,
     upsertSelectedPreviewText
-} from "./moodleCourse-graphicPreview.js?v=2026-1.0.0.65";
+} from "./moodleCourse-graphicPreview.js?v=2026-1.0.1.14";
 
 
 /* CONFIGURACIÓN FIREBASE */
@@ -7150,6 +7150,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 </div>
             </div>
         `;
+    delete window.__forceRefreshModuloId;
 
     // Solo volver arriba si no se pidió ir a un módulo específico
     if (!moduloIdToScroll) {
@@ -7256,6 +7257,9 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                     // Guardado automático del contenido del módulo al editar.
                     if (!contenedor.dataset.autosaveBound) {
                         contenedor.dataset.autosaveBound = "1";
+                        contenedor.dataset.lastSavedHtml = normalizarContenidoModuloPersistible(
+                            sanitizeRichText(contenedor.innerHTML)
+                        );
 
                         const guardarModuloDesdeContenedor = async (forzar = false) => {
                             const modId = contenedor.dataset.moduloId;
@@ -7584,6 +7588,16 @@ function crearModalInstruccionesSubtema() {
 window.ejecutarGeneracionModuloGemini = async function (moduloId) {
     const cleanModuloId = String(moduloId || "").trim();
     if (!cleanModuloId) return;
+    const contenedorModulo = document.getElementById(`contenido-${cleanModuloId}`);
+    if (contenedorModulo) {
+        contenedorModulo.dataset.lastSavedHtml = normalizarContenidoModuloPersistible(
+            sanitizeRichText(contenedorModulo.innerHTML)
+        );
+    }
+    if (moduloAutosaveTimers.has(cleanModuloId)) {
+        clearTimeout(moduloAutosaveTimers.get(cleanModuloId));
+        moduloAutosaveTimers.delete(cleanModuloId);
+    }
     const triggerButtons = Array.from(document.querySelectorAll('[data-mc-action="ejecutar-generacion-modulo-gemini"]'))
         .filter((button) => String(button?.dataset?.mcModuloId || "").trim() === cleanModuloId);
     if (triggerButtons.some((button) => button.dataset.cbGenerating === "1")) {
@@ -7596,6 +7610,7 @@ window.ejecutarGeneracionModuloGemini = async function (moduloId) {
     });
     try {
         await generarModuloGemini(cleanModuloId);
+        window.__forceRefreshModuloId = cleanModuloId;
         const subtemaParaRefrescar = resolverSubtemaParaModulo(cleanModuloId);
         if (!subtemaParaRefrescar?.id) {
             throw new Error("El contenido se generó, pero no se pudo localizar el subtema activo para refrescar la vista.");
@@ -7625,6 +7640,8 @@ function moduloTieneActividadOriginalVisible(modulo = {}) {
 async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = false) {
     // Verificar si es curso duplicado
     const esCursoDuplicado = curso?.nombre?.includes("(Copia)") || false;
+    const forceRefreshModuloId = String(window.__forceRefreshModuloId || "").trim();
+    const forceRefreshModuloIdShort = forceRefreshModuloId ? forceRefreshModuloId.split('_').pop() : "";
     
     // Si es curso duplicado, forzar modo edición
     const esModoLecturaReal = modoLectura && !esCursoDuplicado;
@@ -7635,7 +7652,14 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
 
     const modulosCargados = await Promise.all(
         subtema.modulosIds.map(async (modId) => {
-            const mod = await obtenerModulo(modId, curso.id);
+            const modIdSafe = String(modId || "").trim();
+            const modIdShort = modIdSafe ? modIdSafe.split('_').pop() : "";
+            const shouldForceRefresh = !!forceRefreshModuloId && (
+                modIdSafe === forceRefreshModuloId ||
+                modIdSafe === forceRefreshModuloIdShort ||
+                modIdShort === forceRefreshModuloIdShort
+            );
+            const mod = await obtenerModulo(modId, curso.id, { forceRefresh: shouldForceRefresh });
             return { modId, mod };
         })
     );
@@ -8088,6 +8112,86 @@ ${promptBase}
 `;
 }
 
+function obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado = { code: "es", label: "español" }) {
+  const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
+
+  if (isEnglish) {
+    return {
+      sectionNames: {
+        previousKnowledge: "Previous Knowledge",
+        objectives: "Objectives",
+        opening: "Opening",
+        whileUsingBook: "While Using the book section",
+        closing: "Closing"
+      },
+      abilitiesLabel: "Intellectual abilities",
+      supportLabel: "Support activity",
+      extensionLabel: "Extension activity",
+      objectiveLead: "To",
+      contract: `
+MANDATORY OUTPUT STRUCTURE:
+- Use these exact section titles and in this exact order:
+  1. Previous Knowledge
+  2. Objectives
+  3. Opening
+  4. While Using the book section
+  5. Closing
+- Inside "Objectives", include:
+  - one objective sentence starting with "To"
+  - one line starting exactly with "Intellectual abilities:"
+- Inside "While Using the book section", include:
+  - the core classroom guidance for using the book or module
+  - one paragraph starting exactly with "Support activity:"
+  - one paragraph starting exactly with "Extension activity:"
+- Do not omit any section, even if you must adapt it briefly.
+- Return the response in markdown with headings using this format:
+  ## Previous Knowledge
+  ## Objectives
+  ## Opening
+  ## While Using the book section
+  ## Closing
+`
+    };
+  }
+
+  return {
+    sectionNames: {
+      previousKnowledge: "Conocimientos previos",
+      objectives: "Objetivos",
+      opening: "Apertura",
+      whileUsingBook: "Durante el uso del libro",
+      closing: "Cierre"
+    },
+    abilitiesLabel: "Habilidades intelectuales",
+    supportLabel: "Actividad de apoyo",
+    extensionLabel: "Actividad de ampliación",
+    objectiveLead: "Para",
+    contract: `
+ESTRUCTURA OBLIGATORIA DE SALIDA:
+- Usa estos títulos exactos y en este orden:
+  1. Conocimientos previos
+  2. Objetivos
+  3. Apertura
+  4. Durante el uso del libro
+  5. Cierre
+- Dentro de "Objetivos", incluye:
+  - una oración de objetivo que empiece con "Para"
+  - una línea que empiece exactamente con "Habilidades intelectuales:"
+- Dentro de "Durante el uso del libro", incluye:
+  - la orientación principal para trabajar el contenido del libro o módulo
+  - un párrafo que empiece exactamente con "Actividad de apoyo:"
+  - un párrafo que empiece exactamente con "Actividad de ampliación:"
+- No omitas ninguna sección, aunque debas adaptarla brevemente.
+- Devuelve la respuesta en markdown usando encabezados con este formato:
+  ## Conocimientos previos
+  ## Objetivos
+  ## Apertura
+  ## Durante el uso del libro
+  ## Cierre
+`
+  };
+}
+
 // Función para abrir el modal de Notas para el Maestro
 window.abrirModalNotasMaestro = async function(moduloId) {
     moduloNotasMaestroId = moduloId;
@@ -8278,7 +8382,8 @@ async function generarNotasMaestroConIA(moduloId, contenidoModulo) {
             preguntasDetectadas,
             tipoModulo,
             nombreModulo: modulo.nombre || "Sin nombre",
-            contenidoLimpio
+            contenidoLimpio,
+            idiomaDetectado
         });
         } 
         else if (modo === "leccion") {
@@ -8286,21 +8391,24 @@ async function generarNotasMaestroConIA(moduloId, contenidoModulo) {
             tipoModulo,
             nombreModulo: modulo.nombre || "Sin nombre",
             contenidoLimpio,
-            preguntasDetectadas
+            preguntasDetectadas,
+            idiomaDetectado
         });
         } 
         else if (modo === "actividad_guiada") {
         prompt = construirPromptActividadGuiada({
             tipoModulo,
             nombreModulo: modulo.nombre || "Sin nombre",
-            contenidoLimpio
+            contenidoLimpio,
+            idiomaDetectado
         });
         }
         else {
         prompt = construirPromptContenido({
             tipoModulo,
             nombreModulo: modulo.nombre || "Sin nombre",
-            contenidoLimpio
+            contenidoLimpio,
+            idiomaDetectado
         });
         }
 
@@ -8391,28 +8499,30 @@ function construirPromptQuizz({
   preguntasDetectadas,
   tipoModulo,
   nombreModulo,
-  contenidoLimpio
+  contenidoLimpio,
+  idiomaDetectado
 }) {
+  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
   return `
 Eres un experto en pedagogía y diseño instruccional.
 
-Vas a generar "Notas para el Maestro" EXCLUSIVAMENTE sobre el siguiente QUIZZ.
+Vas a generar notas del maestro con estructura editorial fija para el siguiente quiz.
+
+${plantilla.contract}
 
 REGLAS OBLIGATORIAS:
 - El módulo contiene EXACTAMENTE ${preguntasDetectadas} preguntas.
-- Genera EXACTAMENTE ${preguntasDetectadas} párrafos, más uno introductorio.
-- Cada párrafo corresponde a UNA pregunta real.
-- NO inventes actividades ni estaciones.
-- NO agregues preguntas inexistentes.
-
-FORMA:
-- Usa ordinales: primera, segunda, tercera, etc.
-- Tono docente profesional.
-- Texto continuo, sin listas.
-
-ESTRUCTURA:
-1. Un párrafo introductorio.
-2. Un párrafo por pregunta, en orden exacto.
+- Analiza únicamente las preguntas reales del quiz.
+- No agregues preguntas inexistentes.
+- No inventes estaciones ni recursos que no aparezcan.
+- Convierte el análisis del quiz a la plantilla editorial obligatoria.
+- En "${plantilla.sectionNames.previousKnowledge}" indica qué saberes y vocabulario conviene activar.
+- En "${plantilla.sectionNames.objectives}" redacta una meta clara que inicie con "${plantilla.objectiveLead}" y añade la línea "${plantilla.abilitiesLabel}:".
+- En "${plantilla.sectionNames.opening}" explica cómo introducir el quiz antes de resolverlo.
+- En "${plantilla.sectionNames.whileUsingBook}" explica cómo acompañar cada pregunta como evidencia de comprensión, sin enumerarlas como examen aislado.
+- En "${plantilla.supportLabel}:" incluye apoyo concreto para estudiantes que necesiten andamiaje.
+- En "${plantilla.extensionLabel}:" incluye una variante de profundización fiel al contenido.
+- En "${plantilla.sectionNames.closing}" explica cómo cerrar y verificar comprensión.
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -8423,28 +8533,31 @@ CONTENIDO DEL QUIZZ:
 ${contenidoLimpio}
 ================================
 
-Devuelve SOLO el texto de las notas.
+Devuelve SOLO las notas del maestro en la estructura solicitada.
 `;
 }
 
 function construirPromptContenido({
   tipoModulo,
   nombreModulo,
-  contenidoLimpio
+  contenidoLimpio,
+  idiomaDetectado
 }) {
+  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
   return `
 Eres un experto en pedagogía y diseño instruccional.
 
-Vas a generar "Notas para el Maestro" sobre un MÓDULO DE CONTENIDO (no es un quizz).
+Vas a generar notas del maestro sobre un módulo de contenido con estructura editorial fija.
+
+${plantilla.contract}
 
 OBJETIVO:
 Orientar al docente sobre cómo trabajar este contenido en el aula.
 
 REGLAS:
-- NO estructures el texto como preguntas.
-- NO uses ordinales.
-- NO menciones “pregunta”.
-- NO inventes actividades que no aparezcan.
+- No estructures el texto como cuestionario.
+- No uses ordinales ni bloques libres sin encabezados.
+- No inventes actividades que no aparezcan.
 - Analiza el contenido como una secuencia didáctica.
 
 ENFÓCATE EN:
@@ -8453,12 +8566,9 @@ ENFÓCATE EN:
 - Cómo abordar el contenido paso a paso.
 - Qué ideas clave deben enfatizarse.
 - Qué aprendizajes se esperan.
-
-FORMA:
-- Tono docente profesional.
-- Párrafos continuos.
-- Usa expresiones como:
-  “Le sugerimos que…”, “Es importante que…”, “Se recomienda…”
+- Usa la plantilla fija y adapta cada sección al contenido real del módulo.
+- En "${plantilla.supportLabel}:" incluye una ayuda concreta para estudiantes con dificultad.
+- En "${plantilla.extensionLabel}:" incluye una ampliación auténtica, no genérica.
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -8469,7 +8579,7 @@ CONTENIDO A ANALIZAR:
 ${contenidoLimpio}
 ================================
 
-Devuelve SOLO el texto de las notas del maestro.
+Devuelve SOLO las notas del maestro en la estructura solicitada.
 `;
 }
 
@@ -8477,12 +8587,16 @@ function construirPromptLeccion({
   tipoModulo,
   nombreModulo,
   contenidoLimpio,
-  preguntasDetectadas
+  preguntasDetectadas,
+  idiomaDetectado
 }) {
+  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
   return `
 Eres un experto en pedagogía y diseño instruccional.
 
-Vas a generar "Notas para el Maestro" sobre una LECCIÓN interactiva de Moodle.
+Vas a generar notas del maestro sobre una lección interactiva de Moodle con estructura editorial fija.
+
+${plantilla.contract}
 
 OBJETIVO:
 Orientar al docente sobre cómo conducir la lección paso a paso,
@@ -8493,8 +8607,11 @@ REGLAS IMPORTANTES:
 - NO trates la lección como un quizz.
 - NO uses la palabra “cuestionario”.
 - Las preguntas funcionan como puntos de control o verificación.
-- NO enumeres preguntas como si fueran un examen.
+- No enumeres preguntas como si fueran un examen.
 - NO inventes escenas, actividades ni rutas que no existan.
+- Usa la plantilla fija y adapta cada sección al flujo de la lección.
+- En "${plantilla.sectionNames.whileUsingBook}" explica cómo conducir la navegación y monitorear los puntos de verificación.
+- Incluye "${plantilla.supportLabel}:" y "${plantilla.extensionLabel}:" dentro de esa sección.
 
 ENFÓCATE EN:
 - Propósito pedagógico general de la lección.
@@ -8503,13 +8620,6 @@ ENFÓCATE EN:
 - Cómo guiar al alumno durante el procedimiento o narrativa.
 - Cómo usar las preguntas para reforzar comprensión y seguridad.
 - Qué aprendizajes se esperan al finalizar la lección.
-
-FORMA:
-- Tono docente profesional.
-- Texto continuo en párrafos.
-- NO listas ni viñetas.
-- Puedes usar expresiones como:
-  “Le sugerimos que…”, “Es importante que…”, “Se recomienda…”
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -8521,19 +8631,23 @@ CONTENIDO DE LA LECCIÓN:
 ${contenidoLimpio}
 ================================
 
-Devuelve SOLO el texto de las notas del maestro.
+Devuelve SOLO las notas del maestro en la estructura solicitada.
 `;
 }
 
 function construirPromptActividadGuiada({
   tipoModulo,
   nombreModulo,
-  contenidoLimpio
+  contenidoLimpio,
+  idiomaDetectado
 }) {
+  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
   return `
 Eres un experto en pedagogía y diseño instruccional.
 
-Vas a generar "Notas para el Maestro" para una ACTIVIDAD PRÁCTICA.
+Vas a generar notas del maestro para una actividad práctica con estructura editorial fija.
+
+${plantilla.contract}
 
 OBJETIVO:
 Entregar instrucciones claras y accionables para que el docente ejecute la actividad con su grupo.
@@ -8544,6 +8658,10 @@ REGLAS IMPORTANTES:
 - Explica cómo acompañar al estudiante si se bloquea o comete errores.
 - Incluye una forma simple de evidenciar el aprendizaje al final.
 - NO inventes recursos que no estén en el contenido.
+- Usa la plantilla fija como salida final.
+- En "${plantilla.sectionNames.opening}" enfoca la activación y preparación.
+- En "${plantilla.sectionNames.whileUsingBook}" describe la ejecución acompañada de la actividad.
+- Incluye "${plantilla.supportLabel}:" y "${plantilla.extensionLabel}:" dentro de esa sección.
 
 ENFÓCATE EN:
 - Propósito de la actividad.
@@ -8551,12 +8669,6 @@ ENFÓCATE EN:
 - Paso a paso para implementar el ejercicio.
 - Preguntas de acompañamiento que puede usar el docente.
 - Criterios de logro esperados.
-
-FORMA:
-- Tono docente profesional.
-- Párrafos claros, concretos y directos.
-- Puedes usar expresiones como:
-  “Le sugerimos que…”, “Durante esta fase…”, “Al finalizar…”
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -8567,7 +8679,7 @@ CONTENIDO DE LA ACTIVIDAD:
 ${contenidoLimpio}
 ================================
 
-Devuelve SOLO el texto de las notas del maestro.
+Devuelve SOLO las notas del maestro en la estructura solicitada.
 `;
 }
 
@@ -9549,16 +9661,25 @@ function construirContenidoInicialModulo(tipo) {
     if (tipoNormalizado !== "notas_maestro") return "";
 
     return `
-<h3>Ejercicio guiado: Aplicación del contenido</h3>
-<p><strong>Objetivo de la actividad:</strong> Aplicar los conceptos del módulo en una situación práctica.</p>
-<p><strong>Instrucciones para el estudiante:</strong></p>
-<ol>
-  <li>Lee con atención la consigna y subraya la información clave.</li>
-  <li>Resuelve el ejercicio justificando cada paso de tu respuesta.</li>
-  <li>Compara tu solución con un compañero y mejora tu propuesta.</li>
-  <li>Presenta la versión final explicando qué aprendiste.</li>
-</ol>
-<p><strong>Criterio de logro:</strong> Explica el procedimiento con claridad y sustenta su respuesta.</p>
+<div class="notas-maestro-simple">
+  <h2>Conocimientos previos</h2>
+  <p>Active ideas previas del grupo sobre el tema, el vocabulario clave y el contexto necesario para comprender la actividad.</p>
+
+  <h2>Objetivos</h2>
+  <p>Para aplicar los conceptos centrales del módulo en una situación guiada, con acompañamiento docente y reflexión final.</p>
+  <p><strong>Habilidades intelectuales:</strong> CFU, CFC, NST, NFU, NMI</p>
+
+  <h2>Apertura</h2>
+  <p>Presente brevemente el reto, modele un ejemplo corto y confirme que el grupo entiende la consigna antes de iniciar.</p>
+
+  <h2>Durante el uso del libro</h2>
+  <p>Indique al alumnado que resuelva la actividad paso a paso, individualmente o en parejas, mientras usted monitorea y da retroalimentación puntual.</p>
+  <p><strong>Actividad de apoyo:</strong> Ofrezca vocabulario visible, pistas guiadas o un ejemplo parcial para estudiantes que necesiten andamiaje.</p>
+  <p><strong>Actividad de ampliación:</strong> Pida una variante más compleja, una justificación adicional o una aplicación en un contexto nuevo.</p>
+
+  <h2>Cierre</h2>
+  <p>Socialice respuestas, compare estrategias y cierre con una breve reflexión sobre qué aprendieron y cómo lo resolvieron.</p>
+</div>
 `.trim();
 }
 
@@ -9579,10 +9700,24 @@ Solo organiza el contenido con buena estructura: título, subtítulos, párrafos
     if (tipoNormalizado !== "notas_maestro") return "";
 
     return `
-1. Presente el objetivo del ejercicio y el tiempo total estimado.
-2. Modele un ejemplo breve antes de iniciar el trabajo autónomo.
-3. Monitoree el avance con preguntas de apoyo y retroalimentación puntual.
-4. Cierre con socialización de respuestas y criterios de evaluación.
+Genera el contenido del módulo con esta estructura fija de Notas del maestro.
+
+Títulos obligatorios y en este orden:
+1. Conocimientos previos
+2. Objetivos
+3. Apertura
+4. Durante el uso del libro
+5. Cierre
+
+Reglas obligatorias:
+- En "Objetivos" incluye una oración que empiece con "Para".
+- Después incluye una línea exacta que empiece con "Habilidades intelectuales:".
+- Dentro de "Durante el uso del libro" incluye:
+  - orientación principal para acompañar el trabajo
+  - un párrafo que empiece exactamente con "Actividad de apoyo:"
+  - un párrafo que empiece exactamente con "Actividad de ampliación:"
+- Usa español natural, tono docente profesional y estructura editorial clara.
+- Devuelve el resultado con encabezados visibles y contenido listo para mostrarse en el módulo.
 `.trim();
 }
 
@@ -9817,7 +9952,7 @@ function quitarUndefinedPlano(obj = {}) {
     return out;
 }
 
-function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
+export function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
     const moduloIdSafe = String(moduloId || "").trim();
     const cursoIdSafe = String(cursoId || "").trim();
     if (!moduloIdSafe || !payload || typeof payload !== "object") return;
@@ -13775,7 +13910,7 @@ if (document.readyState === "loading") {
 
 // === GESTIÓN DE CACHE EN DEPLOY ===
 
-const APP_VERSION = "2026.04.10-01";
+const APP_VERSION = "2026.04.13-02";
 
 const storedVersion = localStorage.getItem("APP_VERSION");
 

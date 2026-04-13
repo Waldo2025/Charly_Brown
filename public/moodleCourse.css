@@ -3239,6 +3239,29 @@ body.theme-dark {
     font-weight: 600;
 }
 
+body[data-page="moodlecourse.html"] #contenidoNotasMaestro :is(ul, ol),
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .notas-maestro-simple :is(ul, ol) {
+    margin: 0.65rem 0 1rem 1.15rem !important;
+    padding-left: 1.2rem !important;
+    list-style-position: outside !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoNotasMaestro ul,
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .notas-maestro-simple ul {
+    padding-left: 1.35rem !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoNotasMaestro ol,
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .notas-maestro-simple ol {
+    padding-left: 1.55rem !important;
+}
+
+body[data-page="moodlecourse.html"] #contenidoNotasMaestro :is(ul, ol) > li,
+body[data-page="moodlecourse.html"] #contenidoEditor .modulo-contenido .notas-maestro-simple :is(ul, ol) > li {
+    margin-bottom: 0.45rem !important;
+    padding-left: 0.2rem !important;
+}
+
 .cb-editor-table {
     border-collapse: collapse;
     width: 100%;

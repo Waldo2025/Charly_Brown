@@ -1,5 +1,5 @@
-import { obtenerModulo, guardarModulo } from "./moodleCourse.js?v=2026-1.0.0.65";
-import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.0.65";
+import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.1.14";
+import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.1.14";
 const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function getGeminiEndpoint() {
@@ -785,6 +785,10 @@ function syncModuloGeneradoEnEstadoLocal(moduloActualizado = {}, cursoId = "") {
             Object.assign(existing, moduloActualizado);
         }
     }
+    const cursoIdSeguro = String(cursoId || moduloActualizado?.cursoId || window.curso?.id || "").trim();
+    if (cursoIdSeguro) {
+        sincronizarModuloLocal(moduloId, cursoIdSeguro, moduloActualizado);
+    }
 }
 
 function inferirCantidadSolicitadaParaQuizz(texto = "") {
@@ -1051,7 +1055,12 @@ const LANGUAGE_PROFILES = [
     {
         code: "en",
         label: "english",
-        words: [" the ", " and ", " for ", " with ", " this ", " should ", " students ", " learning ", " objective ", " activity ", " lesson ", " write ", " explain "]
+        words: [
+            " the ", " and ", " for ", " with ", " this ", " should ", " students ", " learning ", " objective ",
+            " activity ", " lesson ", " write ", " explain ", " chapter ", " reading ", " unit ", " book ",
+            " opener ", " previous knowledge ", " opening ", " closing ", " teacher ", " notes ", " support activity ",
+            " extension activity ", " look at ", " answer ", " true ", " false ", " choose ", " match ", " complete "
+        ]
     },
     {
         code: "pt",
@@ -1103,6 +1112,10 @@ function detectarIdiomaPrincipal(texto = "") {
         label: mejor.label,
         confidence: Number((mejor.score / Math.max(1, mejor.score + segundo.score)).toFixed(2))
     };
+}
+
+function esIdiomaIngles(idioma = {}) {
+    return String(idioma?.code || "").trim().toLowerCase().startsWith("en");
 }
 
 
@@ -1532,7 +1545,8 @@ export async function generarModuloGemini(moduloId) {
             incluirRespuestas: preferenciasQuizz.incluirRespuestas,
             incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
             usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
-            exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad
+            exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
+            idioma: idiomaDetectadoModulo
         })}
 
         ===== FORMATO DE SALIDA =====
@@ -1606,7 +1620,8 @@ export async function generarModuloGemini(moduloId) {
                 incluirRespuestas: preferenciasQuizz.incluirRespuestas,
                 incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
                 usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
-                exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad
+                exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
+                idioma: idiomaDetectadoModulo
             })}
 
             ${incluirInstruccionOriginalEnPropuesta ? `
@@ -1711,7 +1726,7 @@ export async function generarModuloGemini(moduloId) {
         }
 
         await guardarModulo(moduloIdNormalizado, cambiosModulo, cursoIdPersistencia);
-        const moduloGuardado = await obtenerModulo(moduloIdNormalizado, cursoIdPersistencia);
+        const moduloGuardado = await obtenerModulo(moduloIdNormalizado, cursoIdPersistencia, { forceRefresh: true });
         const contenidoPersistido = String(moduloGuardado?.contenido || "").trim();
         if (!contenidoPersistido) {
             throw new Error("El contenido generado no quedó persistido en el módulo.");
@@ -1720,7 +1735,9 @@ export async function generarModuloGemini(moduloId) {
         // Pintar en UI
         const cont = document.getElementById(`contenido-${moduloIdNormalizado}`);
         if (cont) {
-            cont.innerHTML = contenidoPersistido;
+            cont.innerHTML = typeof window.renderizarContenidoModulo === "function"
+                ? window.renderizarContenidoModulo(contenidoPersistido, moduloGuardado?.tipo || modulo?.tipo || "")
+                : contenidoPersistido;
         }
         if (typeof window.activarAccionesEnParrafos === "function") {
             window.setTimeout(() => window.activarAccionesEnParrafos(), 0);
@@ -1851,8 +1868,58 @@ ${textoOriginal}
 
 function promptExtraPorTipo(tipo, options = {}) {
     const cantidadSolicitada = Number(options?.cantidadSolicitadaQuizz || 0) || null;
+    const isEnglish = esIdiomaIngles(options?.idioma);
     switch (tipo) {
-case "Quizz": return `
+case "Quizz": return isEnglish ? `
+Generate a Moodle QUIZ in structured markdown.
+
+RULES:
+- Use one section per question with the heading "## Question X — Type".
+- Respect EXACTLY the number of questions/activities/items requested by the author when specified.
+- ${cantidadSolicitada
+    ? `For this module, you must generate EXACTLY ${cantidadSolicitada} questions because the author specified that amount.`
+    : `If the author did NOT specify an exact amount, do not invent extra questions. Generate only the minimum reasonable number required by the instruction.`}
+- Mix question types only if the author asks for it or if it helps faithfully convert the original activities, without increasing the total count.
+- If there is a reference image, ANALYZE it first for visual pattern and pedagogy.
+- If the image contains sample exercises, create NEW exercises inspired by that same style, without copying numbers, options, or wording literally.
+- Do not switch subject, topic, or domain. Keep the detected theme from the author instruction and any valid visual reference.
+- If the original activity is mathematics, all questions must remain mathematics.
+- If the reference shows algebraic operations or equations, the new questions must stay in that same subtype: simplification, equivalence, solving, or closely related algebra analysis.
+- Do not escalate to broader topics such as limits, advanced rational functions, or calculus unless the original material explicitly asks for them.
+- "More difficult" means slightly more demanding within the SAME exercise family, not a new topic.
+- Keep the same thematic level as the visual reference, but ${options?.exigirMayorDificultad ? "make the difficulty clearly higher and avoid obvious answers." : "keep a difficulty level consistent with the author's request."}
+- ${options?.usarImagenComoPatron ? "The reference image has priority to infer exercise type, structure, and abstraction level." : "Use the image only if it provides real context for the requested activity."}
+- Each question must contain:
+  - **Question**
+  - **Options** (if applicable)
+  - **Correct answer**
+  - **Correct feedback**
+  - **Incorrect feedback**
+  - **Global feedback**
+- Each item must be on its OWN line or paragraph.
+- Leave a blank line between:
+  - the question title
+  - the "Question:" line
+  - the "Options:" block
+  - the "Correct answer:" line
+  - each feedback block
+- Mandatory multiple-choice format:
+  Question: ...
+  Options:
+  A) ...
+  B) ...
+  C) ...
+  D) ...
+- Mandatory matching format:
+  - After "Question:" or "Instruction:", use a REAL two-column markdown table.
+  - The table MUST include a header, separator row, and one row per relation.
+  - Keep each expression or result within the SAME row.
+  - Use inline math within cells, not display math.
+- Do not use HTML.
+- Do not use plain unstructured text.
+- If the module includes "Original Activity N" and "Proposed Activity N", the proposal heading must be:
+  ## Proposed Activity N — Type
+` : `
 Genera un CUESTIONARIO (Quizz) en markdown estructurado.
 
 REGLAS:
@@ -1913,7 +1980,36 @@ REGLAS:
 `;
 
 
-        case "Página": return `
+        case "Página": return isEnglish ? `
+        Generate a Moodle PAGE in structured markdown with clear didactic content.
+
+        CRITICAL RULES:
+        1. If the author includes a reading with explicit instructions like "do not modify", "transcribe exactly", or "copy as is":
+        - DO NOT paraphrase the provided content
+        - DO NOT summarize the provided content
+        - DO NOT interpret the provided content
+        - TRANSCRIBE the provided content EXACTLY
+        - KEEP the original format if specified
+        - Protected content must remain IDENTICAL
+
+        2. For content you DO need to generate:
+        - Main title
+        - Short introduction (context and purpose)
+        - Content development:
+            - Clear and concise explanation
+            - Organized bullets or lists
+            - Concrete examples
+            - Key concepts highlighted with subheadings
+            - Tables ARE ALLOWED when helpful
+        - 2 or 3 reflection or practice tasks
+
+        3. FORMAT RULES:
+        - Use clear markdown headings
+        - Use lists to organize ideas and steps
+        - You may use markdown tables when useful
+        - The content must be didactic and professional
+        - If there is protected content, integrate it in the proper place WITHOUT CHANGING IT
+        ` : `
         Genera una PÁGINA Moodle en markdown estructurado, con contenido didáctico claro.
 
         CRÍTICAMENTE IMPORTANTE:
@@ -1947,26 +2043,137 @@ REGLAS:
         NO intentes "mejorar" ni "reformular" el contenido protegido.
         `;
 
-        case "Temario": return `
-        Genera un TEMARIO Moodle en markdown estructurado.
+        case "Notas del maestro":
+        case "Teacher's Notes": return isEnglish ? `
+        Generate a Moodle TEACHER'S NOTES module in structured markdown following this FIXED structure.
+
+        REQUIRED HEADINGS:
+        ## Previous Knowledge
+        ## Objectives
+        ## Opening
+        ## While Using the book section
+        ## Closing
+
+        MANDATORY CONTENT RULES:
+        - Always keep those headings exactly as written.
+        - Under "Objectives", include:
+          - one objective sentence starting with "To ..."
+          - one line exactly labeled "Intellectual abilities:"
+        - Under "Opening", provide practical teacher guidance, not student worksheet text.
+        - Under "While Using the book section", include:
+          - core classroom guidance connected to the activity or page
+          - one subsection labeled "Support activity:"
+          - one subsection labeled "Extension activity:"
+        - Under "Closing", include a concrete wrap-up, checking, or reflection action.
+        - If the author provides a specific exercise, page, image, or prompt, adapt the notes to that exact material.
+        - The output must read like real classroom teaching notes, not generic theory.
+        - Do not convert this into a quiz, a reading, or a syllabus table.
+        - Do not omit any section even if information is limited; complete it coherently.
+        - Use bullets or numbered steps when they improve clarity.
+
+        STYLE:
+        - Professional, practical, teacher-facing language.
+        - Keep the structure clean and easy to apply in class.
+        - Return only the final teacher's notes content in markdown.
+        ` : `
+        Genera un módulo de NOTAS DEL MAESTRO Moodle en markdown estructurado siguiendo esta estructura FIJA.
+
+        ENCABEZADOS OBLIGATORIOS:
+        ## Conocimientos previos
+        ## Objetivos
+        ## Apertura
+        ## Durante el uso del libro
+        ## Cierre
+
+        REGLAS OBLIGATORIAS DE CONTENIDO:
+        - Conserva siempre esos encabezados exactamente así.
+        - En "Objetivos" incluye:
+          - una oración objetivo que empiece con "Para ..."
+          - una línea exactamente etiquetada como "Habilidades intelectuales:"
+        - En "Apertura", escribe guía práctica para el docente, no texto de actividad para el alumno.
+        - En "Durante el uso del libro" incluye:
+          - orientación central para conducir la actividad o página
+          - un subapartado llamado "Actividad de apoyo:"
+          - un subapartado llamado "Actividad de ampliación:"
+        - En "Cierre", incluye una acción concreta de cierre, verificación o reflexión.
+        - Si el autor proporciona ejercicio, página, imagen o consigna específica, adapta las notas a ese material exacto.
+        - La salida debe sonar a notas reales de clase para el docente, no a teoría genérica.
+        - No conviertas esto en quizz, lectura ni temario.
+        - No omitas ninguna sección aunque falte contexto; complétala de manera coherente.
+        - Usa viñetas o pasos numerados cuando ayuden a la claridad.
+
+        ESTILO:
+        - Lenguaje profesional, práctico y dirigido al docente.
+        - Mantén la estructura clara y fácil de aplicar en clase.
+        - Devuelve solo las notas del maestro finales en markdown.
+        `;
+
+        case "Temario": return isEnglish ? `
+        Generate a Moodle OUTLINE / SYLLABUS as a MARKDOWN TABLE.
+
+        OBJECTIVE:
+        - Present the subtopic roadmap clearly.
+        - Serve as an initial guide and navigation map.
+        - Organize the main blocks, contents, or sections in table form.
+
+        RULES:
+        - The final output MUST be primarily a markdown table, not a bullet list.
+        - Include a short title and, if needed, one short introductory sentence before the table.
+        - After that, return ONE clean markdown table with EXACTLY these 3 columns:
+          | CLIL | Language Arts | Language Functions |
+        - Keep that column order.
+        - Each row should represent one major part of the subtopic progression.
+        - "CLIL" should name the topic, content block, or conceptual focus.
+        - "Language Arts" should include vocabulary, grammar, discourse, or language content involved.
+        - "Language Functions" should include communicative use, performance, or skill focus.
+        - Do not turn it into a quiz.
+        - Do not turn it into a long reading passage.
+        - Do not add assessment or feedback.
+        - Do not replace the table with bullets unless the author explicitly asked for a non-table format.
+        - Return only the final clean structured syllabus table.
+        ` : `
+        Genera un TEMARIO Moodle en formato de TABLA MARKDOWN.
 
         OBJETIVO:
         - Presentar de forma clara el recorrido del subtema.
         - Servir como guía inicial y mapa de navegación del contenido.
-        - Ordenar los puntos, apartados o bloques principales sin desarrollar cada uno en exceso.
+        - Ordenar los puntos, apartados o bloques principales en forma tabular.
 
         REGLAS:
-        - Usa encabezados markdown claros.
-        - Incluye una breve introducción de orientación.
-        - Presenta los temas o apartados principales en orden lógico.
-        - Puedes usar listas numeradas o viñetas.
+        - La salida final DEBE ser principalmente una tabla markdown, no una lista.
+        - Incluye un título claro y, si hace falta, una frase breve de orientación antes de la tabla.
+        - Después de eso, devuelve UNA sola tabla markdown limpia con EXACTAMENTE estas 3 columnas:
+          | CLIL | Lengua | Funciones del lenguaje |
+        - Mantén ese orden de columnas.
+        - Cada fila debe representar una parte importante del recorrido del subtema.
+        - En "CLIL" coloca el tema, bloque o enfoque conceptual.
+        - En "Lengua" coloca vocabulario, gramática o contenido lingüístico relevante.
+        - En "Funciones del lenguaje" coloca el uso comunicativo, desempeño o habilidad principal.
         - No lo conviertas en cuestionario.
         - No lo conviertas en lectura extensa.
         - No agregues evaluación ni retroalimentaciones.
-        - Devuelve solo el temario final, limpio y estructurado.
+        - No sustituyas la tabla por viñetas salvo que el autor pida explícitamente otro formato.
+        - Devuelve solo el temario final, limpio y estructurado en tabla.
         `;
 
-        case "Lectura": return `
+        case "Lectura": return isEnglish ? `
+        Generate a Moodle READING in structured markdown.
+
+        CRITICAL RULES:
+        - DO NOT invent new content.
+        - DO NOT summarize.
+        - DO NOT paraphrase.
+        - DO NOT change wording or tone from the original text.
+        - DO NOT add questions, activities, exercises, or new conclusions.
+        - Your only task is to TRANSCRIBE and STRUCTURE the provided text.
+        - If the original text already has **bold**, *italics*, subheadings, or lists, KEEP THEM.
+
+        YOU MUST:
+        - Preserve the base content literally.
+        - Organize it with titles, subtitles, and paragraphs only when the structure is evident.
+        - Keep lists, tables, quotes, or special blocks if they already exist in the source text.
+        - Correct only minimal formatting issues for Moodle readability.
+        ` : `
         Genera una LECTURA Moodle en markdown estructurado.
 
         REGLAS CRÍTICAS:
@@ -1992,7 +2199,32 @@ REGLAS:
         `;
 
 
-        case "Libro": return `
+        case "Libro": return isEnglish ? `
+        Generate a Moodle BOOK in markdown with organized chapters.
+        Include:
+
+        1) Structure:
+        - Use "## Chapter 1", "## Chapter 2", etc.
+
+        2) Content:
+        - Brief, didactic explanatory text up to 3 medium paragraphs.
+        - Associate with scientific studies when applicable.
+        - Structured text with **bold**, *italics*, lists, and subheadings.
+
+        3) Integrated activities:
+        - At the end of each chapter, add an APA reference used as the basis for that chapter.
+
+        4) Style:
+        - Clear, natural, pedagogical language.
+        - Do not generate alternative paths.
+        - Do not include extra AI commentary.
+
+        Output structure:
+        - "## Chapter X: Title"
+        - "### Development"
+        - "### Suggested activity"
+        - "### References (APA)"
+        ` : `
         Genera un LIBRO estilo Moodle en markdown con capítulos organizados.
         Incluye lo siguiente:
 
@@ -2019,7 +2251,37 @@ REGLAS:
         - "### Referencias (APA)"
         `;
 
-        case "Lección": return `
+        case "Lección": return isEnglish ? `
+        Generate a Moodle LESSON in markdown, structured as screens with branching navigation.
+        Include:
+
+        1) Content scenes:
+        - Do not add extra AI commentary.
+
+        2) Alternative paths:
+        - Create alternate routes depending on student choices.
+        - Each correct option should point to another scene.
+
+        3) Interactive questions:
+        - Each scene should include a multiple-choice, true/false, or short-answer question.
+        - For each answer, specify the jump destination.
+
+        4) Reinforcement routes:
+        - If the student answers incorrectly, send them to a feedback screen and then back to the route.
+
+        5) Final scene:
+        - Closing message.
+        - "Finish Lesson" action.
+
+        Output structure:
+        - "## Scene 1: Title"
+        - "### Content"
+        - "### Question"
+        - "### Options and jump"
+        - "### Feedback"
+        - Repeat for following scenes
+        - "## Final scene"
+        ` : `
         Genera una LECCIÓN estilo Moodle en markdown, estructurada en pantallas con navegación ramificada.
         Incluye:
 
@@ -2055,7 +2317,9 @@ REGLAS:
         Personaliza todo según el tema específico solicitado por el usuario.
         `;
 
-        default: return `
+        default: return isEnglish ? `
+Generate a professional Moodle resource in structured markdown with headings, lists, and clear sections.
+        ` : `
 Genera recurso Moodle profesional en markdown estructurado (encabezados, listas y secciones claras).
         `;
     }
