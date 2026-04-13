@@ -22774,7 +22774,6 @@ function _unidadCampoFormativoDeCategoria(categoria = "") {
   const mapeoCampoFormativo = {
     "Lenguaje y comunicación": "Lenguajes",
     "Ciencias experimentales": "Saberes y Pensamiento Científico",
-    "Conocimientos del medio": "Saberes y Pensamiento Científico",
     "Ciencias sociales": "Ética, Naturaleza y Sociedades",
     "Formación socioemocional": "De lo Humano y lo Comunitario",
     "Matemáticas": "Saberes y Pensamiento Científico"
@@ -24135,11 +24134,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         const categoriaEditorialProyecto = _unidadEtiquetaCategoriaCampo(categoria, subtema);
         const subcategoriaEditorialAlumnoProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
+        const campoProyecto = _unidadCampoFormativoDeCategoria(categoria);
         document.getElementById(bloqueId).innerHTML = `
                 <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;" id="${bloqueId}-layout">
                     <div id="${proyectoAlumnoColId}" class="col-alumno" style="flex:1; min-width:300px;">
                         ${tablaInicialProyectoHTML}
-                        <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorialProyecto}</p>
+                        <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                        ${campoProyecto ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoProyecto}</p>` : ""}
                         <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumnoProyecto}</p>
                         <h4>${tituloProyectoParcial}</h4>
                         <div id="${proyectoAlumnoContenidoId}"></div>
@@ -24223,7 +24224,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           const subcategoriaEditorialMaestroProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
           layoutProyecto.insertAdjacentHTML("beforeend", `
                 <div id="${proyectoMaestroColId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorialProyecto}</p>
+                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                  ${campoProyecto ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoProyecto}</p>` : ""}
                   <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestroProyecto}</p>
                   <h4>${tituloMostrar || "Notas del maestro"}</h4>
                   ${soporteLecturaMaestroProyectoHTML || ""}
@@ -24438,17 +24440,34 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const categoriaEditorial = _unidadEtiquetaCategoriaCampo(categoria, subtema);
         const subcategoriaEditorialAlumno = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
         const subcategoriaEditorialMaestro = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
+        const campoFormativo = _unidadCampoFormativoDeCategoria(categoria);
+        const competenciasSubcategoriaAlumno = _unidadRenderCompetenciasAscHTML(subtema, categoria);
+        const competenciasSubcategoriaMaestro = _unidadRenderCompetenciasAscHTML(subtema, categoria);
+        const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
+        const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
+        const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria);
+        const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria);
+
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
+                      ${competenciasSubcategoriaAlumno}
+                      ${competenciaSubcategoriaAlumno}
+                      ${ejeSubcategoriaAlumno}
                       <h4>${tituloCreativoLimpioBase}</h4>
+                      <h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                      <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
+                      ${competenciasSubcategoriaMaestro}
+                      ${competenciaSubcategoriaMaestro}
+                      ${ejeSubcategoriaMaestro}
                       <h4>Notas del maestro</h4>
                       <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido del alumno...</p>
                   </div>
@@ -24606,13 +24625,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.debeInsertarLecturaLenguaje = false; // Prevenir duplicados
         }
 
-        const competenciasSubcategoriaAlumno = _unidadRenderCompetenciasAscHTML(subtema, categoria);
-        const competenciasSubcategoriaMaestro = _unidadRenderCompetenciasAscHTML(subtema, categoria);
-        const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
-        const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
-        const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria);
-        const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria);
-
         // Render parcial en tiempo real: primero columna alumno.
         const colAlumnoId = `${bloqueId}-alumno`;
         const colMaestroId = `${bloqueId}-maestro`;
@@ -24622,28 +24634,24 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
                     ${lecturaNomenclaturaHTML}
                     ${tablaInicialHTML}
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
                     ${competenciasSubcategoriaAlumno}
                     ${competenciaSubcategoriaAlumno}
                     ${ejeSubcategoriaAlumno}
-                    <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                        ${categoriaEditorial}
-                    </h3>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${etiquetaInterdisc}
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
+                    <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
+                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
                     ${competenciasSubcategoriaMaestro}
                     ${competenciaSubcategoriaMaestro}
                     ${ejeSubcategoriaMaestro}
-                    <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
-                        ${categoriaEditorial}
-                    </h3>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${soporteLecturaMaestroHTML}
