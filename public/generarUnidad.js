@@ -23210,7 +23210,7 @@ window.generarProgramaSintetico = function (secuenciaActual) {
 
 
 // 🎨 Actualización de colores en generarRutaSugerida
-window.generarRutaSugerida = function (subtemasOrdenados) {
+window.generarRutaSugerida = function (subtemasOrdenados, tablaHTML = "") {
   const coloresPorCategoria = {
     "Ortografía": "#a3d3f5",          // azul claro
     "Gramatica": "#d0e6ff",           // celeste
@@ -23269,6 +23269,7 @@ window.generarRutaSugerida = function (subtemasOrdenados) {
           Se propone un orden para realizar las diferentes secciones de la Unidad didáctica que puede modificar o seguir:
         </p>
         ${items}
+        ${tablaHTML}
       </div>
     </div>
   `;
@@ -24635,8 +24636,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         let bloqueRutaHTML = "";
         if (!window.rutaYTablaInsertadasEnNotas) {
           const todosSubtemasOrdenados = Object.keys(window.categoriaPorSubtema || {});
-          bloqueRutaHTML = generarRutaSugerida(todosSubtemasOrdenados);
-          bloqueRutaHTML += generarProgramaSintetico(_unidadBuildEffectiveSecuenciaFlatAllCategories());
+          const tablaContextualizacion = generarProgramaSintetico(_unidadBuildEffectiveSecuenciaFlatAllCategories());
+          bloqueRutaHTML = generarRutaSugerida(todosSubtemasOrdenados, tablaContextualizacion);
           window.rutaYTablaInsertadasEnNotas = true;
         }
 
