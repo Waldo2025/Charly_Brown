@@ -387,7 +387,6 @@
 
   async function hardRefresh(version) {
     const url = new URL(POST_CLEAR_REDIRECT_PATH, window.location.origin);
-    if (version) url.searchParams.set('v', version);
     url.searchParams.set(HARD_RESET_PARAM, '1');
     try {
       window.name = version ? `${WINDOW_NAME_PREFIX}${version}` : '';
@@ -422,8 +421,6 @@
     } catch (_) {}
     await clearOriginBrowsingData();
     const nextUrl = new URL(POST_CLEAR_REDIRECT_PATH, window.location.origin);
-    if (version) nextUrl.searchParams.set('v', version);
-    nextUrl.searchParams.set(HARD_RESET_DONE_PARAM, '1');
     window.location.replace(nextUrl.toString());
     return true;
   }
