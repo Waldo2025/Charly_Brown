@@ -23248,12 +23248,28 @@ window.generarRutaSugerida = function (subtemasOrdenados) {
 
   return `
     <div style="border-left:4px solid #4aa3df;padding-left:10px;margin:20px 0;">
-      <h3 style="color:#9caa0f;margin-bottom:5px;">Ruta sugerida</h3>
-      <p style="font-size:14px;line-height:1.4;">
-        Esta herramienta le proporciona orientaciones para la organización de sus actividades durante la semana.
-        Se propone un orden para realizar las diferentes secciones de la Unidad didáctica que puede modificar o seguir:
-      </p>
-      ${items}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+        <h3 style="color:#9caa0f; margin:0;">Ruta sugerida</h3>
+        <button onclick="
+          const cont = this.parentElement.nextElementSibling;
+          if (cont.style.display === 'none') {
+            cont.style.display = 'block';
+            this.innerHTML = '<i class=\\'fas fa-eye-slash\\'></i> Ocultar';
+          } else {
+            cont.style.display = 'none';
+            this.innerHTML = '<i class=\\'fas fa-eye\\'></i> Mostrar';
+          }
+        " style="background:#f3f4f6; border:1px solid #e5e7eb; color:#6b7280; cursor:pointer; font-size:11px; font-weight:700; padding:4px 8px; border-radius:6px; transition:all 0.2s;">
+          <i class="fas fa-eye-slash"></i> Ocultar
+        </button>
+      </div>
+      <div class="ruta-sugerida-contenido" style="margin-top:10px;">
+        <p style="font-size:14px;line-height:1.4;">
+          Esta herramienta le proporciona orientaciones para la organización de sus actividades durante la semana.
+          Se propone un orden para realizar las diferentes secciones de la Unidad didáctica que puede modificar o seguir:
+        </p>
+        ${items}
+      </div>
     </div>
   `;
 };
