@@ -24,7 +24,7 @@
   <script src="vendor/datatables/jquery.dataTables.min.js"></script>
 
 
-  <link rel="stylesheet" href="generarLectura.css">
+  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.09">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
   <link rel="stylesheet" href="chatbot.css">
@@ -3164,6 +3164,31 @@
     </div>
   </div>
 
+  <!-- Modal: Crear lectura por Prompt (cuando no hay seleccionada) -->
+  <div id="modalCrearLecturaPrompt" class="unidad-modal" style="display:none; z-index: 10001;">
+    <div class="unidad-panel" style="max-width: 500px; margin: 10% auto;">
+      <div class="unidad-content">
+        <div class="unidad-header">
+          <h3 class="unidad-title"><i class="fa-solid fa-magic"></i> Crear lectura nueva</h3>
+          <button type="button" id="cerrarModalCrearLecturaPrompt" class="unidad-close">&times;</button>
+        </div>
+        <div class="p-4 space-y-4">
+          <p class="text-sm text-gray-600">No has seleccionado ninguna lectura. Describe el tema o contenido para generar una lectura nueva y preguntas de comprensión con IA:</p>
+          <textarea id="promptNuevaLecturaUnidad" rows="4" class="unidad-input w-full" placeholder="Ej: Una lectura sobre el ciclo del agua para niños de 4to grado..."></textarea>
+          
+          <div id="statusCrearLecturaPrompt" style="display:none; font-size: 13px;">
+            <i class="fas fa-spinner fa-spin"></i> Generando lectura...
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <button type="button" id="btnCancelarCrearLecturaPrompt" class="unidad-btn unidad-btn-outline">Cancelar</button>
+            <button type="button" id="btnAceptarCrearLecturaPrompt" class="unidad-btn unidad-btn-primary">Generar y continuar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Resultado Unidad -->
   <div id="modalResultadoUnidad" class="unidad-modal" style="display:none;">
     <div class="unidad-panel">
@@ -3192,6 +3217,7 @@
                 title="Regenerar resultado de la unidad" aria-label="Regenerar resultado de la unidad">
                 <i class="fa-solid fa-rotate"></i><span class="unidad-btn-text">Regenerar</span>
               </button>
+              <div id="cbUnidadFooterStyleSelectorPlaceholder" style="display: inline-block;"></div>
               <button type="button" id="btnToggleUnidadSyaPanel"
                 class="unidad-btn unidad-btn-secondary unidad-action-btn"
                 title="Abrir panel de secuencia y alcance" aria-label="Abrir panel de secuencia y alcance" aria-pressed="false">
@@ -3258,18 +3284,7 @@
           </button>
         </div>
 
-        <aside id="unidadResultadoSyaPanel" class="unidad-result-sya-panel" aria-hidden="true">
-          <div class="unidad-result-sya-panel-header">
-            <div>
-              <strong>Secuencia y alcance</strong>
-              <p>Categorías generadas en esta unidad</p>
-            </div>
-            <button type="button" id="btnCerrarUnidadSyaPanel" class="unidad-result-sya-panel-close" aria-label="Cerrar panel">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-          <div id="unidadResultadoSyaPanelBody" class="unidad-result-sya-panel-body"></div>
-        </aside>
+
       </div>
     </div>
   </div>
@@ -4078,7 +4093,7 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=2026-1.0.1.08"></script>
+  <script type="module" src="generarUnidad.js?v=2026-1.0.1.09"></script>
   <script type="module" src="generarUnidad2.js?v=2026-1.0.0.72"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>

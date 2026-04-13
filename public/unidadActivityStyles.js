@@ -101,23 +101,24 @@ const STYLE_CATALOG = {
   },
   quiz: {
     id: "quiz",
-    label: "Estilo Quiz",
+    label: "Estilo Quiz - Examen",
     shortLabel: "Quiz",
-    summary: "Preguntas cortas, opciones, retro rápida.",
-    pillars: ["agilidad", "selección", "retroalimentación", "chequeo rápido"],
-    verbs: ["elige", "marca", "detecta", "corrige", "verifica"],
+    summary: "Evaluación variada: opción múltiple, abierta, falso/verdadero y relación.",
+    pillars: ["evaluación", "diversidad de reactivos", "retroalimentación", "chequeo de aprendizaje"],
+    verbs: ["resuelve", "elige", "responde", "conecta", "verifica"],
     strengths: [
-      "Permite revisar comprensión de forma rápida y entretenida.",
-      "Es útil para repaso, activación o cierre corto."
+      "Mide diferentes niveles de conocimiento (desde memoria hasta síntesis).",
+      "Mantiene el interés del alumno con formatos de pregunta cambiantes."
     ],
     risks: [
-      "Si domina todo el diseño, empobrece producción abierta.",
-      "Puede medir reconocimiento más que razonamiento si no se diseña bien."
+      "Puede resultar confuso si no se indica bien el modo de respuesta.",
+      "Requiere claves de respuesta muy precisas para preguntas abiertas."
     ],
     promptDirectives: [
-      "Diseña actividades tipo quiz con preguntas cortas, opciones claras y verificación rápida.",
-      "Combina reactivos de opción múltiple, verdadero/falso, relación, completar o detección de error.",
-      "Incluye retroalimentación breve o criterio de corrección por reactivo."
+      "Diseña una batería de preguntas tipo examen con formatos variados.",
+      "Usa una mezcla equilibrada de: preguntas abiertas (desarrollo corto), opción múltiple (A, B, C), falso/verdadero, oraciones para completar y columnas para relacionar.",
+      "Asegura que cada reactivo sea independiente y tenga una instrucción de respuesta clara.",
+      "Incluye siempre la respuesta esperada o clave de corrección con detalle pedagógico."
     ]
   },
   diagnostico: {
@@ -369,6 +370,10 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     `CONTRATO DE FORMATO OBLIGATORIO: usa ${dominant.label} como estructura rectora.`,
     "Todas las actividades deben seguir el MISMO formato rector durante este bloque.",
     "Cada actividad debe ir dentro de <div class=\"activity\">.",
+    "REGLA DE NUMERACIÓN CRÍTICA: Cada actividad DEBE comenzar con su número correlativo seguido de un punto y un espacio (ej: 1. , 2. , 3. ).",
+    "El número debe estar al inicio del primer párrafo (<p>) de la actividad, antes de cualquier etiqueta <strong>.",
+    "REGLA DE RESPUESTA CONCISA: En el bloque <div class=\"answer\">, sé extremadamente breve y directo. Solo la respuesta esperada y un comentario mínimo si es necesario.",
+    "REGLA DE BLOQUE DE RESPUESTA ÚNICO: NO escribas la respuesta ni la clave fuera del bloque <div class=\"answer\">. Todo lo relacionado con la solución o el criterio de evaluación debe ir EXCLUSIVAMENTE dentro de <div class=\"answer\">.",
     "Puedes variar el contenido pedagógico entre actividades, pero NO cambiar el formato rector a mitad del bloque."
   ];
 
@@ -386,7 +391,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     <li>[Subinstrucción 4 opcional]</li>
   </ol>
   <div class="answer">
-    <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [respuesta breve y retroalimentación mínima]</span>
   </div>
 </div>`,
       "En ASC sí debes usar subinstrucciones y etiqueta final 'Respuesta:'."
@@ -405,7 +410,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     <li><strong>Justifica:</strong> [por qué su solución funciona]</li>
   </ul>
   <div class="answer">
-    <span style="color:mediumvioletred;">Criterio de logro: [qué evidencia mostraría una resolución correcta]</span>
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [respuesta o evidencia breve]</span>
   </div>
 </div>`
     ],
@@ -420,7 +425,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
   <div class="inquiry-block"><strong>Evidencias a revisar:</strong> [lectura, datos, imagen, ejemplo, experimento o fuente]</div>
   <div class="inquiry-block"><strong>Análisis:</strong> [qué debe comparar, contrastar u observar]</div>
   <div class="answer">
-    <span style="color:mediumvioletred;">Hallazgo esperado: [conclusión o explicación sustentada]</span>
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [conclusión breve]</span>
   </div>
 </div>`
     ],
@@ -438,26 +443,45 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     <li><strong>Ejercicio 3:</strong> [mini reto final opcional]</li>
   </ul>
   <div class="answer">
-    <span style="color:mediumvioletred;">Comprobación rápida: [respuesta o criterio breve para validar]</span>
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [respuesta breve]</span>
   </div>
 </div>`
     ],
     quiz: [
       ...commonIntro,
-      "Formato Quiz obligatorio: pregunta breve + opciones o reactivos + clave o retroalimentación rápida.",
-      "NO uses el molde ASC tradicional.",
-      "Usa esta plantilla como guía:",
-      `<div class="activity">
-  <p>1. <strong>[Pregunta o consigna corta tipo quiz].</strong> [IC T. IND]</p>
-  <div class="quiz-block"><strong>Modo:</strong> [opción múltiple / verdadero-falso / relación / completar]</div>
+      "Formato Quiz - Examen obligatorio: batería de reactivos variados (opción múltiple, abierta, relación, completar).",
+      "Usa estos ejemplos de estructura dentro de <div class=\"activity\">:",
+      `<!-- Ejemplo Opción Múltiple -->
+<div class="activity">
+  <p>1. <strong>[Pregunta de opción múltiple].</strong> [IC T. IND]</p>
   <ul class="quiz-flow">
-    <li>[A] ...</li>
-    <li>[B] ...</li>
-    <li>[C] ...</li>
-    <li>[D] ...</li>
+    <li>A) [Opción 1]</li>
+    <li>B) [Opción 2]</li>
+    <li>C) [Opción 3]</li>
   </ul>
   <div class="answer">
-    <span style="color:mediumvioletred;">Clave / retro rápida: [respuesta correcta y explicación breve]</span>
+    <span style="color:mediumvioletred;">Clave: [Letra y explicación]</span>
+  </div>
+</div>
+
+<!-- Ejemplo Pregunta Abierta -->
+<div class="activity">
+  <p>1. <strong>[Pregunta abierta o de desarrollo corto].</strong> [IC T. IND]</p>
+  <div class="quiz-space">_________________________________________________</div>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [puntos clave breves]</span>
+  </div>
+</div>
+
+<!-- Ejemplo Relación de Columnas -->
+<div class="activity">
+  <p>1. <strong>[Instrucción para relacionar conceptos].</strong> [IC T. IND]</p>
+  <div class="quiz-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+    <div>1. [Concepto A]</div><div>( ) [Definición 1]</div>
+    <div>2. [Concepto B]</div><div>( ) [Definición 2]</div>
+  </div>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Clave: 1-[X], 2-[Y]</span>
   </div>
 </div>`
     ],
@@ -469,11 +493,10 @@ function buildUnidadStyleFormatContract(styleIds = []) {
       "Usa esta plantilla como guía:",
       `<div class="activity">
   <p>1. <strong>[Reactivo diagnóstico de entrada sobre el contenido].</strong> [IC T. IND]</p>
-  <div class="diagnostic-block"><strong>Tipo de reactivo:</strong> [opción múltiple / completar / relación / respuesta breve / clasificación]</div>
-  <div class="diagnostic-block"><strong>Respuesta o evidencia esperada:</strong> [qué debería contestar o mostrar un alumno con base previa]</div>
-  <div class="diagnostic-block"><strong>Lectura docente:</strong> [qué indicaría dominio inicial, duda, idea incompleta o error frecuente]</div>
+  <div class="diagnostic-block"><strong>Tipo de reactivo:</strong> [opción múltiple / completar / relación / respuesta breve]</div>
+  <div class="diagnostic-block"><strong>Lectura docente:</strong> [qué indicaría dominio inicial, duda o error frecuente]</div>
   <div class="answer">
-    <span style="color:mediumvioletred;">Indicador diagnóstico: [cómo interpretar la respuesta y qué decisión pedagógica tomar]</span>
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [respuesta y qué decisión pedagógica tomar]</span>
   </div>
 </div>`,
       "Prioriza preguntas de entrada tipo examen breve para medir conocimientos previos, no tareas largas de desarrollo.",

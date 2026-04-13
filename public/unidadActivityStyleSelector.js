@@ -463,12 +463,16 @@ function attachUnidadActivityStyleSelectors(root = document) {
 }
 
 document.addEventListener("click", (event) => {
-  const inside = event.target?.closest?.(".cb-unidad-style-selector");
-  const insideFloatingMenu = event.target?.closest?.(".cb-unidad-style-menu");
-  if (!inside) {
-    if (!insideFloatingMenu) _closeAllStyleMenus();
+  if (!ACTIVE_STYLE_MENU_ROOT) return;
+
+  // Si el clic es dentro del trigger o del menú activo, no hacemos nada
+  const isTrigger = event.target?.closest?.("[data-action='toggle-style-menu']");
+  const isMenu = event.target?.closest?.(".cb-unidad-style-menu");
+
+  if (!isTrigger && !isMenu) {
+    _closeAllStyleMenus();
   }
-});
+}, true);
 
 window.addEventListener("resize", () => {
   if (ACTIVE_STYLE_MENU_ROOT) _positionFloatingStyleMenu(ACTIVE_STYLE_MENU_ROOT);

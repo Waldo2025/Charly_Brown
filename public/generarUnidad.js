@@ -1285,15 +1285,17 @@ function _unidadReleasePromptLock(key = "") {
 }
 
 function finalizarSpinnerProceso(statusId, ok = true, textoFinal = "") {
-  if (statusId === "spinner-categoria-Proyectos") {
-    document.getElementById(statusId)?.remove();
-    return;
-  }
   const el = document.getElementById(statusId);
-  if (el) {
-    const icono = ok ? "fa-circle-check" : "fa-triangle-exclamation";
-    const color = ok ? "#16a34a" : "#dc2626";
-    el.innerHTML = `<i class="fas ${icono}" style="color:${color};"></i> ${textoFinal || (ok ? "Completado" : "Error")}`;
+  if (!el) return;
+
+  if (ok) {
+    // Remueve el spinner completamente cuando termina con éxito
+    el.remove();
+  } else {
+    // Muestra error si falló
+    const icono = "fa-triangle-exclamation";
+    const color = "#dc2626";
+    el.innerHTML = `<i class="fas ${icono}" style="color:${color};"></i> ${textoFinal || "Error"}`;
   }
 }
 
@@ -3104,6 +3106,12 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
 async function _resolverLecturaUnidadActual(ctx = {}) {
   const lecturaPrincipalId = String(selectTema?.value || "").trim();
   const lecturaAlternaId = String(selectTemaASC?.value || "").trim();
+
+  // ✅ NUEVO: Fallback a lectura generada por prompt si no hay IDs seleccionados
+  if (!lecturaPrincipalId && !lecturaAlternaId && window.lecturaNuevaCoincidenteGlobal) {
+      return _normalizarLecturaResueltaUnidad([window.lecturaNuevaCoincidenteGlobal], "lectura_prompt");
+  }
+
   const lecturasSeleccionadas = [];
 
   if (lecturaPrincipalId) {
@@ -3479,9 +3487,6 @@ const btnAbrirResultadoUnidadTop = document.getElementById("btnAbrirResultadoUni
 const btnDetenerGeneracionUnidad = document.getElementById("btnDetenerGeneracionUnidad");
 const btnRegenerarResultadoUnidad = document.getElementById("btnRegenerarResultadoUnidad");
 const btnToggleUnidadSyaPanel = document.getElementById("btnToggleUnidadSyaPanel");
-const btnCerrarUnidadSyaPanel = document.getElementById("btnCerrarUnidadSyaPanel");
-const unidadResultadoSyaPanel = document.getElementById("unidadResultadoSyaPanel");
-const unidadResultadoSyaPanelBody = document.getElementById("unidadResultadoSyaPanelBody");
 const btnVozUnidad = document.getElementById("btnVozUnidad");
 const studioWorkspaceUnidad = document.querySelector(".panel-analisis.studio-workspace");
 const unidadDockHost = document.getElementById("unidadDockHost");
@@ -3489,7 +3494,17 @@ let unidadResultadoHeaderScrollBound = false;
 let unidadResultadoHeaderLastScrollTop = 0;
 let unidadResultadoHeaderTicking = false;
 let unidadResultadoFullscreenHandlerBound = false;
-let unidadResultadoSyaPanelRenderToken = 0;
+let currentUnidadGuardadaId = null;
+
+function _unidadSetSaveNeeded(needed = true) {
+  const btn = document.getElementById("btnGuardarUnidad");
+  if (!btn) return;
+  if (needed) {
+    btn.classList.add("btn-guardar-needed");
+  } else {
+    btn.classList.remove("btn-guardar-needed");
+  }
+}
 const SECTION_STATE_STORAGE_KEY = "cb.studio.active.section.v1";
 const UNIDAD_SIDE_COLLAPSE_KEY = "cb.unidad.side.collapsed.v1";
 const MODALES_ACOPLADOS_UNIDAD = [
@@ -17417,7 +17432,7 @@ function abrirModalResultadoUnidad() {
   }
   _inicializarFullscreenResultadoUnidad();
   _actualizarBotonFullscreenResultadoUnidad();
-  _unidadRenderResultSyaPanel().catch(() => {});
+  _unidadRefreshFooterStyleSelector();
 }
 
 function prepararNuevoResultadoUnidad() {
@@ -17425,10 +17440,10 @@ function prepararNuevoResultadoUnidad() {
   if (cont) cont.innerHTML = "";
   limpiarResultadoUnidadEnStorage();
   _unidadToggleResultSyaPanel(false);
-  window.tablaInicialInsertada = false;
-  window.rutaYTablaInsertadasEnNotas = false;
-  window.notasMaestroAcumuladas = "";
   window.respuestaFinal = "";
+  window.lecturaGlobalMostrada = false;
+  window.debeInsertarLecturaLenguaje = true;
+  window.bloqueLecturaGlobalParaLenguaje = "";
 }
 
 function _resultadoUnidadFullscreenActivo() {
@@ -17530,104 +17545,7 @@ function _unidadGetGeneratedCategoryNamesFromResult() {
   return Array.from(new Set(names));
 }
 
-function _unidadBuildResultSyaMetaLabel(version = null) {
-  if (!version) return "Original";
-  if (version.sourceType === "own") return version.isPublished ? "Mi versión publicada" : "Mi borrador";
-  if (version.sourceType === "shared") return `Compartida por ${version.ownerName || version.ownerEmail || version.ownerUid || "otro usuario"}`;
-  return "Original";
-}
 
-function _unidadBuildResultSyaSummary(entries = []) {
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  if (!safeEntries.length) {
-    return `<div class="unidad-result-sya-empty">No hay información de secuencia disponible para esta categoría.</div>`;
-  }
-  return safeEntries.slice(0, 3).map((entry) => {
-    const subtema = formatearSubtema(entry?.subtema || "");
-    const summary = String(entry?.T || entry?.AE || entry?.C || entry?.P || "").trim() || "Sin descripción.";
-    return `
-      <div class="unidad-result-sya-entry">
-        <strong>${_unidadEscapeHtml(subtema)}</strong>
-        <p>${_unidadEscapeHtml(summary)}</p>
-      </div>
-    `;
-  }).join("");
-}
-
-async function _unidadRenderResultSyaPanel() {
-  if (!unidadResultadoSyaPanelBody) return;
-  const token = ++unidadResultadoSyaPanelRenderToken;
-  const categorias = _unidadGetGeneratedCategoryNamesFromResult();
-  if (!categorias.length) {
-    unidadResultadoSyaPanelBody.innerHTML = `<div class="unidad-result-sya-empty">Genera al menos una categoría para ver aquí su secuencia y alcance activa.</div>`;
-    return;
-  }
-
-  unidadResultadoSyaPanelBody.innerHTML = `<div class="unidad-result-sya-empty">Cargando secuencias activas…</div>`;
-  const cards = [];
-  for (const categoria of categorias) {
-    const { context, versions } = await _unidadLoadSyaVersionsForCategoria(categoria);
-    if (token !== unidadResultadoSyaPanelRenderToken) return;
-    const selected = _unidadGetSelectedSyaVersionForContext(context, versions)
-      || versions.find((version) => version.sourceType === "original")
-      || null;
-    const entries = selected?.entries?.length
-      ? _unidadNormalizeSyaEntries(selected.entries, categoria)
-      : _unidadBuildSyaEntriesFromFlat(categoria, secuenciaActual || {});
-    const subtemasCount = Array.isArray(entries) ? entries.length : 0;
-    cards.push(`
-      <section class="unidad-result-sya-card" data-categoria="${_unidadEscapeHtml(categoria)}">
-        <div class="unidad-result-sya-card-head">
-          <div>
-            <h3 class="unidad-result-sya-card-title">${_unidadEscapeHtml(categoria)}</h3>
-            <p class="unidad-result-sya-card-meta">${subtemasCount} subtema${subtemasCount === 1 ? "" : "s"} · ${_unidadEscapeHtml(_unidadBuildResultSyaMetaLabel(selected))}</p>
-          </div>
-          <span class="unidad-result-sya-card-badge">SyA activa</span>
-        </div>
-        <div class="unidad-result-sya-summary">
-          ${_unidadBuildResultSyaSummary(entries)}
-        </div>
-        <div class="unidad-result-sya-actions">
-          <button type="button" class="unidad-result-sya-btn" data-action="edit-sya" data-categoria="${_unidadEscapeHtml(categoria)}">Editar SyA</button>
-          <button type="button" class="unidad-result-sya-btn is-primary" data-action="regen-category" data-categoria="${_unidadEscapeHtml(categoria)}">Regenerar</button>
-        </div>
-      </section>
-    `);
-  }
-
-  if (token !== unidadResultadoSyaPanelRenderToken) return;
-  unidadResultadoSyaPanelBody.innerHTML = cards.join("");
-  unidadResultadoSyaPanelBody.querySelectorAll("[data-action='edit-sya']").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const categoria = String(button.dataset.categoria || "").trim();
-      if (!categoria) return;
-      await _unidadOpenSyaModal(categoria);
-    });
-  });
-  unidadResultadoSyaPanelBody.querySelectorAll("[data-action='regen-category']").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const categoria = String(button.dataset.categoria || "").trim();
-      if (!categoria) return;
-      await _unidadRegenerateCategoryFromResultPanel(categoria);
-    });
-  });
-}
-
-function _unidadToggleResultSyaPanel(force = null) {
-  const content = _unidadGetResultContentNode();
-  if (!content || !unidadResultadoSyaPanel) return;
-  const nextState = typeof force === "boolean"
-    ? force
-    : !content.classList.contains("is-sya-panel-open");
-  content.classList.toggle("is-sya-panel-open", nextState);
-  unidadResultadoSyaPanel.setAttribute("aria-hidden", nextState ? "false" : "true");
-  if (btnToggleUnidadSyaPanel) {
-    btnToggleUnidadSyaPanel.setAttribute("aria-pressed", nextState ? "true" : "false");
-  }
-  if (nextState) {
-    _unidadRenderResultSyaPanel().catch(() => {});
-  }
-}
 
 async function _unidadRegenerateCategoryFromResultPanel(categoria = "") {
   const categoriaObjetivo = String(categoria || "").trim();
@@ -17648,7 +17566,6 @@ async function _unidadRegenerateCategoryFromResultPanel(categoria = "") {
   abrirModalResultadoUnidad();
   window.ultimaCategoriaIntentada = categoriaObjetivo;
   await generarSeccionCategoria(categoriaObjetivo);
-  _unidadRenderResultSyaPanel().catch(() => {});
 }
 
 
@@ -17687,16 +17604,20 @@ cerrarModalResultadoUnidad?.addEventListener("click", () => {
   if (modalResultadoUnidad) {
     modalResultadoUnidad.style.display = "none";
   }
-  _unidadToggleResultSyaPanel(false);
   mantenerEscuchaPasivaCharly();
 });
 
 btnToggleUnidadSyaPanel?.addEventListener("click", () => {
-  _unidadToggleResultSyaPanel();
-});
+  const categoria = 
+    window.generandoCategoria || 
+    window.categoriaEnProceso || 
+    window.ultimaCategoriaIntentada || 
+    document.getElementById("unidadTema")?.value || 
+    "General";
 
-btnCerrarUnidadSyaPanel?.addEventListener("click", () => {
-  _unidadToggleResultSyaPanel(false);
+  _unidadOpenSyaModal(categoria).catch(() => {
+    alert("❌ No se pudo abrir el panel de SyA.");
+  });
 });
 
 window.addEventListener("cb-ui-modal-closed", () => {
@@ -17714,6 +17635,36 @@ btnRegenerarResultadoUnidad?.addEventListener("click", () => {
     alert("❌ No se pudo regenerar la unidad.");
   });
 });
+
+function _unidadRefreshFooterStyleSelector() {
+  const host = document.getElementById("cbUnidadFooterStyleSelectorPlaceholder");
+  if (!host) return;
+
+  const categoria = 
+    window.generandoCategoria || 
+    window.categoriaEnProceso || 
+    window.ultimaCategoriaIntentada || 
+    document.getElementById("unidadTema")?.value || 
+    "General";
+
+  // Asegurar que el selector esté habilitado
+  if (typeof _unidadSetStyleSelectorEnabled === "function") {
+    _unidadSetStyleSelectorEnabled(categoria, true);
+  }
+
+  host.innerHTML = buildUnidadActivityStyleSelectorHtml(categoria);
+  attachUnidadActivityStyleSelectors(host);
+
+  // Estilizar el trigger para que coincida con la unidad
+  const trigger = host.querySelector("[data-action='toggle-style-menu']");
+  if (trigger) {
+    trigger.className = "unidad-btn unidad-btn-secondary unidad-action-btn";
+    trigger.style.minHeight = "28px";
+    trigger.style.height = "28px";
+    trigger.style.padding = "0 10px";
+    trigger.innerHTML = '<i class="fa-solid fa-palette"></i><span class="unidad-btn-text">Estilo</span>';
+  }
+}
 
 // Carga lecturas por nivel y grado
 
@@ -18347,6 +18298,11 @@ function conectarBotonGenerarTodo() {
 
   btnActual.addEventListener("click", async () => {
     if (btnActual.disabled) return;
+
+    // ✅ NUEVO: Verificar lectura antes de iniciar
+    const readingOk = await _asegurarLecturaAntesDeGenerar();
+    if (!readingOk) return;
+
     const estrategiaLista = await _asegurarModoLecturasUnidad({ categoria: "unidad-completa" });
     if (!estrategiaLista) return;
 
@@ -20491,6 +20447,10 @@ function generarCategoriaHandler(event) {
 
   if (cat && !btn.disabled) {
     (async () => {
+      // ✅ NUEVO: Verificar lectura antes de iniciar
+      const readingOk = await _asegurarLecturaAntesDeGenerar();
+      if (!readingOk) return;
+
       const estrategiaLista = await _asegurarModoLecturasUnidadManual({ categoria: cat });
       if (!estrategiaLista) return;
       const syaReady = await _unidadEnsureSyaSelectionReady(cat, { openModalIfNeeded: true });
@@ -20619,7 +20579,6 @@ async function verificarSecuencia() {
     await actualizarLecturasASC();
     window.lecturaInsertadaParaLenguaje = false;
     window.bloqueLecturaGlobalParaLenguaje = "";
-    window.lecturaNuevaCoincidenteGlobal = null;
 
     // ✅ CORRECCIÓN: AGREGAR "Ciencias experimentales" al catálogo de categorías
     const categorias = {
@@ -23013,6 +22972,7 @@ async function generarSeccionCategoria(categoria) {
   window.generandoCategoria = categoria;
   window.categoriaEnProceso = categoria;
   window.ultimaCategoriaIntentada = categoria;
+  _unidadSetSaveNeeded(true);
   setCategoriaSpinnerUI(categoria, true);
   const statusCategoriaId = `spinner-categoria-${categoria.replace(/\s+/g, "-")}`;
   try {
@@ -23144,10 +23104,19 @@ async function generarSeccionCategoria(categoria) {
     }
     _insertarContenedorCategoriaResultadoUnidad(resultadoUnidad, contenedor, categoria);
 
-    // ✅ NUEVO: Agregar título de categoría
+    // ✅ NUEVO: Agregar título de categoría con badge de estilo debajo
+    const activeStyles = typeof getSelectedUnidadActivityStyles === "function" ? getSelectedUnidadActivityStyles(categoria) : [];
+    const catalog = typeof getUnidadStyleCatalog === "function" ? getUnidadStyleCatalog() : [];
+    const styleLabels = activeStyles.map(id => {
+      const s = catalog.find(item => item.id === id);
+      return s ? (s.shortLabel || s.label) : id;
+    });
+    const styleBadgeHtml = styleLabels.length > 0 ? 
+      `<div class="categoria-style-badge" style="display: inline-block; margin-bottom: 20px; background: #e0ecff; color: #1d4ed8; padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; border: 1px solid #bfdbfe;">Estilo: ${styleLabels.join(" + ")}</div>` : '';
+
     const subtemasLista = subtemasDeCategoria.map(sub => formatearSubtema(sub)).join(", ");
     const tituloCategoriaHTML = `
-        <h2 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
+        <h2 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 12px; position: relative;">
             ${categoria}
             ${subtemasDeCategoria.length > 0 ?
         `<span style="font-size: 0.8em; color: #666; display: block; margin-top: 5px;">
@@ -23155,10 +23124,18 @@ async function generarSeccionCategoria(categoria) {
             </span>` :
         ''}
         </h2>
+        ${styleBadgeHtml}
     `;
 
     // ✅ CORRECCIÓN: Insertar título de categoría al inicio del contenedor
-    contenedor.innerHTML = tituloCategoriaHTML;
+    // Si hay una lectura global (ej. por prompt) que no se ha mostrado, la inyectamos al inicio de la primera categoría
+    let lecturaGlobalInyectada = "";
+    if (window.lecturaNuevaCoincidenteGlobal && !window.lecturaGlobalMostrada) {
+       lecturaGlobalInyectada = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, { categoria, statusId: statusCategoriaId });
+       window.lecturaGlobalMostrada = true;
+    }
+    contenedor.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+    contenedor.style.position = "relative"; // Asegurar que el badge se posicione respecto al contenedor
     // Llevar la vista al bloque de la categoría que se está generando.
     contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -25689,7 +25666,19 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
 
     // Guardar el HTML final (con URLs de Storage)
     unidadDoc.contenido = htmlContenidoParaGuardar;
-    await addDoc(collection(db, "unidadesGeneradas"), unidadDoc);
+
+    if (currentUnidadGuardadaId) {
+      // Actualizar unidad existente
+      await setDoc(doc(db, "unidadesGeneradas", currentUnidadGuardadaId), unidadDoc, { merge: true });
+      logVisual(`🔄 Unidad actualizada (ID: ${currentUnidadGuardadaId})`);
+    } else {
+      // Crear nueva unidad
+      const docRef = await addDoc(collection(db, "unidadesGeneradas"), unidadDoc);
+      currentUnidadGuardadaId = docRef.id;
+      logVisual(`✅ Nueva unidad creada (ID: ${currentUnidadGuardadaId})`);
+    }
+
+    _unidadSetSaveNeeded(false);
     alert("✅ Unidad guardada correctamente en Firestore.");
     // Mantener el estado actual para continuar editando/regenerando sin recargar.
     guardarSelectsUnidad();
@@ -27818,3 +27807,175 @@ window.cbVoiceWorkflowBridge.stopPlaybackAudio = () => {
   _detenerAudioWorkflowPlay();
   return true;
 };
+
+/**
+ * Genera el HTML para el bloque de lectura global (usado en Lenguaje o como cabecera de unidad)
+ */
+async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", statusId = "" } = {}) {
+  if (!lecturaObj) return "";
+  
+  const preguntasLectura = lecturaObj.preguntasComprension || lecturaObj.preguntas || [];
+  const sinonimosLecturaBase = _extraerSinonimosLecturaUnidad(lecturaObj);
+  const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(
+    _contenidoLecturaUnidad(lecturaObj),
+    sinonimosLecturaBase
+  );
+  const tituloLecturaBase = lecturaObj.titulo || lecturaObj.tema || "Sin título";
+  const encabezadoLecturaBase = "Lectura Principal";
+
+  // Verificar gráfico
+  const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
+  const wantsReadingGraphic = usoGrafico === "lectura" || usoGrafico === "ambos";
+  
+  // Para la lectura global, si no hay categoria, no generamos gráfico o usamos la actual
+  let apoyoLecturaHTML = "";
+  if (wantsReadingGraphic && categoria) {
+    apoyoLecturaHTML = await _unidadGenerarGraficoDesdeLecturaHTML({ 
+        categoria, 
+        lecturaResuelta: { lectura: lecturaObj, contenido: contenidoLecturaBase }, 
+        statusId 
+    }).catch(() => "");
+  }
+
+  return `
+    <div class="bloque-lectura-global" style="margin-bottom:30px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+        <h2 style="color:#2c5aa0; margin-top:0; border-bottom: 2px solid #2c5aa0; padding-bottom: 10px;">${encabezadoLecturaBase}: ${tituloLecturaBase}</h2>
+        ${apoyoLecturaHTML}
+        <div class="contenido-lectura" style="line-height: 1.8; font-size: 1.1rem; color: #334155;">
+            ${contenidoLecturaBase || "<em>Lectura sin contenido disponible</em>"}
+        </div>
+        ${preguntasLectura.length ? `
+            <div class="preguntas-lectura" style="margin-top:25px; padding-top: 15px; border-top: 1px dashed #cbd5e1;">
+                <h3 style="color: #475569;">Preguntas de comprensión lectora:</h3>
+                <ul style="list-style-type: decimal; padding-left: 20px;">
+                    ${preguntasLectura.map(p => {
+                        const q = (typeof p === "string" ? p : (p.pregunta || p.texto || "")).trim();
+                        const r = (typeof p === "object" ? (p.respuesta || "") : "");
+                        return `<li style="margin-bottom: 12px;"><strong>${q}</strong><br>
+                                <span style="color:mediumvioletred; font-style: italic;">Sugerencia de respuesta: ${r}</span></li>`;
+                    }).join("")}
+                </ul>
+            </div>
+        ` : ""}
+    </div>
+  `;
+}
+
+
+/**
+ * Abre un modal para generar una lectura nueva con Gemini si no hay ninguna seleccionada.
+ */
+async function _asegurarLecturaAntesDeGenerar() {
+  const selectTema = document.getElementById("unidadTema");
+  const selectTemaASC = document.getElementById("unidadTemaASC");
+  
+  const principalId = String(selectTema?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+
+  // Si ya hay alguna lectura seleccionada (base de datos o prompt), no hacemos nada
+  if (principalId || ascId || window.lecturaNuevaCoincidenteGlobal) return true;
+
+  // Si no hay lectura, abrimos el modal
+  const modal = document.getElementById("modalCrearLecturaPrompt");
+  if (!modal) return true; // Fallback por si no existe
+  
+  modal.style.display = "block";
+
+  return new Promise((resolve) => {
+    const btnAceptar = document.getElementById("btnAceptarCrearLecturaPrompt");
+    const btnCancelar = document.getElementById("btnCancelarCrearLecturaPrompt");
+    const cerrarX = document.getElementById("cerrarModalCrearLecturaPrompt");
+    const input = document.getElementById("promptNuevaLecturaUnidad");
+    const status = document.getElementById("statusCrearLecturaPrompt");
+
+    const cleanup = () => {
+      modal.style.display = "none";
+      btnAceptar.onclick = null;
+      btnCancelar.onclick = null;
+      cerrarX.onclick = null;
+    };
+
+    btnCancelar.onclick = () => { cleanup(); resolve(false); };
+    cerrarX.onclick = () => { cleanup(); resolve(false); };
+
+    btnAceptar.onclick = async () => {
+      const promptDesc = String(input.value || "").trim();
+      if (!promptDesc) {
+        alert("Por favor describe la lectura que deseas (temas, nivel, etc.)");
+        return;
+      }
+
+      status.style.display = "block";
+      btnAceptar.disabled = true;
+
+      try {
+        const result = await _generarLecturaIAConPrompt(promptDesc);
+        if (result) {
+          window.lecturaNuevaCoincidenteGlobal = result;
+          cleanup();
+          resolve(true); // Continuar
+        } else {
+          alert("No se pudo generar la lectura. Inténtalo de nuevo.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Ocurrió un error al generar la lectura con IA.");
+      } finally {
+        status.style.display = "none";
+        btnAceptar.disabled = false;
+      }
+    };
+  });
+}
+
+async function _generarLecturaIAConPrompt(promptUsuario) {
+  const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "Primaria";
+  const grado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "Primero";
+
+  const promptFinal = `Genera una lectura educativa basada en la siguiente descripción: "${promptUsuario}".
+Nivel: ${nivel}, Grado: ${grado}.
+
+REQUISITOS DE FORMATO:
+1. Responde ÚNICAMENTE con un objeto JSON válido.
+2. Asegúrate de que no haya saltos de línea literales dentro de las cadenas de texto (usa \\n para saltos de línea).
+3. Escapa correctamente las comillas dobles internas si usas diálogos.
+4. El JSON DEBE seguir rigurosamente esta estructura:
+{
+  "titulo": "Título de la lectura",
+  "texto": "Contenido completo de la lectura...",
+  "preguntasComprension": [
+    {"pregunta": "Pregunta 1", "respuesta": "Respuesta 1"},
+    {"pregunta": "Pregunta 2", "respuesta": "Respuesta 2"},
+    {"pregunta": "Pregunta 3", "respuesta": "Respuesta 3"},
+    {"pregunta": "Pregunta 4", "respuesta": "Respuesta 4"},
+    {"pregunta": "Pregunta 5", "respuesta": "Respuesta 5"}
+  ]
+}`;
+
+  try {
+    const res = await enviarPrompt([{ role: "user", text: promptFinal }], { jsonMode: true });
+    if (!res) return null;
+
+    // Si ya viene como objeto (jsonMode), lo devolvemos directamente
+    if (typeof res === "object" && !Array.isArray(res)) return res;
+    
+    // Si es un string, lo limpiamos y parseamos
+    let cleanString = String(res).replace(/```json|```/g, "").trim();
+    
+    // Reemplazar solo caracteres de control verdaderamente problemáticos (0-8, 11-12, 14-31)
+    // Dejamos 9 (Tab), 10 (LF), 13 (CR) porque son whitespace válidos en JSON estructural
+    // Si están dentro de un string, el modelo DEBE haberlos escapado como \n.
+    // Si no los escapó, el parseo fallará de todos modos, pero no los "romperemos" nosotros antes.
+    cleanString = cleanString.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+
+    try {
+      return JSON.parse(cleanString);
+    } catch (parseErr) {
+      console.error("Error al parsear lectura generada:", parseErr, "Raw:", cleanString);
+      return null;
+    }
+  } catch (err) {
+    console.warn("Error enviando prompt de lectura:", err);
+    return null;
+  }
+}
