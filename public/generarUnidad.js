@@ -24439,22 +24439,22 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
                       ${competenciasSubcategoriaAlumno}
                       ${competenciaSubcategoriaAlumno}
                       ${ejeSubcategoriaAlumno}
+                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <h4>${tituloCreativoLimpioBase}</h4>
                       <h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
                       ${competenciasSubcategoriaMaestro}
                       ${competenciaSubcategoriaMaestro}
                       ${ejeSubcategoriaMaestro}
+                      ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                       <h4>Notas del maestro</h4>
                       <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido del alumno...</p>
                   </div>
@@ -24622,11 +24622,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     ${lecturaNomenclaturaHTML}
                     ${tablaInicialHTML}
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialAlumno}</p>
                     ${competenciasSubcategoriaAlumno}
                     ${competenciaSubcategoriaAlumno}
                     ${ejeSubcategoriaAlumno}
+                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${etiquetaInterdisc}
@@ -24634,11 +24634,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
                     ${competenciasSubcategoriaMaestro}
                     ${competenciaSubcategoriaMaestro}
                     ${ejeSubcategoriaMaestro}
+                    ${campoFormativo ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoFormativo}</p>` : ""}
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
                     ${soporteLecturaMaestroHTML}
