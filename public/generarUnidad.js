@@ -24273,11 +24273,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           const subcategoriaEditorialMaestroProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
           layoutProyecto.insertAdjacentHTML("beforeend", `
                 <div id="${proyectoMaestroColId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoria}</p>
-                  ${campoProyecto ? `<p style="margin:0 0 6px 0; font-size:13px;"><strong>Campo formativo:</strong> ${campoProyecto}</p>` : ""}
-                  <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestroProyecto}</p>
-                  <h4>${tituloMostrar || "Notas del maestro"}</h4>
                   ${soporteLecturaMaestroProyectoHTML || ""}
+                  <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestroProyecto}</span>
+                    ${campoProyecto ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoProyecto}</span>` : ""}
+                  </div>
+                  <h4>${tituloMostrar || "Notas del maestro"}</h4>
                   <div id="${proyectoMaestroColId}-contenido"></div>
                 </div>
               `);
@@ -24703,6 +24705,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                    ${soporteLecturaMaestroHTML}
+                    ${bloqueRutaHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
@@ -24713,8 +24717,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     </div>
                     <h4>${tituloCreativoLimpioBase}</h4>
                     <h5 style="color:#666;font-weight:normal;">${T}</h5>
-                    ${soporteLecturaMaestroHTML}
-                    ${bloqueRutaHTML}
                     <p><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
                     <div id="${colMaestroId}-contenido" style="white-space:pre-wrap;"></div>
                 </div>
@@ -24754,18 +24756,21 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colMaestro = document.getElementById(colMaestroId);
         if (colMaestro) {
           colMaestro.innerHTML = `
-              <p style="margin:0 0 6px 0; font-size:13px;"><strong>Categoría:</strong> ${categoriaEditorial}</p>
-              <p style="margin:0 0 6px 0; font-size:13px;"><strong>Subcategoría:</strong> ${subcategoriaEditorialMaestro}</p>
-              ${competenciasSubcategoriaMaestro}
-              ${competenciaSubcategoriaMaestro}
-              ${ejeSubcategoriaMaestro}
+              ${soporteLecturaMaestroHTML}
+              ${bloqueRutaHTML}
+              <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
+                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
+                  ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                  ${ejeSubcategoriaMaestro}
+                  ${competenciasSubcategoriaMaestro}
+                  ${competenciaSubcategoriaMaestro}
+              </div>
               <h3 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 8px; margin-bottom: 20px;">
                   ${categoriaEditorial}
               </h3>
               <h4>${tituloCreativoLimpioBase}</h4>
               <h5 style="color:#666;font-weight:normal;">${T}</h5>
-              ${soporteLecturaMaestroHTML}
-              ${bloqueRutaHTML}
               <div id="${colMaestroId}-contenido"></div>
             `;
           await renderContenidoEnTiempoReal(document.getElementById(`${colMaestroId}-contenido`), notasFinalesColMaestro);
