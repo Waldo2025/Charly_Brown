@@ -17848,10 +17848,6 @@ function _unidadRefreshFooterStyleSelector() {
     document.getElementById("unidadTema")?.value || 
     "General";
 
-  // Asegurar que el selector esté habilitado
-  if (typeof _unidadSetStyleSelectorEnabled === "function") {
-    _unidadSetStyleSelectorEnabled(categoria, true);
-  }
 
   host.innerHTML = buildUnidadActivityStyleSelectorHtml(categoria);
   attachUnidadActivityStyleSelectors(host);
