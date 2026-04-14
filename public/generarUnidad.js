@@ -21771,6 +21771,397 @@ function _forzarLecturaGeneradoraProyecto(html = "", contenidoLectura = "", titu
   return `${original.slice(0, start)}${bloqueExacto}${original.slice(end)}`;
 }
 
+function _unidadImportedTextStorageKey(categoria = "", subtema = "") {
+  const normalizar = (valor) => String(valor || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `unidad_ingesta_texto_${normalizar(categoria)}__${normalizar(subtema)}`;
+}
+
+function _unidadGetImportedTextSourceForSubtema(categoria = "", subtema = "") {
+  try {
+    const runtimeMap = window.__unidadTextoImportadoPorSubtema || {};
+    const runtimeKey = _unidadImportedTextStorageKey(categoria, subtema);
+    const runtimePayload = runtimeMap?.[runtimeKey];
+    if (runtimePayload && typeof runtimePayload === "object") {
+      const structuredHtml = String(runtimePayload.structuredHtml || "").trim();
+      const originalHtml = String(runtimePayload.originalHtml || "").trim();
+      const plainText = String(runtimePayload.plainText || "").trim();
+      if (structuredHtml || originalHtml || plainText) {
+        return {
+          categoria: String(runtimePayload.categoria || categoria || "").trim(),
+          subtema: String(runtimePayload.subtema || subtema || "").trim(),
+          structuredHtml,
+          originalHtml,
+          plainText,
+          mode: String(runtimePayload.mode || "").trim(),
+          createdAt: Number(runtimePayload.createdAt || 0) || 0
+        };
+      }
+    }
+
+    const raw = localStorage.getItem(runtimeKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const structuredHtml = String(parsed.structuredHtml || "").trim();
+    const originalHtml = String(parsed.originalHtml || "").trim();
+    const plainText = String(parsed.plainText || "").trim();
+    if (!structuredHtml && !originalHtml && !plainText) return null;
+    return {
+      categoria: String(parsed.categoria || categoria || "").trim(),
+      subtema: String(parsed.subtema || subtema || "").trim(),
+      structuredHtml,
+      originalHtml,
+      plainText,
+      mode: String(parsed.mode || "").trim(),
+      createdAt: Number(parsed.createdAt || 0) || 0
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function _unidadBuildPromptDeCategoriaDesdeTextoImportado({
+  categoria = "",
+  subtema = "",
+  tituloCreativo = "",
+  cantidad = 1,
+  T = "",
+  AE = "",
+  C = "",
+  P = "",
+  instruccionesAdicionales = "",
+  payload = null,
+  generarFichas = false,
+  generarAnexos = false,
+  generarVideos = false
+} = {}) {
+  const fuenteHtml = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
+  const fuentePlano = String(payload?.plainText || "").trim();
+  const fuente = fuenteHtml || _escapeHtmlUnidad(fuentePlano);
+  const subtemaFormateado = formatearSubtema(subtema);
+  const tituloFinal = String(tituloCreativo || subtemaFormateado).trim();
+  const recursosExtra = [
+    generarFichas ? "- Si hay ficha activada, añade el bloque de ficha de refuerzo coherente con el mismo contenido base." : "",
+    generarAnexos ? "- Si hay anexo activado, añade un anexo visual breve alineado al mismo contenido base." : "",
+    generarVideos ? "- Si hay video activado, añade el guion de video educativo alineado al mismo contenido base." : ""
+  ].filter(Boolean).join("\n");
+
+  return `
+Eres un especialista en transformación editorial de contenido escolar con formato ASC.
+Tu tarea es TOMAR el contenido existente y REESCRIBIRLO al formato ASC para la subcategoría "${subtemaFormateado}" de la categoría "${categoria}".
+
+REGLAS ABSOLUTAS:
+- NO inventes contenido nuevo.
+- NO cambies el tema, propósito, ejemplos, respuestas ni orden lógico de las actividades existentes.
+- NO agregues personajes, lecturas, contextos narrativos, materiales o consignas que no estén ya presentes en el texto fuente.
+- NO conviertas el contenido en una actividad distinta ni más creativa: solo REESCRÍBELO con formato ASC.
+- USA el contenido fuente pegado por el usuario como base obligatoria.
+- Conserva exactamente las mismas actividades, con la misma intención didáctica.
+- Si el texto trae 2 actividades, deben salir 2 actividades. Si trae 5, deben salir 5. NO inventes actividades extra ni elimines actividades existentes.
+- Si una actividad ya trae respuesta esperada, consérvala; si no trae respuesta, no inventes una extensa.
+- Puedes limpiar encabezados repetidos, basura visual o texto docente que no pertenezca al alumno, pero sin alterar el contenido pedagógico real.
+- SI el texto trae lectura principal, notas del maestro, bibliografía, temario o encabezados globales de unidad, elimínalos del resultado.
+- Entrega SOLO la sección del alumno de esta subcategoría.
+- Da formato ASC visual correcto y consistente.
+- Asigna modalidad [IC T. IND], [IC T. PAR] o [IC T. EQUI] solo si hace falta para completar el formato, respetando el sentido original de la actividad.
+- NO incluyas metadatos de categoría, subcategoría, campo formativo ni etiquetas del maestro.
+- NO uses el contenido de la lectura seleccionada para inventar actividades nuevas. La lectura solo puede servir como contexto si el texto fuente ya la menciona.
+
+MARCO CURRICULAR DE REFERENCIA:
+- T: ${T || "No disponible"}
+- AE: ${AE || "No disponible"}
+- C: ${C || "No disponible"}
+- P: ${P || "No disponible"}
+
+${instruccionesAdicionales ? `INSTRUCCIONES ESPECÍFICAS DEL USUARIO:\n${instruccionesAdicionales}\n` : ""}
+${recursosExtra ? `RECURSOS EXTRA SI ESTÁN ACTIVADOS:\n${recursosExtra}\n` : ""}
+
+FORMATO DE SALIDA:
+- Usa HTML limpio.
+- Cada actividad principal debe ir en <div class="activity">.
+- La instrucción principal debe ir en un <p> con <strong>.
+- Los pasos internos deben ir en <ol class="steps" type="a"> cuando existan pasos o subinstrucciones identificables.
+- La respuesta esperada, solo si ya existe o es claramente deducible del texto base, debe ir en <div class="answer"><span style="color:mediumvioletred;">Respuesta: ...</span></div>.
+- No uses bloques markdown.
+- No incluyas comentarios.
+
+CONTRATO DE FIDELIDAD:
+- Debes mantener la misma cantidad de actividades detectadas en el texto fuente.
+- Debes mantener el mismo orden de aparición.
+- Debes mantener las mismas ideas centrales y ejemplos.
+- Tu trabajo es SOLO normalizar el formato a ASC.
+- Si alteras el contenido de fondo, tu respuesta es incorrecta.
+
+CONTENIDO FUENTE A TRANSFORMAR:
+${fuente}
+
+Devuelve ÚNICAMENTE el HTML final reescrito al formato ASC para "${tituloFinal}", conservando fielmente el contenido fuente.
+  `;
+}
+
+function _unidadExtractImportedOwnTitle(payload = null, fallback = "") {
+  const source = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
+  const fallbackTitle = String(fallback || "").trim();
+  if (!source) return fallbackTitle;
+
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+      const titleNode = doc.querySelector("h1, h2, h3, h4, strong");
+      const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim();
+      if (titleText && titleText.length <= 120) return titleText;
+    } catch (_) {
+      // noop
+    }
+  }
+
+  const plain = source.replace(/<[^>]*>/g, "\n");
+  const lines = plain.split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const candidate = lines.find((line) => {
+    if (line.length > 120) return false;
+    if (/^\[.*\]$/.test(line)) return false;
+    if (/^[A-Z0-9_ -]{12,}$/.test(line)) return false;
+    if (/^(categoria|subcat|campo formativo|eje articulador|habilidad|competencia)\b/i.test(line)) return false;
+    return true;
+  });
+  return candidate || fallbackTitle;
+}
+
+function _unidadIsImportedMetadataLine(line = "") {
+  const safe = String(line || "").replace(/\s+/g, " ").trim();
+  if (!safe) return true;
+  const normalized = safe
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+  if (/^\[(icono|sello)[^\]]*\]$/i.test(safe)) return true;
+  if (/^[A-Z0-9_ -]{14,}$/.test(safe) && /[_\d]/.test(safe)) return true;
+  if (/^(categoria|subcat|eje articulador|campo formativo|habilidad cognitiva asociada)\s*:/i.test(safe)) return true;
+  if (/^[a-záéíóúñü ]+\s+competencia\s*:/i.test(normalized)) return true;
+  if (/^(campo formativo|eje articulador)\b/i.test(normalized)) return true;
+  if (/^(ecm|ecr|icm|ihc|pc|cc|ce|oral|escrita)$/i.test(safe)) return true;
+  return false;
+}
+
+function _unidadImportedPlainLines(source = "") {
+  const html = String(source || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6|blockquote|tr|td)>/gi, "\n")
+    .replace(/<(ol|ul|table|tbody|thead)[^>]*>/gi, "\n")
+    .replace(/<\/(ol|ul|table|tbody|thead)>/gi, "\n");
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\u00a0/g, " ")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function _unidadSplitInlineRespuestaEnLinea(line = "") {
+  const safe = String(line || "").replace(/\s+/g, " ").trim();
+  if (!safe) return { text: "", answer: "" };
+
+  const personalMatch = safe.match(/^(.*?)(respuesta personal\.?)$/i);
+  if (personalMatch) {
+    return {
+      text: personalMatch[1].replace(/\s+/g, " ").trim(),
+      answer: personalMatch[2].trim()
+    };
+  }
+
+  const explicitMatch = safe.match(/^(.*?)(respuesta\s*:\s*.+)$/i);
+  if (explicitMatch) {
+    return {
+      text: explicitMatch[1].replace(/\s+/g, " ").trim(),
+      answer: explicitMatch[2].trim()
+    };
+  }
+
+  return { text: safe, answer: "" };
+}
+
+function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
+  const original = String(source || "").trim();
+  if (!original) return "";
+
+  if (/<div\s+class=["']activity(?:-fichas)?["']/i.test(original)) {
+    return original;
+  }
+
+  const lines = _unidadImportedPlainLines(original);
+  if (!lines.length) return original;
+
+  const titleFallback = String(options?.fallbackTitle || "").trim();
+  const intro = [];
+  const activities = [];
+  let title = "";
+  let current = null;
+
+  const pushCurrent = () => {
+    if (!current) return;
+    if (current.lead || current.steps.length || current.paragraphs.length) {
+      activities.push(current);
+    }
+    current = null;
+  };
+
+  const createActivity = (lead = "") => ({
+    lead: String(lead || "").trim(),
+    steps: [],
+    paragraphs: []
+  });
+
+  const isNumberedLine = (line = "") => /^\d+\.\s+/.test(String(line || "").trim());
+  const isMainActivityLine = (line = "") => {
+    const safe = String(line || "").trim();
+    return /^actividad\s+\d+[\.:]/i.test(safe) || (/^\d+\.\s+/.test(safe) && /\[IC/i.test(safe));
+  };
+
+  lines.forEach((lineRaw) => {
+    const line = String(lineRaw || "").replace(/\s+/g, " ").trim();
+    if (!line || _unidadIsImportedMetadataLine(line)) return;
+
+    if (!title && !isNumberedLine(line) && !/^\[.*\]$/.test(line)) {
+      title = line;
+      return;
+    }
+
+    if (isMainActivityLine(line)) {
+      pushCurrent();
+      current = createActivity(line);
+      return;
+    }
+
+    if (!current) {
+      intro.push(line);
+      return;
+    }
+
+    if (isNumberedLine(line)) {
+      const cleanedStep = line.replace(/^\d+\.\s*/, "").trim();
+      const { text, answer } = _unidadSplitInlineRespuestaEnLinea(cleanedStep);
+      current.steps.push({
+        text: text || cleanedStep,
+        answer
+      });
+      return;
+    }
+
+    if (current.steps.length) {
+      const lastStep = current.steps[current.steps.length - 1];
+      if (!lastStep.answer) {
+        lastStep.answer = line;
+      } else {
+        lastStep.answer = `${lastStep.answer} ${line}`.trim();
+      }
+      return;
+    }
+
+    current.paragraphs.push(line);
+  });
+
+  pushCurrent();
+
+  if (!activities.length) {
+    return original;
+  }
+
+  const titleHtml = title || titleFallback;
+  const introHtml = intro.length
+    ? intro.map((item) => `<p>${_escapeHtmlUnidad(item)}</p>`).join("")
+    : "";
+
+  const activitiesHtml = activities.map((activity) => {
+    const leadText = String(activity.lead || "").replace(/^actividad\s+\d+[\.:]\s*/i, "").replace(/^\d+\.\s*/, "").trim();
+    const leadSplit = _unidadSplitInlineRespuestaEnLinea(leadText);
+    const leadHtml = leadSplit.text
+      ? `<p><strong>${_escapeHtmlUnidad(leadSplit.text)}</strong></p>`
+      : "";
+    const paragraphsHtml = activity.paragraphs.map((item) => `<p>${_escapeHtmlUnidad(item)}</p>`).join("");
+    const stepsHtml = activity.steps.length
+      ? `<ol class="steps" type="a">${activity.steps.map((step) => `
+            <li>
+              ${_escapeHtmlUnidad(step.text || "")}
+              ${step.answer ? `<div class="answer"><span style="color:mediumvioletred;">${_escapeHtmlUnidad(step.answer)}</span></div>` : ""}
+            </li>
+          `).join("")}</ol>`
+      : "";
+    const leadAnswerHtml = !activity.steps.length && leadSplit.answer
+      ? `<div class="answer"><span style="color:mediumvioletred;">${_escapeHtmlUnidad(leadSplit.answer)}</span></div>`
+      : "";
+
+    return `<div class="activity">${leadHtml}${paragraphsHtml}${stepsHtml}${leadAnswerHtml}</div>`;
+  }).join("");
+
+  return `
+    ${titleHtml ? `<h4>${_escapeHtmlUnidad(titleHtml)}</h4>` : ""}
+    ${introHtml}
+    ${activitiesHtml}
+  `.trim();
+}
+
+function _unidadWrapLooseTopLevelActivities(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const directChildren = Array.from(root.children);
+  if (!directChildren.length) return source;
+
+  const isAlreadyWrapped = (node) => node.classList?.contains("activity") || node.classList?.contains("activity-fichas");
+  const isLooseMainInstruction = (node) => {
+    if (!(node instanceof Element) || isAlreadyWrapped(node)) return false;
+    if (/^H[1-6]$/i.test(node.tagName || "")) return false;
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!/^\d+\.\s+/.test(text)) return false;
+    if (/^\d+\.\s+[a-záéíóúñü].*:\s*$/i.test(text)) return false;
+    return true;
+  };
+
+  const startsNewTopLevel = (node) => {
+    if (!(node instanceof Element)) return false;
+    if (isAlreadyWrapped(node)) return true;
+    if (/^H[1-6]$/i.test(node.tagName || "")) return true;
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    return /^\d+\.\s+/.test(text);
+  };
+
+  let changed = false;
+  for (let i = 0; i < directChildren.length; i += 1) {
+    const node = directChildren[i];
+    if (!isLooseMainInstruction(node)) continue;
+
+    const wrapper = doc.createElement("div");
+    wrapper.className = "activity";
+    root.insertBefore(wrapper, node);
+
+    let current = node;
+    while (current) {
+      const next = current.nextElementSibling;
+      wrapper.appendChild(current);
+      changed = true;
+      if (!next || startsNewTopLevel(next)) break;
+      current = next;
+    }
+  }
+
+  return changed ? root.innerHTML : source;
+}
+
 // ===================== PROYECTOS (con PISA + RÚBRICA POR FASE + Fichas/Anexos/Video/Recortable) =====================
 window.construirPromptProyecto = function (
   objetivosDelSubtema,
@@ -23182,6 +23573,20 @@ function _unidadAscThemePorChip(chip = "") {
   };
 }
 
+function _unidadExtractExplicitAscChips(text = "") {
+  const source = String(text || "");
+  if (!source.trim()) return [];
+
+  const matches = Array.from(source.matchAll(/\[(IC\.?\s*[^\]]+)\]/gi))
+    .map((match) => String(match[1] || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const isModalityChip = (value = "") => /IC\.?\s*T\.?\s*(IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?)/i.test(value);
+  const isPlecaChip = (value = "") => /\bPLECA(?:S)?\b/i.test(value);
+
+  return Array.from(new Set(matches.filter((chip) => !isModalityChip(chip) && !isPlecaChip(chip))));
+}
+
 function _unidadCompetenciaPrimariaTexto(subtema = "", categoria = "", { lectura = false } = {}) {
   if (lectura) return "Comprensión lectora";
 
@@ -23950,7 +24355,19 @@ async function generarSeccionCategoria(categoria) {
        lecturaGlobalInyectada = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, { categoria, statusId: statusCategoriaId });
        window.lecturaGlobalMostrada = true;
     }
-    contenedor.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+    let categoriaHeader = contenedor.querySelector(":scope > .bloque-categoria-header");
+    if (!categoriaHeader) {
+      categoriaHeader = document.createElement("div");
+      categoriaHeader.className = "bloque-categoria-header";
+      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+      if (contenedor.firstChild) {
+        contenedor.insertBefore(categoriaHeader, contenedor.firstChild);
+      } else {
+        contenedor.appendChild(categoriaHeader);
+      }
+    } else {
+      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+    }
     contenedor.style.position = "relative"; // Asegurar que el badge se posicione respecto al contenedor
     // Llevar la vista al bloque de la categoría que se está generando.
     contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -24553,6 +24970,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value;
       const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value;
       const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
+      const importedTextPayload = _unidadGetImportedTextSourceForSubtema(categoria, subtema);
+      const importedUsesOwnHeading = !!importedTextPayload;
+      const importedOwnTitle = importedUsesOwnHeading
+        ? _unidadExtractImportedOwnTitle(importedTextPayload, formatearSubtema(subtema))
+        : "";
+      const tituloRenderSubtema = importedUsesOwnHeading ? importedOwnTitle : "";
 
       // IMPORTANTE: no generes clave de ficha si no está marcado (evita desordenar contadores globales)
       if (!window.clavesFichaPorUnidad) window.clavesFichaPorUnidad = {};
@@ -24560,17 +24983,28 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
       let claveFichaActual = "";
 
-      // ===== Título por subtema =====
-      actualizarSpinnerProceso(statusId, `Preparando título para <strong>${formatearSubtema(subtema)}</strong>...`);
-      logVisual(`📌 Preparando prompt del título para: ${subtema}`);
-      const tituloCreativoLimpioBase = await generarTituloCreativoUnico({
-        subtema,
-        nivel,
-        grado: gradoTexto,
-        tipo: "subtema",
+      // ===== Título por subtema / modo importado =====
+      actualizarSpinnerProceso(
         statusId,
-        maxIntentos: 3
-      });
+        importedUsesOwnHeading
+          ? `Preparando contenido importado para <strong>${formatearSubtema(subtema)}</strong>...`
+          : `Preparando título para <strong>${formatearSubtema(subtema)}</strong>...`
+      );
+      logVisual(
+        importedUsesOwnHeading
+          ? `📌 Modo importado activo para: ${subtema}`
+          : `📌 Preparando prompt del título para: ${subtema}`
+      );
+      const tituloCreativoLimpioBase = importedUsesOwnHeading
+        ? tituloRenderSubtema
+        : await generarTituloCreativoUnico({
+          subtema,
+          nivel,
+          grado: gradoTexto,
+          tipo: "subtema",
+          statusId,
+          maxIntentos: 3
+        });
 
       // ===== Flujo normal (otras categorías) =====
       try {
@@ -24602,7 +25036,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         let instruccionesAdicionales = [instruccionesAdicionalesBase, stylePromptCategoria].filter(Boolean).join("\n\n");
         let lecturaAnalysis = null;
 
-        if (relacionadaFinal && String(contenidoLecturaParaPrompt || "").trim()) {
+        if (!importedUsesOwnHeading && relacionadaFinal && String(contenidoLecturaParaPrompt || "").trim()) {
           lecturaAnalysis = await _unidadAnalizarLecturaRelacionada({
             categoria,
             subtema,
@@ -24633,23 +25067,44 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         let apoyoHTML = "";
 
 
-        const promptCategoria = construirPromptDeCategoria(
-          categoria,
-          objetivosDelSubtema,
-          contenidoLecturaParaPrompt,
-          preguntasParaPrompt,
-          [subtema],
-          cantidad,
-          generarFichas,
-          generarAnexos,
-          generarVideos,
-          tituloCreativoLimpioBase,
-          "", // promptTitulo
-          relacionadaFinal, // ✅ Indicar explícitamente si está relacionada
-          instruccionesAdicionales
-        );
+        const promptCategoria = importedTextPayload
+          ? _unidadBuildPromptDeCategoriaDesdeTextoImportado({
+            categoria,
+            subtema,
+            tituloCreativo: tituloCreativoLimpioBase,
+            cantidad,
+            T: objetivoT,
+            AE: objetivoAE,
+            C: objetivoC,
+            P: objetivoP,
+            instruccionesAdicionales,
+            payload: importedTextPayload,
+            generarFichas,
+            generarAnexos,
+            generarVideos
+          })
+          : construirPromptDeCategoria(
+            categoria,
+            objetivosDelSubtema,
+            contenidoLecturaParaPrompt,
+            preguntasParaPrompt,
+            [subtema],
+            cantidad,
+            generarFichas,
+            generarAnexos,
+            generarVideos,
+            tituloCreativoLimpioBase,
+            "", // promptTitulo
+            relacionadaFinal, // ✅ Indicar explícitamente si está relacionada
+            instruccionesAdicionales
+          );
 
-        actualizarSpinnerProceso(statusId, `Generando actividades para <strong>${formatearSubtema(subtema)}</strong>...`);
+        actualizarSpinnerProceso(
+          statusId,
+          importedUsesOwnHeading
+            ? `Reescribiendo texto importado para <strong>${formatearSubtema(subtema)}</strong>...`
+            : `Generando actividades para <strong>${formatearSubtema(subtema)}</strong>...`
+        );
         const previewAlumnoId = `${bloqueId}-preview-alumno`;
         const categoriaEditorial = _unidadEtiquetaCategoriaCampo(categoria, subtema);
         const subcategoriaEditorialAlumno = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
@@ -24673,8 +25128,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                       </div>
-                      <h4>${tituloCreativoLimpioBase}</h4>
-                      <h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>
+                      ${importedUsesOwnHeading ? "" : `<h4>${tituloCreativoLimpioBase}</h4>`}
+                      ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>`}
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
                   <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
@@ -24686,19 +25141,33 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaMaestro}
                         ${competenciaSubcategoriaMaestro}
                       </div>
-                      <h4>Notas del maestro</h4>
+                      <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : "Notas del maestro"}</h4>
                       <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido del alumno...</p>
                   </div>
               </div>
             `;
-        const promptLockKey = `contenido:${categoria}:${subtema}`;
-        if (!_unidadTryAcquirePromptLock(promptLockKey)) {
-          throw new Error(`Generación duplicada bloqueada para ${categoria}/${subtema}`);
+        let htmlAlumno = "";
+        if (importedTextPayload) {
+          const importedSource = String(
+            importedTextPayload.structuredHtml
+            || importedTextPayload.originalHtml
+            || importedTextPayload.plainText
+            || ""
+          ).trim();
+          htmlAlumno = _unidadConvertImportedTextToAscHtml(importedSource, {
+            fallbackTitle: importedOwnTitle || formatearSubtema(subtema)
+          });
+          logVisual(`✅ Contenido del alumno reutilizado desde texto importado (${htmlAlumno.length} caracteres)`);
+        } else {
+          const promptLockKey = `contenido:${categoria}:${subtema}`;
+          if (!_unidadTryAcquirePromptLock(promptLockKey)) {
+            throw new Error(`Generación duplicada bloqueada para ${categoria}/${subtema}`);
+          }
+          const respuestaAlumno = await enviarPrompt([{ role: "user", text: promptCategoria }]);
+          _unidadReleasePromptLock(promptLockKey);
+          logVisual(`✅ Respuesta alumno recibida (${(respuestaAlumno || "").length} caracteres)`);
+          htmlAlumno = (respuestaAlumno || "").replace(/```html|```/g, "").trim();
         }
-        const respuestaAlumno = await enviarPrompt([{ role: "user", text: promptCategoria }]);
-        _unidadReleasePromptLock(promptLockKey);
-        logVisual(`✅ Respuesta alumno recibida (${(respuestaAlumno || "").length} caracteres)`);
-        let htmlAlumno = (respuestaAlumno || "").replace(/```html|```/g, "").trim();
 
         // ✅ Verificar estructura solo si la respuesta no está vacía
         if (htmlAlumno.trim()) {
@@ -24737,6 +25206,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
         let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
+        htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
@@ -24783,6 +25253,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           }).catch(() => "");
           if (ajustado) htmlAlumnoLimpio = cleanHTML(ajustado);
         }
+        htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto);
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
@@ -24826,7 +25297,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.debeInsertarLecturaLenguaje
         );
 
-        const lecturaNomenclaturaHTML = esPrimerSubtemaLenguaje
+        const lecturaNomenclaturaHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje)
           ? `
               <div class="lectura-global-categoria" style="margin-bottom:30px;">
                 <div id="unidadTemarioResumenMount">${_unidadBuildTemarioUnidadHTML()}</div>
@@ -24844,7 +25315,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           htmlAlumnoConApoyoVisual = _unidadStripDuplicatedLectureBlocksFromHtml(htmlAlumnoConApoyoVisual);
         }
         const lecturaFuenteLenguaje = lectura || lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
-        const soporteLecturaMaestroHTML = esPrimerSubtemaLenguaje
+        const soporteLecturaMaestroHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje)
           ? _bloqueMaestroLecturaSoporteUnidad(lecturaFuenteLenguaje)
           : "";
 
@@ -24861,7 +25332,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                 <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
                     ${lecturaNomenclaturaHTML}
-                    ${tablaInicialHTML}
+                    ${importedUsesOwnHeading ? "" : tablaInicialHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
@@ -24870,14 +25341,14 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                     </div>
-                    <h4>${tituloCreativoLimpioBase}</h4>
-                    <h5 style="color:#666;font-weight:normal;">${T}</h5>
-                    ${etiquetaInterdisc}
+                    ${importedUsesOwnHeading ? "" : `<h4>${tituloCreativoLimpioBase}</h4>`}
+                    ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
+                    ${importedUsesOwnHeading ? "" : etiquetaInterdisc}
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    ${soporteLecturaMaestroHTML}
-                    ${bloqueRutaHTML}
+                    ${importedUsesOwnHeading ? "" : soporteLecturaMaestroHTML}
+                    ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
@@ -24886,20 +25357,22 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaMaestro}
                         ${competenciaSubcategoriaMaestro}
                     </div>
-                    <h4>${tituloCreativoLimpioBase}</h4>
-                    <h5 style="color:#666;font-weight:normal;">${T}</h5>
+                    <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : tituloCreativoLimpioBase}</h4>
+                    ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
                     <p><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
                     <div id="${colMaestroId}-contenido" style="white-space:pre-wrap;"></div>
                 </div>
             </div>
           `;
-        _unidadRegisterTemarioSubcategoria({
-          subtema,
-          categoria,
-          titulo: formatearSubtema(subtema),
-          descripcion: AE || T || C || P || formatearSubtema(subtema)
-        });
-        _unidadRefreshTemarioUnidadMount();
+        if (!importedUsesOwnHeading) {
+          _unidadRegisterTemarioSubcategoria({
+            subtema,
+            categoria,
+            titulo: formatearSubtema(subtema),
+            descripcion: AE || T || C || P || formatearSubtema(subtema)
+          });
+          _unidadRefreshTemarioUnidadMount();
+        }
         await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoConApoyoVisual);
 
         const promptNotas = construirPromptNotasMaestro(
@@ -24907,14 +25380,20 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           nivel,
           gradoTexto,
           subtema,
-          tituloCreativoLimpioBase,
+          tituloCreativoLimpioBase || importedOwnTitle || formatearSubtema(subtema),
           claveFichaActual
         );
 
         actualizarSpinnerProceso(statusId, `Generando notas del maestro para <strong>${formatearSubtema(subtema)}</strong>...`);
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
-        const respuestaMaestro = await enviarPrompt([{ role: "user", text: promptNotas }]);
-        logVisual(`✅ Notas del maestro listas para ${subtema}`);
+        let respuestaMaestro = "";
+        try {
+          respuestaMaestro = await enviarPrompt([{ role: "user", text: promptNotas }]);
+          logVisual(`✅ Notas del maestro listas para ${subtema}`);
+        } catch (errorNotas) {
+          console.warn(`Notas del maestro en fallback local para ${categoria}/${subtema}:`, errorNotas);
+          logVisual(`⚠️ Notas del maestro generadas con fallback local para ${subtema}`);
+        }
 
         const htmlMaestro = (respuestaMaestro || "").replace(/```html|```/g, "").trim();
         const htmlMaestroLimpio = cleanHTML(htmlMaestro);
@@ -24925,7 +25404,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           subtema,
           tituloCreativo: tituloCreativoLimpioBase,
           grado: gradoTexto,
-          expectedActivityCount: cantidad,
+          expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad,
           rawHtml: htmlMaestroLimpio
         });
 
@@ -24942,8 +25421,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colMaestro = document.getElementById(colMaestroId);
         if (colMaestro) {
           colMaestro.innerHTML = `
-              ${soporteLecturaMaestroHTML}
-              ${bloqueRutaHTML}
+              ${importedUsesOwnHeading ? "" : soporteLecturaMaestroHTML}
+              ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
               <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
@@ -24952,8 +25431,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   ${habilidadSubcategoriaMaestro}
                   ${competenciaSubcategoriaMaestro}
               </div>
-              <h4>${tituloCreativoLimpioBase}</h4>
-              <h5 style="color:#666;font-weight:normal;">${T}</h5>
+              <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : tituloCreativoLimpioBase}</h4>
+              ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
               <div id="${colMaestroId}-contenido"></div>
             `;
           await renderContenidoEnTiempoReal(document.getElementById(`${colMaestroId}-contenido`), notasFinalesColMaestro);
@@ -24984,11 +25463,14 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             } else {
                 const detail = String(err?.message || err?.error?.message || err?.error || "").trim();
                 console.error(`Error al generar subtema ${categoria}/${subtema}:`, err);
-                document.getElementById(bloqueId).innerHTML = `
+                const bloqueError = document.getElementById(bloqueId);
+                if (bloqueError) {
+                  bloqueError.innerHTML = `
                   <p style="color:red;">❌ Error al generar contenido para "${formatearSubtema(subtema)}"</p>
                   ${detail ? `<pre style="white-space:pre-wrap; font-size:12px; background:#fff7ed; border:1px solid #fed7aa; padding:10px; border-radius:10px; color:#7c2d12;">${detail}</pre>` : ""}
                   <p style="font-size:12px; color:#6b7280;">Abre DevTools → Console/Network para ver el detalle.</p>
                 `;
+                }
                 categoriaConErrores = true;
                 finalizarSpinnerProceso(statusId, false, `❌ Error en ${formatearSubtema(subtema)}`);
             }
@@ -25468,21 +25950,39 @@ function enviarPromptStreaming(mensajes, onPartial) {
 
 // ✅ Función auxiliar para separar actividades normales y de fichas
 function extraerActividades(contenidoActividades) {
-  // 1️⃣ Capturar primero TODAS las fichas
-  const fichasMatch = [...contenidoActividades.matchAll(
-    /<div class="activity-fichas">([\s\S]*?)<\/div>/g
-  )].map(m => m[1].trim());
+  const source = String(contenidoActividades || "");
+  if (!source.trim()) {
+    return {
+      actividadesNormales: [],
+      actividadesFichas: []
+    };
+  }
 
-  // 2️⃣ Eliminar las fichas del contenido para evitar confusión
-  let contenidoSinFichas = contenidoActividades
-    // quitar fichas
-    .replace(/<div class="activity-fichas">[\s\S]*?<\/div>/g, "")
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+      const root = doc.body.firstElementChild || doc.body;
+      const actividadesFichas = Array.from(root.querySelectorAll(".activity-fichas"))
+        .map((node) => String(node.innerHTML || "").trim())
+        .filter(Boolean);
+      const actividadesNormales = Array.from(root.querySelectorAll(".activity"))
+        .filter((node) => !node.closest(".activity-fichas"))
+        .map((node) => String(node.innerHTML || "").trim())
+        .filter(Boolean);
 
+      return {
+        actividadesNormales,
+        actividadesFichas
+      };
+    } catch (_) {
+      // fallback below
+    }
+  }
 
-  // 3️⃣ Ahora capturar SOLO las actividades normales
-  const actividadesMatch = [...contenidoSinFichas.matchAll(
-    /<div class="activity">([\s\S]*?)<\/div>/g
-  )].map(m => m[1].trim());
+  const fichasMatch = [...source.matchAll(/<div class="activity-fichas">([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
+  const contenidoSinFichas = source.replace(/<div class="activity-fichas">[\s\S]*?<\/div>/g, "");
+  const actividadesMatch = [...contenidoSinFichas.matchAll(/<div class="activity">([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
 
   return {
     actividadesNormales: actividadesMatch,
@@ -25537,11 +26037,11 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   if (!source.trim() || typeof DOMParser === "undefined") return source;
 
   const MODALITY_BADGES = [
-    { regex: /\[IC\s*T\.\s*IND\]/i, label: "IC. T. IND", icon: "fa-solid fa-user", color: "#0f766e", bg: "#ccfbf1" },
-    { regex: /\[IC\s*T\.\s*PAR\]/i, label: "IC. T. PAR", icon: "fa-solid fa-user-group", color: "#1d4ed8", bg: "#dbeafe" },
-    { regex: /\[IC\s*T\.\s*EQUI\]/i, label: "IC. T. EQUI", icon: "fa-solid fa-people-group", color: "#7c3aed", bg: "#ede9fe" }
+    { regex: /\[IC\.?\s*T\.?\s*IND(?:IVIDUAL)?\]/i, label: "IC. T. IND", icon: "fa-solid fa-user", color: "#0f766e", bg: "#ccfbf1" },
+    { regex: /\[IC\.?\s*T\.?\s*PAR(?:ES)?\]/i, label: "IC. T. PAR", icon: "fa-solid fa-user-group", color: "#1d4ed8", bg: "#dbeafe" },
+    { regex: /\[IC\.?\s*T\.?\s*EQUI(?:PO)?\]/i, label: "IC. T. EQUI", icon: "fa-solid fa-people-group", color: "#7c3aed", bg: "#ede9fe" }
   ];
-  const ascChips = _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
+  const PLECA_BADGE_REGEX = /\[(\d+)\s+PLECA(?:S)?\]/i;
   const ICONS = [
     { key: "ficha",      regex: /\bficha\s+[p]?\d+\w*/i,        label: "IC. Fichas",    icon: "fa-solid fa-pen-nib",   color: "#2563eb", bg: "#dbeafe" },
     { key: "anexo",      regex: /\banexo\s+[p]?\d+\w*/i,         label: "IC. Anexo",     icon: "fa-solid fa-paperclip", color: "#d97706", bg: "#fef3c7" },
@@ -25557,8 +26057,34 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas"));
   if (!activities.length) return source;
 
+  const appendPlecaBadge = (node) => {
+    if (!(node instanceof Element)) return;
+    if (node.querySelector(".unidad-ic-pleca-badge")) return;
+    const inner = String(node.innerHTML || "");
+    const match = inner.match(PLECA_BADGE_REGEX);
+    if (!match) return;
+
+    node.innerHTML = inner
+      .replace(new RegExp(PLECA_BADGE_REGEX.source, "ig"), "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    const plecaChip = doc.createElement("span");
+    const plecasCount = Math.max(1, parseInt(match[1], 10) || 1);
+    const label = `${plecasCount} ${plecasCount === 1 ? "PLECA" : "PLECAS"}`;
+    plecaChip.className = "unidad-ic-pleca-badge";
+    plecaChip.title = label;
+    plecaChip.style.cssText = "display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#ecfccb;color:#4d7c0f;font-size:10px;font-weight:700;border:1px solid #a3e63566;white-space:nowrap;margin-left:8px;vertical-align:middle;";
+    plecaChip.innerHTML = `<i class="fa-solid fa-grip-lines" style="font-size:9px;"></i> ${label}`;
+    node.appendChild(plecaChip);
+  };
+
   activities.forEach((activity) => {
     const blockText = activity.textContent || "";
+    const explicitAscChips = _unidadExtractExplicitAscChips(activity.innerHTML || blockText);
+    const ascChips = explicitAscChips.length
+      ? explicitAscChips
+      : _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
     const detected = ICONS.filter(ic => ic.regex.test(blockText));
     const detectedModality = MODALITY_BADGES.find((badge) => badge.regex.test(blockText));
     if (!detected.length && !detectedModality && !ascChips.length) return;
@@ -25576,6 +26102,11 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
         .replace(/\s{2,}/g, " ")
         .trim();
     }
+
+    firstP.innerHTML = firstP.innerHTML
+      .replace(/\[(?:IC\.?|IC)\s*[^\]]+\]/gi, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
 
     const badgeContainer = doc.createElement("span");
     badgeContainer.className = "unidad-ic-resource-badges";
@@ -25610,6 +26141,11 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
     });
 
     firstP.appendChild(badgeContainer);
+
+    Array.from(activity.querySelectorAll("li, p")).forEach((node) => {
+      if (node.closest(".answer")) return;
+      appendPlecaBadge(node);
+    });
   });
 
   return root.innerHTML;
@@ -25715,28 +26251,24 @@ function _unidadNormalizeActivityLeadStrong(html = "") {
 
   activities.forEach((activity) => {
     const firstParagraph = activity.querySelector("p");
-    const leadStrong = firstParagraph?.querySelector("strong");
-    if (!firstParagraph || !leadStrong) return;
+    if (!firstParagraph) return;
 
-    const strongText = String(leadStrong.textContent || "").replace(/\s+/g, " ").trim();
-    if (!strongText) return;
+    const plainText = String(firstParagraph.textContent || "").replace(/\s+/g, " ").trim();
+    if (!plainText) return;
 
-    const splitMatch = strongText.match(/^([\s\S]*?\.)\s+([\s\S]+)$/);
+    const splitMatch = plainText.match(/^(\d+\.\s*)?([\s\S]*?\.)\s*([\s\S]*)$/);
     if (!splitMatch) return;
 
-    const [, boldPart, plainPart] = splitMatch;
-    leadStrong.textContent = boldPart.trim();
+    const [, numericPrefix = "", boldPart, restPart] = splitMatch;
+    const badgeContainer = firstParagraph.querySelector(".unidad-ic-resource-badges");
+    const badgeHtml = badgeContainer ? badgeContainer.outerHTML : "";
+    const restClean = String(restPart || "").replace(/\s+/g, " ").trim();
+    const prefixClean = String(numericPrefix || "").trim();
 
-    const trailingNodes = Array.from(firstParagraph.childNodes);
-    const strongIndex = trailingNodes.indexOf(leadStrong);
-    const afterStrong = strongIndex >= 0 ? trailingNodes.slice(strongIndex + 1) : [];
-    const trailingText = afterStrong.map((node) => node.textContent || "").join(" ").replace(/\s+/g, " ").trim();
-    const normalizedTail = [plainPart.trim(), trailingText].filter(Boolean).join(" ").trim();
-
-    afterStrong.forEach((node) => node.remove());
-    if (normalizedTail) {
-      firstParagraph.appendChild(doc.createTextNode(` ${normalizedTail}`));
-    }
+    firstParagraph.innerHTML = `
+      ${prefixClean ? `${_escapeHtmlUnidad(prefixClean)} ` : ""}<strong>${_escapeHtmlUnidad(boldPart.trim())}</strong>${restClean ? ` ${_escapeHtmlUnidad(restClean)}` : ""}
+      ${badgeHtml}
+    `.replace(/\s{2,}/g, " ").trim();
   });
 
   return doc.body.innerHTML.replace(/^<div>|<\/div>$/g, "");
@@ -26060,12 +26592,26 @@ function _unidadBuildTeacherNotesStructuredHtml({
       ? actividadesNormales.slice(0, parseInt(expectedActivityCount, 10))
       : actividadesNormales
   );
-  if (!cappedActivities.length) return String(rawHtml || "").trim();
+  if (!cappedActivities.length) {
+    return `
+      <div class="unidad-teacher-notes asc-teacher-layout">
+        <h3>Actividad General</h3>
+        <div class="unidad-teacher-general-item">
+          <p>No se detectó una actividad estructurada para convertir a notas del maestro. Revise el formato del contenido del alumno antes de regenerar.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const stripIcBadges = (text = "") => String(text || "")
+    .replace(/\[(?:IC\.?|IC)\s*[^\]]+\]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   const detectModalidad = (text = "") =>
-    /\[IC\s*T\.\s*IND\]/i.test(text) ? "Trabajo individual" :
-      /\[IC\s*T\.\s*PAR\]/i.test(text) ? "Trabajo en parejas" :
-        /\[IC\s*T\.\s*EQUI\]/i.test(text) ? "Trabajo en equipo" : "Sin modalidad";
+    /\[IC\.?\s*T\.?\s*IND\]/i.test(text) ? "Trabajo individual" :
+      /\[IC\.?\s*T\.?\s*PAR\]/i.test(text) ? "Trabajo en parejas" :
+        /\[IC\.?\s*T\.?\s*EQUI\]/i.test(text) ? "Trabajo en equipo" : "Sin modalidad";
 
   const detectRecursos = (text = "") => {
     const out = [];
@@ -26082,13 +26628,12 @@ function _unidadBuildTeacherNotesStructuredHtml({
 
   const extractLead = (activityHtml = "") => {
     if (typeof DOMParser === "undefined") {
-      return String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+      return stripIcBadges(String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
     }
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${String(activityHtml || "")}</div>`, "text/html");
     const firstParagraph = doc.querySelector("p");
-    const text = String(firstParagraph?.textContent || doc.body.textContent || "")
-      .replace(/\[IC\s*T\.\s*[A-Z]+\]/gi, "")
+    const text = stripIcBadges(String(firstParagraph?.textContent || doc.body.textContent || ""))
       .replace(/\b\d+\.\s*/g, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -26111,8 +26656,9 @@ function _unidadBuildTeacherNotesStructuredHtml({
   ];
   const actividadesHtml = cappedActivities.map((activityHtml, index) => {
     const lead = extractLead(activityHtml);
-    const plain = String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    const modalidad = detectModalidad(plain);
+    const plain = stripIcBadges(String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+    const plainRaw = String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const modalidad = detectModalidad(plainRaw);
     const recursos = detectRecursos(plain);
     const verboDocente = verbosDocentes[index % verbosDocentes.length];
     const recursoText = recursos.length

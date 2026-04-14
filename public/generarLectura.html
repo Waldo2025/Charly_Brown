@@ -4113,7 +4113,7 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=2026-1.0.1.15"></script>
+  <script type="module" src="generarUnidad.js?v=2026-1.0.1.16"></script>
   <script type="module" src="generarUnidad2.js?v=2026-1.0.0.72"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>
@@ -4136,7 +4136,7 @@
               <div class="space-y-4">
                   <div class="flex items-center justify-between">
                       <label class="block text-sm font-bold text-slate-700">Contenido a procesar</label>
-                      <span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500">Gemini analizará y dividirá este texto</span>
+                      <span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500">Elige la subcategoría y usa el texto pegado como base</span>
                   </div>
                   <div id="txtIngestaIA" 
                        contenteditable="true"
@@ -4147,33 +4147,33 @@
               
               <div id="loadingIngestaIA" class="hidden flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <i class="fas fa-circle-notch fa-spin text-3xl text-purple-600 mb-3"></i>
-                  <span class="font-bold text-slate-700">Analizando estructura pedagógica...</span>
-                  <p class="text-xs text-slate-500 mt-1">Detectando subcategorías y vinculando con la secuencia</p>
+                  <span class="font-bold text-slate-700">Preparando estructura pedagógica...</span>
+                  <p class="text-xs text-slate-500 mt-1">Limpiando y organizando el texto para reutilizarlo en la generación</p>
               </div>
 
               <div id="resultadoAnalisisIA" class="hidden space-y-4">
                   <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
                       <i class="fas fa-check-circle text-green-500"></i>
-                      <h4 class="font-bold text-slate-800 text-sm">Subcategorías Detectadas:</h4>
+                      <h4 class="font-bold text-slate-800 text-sm">Subcategorías disponibles:</h4>
                   </div>
                   <div id="listaSubcategoriasIA" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2">
                       <!-- Aquí se insertarán las tarjetas de subcategorías -->
                   </div>
-                  <p class="text-[10px] text-slate-500 italic">Desmarca las que no desees generar en este momento.</p>
+                  <p class="text-[10px] text-slate-500 italic">Selecciona una o varias subcategorías para transformar el texto pegado en esas secciones.</p>
               </div>
           </div>
           <div class="modal-lecturas-footer" style="padding: 20px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
               <div class="flex items-center gap-2 mr-auto text-[11px] text-slate-500">
                   <i class="fas fa-info-circle"></i>
-                  <span>Se usará el modelo Gemini 2.5 Flash</span>
+                  <span>El análisis del texto es opcional; la selección de subcategorías ya está disponible</span>
               </div>
               <button id="btnAnalizarIngestaIA" class="btn-principal" 
                       style="background: #1e293b; color: white; border: none; padding: 10px 22px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; items-center; gap: 8px; transition: all 0.2s;">
-                  <i class="fas fa-magic"></i> Analizar Contenido
+                  <i class="fas fa-magic"></i> Preparar texto
               </button>
               <button id="btnContinuarIngestaIA" class="btn-principal hidden"
                       style="background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); color: white; border: none; padding: 10px 22px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; items-center; gap: 8px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.2);">
-                  <i class="fas fa-rocket"></i> Continuar a Generación
+                  <i class="fas fa-rocket"></i> Iniciar proceso
               </button>
               <button id="btnCerrarIngestaIA" class="btn-secundario"
                       style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
@@ -4183,6 +4183,6 @@
       </div>
   </div>
 
-  <script type="module" src="generarLectura-iaIngesta.js?v=2026-1.0.1.16"></script>
+  <script type="module" src="generarLectura-iaIngesta.js?v=2026-1.0.1.17"></script>
 </body>
 </html>
