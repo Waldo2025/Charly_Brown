@@ -21279,8 +21279,6 @@ async function verificarSecuencia() {
         tdRelacion.appendChild(chkRelacion);
 
         const tdInterdisc = document.createElement("td");
-        interdiscWrap.appendChild(selectInterdisciplinariedad);
-        interdiscWrap.appendChild(interdiscTrigger);
         tdInterdisc.appendChild(interdiscWrap);
 
         const tdRecort = document.createElement("td");
