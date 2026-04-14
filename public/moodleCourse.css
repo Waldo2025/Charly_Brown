@@ -165,6 +165,40 @@ body {
   padding-bottom: 0.15rem;
 }
 
+/* Placeholder para div contenteditable */
+[contenteditable="true"]:empty:before {
+  content: attr(placeholder);
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+  pointer-events: none;
+  display: block;
+  font-style: italic;
+}
+
+#txtModalInstruccionesGemini {
+    outline: none;
+    line-height: 1.6;
+    background-color: hsl(var(--background));
+    transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+#txtModalInstruccionesGemini:focus {
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.1);
+}
+
+#txtModalInstruccionesGemini figure.cb-editor-image-wrap {
+    margin: 1.5rem 0;
+    text-align: center;
+}
+
+#txtModalInstruccionesGemini figure.cb-editor-image-wrap img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
 
 /* Contenedor principal que se desplaza */
 .flex.h-screen.overflow-hidden {
@@ -5842,3 +5876,76 @@ body[data-page="moodlecourse.html"] :is(
         align-items: stretch;
     }
 }
+
+/* === ESTILOS PARA NOTAS DEL MAESTRO (Rich Aesthetics) === */
+.cb-notes-header {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.85rem 1.25rem;
+    border-radius: var(--radius);
+    margin-top: 2rem;
+    margin-bottom: 0.85rem;
+    font-weight: 600;
+    font-size: 1.15rem;
+    letter-spacing: -0.01em;
+    transition: all var(--transition-base);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.cb-notes-section-preview {
+    background-color: #f0f9ff;
+    color: #0369a1;
+    border-left: 5px solid #0ea5e9;
+}
+
+.cb-notes-section-objectives {
+    background-color: #f0fdf4;
+    color: #15803d;
+    border-left: 5px solid #22c55e;
+}
+
+.cb-notes-section-opening {
+    background-color: #fffaf0;
+    color: #b45309;
+    border-left: 5px solid #f59e0b;
+}
+
+.cb-notes-section-main {
+    background-color: #fef2f2;
+    color: #b91c1c;
+    border-left: 5px solid #ef4444;
+}
+
+.cb-notes-section-extension {
+    background-color: #f5f3ff;
+    color: #7c3aed;
+    border-left: 5px solid #8b5cf6;
+}
+
+.cb-notes-section-support {
+    background-color: #fff1f2;
+    color: #be123c;
+    border-left: 5px solid #f43f5e;
+}
+
+.cb-notes-section-closing {
+    background-color: #f8fafc;
+    color: #334155;
+    border-left: 5px solid #64748b;
+}
+
+.cb-notes-paragraph {
+    padding: 0.5rem 1.25rem;
+    line-height: 1.7;
+    color: hsl(var(--foreground));
+    font-size: 0.95rem;
+}
+
+.dark .cb-notes-section-preview { background-color: rgba(3, 105, 161, 0.15); color: #7dd3fc; }
+.dark .cb-notes-section-objectives { background-color: rgba(21, 128, 61, 0.15); color: #86efac; }
+.dark .cb-notes-section-opening { background-color: rgba(180, 83, 9, 0.15); color: #fcd34d; }
+.dark .cb-notes-section-main { background-color: rgba(185, 28, 28, 0.15); color: #fca5a5; }
+.dark .cb-notes-section-extension { background-color: rgba(124, 58, 237, 0.15); color: #ddd6fe; }
+.dark .cb-notes-section-support { background-color: rgba(190, 18, 60, 0.15); color: #fda4af; }
+.dark .cb-notes-section-closing { background-color: rgba(51, 65, 85, 0.15); color: #cbd5e1; }

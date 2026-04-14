@@ -1,0 +1,37 @@
+--- public/generarUnidad.js
++++ public/generarUnidad.js
+@@ -22926,11 +22926,11 @@
+   const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
+   if (!chips.length) return "";
+-  const html = chips.map((chip) => `
+-    <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(44,90,160,0.22);background:#f5f8ff;color:#426b35;font-size:12px;font-weight:800;letter-spacing:.02em;">
++  return chips.map((chip) => `
++    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid rgba(44,90,160,0.22);background:#f5f8ff;color:#426b35;font-size:11px;font-weight:700;letter-spacing:.02em;">
+       [${_escapeHtmlUnidad(chip)}]
+     </span>
+   `).join(" ");
+-  return `<div class="unidad-asc-competencias" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px 0;">${html}</div>`;
+ }
+ 
+@@ -23008,11 +23008,9 @@
+   const chips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
+   const theme = _unidadAscThemePorChip(chips[0] || "");
+   return `
+-    <div class="unidad-competencia-primaria" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px 0;">
+-      <span style="display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.bg};color:${theme.text};font-size:12px;font-weight:800;letter-spacing:.01em;">
++      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.bg};color:${theme.text};font-size:11px;font-weight:700;letter-spacing:.01em;">
+         ${_escapeHtmlUnidad(etiqueta)} - Competencia: ${_escapeHtmlUnidad(competencia)}
+       </span>
+-    </div>
+   `;
+ }
+@@ -23053,9 +23050,7 @@
+   const eje = _unidadEjeArticuladorPorSubtema(subtema, categoria, options);
+   if (!eje?.nombre || !eje?.sello) return "";
+   return `
+-    <p class="unidad-eje-articulador" style="margin:0 0 12px 0; font-size:13px; color:#355e3b;">
+-      <strong>Eje articulador:</strong> ${_escapeHtmlUnidad(eje.nombre)} [SELLO EJE ARTICULADOR ${_escapeHtmlUnidad(eje.sello)}]
+-    </p>
++    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bbf7d0;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Eje articulador: ${_escapeHtmlUnidad(eje.nombre)} [${_escapeHtmlUnidad(eje.sello)}]</span>
+   `;
+ }

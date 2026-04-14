@@ -24,7 +24,7 @@ const storage = getStorage(app);
 // ⚙️ Ejecutar el generador de imágenes
 setupImageGenerator(storage);
 
-export { auth, storage }; // ahora sí puedes exportar ambos
+export { auth, storage, db }; // ahora sí puedes exportar ambos
 
 
 let currentUserId = null;

@@ -7664,6 +7664,12 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         })
     );
 
+    // 🔥 VINCULACIÓN CRUCIAL: Mantener la lista de objetos de módulo en el subtema para sincronización
+    subtema.modulos = modulosCargados.map(m => m.mod).filter(Boolean);
+    if (window.subtemaActivo && window.subtemaActivo.id === subtema.id) {
+        window.subtemaActivo.modulos = subtema.modulos;
+    }
+
     let html = "";
 
     for (const { modId, mod } of modulosCargados) {
@@ -9329,8 +9335,37 @@ function convertirMarkdownBasicoAHtml(markdown) {
             cerrarCita();
             cerrarTabla();
             const nivel = encabezado[1].length;
-            const contenido = formatearInlineMarkdown(encabezado[2].trim());
-            html.push(`<h${nivel} class="font-semibold text-slate-900 mt-3 mb-2">${contenido}</h${nivel}>`);
+            const tituloRaw = encabezado[2].trim();
+            const contenido = formatearInlineMarkdown(tituloRaw);
+            
+            let extraClass = "";
+            let icon = "";
+            
+            const lower = tituloRaw.toLowerCase();
+            if (lower.includes("conocimientos previos") || lower.includes("previous knowledge")) {
+                extraClass = "cb-notes-section-preview";
+                icon = '<i class="fas fa-brain mr-2"></i>';
+            } else if (lower.includes("objetivos") || lower.includes("objectives")) {
+                extraClass = "cb-notes-section-objectives";
+                icon = '<i class="fas fa-bullseye mr-2"></i>';
+            } else if (lower.includes("apertura") || lower.includes("opening")) {
+                extraClass = "cb-notes-section-opening";
+                icon = '<i class="fas fa-door-open mr-2"></i>';
+            } else if (lower.includes("durante el ") || lower.includes("while using the")) {
+                extraClass = "cb-notes-section-main";
+                icon = '<i class="fas fa-chalkboard-teacher mr-2"></i>';
+            } else if (lower.includes("actividad de ampliación") || lower.includes("extension activity")) {
+                extraClass = "cb-notes-section-extension";
+                icon = '<i class="fas fa-rocket mr-2"></i>';
+            } else if (lower.includes("actividad de refuerzo") || lower.includes("support activity")) {
+                extraClass = "cb-notes-section-support";
+                icon = '<i class="fas fa-life-ring mr-2"></i>';
+            } else if (lower.includes("cierre") || lower.includes("closing")) {
+                extraClass = "cb-notes-section-closing";
+                icon = '<i class="fas fa-flag-checkered mr-2"></i>';
+            }
+            
+            html.push(`<h${nivel} class="cb-notes-header ${extraClass}">${icon}${contenido}</h${nivel}>`);
             continue;
         }
 
@@ -9962,7 +9997,11 @@ export function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
         let updated = false;
         items.forEach((item) => {
             if (!item || typeof item !== "object") return;
-            if (String(item.id || "").trim() === moduloIdSafe) {
+            const itemId = String(item.id || "").trim();
+            const itemFullId = construirDocIdModulo(itemId, cursoIdSafe);
+            
+            // Comparar tanto contra ID corto como largo para mayor robustez
+            if (itemId === moduloIdSafe || itemFullId === moduloIdSafe || itemId === moduloIdSafe.split('_').pop()) {
                 Object.assign(item, payload);
                 updated = true;
             }
@@ -13822,6 +13861,32 @@ function inicializarEventosModalInstruccionesGemini() {
         window.__moduloEditandoInstruccionesCursoId = null;
         modal.classList.add("hidden");
         modal.classList.remove("flex");
+    });
+
+    // 🔥 SINCRONIZACIÓN EN TIEMPO REAL CON ESTADO LOCAL
+    const sincronizarCamposGeminiLocal = () => {
+        const editor = obtenerEditorGemini();
+        if (!editor) return;
+        const moduloId = window.__moduloEditandoInstruccionesId;
+        const cursoIdModulo = String(window.__moduloEditandoInstruccionesCursoId || curso?.id || "").trim() || null;
+        if (!moduloId) return;
+
+        sincronizarModuloLocal(moduloId, cursoIdModulo, {
+            instrucciones: editor.innerHTML,
+            incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
+            generarGrafico: checkGenerarGrafico?.checked === true,
+            ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
+        });
+    };
+
+    const editor = obtenerEditorGemini();
+    if (editor) {
+        editor.addEventListener("input", sincronizarCamposGeminiLocal);
+        editor.addEventListener("keyup", sincronizarCamposGeminiLocal);
+        editor.addEventListener("blur", sincronizarCamposGeminiLocal);
+    }
+    [checkIncluirOriginal, checkGenerarGrafico, checkIgnorarContexto].forEach(chk => {
+        if (chk) chk.addEventListener("change", sincronizarCamposGeminiLocal);
     });
 
     btnGuardar.addEventListener("click", async () => {
