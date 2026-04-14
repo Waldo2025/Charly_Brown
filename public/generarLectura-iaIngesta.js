@@ -463,6 +463,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 window.mostrarNotificacion(`🚀 Preparando generación desde texto para: ${categoria}`, 'success');
             }
             setTimeout(() => {
+                btnGenerarCategoria.dataset.isIngestaIA = "true";
                 btnGenerarCategoria.click();
             }, 600 + (index * 500));
         });

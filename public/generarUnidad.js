@@ -20960,6 +20960,11 @@ function generarCategoriaHandler(event) {
       const originalIcon = btn.innerHTML;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
+      // ✅ Pasar el flag de ingesta si el click viene del flujo IA
+      const isIngestaIA = btn.dataset.isIngestaIA === "true";
+      // Limpiar el flag para el siguiente click
+      delete btn.dataset.isIngestaIA;
+
       const stopBtn = (cat === "Proyectos") ? document.getElementById("btn-detener-Proyectos") : null;
       if (stopBtn) {
         window.cancelarProyectos = false;
@@ -20967,7 +20972,7 @@ function generarCategoriaHandler(event) {
         stopBtn.disabled = false;
       }
 
-      return generarSeccionCategoria(cat)
+      return generarSeccionCategoria(cat, { isIngestaIA })
       .then(() => {
         btn.innerHTML = '<i class="fas fa-check"></i>';
         setTimeout(() => {
@@ -21779,6 +21784,39 @@ function _unidadImportedTextStorageKey(categoria = "", subtema = "") {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
   return `unidad_ingesta_texto_${normalizar(categoria)}__${normalizar(subtema)}`;
+}
+
+function _unidadLimpiarTextoImportadoDeSubtema(categoria = "", subtema = "") {
+  try {
+    const key = _unidadImportedTextStorageKey(categoria, subtema);
+    localStorage.removeItem(key);
+    if (window.__unidadTextoImportadoPorSubtema) {
+      delete window.__unidadTextoImportadoPorSubtema[key];
+    }
+  } catch (_) {}
+}
+
+function _unidadLimpiarTextoImportadoDeCategoria(categoria = "") {
+  try {
+    // Buscar todos los subtemas de esta categoría y limpiarlos
+    Object.keys(categoriaPorSubtema).forEach(subtema => {
+      if (categoriaPorSubtema[subtema] === categoria) {
+        _unidadLimpiarTextoImportadoDeSubtema(categoria, subtema);
+      }
+    });
+
+    // Limpieza agresiva por prefijo (por si acaso)
+    const normalizar = (valor) => String(valor || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const prefijo = `unidad_ingesta_texto_${normalizar(categoria)}`;
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefijo)) {
+        localStorage.removeItem(key);
+        i--; // Ajustar índice tras eliminar
+      }
+    }
+  } catch (_) {}
 }
 
 function _unidadGetImportedTextSourceForSubtema(categoria = "", subtema = "") {
@@ -23109,10 +23147,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   };
 
   function generarHabilidad() {
-    const proceso = Object.keys(habilidades.procesos)[Math.floor(Math.random() * 5)];
-    const producto = Object.keys(habilidades.productos)[Math.floor(Math.random() * 6)];
-    const contenido = Object.keys(habilidades.contenidos)[Math.floor(Math.random() * 3)];
-    return `${proceso}${producto}${contenido}`;
+    return _unidadHabilidadCognitivaPorSubtema(subtemaClave, categoria, { lectura: relacionadaConLectura });
   }
 
   function generarEjemploHabilidad(clave) {
@@ -23643,10 +23678,10 @@ function _unidadHabilidadCognitivaPorSubtema(subtema = "", categoria = "", { lec
     Habilidades: "DCS",
     ComprensionLectora: "ERM",
     Naturales: "CCF",
-    ConocimientoDelMedio: "CRI",
-    MiLocalidad: "CRI",
+    ConocimientoDelMedio: "CRM",
+    MiLocalidad: "CRM",
     Historia: "ERM",
-    Geografia: "CRI",
+    Geografia: "CRM",
     CivicaEtica: "ERS",
     Socioemocional: "DCS",
     Matematicas: "NCM"
@@ -23654,7 +23689,7 @@ function _unidadHabilidadCognitivaPorSubtema(subtema = "", categoria = "", { lec
   if (mapa[normalized]) return mapa[normalized];
   const categoriaNorm = String(categoria || "").trim();
   if (categoriaNorm === "Lenguaje y comunicación") return "ERM";
-  if (categoriaNorm === "Ciencias sociales") return "CRI";
+  if (categoriaNorm === "Ciencias sociales") return "CRM";
   if (categoriaNorm === "Ciencias experimentales") return "CCF";
   if (categoriaNorm === "Matemáticas") return "NCM";
   return "ERM";
@@ -23665,7 +23700,7 @@ function _unidadRenderHabilidadCognitivaHTML(subtema = "", categoria = "", optio
   if (!clave) return "";
   return `
       <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;letter-spacing:.01em;">
-        Habilidad cognitiva asociada: ${_escapeHtmlUnidad(clave)}
+        Habilidad Cognitiva Asociada: ${_escapeHtmlUnidad(clave)}
       </span>
   `;
 }
@@ -24115,10 +24150,11 @@ async function generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo) 
     const actividadHTML = actividadesFichas[idx];
     const textoPlano = actividadHTML.replace(/<[^>]*>/g, "").trim();
 
-    const modalidad = textoPlano.includes("[IC T. IND]") ? "Trabajo individual"
-      : textoPlano.includes("[IC T. PAR]") ? "Trabajo en parejas"
-        : textoPlano.includes("[IC T. EQUI]") ? "Trabajo en equipo"
-          : "Sin modalidad definida";
+    const t = textoPlano.toUpperCase();
+    const modalidad = (t.includes("T. IND") || t.includes("INDIVIDUAL")) ? "individual"
+      : (t.includes("T. PAR") || t.includes("PAREJAS")) ? "en parejas"
+        : (t.includes("T. EQUI") || t.includes("EQUIPO")) ? "en equipo"
+          : "individual";
 
     const promptGemini = `
 Eres experto en didáctica. Analiza la siguiente ficha de refuerzo para modalidad: ${modalidad}.
@@ -24166,7 +24202,13 @@ function debeRelacionarConLectura(subtema) {
 
 
 // 🟢 CORRECCIÓN: Modificar la función generarSeccionCategoria
-async function generarSeccionCategoria(categoria) {
+async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) {
+  // ✅ Si NO es un flujo de ingesta IA controlado, limpiar cualquier residuo de texto importado previo
+  if (!isIngestaIA) {
+    if (typeof _unidadLimpiarTextoImportadoDeCategoria === "function") {
+      _unidadLimpiarTextoImportadoDeCategoria(categoria);
+    }
+  }
   let categoriaConErrores = false;
   const effectiveSecuenciaCategoria = _unidadBuildEffectiveSecuenciaFlatForCategoria(categoria);
 
@@ -25110,12 +25152,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const subcategoriaEditorialAlumno = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
         const subcategoriaEditorialMaestro = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
         const campoFormativo = _unidadCampoFormativoDeCategoria(categoria);
-        const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
-        const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
-        const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria);
-        const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria);
-        const habilidadSubcategoriaAlumno = _unidadRenderHabilidadCognitivaHTML(subtema, categoria);
-        const habilidadSubcategoriaMaestro = _unidadRenderHabilidadCognitivaHTML(subtema, categoria);
+        const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema), lectura: relacionadaFinal });
+        const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema), lectura: relacionadaFinal });
+        const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria, { lectura: relacionadaFinal });
+        const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria, { lectura: relacionadaFinal });
+        const habilidadSubcategoriaAlumno = _unidadRenderHabilidadCognitivaHTML(subtema, categoria, { lectura: relacionadaFinal });
+        const habilidadSubcategoriaMaestro = _unidadRenderHabilidadCognitivaHTML(subtema, categoria, { lectura: relacionadaFinal });
 
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
@@ -26604,14 +26646,19 @@ function _unidadBuildTeacherNotesStructuredHtml({
   }
 
   const stripIcBadges = (text = "") => String(text || "")
-    .replace(/\[(?:IC\.?|IC)\s*[^\]]+\]/gi, " ")
+    .replace(/\[\s*IC\.?\s*[^\]]+\]/gi, " ")
+    .replace(/\bIC\.?\s*(?:T\.)?\s*[A-ZÁÉÍÓÚÑ/]+(?:\s+[A-ZÁÉÍÓÚÑ/]+)*/gi, " ")
+    .replace(/\bIC\.?\s*(?:Recortable|Ficha|Anexo|Video|Oral)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  const detectModalidad = (text = "") =>
-    /\[IC\.?\s*T\.?\s*IND\]/i.test(text) ? "Trabajo individual" :
-      /\[IC\.?\s*T\.?\s*PAR\]/i.test(text) ? "Trabajo en parejas" :
-        /\[IC\.?\s*T\.?\s*EQUI\]/i.test(text) ? "Trabajo en equipo" : "Sin modalidad";
+  const detectModalidad = (text = "") => {
+    const t = String(text || "").toUpperCase();
+    if (t.includes("T. IND") || t.includes("INDIVIDUAL")) return "individual";
+    if (t.includes("T. PAR") || t.includes("PAREJAS")) return "en pares";
+    if (t.includes("T. EQUI") || t.includes("EQUIPO")) return "en equipo";
+    return "individual";
+  };
 
   const detectRecursos = (text = "") => {
     const out = [];

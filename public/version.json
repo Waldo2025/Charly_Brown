@@ -1,22 +1,15 @@
 {
-  "version": "2026-1.0.1.15",
+  "version": "2026-1.0.1.16",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
-    "Nuevo: Íconos de recursos (IC. Fichas, IC. Anexo, IC. Recortable, IC. Video) en cada instrucción principal del libro del alumno.",
-    "Mejora: Notas del maestro ahora agrupan Actividades Generales, Actividad de Ampliación y Actividad de Refuerzo en ese orden.",
-    "Mejora: La Ampliación y el Refuerzo son actividades NUEVAS creadas por la IA, no reformulaciones del libro del alumno.",
-    "Fix: Tabla de contextualización pedagógica ahora se oculta junto con la Ruta Sugerida al presionar el botón Ocultar.",
-    "Fix: Eliminado el título de categoría duplicado en las notas del maestro.",
-    "Mejora: Notas de lectura del maestro (PISA, ejercicios sacádicos, sinónimos, dictado) aparecen al inicio absoluto de la columna del maestro.",
-    "Fix: TypeError q.replace is not a function al generar preguntas de lectura resuelto.",
-    "Fix: moodleCourse ahora refleja de inmediato el resultado nuevo al generar módulos con IA, incluido Temario.",
-    "Fix: Notas del maestro ya usa la estructura editorial fija también cuando se genera como módulo.",
-    "Fix: Títulos automáticos para fichas, anexos, recortables y guiones de video cuando la IA los omite.",
-    "Nuevo: Generación de lecturas por IA vía Prompt si no hay selección previa.",
-    "Mejora: Integración de lecturas generadas por IA como contexto global de la unidad."
+    "Mejora: Sincronización exacta de etiquetas de 'Habilidad cognitiva' entre el inicio y el bloque detallado.",
+    "Fix: Corrección del código de habilidad 'CRI' a 'CRM' para evitar valores indefinidos.",
+    "Mejora: Limpieza de caché automática de 'Importar texto' al generar secciones manualmente.",
+    "Fix: Eliminación de etiquetas de iconografía (IC.) en el texto de las Notas del Maestro.",
+    "Mejora: Modalidad de actividades (individual, pares, equipo) ahora aparece en lenguaje natural en las notas."
   ]
 }
 
