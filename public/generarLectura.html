@@ -24,7 +24,7 @@
   <script src="vendor/datatables/jquery.dataTables.min.js"></script>
 
 
-  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.12">
+  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.15">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
   <link rel="stylesheet" href="chatbot.css">
@@ -3120,27 +3120,43 @@
                   <i class="fa-solid fa-rotate-right"></i><span class="unidad-btn-text"> Reiniciar</span>
                 </button>
               </div>
-              <div class="space-y-1 unidad-editor-field--full">
+              <div class="space-y-1">
                 <label for="unidadTemaTexto" class="unidad-label">Lectura principal</label>
-                <div class="input-con-boton unidad-input-group">
-                  <select id="unidadTemaTexto" class="unidad-input">
-                    <option value="">Selecciona una lectura</option>
-                  </select>
-                  <select id="unidadTema" class="unidad-input" style="display:none;">
-                    <option value="">Usa el botón "Buscar" para seleccionar</option>
-                  </select>
-                  <button id="btnAbrirModalLectura" type="button" class="unidad-btn unidad-btn-secondary unidad-icon-btn"
-                    title="Buscar lectura" aria-label="Buscar lectura">
-                    <i class="fa-solid fa-magnifying-glass"></i><span class="unidad-btn-text"> Buscar</span>
-                  </button>
-                </div>
+                <select id="unidadTemaTexto" class="unidad-input">
+                  <option value="">Selecciona una lectura</option>
+                </select>
+                <select id="unidadTema" class="unidad-input" style="display:none;">
+                  <option value="">Usa el botón "Buscar" para seleccionar</option>
+                </select>
               </div>
 
-              <div class="space-y-1 unidad-editor-field--full">
+              <div class="space-y-1">
                 <label for="unidadTemaASC" class="unidad-label">Lectura alternativa</label>
                 <select id="unidadTemaASC" class="unidad-input">
                   <option value="">Lectura ASC (opcional)</option>
                 </select>
+              </div>
+
+              <div class="space-y-1">
+                <label for="unidadSerie" class="unidad-label">Serie</label>
+                <select id="unidadSerie" class="unidad-input">
+                  <option value="">Selecciona serie</option>
+                  <option value="Primaria en Forma 10rev" selected>Primaria en Forma 10rev</option>
+                  <option value="__otra_serie__">Otro</option>
+                </select>
+              </div>
+
+              <div class="space-y-1 unidad-editor-search-action">
+                <label class="unidad-label" for="btnAbrirModalLectura">Buscar</label>
+                <button id="btnAbrirModalLectura" type="button" class="unidad-btn unidad-btn-secondary unidad-icon-btn unidad-editor-search-btn"
+                  title="Buscar lectura" aria-label="Buscar lectura">
+                  <i class="fa-solid fa-magnifying-glass"></i><span class="unidad-btn-text"> Buscar</span>
+                </button>
+              </div>
+
+              <div class="space-y-1 unidad-editor-field--full" id="unidadSerieOtraWrap" style="display:none;">
+                <label for="unidadSerieOtra" class="unidad-label">Otra serie</label>
+                <input id="unidadSerieOtra" type="text" class="unidad-input" placeholder="Escribe otra serie">
               </div>
 
               <div class="unidad-editor-field--full" id="cbLecturaFusionToggleHost" style="display:none;"></div>
@@ -4093,7 +4109,7 @@
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>
   <script type="module" src="secuenciayalcance.js"></script>
-  <script type="module" src="generarUnidad.js?v=2026-1.0.1.12"></script>
+  <script type="module" src="generarUnidad.js?v=2026-1.0.1.15"></script>
   <script type="module" src="generarUnidad2.js?v=2026-1.0.0.72"></script>
   <script type="module" src="generarUnidadContinuacion.js"></script>
   <script type="module" src="generarUnidadSecundaria.js"></script>
