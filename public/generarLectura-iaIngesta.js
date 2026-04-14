@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCerrarLower?.addEventListener("click", closeMod);
 
     function resetUI() {
-        txtIngesta.value = "";
+        txtIngesta.innerHTML = "";
         resultado.classList.add("hidden");
         btnContinuar.classList.add("hidden");
         loading.classList.add("hidden");
@@ -55,8 +55,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     btnAnalizar?.addEventListener("click", async () => {
-        const text = txtIngesta.value.trim();
-        if (!text) {
+        const text = txtIngesta.innerHTML.trim();
+        if (!text || text === "<br>") {
             alert("Por favor pega algún texto para analizar.");
             return;
         }

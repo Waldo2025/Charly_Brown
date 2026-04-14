@@ -21227,139 +21227,17 @@ async function verificarSecuencia() {
           }
         });
 
+        // Se eliminó la lógica compleja que creaba ~60 modales 'interdiscMenu' anexados a document.body
+        // y ~180 event listeners globales de 'resize', 'scroll', 'click' para cada carga de la tabla,
+        // ya que esto provocaba una fuga de memoria exponencial que bloqueaba o enlentecía la UI (lag).
+        // 14/04/2026 - Ahora se utiliza un simple select nativo con estilo mínimo.
+        selectInterdisciplinariedad.style.width = "100%";
+        selectInterdisciplinariedad.style.padding = "4px 8px";
+        selectInterdisciplinariedad.style.borderRadius = "6px";
+        selectInterdisciplinariedad.style.border = "1px solid #cbd5e1";
+        
         const interdiscWrap = document.createElement("div");
-        interdiscWrap.className = "interdisc-dropdown";
-        const interdiscTrigger = document.createElement("button");
-        interdiscTrigger.type = "button";
-        interdiscTrigger.className = "interdisc-trigger";
-        interdiscTrigger.title = "Interdisciplinariedad";
-        interdiscTrigger.setAttribute("aria-haspopup", "listbox");
-        interdiscTrigger.setAttribute("aria-expanded", "false");
-        interdiscTrigger.innerHTML = `
-          <span class="interdisc-trigger-label">Ninguna</span>
-          <i class="fa-solid fa-caret-down interdisc-trigger-icon" aria-hidden="true"></i>
-        `;
-
-        const interdiscMenu = document.createElement("div");
-        interdiscMenu.className = "interdisc-menu";
-        interdiscMenu.setAttribute("role", "listbox");
-
-        Array.from(selectInterdisciplinariedad.options).forEach((opt) => {
-          const item = document.createElement("button");
-          item.type = "button";
-          item.className = "interdisc-option";
-          item.textContent = opt.textContent || "Ninguna";
-          item.dataset.value = opt.value || "";
-          item.setAttribute("role", "option");
-          interdiscMenu.appendChild(item);
-        });
-        document.body.appendChild(interdiscMenu);
-
-        const aplicarInterdisc = (value = "") => {
-          selectInterdisciplinariedad.value = value;
-          const selected = selectInterdisciplinariedad.options[selectInterdisciplinariedad.selectedIndex];
-          const label = (selected?.textContent || "Ninguna").trim();
-          const labelNode = interdiscTrigger.querySelector(".interdisc-trigger-label");
-          if (labelNode) labelNode.textContent = label;
-          interdiscTrigger.classList.toggle("has-value", !!value);
-          interdiscMenu.querySelectorAll(".interdisc-option").forEach((opt) => {
-            const active = (opt.dataset.value || "") === value;
-            opt.classList.toggle("is-active", active);
-            opt.setAttribute("aria-selected", active ? "true" : "false");
-          });
-          selectInterdisciplinariedad.dispatchEvent(new Event("change", { bubbles: true }));
-        };
-
-        const posicionarInterdiscMenu = (anchor = null) => {
-          const rect = interdiscTrigger.getBoundingClientRect();
-          const menuWidth = Math.min(220, Math.max(150, rect.width));
-          interdiscMenu.style.minWidth = `${menuWidth}px`;
-          interdiscMenu.style.maxWidth = `${menuWidth}px`;
-          const prevDisplay = interdiscMenu.style.display;
-          const prevVisibility = interdiscMenu.style.visibility;
-          interdiscMenu.style.visibility = "hidden";
-          interdiscMenu.style.display = "block";
-          const menuHeight = interdiscMenu.offsetHeight || 220;
-          interdiscMenu.style.display = prevDisplay || "";
-          interdiscMenu.style.visibility = prevVisibility || "";
-
-          const leftIdeal = rect.left + ((rect.width - menuWidth) / 2);
-          const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, leftIdeal));
-          interdiscMenu.style.left = `${left}px`;
-
-          const gap = 2;
-          const espacioAbajo = window.innerHeight - rect.bottom;
-          const abrirArriba = espacioAbajo < (menuHeight + 10) && rect.top > (menuHeight + 10);
-          const top = abrirArriba
-            ? Math.max(8, rect.top - menuHeight - gap)
-            : Math.min(window.innerHeight - menuHeight - 8, rect.bottom + gap);
-          interdiscMenu.style.top = `${Math.max(8, top)}px`;
-        };
-
-        let interdiscCloseTimer = null;
-        const abrirInterdisc = (ev = null) => {
-          if (interdiscCloseTimer) {
-            clearTimeout(interdiscCloseTimer);
-            interdiscCloseTimer = null;
-          }
-          document.querySelectorAll(".interdisc-dropdown.is-open").forEach((node) => {
-            if (node !== interdiscWrap) node.classList.remove("is-open");
-          });
-          document.querySelectorAll(".interdisc-menu.is-open").forEach((node) => {
-            if (node !== interdiscMenu) node.classList.remove("is-open");
-          });
-          interdiscWrap.classList.add("is-open");
-          interdiscMenu.classList.add("is-open");
-          interdiscTrigger.setAttribute("aria-expanded", "true");
-          posicionarInterdiscMenu(ev);
-        };
-
-        const cerrarInterdisc = () => {
-          interdiscWrap.classList.remove("is-open");
-          interdiscMenu.classList.remove("is-open");
-          interdiscTrigger.setAttribute("aria-expanded", "false");
-        };
-
-        const programarCierreInterdisc = () => {
-          if (interdiscCloseTimer) clearTimeout(interdiscCloseTimer);
-          interdiscCloseTimer = setTimeout(() => {
-            cerrarInterdisc();
-            interdiscCloseTimer = null;
-          }, 100);
-        };
-
-        interdiscWrap.addEventListener("mouseenter", abrirInterdisc);
-        interdiscWrap.addEventListener("mouseleave", programarCierreInterdisc);
-        interdiscMenu.addEventListener("mouseenter", () => {
-          if (interdiscCloseTimer) {
-            clearTimeout(interdiscCloseTimer);
-            interdiscCloseTimer = null;
-          }
-        });
-        interdiscMenu.addEventListener("mouseleave", programarCierreInterdisc);
-
-        interdiscMenu.addEventListener("click", (e) => {
-          const option = e.target?.closest?.(".interdisc-option");
-          if (!option) return;
-          e.preventDefault();
-          aplicarInterdisc(option.dataset.value || "");
-          cerrarInterdisc();
-        });
-
-        document.addEventListener("click", (e) => {
-          if (!interdiscWrap.contains(e.target) && !interdiscMenu.contains(e.target)) cerrarInterdisc();
-        });
-
-        window.addEventListener("resize", () => {
-          if (!interdiscWrap.classList.contains("is-open")) return;
-          posicionarInterdiscMenu();
-        });
-        window.addEventListener("scroll", () => {
-          if (!interdiscWrap.classList.contains("is-open")) return;
-          cerrarInterdisc();
-        }, true);
-
-        aplicarInterdisc("");
+        interdiscWrap.appendChild(selectInterdisciplinariedad);
 
         // Recursos
         const chkRecortable = Object.assign(document.createElement("input"), { type: "checkbox", name: `recortable_${subtema}` });
