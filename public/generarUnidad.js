@@ -26611,6 +26611,7 @@ function construirPromptNotasMaestro(
   // ✅ PROMPT FINAL para maestro
   return `
   IMPORTANTE: No repitas ni reformules el texto de las actividades del alumno. SOLO describe estrategias y orientaciones para el maestro.
+  ESTRICTAMENTE PROHIBIDO: No incluyas etiquetas HTML de iconos (como <i class="fas fa-*"></i> o similares) formatea usando texto plano o tags básicos (p, strong, br).
 
   <h2 style="margin-top:20px; margin-bottom:20px;">${tituloCreativo}</h2>
 
@@ -26664,6 +26665,7 @@ function construirPromptNotasMaestro(
   - Máximo 1 párrafo corto por actividad general.
   - Una sola reflexión de cierre.
   - NO elimines la tabla de candelarización.
+  - NO incluyas ninguna etiqueta de clase de icono (como <i> o similares) en el HTML.
   - RESPETA el orden: Generales → Ampliación → Refuerzo → Neurología aplicada.
   `;
 }

@@ -66,43 +66,32 @@ document.addEventListener("DOMContentLoaded", () => {
         btnContinuar.classList.add("hidden");
 
         try {
-            // 1. Obtener contexto de la secuencia activa para ayudar a Gemini
-            const secuenciaDocs = await _obtenerSubtemasDisponibles();
-            const subtemasStr = secuenciaDocs.map(s => `- ${s.subtema} (${s.categoria})`).join('\n');
-
             const prompt = `
-            Eres un experto en diseño curricular. Analiza el siguiente texto y divídelo en fragmentos que correspondan a subcategorías pedagógicas.
-            
-            ${categoriaContexto ? `EL USUARIO ESTÁ ENFOCADO EN LA CATEGORÍA: "${categoriaContexto}". Prioriza subtemas de esta materia si es posible.` : ''}
+            Eres un experto en diseño curricular. Analiza el siguiente texto y estructúralo adecuadamente en HTML.
+            Tu objetivo es identificar y diferenciar claramente las siguientes partes basándote en el formato y contenido:
+            - **Instrucción**: (Usa la clase <div class="instruccion">...</div>)
+            - **Subinstrucción**: (Usa la clase <div class="sub-instruccion">...</div>)
+            - **Respuesta (Answer)**: (Usa la clase <div class="answer">...</div>)
 
-            SUBTEMAS Y CATEGORÍAS DISPONIBLES EN EL SISTEMA:
-            ${subtemasStr}
-            
-            INSTRUCCIÓN:
-            1. Lee el texto e identifica fragmentos que hablen sobre los subtemas listados arriba.
-            2. Si un fragmento no coincide exactamente, busca la categoría más cercana.
-            3. Devuelve un JSON estrictamente estructurado como un array de objetos.
-            
-            OUTPUT ESPERADO (JSON):
-            [
-              {
-                "subtema": "Nombre del subtema exacto o más cercano",
-                "categoria": "Categoría (Materia)",
-                "textoExtraido": "Fragmento del texto original que trata este tema",
-                "justificacion": "Breve explicación de por qué corresponde a este subtema"
-              }
-            ]
+            No inventes ningún texto nuevo ni separes el texto en distintos subtemas.
+            Solo reforma el texto original agregando estas clases HTML donde corresponda para indicar su estructura pedagógica.
             
             TEXTO A ANALIZAR:
             ${text}
             
-            Responde ÚNICAMENTE con el bloque JSON.
+            Responde ÚNICAMENTE con el bloque HTML estructurado (sin bloques delimitadores de markdown).
             `;
 
             const rawResponse = await _llamarGeminiSimplificado(prompt);
-            analisisActual = JSON.parse(rawResponse.replace(/```json\s?|```/g, "").trim());
+            analisisActual = rawResponse.replace(/```html\s?|```/gi, "").trim();
 
-            _mostrarResultadosAnalisis(analisisActual);
+            const secuenciaDocs = await _obtenerSubtemasDisponibles();
+            let subtemasFiltrados = secuenciaDocs;
+            if (categoriaContexto) {
+                subtemasFiltrados = secuenciaDocs.filter(s => s.categoria === categoriaContexto);
+            }
+
+            _mostrarSubcategoriasParaElegir(subtemasFiltrados);
         } catch (error) {
             console.error("Error analizando ingesta:", error);
             alert("Hubo un error al analizar el texto con Gemini. Revisa la consola.");
@@ -112,17 +101,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     btnContinuar?.addEventListener("click", () => {
-        const seleccionados = Array.from(document.querySelectorAll(".ingesta-check:checked")).map(chk => {
-            return analisisActual[parseInt(chk.dataset.index)];
-        });
+        const seleccionado = document.querySelector(".ingesta-radio:checked");
 
-        if (!seleccionados.length) {
-            alert("Selecciona al menos un fragmento para continuar.");
+        if (!seleccionado) {
+            alert("Selecciona a qué única subcategoría corresponde este texto.");
             return;
         }
 
-        // Proceder a la generación masiva
-        _procesarGeneracionMasivaIA(seleccionados);
+        const itemData = {
+            subtema: seleccionado.value,
+            categoria: seleccionado.dataset.categoria,
+            textoExtraido: analisisActual
+        };
+
+        // Proceder a la generación única
+        _procesarGeneracionUnicaIA(itemData);
     });
 
     async function _obtenerSubtemasDisponibles() {
@@ -166,17 +159,22 @@ document.addEventListener("DOMContentLoaded", () => {
         return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     }
 
-    function _mostrarResultadosAnalisis(analisis) {
+    function _mostrarSubcategoriasParaElegir(subtemas) {
         listaResultados.innerHTML = "";
-        analisis.forEach((item, index) => {
-            const card = document.createElement("div");
-            card.className = "flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-purple-300 transition-colors";
+        
+        if (!subtemas || !subtemas.length) {
+            listaResultados.innerHTML = `<p class="text-slate-500 text-sm">No hay subcategorías disponibles para mostrar.</p>`;
+            return;
+        }
+
+        subtemas.forEach((sub) => {
+            const card = document.createElement("label");
+            card.className = "flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-purple-300 transition-colors cursor-pointer";
             card.innerHTML = `
-                <input type="checkbox" checked class="ingesta-check mt-1" data-index="${index}">
+                <input type="radio" name="subcategoriaSelect" value="${sub.subtema}" data-categoria="${sub.categoria}" class="ingesta-radio mt-1 w-4 h-4 text-purple-600 focus:ring-purple-500">
                 <div class="flex-1 min-w-0">
-                    <p class="text-xs font-bold text-purple-700 uppercase tracking-wider">${item.categoria}</p>
-                    <h5 class="text-sm font-bold text-slate-800 truncate">${item.subtema}</h5>
-                    <p class="text-[11px] text-slate-500 line-clamp-2 mt-1">${item.textoExtraido}</p>
+                    <p class="text-xs font-bold text-purple-700 uppercase tracking-wider">${sub.categoria}</p>
+                    <h5 class="text-sm font-bold text-slate-800 truncate">${sub.subtema}</h5>
                 </div>
             `;
             listaResultados.appendChild(card);
@@ -186,18 +184,18 @@ document.addEventListener("DOMContentLoaded", () => {
         btnContinuar.classList.remove("hidden");
     }
 
-    async function _procesarGeneracionMasivaIA(items) {
+    async function _procesarGeneracionUnicaIA(item) {
         // Cerrar este modal
         modal.style.display = "none";
         
-        // 1. Asegurarnos de que el modal de la unidad esté abierto para poder manipular el DOM
+        // 1. Asegurarnos de que el modal de la unidad esté abierto
         if (typeof window.abrirModalUnit === "function") {
             window.abrirModalUnit();
         } else {
             document.getElementById("btnAbrirModalUnidad")?.click();
         }
 
-        // 2. Esperar a que el modal y la tabla se carguen
+        // 2. Esperar a que la tabla se cargue
         let intentos = 0;
         const maxIntentos = 10;
         
@@ -205,7 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const container = document.getElementById("contenedorTablaSecuencia");
             if (container && container.querySelectorAll("tr").length > 3) {
                 clearInterval(interval);
-                _completarVinculacion(items);
+                _ejecutarVinculacionYGeneracion(item);
             } else if (intentos >= maxIntentos) {
                 clearInterval(interval);
                 console.error("No se encontró la tabla de secuencia a tiempo.");
@@ -215,42 +213,47 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 500);
     }
 
-    function _completarVinculacion(items) {
-        let vinculados = 0;
+    function _ejecutarVinculacionYGeneracion(item) {
+        const row = _buscarFilaPorSubtema(item.subtema, item.categoria);
         
-        for (const item of items) {
-            const row = _buscarFilaPorSubtema(item.subtema, item.categoria);
-            
-            if (row) {
-                // Marcar el checkbox de "generar"
-                const chk = row.querySelector("input[name^='generar_']");
-                if (chk) {
-                    chk.checked = true;
-                    // Disparar evento change para que el estado local se actualice
-                    chk.dispatchEvent(new Event('change', { bubbles: true }));
+        if (row) {
+            // Desmarcar todos los demás en esa categoría
+            const checksEnCategoria = document.querySelectorAll(`input[name^='generar_'][data-categoria="${item.categoria}"]`);
+            checksEnCategoria.forEach(chk => {
+                chk.checked = false;
+                chk.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+
+            // Marcar solo el seleccionado
+            const chk = row.querySelector("input[name^='generar_']");
+            if (chk) {
+                chk.checked = true;
+                chk.dispatchEvent(new Event('change', { bubbles: true }));
+
+                const moduloId = chk.name.replace("generar_", "");
+                // Guardar el HTML estructurado
+                localStorage.setItem(`instrucciones_gemini_${moduloId}`, item.textoExtraido);
+
+                const btnGemini = row.querySelector(`[data-mc-action="abrir-instrucciones-gemini"]`);
+                if (btnGemini) {
+                    btnGemini.classList.add("btn-gemini-active");
+                    const icon = btnGemini.querySelector("i");
+                    if (icon) icon.className = "fas fa-robot text-purple-600";
                 }
 
-                // Obtener ID del módulo
-                const moduloId = chk ? chk.name.replace("generar_", "") : null;
-                if (moduloId) {
-                    // Guardar instrucciones
-                    localStorage.setItem(`instrucciones_gemini_${moduloId}`, item.textoExtraido);
-                    
-                    // Mostrar feedback visual
-                    const btnGemini = row.querySelector(`[data-mc-action="abrir-instrucciones-gemini"]`);
-                    if (btnGemini) {
-                        btnGemini.classList.add("btn-gemini-active");
-                        // Si existe FontAwesome
-                        const icon = btnGemini.querySelector("i");
-                        if (icon) icon.className = "fas fa-robot text-purple-600";
+                // Iniciar proceso de generación de la sección
+                const btnGenerarCategoria = document.getElementById(`btn-generar-${item.categoria.replace(/\s+/g, '-')}`);
+                if (btnGenerarCategoria) {
+                    if (window.mostrarNotificacion) {
+                        window.mostrarNotificacion(`🚀 Generando sección: ${item.categoria}...`, 'success');
                     }
-                    vinculados++;
+                    setTimeout(() => {
+                        btnGenerarCategoria.click();
+                    }, 600);
                 }
             }
-        }
-
-        if (window.mostrarNotificacion) {
-            window.mostrarNotificacion(`✨ Vinculados ${vinculados} módulos con éxito. Revisa y genera la unidad.`, 'success');
+        } else {
+             if (window.mostrarNotificacion) window.mostrarNotificacion("❌ No se pudo encontrar la fila en la tabla.", "error");
         }
     }
 
