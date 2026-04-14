@@ -2672,26 +2672,41 @@ input {
 }
 
 .steps {
-  margin-top: 8px;
-  padding-left: 20px;
+  margin-top: 10px;
+  padding-left: 1.4rem;
 }
 
-ol[type="a"],
-ol.steps {
-  list-style-type: lower-alpha !important;
+.activity ol.steps,
+.activity-fichas ol.steps,
+.steps.steps-numbered {
+  list-style-type: decimal !important;
   list-style-position: outside;
-  margin-left: 1.8em;
-  padding-left: 1.2em;
+  margin: 10px 0 0 0.4rem;
+  padding-left: 1.25rem;
 }
 
-.activity ol[type="a"] > li::marker {
+.activity ol.steps > li,
+.activity-fichas ol.steps > li {
+  margin-bottom: 0.42rem;
+  padding-left: 0.15rem;
+  line-height: 1.48;
+}
+
+.activity ol.steps > li::marker,
+.activity-fichas ol.steps > li::marker {
   font-weight: bold;
+  color: #2563eb;
 }
 
 
 .answer {
-  margin-top: 10px;
+  margin-top: 12px;
   margin-bottom: 20px;
+  padding: 10px 12px;
+  border-left: 4px solid #ec4899;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(252, 231, 243, 0.78), rgba(253, 242, 248, 0.95));
+  color: #be185d;
   font-style: italic;
   font-size: 12px !important;
 }
@@ -2699,10 +2714,110 @@ ol.steps {
 .activity > p {
   font-size: 1rem;
   line-height: 1.45;
+  margin-bottom: 0.25rem;
+}
+
+.activity {
+  margin: 18px 0 24px;
+  padding: 16px 18px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .activity > p strong {
   font-size: 1.08em;
+  color: #0f172a;
+}
+
+.activity-fichas {
+  margin: 18px 0 24px;
+}
+
+.unidad-teacher-notes {
+  display: grid;
+  gap: 14px;
+}
+
+.unidad-teacher-notes > h3:first-child {
+  margin: 0 0 4px;
+  color: #60a5fa;
+  font-size: 1rem;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.unidad-teacher-extension,
+.unidad-teacher-reinforcement {
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.unidad-teacher-general-item {
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.unidad-teacher-general-item p,
+.unidad-teacher-extension p,
+.unidad-teacher-reinforcement p,
+.unidad-teacher-neurology p {
+  margin: 0 0 10px;
+  line-height: 1.55;
+}
+
+.unidad-teacher-general-item p:last-child,
+.unidad-teacher-extension p:last-child,
+.unidad-teacher-reinforcement p:last-child,
+.unidad-teacher-neurology p:last-child {
+  margin-bottom: 0;
+}
+
+.unidad-teacher-extension h3,
+.unidad-teacher-reinforcement h3,
+.unidad-teacher-neurology h3 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+.unidad-teacher-extension h3 {
+  color: #60a5fa;
+}
+
+.unidad-teacher-reinforcement h3 {
+  color: #0f172a;
+}
+
+.unidad-teacher-metacognition {
+  margin: 8px 0 0 1rem;
+  padding-left: 1rem;
+  color: #60a5fa;
+}
+
+.unidad-teacher-metacognition li {
+  margin-bottom: 0.32rem;
+}
+
+.unidad-teacher-neurology {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 2px dashed #a7f3d0;
+  background:
+    radial-gradient(circle at top right, rgba(196, 181, 253, 0.2), transparent 30%),
+    linear-gradient(180deg, #ecfdf5, #f0fdf4);
+  box-shadow: 0 10px 26px rgba(16, 185, 129, 0.12);
+}
+
+.unidad-teacher-neurology h3 {
+  color: #10b981;
 }
 
 .activity :is(.challenge, .inquiry-block, .dynamic-block, .quiz-block, .diagnostic-block, .assessment-block, .project-block, .sel-block, .structured-block, .hybrid-block, .ai-block) {
@@ -3015,6 +3130,17 @@ ol.steps {
 
 .unidad-editor-modal .unidad-editor-side .unidad-editor-field--full {
   grid-column: 1 / -1;
+}
+
+.unidad-editor-modal .unidad-editor-side .unidad-editor-search-action {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.unidad-editor-modal .unidad-editor-side .unidad-editor-search-btn {
+  width: 100%;
 }
 
 .unidad-editor-modal .unidad-editor-panel.side-collapsed .unidad-editor-main,

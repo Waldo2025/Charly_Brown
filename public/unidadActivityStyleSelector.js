@@ -14,9 +14,10 @@ const STYLE_STORAGE_KEY = "cb_unidad_activity_style_selections_v1";
 let ACTIVE_STYLE_MENU_ROOT = null;
 let ACTIVE_STYLE_MENU_FRAME = 0;
 
-function _normalizeEducationalStyleSelection(styleIds = []) {
+function _normalizeEducationalStyleSelection(styleIds = [], { allowEmpty = false } = {}) {
   const safe = _sanitizePersistedStyleIds(styleIds || []);
-  return safe.length ? safe : ["asc"];
+  if (safe.length) return safe;
+  return allowEmpty ? [] : ["asc"];
 }
 
 function _getCatalogIds() {
@@ -68,7 +69,7 @@ function _categoriaKey(categoria = "") {
 function _ensureLoadedSelections() {
   const persisted = _readPersistedSelections();
   Object.keys(persisted || {}).forEach((categoria) => {
-    STYLE_SELECTIONS[categoria] = _normalizeEducationalStyleSelection(persisted[categoria] || []);
+    STYLE_SELECTIONS[categoria] = _normalizeEducationalStyleSelection(persisted[categoria] || [], { allowEmpty: true });
   });
 }
 
@@ -86,7 +87,7 @@ function setSelectedUnidadActivityStyles(categoria = "", styleIds = []) {
   _ensureLoadedSelections();
   const key = _categoriaKey(categoria);
   if (!key) return [];
-  STYLE_SELECTIONS[key] = _normalizeEducationalStyleSelection(styleIds || []);
+  STYLE_SELECTIONS[key] = _normalizeEducationalStyleSelection(styleIds || [], { allowEmpty: true });
   _writePersistedSelections(STYLE_SELECTIONS);
   return [...STYLE_SELECTIONS[key]];
 }

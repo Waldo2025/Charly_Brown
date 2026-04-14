@@ -99,7 +99,6 @@ function _unidadBuildCategoryStyleUi(categoria = "") {
         <input type="checkbox" 
                class="cb-unidad-style-toggle-input" 
                data-action="toggle-style-selector" 
-               data-cb-persist="false"
                data-categoria="${_unidadEscapeHtml(categoria)}" 
                ${enabled ? "checked" : ""}>
         <span class="cb-unidad-style-toggle-track"></span>
@@ -115,11 +114,14 @@ function _unidadBuildCategoryStyleUi(categoria = "") {
 function _unidadBindCategoryStyleUi(root = document) {
   const scope = root && typeof root.querySelectorAll === "function" ? root : document;
   scope.querySelectorAll(".cb-unidad-style-toolbar[data-categoria]").forEach((toolbar) => {
-    if (toolbar.dataset.boundStyleToolbar === "1") return;
-    toolbar.dataset.boundStyleToolbar = "1";
     const categoria = String(toolbar.dataset.categoria || "").trim().normalize("NFC");
     const toggle = toolbar.querySelector(".cb-unidad-style-toggle-input[data-action='toggle-style-selector']");
     const host = toolbar.querySelector("[data-role='style-selector-host']");
+    const enabled = _unidadIsStyleSelectorEnabled(categoria);
+    if (toggle) toggle.checked = enabled;
+    if (host) host.style.display = enabled ? "" : "none";
+    if (toolbar.dataset.boundStyleToolbar === "1") return;
+    toolbar.dataset.boundStyleToolbar = "1";
     toggle?.addEventListener("change", () => {
       const enabled = toggle.checked === true;
       _unidadSetStyleSelectorEnabled(categoria, enabled);
@@ -1492,6 +1494,7 @@ function _limpiarSeccionesLecturaNoNarrables(texto = "") {
   let limpio = String(texto || "");
   const cortes = [
     /(?:^|\n{2,})(tabla de sinonimos|tabla de sinónimos|sinonimos|sinónimos|glosario|vocabulario)\b[\s\S]*$/i,
+    /(?:^|\n)(tabla de sinonimos|tabla de sinónimos|sinonimos|sinónimos|glosario|vocabulario)\s*:?\s*(?:\n|$)[\s\S]*$/i,
     /(?:^|\n{2,})(bibliografia|bibliografía|fuentes consultadas|referencias bibliograficas|referencias bibliográficas)\b[\s\S]*$/i,
     /(?:^|\n{2,})(preguntas de comprension|preguntas de comprensión|preguntas de reflexion|preguntas de reflexión|cuestionario|actividades de comprension|actividades de comprensión)\b[\s\S]*$/i
   ];
@@ -2143,6 +2146,11 @@ function verificarUnidadActual() {
   const unidadActual = selectUnidad.value;
   const modeloActual = document.getElementById("selectGeminiEndpoint")?.value;
 
+  if (unidadAnterior && unidadActual && unidadAnterior !== unidadActual) {
+    window.__unidadTemarioSubcategorias = {};
+    _unidadRefreshTemarioUnidadMount();
+  }
+
   if (unidadActual) {
     // ✅ SOLO crear contadores si no existen, NUNCA resetear
     if (!window.contadoresPorUnidad) {
@@ -2293,19 +2301,79 @@ function _normalizarContenidoLecturaHTMLUnidad(contenido = "") {
 }
 
 function _extraerSinonimosLecturaUnidad(lectura = {}) {
+  const normalizeSinonimoHeader = (value = "") => String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const isSinonimoMetaLine = (line = "") => {
+    const normalized = normalizeSinonimoHeader(line);
+    return /^(tabla de sinonimos|sinonimos|glosario|vocabulario|palabra|palabra en la lectura|sinonimo|sinonimos sencillos|sinonimos simples|bibliografia|fuentes consultadas|referencias|referencias bibliograficas)$/.test(normalized);
+  };
+
+  const parseSinonimosFromHtml = (html = "") => {
+    const raw = String(html || "").trim();
+    if (!raw || typeof document === "undefined" || !/<table[\s\S]*?>/i.test(raw)) return [];
+    const wrap = document.createElement("div");
+    wrap.innerHTML = raw;
+    const table = wrap.querySelector("table");
+    if (!table) return [];
+    const rows = Array.from(table.querySelectorAll("tr"))
+      .map((row) => Array.from(row.querySelectorAll("td, th"))
+        .map((cell) => String(cell.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean))
+      .filter((cells) => cells.length >= 2)
+      .map((cells) => ({ palabra: cells[0], sinonimos: cells[1] }))
+      .filter((item) => item.palabra && item.sinonimos)
+      .filter((item) => !isSinonimoMetaLine(item.palabra) && !isSinonimoMetaLine(item.sinonimos));
+    return rows;
+  };
+
+  const parseSinonimosFromText = (text = "") => {
+    const raw = String(text || "").replace(/\r/g, "").trim();
+    if (!raw) return [];
+    const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const match = normalized.match(/(?:^|\n)(tabla de sinonimos|sinonimos|glosario|vocabulario)\b[\s\S]*$/i);
+    if (!match || typeof match.index !== "number") return [];
+    let tail = raw.slice(match.index).trim();
+    const tailNormalized = tail.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const bibliographyMatch = tailNormalized.match(/(?:^|\n)(bibliografia|fuentes consultadas|referencias bibliograficas|referencias)\b/i);
+    if (bibliographyMatch && typeof bibliographyMatch.index === "number" && bibliographyMatch.index > 0) {
+      tail = tail.slice(0, bibliographyMatch.index).trim();
+    }
+    const lines = tail
+      .split("\n")
+      .map((line) => String(line || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .filter((line) => !isSinonimoMetaLine(line));
+    const out = [];
+    for (let i = 0; i < lines.length; i += 2) {
+      const palabra = lines[i];
+      const sinonimos = lines[i + 1] || "";
+      if (!palabra) continue;
+      out.push({ palabra, sinonimos });
+    }
+    return out.filter((item) => item.palabra);
+  };
+
   const raw =
     lectura?.tablaSinonimos
     || lectura?.tabla_sinonimos
     || lectura?.sinonimos
     || lectura?.sinónimos
+    || lectura?.rawData?.tablaSinonimos
+    || lectura?.rawData?.tabla_sinonimos
+    || lectura?.rawData?.sinonimos
+    || lectura?.rawData?.sinónimos
     || lectura?.campos?.tablaSinonimos
     || lectura?.campos?.tabla_sinonimos
     || lectura?.campos?.sinonimos
     || lectura?.campos?.sinónimos
     || null;
-  if (!raw) return [];
+  let parsedFromStructured = [];
   if (Array.isArray(raw)) {
-    return raw
+    parsedFromStructured = raw
       .map((item) => {
         if (typeof item === "string") {
           const parts = item.split(/[:—-]/).map((p) => p.trim()).filter(Boolean);
@@ -2318,45 +2386,107 @@ function _extraerSinonimosLecturaUnidad(lectura = {}) {
         return palabra ? { palabra, sinonimos } : null;
       })
       .filter(Boolean);
-  }
-  if (typeof raw === "object") {
-    return Object.entries(raw)
+  } else if (raw && typeof raw === "object") {
+    parsedFromStructured = Object.entries(raw)
       .map(([palabra, sinonimos]) => ({
         palabra: String(palabra || "").trim(),
         sinonimos: Array.isArray(sinonimos) ? sinonimos.join(", ") : String(sinonimos || "").trim()
       }))
       .filter((item) => item.palabra);
+  } else if (typeof raw === "string") {
+    const texto = String(raw || "").trim();
+    parsedFromStructured = parseSinonimosFromHtml(texto);
+    if (!parsedFromStructured.length) {
+      parsedFromStructured = texto
+        .split(/\n|;/)
+        .map((linea) => {
+          const parts = linea.split(/[:—-]/).map((p) => p.trim()).filter(Boolean);
+          return parts[0] ? { palabra: parts[0], sinonimos: parts.slice(1).join(", ") } : null;
+        })
+        .filter((item) => item?.palabra && item?.sinonimos && !isSinonimoMetaLine(item.palabra) && !isSinonimoMetaLine(item.sinonimos));
+    }
   }
-  const texto = String(raw || "").trim();
-  if (!texto) return [];
-  return texto
-    .split(/\n|;/)
-    .map((linea) => {
-      const parts = linea.split(/[:—-]/).map((p) => p.trim()).filter(Boolean);
-      return parts[0] ? { palabra: parts[0], sinonimos: parts.slice(1).join(", ") } : null;
-    })
-    .filter(Boolean);
+  if (parsedFromStructured.length) return parsedFromStructured;
+
+  const contenidoFallback = String(
+    lectura?.contenidoHTMLRaw
+    || lectura?.rawData?.contenidoHTML
+    || lectura?.contenidoHTML
+    || lectura?.contenidoPlano
+    || lectura?.rawData?.contenidoPlano
+    || lectura?.rawData?.textoLectura
+    || lectura?.rawData?.lectura
+    || lectura?.rawData?.contenido
+    || lectura?.rawData?.texto
+    || lectura?.textoLectura
+    || lectura?.lectura
+    || lectura?.contenido
+    || lectura?.texto
+    || ""
+  );
+  const parsedFromContent = parseSinonimosFromText(_htmlAPlainText(contenidoFallback));
+  return parsedFromContent;
 }
 
 function _extraerBibliografiaLecturaUnidad(lectura = {}) {
+  const buildApaReferencesHtml = (items = []) => {
+    const cleanItems = (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (!cleanItems.length) return "";
+    return `
+      <div class="lectura-bibliografia-lista lectura-bibliografia-apa">
+        ${cleanItems.map((item) => `
+          <p class="lectura-bibliografia-apa-item" style="margin:0 0 10px 0; padding-left:24px; text-indent:-24px; line-height:1.6;">${_escapeHtmlUnidad(item)}</p>
+        `).join("")}
+      </div>
+    `;
+  };
+
+  const parseBibliografiaFromText = (text = "") => {
+    const raw = String(text || "").replace(/\r/g, "").trim();
+    if (!raw) return "";
+    const normalized = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const match = normalized.match(/(?:^|\n)(bibliografia|fuentes consultadas|referencias bibliograficas|referencias)\b[\s\S]*$/i);
+    if (!match || typeof match.index !== "number") return "";
+    const tail = raw.slice(match.index).trim();
+    const items = tail
+      .split("\n")
+      .map((line) => String(line || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .filter((line) => !/^(bibliograf[ií]a|fuentes consultadas|referencias(?: bibliogr[aá]ficas)?)$/i.test(line));
+    return buildApaReferencesHtml(items);
+  };
+
   const raw =
     lectura?.bibliografia
     || lectura?.bibliografía
     || lectura?.fuentes
     || lectura?.referencias
     || lectura?.referenciasBibliograficas
+    || lectura?.rawData?.bibliografia
+    || lectura?.rawData?.bibliografía
+    || lectura?.rawData?.fuentes
+    || lectura?.rawData?.referencias
+    || lectura?.rawData?.referenciasBibliograficas
     || lectura?.campos?.bibliografia
     || lectura?.campos?.bibliografía
     || lectura?.campos?.fuentes
     || lectura?.campos?.referencias
     || lectura?.campos?.referenciasBibliograficas
     || null;
-  if (!raw) return "";
   if (typeof raw === "string") {
     const texto = raw.trim();
     if (!texto) return "";
-    if (/<[a-z][\s\S]*>/i.test(texto)) return texto;
-    return `<ul>${texto.split(/\n|;/).map((item) => item.trim()).filter(Boolean).map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>`;
+    if (/<[a-z][\s\S]*>/i.test(texto)) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = texto;
+      const items = Array.from(wrap.querySelectorAll("li, p, div"))
+        .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+      return buildApaReferencesHtml(items);
+    }
+    return buildApaReferencesHtml(texto.split(/\n|;/).map((item) => item.trim()).filter(Boolean));
   }
   if (Array.isArray(raw)) {
     const items = raw
@@ -2366,13 +2496,29 @@ function _extraerBibliografiaLecturaUnidad(lectura = {}) {
         return "";
       })
       .filter(Boolean);
-    return items.length ? `<ul>${items.map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>` : "";
+    return buildApaReferencesHtml(items);
   }
-  if (typeof raw === "object") {
+  if (raw && typeof raw === "object") {
     const items = Object.values(raw).map((item) => String(item || "").trim()).filter(Boolean);
-    return items.length ? `<ul>${items.map((item) => `<li>${_escapeHtmlUnidad(item)}</li>`).join("")}</ul>` : "";
+    return buildApaReferencesHtml(items);
   }
-  return "";
+  const contenidoFallback = String(
+    lectura?.contenidoHTMLRaw
+    || lectura?.rawData?.contenidoHTML
+    || lectura?.contenidoHTML
+    || lectura?.contenidoPlano
+    || lectura?.rawData?.contenidoPlano
+    || lectura?.rawData?.textoLectura
+    || lectura?.rawData?.lectura
+    || lectura?.rawData?.contenido
+    || lectura?.rawData?.texto
+    || lectura?.textoLectura
+    || lectura?.lectura
+    || lectura?.contenido
+    || lectura?.texto
+    || ""
+  );
+  return parseBibliografiaFromText(_htmlAPlainText(contenidoFallback));
 }
 
 function _resaltarSinonimosEnLecturaUnidad(html = "", sinonimos = []) {
@@ -2416,7 +2562,7 @@ function _tablaSinonimosLecturaUnidadHTML(sinonimos = []) {
     .filter(Boolean);
   if (!rows.length) return "";
   return `
-    <table class="lectura-tabla-sinonimos" border="1" cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;margin:10px 0 18px;">
+    <table class="lectura-tabla-sinonimos" border="1" cellpadding="6" cellspacing="0" style="width:auto;min-width:0;max-width:560px;border-collapse:collapse;margin:10px 0 18px;display:inline-table;">
       <thead><tr><th style="border:1px solid #d8dee9;padding:6px 8px;background:#f3f6fb;">Palabra en la lectura</th><th style="border:1px solid #d8dee9;padding:6px 8px;background:#f3f6fb;">Sinónimos sencillos</th></tr></thead>
       <tbody>${rows.join("")}</tbody>
     </table>
@@ -2441,9 +2587,10 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
   const categoriasLecturaStr = "Lenguaje y comunicación";
   const subcategoriaLectura = _unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: categoriasLecturaStr, columna: "maestro" });
   
-  const competenciasLectura = _unidadRenderCompetenciasAscHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true });
   const competenciaLectura = _unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true, label: "Lectura" });
   const ejeLectura = _unidadRenderEjeArticuladorHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true });
+  const habilidadLectura = _unidadRenderHabilidadCognitivaHTML("ComprensionLectora", categoriasLecturaStr, { lectura: true });
+  const campoLectura = _unidadCampoFormativoDeCategoria(categoriasLecturaStr);
 
   const preguntasArr = _preguntasLecturaUnidad(lectura) || [];
   const indicadores = [
@@ -2478,12 +2625,13 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
   const dictadoWordsStr = dictadoWordsArr.slice(0, 10).join(", ");
 
   return `
-    <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;">
+    <div class="notas-maestro-lectura-soporte" style="margin:0 0 18px;padding:12px;border:none;border-radius:0;background:transparent;">
       <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaLectura}</span>
-        ${competenciasLectura}
-        ${competenciaLectura}
         ${ejeLectura}
+        ${campoLectura ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoLectura}</span>` : ""}
+        ${habilidadLectura}
+        ${competenciaLectura}
       </div>
       
       <h3 style="color:#4a90e2; margin-top:20px; margin-bottom:12px;">${tituloLectura}</h3>
@@ -2514,16 +2662,29 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
 }
 
 function _contenidoLecturaUnidad(lectura = {}) {
+  const contenidoHtml = String(
+    lectura?.contenidoHTMLRaw
+    || lectura?.rawData?.contenidoHTML
+    || lectura?.contenidoHTML
+    || ""
+  ).trim();
+  if (contenidoHtml) {
+    const narrable = _obtenerTextoCompletoLectura({
+      ...lectura,
+      contenidoHTML: contenidoHtml
+    });
+    return _normalizarContenidoLecturaHTMLUnidad(narrable || contenidoHtml);
+  }
   const contenido = String(
-    lectura?.contenidoHTML
-    || lectura?.contenidoPlano
+    lectura?.contenidoPlano
     || lectura?.textoLectura
     || lectura?.lectura
     || lectura?.contenido
     || lectura?.texto
     || ""
   ).trim();
-  return _normalizarContenidoLecturaHTMLUnidad(contenido);
+  const limpio = _limpiarSeccionesLecturaNoNarrables(_htmlAPlainText(contenido));
+  return _normalizarContenidoLecturaHTMLUnidad(limpio || contenido);
 }
 
 function _preguntasLecturaUnidad(lectura = {}) {
@@ -3291,13 +3452,21 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
     const lectura = unicas[0];
     const lecturaId = String(lectura?.id || "").trim();
     const lecturaOrigen = _origenLecturaUnidad(lectura);
+    const contenidoHTMLRaw = String(
+      lectura?.contenidoHTML
+      || lectura?.rawData?.contenidoHTML
+      || lectura?.campos?.contenidoHTML
+      || ""
+    ).trim();
     return {
       modo,
       lectura: {
         ...lectura,
+        rawData: (lectura?.rawData && typeof lectura.rawData === "object") ? lectura.rawData : { ...lectura },
         titulo: _tituloLecturaUnidad(lectura),
         tema: _tituloLecturaUnidad(lectura),
-        contenidoHTML: _contenidoLecturaUnidad(lectura),
+        contenidoHTMLRaw,
+        contenidoHTML: contenidoHTMLRaw || _contenidoLecturaUnidad(lectura),
         preguntasComprension: _preguntasLecturaUnidad(lectura)
       },
       lecturas: [lectura],
@@ -3324,6 +3493,8 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
       id: lecturaIds.join("|"),
       titulo,
       tema: titulo,
+      rawData: { lecturas: unicas.map((item) => ({ ...item })) },
+      contenidoHTMLRaw: contenido,
       contenidoHTML: contenido,
       preguntasComprension: preguntas,
       tipo: "fusion",
@@ -9757,12 +9928,67 @@ function _lecturasAgentBuildBibliografiaHtml(value = null) {
 }
 
 function _lecturasAgentBuildSinonimosHtml(value = null) {
+  const buildTable = (rows = []) => {
+    const safeRows = (Array.isArray(rows) ? rows : [])
+      .map((item) => {
+        const palabra = String(item?.palabra || "").trim();
+        const sinon = String(item?.sinonimos || "").trim();
+        if (!palabra && !sinon) return "";
+        return `<tr><td>${_lecturasAgentSafeHtml(palabra || "—")}</td><td>${_lecturasAgentSafeHtml(sinon || "—")}</td></tr>`;
+      })
+      .filter(Boolean);
+    if (!safeRows.length) return "";
+    return `
+      <table class="lecturas-asc-agent-section-table lectura-tabla-sinonimos">
+        <thead><tr><th>Palabra</th><th>Sinónimo simple</th></tr></thead>
+        <tbody>${safeRows.join("")}</tbody>
+      </table>
+    `;
+  };
+
+  const parsePairsFromText = (raw = "") => {
+    const lines = String(raw || "")
+      .split(/\n|;/)
+      .map((line) => String(line || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const out = [];
+    lines.forEach((line) => {
+      const parts = line.split(/[:\-—–]/).map((part) => part.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        out.push({ palabra: parts[0], sinonimos: parts.slice(1).join(", ") });
+      }
+    });
+    if (out.length) return out;
+
+    const compact = lines.filter((line) => !/^(tabla de sin[oó]nimos|palabra|sin[oó]nimo(?:s)? simple(?:s)?)$/i.test(line));
+    for (let i = 0; i < compact.length; i += 2) {
+      const palabra = compact[i];
+      const sinonimos = compact[i + 1] || "";
+      if (palabra) out.push({ palabra, sinonimos });
+    }
+    return out;
+  };
+
   if (value == null) return "";
   if (typeof value === "string") {
     const raw = String(value || "").trim();
     if (!raw) return "";
-    if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
-    return `<p>${_lecturasAgentSafeHtml(raw)}</p>`;
+    if (/<table[\s\S]*?>/i.test(raw)) return raw;
+    if (/<[a-z][\s\S]*>/i.test(raw)) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = raw;
+      const table = wrap.querySelector("table");
+      if (table) {
+        table.classList.add("lecturas-asc-agent-section-table", "lectura-tabla-sinonimos");
+        return wrap.innerHTML;
+      }
+      const textLines = Array.from(wrap.querySelectorAll("p, li, div, span, strong"))
+        .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+      const parsedRows = parsePairsFromText(textLines.join("\n"));
+      return buildTable(parsedRows) || raw;
+    }
+    return buildTable(parsePairsFromText(raw)) || `<p>${_lecturasAgentSafeHtml(raw)}</p>`;
   }
   if (!Array.isArray(value)) return "";
   const rows = value
@@ -9773,16 +9999,10 @@ function _lecturasAgentBuildSinonimosHtml(value = null) {
         ? item.sinonimos.join(", ")
         : String(item?.sinonimos || item?.sinónimos || item?.equivalente || "").trim();
       if (!palabra && !sinon) return null;
-      return `<tr><td>${_lecturasAgentSafeHtml(palabra || "—")}</td><td>${_lecturasAgentSafeHtml(sinon || "—")}</td></tr>`;
+      return { palabra: palabra || "—", sinonimos: sinon || "—" };
     })
     .filter(Boolean);
-  if (!rows.length) return "";
-  return `
-    <table class="lecturas-asc-agent-section-table">
-      <thead><tr><th>Palabra</th><th>Sinónimos</th></tr></thead>
-      <tbody>${rows.join("")}</tbody>
-    </table>
-  `;
+  return buildTable(rows);
 }
 
 function _lecturasAgentSanitizeRichHtml(html = "") {
@@ -9841,11 +10061,32 @@ function _lecturasAgentPrepareSectionHtml(key = "", html = "") {
   const tables = Array.from(wrap.querySelectorAll("table"));
   tables.forEach((table) => {
     table.classList.add("lecturas-asc-agent-section-table");
+    table.classList.add("lectura-tabla-sinonimos");
     const caption = table.querySelector("caption");
     if (caption && _lecturasAgentIsSectionHeadingDuplicate(caption.textContent || "", sectionKey)) {
       caption.remove();
     }
   });
+  if (!tables.length) {
+    const textNodes = Array.from(wrap.querySelectorAll("p, li, div, span, strong"))
+      .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const compact = textNodes.filter((line) => !/^(tabla de sin[oó]nimos|palabra|sin[oó]nimo(?:s)? simple(?:s)?)$/i.test(line));
+    const rows = [];
+    for (let i = 0; i < compact.length; i += 2) {
+      const palabra = compact[i];
+      const sinonimos = compact[i + 1] || "";
+      if (palabra) rows.push(`<tr><td>${_lecturasAgentSafeHtml(palabra)}</td><td>${_lecturasAgentSafeHtml(sinonimos || "—")}</td></tr>`);
+    }
+    if (rows.length) {
+      wrap.innerHTML = `
+        <table class="lecturas-asc-agent-section-table lectura-tabla-sinonimos">
+          <thead><tr><th>Palabra</th><th>Sinónimo simple</th></tr></thead>
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      `;
+    }
+  }
   return String(wrap.innerHTML || "").trim();
 }
 
@@ -21958,11 +22199,32 @@ window.construirPromptProyecto = function (
     ? "Copia la **lectura detonante provista** como la única **lectura generadora** del proyecto. NO la edites, NO le agregues personajes, NO cambies nombres y NO generes otra lectura."
     : "Escribe una **lectura generadora** (300–500 palabras) segmentada en párrafos cortos."}
       ${bloqueLectura
-    ? "-IMPORTANTE: no agregues tabla de sinónimos dentro de la lectura generadora porque debe quedar exactamente igual a la lectura detonante."
-    : `-IMPORTANTE: envuelve en bold <b>sinonimos</b> las palabras que puedan tener más de una sinónimo
-      -IMPORTANTE: los <b>sinonimos</b> deben ser palabras difíciles
-      -crea una tabla al final de la lectura con las palabras en bold y sus sinónimos, 
-      -los sinónimos de la tabla deben ser sencillos para que los niños los comprendan`}
+    ? `-IMPORTANTE: la lectura generadora debe conservarse EXACTA en su cuerpo narrativo, pero debes analizarla y colocar INMEDIATAMENTE después una tabla de sinónimos como parte del bloque inicial de lectura.
+      -Si la lectura detonante ya incluye una tabla de sinónimos, reprodúcela como tabla HTML real de 2 columnas; NO la conviertas en párrafos.
+      -Si la lectura detonante no incluye tabla, identifícala tú mismo a partir de la lectura y crea una tabla de sinónimos con palabras difíciles del texto.
+      -Usa SIEMPRE este contrato HTML exacto para la tabla:
+      <h3>Tabla de Sinónimos</h3>
+      <table class="lectura-tabla-sinonimos">
+        <thead><tr><th>Palabra</th><th>Sinónimo simple</th></tr></thead>
+        <tbody>
+          <tr><td>Palabra difícil</td><td>Sinónimo sencillo</td></tr>
+        </tbody>
+      </table>
+      -NO entregues la tabla como lista, párrafos sueltos ni texto plano.`
+    : `-IMPORTANTE: marca con <b>...</b> las palabras difíciles de la lectura que tendrán sinónimos.
+      -La tabla de sinónimos es OBLIGATORIA y forma parte de la estructura inicial de la lectura.
+      -Debes colocarla INMEDIATAMENTE después del último párrafo de la lectura usando SIEMPRE este contrato HTML exacto:
+      <h3>Tabla de Sinónimos</h3>
+      <table class="lectura-tabla-sinonimos">
+        <thead><tr><th>Palabra</th><th>Sinónimo simple</th></tr></thead>
+        <tbody>
+          <tr><td>Palabra difícil</td><td>Sinónimo sencillo</td></tr>
+        </tbody>
+      </table>
+      -Incluye entre 6 y 10 filas.
+      -Las palabras de la tabla deben ser palabras realmente presentes en la lectura.
+      -Los sinónimos deben ser muy sencillos y adecuados para niños.
+      -NO entregues la tabla como lista, párrafos sueltos ni texto plano.`}
   3) **Justo después de la lectura generadora, añade 6 preguntas de comprensión tipo PISA**, NO literales:
     - Al menos 1 metacognitiva.
     - Usa el formato EXACTO:
@@ -22717,13 +22979,13 @@ function generarBloqueHabilidad(habilidadClave) {
     - Cada actividad debe ir dentro de <div class="activity">.
     - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
     - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
-    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones + bloque final con etiqueta "Respuesta:".
+    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3... + bloque final con etiqueta "Respuesta:".
     `
     : `
     ESTRUCTURA OBLIGATORIA POR ACTIVIDAD NORMAL:
     <div class="activity">
       <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
-      <ol type="a" class="steps">
+      <ol class="steps steps-numbered">
         <li>[Subactividad 1]</li>
         <li>[Subactividad 2 opcional]</li>
         <li>[Subactividad 3 opcional]</li>
@@ -22769,6 +23031,13 @@ function generarBloqueHabilidad(habilidadClave) {
 
     REGLAS DE LONGITUD Y CLARIDAD:
     ${instruccionLongitud}
+    ${grado === "Primero" ? `
+    ICONOGRAFÍA TEXTUAL PARA PRIMERO:
+    - Solo para Primero, sustituye dentro de la instrucción la palabra de acción correspondiente por su clave textual de iconografía nivel 1 cuando exista coincidencia exacta.
+    - Ejemplos válidos: [IC OBSERVA], [IC ESCRIBE], [IC ENCUENTRA], [IC LEE], [IC COLOREA GENERICO].
+    - Usa la clave textual en lugar de la palabra, no insertes imágenes ni expliques la sustitución.
+    - No inventes claves; usa únicamente claves estándar de nivel 1.
+    ` : ""}
 
     RELACIÓN CON LECTURA:
     ${relacionadaConLectura
@@ -23070,6 +23339,45 @@ function _unidadRenderCompetenciaPrimariaHTML(subtema = "", categoria = "", opti
   `;
 }
 
+function _unidadHabilidadCognitivaPorSubtema(subtema = "", categoria = "", { lectura = false } = {}) {
+  if (lectura) return "ERM";
+  const normalized = _unidadNormalizarSubtemaKey(subtema);
+  const mapa = {
+    Artes: "ECM",
+    Ortografia: "ERM",
+    Gramatica: "ERS",
+    ExpresionEscrita: "NCM",
+    ExpresionOral: "ECM",
+    Habilidades: "DCS",
+    ComprensionLectora: "ERM",
+    Naturales: "CCF",
+    ConocimientoDelMedio: "CRI",
+    MiLocalidad: "CRI",
+    Historia: "ERM",
+    Geografia: "CRI",
+    CivicaEtica: "ERS",
+    Socioemocional: "DCS",
+    Matematicas: "NCM"
+  };
+  if (mapa[normalized]) return mapa[normalized];
+  const categoriaNorm = String(categoria || "").trim();
+  if (categoriaNorm === "Lenguaje y comunicación") return "ERM";
+  if (categoriaNorm === "Ciencias sociales") return "CRI";
+  if (categoriaNorm === "Ciencias experimentales") return "CCF";
+  if (categoriaNorm === "Matemáticas") return "NCM";
+  return "ERM";
+}
+
+function _unidadRenderHabilidadCognitivaHTML(subtema = "", categoria = "", options = {}) {
+  const clave = _unidadHabilidadCognitivaPorSubtema(subtema, categoria, options);
+  if (!clave) return "";
+  return `
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;letter-spacing:.01em;">
+        Habilidad cognitiva asociada: ${_escapeHtmlUnidad(clave)}
+      </span>
+  `;
+}
+
 function _unidadEjeArticuladorPorSubtema(subtema = "", categoria = "", { lectura = false } = {}) {
   if (lectura) {
     return { nombre: "Fomento a la lectura y la escritura", sello: "V" };
@@ -23106,10 +23414,25 @@ function _unidadEjeArticuladorPorSubtema(subtema = "", categoria = "", { lectura
 function _unidadRenderEjeArticuladorHTML(subtema = "", categoria = "", options = {}) {
   const eje = _unidadEjeArticuladorPorSubtema(subtema, categoria, options);
   if (!eje?.nombre || !eje?.sello) return "";
-  return `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bbf7d0;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Eje articulador: ${_escapeHtmlUnidad(eje.nombre)} [${_escapeHtmlUnidad(eje.sello)}]</span>`;
+  return `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #bbf7d0;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Eje articulador: [${_escapeHtmlUnidad(eje.nombre)} ${_escapeHtmlUnidad(eje.sello)}]</span>`;
 }
 
 window.generarProgramaSintetico = function (secuenciaActual) {
+  const resumirListaPedagogica = (items = [], fallback = "-") => {
+    const limitarPalabras = (text = "", maxWords = 25) => {
+      const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+      if (!words.length) return "";
+      if (words.length <= maxWords) return words.join(" ").replace(/[.;:,\s]+$/g, "").trim() + ".";
+      return words.slice(0, maxWords).join(" ").replace(/[.;:,\s]+$/g, "").trim() + ".";
+    };
+
+    const clean = (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (!clean.length) return fallback;
+    return limitarPalabras(clean[0], 25);
+  };
+
   // Columnas para cada campo formativo (Set evita duplicados)
   const columnas = {
     "Lenguajes": { contenido: new Set(), proceso: new Set(), ambiente: "Áulico" },
@@ -23149,8 +23472,8 @@ window.generarProgramaSintetico = function (secuenciaActual) {
   const columnasFinales = {};
   for (const campo in columnas) {
     columnasFinales[campo] = {
-      contenido: Array.from(columnas[campo].contenido).join("<br>") || "-",
-      proceso: Array.from(columnas[campo].proceso).join("<br>") || "-",
+      contenido: resumirListaPedagogica(Array.from(columnas[campo].contenido)),
+      proceso: resumirListaPedagogica(Array.from(columnas[campo].proceso)),
       ambiente: columnas[campo].ambiente
     };
   }
@@ -23174,8 +23497,8 @@ window.generarProgramaSintetico = function (secuenciaActual) {
         <tbody>
           <!-- Contenidos -->
           <tr>
-            <td rowspan="3" style="background:#CFEDEA; font-weight:bold; writing-mode: vertical-rl; transform: rotate(180deg);">
-              Programa<br>Sintético
+            <td rowspan="3" style="background:#CFEDEA; font-weight:bold; writing-mode: vertical-rl; transform: rotate(180deg); white-space:nowrap;">
+              Programa Sintético
             </td>
             <td style="background:#ebf1de; font-weight:bold;">Contenidos</td>
             <td>${columnasFinales["Lenguajes"].contenido}</td>
@@ -23231,7 +23554,7 @@ window.generarRutaSugerida = function (subtemasOrdenados, tablaHTML = "") {
     const colorFondo = coloresPorCategoria[subtema] || (index % 2 ? '#a3d3f5' : '#d0e6ff');
 
     return `
-      <div style="display:flex;align-items:center;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;break-inside:avoid;min-width:0;">
         <div style="
           width:28px;height:28px;
           background:${colorFondo};
@@ -23268,7 +23591,9 @@ window.generarRutaSugerida = function (subtemasOrdenados, tablaHTML = "") {
           Esta herramienta le proporciona orientaciones para la organización de sus actividades durante la semana.
           Se propone un orden para realizar las diferentes secciones de la Unidad didáctica que puede modificar o seguir:
         </p>
-        ${items}
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));column-gap:28px;row-gap:10px;align-items:start;">
+          ${items}
+        </div>
         ${tablaHTML}
       </div>
     </div>
@@ -23728,10 +24053,13 @@ async function generarSeccionCategoria(categoria) {
         ${styleBadgeHtml}
     `;
 
-    // ✅ CORRECCIÓN: Insertar título de categoría al inicio del contenedor
-    // Si hay una lectura global (ej. por prompt) que no se ha mostrado, la inyectamos al inicio de la primera categoría
+    // Insertar título de categoría al inicio del contenedor.
+    // La lectura de Lenguaje debe vivir dentro del primer col-alumno, no en el encabezado de categoría.
     let lecturaGlobalInyectada = "";
-    if (window.lecturaNuevaCoincidenteGlobal && !window.lecturaGlobalMostrada) {
+    const lenguajeConLecturaRelacionada =
+      categoria === "Lenguaje y comunicación" &&
+      subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
+    if (window.lecturaNuevaCoincidenteGlobal && !window.lecturaGlobalMostrada && !lenguajeConLecturaRelacionada) {
        lecturaGlobalInyectada = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, { categoria, statusId: statusCategoriaId });
        window.lecturaGlobalMostrada = true;
     }
@@ -23752,71 +24080,18 @@ async function generarSeccionCategoria(categoria) {
         const chkRelacion = document.querySelector(`input[name='relacion_${sub}']`);
         return chkRelacion ? chkRelacion.checked : false;
       });
-    window.lecturaNuevaCoincidenteGlobal = lectura || null;
+    window.lecturaNuevaCoincidenteGlobal = lectura || lecturaResuelta?.lectura || null;
 
-
-
-    // ✅ CORRECCIÓN: CREAR BLOQUE DE LECTURA GLOBAL UNA SOLA VEZ
-    let bloqueLecturaGlobal = "";
-    if (window.lecturaNuevaCoincidenteGlobal) {
-      // Tomar preguntas desde cualquiera de los dos formatos
-      const preguntasLectura =
-        window.lecturaNuevaCoincidenteGlobal.preguntasComprension ||
-        window.lecturaNuevaCoincidenteGlobal.preguntas ||
-        [];
-      const sinonimosLecturaBase = _extraerSinonimosLecturaUnidad(window.lecturaNuevaCoincidenteGlobal);
-      const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(
-        _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal),
-        sinonimosLecturaBase
-      );
-      const tituloLecturaBase =
-        window.lecturaNuevaCoincidenteGlobal.titulo ||
-        window.lecturaNuevaCoincidenteGlobal.tema ||
-        "Sin título";
-      const encabezadoLecturaBase = "Lectura";
-      const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
-      const wantsReadingGraphic = usoGrafico === "lectura" || usoGrafico === "ambos";
-      const hayImagenLectura = subtemasDeCategoria.some((sub) => !!document.querySelector(`input[name='imagen_${sub}']`)?.checked);
-      let apoyoLecturaHTML = "";
-      if (wantsReadingGraphic && hayImagenLectura) {
-        apoyoLecturaHTML = await _unidadGenerarGraficoDesdeLecturaHTML({ categoria, lecturaResuelta, statusId: statusCategoriaId }).catch(() => "");
-      }
-
-      bloqueLecturaGlobal = `
-            <div class="bloque-lectura-global" style="margin-bottom:22px; padding: 0; border: none; border-radius: 0; background: transparent;">
-                <h3 style="color:#2c5aa0; margin-top:0;">${encabezadoLecturaBase}: ${tituloLecturaBase}</h3>
-                ${apoyoLecturaHTML}
-                <div class="contenido-lectura" style="line-height: 1.6;">
-                    ${contenidoLecturaBase || "<em>Lectura sin contenido disponible</em>"}
-                </div>
-                ${preguntasLectura.length ? `
-                    <div class="preguntas-lectura" style="margin-top:15px;">
-                        <h4>Preguntas de comprensión:</h4>
-                        <ul>
-                            ${preguntasLectura.map(p =>
-        `<li>${(typeof p === "string" ? p : (p.pregunta || p.texto || "")).trim()}<br>
-                                  <span style="color:mediumvioletred;">${(typeof p === "object" ? (p.respuesta || "") : "")}</span></li>`
-      ).join("")
-          }
-                        </ul>
-                    </div>
-                ` : ""}
-            </div>
-        `;
-    }
-
-
-    // ✅ CORRECCIÓN: PARA LENGUAJE Y COMUNICACIÓN - INSERTAR LECTURA GLOBAL DENTRO DEL COL-ALUMNO
+    // ✅ PARA LENGUAJE Y COMUNICACIÓN: la lectura ya se inserta en col-alumno, no duplicar bloque global
     if (categoria === "Lenguaje y comunicación") {
       const algunSubtemaRelacionado = subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
-
-      if (algunSubtemaRelacionado && bloqueLecturaGlobal) {
-
-        // ✅ CORRECCIÓN: Guardar referencia para usarla más tarde
-        // NO la insertamos aquí, solo preparamos la variable
-        window.bloqueLecturaGlobalParaLenguaje = bloqueLecturaGlobal;
+      if (algunSubtemaRelacionado && window.lecturaNuevaCoincidenteGlobal) {
+        window.bloqueLecturaGlobalParaLenguaje = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, {
+          categoria,
+          statusId: statusCategoriaId
+        });
         window.debeInsertarLecturaLenguaje = true;
-
+        window.lecturaGlobalMostrada = true;
       } else {
         window.debeInsertarLecturaLenguaje = false;
         window.bloqueLecturaGlobalParaLenguaje = "";
@@ -23916,10 +24191,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         return;
       }
 
-      const cantidad = parseInt(document.querySelector(`input[name='num_${subtema}']`)?.value || "1", 10);
+      const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
+      const cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema);
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
-      const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
       const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
       const objetivoAE = objetivosDelSubtema.find(o => o.tipo === "AE")?.descripcion || "N/A";
       const objetivoC = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
@@ -24357,10 +24632,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       if (!generarFichas) {
       }
 
-      const cantidad = parseInt(document.querySelector(`input[name='num_${subtema}']`)?.value || "1", 10);
+      const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
+      const cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema);
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
-      const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
       const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
       const objetivoAE = objetivosDelSubtema.find(o => o.tipo === "AE")?.descripcion || "N/A";
       const objetivoC = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
@@ -24493,12 +24768,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const subcategoriaEditorialAlumno = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
         const subcategoriaEditorialMaestro = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "maestro" });
         const campoFormativo = _unidadCampoFormativoDeCategoria(categoria);
-        const competenciasSubcategoriaAlumno = _unidadRenderCompetenciasAscHTML(subtema, categoria);
-        const competenciasSubcategoriaMaestro = _unidadRenderCompetenciasAscHTML(subtema, categoria);
         const competenciaSubcategoriaAlumno = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
         const competenciaSubcategoriaMaestro = _unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: formatearSubtema(subtema) });
         const ejeSubcategoriaAlumno = _unidadRenderEjeArticuladorHTML(subtema, categoria);
         const ejeSubcategoriaMaestro = _unidadRenderEjeArticuladorHTML(subtema, categoria);
+        const habilidadSubcategoriaAlumno = _unidadRenderHabilidadCognitivaHTML(subtema, categoria);
+        const habilidadSubcategoriaMaestro = _unidadRenderHabilidadCognitivaHTML(subtema, categoria);
 
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
@@ -24506,9 +24781,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                       <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
-                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                         ${ejeSubcategoriaAlumno}
-                        ${competenciasSubcategoriaAlumno}
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                       </div>
                       <h4>${tituloCreativoLimpioBase}</h4>
@@ -24519,9 +24794,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                       <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
-                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                         ${ejeSubcategoriaMaestro}
-                        ${competenciasSubcategoriaMaestro}
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${habilidadSubcategoriaMaestro}
                         ${competenciaSubcategoriaMaestro}
                       </div>
                       <h4>Notas del maestro</h4>
@@ -24575,7 +24850,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
         let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
+        htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto);
         let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
         htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados);
@@ -24618,9 +24896,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           }).catch(() => "");
           if (ajustado) htmlAlumnoLimpio = cleanHTML(ajustado);
         }
+        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto);
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
-        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema, categoria });
         let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
@@ -24656,27 +24936,29 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const esPrimerSubtemaLenguaje = (
           categoria === "Lenguaje y comunicación" &&
           subtema === subtemasDeCategoria[0] &&
-          window.debeInsertarLecturaLenguaje &&
-          window.bloqueLecturaGlobalParaLenguaje
+          window.debeInsertarLecturaLenguaje
         );
 
         const lecturaNomenclaturaHTML = esPrimerSubtemaLenguaje
           ? `
               <div class="lectura-global-categoria" style="margin-bottom:30px;">
+                <div id="unidadTemarioResumenMount">${_unidadBuildTemarioUnidadHTML()}</div>
                 <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</span>
-                  ${_unidadRenderCompetenciasAscHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
-                  ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
                   ${_unidadRenderEjeArticuladorHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                  ${_unidadCampoFormativoDeCategoria("Lenguaje y comunicación") ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_unidadCampoFormativoDeCategoria("Lenguaje y comunicación")}</span>` : ""}
+                  ${_unidadRenderHabilidadCognitivaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
+                  ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
                 </div>
-                ${window.bloqueLecturaGlobalParaLenguaje}
+                ${window.bloqueLecturaGlobalParaLenguaje || ""}
               </div>`
           : "";
         if (esPrimerSubtemaLenguaje) {
           htmlAlumnoConApoyoVisual = _unidadStripDuplicatedLectureBlocksFromHtml(htmlAlumnoConApoyoVisual);
         }
+        const lecturaFuenteLenguaje = lectura || lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
         const soporteLecturaMaestroHTML = esPrimerSubtemaLenguaje
-          ? _bloqueMaestroLecturaSoporteUnidad(window.lecturaNuevaCoincidenteGlobal)
+          ? _bloqueMaestroLecturaSoporteUnidad(lecturaFuenteLenguaje)
           : "";
 
         // Una vez insertada, marcar como ya insertada
@@ -24696,9 +24978,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialAlumno}</span>
-                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                         ${ejeSubcategoriaAlumno}
-                        ${competenciasSubcategoriaAlumno}
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                     </div>
                     <h4>${tituloCreativoLimpioBase}</h4>
@@ -24712,9 +24994,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
-                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                         ${ejeSubcategoriaMaestro}
-                        ${competenciasSubcategoriaMaestro}
+                        ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                        ${habilidadSubcategoriaMaestro}
                         ${competenciaSubcategoriaMaestro}
                     </div>
                     <h4>${tituloCreativoLimpioBase}</h4>
@@ -24724,6 +25006,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 </div>
             </div>
           `;
+        _unidadRegisterTemarioSubcategoria({
+          subtema,
+          categoria,
+          titulo: formatearSubtema(subtema),
+          descripcion: AE || T || C || P || formatearSubtema(subtema)
+        });
+        _unidadRefreshTemarioUnidadMount();
         await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoConApoyoVisual);
 
         const promptNotas = construirPromptNotasMaestro(
@@ -24743,7 +25032,15 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const htmlMaestro = (respuestaMaestro || "").replace(/```html|```/g, "").trim();
         const htmlMaestroLimpio = cleanHTML(htmlMaestro);
 
-        let notasFinalesColMaestro = htmlMaestroLimpio;
+        let notasFinalesColMaestro = _unidadBuildTeacherNotesStructuredHtml({
+          contenidoActividades: htmlAlumnoLimpio,
+          categoria,
+          subtema,
+          tituloCreativo: tituloCreativoLimpioBase,
+          grado: gradoTexto,
+          expectedActivityCount: cantidad,
+          rawHtml: htmlMaestroLimpio
+        });
 
         if (actividadesFichas && actividadesFichas.length > 0) {
           const bloqueNotasFicha = await generarNotasDeFichas(actividadesFichas, subtema, tituloCreativoLimpioBase);
@@ -24763,9 +25060,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
-                  ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                   ${ejeSubcategoriaMaestro}
-                  ${competenciasSubcategoriaMaestro}
+                  ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
+                  ${habilidadSubcategoriaMaestro}
                   ${competenciaSubcategoriaMaestro}
               </div>
               <h4>${tituloCreativoLimpioBase}</h4>
@@ -25348,10 +25645,16 @@ function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
  * at the END of the first <p> (main instruction only, not sub-instructions).
  * Detects: Ficha, Anexo, Recortable, Video by keyword match in the block text.
  */
-function _unidadInjectResourceIconsInActivities(html = "") {
+function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   const source = String(html || "");
   if (!source.trim() || typeof DOMParser === "undefined") return source;
 
+  const MODALITY_BADGES = [
+    { regex: /\[IC\s*T\.\s*IND\]/i, label: "IC. T. IND", icon: "fa-solid fa-user", color: "#0f766e", bg: "#ccfbf1" },
+    { regex: /\[IC\s*T\.\s*PAR\]/i, label: "IC. T. PAR", icon: "fa-solid fa-user-group", color: "#1d4ed8", bg: "#dbeafe" },
+    { regex: /\[IC\s*T\.\s*EQUI\]/i, label: "IC. T. EQUI", icon: "fa-solid fa-people-group", color: "#7c3aed", bg: "#ede9fe" }
+  ];
+  const ascChips = _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
   const ICONS = [
     { key: "ficha",      regex: /\bficha\s+[p]?\d+\w*/i,        label: "IC. Fichas",    icon: "fa-solid fa-pen-nib",   color: "#2563eb", bg: "#dbeafe" },
     { key: "anexo",      regex: /\banexo\s+[p]?\d+\w*/i,         label: "IC. Anexo",     icon: "fa-solid fa-paperclip", color: "#d97706", bg: "#fef3c7" },
@@ -25370,18 +25673,45 @@ function _unidadInjectResourceIconsInActivities(html = "") {
   activities.forEach((activity) => {
     const blockText = activity.textContent || "";
     const detected = ICONS.filter(ic => ic.regex.test(blockText));
-    if (!detected.length) return;
+    const detectedModality = MODALITY_BADGES.find((badge) => badge.regex.test(blockText));
+    if (!detected.length && !detectedModality && !ascChips.length) return;
 
     // Only target the first <p> — the main instruction
     const firstP = activity.querySelector("p");
     if (!firstP) return;
 
     // Avoid injecting twice
-    if (firstP.querySelector(".unidad-ic-resource-badge")) return;
+    if (firstP.querySelector(".unidad-ic-resource-badge, .unidad-ic-modality-badge, .unidad-ic-asc-badge")) return;
+
+    if (detectedModality) {
+      firstP.innerHTML = firstP.innerHTML
+        .replace(detectedModality.regex, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+    }
 
     const badgeContainer = doc.createElement("span");
     badgeContainer.className = "unidad-ic-resource-badges";
     badgeContainer.style.cssText = "display:inline-flex;gap:5px;align-items:center;margin-left:8px;vertical-align:middle;flex-wrap:wrap;";
+
+    if (detectedModality) {
+      const modalityChip = doc.createElement("span");
+      modalityChip.className = "unidad-ic-modality-badge";
+      modalityChip.title = detectedModality.label;
+      modalityChip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:${detectedModality.bg};color:${detectedModality.color};font-size:10px;font-weight:700;border:1px solid ${detectedModality.color}33;white-space:nowrap;`;
+      modalityChip.innerHTML = `<i class="${detectedModality.icon}" style="font-size:9px;"></i> ${detectedModality.label}`;
+      badgeContainer.appendChild(modalityChip);
+    }
+
+    ascChips.forEach((chipLabel) => {
+      const theme = _unidadAscThemePorChip(chipLabel);
+      const chip = doc.createElement("span");
+      chip.className = "unidad-ic-asc-badge";
+      chip.title = chipLabel;
+      chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:${theme.bg};color:${theme.text};font-size:10px;font-weight:700;border:1px solid ${theme.border};white-space:nowrap;`;
+      chip.innerHTML = `<i class="fa-solid fa-book-open-reader" style="font-size:9px;"></i> ${_escapeHtmlUnidad(chipLabel)}`;
+      badgeContainer.appendChild(chip);
+    });
 
     detected.forEach(ic => {
       const chip = doc.createElement("span");
@@ -25523,6 +25853,419 @@ function _unidadNormalizeActivityLeadStrong(html = "") {
   });
 
   return doc.body.innerHTML.replace(/^<div>|<\/div>$/g, "");
+}
+
+function _unidadIsPrimerGrado(grado = "") {
+  const safe = String(grado || "").trim().toLowerCase();
+  return safe === "primero" || /^1\b/.test(safe);
+}
+
+function _unidadNormalizeAscNumberedSteps(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const lists = Array.from(root.querySelectorAll(".activity ol, .activity-fichas ol"));
+  lists.forEach((list) => {
+    list.removeAttribute("type");
+    list.setAttribute("class", [list.getAttribute("class"), "steps", "steps-numbered"].filter(Boolean).join(" "));
+  });
+
+  return root.innerHTML;
+}
+
+function _unidadReplaceActionWordsWithPrimerKeysInText(text = "") {
+  let next = String(text || "");
+  const replacements = [
+    ["Observa video", "[IC OBSERVA VIDEO]"],
+    ["Pintura digital multicolor", "[IC PINTURA DIGITAL MULTICOLOR]"],
+    ["Huellas pintura digital", "[IC HUELLAS PINTURA DIGITAL]"],
+    ["Señala multicolor", "[IC SEÑALA MULTICOLOR]"],
+    ["Ordena/clasifica", "[IC ORDENA/CLASIFICA]"],
+    ["Escribe número", "[IC ESCRIBE NUMERO]"],
+    ["Une los puntos", "[IC UNE LOS PUNTOS]"],
+    ["Producción personal", "[IC PRODUCCION PERSONAL]"],
+    ["Relaciona multicolor", "[IC RELACIONA MULTICOLOR]"],
+    ["Colorea multicolor", "[IC COLOREA MULTICOLOR]"],
+    ["Colorea genérico", "[IC COLOREA GENERICO]"],
+    ["Colorea rojo", "[IC COLOREA ROJO]"],
+    ["Colorea azul", "[IC COLOREA AZUL]"],
+    ["Circula multicolor", "[IC CIRCULA MULTICOLOR]"],
+    ["Circula genérico", "[IC CIRCULA GENERICO]"],
+    ["Circula rojo", "[IC CIRCULA ROJO]"],
+    ["Circula azul", "[IC CIRCULA AZUL]"],
+    ["Circula lápiz", "[IC CIRCULA LAPIZ]"],
+    ["Traza multicolor", "[IC TRAZA MULTICOLOR]"],
+    ["Traza genérico", "[IC TRAZA GENERICO]"],
+    ["Traza rojo", "[IC TRAZA ROJO]"],
+    ["Traza azul", "[IC TRAZA AZUL]"],
+    ["Traza verde", "[IC TRAZA VERDE]"],
+    ["Traza lápiz", "[IC TRAZA LAPIZ]"],
+    ["En rectángulo lápiz", "[IC EN RECTANGULO LAPIZ]"],
+    ["En rectángulo genérico", "[IC EN RECTANGULO GENERICO]"],
+    ["En rectángulo azul", "[IC EN RECTANGULO AZUL]"],
+    ["En rectángulo rojo", "[IC EN RECTANGULO ROJO]"],
+    ["Subraya lápiz", "[IC SUBRAYA LAPIZ]"],
+    ["Subraya genérico", "[IC SUBRAYA GENERICO]"],
+    ["Subraya rojo", "[IC SUBRAYA ROJO]"],
+    ["Subraya azul", "[IC SUBRAYA AZUL]"],
+    ["Bloques lógicos", "[IC BLOQUES LOGICOS]"],
+    ["Regletas", "[IC REGLETAS]"],
+    ["Rekenrek", "[IC REKENREK]"],
+    ["Observa", "[IC OBSERVA]"],
+    ["Encuentra", "[IC ENCUENTRA]"],
+    ["Escribe", "[IC ESCRIBE]"],
+    ["Lee", "[IC LEE]"],
+    ["Describe", "[IC DESCRIBE]"],
+    ["Comenta", "[IC COMENTA]"],
+    ["Canta", "[IC CANTA]"],
+    ["Indaga", "[IC INDAGA]"],
+    ["Investiga", "[IC INVESTIGA]"],
+    ["Imagina", "[IC IMAGINA]"],
+    ["Escucha", "[IC ESCUCHA]"],
+    ["Resuelve", "[IC RESUELVE]"],
+    ["Cuenta", "[IC CUENTA]"],
+    ["No cuentes", "[IC NO CUENTES]"],
+    ["Señala", "[IC SEÑALA]"],
+    ["Juego", "[IC JUEGO]"],
+    ["Compara", "[IC COMPARA]"],
+    ["Palomea", "[IC PALOMEA]"],
+    ["Pega", "[IC PEGA]"],
+    ["Corta", "[IC CORTA]"],
+    ["Construye", "[IC CONSTRUYE]"],
+    ["Relaciona", "[IC RELACIONA]"],
+    ["Tacha", "[IC TACHA]"],
+    ["Dibuja", "[IC DIBUJA]"]
+  ];
+
+  replacements.forEach(([phrase, token]) => {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), token);
+  });
+
+  return next;
+}
+
+function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "") {
+  const source = String(html || "");
+  if (!source.trim() || !_unidadIsPrimerGrado(grado) || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const targets = Array.from(root.querySelectorAll(".activity p, .activity li, .activity-fichas p, .activity-fichas li"));
+  targets.forEach((node) => {
+    if (node.closest(".answer")) return;
+    const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(node.textContent || "");
+    if (replaced !== (node.textContent || "")) {
+      node.textContent = replaced;
+    }
+  });
+
+  return root.innerHTML;
+}
+
+function _unidadResolveCantidadActividades(subtema = "", objetivosDelSubtema = []) {
+  const inputValue = parseInt(document.querySelector(`input[name='num_${subtema}']`)?.value || "", 10);
+  if (Number.isFinite(inputValue) && inputValue > 0) return inputValue;
+
+  const objetivoConCantidad = Array.isArray(objetivosDelSubtema)
+    ? objetivosDelSubtema.find((item) => Number.isFinite(parseInt(item?.cantidad, 10)) && parseInt(item?.cantidad, 10) > 0)
+    : null;
+  const fallback = parseInt(objetivoConCantidad?.cantidad || "1", 10);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 1;
+}
+
+function _unidadGetTemarioStore() {
+  if (!window.__unidadTemarioSubcategorias || typeof window.__unidadTemarioSubcategorias !== "object") {
+    window.__unidadTemarioSubcategorias = {};
+  }
+  return window.__unidadTemarioSubcategorias;
+}
+
+function _unidadBuildTemarioDescripcion(text = "") {
+  const plain = String(text || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (!plain) return "";
+  const words = plain.split(" ").filter(Boolean).slice(0, 18);
+  return words.join(" ").replace(/[.;:,\s]+$/g, "").trim() + ".";
+}
+
+function _unidadConvertAeToIndicadorPrimeraPersona(text = "") {
+  const raw = String(text || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const normalized = raw.replace(/[.;:,\s]+$/g, "").trim();
+  const replacements = [
+    [/^desarrollar\b/i, "Desarrollo"],
+    [/^comprender\b/i, "Comprendo"],
+    [/^analizar\b/i, "Analizo"],
+    [/^aplicar\b/i, "Aplico"],
+    [/^escribir\b/i, "Escribo"],
+    [/^reconocer\b/i, "Reconozco"],
+    [/^redactar\b/i, "Redacto"],
+    [/^expresarse\b/i, "Me expreso"],
+    [/^expresar\b/i, "Expreso"],
+    [/^identificar\b/i, "Identifico"],
+    [/^interpretar\b/i, "Interpreto"],
+    [/^gestionar\b/i, "Gestiono"],
+    [/^actuar\b/i, "Actúo"],
+    [/^fomentar\b/i, "Fortalezco"]
+  ];
+  for (const [pattern, replacement] of replacements) {
+    if (pattern.test(normalized)) {
+      return normalized.replace(pattern, replacement) + ".";
+    }
+  }
+  return `Logro ${normalized.charAt(0).toLowerCase()}${normalized.slice(1)}.`;
+}
+
+function _unidadBuildTemarioStars(level = 1) {
+  const count = Math.max(1, Math.min(3, parseInt(level, 10) || 1));
+  return "*".repeat(count);
+}
+
+function _unidadResolveTemarioImportance({
+  subtema = "",
+  titulo = "",
+  descripcion = "",
+  categoria = ""
+} = {}) {
+  const normalize = (text = "") => String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9ñü\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokenize = (text = "") => {
+    const stopwords = new Set(["de", "la", "el", "y", "en", "con", "para", "del", "las", "los", "un", "una", "por", "que", "al"]);
+    return Array.from(new Set(
+      normalize(text).split(" ").filter((word) => word.length >= 4 && !stopwords.has(word))
+    ));
+  };
+
+  const lectura = window.lecturaNuevaCoincidenteGlobal || null;
+  const readingContext = [
+    lectura?.titulo,
+    lectura?.tema,
+    lectura?.contenidoPlano,
+    lectura?.textoLectura,
+    lectura?.contenido
+  ].filter(Boolean).join(" ");
+
+  const sourceTokens = tokenize(`${subtema} ${titulo} ${descripcion} ${categoria}`);
+  const contextTokens = new Set(tokenize(readingContext));
+
+  const overlap = sourceTokens.filter((token) => contextTokens.has(token)).length;
+  if (overlap >= 3) return 3;
+  if (overlap >= 1) return 2;
+  return 1;
+}
+
+function _unidadRegisterTemarioSubcategoria({
+  subtema = "",
+  categoria = "",
+  titulo = "",
+  descripcion = "",
+  importancia = 1
+} = {}) {
+  const key = String(subtema || "").trim();
+  if (!key) return;
+  const store = _unidadGetTemarioStore();
+  store[key] = {
+    subtema: key,
+    categoria: String(categoria || "").trim(),
+    titulo: String(titulo || formatearSubtema(key)).trim() || formatearSubtema(key),
+    descripcion: _unidadBuildTemarioDescripcion(_unidadConvertAeToIndicadorPrimeraPersona(descripcion)),
+    importancia: Math.max(1, Math.min(3, parseInt(importancia, 10) || _unidadResolveTemarioImportance({ subtema: key, titulo, descripcion, categoria })))
+  };
+}
+
+function _unidadBuildTemarioUnidadHTML() {
+  const store = _unidadGetTemarioStore();
+  const entries = Object.values(store || {});
+  if (!entries.length) return "";
+
+  const unidadLabel = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "";
+  const items = entries.map((entry) => {
+    const stars = _unidadBuildTemarioStars(entry.importancia);
+    return `
+      <div style="margin-bottom:14px;">
+        <p style="margin:0 0 4px 0; font-weight:800; color:#0f172a;">${_escapeHtmlUnidad(entry.titulo)} ${stars}</p>
+        <p style="margin:0; color:#475569; line-height:1.45;">${_escapeHtmlUnidad(entry.descripcion || "Descripción pendiente.")}</p>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="unidad-temario-resumen" style="margin:18px 0 26px; padding:18px 20px; border:1px solid #dbe7f3; border-radius:18px; background:#f8fbff;">
+      <h3 style="margin:0 0 14px 0; color:#0f172a; font-size:1.6rem; font-weight:800;">Unidad ${_escapeHtmlUnidad(unidadLabel || "")}</h3>
+      <div class="unidad-temario-resumen-lista">
+        ${items}
+      </div>
+    </div>
+  `;
+}
+
+function _unidadRefreshTemarioUnidadMount() {
+  const mount = document.getElementById("unidadTemarioResumenMount");
+  if (!mount) return;
+  mount.innerHTML = _unidadBuildTemarioUnidadHTML();
+}
+
+function _unidadStripTeacherOnlySectionsFromAlumnoHtml(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const isTeacherOnlyTitle = (text = "") => {
+    const normalized = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    return normalized === "actividad de ampliacion" || normalized === "actividad de refuerzo";
+  };
+
+  Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6, p, strong, div")).forEach((node) => {
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!isTeacherOnlyTitle(text)) return;
+
+    const block = node.closest(".activity, .activity-fichas, .unidad-teacher-extension, .unidad-teacher-reinforcement");
+    if (block) {
+      block.remove();
+      return;
+    }
+
+    const next = node.nextElementSibling;
+    node.remove();
+    if (next && (/^DIV|^P|^OL|^UL$/i.test(next.tagName || ""))) {
+      next.remove();
+    }
+  });
+
+  return root.innerHTML.trim();
+}
+
+function _unidadBuildTeacherNotesStructuredHtml({
+  contenidoActividades = "",
+  categoria = "",
+  subtema = "",
+  tituloCreativo = "",
+  grado = "",
+  expectedActivityCount = 0,
+  rawHtml = ""
+} = {}) {
+  const { actividadesNormales } = extraerActividades(String(contenidoActividades || ""));
+  const cappedActivities = (
+    Number.isFinite(parseInt(expectedActivityCount, 10)) && parseInt(expectedActivityCount, 10) > 0
+      ? actividadesNormales.slice(0, parseInt(expectedActivityCount, 10))
+      : actividadesNormales
+  );
+  if (!cappedActivities.length) return String(rawHtml || "").trim();
+
+  const detectModalidad = (text = "") =>
+    /\[IC\s*T\.\s*IND\]/i.test(text) ? "Trabajo individual" :
+      /\[IC\s*T\.\s*PAR\]/i.test(text) ? "Trabajo en parejas" :
+        /\[IC\s*T\.\s*EQUI\]/i.test(text) ? "Trabajo en equipo" : "Sin modalidad";
+
+  const detectRecursos = (text = "") => {
+    const out = [];
+    const ficha = text.match(/\bFicha\s+[Pp]?\d+\w*/i);
+    const recortable = text.match(/\bRecortable\s+[Pp]?\d+\w*/i);
+    const anexo = text.match(/\bAnexo\s+[Pp]?\d+\w*/i);
+    const video = text.match(/video\s+"([^"]+)"/i);
+    if (ficha) out.push(ficha[0]);
+    if (recortable) out.push(recortable[0]);
+    if (anexo) out.push(anexo[0]);
+    if (video?.[1]) out.push(`video "${video[1]}"`);
+    return out;
+  };
+
+  const extractLead = (activityHtml = "") => {
+    if (typeof DOMParser === "undefined") {
+      return String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${String(activityHtml || "")}</div>`, "text/html");
+    const firstParagraph = doc.querySelector("p");
+    const text = String(firstParagraph?.textContent || doc.body.textContent || "")
+      .replace(/\[IC\s*T\.\s*[A-Z]+\]/gi, "")
+      .replace(/\b\d+\.\s*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text;
+  };
+
+  const tituloSeguro = String(tituloCreativo || formatearSubtema(subtema)).trim();
+  const metacognitivas = [
+    "¿Qué hiciste primero para resolver la actividad?",
+    "¿Cómo comprobaste que tu respuesta era correcta?",
+    "¿Qué apoyo necesitaron algunos alumnos para avanzar?"
+  ];
+  const verbosDocentes = [
+    "guíe al alumno",
+    "acompañe al alumno",
+    "oriente al alumno",
+    "invite al alumno a desarrollar",
+    "conduzca al alumno en",
+    "pida al alumno que realice"
+  ];
+  const actividadesHtml = cappedActivities.map((activityHtml, index) => {
+    const lead = extractLead(activityHtml);
+    const plain = String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const modalidad = detectModalidad(plain);
+    const recursos = detectRecursos(plain);
+    const verboDocente = verbosDocentes[index % verbosDocentes.length];
+    const recursoText = recursos.length
+      ? `Use ${recursos.join(", ")} como apoyo concreto.`
+      : `Modele brevemente antes de iniciar.`;
+    const metaList = index === 0
+      ? `<ol class="unidad-teacher-metacognition">${metacognitivas.map((item) => `<li>${item}</li>`).join("")}</ol>`
+      : "";
+    return `
+      <div class="unidad-teacher-general-item">
+        <p>En la actividad ${index + 1}, ${verboDocente} "${_escapeHtmlUnidad(lead)}" en modalidad ${modalidad.toLowerCase()}. ${recursoText}</p>
+        <p>Pida una explicación breve del procedimiento y cierre con verificación rápida.</p>
+        ${metaList}
+      </div>
+    `;
+  }).join("");
+
+  const refuerzo = `
+    <div class="unidad-teacher-reinforcement">
+      <h3>Actividad de refuerzo</h3>
+      <p>Trabaje una versión guiada del mismo contenido con menos carga verbal, ejemplo resuelto y apoyos visuales para asegurar comprensión.</p>
+    </div>
+  `;
+
+  const neurologia = `
+    <aside class="unidad-teacher-neurology">
+      <h3>Neurología aplicada</h3>
+      <p>Cuando los alumnos formulen buenas preguntas, recupérelas en voz alta, escríbalas en un espacio visible y reutilícelas durante la sesión. Esto fortalece memoria de trabajo, atención sostenida y recuperación activa del aprendizaje.</p>
+      <p>Alterne momentos de observación, verbalización y acción para favorecer distintas rutas de procesamiento. Si un alumno se bloquea, reduzca la tarea, ofrezca una pista concreta y vuelva a incrementar el desafío cuando recupere seguridad.</p>
+    </aside>
+  `;
+
+  return `
+    <div class="unidad-teacher-notes asc-teacher-layout">
+      <h3>Actividad General</h3>
+      ${actividadesHtml}
+      ${refuerzo}
+      ${neurologia}
+    </div>
+  `;
 }
 
 function _unidadEnsureFichaTitles(html = "", recursos = {}) {
@@ -25995,9 +26738,9 @@ function construirPromptNotasMaestro(
   ━━━━━━━━━━━━━━━━━━━━━━━━━━
   ESTRUCTURA FIJA (en este orden):
 
-  1️⃣ <h3 style="color:#1d4ed8;">Actividades generales</h3>
-     - Escribe orientaciones para el maestro sobre CADA actividad general listada arriba (actividad 1, actividad 2, etc.).
-     - 1 párrafo por actividad. Incluye modalidad y recursos mencionados.
+  1️⃣ <h3 style="color:#1d4ed8;">Actividad General</h3>
+     - Escribe orientaciones breves para el maestro sobre cada actividad listada arriba.
+     - 1 párrafo corto por actividad. Incluye modalidad y recursos mencionados.
      - Menciona explícitamente los recursos: ficha, recortable, anexo, video cuando aplique.
 
   2️⃣ <h3 style="color:#7c3aed;">Actividad de ampliación</h3>
@@ -26011,6 +26754,10 @@ function construirPromptNotasMaestro(
      - Debe ser una actividad más sencilla o simplificada del mismo tema.
      - ${recursoRefuerzo ? recursoRefuerzo + " para ejercitar y fortalecer los prerrequisitos." : "Sugiere una actividad manipulativa o simplificada para consolidar."}
      - Recuerde que de forma lúdica se favorecen los procesos de aprendizaje.
+
+  4️⃣ <h3 style="color:#10b981;">Neurología aplicada</h3>
+     - Cierra SIEMPRE con un bloque final de neurología aplicada.
+     - Redacta recomendaciones breves, concretas y accionables para memoria de trabajo, atención, recuperación activa, modelado y andamiaje.
   ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   📌 **Distribución del tiempo:**
@@ -26027,10 +26774,10 @@ function construirPromptNotasMaestro(
   ⚠️ **Restricciones:**
   - NO copies ni reformules las actividades del alumno.
   - Las secciones Ampliación y Refuerzo son actividades NUEVAS creadas por ti, no reformulaciones de las del alumno.
-  - Máximo 1-2 párrafos por actividad general.
+  - Máximo 1 párrafo corto por actividad general.
   - Una sola reflexión de cierre.
   - NO elimines la tabla de candelarización.
-  - RESPETA el orden: Generales → Ampliación → Refuerzo.
+  - RESPETA el orden: Generales → Ampliación → Refuerzo → Neurología aplicada.
   `;
 }
 
@@ -28712,10 +29459,7 @@ async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", sta
   
   const preguntasLectura = lecturaObj.preguntasComprension || lecturaObj.preguntas || [];
   const sinonimosLecturaBase = _extraerSinonimosLecturaUnidad(lecturaObj);
-  const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(
-    _contenidoLecturaUnidad(lecturaObj),
-    sinonimosLecturaBase
-  );
+  const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(_contenidoLecturaUnidad(lecturaObj), sinonimosLecturaBase);
   const tituloLecturaBase = lecturaObj.titulo || lecturaObj.tema || "Sin título";
   const encabezadoLecturaBase = "Lectura Principal";
 
@@ -28734,8 +29478,8 @@ async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", sta
   }
 
   return `
-    <div class="bloque-lectura-global" style="margin-bottom:30px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-        <h2 style="color:#2c5aa0; margin-top:0; border-bottom: 2px solid #2c5aa0; padding-bottom: 10px;">${encabezadoLecturaBase}: ${tituloLecturaBase}</h2>
+    <div class="bloque-lectura-global" style="margin-bottom:30px; padding: 20px; border:none; border-radius:0; background:transparent; box-shadow:none;">
+        <h2 style="color:#000 !important; margin-top:0; border-bottom:none; padding-bottom:10px;">${encabezadoLecturaBase}: ${tituloLecturaBase}</h2>
         ${apoyoLecturaHTML}
         <div class="contenido-lectura" style="line-height: 1.8; font-size: 1.1rem; color: #334155;">
             ${contenidoLecturaBase || "<em>Lectura sin contenido disponible</em>"}

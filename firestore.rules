@@ -609,6 +609,10 @@ service cloud.firestore {
       allow write: if isEditor();
     }
 
+    match /unidadSeriesCatalogo/{docId} {
+      allow read, write: if isEditor();
+    }
+
     match /lecturas_game_profiles_caps/{profileId} {
       allow read, write: if isAdmin() || (
         isSignedIn() &&

@@ -2044,7 +2044,8 @@ REGLAS:
         `;
 
         case "Notas del maestro":
-        case "Teacher's Notes": return isEnglish ? `
+        case "Teacher's Notes":
+        case "notas_maestro": return isEnglish ? `
         Generate a Moodle TEACHER'S NOTES module in structured markdown following this FIXED structure.
 
         REQUIRED HEADINGS:
