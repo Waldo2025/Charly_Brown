@@ -25761,22 +25761,9 @@ function construirPromptNotasMaestro(
     const bloqueNotasFicha = generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo);
   }
 
-  // Label mapping for activity type
-  const getTipoActividad = (textoPlano, idx, total) => {
-    if (/ficha\s*\d+/i.test(textoPlano)) return "Refuerzo";
-    if (/recortable\s*\d+|anexo\s*\d+|video/i.test(textoPlano)) return "Ampliación";
-    // If there are ≥3 activities: last is Ampliación, second-to-last is Refuerzo, rest are General
-    if (total >= 3) {
-      if (idx === total - 1) return "Ampliación";
-      if (idx === total - 2) return "Refuerzo";
-    }
-    return "General";
-  };
-
-  // ✅ Procesar actividades normales
+  // ✅ Procesar actividades normales — todas son Generales (las actividades del alumno siempre son generales)
   const listaNormales = actividadesNormales.map((a, i) => {
     const textoPlano = a.replace(/<[^>]*>/g, "").trim();
-    const tipo = getTipoActividad(textoPlano, i, actividadesNormales.length);
 
     // Extraer recursos específicos
     const fichaMatch = textoPlano.match(/ficha\s+(\d+\w*)/i);
@@ -25798,7 +25785,7 @@ function construirPromptNotasMaestro(
 
     const tituloCorto = textoPlano.split(".")[0];
 
-    return `[ACTIVIDAD ${i + 1}] — TIPO: ${tipo}
+    return `[ACTIVIDAD GENERAL ${i + 1}]
       Título: ${tituloCorto}.
       Modalidad: ${modalidad}
       ${recursosTexto}`;
@@ -25982,67 +25969,68 @@ function construirPromptNotasMaestro(
   }
 
 
+  // Detectar si hay recursos disponibles para sugerir en Refuerzo
+  const recursoRefuerzo = claveFichaActualGlobal
+    ? `Puede apoyarse en la ${claveFichaActualGlobal}`
+    : claveRecortable
+      ? `Puede apoyarse en el ${claveRecortable}`
+      : claveAnexo
+        ? `Puede apoyarse en el ${claveAnexo}`
+        : "";
+
   // ✅ PROMPT FINAL para maestro
   return `
   IMPORTANTE: No repitas ni reformules el texto de las actividades del alumno. SOLO describe estrategias y orientaciones para el maestro.
 
   <h2 style="margin-top:20px; margin-bottom:20px;">${tituloCreativo}</h2>
 
-  Estas son las actividades detectadas para el subtema (nivel **${nivel}**, grado **${grado}**).
-  Cada actividad ya tiene su TIPO asignado — debes respetarlo exactamente:
+  Estas son las actividades del libro del alumno para el subtema (nivel **${nivel}**, grado **${grado}**).
+  TODAS son Actividades Generales — corresponden al trabajo ordinario de la clase:
 
   ${listaNormales}
 
   📌 **Tu tarea como IA**
-  Genera un conjunto completo de **Notas para el Maestro**, en formato HTML, para cada actividad.
+  Genera unas **Notas para el Maestro** completas, en formato HTML, con la siguiente estructura OBLIGATORIA:
 
-  ✅ ESTRUCTURA OBLIGATORIA — agrupa las actividades bajo sus encabezados de tipo:
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ESTRUCTURA FIJA (en este orden):
 
-  1. Primero, coloca un encabezado <h3 style="color:#1d4ed8;">Actividades generales</h3> y lista todas las actividades de TIPO "General".
-  2. Luego, coloca <h3 style="color:#7c3aed;">Actividad de ampliación</h3> y la(s) actividad(es) de TIPO "Ampliación".
-  3. Por último, coloca <h3 style="color:#dc2626;">Actividades de refuerzo</h3> y la(s) actividad(es) de TIPO "Refuerzo".
-  4. Si solo hay 1 o 2 actividades en total, omite los encabezados de tipo y simplemente escribe las notas.
+  1️⃣ <h3 style="color:#1d4ed8;">Actividades generales</h3>
+     - Escribe orientaciones para el maestro sobre CADA actividad general listada arriba (actividad 1, actividad 2, etc.).
+     - 1 párrafo por actividad. Incluye modalidad y recursos mencionados.
+     - Menciona explícitamente los recursos: ficha, recortable, anexo, video cuando aplique.
 
-  ✅ PARA CADA ACTIVIDAD:
-    - Comienza mencionando a qué actividad corresponde: "En la actividad X..."
-    - Describe cómo guiarla en el aula y materiales sugeridos
-    - **Menciona explícitamente los recursos asociados (ficha, anexo, video, recortable)**
-    - Ejemplo: "En la actividad 3, utilice la ${claveFichaActualGlobal} para reforzar..."
-    - Incluye la modalidad de trabajo naturalmente en el texto
-    - Agrega estrategia para estudiantes con barreras de aprendizaje
+  2️⃣ <h3 style="color:#7c3aed;">Actividad de ampliación</h3>
+     - CREA (no copies del alumno) una actividad NUEVA de enriquecimiento para estudiantes avanzados.
+     - Debe estar relacionada con el tema "${tituloCreativo}".
+     - Puede incorporar recursos digitales, trabajo colaborativo o proyectos creativos.
+     - Si existe video o recortable, puedes sugerirlo aquí también.
 
-  📌 **Distribución del tiempo para este subtema:**
+  3️⃣ <h3 style="color:#dc2626;">Actividad de refuerzo</h3>
+     - CREA (no copies del alumno) una sugerencia de apoyo para estudiantes con dificultades.
+     - Debe ser una actividad más sencilla o simplificada del mismo tema.
+     - ${recursoRefuerzo ? recursoRefuerzo + " para ejercitar y fortalecer los prerrequisitos." : "Sugiere una actividad manipulativa o simplificada para consolidar."}
+     - Recuerde que de forma lúdica se favorecen los procesos de aprendizaje.
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  📌 **Distribución del tiempo:**
   - Tema: "${tituloCreativo}"
-  - Actividades detectadas: ${totalActividades}
+  - Actividades generales detectadas: ${actividadesNormales.length}
   - Tiempo total sugerido: ${minutosTotales} minutos
 
-  📌 **Formato exacto de cada bloque en las Notas para el Maestro:**
-
-  <h1>${tituloCreativo}</h1>
-
-  <h3 style="color:#1d4ed8;">Actividades generales</h3>
-  <p style="margin-bottom:20px;">Actividad 1 (General): Estrategias de gestión del aula, <strong>incluyendo modalidad</strong> y un ejemplo/reflexión.</p>
-
-  <h3 style="color:#7c3aed;">Actividad de ampliación</h3>
-  <p style="margin-bottom:20px;">Actividad N (Ampliación): Estrategias de gestión del aula, incluyendo modalidad y recurso asociado.</p>
-
-  <h3 style="color:#dc2626;">Actividades de refuerzo</h3>
-  <p style="margin-bottom:20px;">Actividad N (Refuerzo): Estrategias de gestión del aula, ficha/anexo/recortable asociado.</p>
-  <p style="margin-bottom:20px;">Estrategia simplificada para estudiantes con barreras de aprendizaje.</p>
-
   📌 **Reflexión global al final:**
-  Una sola reflexión de cierre sobre el aprendizaje esperado de las actividades para el maestro.
+  Una sola reflexión de cierre sobre el aprendizaje esperado para el maestro.
 
   **Al final de TODAS las notas, agrega obligatoriamente esta tabla HTML sin cambios:**
   ${tablaCandelarizacion}
 
-
   ⚠️ **Restricciones:**
   - NO copies ni reformules las actividades del alumno.
-  - Máximo 1 párrafo por actividad, detallando al profesor lo que debe hacer para realizar la actividad y cómo llevar una correcta gestión del aula para lograr una actividad exitosa.
-  - Una sola reflexión de cierre sobre el aprendizaje esperado de las actividades para el maestro.
+  - Las secciones Ampliación y Refuerzo son actividades NUEVAS creadas por ti, no reformulaciones de las del alumno.
+  - Máximo 1-2 párrafos por actividad general.
+  - Una sola reflexión de cierre.
   - NO elimines la tabla de candelarización.
-  - RESPETA exactamente los tipos de actividad asignados en la lista (General / Ampliación / Refuerzo).
+  - RESPETA el orden: Generales → Ampliación → Refuerzo.
   `;
 }
 
