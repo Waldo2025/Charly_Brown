@@ -17,9 +17,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const listaResultados = document.getElementById("listaSubcategoriasIA");
 
     let analisisActual = [];
+    let categoriaContexto = "";
 
+    // Abrir modal desde el botón lateral original
     btnOpen?.addEventListener("click", () => {
+        categoriaContexto = "";
         modal.style.display = "flex";
+    });
+
+    // Delegación para botones dinámicos en la tabla de secuencia
+    document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-ingesta-ia");
+        if (btn) {
+            categoriaContexto = btn.dataset.categoria || "";
+            modal.style.display = "flex";
+            if (window.mostrarNotificacion && categoriaContexto) {
+                window.mostrarNotificacion(`🎯 Enfocando análisis en: ${categoriaContexto}`, 'info');
+            }
+        }
     });
 
     const closeMod = () => {
@@ -58,6 +73,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const prompt = `
             Eres un experto en diseño curricular. Analiza el siguiente texto y divídelo en fragmentos que correspondan a subcategorías pedagógicas.
             
+            ${categoriaContexto ? `EL USUARIO ESTÁ ENFOCADO EN LA CATEGORÍA: "${categoriaContexto}". Prioriza subtemas de esta materia si es posible.` : ''}
+
             SUBTEMAS Y CATEGORÍAS DISPONIBLES EN EL SISTEMA:
             ${subtemasStr}
             

@@ -21462,6 +21462,17 @@ async function verificarSecuencia() {
 
             <div class="tooltip">
                 <button type="button" 
+                        class="btn-icono-categoria ingesta-ia btn-ingesta-ia" 
+                        data-categoria="${categoria}" 
+                        title="Generar a partir de texto para esta categoría"
+                        id="btn-ingesta-ia-${categoria.replace(/\s+/g, '-')}">
+                    <i class="fas fa-robot"></i>
+                </button>
+                <span class="tooltiptext">Generar a partir de texto</span>
+            </div>
+
+            <div class="tooltip">
+                <button type="button" 
                         class="btn-icono-categoria generar" 
                         data-categoria="${categoria}" 
                         title="Generar esta sección completa"
@@ -28548,6 +28559,12 @@ estiloIconos.textContent = `
         background-color: #ecfeff !important;
         color: #0f766e !important;
         border-color: #99f6e4 !important;
+    }
+
+    .btn-icono-categoria.ingesta-ia:hover {
+        background-color: #f5f3ff !important;
+        color: #7c3aed !important;
+        border-color: #c4b5fd !important;
     }
     
     .btn-icono-categoria.instrucciones.active {
