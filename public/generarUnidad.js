@@ -19968,7 +19968,9 @@ function _unidadEnsureSyaModalStyles() {
     #${UNIDAD_SYA_MODAL_ID} .unidad-sya-panel {
       width: min(1080px, calc(100vw - 20px));
       max-height: min(88vh, 860px);
-      overflow: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
       background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%);
       border-radius: 14px;
       border: 1px solid rgba(148, 163, 184, 0.26);
@@ -20016,6 +20018,10 @@ function _unidadEnsureSyaModalStyles() {
       grid-template-columns: minmax(240px, 292px) minmax(0, 1fr);
       gap: 12px;
       align-items: start;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding-right: 4px;
     }
     #${UNIDAD_SYA_MODAL_ID} .unidad-sya-card {
       border: 1px solid rgba(226, 232, 240, 0.92);
@@ -20337,6 +20343,10 @@ function _unidadEnsureSyaModalStyles() {
       margin-top: 10px;
     }
     #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      flex-shrink: 0;
       display: flex;
       flex-wrap: wrap;
       justify-content: space-between;
@@ -20345,6 +20355,7 @@ function _unidadEnsureSyaModalStyles() {
       margin-top: 12px;
       padding-top: 10px;
       border-top: 1px solid #e2e8f0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98));
     }
     #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer-actions,
     #${UNIDAD_SYA_MODAL_ID} .unidad-sya-footer-secondary {

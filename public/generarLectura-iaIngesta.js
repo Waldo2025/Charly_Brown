@@ -9,12 +9,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const modal = document.getElementById("modalIngestaMasivaIA");
     const btnCerrar = document.getElementById("cerrarModalIngestaIA");
     const btnCerrarLower = document.getElementById("btnCerrarIngestaIA");
-    const btnAnalizar = document.getElementById("btnAnalizarIngestaIA");
     const btnContinuar = document.getElementById("btnContinuarIngestaIA");
     const txtIngesta = document.getElementById("txtIngestaIA");
     const loading = document.getElementById("loadingIngestaIA");
     const resultado = document.getElementById("resultadoAnalisisIA");
     const listaResultados = document.getElementById("listaSubcategoriasIA");
+    const ingestaSubcatCount = document.getElementById("ingestaSubcatCount");
+    const ingestaSelectionLabel = document.getElementById("ingestaSelectionLabel");
 
     let analisisActual = null;
     let categoriaContexto = "";
@@ -73,6 +74,20 @@ document.addEventListener("DOMContentLoaded", () => {
         loading.classList.add("hidden");
         listaResultados.innerHTML = "";
         analisisActual = null;
+        _actualizarResumenSeleccion();
+    }
+
+    function _actualizarResumenSeleccion() {
+        const total = document.querySelectorAll(".ingesta-checkbox").length;
+        const selected = document.querySelectorAll(".ingesta-checkbox:checked").length;
+        if (ingestaSubcatCount) {
+            ingestaSubcatCount.innerHTML = `<i class="fas fa-layer-group"></i> ${selected} seleccionada${selected === 1 ? "" : "s"}`;
+        }
+        if (ingestaSelectionLabel) {
+            ingestaSelectionLabel.textContent = total
+                ? `${selected} de ${total} subcategorías activas`
+                : "Selecciona las subcategorías destino";
+        }
     }
 
     async function _prepararTextoConGeminiSiHaceFalta({ force = false } = {}) {
@@ -141,10 +156,6 @@ document.addEventListener("DOMContentLoaded", () => {
             btnContinuar.classList.remove("hidden");
         }
     }
-
-    btnAnalizar?.addEventListener("click", async () => {
-        await _prepararTextoConGeminiSiHaceFalta({ force: true });
-    });
 
     btnContinuar?.addEventListener("click", async () => {
         const seleccionados = Array.from(document.querySelectorAll(".ingesta-checkbox:checked"));
@@ -278,24 +289,43 @@ document.addEventListener("DOMContentLoaded", () => {
             listaResultados.innerHTML = `<p class="text-slate-500 text-sm">No hay subcategorías disponibles para mostrar.</p>`;
             resultado.classList.remove("hidden");
             btnContinuar.classList.add("hidden");
+            _actualizarResumenSeleccion();
             return;
         }
 
         subtemas.forEach((sub) => {
-            const card = document.createElement("label");
-            card.className = "flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-purple-300 transition-colors cursor-pointer";
+            const card = document.createElement("button");
+            card.type = "button";
+            card.className = "ingesta-subcat-card";
+            card.setAttribute("aria-pressed", "false");
             card.innerHTML = `
-                <input type="checkbox" name="subcategoriaSelect" value="${sub.subtema}" data-categoria="${sub.categoria}" class="ingesta-checkbox mt-1 w-4 h-4 text-purple-600 focus:ring-purple-500">
-                <div class="flex-1 min-w-0">
-                    <p class="text-xs font-bold text-purple-700 uppercase tracking-wider">${sub.categoria}</p>
-                    <h5 class="text-sm font-bold text-slate-800 truncate">${sub.etiqueta || sub.subtema}</h5>
+                <input type="checkbox" name="subcategoriaSelect" value="${sub.subtema}" data-categoria="${sub.categoria}" class="ingesta-checkbox">
+                <div class="ingesta-subcat-top">
+                    <span class="ingesta-subcat-categoria">${sub.categoria}</span>
+                    <span class="ingesta-subcat-check"><i class="fas fa-check"></i></span>
                 </div>
+                <h5 class="ingesta-subcat-name">${sub.etiqueta || sub.subtema}</h5>
+                <p class="ingesta-subcat-helper">Usar este texto como base de la subcategoría ${sub.etiqueta || sub.subtema}.</p>
             `;
+            const checkbox = card.querySelector(".ingesta-checkbox");
+            const syncState = () => {
+                const active = !!checkbox?.checked;
+                card.classList.toggle("is-selected", active);
+                card.setAttribute("aria-pressed", active ? "true" : "false");
+            };
+            card.addEventListener("click", () => {
+                if (!checkbox) return;
+                checkbox.checked = !checkbox.checked;
+                syncState();
+                _actualizarResumenSeleccion();
+            });
+            syncState();
             listaResultados.appendChild(card);
         });
 
         resultado.classList.remove("hidden");
         btnContinuar.classList.remove("hidden");
+        _actualizarResumenSeleccion();
     }
 
     function _storageKeyForImportedText(categoria = "", subtema = "") {

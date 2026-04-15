@@ -4125,64 +4125,702 @@
 
 
   <script src="update-banner-loader.js" defer></script>
+  <style>
+    #modalIngestaMasivaIA {
+      backdrop-filter: blur(5px);
+      background: rgba(15, 23, 42, 0.42);
+    }
+
+    :root {
+      --cb-editorial-shell-bg:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.96) 14%, rgba(247, 249, 252, 0.98) 14%, rgba(255,255,255,0.98) 100%);
+      --cb-editorial-shell-border: 1px solid rgba(148, 163, 184, 0.26);
+      --cb-editorial-shell-shadow: 0 30px 90px rgba(15, 23, 42, 0.32);
+      --cb-editorial-head-bg:
+        radial-gradient(circle at top right, rgba(96, 165, 250, 0.14), transparent 28%),
+        linear-gradient(135deg, rgba(15,23,42,0.96), rgba(30,41,59,0.94));
+      --cb-editorial-card-bg: linear-gradient(180deg, #ffffff, #f8fafc);
+      --cb-editorial-card-border: 1px solid #dbe3ef;
+      --cb-editorial-card-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+      --cb-editorial-pill-bg: #eef2ff;
+      --cb-editorial-pill-text: #4338ca;
+    }
+
+    #modalIngestaMasivaIA .modal-lecturas-contenido.ingesta-panel {
+      width: min(1120px, calc(100vw - 56px));
+      max-width: 1120px;
+      border: var(--cb-editorial-shell-border);
+      border-top: none;
+      border-radius: 24px;
+      overflow: hidden;
+      background: var(--cb-editorial-shell-bg);
+      box-shadow: var(--cb-editorial-shell-shadow);
+    }
+
+    #modalIngestaMasivaIA .ingesta-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 26px 18px;
+      color: #f8fafc;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+      background: var(--cb-editorial-head-bg);
+    }
+
+    #modalIngestaMasivaIA .ingesta-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    #modalIngestaMasivaIA .ingesta-title-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #8b5cf6, #4f46e5);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
+      color: #fff;
+      font-size: 18px;
+    }
+
+    #unidadSyaModal {
+      backdrop-filter: blur(5px);
+      background: rgba(15, 23, 42, 0.42) !important;
+    }
+
+    #unidadSyaModal .unidad-sya-panel,
+    #modalInstruccionesGemini .modal-contenido-instrucciones,
+    .cb-unidad-style-menu.is-open {
+      border: var(--cb-editorial-shell-border) !important;
+      border-radius: 24px !important;
+      overflow: hidden;
+      background: var(--cb-editorial-shell-bg) !important;
+      box-shadow: var(--cb-editorial-shell-shadow) !important;
+      backdrop-filter: blur(8px);
+    }
+
+    #unidadSyaModal .unidad-sya-header,
+    #modalInstruccionesGemini .modal-header-instrucciones,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-header {
+      margin: 0 !important;
+      padding: 18px 22px !important;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.22) !important;
+      background: var(--cb-editorial-head-bg) !important;
+      color: #f8fafc !important;
+    }
+
+    #unidadSyaModal .unidad-sya-header h3,
+    #modalInstruccionesGemini .modal-header-instrucciones h3,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-header h3,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-header h4 {
+      color: #f8fafc !important;
+      font-size: 1.3rem !important;
+      font-weight: 800 !important;
+      letter-spacing: -0.02em !important;
+      margin: 0 !important;
+    }
+
+    #unidadSyaModal .unidad-sya-context,
+    #modalInstruccionesGemini #categoriaInstrucciones,
+    #modalInstruccionesGemini .modal-header-instrucciones p,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-header p {
+      color: rgba(226, 232, 240, 0.82) !important;
+    }
+
+    #unidadSyaModal .unidad-sya-close,
+    #modalInstruccionesGemini .cb-modal-close,
+    #modalInstruccionesGemini #cerrarModalInstrucciones,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-close {
+      width: 42px !important;
+      height: 42px !important;
+      min-width: 42px !important;
+      border-radius: 14px !important;
+      border: 1px solid rgba(148, 163, 184, 0.26) !important;
+      background: rgba(255,255,255,0.08) !important;
+      color: #e2e8f0 !important;
+      box-shadow: none !important;
+    }
+
+    #unidadSyaModal .unidad-sya-close:hover,
+    #modalInstruccionesGemini .cb-modal-close:hover,
+    #modalInstruccionesGemini #cerrarModalInstrucciones:hover,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-close:hover {
+      background: rgba(255,255,255,0.16) !important;
+      border-color: rgba(191, 219, 254, 0.44) !important;
+      color: #fff !important;
+      transform: translateY(-1px);
+    }
+
+    #unidadSyaModal .unidad-sya-layout,
+    #modalInstruccionesGemini .modal-contenido-instrucciones > div:last-child {
+      background: linear-gradient(180deg, rgba(248,250,252,0.82), #fff 18%);
+    }
+
+    #unidadSyaModal .unidad-sya-card,
+    #modalInstruccionesGemini .instrucciones-preview,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-body,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-section {
+      background: var(--cb-editorial-card-bg) !important;
+      border: var(--cb-editorial-card-border) !important;
+      border-radius: 18px !important;
+      box-shadow: var(--cb-editorial-card-shadow) !important;
+    }
+
+    #modalInstruccionesGemini {
+      background: rgba(15, 23, 42, 0.42) !important;
+      backdrop-filter: blur(5px);
+    }
+
+    #modalInstruccionesGemini .modal-contenido-instrucciones {
+      width: min(860px, calc(100vw - 40px)) !important;
+      max-width: 860px !important;
+      max-height: min(88vh, 860px) !important;
+      padding: 0 !important;
+    }
+
+    #modalInstruccionesGemini .modal-contenido-instrucciones > div:last-child {
+      padding: 20px 22px 22px !important;
+    }
+
+    #modalInstruccionesGemini .instrucciones-textarea {
+      width: 100% !important;
+      min-height: 170px !important;
+      border: 1px solid #dbe3ef !important;
+      border-radius: 18px !important;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94)) !important;
+      color: #172033 !important;
+      padding: 16px 18px !important;
+      font-family: "Aptos", "Segoe UI", sans-serif !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+
+    #modalInstruccionesGemini .cb-modal-foot {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 14px 0 0 !important;
+      margin-top: 18px !important;
+      border-top: 1px solid #dbe3ef;
+    }
+
+    #modalInstruccionesGemini .cb-modal-foot button {
+      border-radius: 14px !important;
+      min-height: 42px;
+      padding: 0 16px !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+      border: 1px solid transparent !important;
+      box-shadow: none !important;
+    }
+
+    #modalInstruccionesGemini #btnGuardarInstrucciones {
+      background: linear-gradient(135deg, #4f46e5, #2563eb) !important;
+      color: #fff !important;
+    }
+
+    #modalInstruccionesGemini #btnCancelarInstrucciones {
+      background: #fff !important;
+      color: #334155 !important;
+      border-color: #dbe3ef !important;
+    }
+
+    #modalInstruccionesGemini #btnBorrarInstrucciones {
+      background: linear-gradient(180deg, #0f172a, #1e293b) !important;
+      color: #fff !important;
+    }
+
+    #unidadSyaModal .unidad-sya-panel {
+      width: min(1120px, calc(100vw - 56px)) !important;
+      max-height: min(88vh, 860px) !important;
+      padding: 0 !important;
+    }
+
+    #unidadSyaModal .unidad-sya-layout {
+      padding: 20px 22px 0 !important;
+      gap: 18px !important;
+    }
+
+    #unidadSyaModal .unidad-sya-card {
+      padding: 16px !important;
+    }
+
+    #unidadSyaModal .unidad-sya-card h4 {
+      color: #0f172a !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+      letter-spacing: 0.04em !important;
+    }
+
+    #unidadSyaModal .unidad-sya-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 18px !important;
+      border-top: 1px solid #dbe3ef !important;
+      background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(241,245,249,0.96)) !important;
+    }
+
+    #unidadSyaModal .unidad-sya-btn,
+    .cb-unidad-style-menu.is-open button {
+      border-radius: 14px !important;
+      min-height: 42px !important;
+      padding: 0 16px !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+    }
+
+    .cb-unidad-style-menu.is-open {
+      min-width: 360px;
+      padding: 0 !important;
+      border-radius: 22px !important;
+    }
+
+    .cb-unidad-style-menu.is-open .cb-unidad-style-menu-body {
+      margin: 16px !important;
+      padding: 14px !important;
+    }
+
+    .cb-unidad-style-menu.is-open .cb-unidad-style-option,
+    .cb-unidad-style-menu.is-open .cb-unidad-style-chip,
+    .cb-unidad-style-menu.is-open label {
+      border-radius: 14px !important;
+    }
+
+    @media (max-width: 960px) {
+      #unidadSyaModal .unidad-sya-footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      #unidadSyaModal .unidad-sya-footer-secondary,
+      #unidadSyaModal .unidad-sya-footer-actions {
+        width: 100%;
+      }
+
+      #modalInstruccionesGemini .modal-contenido-instrucciones,
+      #unidadSyaModal .unidad-sya-panel,
+      .cb-unidad-style-menu.is-open {
+        width: calc(100vw - 24px) !important;
+      }
+    }
+
+    #modalIngestaMasivaIA .ingesta-title-block h3 {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+
+    #modalIngestaMasivaIA .ingesta-title-block p {
+      margin: 5px 0 0;
+      font-size: 12px;
+      color: rgba(226, 232, 240, 0.82);
+    }
+
+    #modalIngestaMasivaIA .ingesta-close {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      background: rgba(255,255,255,0.08);
+      color: #e2e8f0;
+      font-size: 22px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    #modalIngestaMasivaIA .ingesta-close:hover {
+      background: rgba(255,255,255,0.16);
+      border-color: rgba(191, 219, 254, 0.44);
+      transform: translateY(-1px);
+    }
+
+    #modalIngestaMasivaIA .ingesta-body {
+      padding: 22px 24px 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      align-items: start;
+      background: linear-gradient(180deg, rgba(248,250,252,0.82), #fff 18%);
+    }
+
+    #modalIngestaMasivaIA .ingesta-editor-card,
+    #modalIngestaMasivaIA .ingesta-sidebar-card {
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      border: 1px solid #dbe3ef;
+      border-radius: 22px;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+      overflow: hidden;
+    }
+
+    #modalIngestaMasivaIA .ingesta-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid #e5edf7;
+      background: linear-gradient(180deg, rgba(241,245,249,0.88), rgba(255,255,255,0.92));
+    }
+
+    #modalIngestaMasivaIA .ingesta-card-head h4 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #0f172a;
+    }
+
+    #modalIngestaMasivaIA .ingesta-card-head span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    #txtIngestaIA.ingesta-editor {
+      min-height: 28rem;
+      max-height: 34rem;
+      overflow-y: auto;
+      padding: 20px 22px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94)),
+        repeating-linear-gradient(180deg, transparent 0 27px, rgba(148,163,184,0.10) 27px 28px);
+      color: #172033;
+      font-size: 15px;
+      line-height: 1.72;
+      outline: none;
+      border: none;
+      font-family: "Aptos", "Segoe UI", sans-serif;
+    }
+
+    #txtIngestaIA.ingesta-editor:empty::before {
+      content: attr(placeholder);
+      color: #94a3b8;
+    }
+
+    #modalIngestaMasivaIA .ingesta-sidebar-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      max-height: 34rem;
+    }
+
+    #modalIngestaMasivaIA .ingesta-sidebar-scroll {
+      padding: 16px 18px 18px;
+      overflow-y: auto;
+    }
+
+    #modalIngestaMasivaIA .ingesta-status-note {
+      margin: 0 0 14px;
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    #modalIngestaMasivaIA .ingesta-selection-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #334155;
+      border: 1px solid #dbe3ef;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    #listaSubcategoriasIA.ingesta-subcat-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-card {
+      position: relative;
+      width: 100%;
+      text-align: left;
+      border: 1px solid #dbe3ef;
+      border-radius: 18px;
+      padding: 15px 16px 14px;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      cursor: pointer;
+      transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-card:hover {
+      transform: translateY(-1px);
+      border-color: #93c5fd;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.10);
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-card.is-selected {
+      border-color: #4f46e5;
+      background: linear-gradient(135deg, rgba(79,70,229,0.08), rgba(59,130,246,0.08) 68%, rgba(255,255,255,0.96));
+      box-shadow: 0 12px 28px rgba(79, 70, 229, 0.16);
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-card input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-categoria {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-check {
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.16s ease;
+      flex-shrink: 0;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-card.is-selected .ingesta-subcat-check {
+      background: linear-gradient(135deg, #4f46e5, #2563eb);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(79, 70, 229, 0.24);
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-name {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #172033;
+      letter-spacing: -0.01em;
+    }
+
+    #listaSubcategoriasIA .ingesta-subcat-helper {
+      margin: 8px 0 0;
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.45;
+    }
+
+    #modalIngestaMasivaIA .ingesta-loading {
+      margin-top: 14px;
+      padding: 18px;
+      border-radius: 18px;
+      border: 1px dashed #cbd5e1;
+      background: linear-gradient(180deg, #f8fafc, #eff6ff);
+      text-align: center;
+    }
+
+    #modalIngestaMasivaIA .ingesta-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-top: 1px solid #dbe3ef;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.92), rgba(241,245,249,0.96));
+    }
+
+    #modalIngestaMasivaIA .ingesta-footer-note {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      color: #64748b;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    #modalIngestaMasivaIA .ingesta-footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn {
+      border: 1px solid transparent;
+      border-radius: 14px;
+      min-height: 42px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      cursor: pointer;
+      transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn-secondary {
+      background: #fff;
+      border-color: #dbe3ef;
+      color: #334155;
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn-secondary:hover {
+      box-shadow: 0 8px 22px rgba(148, 163, 184, 0.20);
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn-neutral {
+      background: linear-gradient(180deg, #0f172a, #1e293b);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn-primary {
+      background: linear-gradient(135deg, #4f46e5, #2563eb);
+      color: #fff;
+      box-shadow: 0 12px 28px rgba(79, 70, 229, 0.24);
+    }
+
+    #modalIngestaMasivaIA .ingesta-btn-primary:disabled,
+    #modalIngestaMasivaIA .ingesta-btn-neutral:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    @media (max-width: 960px) {
+      #modalIngestaMasivaIA .modal-lecturas-contenido.ingesta-panel {
+        width: calc(100vw - 24px);
+      }
+
+      #modalIngestaMasivaIA .ingesta-body {
+        grid-template-columns: 1fr;
+      }
+
+      #modalIngestaMasivaIA .ingesta-sidebar-card {
+        max-height: none;
+      }
+
+      #modalIngestaMasivaIA .ingesta-footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      #modalIngestaMasivaIA .ingesta-footer-actions {
+        width: 100%;
+        justify-content: stretch;
+      }
+
+      #modalIngestaMasivaIA .ingesta-footer-actions .ingesta-btn {
+        flex: 1;
+      }
+    }
+  </style>
+
   <!-- MODAL: Ingesta Masiva por IA -->
   <div id="modalIngestaMasivaIA" class="modal-lecturas" style="display:none;">
-      <div class="modal-lecturas-contenido" style="max-width: 800px; border-top: 4px solid #7c3aed;">
-          <div class="modal-lecturas-header" style="background: #f8fafc; color: #1e293b; border-bottom: 1px solid #e2e8f0;">
-              <h3><i class="fas fa-robot text-purple-600"></i> Generar a partir de texto</h3>
-              <button id="cerrarModalIngestaIA" class="cerrar-modal-lecturas" style="color: #64748b;">&times;</button>
-          </div>
-          <div class="modal-lecturas-body" style="padding: 24px; gap: 24px;">
-              <div class="space-y-4">
-                  <div class="flex items-center justify-between">
-                      <label class="block text-sm font-bold text-slate-700">Contenido a procesar</label>
-                      <span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500">Elige la subcategoría y usa el texto pegado como base</span>
+      <div class="modal-lecturas-contenido ingesta-panel">
+          <div class="ingesta-header">
+              <div class="ingesta-title-wrap">
+                  <span class="ingesta-title-icon"><i class="fas fa-robot"></i></span>
+                  <div class="ingesta-title-block">
+                      <h3>Generar a partir de texto</h3>
+                      <p>Convierte contenido existente al formato ASC y vincúlalo a una o varias subcategorías.</p>
                   </div>
-                  <div id="txtIngestaIA" 
+              </div>
+              <button id="cerrarModalIngestaIA" class="ingesta-close" type="button" aria-label="Cerrar">&times;</button>
+          </div>
+          <div class="ingesta-body">
+              <section class="ingesta-editor-card">
+                  <div class="ingesta-card-head">
+                      <h4>Contenido a procesar</h4>
+                      <span><i class="fas fa-file-lines"></i> Texto base del alumno</span>
+                  </div>
+                  <div id="txtIngestaIA"
                        contenteditable="true"
-                       style="min-height: 18rem; max-height: 24rem; overflow-y: auto;"
-                       class="w-full p-4 border border-slate-200 rounded-xl font-sans text-sm focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all shadow-sm bg-white empty:before:content-[attr(placeholder)] empty:before:text-slate-400 cursor-text" 
-                       placeholder="Pega aquí el contenido de un manual, libro o apuntes (el formato se mantendrá para la IA)..."></div>
-              </div>
-              
-              <div id="loadingIngestaIA" class="hidden flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                  <i class="fas fa-circle-notch fa-spin text-3xl text-purple-600 mb-3"></i>
-                  <span class="font-bold text-slate-700">Preparando estructura pedagógica...</span>
-                  <p class="text-xs text-slate-500 mt-1">Limpiando y organizando el texto para reutilizarlo en la generación</p>
-              </div>
+                       class="ingesta-editor"
+                       placeholder="Pega aquí el contenido de un manual, libro o apuntes. Gemini respetará el texto fuente y solo lo organizará al formato ASC."></div>
+              </section>
 
-              <div id="resultadoAnalisisIA" class="hidden space-y-4">
-                  <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <i class="fas fa-check-circle text-green-500"></i>
-                      <h4 class="font-bold text-slate-800 text-sm">Subcategorías disponibles:</h4>
+              <aside class="ingesta-sidebar-card">
+                  <div class="ingesta-card-head">
+                      <h4>Subcategorías disponibles</h4>
+                      <span id="ingestaSubcatCount"><i class="fas fa-layer-group"></i> 0 seleccionadas</span>
                   </div>
-                  <div id="listaSubcategoriasIA" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2">
-                      <!-- Aquí se insertarán las tarjetas de subcategorías -->
+                  <div class="ingesta-sidebar-scroll">
+                      <p class="ingesta-status-note">Selecciona una o varias subcategorías. El texto pegado se reutilizará como base para esas secciones.</p>
+                      <div id="loadingIngestaIA" class="hidden ingesta-loading">
+                          <i class="fas fa-circle-notch fa-spin" style="font-size:28px; color:#4f46e5; margin-bottom:10px;"></i>
+                          <div style="font-weight:800; color:#0f172a;">Preparando estructura pedagógica...</div>
+                          <p style="margin:6px 0 0; font-size:12px; color:#64748b;">Limpiando, ordenando y vinculando el texto al formato ASC.</p>
+                      </div>
+
+                      <div id="resultadoAnalisisIA" class="hidden">
+                          <div class="ingesta-selection-count">
+                              <i class="fas fa-check-circle"></i>
+                              <span id="ingestaSelectionLabel">Selecciona las subcategorías destino</span>
+                          </div>
+                          <div id="listaSubcategoriasIA" class="ingesta-subcat-grid">
+                              <!-- Aquí se insertarán las tarjetas de subcategorías -->
+                          </div>
+                      </div>
                   </div>
-                  <p class="text-[10px] text-slate-500 italic">Selecciona una o varias subcategorías para transformar el texto pegado en esas secciones.</p>
-              </div>
+              </aside>
           </div>
-          <div class="modal-lecturas-footer" style="padding: 20px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
-              <div class="flex items-center gap-2 mr-auto text-[11px] text-slate-500">
-                  <i class="fas fa-info-circle"></i>
-                  <span>El análisis del texto es opcional; la selección de subcategorías ya está disponible</span>
+          <div class="ingesta-footer">
+              <div class="ingesta-footer-actions">
+                  <button id="btnContinuarIngestaIA" class="ingesta-btn ingesta-btn-primary hidden" type="button">
+                      <i class="fas fa-rocket"></i> Iniciar proceso
+                  </button>
+                  <button id="btnCerrarIngestaIA" class="ingesta-btn ingesta-btn-secondary" type="button">
+                      Cancelar
+                  </button>
               </div>
-              <button id="btnAnalizarIngestaIA" class="btn-principal" 
-                      style="background: #1e293b; color: white; border: none; padding: 10px 22px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; items-center; gap: 8px; transition: all 0.2s;">
-                  <i class="fas fa-magic"></i> Preparar texto
-              </button>
-              <button id="btnContinuarIngestaIA" class="btn-principal hidden"
-                      style="background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); color: white; border: none; padding: 10px 22px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; items-center; gap: 8px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.2);">
-                  <i class="fas fa-rocket"></i> Iniciar proceso
-              </button>
-              <button id="btnCerrarIngestaIA" class="btn-secundario"
-                      style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
-                  Cancelar
-              </button>
           </div>
       </div>
   </div>
 
-  <script type="module" src="generarLectura-iaIngesta.js?v=2026-1.0.1.17"></script>
+  <script type="module" src="generarLectura-iaIngesta.js?v=2026-1.0.1.18"></script>
 </body>
 </html>
