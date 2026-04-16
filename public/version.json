@@ -1,5 +1,5 @@
 {
-  "version": "2026-1.0.1.16",
+  "version": "2026-1.0.1.19",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
@@ -12,4 +12,3 @@
     "Mejora: Modalidad de actividades (individual, pares, equipo) ahora aparece en lenguaje natural en las notas."
   ]
 }
-
