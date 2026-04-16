@@ -702,7 +702,7 @@ function insertarGraficoDespuesDeActividadOriginal(baseHtml = "", figureHtml = "
     container.innerHTML = html;
     container.querySelectorAll(".cb-module-generated-graphic").forEach((node) => node.remove());
 
-    const originalHeading = container.querySelector(".cb-module-block-title.is-original");
+    const originalHeading = container.querySelector(".cb-module-block-title.is-original, .cb-module-block-title.is-proposal");
     if (!originalHeading) {
         return `${figure}\n${container.innerHTML.trim()}`.trim();
     }
@@ -717,6 +717,94 @@ function insertarGraficoDespuesDeActividadOriginal(baseHtml = "", figureHtml = "
     insertAfter.insertAdjacentHTML("afterend", figure);
     return container.innerHTML.trim();
 }
+
+function asegurarTituloPropuestaEnHtml(html = "", tipoModulo = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return raw;
+    const container = document.createElement("div");
+    container.innerHTML = raw;
+    if (container.querySelector(".cb-module-block-title.is-proposal")) {
+        return raw;
+    }
+
+    const tipoNormalizado = String(tipoModulo || "").trim().toLowerCase();
+    if (tipoNormalizado === "lectura" || tipoNormalizado === "temario") {
+        return raw;
+    }
+
+    const title = document.createElement("h3");
+    title.className = "cb-module-block-title is-proposal";
+    title.textContent = "Propuesta de actividad";
+    container.insertBefore(title, container.firstChild);
+    return container.innerHTML.trim();
+}
+
+function construirBloqueImagenOriginalPropuesta(instruccionesHtml = "", limite = 2) {
+    const raw = String(instruccionesHtml || "").trim();
+    if (!raw) return "";
+    const container = document.createElement("div");
+    container.innerHTML = raw;
+
+    const bloques = [];
+    const vistos = new Set();
+    const capturarNodo = (node) => {
+        if (!node || vistos.has(node)) return;
+        vistos.add(node);
+        bloques.push(node.outerHTML);
+    };
+
+    container.querySelectorAll("figure").forEach((figure) => {
+        if (figure.querySelector("img")) {
+            capturarNodo(figure);
+        }
+    });
+
+    if (!bloques.length) {
+        container.querySelectorAll("img").forEach((img) => {
+            if (bloques.length >= limite) return;
+            const src = String(img.getAttribute("src") || "").trim();
+            if (!src) return;
+            const alt = String(img.getAttribute("alt") || "Imagen original").trim() || "Imagen original";
+            bloques.push(`
+                <figure class="cb-module-original-image">
+                    <img src="${escapeHtmlValue(src)}" alt="${escapeHtmlValue(alt)}" class="cb-module-original-image__img" />
+                </figure>
+            `.trim());
+        });
+    }
+
+    const figuras = bloques.slice(0, Math.max(1, Number(limite) || 1)).join("");
+    if (!figuras) return "";
+    return `
+        <div class="cb-module-original-image-block">
+            <h4>Imagen original</h4>
+            ${figuras}
+        </div>
+    `.trim();
+}
+
+function insertarImagenOriginalEnPropuesta(html = "", instruccionesHtml = "", tipoModulo = "") {
+    let contenido = asegurarTituloPropuestaEnHtml(html, tipoModulo);
+    const bloqueImagenOriginal = construirBloqueImagenOriginalPropuesta(instruccionesHtml, 2);
+    if (!bloqueImagenOriginal) return contenido;
+
+    const container = document.createElement("div");
+    container.innerHTML = contenido;
+    if (container.querySelector(".cb-module-original-image-block, .cb-module-original-image")) {
+        return asegurarTituloPropuestaEnHtml(container.innerHTML.trim(), tipoModulo);
+    }
+    const title = container.querySelector(".cb-module-block-title.is-proposal");
+    if (!title) {
+        container.insertAdjacentHTML("afterbegin", bloqueImagenOriginal);
+        return container.innerHTML.trim();
+    }
+
+    title.insertAdjacentHTML("afterend", bloqueImagenOriginal);
+    return container.innerHTML.trim();
+}
+
+window.asegurarTituloPropuestaEnHtml = asegurarTituloPropuestaEnHtml;
+window.insertarImagenOriginalEnPropuesta = insertarImagenOriginalEnPropuesta;
 
 function combinarContenidoConGrafico(image = {}, contenido = "", modulo = {}) {
     const baseHtml = limpiarHtmlGraficoGenerado(contenido);
@@ -1356,10 +1444,12 @@ export async function generarModuloGemini(moduloId) {
         const instruccionesRaw = modulo.instrucciones || "";
         const cursoIdPersistencia = String(modulo.cursoId || cursoIdModulo || "").trim() || null;
         const incluirInstruccionOriginalEnPropuesta = modulo.incluirInstruccionOriginalEnPropuesta === true;
+        const incluirImagenOriginalEnPropuesta = modulo.incluirImagenOriginalEnPropuesta === true;
         const generarGrafico = modulo.generarGrafico === true;
         const ignorarContextoOtrosModulos = modulo.ignorarContextoOtrosModulos === true;
         const { textOnly: instruccionesSoloTexto, richText: instruccionesRichText, images: imagenesInstrucciones } =
             extraerPartesMultimodalesDesdeInstrucciones(instruccionesRaw, modulo.id || moduloId);
+        const imagenesParaAnalisis = incluirImagenOriginalEnPropuesta ? imagenesInstrucciones : [];
         const instruccionesParaPrompt = modulo.tipo === "Lectura" && String(instruccionesRichText || "").trim()
             ? instruccionesRichText
             : instruccionesSoloTexto;
@@ -1370,16 +1460,16 @@ export async function generarModuloGemini(moduloId) {
         const cantidadActividadesBase = inferirCantidadActividadesBase(instruccionesParaPrompt);
         const preferenciasQuizz = detectarPreferenciasQuizz(
             instruccionesParaPrompt,
-            imagenesInstrucciones.length
+            imagenesParaAnalisis.length
         );
         const dominioActividad = inferirDominioActividad(
             instruccionesParaPrompt,
-            imagenesInstrucciones.length
+            imagenesParaAnalisis.length
         );
         const microtipoActividad = inferirMicrotipoActividad(
             instruccionesParaPrompt,
             dominioActividad.code,
-            imagenesInstrucciones.length
+            imagenesParaAnalisis.length
         );
         const anclaMatematica = dominioActividad.code === "math"
             ? extraerAnclaMatematica(instruccionesParaPrompt)
@@ -1456,7 +1546,7 @@ export async function generarModuloGemini(moduloId) {
         const contextoSubtemaCompacto = ignorarContextoOtrosModulos ? "" : obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
         const imagenesLimitadas = [];
         let totalInlineChars = 0;
-        imagenesInstrucciones.slice(0, 2).forEach((img) => {
+        imagenesParaAnalisis.slice(0, 2).forEach((img) => {
             const data = String(img?.data || "").trim();
             if (!data) return;
             if ((totalInlineChars + data.length) > 900000) return;
@@ -1466,6 +1556,11 @@ export async function generarModuloGemini(moduloId) {
                 data
             });
         });
+        const instruccionesParaPromptFinal = instruccionesParaPrompt || (
+            incluirImagenOriginalEnPropuesta && imagenesLimitadas.length > 0
+                ? "(Sin instrucciones textuales. Usa la imagen adjunta como referencia principal.)"
+                : "(Sin instrucciones textuales.)"
+        );
 
         const prompt = `
         ${ignorarContextoOtrosModulos ? `
@@ -1485,7 +1580,7 @@ export async function generarModuloGemini(moduloId) {
         Nombre: ${modulo.nombre}
 
         ===== INSTRUCCIONES DEL AUTOR =====
-        ${instruccionesParaPrompt || "(Sin instrucciones textuales. Usa la imagen adjunta como referencia principal.)"}
+        ${instruccionesParaPromptFinal}
         ${dominioActividad.code === "math" && instruccionesMatematicasNormalizadas !== instruccionesSoloTexto ? `
 
         ===== NORMALIZACIÓN DE NOTACIÓN MATEMÁTICA =====
@@ -1525,6 +1620,15 @@ export async function generarModuloGemini(moduloId) {
         - ${anclaMatematica.usesPowers ? "Conserva potencias/cuadrados si aparecen en el ejemplo base." : "No escales a expresiones de grado mayor si el ejemplo no lo exige."}
         - ${anclaMatematica.usesParentheses ? "Conserva una complejidad estructural similar con agrupaciones comparables." : "No aumentes la complejidad estructural sin necesidad."}
         - "Más difícil" significa un poco más de razonamiento dentro de la MISMA familia de ejercicios, no introducir técnicas nuevas como factorización cúbica, división polinómica, asíntotas, límites o funciones avanzadas.
+        ` : ""}
+
+        ${imagenesLimitadas.length > 0 ? `
+        ===== IMAGEN ORIGINAL DEL AUTOR =====
+        - El autor habilitó el uso de la imagen original como referencia.
+        - Reutiliza la imagen para crear una actividad nueva, coherente y pedagógicamente adaptada a las instrucciones del autor.
+        - No copies literal el ejercicio: conserva la intención didáctica, pero reformula la consigna, el nivel o el formato según corresponda.
+        - Si la imagen muestra un ejercicio completo, usa su estructura visual y temática como base sin perder el sentido original.
+        ======================================
         ` : ""}
 
         ${imagenesLimitadas.length > 0 ? `
@@ -1683,7 +1787,8 @@ export async function generarModuloGemini(moduloId) {
         if (typeof window.aplicarVisibilidadActividadOriginalEnContenido === "function") {
             contenidoParaGuardar = window.aplicarVisibilidadActividadOriginalEnContenido(contenidoParaGuardar, {
                 ...modulo,
-                incluirInstruccionOriginalEnPropuesta: false
+                incluirInstruccionOriginalEnPropuesta: false,
+                incluirImagenOriginalEnPropuesta: false
             }, false);
         }
 
@@ -1692,13 +1797,13 @@ export async function generarModuloGemini(moduloId) {
             try {
                 setEstadoGeneracionModulo(moduloIdNormalizado, "Analizando actividades para diseñar el gráfico...", "info", true);
                 const image = await generarGraficoComplementarioModulo({
-                    modulo,
-                    cursoId: cursoIdPersistencia,
-                    instrucciones: instruccionesParaPrompt,
-                    contenido: contenidoParaGuardar,
-                    idioma: idiomaDetectadoModulo,
-                    instructionImages: imagenesLimitadas
-                });
+                modulo,
+                cursoId: cursoIdPersistencia,
+                instrucciones: instruccionesParaPrompt,
+                contenido: contenidoParaGuardar,
+                idioma: idiomaDetectadoModulo,
+                instructionImages: imagenesLimitadas
+            });
                 contenidoParaGuardar = typeof window.normalizarContenidoModuloPersistible === "function"
                     ? window.normalizarContenidoModuloPersistible(combinarContenidoConGrafico(image, contenidoParaGuardar, {
                         ...modulo,
@@ -1723,6 +1828,19 @@ export async function generarModuloGemini(moduloId) {
                 contenidoParaGuardar,
                 modulo,
                 incluirInstruccionOriginalEnPropuesta
+            );
+        }
+
+        if (incluirImagenOriginalEnPropuesta && typeof window.insertarImagenOriginalEnPropuesta === "function") {
+            contenidoParaGuardar = window.insertarImagenOriginalEnPropuesta(
+                contenidoParaGuardar,
+                instruccionesRaw,
+                modulo?.tipo || ""
+            );
+        } else if (typeof window.asegurarTituloPropuestaEnHtml === "function") {
+            contenidoParaGuardar = window.asegurarTituloPropuestaEnHtml(
+                contenidoParaGuardar,
+                modulo?.tipo || ""
             );
         }
 

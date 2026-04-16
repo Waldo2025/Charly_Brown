@@ -4195,6 +4195,7 @@ btnCrearCurso.addEventListener("click", async () => {
             contenido: construirContenidoInicialModulo("Temario"),
             instrucciones: construirInstruccionesInicialesModulo("Temario"),
             incluirInstruccionOriginalEnPropuesta: false,
+            incluirImagenOriginalEnPropuesta: false,
             generarGrafico: false,
             ignorarContextoOtrosModulos: false,
             traducciones: [],
@@ -4210,6 +4211,7 @@ btnCrearCurso.addEventListener("click", async () => {
             contenido: construirContenidoInicialModulo("Lectura"),
             instrucciones: construirInstruccionesInicialesModulo("Lectura"),
             incluirInstruccionOriginalEnPropuesta: false,
+            incluirImagenOriginalEnPropuesta: false,
             generarGrafico: false,
             ignorarContextoOtrosModulos: false,
             traducciones: [],
@@ -5388,6 +5390,7 @@ btnAddTema.addEventListener("click", async () => {
         contenido: construirContenidoInicialModulo("Temario"),
         instrucciones: construirInstruccionesInicialesModulo("Temario"),
         incluirInstruccionOriginalEnPropuesta: false,
+        incluirImagenOriginalEnPropuesta: false,
         generarGrafico: false,
         ignorarContextoOtrosModulos: false,
         traducciones: [],
@@ -5404,6 +5407,7 @@ btnAddTema.addEventListener("click", async () => {
         contenido: construirContenidoInicialModulo("Lectura"),
         instrucciones: construirInstruccionesInicialesModulo("Lectura"),
         incluirInstruccionOriginalEnPropuesta: false,
+        incluirImagenOriginalEnPropuesta: false,
         generarGrafico: false,
         ignorarContextoOtrosModulos: false,
         traducciones: [],
@@ -7670,12 +7674,26 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         if (mod.archivado && !mostrarModulosArchivados) continue;
 
         const esActivo = modId === moduloActivoId || mod.id === moduloActivoId;
-        const contenidoModuloHtml = renderizarContenidoModulo(mod.contenido, mod.tipo || "");
-        const tieneActividadOriginal = contenidoModuloYaIncluyeActividadOriginal(contenidoModuloHtml);
+        let contenidoModuloHtml = renderizarContenidoModulo(mod.contenido, mod.tipo || "");
+        if (mod.incluirImagenOriginalEnPropuesta && typeof window.insertarImagenOriginalEnPropuesta === "function") {
+            contenidoModuloHtml = window.insertarImagenOriginalEnPropuesta(
+                contenidoModuloHtml,
+                mod.instrucciones || "",
+                mod.tipo || ""
+            );
+        } else if (typeof window.asegurarTituloPropuestaEnHtml === "function") {
+            contenidoModuloHtml = window.asegurarTituloPropuestaEnHtml(contenidoModuloHtml, mod.tipo || "");
+        }
+        const mostrarActividadOriginal = mod.mostrarActividadOriginal !== false;
+        const bloqueActividadOriginal = construirActividadOriginalHtmlModulo(mod);
+        const renderBloqueOriginal = bloqueActividadOriginal && !contenidoModuloYaIncluyeActividadOriginal(contenidoModuloHtml)
+            ? bloqueActividadOriginal
+            : "";
 
         html += `
 <div class="p-4 border rounded-md bg-white shadow-sm hover:bg-gray-50 transition
-    ${esActivo ? 'modulo-activo highlight-pulse' : ''}" 
+    ${esActivo ? 'modulo-activo highlight-pulse' : ''}
+    ${mostrarActividadOriginal ? '' : 'modulo-original-oculta'}" 
     id="modulo-${mod.id}"
     data-modulo-archivado="${mod.archivado ? "true" : "false"}">
 
@@ -7722,11 +7740,11 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
             </button>
 
             <button type="button" class="icon-btn btn-modulo-accion"
-                    title="${tieneActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
-                    aria-label="${tieneActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                    title="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                    aria-label="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
                     data-mc-action="agregar-actividad-original-modulo"
                     data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas ${tieneActividadOriginal ? 'fa-eye-slash' : 'fa-square-plus'} text-emerald-600"></i>
+                <i class="fas ${mostrarActividadOriginal ? 'fa-eye' : 'fa-eye-slash'} text-emerald-600"></i>
             </button>
 
             <div class="cb-module-actions-menu">
@@ -7756,6 +7774,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
     <!-- CONTENIDO DEL MÓDULO -->
     <div class="mt-3">
         <div id="spinner-${mod.id}" class="text-blue-600 text-xs mb-2 hidden"></div>
+        ${renderBloqueOriginal}
 
         <!-- 🔥 CORRECCIÓN CRUCIAL: Usar esModoLecturaReal en lugar de modoLectura -->
         <div class="p-3 bg-gray-50 border border-gray-200 rounded modulo-contenido ${!esModoLecturaReal ? 'contenido-editable' : ''}" 
@@ -8901,6 +8920,19 @@ function decorarContenidoModuloRenderizado(html = "", tipoModulo = "") {
     root.innerHTML = raw;
     expandirBloquesEstructuradosModulo(root);
     renderizarStemEnElemento(root);
+
+    const tipoNormalizado = normalizarTipoModulo(tipoModulo);
+    const yaTieneTituloPropuesta = root.querySelector(".cb-module-block-title.is-proposal");
+    const pareceContenidoDeActividad =
+        root.querySelector(".cb-module-question-heading, .cb-module-feedback-line, .cb-module-generated-graphic") ||
+        /^(pregunta\s+\d+|pregunta:|opciones:|respuesta correcta:|retroalimentaci[oó]n correcta:|retroalimentaci[oó]n incorrecta:|actividad\s+\d+)/im.test(String(root.textContent || "").trim());
+    if (!yaTieneTituloPropuesta && tipoNormalizado !== "temario" && tipoNormalizado !== "lectura" && pareceContenidoDeActividad) {
+        root.insertAdjacentHTML(
+            "afterbegin",
+            '<h3 class="cb-module-block-title is-proposal">Propuesta de actividad</h3>'
+        );
+    }
+
     if (normalizarTipoModulo(tipoModulo) === "temario") {
         decorarTablaTemario(root);
     }
@@ -9758,6 +9790,122 @@ function obtenerSubtemaActualDesdeCurso(subtemaId) {
     return null;
 }
 
+function obtenerMetaSelectorModulo(tipo = "") {
+    const tipoNormalizado = normalizarTipoModulo(tipo);
+    const meta = {
+        quizz: {
+            icon: "fa-circle-question",
+            accent: "blue",
+            ayuda: "Preguntas, respuestas y retroalimentacion."
+        },
+        pagina: {
+            icon: "fa-file-lines",
+            accent: "slate",
+            ayuda: "Contenido limpio para lectura o referencia."
+        },
+        temario: {
+            icon: "fa-table-list",
+            accent: "emerald",
+            ayuda: "Estructura de ruta, tabla o secuencia."
+        },
+        lectura: {
+            icon: "fa-book-open-reader",
+            accent: "amber",
+            ayuda: "Texto base para transcripcion o analisis."
+        },
+        archivo: {
+            icon: "fa-file",
+            accent: "gray",
+            ayuda: "Archivo simple para adjuntar material."
+        },
+        libro: {
+            icon: "fa-book",
+            accent: "violet",
+            ayuda: "Bloques largos con secciones."
+        },
+        leccion: {
+            icon: "fa-chalkboard-user",
+            accent: "rose",
+            ayuda: "Secuencia guiada paso a paso."
+        },
+        tarea: {
+            icon: "fa-clipboard-check",
+            accent: "orange",
+            ayuda: "Actividad evaluable con entrega."
+        },
+        url: {
+            icon: "fa-link",
+            accent: "cyan",
+            ayuda: "Enlace externo o recurso web."
+        },
+        "archivo adjunto": {
+            icon: "fa-paperclip",
+            accent: "indigo",
+            ayuda: "Documento o recurso adjunto."
+        },
+        notas_maestro: {
+            icon: "fa-chalkboard-teacher",
+            accent: "green",
+            ayuda: "Guia docente para apoyar la clase."
+        }
+    };
+
+    return meta[tipoNormalizado] || {
+        icon: "fa-puzzle-piece",
+        accent: "slate",
+        ayuda: "Plantilla general de contenido."
+    };
+}
+
+function obtenerEtiquetaSelectorModulo(tipo = "") {
+    const tipoNormalizado = normalizarTipoModulo(tipo);
+    const etiquetas = {
+        quizz: "Interactivo",
+        pagina: "Texto",
+        temario: "Ruta",
+        lectura: "Lectura",
+        archivo: "Archivo",
+        libro: "Capitulos",
+        leccion: "Guiado",
+        tarea: "Entrega",
+        url: "Web",
+        "archivo adjunto": "Adjunto",
+        notas_maestro: "Docente"
+    };
+
+    return etiquetas[tipoNormalizado] || "Base";
+}
+
+function setModalSelectorModuloBusy(modal, busy = false) {
+    if (!modal) return;
+    const lista = modal.querySelector("#listaOpcionesModulo");
+    const btnCancelar = modal.querySelector("#btnCancelarSelectorModulo");
+    const btnCerrar = modal.querySelector("#btnCerrarSelectorModulo");
+    const status = modal.querySelector("#selectorModuloStatus");
+
+    modal.dataset.creando = busy ? "1" : "0";
+    modal.setAttribute("aria-busy", busy ? "true" : "false");
+
+    if (lista) {
+        lista.querySelectorAll("[data-selector-modulo-card]").forEach((btn) => {
+            btn.disabled = !!busy;
+            btn.setAttribute("aria-disabled", busy ? "true" : "false");
+        });
+    }
+
+    if (btnCancelar) {
+        btnCancelar.disabled = !!busy;
+    }
+
+    if (btnCerrar) {
+        btnCerrar.disabled = !!busy;
+    }
+
+    if (status) {
+        status.classList.toggle("hidden", !busy);
+    }
+}
+
 function mostrarSelectorModulo(subtema) {
     const tipos = [
         "Quizz",
@@ -9776,52 +9924,94 @@ function mostrarSelectorModulo(subtema) {
     const modal = document.getElementById("modalSelectorModulo");
     const lista = document.getElementById("listaOpcionesModulo");
     const btnCancelar = document.getElementById("btnCancelarSelectorModulo");
+    const btnCerrar = document.getElementById("btnCerrarSelectorModulo");
+    const status = document.getElementById("selectorModuloStatus");
 
     // Limpiar lista
     lista.innerHTML = "";
+    if (status) {
+        status.classList.add("hidden");
+        status.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Creando módulo...</span>';
+    }
+    if (modal) {
+        setModalSelectorModuloBusy(modal, false);
+    }
 
     // Crear botones
     tipos.forEach(tipo => {
+        const meta = obtenerMetaSelectorModulo(tipo);
         const btn = document.createElement("button");
-        btn.className = "w-full text-left px-3 py-2 border border-border rounded-md hover:bg-accent text-sm text-foreground bg-background";
-        btn.textContent = tipo;
+        btn.type = "button";
+        btn.dataset.selectorModuloCard = "1";
+        btn.className = `cb-selector-modulo-card cb-selector-modulo-card--${meta.accent}`;
+        btn.innerHTML = `
+            <span class="cb-selector-modulo-card__icon" aria-hidden="true">
+                <i class="fas ${meta.icon}"></i>
+            </span>
+            <span class="cb-selector-modulo-card__body">
+                <span class="cb-selector-modulo-card__title">${tipo}</span>
+                <span class="cb-selector-modulo-card__meta">${obtenerEtiquetaSelectorModulo(tipo)}</span>
+                <span class="cb-selector-modulo-card__help">${meta.ayuda}</span>
+            </span>
+            <span class="cb-selector-modulo-card__spinner" aria-hidden="true">
+                <i class="fas fa-spinner fa-spin"></i>
+            </span>
+            <i class="fas fa-chevron-right cb-selector-modulo-card__chevron" aria-hidden="true"></i>
+        `;
 
         btn.addEventListener("click", async () => {
-            const nuevoModuloId = crypto.randomUUID();
+            if (modal?.dataset?.creando === "1") return;
+            setModalSelectorModuloBusy(modal, true);
+            btn.classList.add("is-loading");
+            if (status) {
+                status.classList.remove("hidden");
+            }
 
-            const nuevoModulo = {
-                id: nuevoModuloId,
-                cursoId: curso.id,
-                subtemaId: subtema.id,
-                tipo,
-                nombre: tipo,
-                contenido: construirContenidoInicialModulo(tipo),
-                instrucciones: construirInstruccionesInicialesModulo(tipo),
-                incluirInstruccionOriginalEnPropuesta: false,
-                generarGrafico: false,
-                ignorarContextoOtrosModulos: false,
-                traducciones: [],
-                creado: Date.now(),
-                actualizado: Date.now()
-            };
+            try {
+                const nuevoModuloId = crypto.randomUUID();
 
-            await guardarModulo(nuevoModuloId, nuevoModulo, curso.id);
+                const nuevoModulo = {
+                    id: nuevoModuloId,
+                    cursoId: curso.id,
+                    subtemaId: subtema.id,
+                    tipo,
+                    nombre: tipo,
+                    contenido: construirContenidoInicialModulo(tipo),
+                    instrucciones: construirInstruccionesInicialesModulo(tipo),
+                    incluirInstruccionOriginalEnPropuesta: false,
+                    generarGrafico: false,
+                    ignorarContextoOtrosModulos: false,
+                    traducciones: [],
+                    creado: Date.now(),
+                    actualizado: Date.now()
+                };
 
-            // 📌 GUARDAR SOLO EL ID INTERNO EN EL SUBTEMA
-            if (!subtema.modulosIds) subtema.modulosIds = [];
-            subtema.modulosIds.push(nuevoModuloId);  // Solo el ID interno
+                await guardarModulo(nuevoModuloId, nuevoModulo, curso.id);
 
-            await guardarCursoFirebase();
-            localStorage.setItem("moduloActivo", nuevoModuloId);
-            renderTemas();
-            const subtemaActual = obtenerSubtemaActualDesdeCurso(subtema.id) || subtema;
-            await cargarSubtema(subtemaActual, nuevoModuloId);
-            modal.classList.add("hidden");
-            modal.classList.remove("flex");
+                // 📌 GUARDAR SOLO EL ID INTERNO EN EL SUBTEMA
+                if (!subtema.modulosIds) subtema.modulosIds = [];
+                subtema.modulosIds.push(nuevoModuloId);  // Solo el ID interno
+
+                await guardarCursoFirebase();
+                localStorage.setItem("moduloActivo", nuevoModuloId);
+                renderTemas();
+                const subtemaActual = obtenerSubtemaActualDesdeCurso(subtema.id) || subtema;
+                await cargarSubtema(subtemaActual, nuevoModuloId);
+                modal.classList.add("hidden");
+                modal.classList.remove("flex");
+            } catch (error) {
+                console.error("No se pudo crear el módulo:", error);
+                alert(`No se pudo crear el módulo.\n${error?.message || ""}`);
+            } finally {
+                if (modal) {
+                    setModalSelectorModuloBusy(modal, false);
+                }
+                btn.classList.remove("is-loading");
+                if (status) {
+                    status.classList.add("hidden");
+                }
+            }
         });
-
-
-
         lista.appendChild(btn);
     });
 
@@ -9831,9 +10021,14 @@ function mostrarSelectorModulo(subtema) {
 
     // CANCELAR
     btnCancelar.onclick = () => {
+        setModalSelectorModuloBusy(modal, false);
         modal.classList.add("hidden");
         modal.classList.remove("flex");
     };
+
+    if (btnCerrar) {
+        btnCerrar.onclick = btnCancelar.onclick;
+    }
 }
 
 
@@ -12489,8 +12684,10 @@ function construirActividadOriginalHtmlModulo(modulo = {}) {
         ? sanitizarHtmlEditorial(hydrated)
         : `<p>${escapeHtml(hydrated).replace(/\n/g, "<br>")}</p>`;
     return `
-        <p>Actividad original</p>
-        <div>${bodyHtml}</div>
+        <div class="word-instruccion-original">
+            <h4>Actividad original</h4>
+            <div>${bodyHtml}</div>
+        </div>
     `.trim();
 }
 
@@ -12664,42 +12861,41 @@ window.agregarActividadOriginalAlModulo = async function(moduloId) {
         alert("No se encontró el módulo.");
         return;
     }
-    if (!String(modulo.instrucciones || "").trim()) {
-        alert("Este módulo no tiene instrucciones guardadas para convertirlas en actividad original.");
-        return;
+    const mostrarActual = modulo.mostrarActividadOriginal !== false;
+    const nuevaVisibilidad = !mostrarActual;
+    const payloadLocal = {
+        mostrarActividadOriginal: nuevaVisibilidad
+    };
+
+    sincronizarModuloLocal(moduloId, cursoIdModulo, payloadLocal);
+
+    const card = document.getElementById(`modulo-${moduloId}`);
+    if (card) {
+        card.classList.toggle("modulo-original-oculta", !nuevaVisibilidad);
+        const icon = card.querySelector('[data-mc-action="agregar-actividad-original-modulo"] i');
+        if (icon) {
+            icon.classList.toggle("fa-eye", nuevaVisibilidad);
+            icon.classList.toggle("fa-eye-slash", !nuevaVisibilidad);
+        }
+        const originalBlock = card.querySelector(".word-instruccion-original");
+        if (originalBlock) {
+            originalBlock.hidden = !nuevaVisibilidad;
+        }
     }
 
-    const contenidoActual = String(modulo.contenido || "").trim();
-    const contenidoRenderizadoActual = renderizarContenidoModulo(contenidoActual, modulo.tipo || "");
-    const yaVisible = contenidoModuloYaIncluyeActividadOriginal(contenidoRenderizadoActual);
-
-    if (!yaVisible && !construirActividadOriginalHtmlModulo(modulo)) {
-        alert("No se pudo construir la actividad original a partir de las instrucciones del módulo.");
-        return;
-    }
-    const contenidoPersistible = aplicarVisibilidadActividadOriginalEnContenido(contenidoActual, modulo, !yaVisible);
-    await guardarModulo(moduloId, {
-        contenido: contenidoPersistible
-    }, cursoIdModulo);
+    await guardarModulo(moduloId, payloadLocal, cursoIdModulo);
 
     const moduloActualizado = {
         ...modulo,
-        contenido: contenidoPersistible
+        mostrarActividadOriginal: nuevaVisibilidad
     };
-    const cont = document.getElementById(`contenido-${moduloId}`);
-    if (cont) {
-        cont.innerHTML = renderizarContenidoModulo(contenidoPersistible, modulo.tipo || "");
-        if (typeof activarAccionesEnParrafos === "function") {
-            window.setTimeout(() => activarAccionesEnParrafos(), 0);
-        }
-    }
     modulosCache.set(construirDocIdModulo(moduloId, cursoIdModulo), moduloActualizado);
     if (window.subtemaActivo?.modulos && Array.isArray(window.subtemaActivo.modulos)) {
         const target = window.subtemaActivo.modulos.find((item) => String(item?.id || "").trim() === String(moduloId || "").trim());
         if (target) Object.assign(target, moduloActualizado);
     }
     renderTemas();
-    mostrarNotificacion(yaVisible ? "Actividad original oculta." : "Actividad original mostrada.", "success");
+    mostrarNotificacion(nuevaVisibilidad ? "Actividad original mostrada." : "Actividad original oculta.", "success");
 };
 
 function limpiarRespuestaTraduccionModulo(texto = "", tipoModulo = "") {
@@ -13676,41 +13872,61 @@ document.addEventListener('DOMContentLoaded', function() {
             const clipboardData = e.clipboardData || window.clipboardData;
             if (!clipboardData) return;
 
-            const items = Array.from(clipboardData.items || []);
-            const imageItems = items.filter((item) => String(item?.type || "").startsWith("image/"));
-            if (imageItems.length > 0) {
+    const items = Array.from(clipboardData.items || []);
+    const imageItems = items.filter((item) => String(item?.type || "").startsWith("image/"));
+    const clipboardHtml = clipboardData.getData('text/html') || "";
+    const clipboardText = clipboardData.getData('text/plain') || "";
+    const htmlTieneImagenes = /<img\b/i.test(clipboardHtml) || /data:image\//i.test(clipboardHtml) || /<figure\b/i.test(clipboardHtml);
+    if (imageItems.length > 0) {
                 e.preventDefault();
                 try {
                     editor.focus();
                     restaurarSeleccionGemini();
 
-                    const html = clipboardData.getData('text/html') || "";
-                    const text = clipboardData.getData('text/plain') || "";
+                    let contenidoPegado = false;
 
-                    if (html && !/<img\b/i.test(html)) {
-                        if (contieneTablaEnHtml(html)) {
-                            let htmlContent = html;
+                    if (clipboardHtml) {
+                        if (contieneTablaEnHtml(clipboardHtml)) {
+                            let htmlContent = clipboardHtml;
                             const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
                             if (bodyMatch) htmlContent = bodyMatch[1];
                             htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
                             htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
                             insertarHtmlEnEditorGemini(htmlContent);
+                            contenidoPegado = true;
+                        } else if (htmlTieneImagenes) {
+                            let htmlContent = clipboardHtml;
+                            const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+                            if (bodyMatch) htmlContent = bodyMatch[1];
+                            htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                            htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+                            insertarHtmlEnEditorGemini(htmlContent);
+                            contenidoPegado = true;
                         } else {
-                            document.execCommand('insertHTML', false, html);
+                            document.execCommand('insertHTML', false, clipboardHtml);
                             guardarSeleccionGemini();
+                            contenidoPegado = true;
                         }
-                    } else if (text && !esTextoTabular(text)) {
-                        document.execCommand('insertText', false, text);
+                    } else if (clipboardText && !esTextoTabular(clipboardText)) {
+                        document.execCommand('insertText', false, clipboardText);
                         guardarSeleccionGemini();
-                    } else if (text && esTextoTabular(text)) {
-                        const tableHTML = convertirTextoTabularATablaHTML(text);
-                        if (tableHTML) insertarHtmlEnEditorGemini(tableHTML);
+                        contenidoPegado = true;
+                    } else if (clipboardText && esTextoTabular(clipboardText)) {
+                        const tableHTML = convertirTextoTabularATablaHTML(clipboardText);
+                        if (tableHTML) {
+                            insertarHtmlEnEditorGemini(tableHTML);
+                            contenidoPegado = true;
+                        }
                     }
 
-                    for (const item of imageItems) {
-                        const file = item.getAsFile?.() || null;
-                        // eslint-disable-next-line no-await-in-loop
-                        await manejarPegadoImagenGemini(file);
+                    // Si ya pegamos HTML o texto, no reinyectamos los archivos de imagen,
+                    // porque algunos portapapeles exponen ambas formas del mismo contenido.
+                    if (!contenidoPegado) {
+                        for (const item of imageItems) {
+                            const file = item.getAsFile?.() || null;
+                            // eslint-disable-next-line no-await-in-loop
+                            await manejarPegadoImagenGemini(file);
+                        }
                     }
                     updateFormatInfo("Contenido multimodal pegado");
                 } catch (_) {
@@ -13781,6 +13997,7 @@ window.abrirInstruccionesGemini = async function(moduloId) {
     // Obtener el editor
     const editor = document.getElementById('txtModalInstruccionesGemini');
     const checkIncluirOriginal = document.getElementById('checkIncluirInstruccionOriginalModulo');
+    const checkIncluirImagenOriginal = document.getElementById('checkIncluirImagenOriginalModulo');
     const checkGenerarGrafico = document.getElementById('checkGenerarGraficoModulo');
     const checkIgnorarContexto = document.getElementById('checkIgnorarContextoOtrosModulos');
     if (!editor) {
@@ -13821,6 +14038,9 @@ No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.`
     if (checkIncluirOriginal) {
         checkIncluirOriginal.checked = modulo.incluirInstruccionOriginalEnPropuesta === true;
     }
+    if (checkIncluirImagenOriginal) {
+        checkIncluirImagenOriginal.checked = modulo.incluirImagenOriginalEnPropuesta === true;
+    }
     if (checkGenerarGrafico) {
         checkGenerarGrafico.checked = modulo.generarGrafico === true;
     }
@@ -13844,6 +14064,7 @@ function inicializarEventosModalInstruccionesGemini() {
     const btnGuardar = document.getElementById("btnGuardarInstruccionesGemini");
     const modal = document.getElementById("modalInstruccionesGemini");
     const checkIncluirOriginal = document.getElementById("checkIncluirInstruccionOriginalModulo");
+    const checkIncluirImagenOriginal = document.getElementById("checkIncluirImagenOriginalModulo");
     const checkGenerarGrafico = document.getElementById("checkGenerarGraficoModulo");
     const checkIgnorarContexto = document.getElementById("checkIgnorarContextoOtrosModulos");
     if (!btnCerrar || !btnGuardar || !modal) return;
@@ -13867,6 +14088,7 @@ function inicializarEventosModalInstruccionesGemini() {
         sincronizarModuloLocal(moduloId, cursoIdModulo, {
             instrucciones: editor.innerHTML,
             incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
+            incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
             generarGrafico: checkGenerarGrafico?.checked === true,
             ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
         });
@@ -13878,7 +14100,7 @@ function inicializarEventosModalInstruccionesGemini() {
         editor.addEventListener("keyup", sincronizarCamposGeminiLocal);
         editor.addEventListener("blur", sincronizarCamposGeminiLocal);
     }
-    [checkIncluirOriginal, checkGenerarGrafico, checkIgnorarContexto].forEach(chk => {
+    [checkIncluirOriginal, checkIncluirImagenOriginal, checkGenerarGrafico, checkIgnorarContexto].forEach(chk => {
         if (chk) chk.addEventListener("change", sincronizarCamposGeminiLocal);
     });
 
@@ -13900,6 +14122,7 @@ function inicializarEventosModalInstruccionesGemini() {
         const payloadLocal = {
             instrucciones: contenidoHTML,
             incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
+            incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
             generarGrafico: checkGenerarGrafico?.checked === true,
             ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
         };
@@ -13912,6 +14135,7 @@ function inicializarEventosModalInstruccionesGemini() {
             const docSnap = docId ? await getDoc(doc(db, "moodleCourses", docId)) : null;
             const instruccionesPersistidas = String(docSnap?.data()?.instrucciones || "").trim();
             const incluirOriginalPersistido = docSnap?.data()?.incluirInstruccionOriginalEnPropuesta === true;
+            const incluirImagenOriginalPersistido = docSnap?.data()?.incluirImagenOriginalEnPropuesta === true;
             const generarGraficoPersistido = docSnap?.data()?.generarGrafico === true;
             const ignorarContextoPersistido = docSnap?.data()?.ignorarContextoOtrosModulos === true;
 
@@ -13919,6 +14143,7 @@ function inicializarEventosModalInstruccionesGemini() {
                 !docSnap?.exists() ||
                 instruccionesPersistidas !== String(contenidoHTML || "").trim() ||
                 incluirOriginalPersistido !== payloadLocal.incluirInstruccionOriginalEnPropuesta ||
+                incluirImagenOriginalPersistido !== payloadLocal.incluirImagenOriginalEnPropuesta ||
                 generarGraficoPersistido !== payloadLocal.generarGrafico ||
                 ignorarContextoPersistido !== payloadLocal.ignorarContextoOtrosModulos
             ) {

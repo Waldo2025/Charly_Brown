@@ -4443,6 +4443,131 @@ body[data-page="moodlecourse.html"] #modalCrearCurso :where(input, select, texta
     border-color: hsl(var(--border)) !important;
 }
 
+body[data-page="moodlecourse.html"] .modulo-original-oculta .cb-module-block-title.is-original,
+body[data-page="moodlecourse.html"] .modulo-original-oculta .cb-module-original-body,
+body[data-page="moodlecourse.html"] .modulo-original-oculta .word-instruccion-original {
+    display: none !important;
+}
+
+body[data-page="moodlecourse.html"] #modalSelectorModulo[data-creating="1"] .cb-selector-modulo-card {
+    cursor: progress !important;
+    opacity: 0.82;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card {
+    --selector-accent: 148 63% 42%;
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    width: 100%;
+    padding: 0.95rem 1rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, hsl(var(--background)) 88%, hsl(var(--selector-accent)) 12%) 0%, hsl(var(--background)) 100%);
+    color: hsl(var(--foreground));
+    text-align: left;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast), opacity var(--transition-fast);
+    cursor: pointer;
+    overflow: hidden;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card:hover {
+    transform: translateY(-1px);
+    border-color: hsl(var(--selector-accent) / 0.45);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card:active {
+    transform: translateY(0);
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card:focus-visible {
+    outline: 2px solid hsl(var(--selector-accent));
+    outline-offset: 2px;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card.is-loading {
+    border-color: hsl(var(--selector-accent) / 0.55);
+    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.55rem;
+    height: 2.55rem;
+    flex: 0 0 2.55rem;
+    border-radius: 0.9rem;
+    background: hsl(var(--selector-accent) / 0.12);
+    color: hsl(var(--selector-accent));
+    font-size: 1rem;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__body {
+    flex: 1;
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__meta {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: hsl(var(--selector-accent));
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__help {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: hsl(var(--muted-foreground));
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__chevron,
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__spinner {
+    margin-left: auto;
+    align-self: center;
+    color: hsl(var(--selector-accent));
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card__spinner {
+    display: none;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card.is-loading .cb-selector-modulo-card__spinner {
+    display: inline-flex;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card.is-loading .cb-selector-modulo-card__chevron {
+    display: none;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card.is-loading .cb-selector-modulo-card__icon {
+    opacity: 0.75;
+}
+
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--blue { --selector-accent: 221 83% 53%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--slate { --selector-accent: 215 20% 45%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--emerald { --selector-accent: 142 71% 41%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--amber { --selector-accent: 38 92% 50%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--gray { --selector-accent: 215 16% 47%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--violet { --selector-accent: 258 90% 66%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--rose { --selector-accent: 346 77% 58%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--orange { --selector-accent: 24 95% 53%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--cyan { --selector-accent: 188 95% 42%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--indigo { --selector-accent: 239 84% 67%; }
+body[data-page="moodlecourse.html"] .cb-selector-modulo-card--green { --selector-accent: 142 71% 41%; }
+
 body[data-page="moodlecourse.html"] #modalTraducirSubtema #listaTraduccionesSubtema > div {
     background-color: transparent !important;
     border-color: hsl(var(--border)) !important;
