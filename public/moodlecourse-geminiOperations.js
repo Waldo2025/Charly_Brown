@@ -1326,7 +1326,7 @@ export async function generarModuloGemini(moduloId) {
     const cursoIdModulo = String(window.curso?.id || "").trim() || null;
 
     // 3. Traer módulo
-    const modulo = await obtenerModulo(moduloIdNormalizado, cursoIdModulo);
+    let modulo = await obtenerModulo(moduloIdNormalizado, cursoIdModulo);
     if (!modulo) {
         alert("No se encontró el módulo en Firebase.");
         moduleGenerationInFlight.delete(moduloIdNormalizado);
@@ -1336,10 +1336,16 @@ export async function generarModuloGemini(moduloId) {
 
     // 4. Validar instrucciones
     if (!modulo.instrucciones || modulo.instrucciones.trim() === "") {
-        alert("❗ Primero debes añadir instrucciones con el ícono de comentarios.");
-        moduleGenerationInFlight.delete(moduloIdNormalizado);
-        setModuleGenerationBusy(moduloIdNormalizado, false);
-        return;
+        const moduloRefrescado = await obtenerModulo(moduloIdNormalizado, cursoIdModulo, { forceRefresh: true });
+        if (moduloRefrescado && String(moduloRefrescado.instrucciones || "").trim() !== "") {
+            modulo = moduloRefrescado;
+            sincronizarModuloLocal(moduloIdNormalizado, cursoIdModulo, moduloRefrescado);
+        } else {
+            alert("❗ Primero debes añadir instrucciones con el ícono de comentarios.");
+            moduleGenerationInFlight.delete(moduloIdNormalizado);
+            setModuleGenerationBusy(moduloIdNormalizado, false);
+            return;
+        }
     }
 
     // 5. Estado visual

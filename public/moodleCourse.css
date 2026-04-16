@@ -5131,6 +5131,13 @@ body[data-page="moodlecourse.html"] :is(
     border-color: hsl(var(--border)) !important;
 }
 
+body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini,
+body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:hover,
+body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:active,
+body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:focus-visible {
+    cursor: pointer !important;
+}
+
 /* Estudio grafico del modulo: override consolidado preview-first */
 .cb-module-graphic-lightbox {
     --cb-stage-zoom: 1;

@@ -2585,6 +2585,7 @@ document.addEventListener("click", (event) => {
 
     if (action === "eliminar-modulo") {
         event.preventDefault();
+        event.stopPropagation();
         const moduloId = actionEl.dataset.mcModuloId || "";
         if (moduloId && window.confirm("¿Eliminar módulo?")) {
             window.eliminarModulo?.(moduloId);
@@ -6144,7 +6145,14 @@ function renderTemas() {
                             <div class="flex items-center gap-2 text-[11px] modulo-actions">
                                 <i class="fas fa-copy cursor-pointer cb-action-icon btn-duplicate-modulo"></i>
                                 <i class="fas fa-pen cursor-pointer cb-action-icon btn-edit-modulo"></i>
-                                <i class="fas fa-trash cursor-pointer cb-action-icon btn-delete-modulo"></i>
+                                <button type="button"
+                                        class="cb-action-icon btn-delete-modulo"
+                                        title="Eliminar módulo"
+                                        aria-label="Eliminar módulo"
+                                        data-mc-action="eliminar-modulo"
+                                        data-mc-modulo-id="${escapeHtml(modId)}">
+                                    <i class="fas fa-trash cursor-pointer"></i>
+                                </button>
                             </div>
                         `;
 
@@ -6342,21 +6350,6 @@ function renderTemas() {
                             if (!nuevoNombre) return;
 
                             await guardarModulo(mod.id, { nombre: nuevoNombre.trim() });
-                            renderTemas();
-                        };
-
-                        /* ELIMINAR MODULO */
-                        li.querySelector(".btn-delete-modulo").onclick = e => {
-                            e.stopPropagation();
-                            if (!confirm("¿Eliminar módulo?")) return;
-                            sub.modulosIds = sub.modulosIds.filter(id => id !== modId);
-                            
-                            // Si eliminamos el módulo activo, limpiar estado
-                            if (modId === moduloActivo) {
-                                localStorage.removeItem("moduloActivo");
-                            }
-                            
-                            guardarCursoFirebase();
                             renderTemas();
                         };
 
@@ -13904,17 +13897,16 @@ function inicializarEventosModalInstruccionesGemini() {
             moduloId,
             cursoIdModulo
         );
+        const payloadLocal = {
+            instrucciones: contenidoHTML,
+            incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
+            generarGrafico: checkGenerarGrafico?.checked === true,
+            ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
+        };
 
         try {
-            const incluirOriginalChecked = checkIncluirOriginal?.checked === true;
-            const generarGraficoChecked = checkGenerarGrafico?.checked === true;
-            const ignorarContextoChecked = checkIgnorarContexto?.checked === true;
-            await guardarModulo(moduloId, {
-                instrucciones: contenidoHTML,
-                incluirInstruccionOriginalEnPropuesta: incluirOriginalChecked,
-                generarGrafico: generarGraficoChecked,
-                ignorarContextoOtrosModulos: ignorarContextoChecked
-            }, cursoIdModulo);
+            sincronizarModuloLocal(moduloId, cursoIdModulo, payloadLocal);
+            await guardarModulo(moduloId, payloadLocal, cursoIdModulo);
 
             const docId = construirDocIdModulo(moduloId, cursoIdModulo);
             const docSnap = docId ? await getDoc(doc(db, "moodleCourses", docId)) : null;
@@ -13926,9 +13918,9 @@ function inicializarEventosModalInstruccionesGemini() {
             if (
                 !docSnap?.exists() ||
                 instruccionesPersistidas !== String(contenidoHTML || "").trim() ||
-                incluirOriginalPersistido !== incluirOriginalChecked ||
-                generarGraficoPersistido !== generarGraficoChecked ||
-                ignorarContextoPersistido !== ignorarContextoChecked
+                incluirOriginalPersistido !== payloadLocal.incluirInstruccionOriginalEnPropuesta ||
+                generarGraficoPersistido !== payloadLocal.generarGrafico ||
+                ignorarContextoPersistido !== payloadLocal.ignorarContextoOtrosModulos
             ) {
                 throw new Error("Las instrucciones o sus opciones no quedaron persistidas en Firebase.");
             }

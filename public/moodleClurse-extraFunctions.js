@@ -18,8 +18,8 @@ import {
     getAuth,
 } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 
-import { guardarModulo } from './moodleCourse.js';
-import { obtenerModulo } from './moodleCourse.js';
+import { guardarModulo } from './moodleCourse.js?v=2026-1.0.1.14';
+import { obtenerModulo } from './moodleCourse.js?v=2026-1.0.1.14';
 import { sanitizeRichText } from './security-utils.js';
 
 /* CONFIGURACIÓN FIREBASE */
@@ -115,7 +115,7 @@ function configurarAutoguardadoModulo(contenedor, moduloId) {
 
 async function guardarContenidoModulo(moduloId, contenido) {
     try {
-        const { guardarModulo } = await import('./moodleCourse.js');
+        const { guardarModulo } = await import('./moodleCourse.js?v=2026-1.0.1.14');
         await guardarModulo(moduloId, { contenido: contenido });
         
         mostrarFeedbackGuardado(moduloId);
