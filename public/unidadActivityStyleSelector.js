@@ -97,12 +97,17 @@ function getDominantUnidadActivityStyle(categoria = "") {
 }
 
 function buildUnidadActivityStylePromptContext(categoria = "", options = {}) {
-  const active = getSelectedUnidadActivityStyles(categoria);
+  const subtema = String(options?.subtema || "").trim();
+  const needsEducationalReadingStyle = subtema === "ComprensionLectora" || subtema === "Comprensión lectora";
+  const active = normalizeUnidadActivityStyleIds([
+    ...getSelectedUnidadActivityStyles(categoria),
+    ...(needsEducationalReadingStyle ? ["educativo"] : [])
+  ]);
   if (!active.length) return "";
-  if (active.length === 1 && active[0] === "asc") return "";
+  if (active.length === 1 && active[0] === "asc" && !needsEducationalReadingStyle) return "";
   return [
     buildUnidadCombinedStylePromptBlock(active),
-    buildUnidadStyleFormatContract(active),
+    buildUnidadStyleFormatContract(active, options),
     buildUnidadStyleExecutionContract(active, options)
   ].filter(Boolean).join("\n\n");
 }

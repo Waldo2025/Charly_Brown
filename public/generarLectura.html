@@ -24,7 +24,7 @@
   <script src="vendor/datatables/jquery.dataTables.min.js"></script>
 
 
-  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.15">
+  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.16">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
   <link rel="stylesheet" href="chatbot.css">
@@ -3222,6 +3222,17 @@
           </button>
         </div>
 
+        <div id="spinnerResultadoUnidadProceso" class="unidad-spinner-overlay" style="display:none;">
+          <div class="unidad-spinner-card">
+            <div class="unidad-spinner-brand" aria-hidden="true">
+              <span class="unidad-spinner-brand-ring"></span>
+              <img src="logoCharly3.png" alt="" class="unidad-spinner-logo">
+            </div>
+            <div class="loader unidad-spinner-loader"></div>
+            <div id="progresoTextoResultadoUnidad" class="unidad-spinner-text">Preparando unidad…</div>
+          </div>
+        </div>
+
         <div id="resultadoUnidadGenerada" class="unidad-result"></div>
 
         <div class="unidad-divider unidad-footer">
@@ -3288,15 +3299,15 @@
           <button id="scrollTopBtn" title="Ir arriba" class="quick-nav-btn" aria-label="Ir arriba">
             <i class="fa-solid fa-angles-up text-xs"></i>
           </button>
-          <button id="scrollPrevCatBtn" title="Categoría anterior" class="quick-nav-btn"
-            aria-label="Ir a la categoría anterior">
+          <button id="scrollPrevCatBtn" title="Subcategoría anterior" class="quick-nav-btn"
+            aria-label="Ir a la subcategoría anterior">
             <i class="fa-solid fa-arrow-up-short-wide text-xs"></i>
           </button>
           <button id="scrollMiddleBtn" title="Ir al medio" class="quick-nav-btn" aria-label="Ir al medio">
             <i class="fa-solid fa-grip-lines text-xs"></i>
           </button>
-          <button id="scrollNextCatBtn" title="Siguiente categoría" class="quick-nav-btn"
-            aria-label="Ir a la siguiente categoría">
+          <button id="scrollNextCatBtn" title="Siguiente subcategoría" class="quick-nav-btn"
+            aria-label="Ir a la siguiente subcategoría">
             <i class="fa-solid fa-arrow-down-short-wide text-xs"></i>
           </button>
           <button id="scrollBottomBtn" title="Ir abajo" class="quick-nav-btn" aria-label="Ir abajo">
@@ -3706,6 +3717,19 @@
                 class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
             <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Exp. oral · P</span><textarea
                 name="ExpresionOral_P" rows="3"
+                class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
+
+            <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Trazos de letras ·
+                T</span><textarea name="TrazosDeLetras_T" rows="3"
+                class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
+            <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Trazos de letras ·
+                AE</span><textarea name="TrazosDeLetras_AE" rows="3"
+                class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
+            <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Trazos de letras ·
+                C</span><textarea name="TrazosDeLetras_C" rows="3"
+                class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
+            <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Trazos de letras ·
+                P</span><textarea name="TrazosDeLetras_P" rows="3"
                 class="rounded-xl border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900 min-h-[68px] resize-y"></textarea></label>
 
             <label class="flex flex-col gap-1 text-sm"><span class="text-xs text-gray-500">Habilidades ·

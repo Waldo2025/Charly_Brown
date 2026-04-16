@@ -2748,8 +2748,7 @@ input {
   font-weight: 700;
 }
 
-.unidad-teacher-extension,
-.unidad-teacher-reinforcement {
+.unidad-teacher-note-section {
   padding: 10px 0;
   border-radius: 0;
   background: transparent;
@@ -2757,56 +2756,8 @@ input {
   box-shadow: none;
 }
 
-.unidad-teacher-general-item {
-  padding: 10px 0;
-  border-radius: 0;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-.unidad-teacher-general-item p,
-.unidad-teacher-extension p,
-.unidad-teacher-reinforcement p,
-.unidad-teacher-neurology p {
-  margin: 0 0 10px;
-  line-height: 1.55;
-}
-
-.unidad-teacher-general-item p:last-child,
-.unidad-teacher-extension p:last-child,
-.unidad-teacher-reinforcement p:last-child,
-.unidad-teacher-neurology p:last-child {
-  margin-bottom: 0;
-}
-
-.unidad-teacher-extension h3,
-.unidad-teacher-reinforcement h3,
-.unidad-teacher-neurology h3 {
-  margin: 0 0 10px;
-  font-size: 1.15rem;
-  line-height: 1.2;
-}
-
-.unidad-teacher-extension h3 {
-  color: #60a5fa;
-}
-
-.unidad-teacher-reinforcement h3 {
-  color: #0f172a;
-}
-
-.unidad-teacher-metacognition {
-  margin: 8px 0 0 1rem;
-  padding-left: 1rem;
-  color: #60a5fa;
-}
-
-.unidad-teacher-metacognition li {
-  margin-bottom: 0.32rem;
-}
-
 .unidad-teacher-neurology {
+  margin-top: 8px;
   padding: 16px 18px;
   border-radius: 18px;
   border: 2px dashed #a7f3d0;
@@ -2818,6 +2769,99 @@ input {
 
 .unidad-teacher-neurology h3 {
   color: #10b981;
+}
+
+.unidad-reflexion-global-maestro {
+  margin: 18px 0 22px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border-left: 4px solid #ec4899;
+  background:
+    linear-gradient(180deg, #fff1f2, #fff7fb);
+  box-shadow: 0 8px 22px rgba(236, 72, 153, 0.10);
+}
+
+.unidad-reflexion-global-maestro h3 {
+  margin: 0 0 10px;
+  color: #be185d;
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.unidad-reflexion-global-maestro p {
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.unidad-teacher-general-item {
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.unidad-teacher-general-item p,
+.unidad-teacher-note-section p {
+  margin: 0 0 10px;
+  line-height: 1.55;
+}
+
+.unidad-teacher-general-item p:last-child,
+.unidad-teacher-note-section p:last-child {
+  margin-bottom: 0;
+}
+
+.unidad-teacher-note-section h3 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+.unidad-resource-placeholder {
+  min-height: 44px;
+  margin: 8px 0 10px;
+  border: 1.5px dashed rgba(148, 163, 184, 0.55);
+  border-radius: 12px;
+  background: transparent;
+}
+
+.unidad-teacher-math-context {
+  margin-top: 4px;
+}
+
+.unidad-math-context-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+
+.unidad-math-context-table th,
+.unidad-math-context-table td {
+  border: 1px solid #d7e4f3;
+  padding: 7px 9px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.unidad-math-context-table th {
+  width: 34%;
+  background: #f8fbff;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.unidad-teacher-metacognition {
+  margin: 8px 0 0 1rem;
+  padding-left: 1rem;
+  color: #60a5fa;
+}
+
+.unidad-teacher-metacognition li {
+  margin-bottom: 0.32rem;
 }
 
 .activity :is(.challenge, .inquiry-block, .dynamic-block, .quiz-block, .diagnostic-block, .assessment-block, .project-block, .sel-block, .structured-block, .hybrid-block, .ai-block) {

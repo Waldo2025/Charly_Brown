@@ -12787,7 +12787,11 @@ function _lecturasGameOpenShell(lectura = null, round = null) {
     shellHtml = _lecturasGameBuildShellHtml(lectura, round, lecturasGameModeRuntime);
   }
   
-  console.log("[DEBUG] Shell HTML length:", shellHtml?.length);
+  console.log("[DEBUG] Shell HTML length:", shellHtml?.length, "isMineblox:", _lecturasGameIsMinebloxChallenge(lecturasGameModeRuntime));
+  if (!shellHtml || shellHtml.length < 10) {
+    console.error("[DEBUG] Shell HTML is empty or too short!");
+    return false;
+  }
   els.modeModalBody.innerHTML = shellHtml;
   console.log("[DEBUG] Shell HTML inserted, checking panel...");
   document.documentElement.classList.add("is-game-modal-open");
@@ -12970,11 +12974,19 @@ async function _lecturasGameStartSelectedGame(options = {}) {
     return;
   }
   console.log("[DEBUG] About to call _lecturasGameOpenShell, round:", runtime.round ? "exists" : "null");
-  if (!_lecturasGameOpenShell(runtime.lectura, runtime.round)) {
-    console.warn("[DEBUG] _lecturasGameOpenShell returned false!");
+  console.log("[DEBUG] runtime.lectura:", !!runtime.lectura, "runtime.round:", !!runtime.round);
+  try {
+    const shellResult = _lecturasGameOpenShell(runtime.lectura, runtime.round);
+    console.log("[DEBUG] OpenShell result:", shellResult);
+    if (!shellResult) {
+      console.error("[DEBUG] OpenShell returned false!");
+      return;
+    }
+  } catch(e) {
+    console.error("[DEBUG] Error in OpenShell:", e);
     return;
   }
-  console.log("[DEBUG] _lecturasGameOpenShell returned true, proceeding to render game...");
+  console.log("[DEBUG] _lecturasGameOpenShell success, proceeding to EnsureThree...");
   await _lecturasGameEnsureThree(runtime);
   console.log("[DEBUG] _lecturasGameEnsureThree completed");
   _lecturasGameResizeCanvas(runtime);

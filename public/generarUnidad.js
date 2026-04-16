@@ -1410,19 +1410,36 @@ function actualizarSpinnerProceso(statusId, texto) {
   if (statusId === "spinner-categoria-Proyectos") return; // solo omitimos el global de categoría
   const el = document.getElementById(statusId);
   if (!el) return;
-  el.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${texto}`;
+  el.innerHTML = _unidadRenderCategoriaSpinnerCard(texto);
+}
+
+function _unidadRenderCategoriaSpinnerCard(texto = "") {
+  const safeText = String(texto || "Preparando contenido...")
+    .replace(/<i\b[^>]*fa-spinner[^>]*><\/i>\s*/gi, "")
+    .trim();
+  return `
+    <div class="unidad-subtema-spinner-card">
+      <div class="unidad-subtema-spinner-brand" aria-hidden="true">
+        <span class="unidad-subtema-spinner-ring"></span>
+        <img src="logoCharly3.png" alt="" class="unidad-subtema-spinner-logo">
+      </div>
+      <div class="unidad-subtema-spinner-text">${safeText}</div>
+    </div>
+  `;
 }
 
 function _unidadEnsureSpinnerElement(container, statusId, initialHtml = "") {
   if (!container || !statusId) return null;
   let el = document.getElementById(statusId);
   if (el) {
-    if (initialHtml) el.innerHTML = initialHtml;
+    el.className = "unidad-subtema-spinner";
+    if (initialHtml) el.innerHTML = _unidadRenderCategoriaSpinnerCard(initialHtml);
     return el;
   }
-  el = document.createElement("p");
+  el = document.createElement("div");
   el.id = statusId;
-  if (initialHtml) el.innerHTML = initialHtml;
+  el.className = "unidad-subtema-spinner";
+  if (initialHtml) el.innerHTML = _unidadRenderCategoriaSpinnerCard(initialHtml);
   container.appendChild(el);
   return el;
 }
@@ -1460,8 +1477,17 @@ function finalizarSpinnerProceso(statusId, ok = true, textoFinal = "") {
   } else {
     // Muestra error si falló
     const icono = "fa-triangle-exclamation";
-    const color = "#dc2626";
-    el.innerHTML = `<i class="fas ${icono}" style="color:${color};"></i> ${textoFinal || "Error"}`;
+    el.className = "unidad-subtema-spinner unidad-subtema-spinner--error";
+    el.innerHTML = `
+      <div class="unidad-subtema-spinner-card">
+        <div class="unidad-subtema-spinner-brand" aria-hidden="true">
+          <span class="unidad-subtema-spinner-ring"></span>
+          <img src="logoCharly3.png" alt="" class="unidad-subtema-spinner-logo">
+        </div>
+        <div class="unidad-subtema-spinner-error-icon"><i class="fas ${icono}"></i></div>
+        <div class="unidad-subtema-spinner-text">${textoFinal || "Error"}</div>
+      </div>
+    `;
   }
 }
 
@@ -1858,6 +1884,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   if (!texto) {
     targetEl.innerHTML = htmlFinal || "";
     renderizarStemPendienteUnidad(targetEl);
+    _unidadScrollResultadoAlFinal(true);
     return;
   }
 
@@ -1878,6 +1905,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
     targetEl.textContent += texto[i];
     if (i % 8 === 0) {
       targetEl.scrollTop = targetEl.scrollHeight;
+      _unidadScrollResultadoAlFinal();
       await sleep(delay);
     }
   }
@@ -1886,6 +1914,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   targetEl.style.wordBreak = "";
   targetEl.innerHTML = htmlFinal || "";
   renderizarStemPendienteUnidad(targetEl);
+  _unidadScrollResultadoAlFinal(true);
 }
 
 function getSelectedModel() {
@@ -3815,6 +3844,12 @@ const descripcionesPorDefecto = {
     C: "Dicción, vocabulario, estructura discursiva y comunicación no verbal.",
     P: "Práctica oral, dramatizaciones, debates y exposiciones."
   },
+  "TrazosDeLetras": {
+    T: "Trazos iniciales de letras y frases cortas para fortalecer la escritura.",
+    AE: "Reconocer, leer y trazar letras y frases breves con direccionalidad adecuada.",
+    C: "Grafías mayúsculas y minúsculas, direccionalidad del trazo, renglón y frases sencillas.",
+    P: "Modelado de la letra, práctica guiada de trazos y copiado de frases cortas con apoyo visual."
+  },
   // Subtemas específicos de Ciencias experimentales
   "Naturales": {
     T: "Estudio de los seres vivos y su interacción con el medio.",
@@ -3889,6 +3924,8 @@ const categoriaPorSubtema = {
   Ortografía: "Lenguaje y comunicación",
   Gramatica: "Lenguaje y comunicación",
   ExpresionEscrita: "Lenguaje y comunicación",
+  TrazosDeLetras: "Lenguaje y comunicación",
+  ComprensionLectora: "Lenguaje y comunicación",
   ExpresionOral: "Lenguaje y comunicación",
   Habilidades: "Lenguaje y comunicación",
   Naturales: "Ciencias experimentales", // ✅ Este debe apuntar a Ciencias experimentales
@@ -3908,6 +3945,8 @@ const btnAbrirModal = document.getElementById("btnAbrirModalUnidad");
 const modalUnidad = document.getElementById("modalGenerarUnidad");
 const cerrarModal = document.getElementById("cerrarModalUnidad");
 const modalResultadoUnidad = document.getElementById("modalResultadoUnidad");
+const spinnerResultadoUnidadProceso = document.getElementById("spinnerResultadoUnidadProceso");
+const progresoTextoResultadoUnidad = document.getElementById("progresoTextoResultadoUnidad");
 const cerrarModalResultadoUnidad = document.getElementById("cerrarModalResultadoUnidad");
 const toggleFullscreenResultadoUnidad = document.getElementById("toggleFullscreenResultadoUnidad");
 const btnAbrirResultadoUnidad = document.getElementById("btnAbrirResultadoUnidad");
@@ -14813,6 +14852,10 @@ function _subtemaAliasesCanonMap() {
   alias[_canonSubtemaClave("expresionescrita")] = "ExpresionEscrita";
   alias[_canonSubtemaClave("expresion oral")] = "ExpresionOral";
   alias[_canonSubtemaClave("expresionoral")] = "ExpresionOral";
+  alias[_canonSubtemaClave("trazos de letras")] = "TrazosDeLetras";
+  alias[_canonSubtemaClave("trazosdeletras")] = "TrazosDeLetras";
+  alias[_canonSubtemaClave("comprension lectora")] = "ComprensionLectora";
+  alias[_canonSubtemaClave("comprensionlectora")] = "ComprensionLectora";
   alias[_canonSubtemaClave("conocimiento del medio")] = "ConocimientoDelMedio";
   alias[_canonSubtemaClave("conocimientodelmedio")] = "ConocimientoDelMedio";
   alias[_canonSubtemaClave("mi localidad")] = "MiLocalidad";
@@ -17932,6 +17975,15 @@ function abrirModalResultadoUnidad() {
   _inicializarFullscreenResultadoUnidad();
   _actualizarBotonFullscreenResultadoUnidad();
   _unidadRefreshFooterStyleSelector();
+  requestAnimationFrame(() => _unidadScrollResultadoAlFinal(true));
+}
+
+function _unidadSetResultLoadingOverlay(visible = false, text = "Preparando unidad…") {
+  if (!spinnerResultadoUnidadProceso) return;
+  spinnerResultadoUnidadProceso.style.display = visible ? "flex" : "none";
+  if (progresoTextoResultadoUnidad) {
+    progresoTextoResultadoUnidad.textContent = String(text || "Preparando unidad…").trim() || "Preparando unidad…";
+  }
 }
 
 function prepararNuevoResultadoUnidad() {
@@ -17943,6 +17995,7 @@ function prepararNuevoResultadoUnidad() {
   window.lecturaGlobalMostrada = false;
   window.debeInsertarLecturaLenguaje = true;
   window.bloqueLecturaGlobalParaLenguaje = "";
+  _unidadSetResultLoadingOverlay(true, "Preparando unidad…");
 }
 
 function _resultadoUnidadFullscreenActivo() {
@@ -18031,8 +18084,221 @@ async function regenerarResultadoUnidadDesdeToolbar() {
   await generarSeccionCategoria(categoriaObjetivo);
 }
 
+function _unidadBuildSubtemaRegenerateButtonHtml({ categoria = "", subtema = "", target = "alumno" } = {}) {
+  const safeCategoria = _escapeHtmlUnidad(String(categoria || "").trim());
+  const safeSubtema = _escapeHtmlUnidad(String(subtema || "").trim());
+  const safeTarget = String(target || "").trim() === "maestro" ? "maestro" : "alumno";
+  const label = safeTarget === "maestro" ? "Regenerar maestro" : "Regenerar subtema";
+  const icon = safeTarget === "maestro" ? "fa-rotate-right" : "fa-rotate";
+  return `
+    <button type="button"
+      class="unidad-subtema-regenerate-btn"
+      data-action="regenerar-subtema-${safeTarget}"
+      data-categoria="${safeCategoria}"
+      data-subtema="${safeSubtema}"
+      data-target="${safeTarget}"
+      title="${label}"
+      aria-label="${label}">
+      <i class="fa-solid ${icon}" aria-hidden="true"></i>
+    </button>
+  `;
+}
+
+async function _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria = "", subtema = "" } = {}) {
+  const safeCategoria = String(categoria || "").trim();
+  const safeSubtema = String(subtema || "").trim();
+  if (!safeCategoria || !safeSubtema) return;
+
+  const bloqueId = `bloque-${safeCategoria}-${safeSubtema}`;
+  const colAlumnoId = `${bloqueId}-alumno`;
+  const colMaestroId = `${bloqueId}-maestro`;
+  const colAlumno = document.getElementById(colAlumnoId);
+  const colMaestro = document.getElementById(colMaestroId);
+  if (!colAlumno || !colMaestro) {
+    alert("⚠️ No se encontró el bloque de alumno/maestro para regenerar.");
+    return;
+  }
+
+  const colAlumnoContenido = document.getElementById(`${colAlumnoId}-contenido`);
+  const colMaestroContenido = document.getElementById(`${colMaestroId}-contenido`);
+  const htmlAlumno = String(colAlumnoContenido?.innerHTML || "").trim();
+  if (!htmlAlumno) {
+    alert("⚠️ No hay contenido del alumno para regenerar las notas del maestro.");
+    return;
+  }
+
+  const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
+  const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
+  const tituloBase = String(colMaestro.querySelector("h4")?.textContent || colAlumno.querySelector("h4")?.textContent || formatearSubtema(safeSubtema)).trim();
+  const actividadesExtraidas = extraerActividades(htmlAlumno);
+  const htmlAlumnoSinFichas = _unidadEliminarBloquesHtmlPorSelector(
+    htmlAlumno,
+    '.activity[data-ficha="true"], .activity-fichas'
+  );
+  const htmlAlumnoSoloFichas = _unidadExtraerBloquesHtmlPorSelector(
+    htmlAlumno,
+    '.activity[data-ficha="true"], .activity-fichas'
+  );
+  const htmlAlumnoBaseParaNotas = htmlAlumnoSinFichas || htmlAlumno;
+
+  const notas = await _unidadGenerarNotasMaestroSeccion({
+    promptContenidoActividades: htmlAlumnoBaseParaNotas,
+    fallbackContenidoActividades: htmlAlumnoBaseParaNotas,
+    categoria: safeCategoria,
+    subtema: safeSubtema,
+    tituloCreativo: tituloBase,
+    tituloSeccion: tituloBase,
+    grado: gradoTexto,
+    nivel,
+    expectedActivityCount: actividadesExtraidas?.actividadesNormales?.length || actividadesExtraidas?.actividadesFichas?.length || 0
+  });
+
+  if (colMaestroContenido) {
+    await renderContenidoEnTiempoReal(colMaestroContenido, notas);
+  }
+
+  if (htmlAlumnoSoloFichas.trim()) {
+    const claveFichaSeccion = String(
+      window.claveFichaActualGlobal
+      || claveFichaActualGlobal
+      || _unidadDetectFichaClaveFromActivities(extraerActividades(htmlAlumno).actividadesFichas || [])
+      || _unidadEtiquetaEditorialRecurso({ subtema: safeSubtema, categoria: safeCategoria, tipoRecurso: "fichas" })
+      || `Ficha ${formatearSubtema(safeSubtema)}`
+    ).trim();
+    void claveFichaSeccion;
+  }
+}
+
+async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtema = "" } = {}) {
+  const safeCategoria = String(categoria || "").trim();
+  const safeSubtema = String(subtema || "").trim();
+  if (!safeCategoria || !safeSubtema) return;
+
+  const bloqueId = `bloque-${safeCategoria}-${safeSubtema}`;
+  const colAlumnoId = `${bloqueId}-alumno`;
+  const colMaestroId = `${bloqueId}-maestro`;
+  const colAlumno = document.getElementById(colAlumnoId);
+  const colMaestro = document.getElementById(colMaestroId);
+  if (!colAlumno || !colMaestro) {
+    alert("⚠️ No se encontró el bloque de subtema para regenerar.");
+    return;
+  }
+
+  const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
+  const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
+  const cantidad = _unidadResolveCantidadActividades(safeSubtema, [{ cantidad: document.querySelector(`input[name='num_${safeSubtema}']`)?.value || 1 }]);
+  const lecturaDisponible = !!window.lecturaNuevaCoincidenteGlobal;
+  const checkboxRelacion = document.querySelector(`input[name='relacion_${safeSubtema}']`);
+  const relacionadaFinal = checkboxRelacion ? checkboxRelacion.checked : false;
+  const contenidoLecturaParaPrompt = relacionadaFinal && lecturaDisponible
+    ? _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal)
+    : "";
+  const preguntasParaPrompt = relacionadaFinal && lecturaDisponible
+    ? (window.lecturaNuevaCoincidenteGlobal?.preguntasComprension || [])
+    : [];
+  let tituloCreativoLimpioBase;
+  try {
+    tituloCreativoLimpioBase = typeof generarTituloCreativoUnico === "function"
+      ? await generarTituloCreativoUnico({
+          subtema: safeSubtema,
+          nivel,
+          grado: gradoTexto,
+          tipo: "subtema",
+          statusId: "",
+          maxIntentos: 2
+        })
+      : formatearSubtema(safeSubtema);
+  } catch (e) {
+    tituloCreativoLimpioBase = formatearSubtema(safeSubtema);
+  }
+
+  const objetivosDelSubtema = [
+    { subtema: safeSubtema, tipo: "T", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "T"), cantidad, relacionada: relacionadaFinal },
+    { subtema: safeSubtema, tipo: "AE", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "AE"), cantidad, relacionada: relacionadaFinal },
+    { subtema: safeSubtema, tipo: "C", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "C"), cantidad, relacionada: relacionadaFinal },
+    { subtema: safeSubtema, tipo: "P", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "P"), cantidad, relacionada: relacionadaFinal }
+  ];
+  const generarFichas = !!document.querySelector(`input[name='ficha_${safeSubtema}']`)?.checked;
+  const generarAnexos = !!document.querySelector(`input[name='anexo_${safeSubtema}']`)?.checked;
+  const generarVideos = !!document.querySelector(`input[name='video_${safeSubtema}']`)?.checked;
+  const tieneRecortable = !!document.querySelector(`input[name='recortable_${safeSubtema}']`)?.checked;
+  const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${safeSubtema}']`)?.checked;
+
+  const instruccionesAdicionalesBase = window.instruccionesGeminiPorCategoria?.[safeCategoria] || "";
+  const stylePromptCategoria = _unidadIsStyleSelectorEnabled(safeCategoria)
+    ? buildUnidadActivityStylePromptContext(safeCategoria, {
+      grado: gradoTexto,
+      subtema: safeSubtema,
+      relatedReading: relacionadaFinal,
+      withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
+    })
+    : "";
+  const instruccionesAdicionales = [instruccionesAdicionalesBase, stylePromptCategoria].filter(Boolean).join("\n\n");
+
+  const promptCategoria = construirPromptDeCategoria(
+    safeCategoria,
+    objetivosDelSubtema,
+    contenidoLecturaParaPrompt,
+    preguntasParaPrompt,
+    [safeSubtema],
+    cantidad,
+    generarFichas,
+    generarAnexos,
+    generarVideos,
+    tituloCreativoLimpioBase,
+    "",
+    relacionadaFinal,
+    instruccionesAdicionales
+  );
+
+  const respuestaAlumno = await enviarPrompt([{ role: "user", text: promptCategoria }]);
+  const cleanHTMLLocal = (html) => String(html || "").replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
+  let htmlAlumnoLimpio = cleanHTMLLocal(String(respuestaAlumno || "").replace(/```html|```/g, "").trim());
+  htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, safeSubtema);
+  let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
+  htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema: safeSubtema, categoria: safeCategoria, grado: gradoTexto });
+  htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
+  htmlAlumnoLimpio = _unidadEnsureFichaMetadataSection(htmlAlumnoLimpio, {
+    subtema: safeSubtema,
+    categoria: safeCategoria,
+    fichaClave: window.claveFichaActualGlobal || claveFichaActualGlobal || ""
+  });
+  htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados, safeSubtema, safeCategoria);
+  recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+  htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
+  htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema: safeSubtema, categoria: safeCategoria, grado: gradoTexto });
+  htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
+
+  const previewAlumno = document.getElementById(`${bloqueId}-alumno-contenido`);
+  if (previewAlumno) {
+    await renderContenidoEnTiempoReal(previewAlumno, htmlAlumnoLimpio);
+  }
+}
+
 function _unidadGetResultContentNode() {
   return modalResultadoUnidad?.querySelector(".unidad-content") || null;
+}
+
+function _unidadScrollResultadoAlFinal(force = false) {
+  const result = document.getElementById("resultadoUnidadGenerada");
+  const content = _unidadGetResultContentNode();
+  const scroller = result || content;
+  const maxBottom = Math.max(
+    content?.scrollHeight || 0,
+    result?.scrollHeight || 0
+  );
+  if (scroller) {
+    scroller.scrollTo({
+      top: maxBottom,
+      behavior: force ? "auto" : "smooth"
+    });
+  }
 }
 
 function _unidadGetGeneratedCategoryNamesFromResult() {
@@ -18132,6 +18398,32 @@ btnDetenerGeneracionUnidad?.addEventListener("click", detenerGeneracionUnidadGlo
 btnRegenerarResultadoUnidad?.addEventListener("click", () => {
   regenerarResultadoUnidadDesdeToolbar().catch(() => {
     alert("❌ No se pudo regenerar la unidad.");
+  });
+});
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.(".unidad-subtema-regenerate-btn");
+  if (!btn) return;
+
+  const categoria = String(btn.dataset.categoria || "").trim();
+  const subtema = String(btn.dataset.subtema || "").trim();
+  const target = String(btn.dataset.target || "alumno").trim();
+  if (!categoria || !subtema) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (target === "maestro") {
+    _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria, subtema }).catch((err) => {
+      console.error("Error regenerando maestro por subtema:", err);
+      alert("❌ No se pudo regenerar el maestro de este subtema.");
+    });
+    return;
+  }
+
+  _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria, subtema }).catch((err) => {
+    console.error("Error regenerando alumno por subtema:", err);
+    alert("❌ No se pudo regenerar el alumno de este subtema.");
   });
 });
 
@@ -19382,15 +19674,21 @@ function toggleInvertirSeleccion() {
 
 
 function obtenerCategoriasPorGrado(grado) {
-  if (["Primero", "Segundo", "Tercero"].includes(grado)) {
+  if (["Primero", "Segundo"].includes(grado)) {
     return {
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "ExpresionOral", "Habilidades"],
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"],
+      "Ciencias sociales": ["Historia", "Geografia"],
+      "Matemáticas": ["Matematicas"]
+    };
+  } else if (["Tercero"].includes(grado)) {
+    return {
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "ComprensionLectora", "ExpresionOral", "Habilidades"],
       "Ciencias sociales": ["Historia", "Geografia"],
       "Matemáticas": ["Matematicas"]
     };
   } else {
     return {
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "Habilidades"],
+      "Lenguaje y comunicación": ["Artes", "Ortografía", "ComprensionLectora", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
       "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"],
       "Ciencias sociales": ["Historia", "Geografia"],
       "Formación socioemocional": ["Socioemocional", "CivicaEtica"],
@@ -19618,9 +19916,12 @@ function _unidadSlug(value = "") {
 }
 
 function _unidadGetCategoriaSubtemasFallback() {
+  const grado = String(document.getElementById("unidadGrado")?.value || selectGrado?.value || "").trim();
   return {
     "Proyectos": ["Proyectos"],
-    "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
+    "Lenguaje y comunicación": ["Primero", "Segundo"].includes(grado)
+      ? ["Artes", "Ortografía", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"]
+      : ["Artes", "Ortografía", "ComprensionLectora", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
     "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"],
     "Ciencias sociales": ["Historia", "Geografia"],
     "Formación socioemocional": ["CivicaEtica", "Socioemocional"],
@@ -21094,7 +21395,9 @@ async function verificarSecuencia() {
     // ✅ CORRECCIÓN: AGREGAR "Ciencias experimentales" al catálogo de categorías
     const categorias = {
       "Proyectos": ["Proyectos"],
-      "Lenguaje y comunicación": ["Artes", "Ortografía", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
+      "Lenguaje y comunicación": ["Primero", "Segundo"].includes(grado)
+        ? ["Artes", "Ortografía", "TrazosDeLetras", "ComprensionLectora", "ExpresionOral", "Habilidades"]
+        : ["Artes", "Ortografía", "ComprensionLectora", "Gramatica", "ExpresionEscrita", "ExpresionOral", "Habilidades"],
       "Ciencias experimentales": ["Naturales", "ConocimientoDelMedio", "MiLocalidad"], // ✅ AGREGADO
       "Ciencias sociales": ["Historia", "Geografia"],
       "Formación socioemocional": ["CivicaEtica", "Socioemocional"],
@@ -21135,6 +21438,8 @@ async function verificarSecuencia() {
       Ortografía: "Lenguaje y comunicación",
       Gramatica: "Lenguaje y comunicación",
       ExpresionEscrita: "Lenguaje y comunicación",
+      ...( ["Primero", "Segundo"].includes(grado) ? { TrazosDeLetras: "Lenguaje y comunicación" } : {} ),
+      ComprensionLectora: "Lenguaje y comunicación",
       ExpresionOral: "Lenguaje y comunicación",
       Habilidades: "Lenguaje y comunicación",
       Naturales: "Ciencias experimentales", // ✅ PERTENECE A CIENCIAS EXPERIMENTALES
@@ -21750,6 +22055,95 @@ const estructuraActividades = `
 // 🟢 También definir listaCriterios globalmente
 const listaCriterios = "Localización, Interpretación, Integración, Evaluación, Reflexión/Transferencia";
 
+const UNIDAD_VOZ_QUOTES_CATALOG = [
+  {
+    id: "mandela_education_progress",
+    author: "Nelson Mandela",
+    quote: "La educación es el arma más poderosa que puedes usar para cambiar el mundo.",
+    tags: ["educacion", "aprendizaje", "escuela", "transformacion", "cambio", "comunidad"]
+  },
+  {
+    id: "malala_change",
+    author: "Malala Yousafzai",
+    quote: "Un niño, un maestro, un libro y un lápiz pueden cambiar el mundo.",
+    tags: ["lectura", "escritura", "lenguaje", "escuela", "aprendizaje", "libro", "lapiz"]
+  },
+  {
+    id: "kofi_knowledge",
+    author: "Kofi Annan",
+    quote: "Knowledge is power. Information is liberating. Education is the premise of progress.",
+    tags: ["conocimiento", "informacion", "investigacion", "ciencias", "aprendizaje", "progreso"]
+  },
+  {
+    id: "montessori_imagination",
+    author: "Maria Montessori",
+    quote: "Our aim is not merely to make the child understand, but so to touch his imagination.",
+    tags: ["artes", "imaginacion", "creatividad", "expresion", "lenguaje", "ninos"]
+  },
+  {
+    id: "picasso_artist",
+    author: "Pablo Picasso",
+    quote: "Every child is an artist. The problem is how to remain an artist once we grow up.",
+    tags: ["artes", "creatividad", "dibujo", "pintura", "expresion", "artistico"]
+  }
+];
+
+function _unidadNormalizeTopicText(text = "") {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9ñü\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _unidadTokenizeTopicText(text = "") {
+  const stopwords = new Set(["de", "la", "el", "y", "en", "con", "para", "del", "las", "los", "un", "una", "por", "que", "al", "se", "lo"]);
+  return Array.from(new Set(
+    _unidadNormalizeTopicText(text)
+      .split(" ")
+      .filter((word) => word.length >= 4 && !stopwords.has(word))
+  ));
+}
+
+function _unidadGetUsedVoiceQuoteIds() {
+  if (!window.__unidadUsedVoiceQuoteIds || !(window.__unidadUsedVoiceQuoteIds instanceof Set)) {
+    window.__unidadUsedVoiceQuoteIds = new Set();
+  }
+  return window.__unidadUsedVoiceQuoteIds;
+}
+
+function _unidadResetUsedVoiceQuotes() {
+  const store = _unidadGetUsedVoiceQuoteIds();
+  store.clear();
+}
+
+function _unidadResolveVoiceQuoteForSubtema({ categoria = "", subtema = "", T = "", AE = "", C = "", P = "" } = {}) {
+  const contextText = `${categoria} ${subtema} ${T} ${AE} ${C} ${P}`;
+  const tokens = _unidadTokenizeTopicText(contextText);
+  if (!tokens.length) return null;
+
+  const used = _unidadGetUsedVoiceQuoteIds();
+  let best = null;
+
+  UNIDAD_VOZ_QUOTES_CATALOG.forEach((item) => {
+    if (used.has(item.id)) return;
+    const score = item.tags.filter((tag) => {
+      const normalizedTag = _unidadNormalizeTopicText(tag);
+      return tokens.some((token) => token.includes(normalizedTag) || normalizedTag.includes(token));
+    }).length;
+    if (score <= 0) return;
+    if (!best || score > best.score) {
+      best = { ...item, score };
+    }
+  });
+
+  if (!best || best.score < 1) return null;
+  used.add(best.id);
+  return best;
+}
+
 function _bloqueLecturaGeneradoraProyectoExacta(contenidoLectura = "", tituloLectura = "") {
   const contenido = String(contenidoLectura || "").trim();
   if (!contenido) return "";
@@ -22107,11 +22501,12 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
     }
 
     if (current.steps.length) {
-      const lastStep = current.steps[current.steps.length - 1];
-      if (!lastStep.answer) {
-        lastStep.answer = line;
+      const nextStepWithoutAnswer = current.steps.find((step) => !step.answer);
+      if (nextStepWithoutAnswer) {
+        nextStepWithoutAnswer.answer = line;
       } else {
-        lastStep.answer = `${lastStep.answer} ${line}`.trim();
+        const lastStep = current.steps[current.steps.length - 1];
+        lastStep.answer = `${lastStep.answer || ""} ${line}`.trim();
       }
       return;
     }
@@ -22157,6 +22552,40 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
     ${introHtml}
     ${activitiesHtml}
   `.trim();
+}
+
+function _unidadEnsureAnswersUnderEachStep(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  Array.from(root.querySelectorAll(".activity, .activity-fichas")).forEach((activity) => {
+    const list = activity.querySelector("ol.steps, ol.steps-numbered, ol");
+    const sharedAnswer = activity.querySelector(":scope > .answer");
+    if (!list || !sharedAnswer) return;
+
+    const items = Array.from(list.querySelectorAll(":scope > li"));
+    if (!items.length) return;
+    const alreadyDistributed = items.some((item) => item.querySelector(".answer"));
+    if (alreadyDistributed) return;
+
+    const answerHtml = sharedAnswer.innerHTML || sharedAnswer.textContent || "";
+    if (!String(answerHtml).trim()) return;
+
+    items.forEach((item) => {
+      const answerNode = doc.createElement("div");
+      answerNode.className = "answer";
+      answerNode.innerHTML = answerHtml;
+      item.appendChild(answerNode);
+    });
+    sharedAnswer.remove();
+  });
+
+  return root.innerHTML;
 }
 
 function _unidadWrapLooseTopLevelActivities(html = "") {
@@ -22363,49 +22792,7 @@ window.construirPromptProyecto = function (
     extraBloquesFinales += `
     <!-- ===== FICHA DE REFUERZO ===== -->
     <h3 style="margin-top:24px;">${claveFichaActual}</h3>
-    <p style="margin:6px 0 12px;">Ficha de refuerzo con 4 actividades. Mantén coherencia con la actividad donde se mencionó.</p>
-
-        <div class="activity-fichas">
-          <div class="actividad-principal">
-            <p>1. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-          </div>
-          <ol type="a">
-            <li>Subraya los sustantivos que sean esenciales en cada oración de la lectura.</li>
-            <li>Dibuja en el margen de cada párrafo una imagen que represente la idea completa.</li>
-          </ol>
-          <span style="color:mediumvioletred;">Respuesta: Los sustantivos son "submarino, periscopio, explorador" y el dibujo debe mostrar un submarino observando con periscopio.</span>
-        </div>
-        <div class="activity-fichas">
-          <div class="actividad-principal">
-            <p>2. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-          </div>
-          <ol type="a">
-            <li>Subraya los sustantivos que sean esenciales en cada oración de la lectura.</li>
-            <li>Encierra en un rectángulo rojo el sustantivo clave.</li>
-            <li>Dibuja en el margen de cada párrafo una imagen que represente la idea completa.</li>
-          </ol>
-          <span style="color:mediumvioletred;">Respuesta: Los sustantivos son "submarino, periscopio, explorador" y el dibujo debe mostrar un submarino observando con periscopio.</span>
-        </div>
-        <div class="activity-fichas">
-          <div class="actividad-principal">
-            <p>3. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-          </div>
-          <ol type="a">
-            <li>Subraya los sustantivos que sean esenciales en cada oración de la lectura.</li>
-            <li>Encierra en un rectángulo rojo el sustantivo clave.</li>
-            <li>Dibuja en el margen de cada párrafo una imagen que represente la idea completa.</li>
-          </ol>
-          <span style="color:mediumvioletred;">Respuesta: Los sustantivos son "submarino, periscopio, explorador" y el dibujo debe mostrar un submarino observando con periscopio.</span>
-        </div>
-        <div class="activity-fichas">
-          <div class="actividad-principal">
-            <p>4. <strong> Cambia al modo infinitivo todos los verbos que encuentres en la primera y segunda parte de la lectura generadora.</strong>  Apóyate en cualquier otra fuente de consulta válida. [IC T. IND]</p>
-          </div>
-          <ol type="a">
-            <li>Subraya los sustantivos que sean esenciales en cada oración de la lectura.</li>
-          </ol>
-          <span style="color:mediumvioletred;">Respuesta: Los sustantivos son "submarino, periscopio, explorador" y el dibujo debe mostrar un submarino observando con periscopio.</span>
-        </div>
+    <p style="margin:6px 0 12px;">La ficha debe conservar el mismo tono, la misma secuencia y la misma estructura que las notas de las subcategorías. Solo cambia el contenido didáctico según el subtema.</p>
     `;
   }
 
@@ -22756,12 +23143,12 @@ function limpiarDuplicadosArtes() {
   const contenedor = document.querySelector('#contenedor-Lenguaje-y-comunicación');
   if (!contenedor) return;
 
-  const fichas = contenedor.querySelectorAll('h3, .activity-fichas');
+  const fichas = contenedor.querySelectorAll('h3, .activity-fichas, .activity[data-ficha="true"]');
   const vistas = new Set();
 
   fichas.forEach(el => {
     const texto = el.textContent.trim().replace(/\s+/g, ' ');
-    if (!/ficha\s+\d+/i.test(texto) && !el.classList.contains('activity-fichas')) {
+    if (!/ficha\s+\d+/i.test(texto) && !el.classList.contains('activity-fichas') && el.getAttribute('data-ficha') !== 'true') {
       return;
     }
     const clave = texto.toLowerCase().replace(/ficha\s+\d+[a-z]?/g, 'ficha');
@@ -22823,6 +23210,9 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
   const objetivosAgrupados = {};
   const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtemaClave);
+  const isTrazosDeLetras = _unidadNormalizarSubtemaKey(subtemaClave) === "TrazosDeLetras";
+  const isComprensionLectora = _unidadNormalizarSubtemaKey(subtemaClave) === "ComprensionLectora";
+  const relacionadaLecturaEstricta = relacionadaConLectura && !isComprensionLectora;
 
   // 1. Verificación unificada de opciones (parámetros y DOM)
   const checkboxFichas = document.querySelector(`input[name='ficha_${subtemaClave}']`);
@@ -22916,6 +23306,10 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     extraDificultadCategoria = "";
   }
 
+  const extraDificultadSubtema = isComprensionLectora ? `
+    Para Comprensión lectora, diseña ejercicios concretos y editoriales: relación imagen-oración, elección de la oración correcta, identificación de nombres propios, rastreo de personajes y acciones, y verificación de sentido a partir de evidencia visible. No conviertas el subtema en preguntas genéricas ni dependas obligatoriamente de la lectura seleccionada; si la lectura existe, úsala solo como contexto opcional cuando encaje con la secuencia y alcance.
+  ` : "";
+
   const tipoActividad = `
   1. tipos de Actividades: Incluir variedad: opción múltiple, completar, dramatizar, construir, recortar, ordenar, escribir, etc.
   `;
@@ -22997,6 +23391,9 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   ⚠️ Las demás actividades normales NO deben volver a mencionar estos recursos.`
     : "";
 
+  const hasTrazosStyle = /ESTILOS PEDAG[ÓO]GICOS ACTIVOS:[\s\S]*Trazos y letras|FORMATO RECTOR INNEGOCIABLE:\s*Trazos y letras|CONTRATO DE FORMATO OBLIGATORIO:\s*usa Trazos y letras/i.test(String(instruccionesAdicionales || ""));
+  const shouldUseTrazosFichaFormat = isTrazosDeLetras || hasTrazosStyle;
+
   // 4. BLOQUES FINALES UNIFICADOS
   let extraBloquesFinales = "";
 
@@ -23005,13 +23402,18 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     extraBloquesFinales += `
       🚨 OBLIGATORIO: genera EXACTAMENTE 1 ficha de refuerzo con clave <strong>${recursos.fichas.clave}</strong> y EXACTAMENTE 4 actividades.
       - Usa la MISMA calidad pedagógica y la MISMA estructura de las actividades normales.
-      - Diferencia única: el contenedor debe ser <div class="activity-fichas"> en lugar de <div class="activity">.
+      - El contenedor debe usar la misma clase base <div class="activity"> y marcar la ficha con data-ficha="true".
       - Cada ficha debe profundizar/variar una actividad normal del subtema (no repetir literalmente).
-      - Cada actividad de ficha debe incluir:
+      ${shouldUseTrazosFichaFormat ? `- Como este bloque usa formato Trazos y letras, cada actividad de ficha debe incluir SOLO:
+        1) instrucción principal en negritas,
+        2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
+        3) bloque <div class="answer"> con el modelo exacto a trazar o copiar.
+      - NO uses subactividades, listas <ol>/<ul>, pasos internos ni viñetas.
+      - Deben ser exactamente 4 instrucciones simples con su answer correspondiente.` : `- Cada actividad de ficha debe incluir:
         1) instrucción principal en negritas,
         2) de 1 a 4 subactividades útiles,
         3) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-        4) respuesta esperada concreta en magenta.
+        4) respuesta esperada concreta en magenta.`}
       `;
   }
 
@@ -23092,19 +23494,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
   1. <div class="activity" style="margin-top:30px;">
      <strong>Para saber más.</strong>
-     <p>Si hay un término o concepto importante que convenga reforzar, incluye una breve explicación de 1 a 2 líneas en lenguaje sencillo y directo, que ayude a consolidar el conocimiento.</p>
-     <p><em>Ejemplo: "La fotosíntesis es el proceso por el cual las plantas convierten la luz solar en energía para vivir."</em></p>
+     <p>Si hay un término o concepto importante que convenga reforzar, usa una cita real y famosa de un autor reconocido que conecte con el subtema. No inventes autores, no uses frases genéricas y no pongas la etiqueta "Autor:".</p>
+     <p>La cita debe ir en lenguaje sencillo, ser breve y estar acompañada por el nombre del autor en la misma línea o al final, sin etiqueta adicional.</p>
   </div>
 
-  2. <div class="activity" style="margin-top:30px;">
-     <strong>El poder de la voz.</strong>
-     <blockquote style="border-left: 4px solid #2196f3; padding-left:12px; margin:12px 0; font-style:italic; background:#f4f7fc;">
-        "La educación es el arma más poderosa que puedes usar para cambiar el mundo."
-        <br>
-        <span style="font-weight:bold;">Nelson Mandela</span>
-     </blockquote>
-  </div>
-  ⚠️ IMPORTANTE: No incluyas ambas. Solo una sección y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
+  ⚠️ IMPORTANTE: Solo esta sección y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
+  - Si incluyes una frase, cita o ejemplo textual, usa una frase real y famosa de un autor reconocido, y escribe solo el nombre del autor sin la etiqueta "Autor:".
   - No incluyas frases religiosas, controversiales, violentas o anónimas.
   - No incluir emojis
   `;
@@ -23256,12 +23651,13 @@ function generarBloqueHabilidad(habilidadClave) {
       "- Usa lenguaje simple, concreto y familiar para niños pequeños" :
       "- Puedes usar vocabulario progresivamente más complejo"
     }
-    ${grado === "Primero" ?
-      "- Máximo 2 subactividades por actividad, preferiblemente 1" :
-      grado === "Segundo" || grado === "Tercero" ?
-        "- Máximo 3 subactividades por actividad" :
-        "- Hasta 4 subactividades para actividades complejas"
-    }
+    ${grado === "Primero" || grado === "Segundo" || grado === "Tercero" ? "- Cada subinstrucción debe ser breve: una sola idea y pocas palabras." : ""}
+    ${grado === "Primero" ? "- En Primero, prioriza subinstrucciones de 4 a 8 palabras." : grado === "Segundo" ? "- En Segundo, prioriza subinstrucciones de 5 a 9 palabras." : grado === "Tercero" ? "- En Tercero, prioriza subinstrucciones de 6 a 10 palabras." : ""}
+    ${isTrazosDeLetras
+      ? "- Para Trazos de letras no uses subactividades ni pasos internos; usa solo una instrucción directa con modelo o espacio de escritura."
+      : `- En formato ASC, cada actividad debe incluir normalmente entre 3 y 4 subactividades útiles.
+    - Solo permite 2 subactividades si la actividad es realmente muy simple y sigue siendo pedagógicamente suficiente.
+    - Evita actividades con una sola subinstrucción salvo casos excepcionales.`}
     
     ${instruccionesAdicionales ? `⚡ RECORDATORIO CRÍTICO: DEBES SEGUIR LA INSTRUCCIÓN ESPECÍFICA DEL USUARIO:
     "${instruccionesAdicionales}"
@@ -23276,9 +23672,12 @@ function generarBloqueHabilidad(habilidadClave) {
     - La fuente disciplinar obligatoria es la secuencia curricular efectiva de este contexto: original o modificada.
     - El contenido disciplinar central de TODAS las actividades debe salir de T/AE/C/P y no de ideas genéricas.
     - Usa T/AE/C/P como fuente principal de vocabulario, operaciones, conceptos y productos esperados.
-    - Si hay lectura relacionada, combínala SIEMPRE con T/AE/C/P en vez de elegir una sola fuente.
-    - Si la lectura relacionada aporta contexto, úsala como escenario, datos, personajes o situaciones de aplicación, pero manteniendo el contenido disciplinar del subtema.
-    - La lectura NO puede reemplazar el concepto disciplinar del subtema y la secuencia NO puede ignorar la lectura cuando esta esté activada.
+    ${isComprensionLectora
+      ? "- Si hay lectura relacionada, úsala solo como apoyo opcional; no la conviertas en requisito absoluto para resolver la actividad."
+      : "- Si hay lectura relacionada, combínala SIEMPRE con T/AE/C/P en vez de elegir una sola fuente."}
+    ${isComprensionLectora
+      ? "- En Comprensión lectora, el foco está en la correspondencia visual-textual y en la evidencia explícita, no en depender de una lectura externa fija."
+      : "- Si la lectura relacionada aporta contexto, úsala como escenario, datos, personajes o situaciones de aplicación, pero manteniendo el contenido disciplinar del subtema.\n    - La lectura NO puede reemplazar el concepto disciplinar del subtema y la secuencia NO puede ignorar la lectura cuando esta esté activada."}
     ${anclasCurriculares.length ? `- Conceptos curriculares detectados que deben aparecer de verdad en las actividades: ${anclasCurriculares.join("; ")}.` : ""}
     ${anclaPrincipal ? `- Concepto prioritario: ${anclaPrincipal}.` : ""}
     - Prohibido derivar las actividades hacia temas no respaldados por T/AE/C/P.
@@ -23295,30 +23694,67 @@ function generarBloqueHabilidad(habilidadClave) {
     ` : ""}
     - Incluye vocabulario matemático preciso y respuestas verificables.
   ` : "";
+  const guardrailTrazos = isTrazosDeLetras ? `
+    REGLAS ESTRICTAS PARA TRAZOS DE LETRAS:
+    - Este subtema es exclusivo de alfabetización inicial para Primaria Primero y Primaria Segundo.
+    - NO lo trates como redacción general, ortografía abstracta ni comprensión lectora tradicional.
+    - Debes proponer una letra objetivo coherente con la secuencia y alcance del subtema.
+    - Las actividades deben centrarse en trazar letras y frases cortas.
+    - Organiza las actividades normales así:
+      1. Presentación de la letra objetivo y direccionalidad del trazo.
+      2. Segundo ejercicio para completar o repetir el trazo de la letra en renglón.
+      3. Lectura y trazo de una frase corta que incluya la letra objetivo.
+      4. Lectura y trazo de otra frase corta del mismo nivel.
+    - Cada actividad debe ser un bloque simple, sin subinstrucciones, sin <ol> ni <li>.
+    - En las respuestas esperadas, escribe en color magenta exactamente la letra o frase modelo que el alumno debe trazar.
+    - Usa frases muy cortas, legibles y adecuadas para alfabetización inicial.
+    - Prioriza mayúscula y minúscula de la misma letra cuando tenga sentido.
+    - La salida debe parecer cuaderno de trazos: instrucción arriba, modelo o renglón abajo.
+  ` : "";
+
+  const guardrailComprensionLectora = isComprensionLectora ? `
+    REGLAS ESTRICTAS PARA COMPRENSIÓN LECTORA:
+    - El contenido debe parecer un ejercicio editorial de lectura comprensiva, no una explicación genérica sobre leer.
+    - Respeta la cantidad indicada por la tabla o la secuencia real de este subtema.
+    - Usa estímulos concretos: oración, imagen, lista breve de nombres, relación personaje-acción o selección de enunciados correctos.
+    - No inventes dependencia obligatoria con la lectura seleccionada; si existe, úsala solo como apoyo opcional y solo cuando aporte sentido pedagógico.
+    - Las respuestas deben poder comprobarse con la evidencia visible o textual del propio ejercicio.
+    - Evita preguntas vacías, abstractas o intercambiables con cualquier otra materia.
+  ` : "";
 
   const hasExplicitFormatContract = /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""));
-  const estructuraBaseActividad = hasExplicitFormatContract
+  const estructuraBaseActividad = isTrazosDeLetras
+    ? `
+    ESTRUCTURA OBLIGATORIA PARA TRAZOS DE LETRAS:
+    <div class="activity">
+      <p>1. <strong>[Instrucción breve de trazo o copia].</strong> [IC T. IND]</p>
+      <div class="answer"><span style="color:mediumvioletred;">Respuesta: [modelo de letra, sílaba o frase para trazar]</span></div>
+    </div>
+    - NO uses listas internas, subinstrucciones ni pasos numerados dentro de la actividad.
+    - Cada actividad debe mostrar directamente el modelo de escritura en la respuesta esperada.
+    `
+    : hasExplicitFormatContract
     ? `
     ESTRUCTURA BASE OBLIGATORIA POR ACTIVIDAD NORMAL:
     - Cada actividad debe ir dentro de <div class="activity">.
     - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
     - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
-    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3... + bloque final con etiqueta "Respuesta:".
+    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3...
+    - Si el contrato alternativo sí es ASC, genera normalmente 3 o 4 subinstrucciones por actividad. No reduzcas todo a una sola.
+    - En formato ASC, cada subinstrucción debe llevar inmediatamente debajo su propia respuesta o evidencia esperada dentro de <div class="answer">...</div>. No coloques una sola respuesta global al final si existen varias subinstrucciones.
     `
     : `
     ESTRUCTURA OBLIGATORIA POR ACTIVIDAD NORMAL:
     <div class="activity">
       <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
       <ol class="steps steps-numbered">
-        <li>[Subactividad 1]</li>
-        <li>[Subactividad 2 opcional]</li>
-        <li>[Subactividad 3 opcional]</li>
-        <li>[Subactividad 4 opcional]</li>
+        <li>[Subactividad 1]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 1]</span></div></li>
+        <li>[Subactividad 2 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 2]</span></div></li>
+        <li>[Subactividad 3 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 3]</span></div></li>
+        <li>[Subactividad 4 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 4]</span></div></li>
       </ol>
-      <div class="answer">
-        <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
-      </div>
     </div>
+    - Regla obligatoria: genera normalmente 3 o 4 subinstrucciones por actividad; evita dejar una sola salvo que el usuario lo haya pedido explícitamente.
     `;
 
   const prompt = `
@@ -23364,13 +23800,17 @@ function generarBloqueHabilidad(habilidadClave) {
     ` : ""}
 
     RELACIÓN CON LECTURA:
-    ${relacionadaConLectura
+    ${relacionadaLecturaEstricta
       ? `- Las actividades deben construirse SIEMPRE con Lectura + Secuencia en conjunto.`
-      : `- Las actividades NO deben referirse a una lectura específica.`}
-    ${instruccionRelacionLectura}
-    ${relacionadaConLectura && contenidoLectura ? `- Contexto de lectura: ${contenidoLectura}` : ""}
+      : `- Las actividades NO deben depender obligatoriamente de una lectura específica; si la lectura activa aporta valor, úsala solo como contexto opcional.`}
+    ${relacionadaLecturaEstricta ? instruccionRelacionLectura : ""}
+    ${isComprensionLectora ? "- En Comprensión lectora, la lectura seleccionada es opcional: no la conviertas en requisito absoluto." : ""}
+    ${relacionadaLecturaEstricta && contenidoLectura ? `- Contexto de lectura: ${contenidoLectura}` : ""}
     ${guardrailCurricular}
+    ${isComprensionLectora ? "- En Comprensión lectora, prioriza correspondencia imagen-texto, selección de oraciones correctas, rastreo de nombres propios y sentido literal/inferencial breve." : ""}
     ${guardrailMath}
+    ${guardrailTrazos}
+    ${guardrailComprensionLectora}
 
     RECURSOS DIDÁCTICOS:
     ${instruccionRecursos}
@@ -23378,6 +23818,7 @@ function generarBloqueHabilidad(habilidadClave) {
 
     MEJORA PEDAGÓGICA ADICIONAL:
     ${extraDificultadCategoria}
+    ${extraDificultadSubtema}
     - Incluye al menos una actividad de transferencia a contexto real.
     - Incluye al menos una actividad con justificación o argumentación.
     - Incluye al menos una pregunta metacognitiva en itálicas.
@@ -23390,7 +23831,7 @@ function generarBloqueHabilidad(habilidadClave) {
     VALIDACIÓN INTERNA ANTES DE RESPONDER:
     - Revisa cada actividad y confirma que sí depende de la secuencia curricular efectiva del subtema.
     - Si una actividad podría servir igual para otra materia o para otra lectura sin cambiar nada, reescríbela.
-    ${relacionadaConLectura ? `- Si la lectura está activada, revisa que cada actividad use simultáneamente información de la lectura y metas de la secuencia.` : ""}
+    ${relacionadaLecturaEstricta ? `- Si la lectura está activada, revisa que cada actividad use simultáneamente información de la lectura y metas de la secuencia.` : (isComprensionLectora ? "- Si la lectura está activada, revísala como apoyo opcional y no como condición obligatoria." : "")}
     ${anclaPrincipal ? `- Revisa que el concepto "${anclaPrincipal}" no aparezca solo decorativamente, sino como operación o idea central del trabajo escolar.` : ""}
     ${recursosOrdenados.length ? `- Revisa que ${recursosOrdenados.join(", ")} queden mencionados explícitamente dentro de actividades normales distintas antes de aparecer en los bloques finales.` : ""}
 
@@ -23399,7 +23840,7 @@ function generarBloqueHabilidad(habilidadClave) {
     ${seccionesExtra}
 
     RECORDATORIO FINAL:
-    ${recursos.fichas.generado ? `- Debes incluir la ficha ${recursos.fichas.clave} con 4 actividades y formato .activity-fichas de calidad equivalente.` : ''}
+    ${recursos.fichas.generado ? `- Debes incluir la ficha ${recursos.fichas.clave} con 4 actividades y formato <div class="activity" data-ficha="true"> de calidad equivalente.` : ''}
     ${recursos.anexos.generado ? `- Debes incluir el anexo visual ${recursos.anexos.clave}.` : ''}
     ${recursos.recortables.generado ? `- Debes incluir el recortable ${recursos.recortables.clave}.` : ''}
     ${recursos.videos.generado ? `- Debes incluir el guion de video "${recursos.videos.clave}".` : ''}
@@ -23472,6 +23913,7 @@ function _unidadSubcategoriaEditorialCodigo(subtema = "", categoria = "") {
   const mapa = {
     Artes: "ARTES",
     Ortografia: "ORTOGRAFIA",
+    TrazosDeLetras: "TRAZOS_DE_LETRAS",
     Gramatica: "GRAMATICA",
     ExpresionEscrita: "EXPRESION_ESCRITA",
     ExpresionOral: "EXPRESION_ORAL",
@@ -23500,6 +23942,8 @@ function _unidadSubtemasPaginablesOrdenados() {
   const canonical = [
     "Artes",
     "Ortografía",
+    "TrazosDeLetras",
+    "ComprensionLectora",
     "Gramatica",
     "ExpresionEscrita",
     "ExpresionOral",
@@ -23526,11 +23970,32 @@ function _unidadPaginaEditorialPorSubtema(subtema = "", categoria = "") {
 }
 
 function _unidadEtiquetaEditorialSubcategoria({ subtema = "", categoria = "", columna = "alumno" } = {}) {
+  const unidadActual = document.getElementById("unidadNumero")?.value || document.querySelector("select#unidadNumero")?.value || "1";
   const partes = [
     _unidadSerieEditorialCodigo(),
     _unidadNivelGradoEditorialCodigo(),
     _unidadLibroEditorialCodigo(columna),
-    _unidadSubcategoriaEditorialCodigo(subtema, categoria)
+    _unidadSubcategoriaEditorialCodigo(subtema, categoria),
+    `U${unidadActual}`
+  ].filter(Boolean);
+  return partes.join("_");
+}
+
+function _unidadEtiquetaEditorialRecurso({ subtema = "", categoria = "", tipoRecurso = "" } = {}) {
+  const unidadActual = document.getElementById("unidadNumero")?.value || document.querySelector("select#unidadNumero")?.value || "1";
+  const tipoMapeado = {
+    fichas: "FICHAS",
+    anexos: "ANEXOS",
+    recortables: "RECORTABLES",
+    videos: "VIDEOS"
+  }[String(tipoRecurso || "").toLowerCase()] || "RECURSO";
+
+  const partes = [
+    _unidadSerieEditorialCodigo(),
+    _unidadNivelGradoEditorialCodigo(),
+    tipoMapeado,
+    _unidadSubcategoriaEditorialCodigo(subtema, categoria),
+    `U${unidadActual}`
   ].filter(Boolean);
   return partes.join("_");
 }
@@ -23549,6 +24014,7 @@ function _unidadCompetenciasAscPorSubtema(subtema = "", categoria = "", { lectur
   const mapa = {
     Artes: ["IC E. ORAL"],
     Ortografia: ["IC E. LINGÜÍSTICAS"],
+    TrazosDeLetras: ["IC E. ESCRITA", "IC E. LINGÜÍSTICAS"],
     Gramatica: ["IC E. LINGÜÍSTICAS"],
     ExpresionEscrita: ["IC E. ESCRITA"],
     ExpresionOral: ["IC E. ORAL"],
@@ -23620,7 +24086,7 @@ function _unidadAscThemePorChip(chip = "") {
 }
 
 function _unidadExtractExplicitAscChips(text = "") {
-  const source = String(text || "");
+  const source = _unidadNormalizeMalformedIcTokens(text);
   if (!source.trim()) return [];
 
   const matches = Array.from(source.matchAll(/\[(IC\.?\s*[^\]]+)\]/gi))
@@ -23629,8 +24095,658 @@ function _unidadExtractExplicitAscChips(text = "") {
 
   const isModalityChip = (value = "") => /IC\.?\s*T\.?\s*(IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?)/i.test(value);
   const isPlecaChip = (value = "") => /\bPLECA(?:S)?\b/i.test(value);
+  const isPrimerActionChip = (value = "") => _unidadIsPrimerActionChip(value);
 
-  return Array.from(new Set(matches.filter((chip) => !isModalityChip(chip) && !isPlecaChip(chip))));
+  return Array.from(new Set(matches.filter((chip) => !isModalityChip(chip) && !isPlecaChip(chip) && !isPrimerActionChip(chip))));
+}
+
+function _unidadNormalizeMalformedIcTokens(text = "") {
+  let safe = String(text || "");
+  if (!safe.trim()) return safe;
+  safe = safe
+    .replace(/\[(?:IC\.?|IC)\s*\[(?:IC\.?|IC)\s*/gi, "[IC ")
+    .replace(/\[(?:IC\.?|IC)\s+(IC\.?\s*[^\]]+)\]/gi, "[$1]")
+    .replace(/\[\s*\[+/g, "[")
+    .replace(/\]+/g, (match) => (match.length > 1 ? "]" : match))
+    .replace(/\[\s*(IC\.?\s*[^\]]+?)\s*\]/gi, (_, label) => `[${String(label || "").replace(/\s+/g, " ").trim()}]`);
+  return safe;
+}
+
+function _unidadStripIcTokens(text = "") {
+  return String(text || "")
+    .replace(/\[\s*IC\.?\s*[^\]]+\]/gi, " ")
+    .replace(/\bIC\.?(\s*[A-ZÁÉÍÓÚÑ/.]+)+\b/g, " ")
+    .replace(/\bIC\.?\s*(?:Recortable|Ficha|Anexo|Video|Oral)\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function _unidadCleanTeacherNotesHtml(html = "") {
+  const source = String(html || "");
+  if (!source.trim()) return source;
+
+  const stripTextNoise = (text = "") => _unidadStripIcTokens(String(text || ""))
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (typeof DOMParser === "undefined") {
+    return stripTextNoise(
+      source
+        .replace(/<i\b[^>]*class=["'][^"']*(?:fa-|unidad-ic-)[^"']*["'][^>]*>[\s\S]*?<\/i>/gi, " ")
+        .replace(/<span\b[^>]*class=["'][^"']*(?:unidad-ic-|fa-)[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, " ")
+        .replace(/\[(?:IC\.?|IC)\s*[^\]]+\]/gi, " ")
+    );
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  Array.from(root.querySelectorAll(
+    "i, .unidad-ic-resource-badges, .unidad-ic-modality-badge, .unidad-ic-asc-badge, [class*='fa-'], [class*='unidad-ic-']"
+  )).forEach((node) => node.remove());
+
+  Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6, p, strong, span, li")).forEach((node) => {
+    const cleaned = stripTextNoise(String(node.innerHTML || node.textContent || ""));
+    if (!cleaned) return;
+    node.innerHTML = cleaned
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  });
+
+  Array.from(root.querySelectorAll("span, p, li, strong, h1, h2, h3, h4, h5, h6")).forEach((node) => {
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!text) node.remove();
+  });
+
+  return root.innerHTML.trim();
+}
+
+function _unidadBuildTeacherNotesSectionHtml({
+  title = "",
+  tone = "#1d4ed8",
+  className = "",
+  style = "",
+  paragraphs = []
+} = {}) {
+  const safeTitle = _escapeHtmlUnidad(String(title || "").trim());
+  const body = (Array.isArray(paragraphs) ? paragraphs : [])
+    .map((line) => `<p>${_escapeHtmlUnidad(String(line || "").trim())}</p>`)
+    .join("");
+  const classes = ["unidad-teacher-note-section", String(className || "").trim()].filter(Boolean).join(" ");
+  const styleAttr = String(style || "").trim() ? ` style="${_escapeHtmlUnidad(String(style || "").trim())}"` : "";
+
+  return `
+    <section class="${classes}"${styleAttr}>
+      <h3 style="color:${tone};">${safeTitle}</h3>
+      ${body}
+    </section>
+  `;
+}
+
+function _unidadBuildTeacherNotesShellHtml({
+  headingHtml = "",
+  preGeneralHtml = "",
+  generalTitle = "Actividad General",
+  generalItemsHtml = "",
+  sectionsHtml = []
+} = {}) {
+  const sections = Array.isArray(sectionsHtml) ? sectionsHtml.filter(Boolean).join("") : String(sectionsHtml || "");
+  return `
+    <div class="unidad-teacher-notes asc-teacher-layout">
+      ${preGeneralHtml || ""}
+      ${headingHtml || ""}
+      <h3>${_escapeHtmlUnidad(generalTitle)}</h3>
+      ${generalItemsHtml || ""}
+      ${sections}
+    </div>
+  `;
+}
+
+function _unidadBuildFichaTeacherMetadataHtml({
+  subtema = "",
+  categoria = "",
+  fichaClave = ""
+} = {}) {
+  const safeFichaClave = String(fichaClave || "").trim();
+  const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" });
+  const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
+  const campo = _unidadCampoFormativoDeCategoria(categoria);
+
+  return `
+    <div class="unidad-ficha-metadatos-etiquetas unidad-metadatos-etiquetas" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;">
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
+      ${_unidadRenderEjeArticuladorHTML(subtema, categoria)}
+      ${campo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_escapeHtmlUnidad(campo)}</span>` : ""}
+      ${_unidadRenderHabilidadCognitivaHTML(subtema, categoria)}
+      ${_unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: safeFichaClave ? "Ficha" : "Ficha" })}
+    </div>
+  `;
+}
+
+function _unidadBuildTeacherNotesNeurologyHtml({
+  lines = []
+} = {}) {
+  const defaultLines = [
+    "Cuando el grupo avance, recupere en voz alta la idea clave, escríbala visible y pídales que la expliquen con sus palabras.",
+    "Alternar observación, verbalización y acción ayuda a sostener la atención, fortalecer la memoria de trabajo y ajustar el andamiaje sin saturar la carga verbal.",
+    "Conviene cerrar con una recuperación activa muy breve, una señal concreta de logro y una pausa final que permita fijar la idea principal antes de pasar a la siguiente tarea."
+  ];
+  const paragraph = (Array.isArray(lines) && lines.length ? lines : defaultLines)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return _unidadBuildTeacherNotesSectionHtml({
+    title: "Neurología aplicada",
+    tone: "#0f172a",
+    className: "unidad-teacher-neurology",
+    style: "margin-bottom:80px;",
+    paragraphs: [paragraph]
+  });
+}
+
+function _unidadEnsureNeurologySectionHtml(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const section = Array.from(root.querySelectorAll("section")).find((node) => {
+    const title = String(node.querySelector("h3")?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return title === "neurología aplicada" || title === "neurologia aplicada";
+  });
+
+  if (section) {
+    section.classList.add("unidad-teacher-neurology");
+    if (!section.getAttribute("style")) {
+      section.setAttribute("style", "margin-bottom:80px;");
+    } else if (!/margin-bottom/i.test(section.getAttribute("style") || "")) {
+      section.setAttribute("style", `${section.getAttribute("style")};margin-bottom:80px;`);
+    }
+    return root.innerHTML;
+  }
+
+  const headings = Array.from(root.querySelectorAll("h3"));
+  const heading = headings.find((node) => {
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return text === "neurología aplicada" || text === "neurologia aplicada";
+  });
+  if (!heading) return source;
+
+  const paragraphs = [];
+  const reflectionBlocks = [];
+  let cursor = heading.nextElementSibling;
+  while (cursor) {
+    const tag = String(cursor.tagName || "").toLowerCase();
+    const titleText = String(cursor.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (/^h[1-6]$/.test(tag) || /candelarizaci[oó]n de actividades recomendada/.test(titleText)) break;
+    if (/^reflexi[oó]n global/i.test(titleText) || /^<strong>\s*reflexi[oó]n global/i.test(String(cursor.innerHTML || "").trim().toLowerCase())) {
+      reflectionBlocks.push(cursor.cloneNode(true));
+      const next = cursor.nextElementSibling;
+      cursor.remove();
+      cursor = next;
+      continue;
+    }
+    paragraphs.push(cursor.cloneNode(true));
+    const next = cursor.nextElementSibling;
+    cursor.remove();
+    cursor = next;
+  }
+
+  const neurologySection = doc.createElement("section");
+  neurologySection.className = "unidad-teacher-note-section unidad-teacher-neurology";
+  neurologySection.setAttribute("style", "margin-bottom:80px;padding:16px 18px;border-radius:18px;border:2px dashed #a7f3d0;background:radial-gradient(circle at top right, rgba(196, 181, 253, 0.2), transparent 30%), linear-gradient(180deg, #ecfdf5, #f0fdf4);box-shadow:0 10px 26px rgba(16,185,129,0.12);");
+  heading.replaceWith(neurologySection);
+  neurologySection.appendChild(heading);
+  paragraphs.forEach((node) => neurologySection.appendChild(node));
+  if (reflectionBlocks.length) {
+    const reflectionSection = doc.createElement("div");
+    reflectionSection.className = "unidad-reflexion-global-maestro";
+    reflectionBlocks.forEach((node) => reflectionSection.appendChild(node));
+    neurologySection.insertAdjacentElement("afterend", reflectionSection);
+  }
+  return root.innerHTML;
+}
+
+function _unidadIsLowerPrimaryGrade(grado = "") {
+  const safe = String(grado || "").trim().toLowerCase();
+  return safe === "primero" || safe === "segundo" || safe === "tercero" || /^([1-3])\b/.test(safe);
+}
+
+function _unidadLimitWords(text = "", maxWords = 14) {
+  const words = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (!words.length) return "";
+  const limit = Math.max(1, parseInt(maxWords, 10) || 14);
+  const clipped = words.length > limit ? words.slice(0, limit) : words;
+  return clipped.join(" ").replace(/[.;:,\s]+$/g, "").trim();
+}
+
+function _unidadTeacherNoteWordLimit(grado = "") {
+  if (_unidadIsPrimerGrado(grado)) return 10;
+  if (_unidadIsLowerPrimaryGrade(grado)) return 12;
+  return 16;
+}
+
+function _unidadBuildResourcePlaceholderHtml(recursos = []) {
+  const safe = (Array.isArray(recursos) ? recursos : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (!safe.length) return "";
+  return `<div class="unidad-resource-placeholder" aria-hidden="true" data-recurso="${_escapeHtmlUnidad(safe.join(" | "))}"></div>`;
+}
+
+function _unidadInferTeacherEvidence(lead = "", recursos = [], grado = "") {
+  const text = String(lead || "").toLowerCase();
+  const resourceHint = (Array.isArray(recursos) && recursos.length) ? ` con apoyo de ${recursos[0]}` : "";
+  let evidence = "";
+  if (/\bletra\b/.test(text) && /\b(traza|copia|escribe|repasa)\b/.test(text)) evidence = "Trazo correcto de la letra indicada.";
+  else if (/\bfrase\b/.test(text) && /\b(lee|copia|escribe|traza)\b/.test(text)) evidence = "Copia o lectura correcta de la frase.";
+  else if (/\bpalabra\b/.test(text)) evidence = "Escritura o lectura correcta de la palabra indicada.";
+  else if (/\bsonid[oa]s?\b/.test(text)) evidence = "Identificación del sonido principal.";
+  else if (/\bn[ií]mero\b|\bconteo\b|\bcantidad\b/.test(text)) evidence = "Conteo o relación correcta de la cantidad.";
+  else if (/\brelaciona\b|\bune\b|\bclasifica\b|\bordena\b/.test(text)) evidence = "Relación, clasificación u orden correcto.";
+  else if (/\bobserva\b|\bidentifica\b|\bencuentra\b|\bubica\b/.test(text)) evidence = "Identificación breve y precisa.";
+  else evidence = _unidadIsPrimerGrado(grado)
+    ? "Evidencia breve de comprensión."
+    : "Evidencia clara de comprensión y procedimiento.";
+  return `${evidence}${resourceHint}`.trim();
+}
+
+function _unidadBuildTeacherCreativeLead(lead = "", recursos = [], grado = "", index = 0) {
+  const rawLead = String(lead || "").trim();
+  const plainLead = _unidadStripIcTokens(rawLead);
+  const lowerLead = plainLead.toLowerCase();
+  const resource = (Array.isArray(recursos) && recursos.length) ? recursos[0] : "";
+  const resourceText = resource ? `, usando ${resource} como apoyo visible` : "";
+  const variant = index % 3;
+
+  const templates = [
+    {
+      test: /\bletra\b|\btraza\b|\bcopia\b|\bescribe\b|\brepasa\b/.test(lowerLead),
+      lines: [
+        [
+          `Haga que ${plainLead} funcione como una ruta breve y visible${resourceText}.`,
+          "Muestre el arranque, avance con calma y deje que el grupo siga con la mirada cada giro del trazo.",
+          "Después, pida una ejecución corta para revisar pulso, forma y cierre sin perder precisión."
+        ],
+        [
+          `Tome ${plainLead} como un modelo que se construye paso a paso${resourceText}.`,
+          "Marque la direccionalidad, verbalice el movimiento y deje claro dónde comienza y dónde termina.",
+          "Cierre con una corrección breve para confirmar que el trazo quedó limpio y ordenado."
+        ],
+        [
+          `Con ${plainLead}, invite al grupo a seguir una huella exacta en el papel${resourceText}.`,
+          "Antes de escribir, haga visible la secuencia del movimiento y pida que la observen con atención.",
+          "Termine con una revisión silenciosa del trabajo para ver si mantuvieron ritmo y proporción."
+        ]
+      ][variant]
+    },
+    {
+      test: /\bfrase\b|\bpalabra\b|\blee\b/.test(lowerLead),
+      lines: [
+        [
+          `Use ${plainLead} como una pista breve para activar lectura y escritura${resourceText}.`,
+          "Haga visible la secuencia de palabras y señale qué parte merece atención primero.",
+          "Cierre comprobando si la frase conserva orden, claridad y sentido."
+        ],
+        [
+          `Con ${plainLead}, abra una pequeña ruta de lectura guiada${resourceText}.`,
+          "Pida que anticipen, lean o copien con intención, no de forma mecánica.",
+          "Revise que la idea se mantenga completa y bien separada al final."
+        ],
+        [
+          `Tome ${plainLead} como una unidad breve que el grupo debe descifrar${resourceText}.`,
+          "Ubique palabras clave, haga una pausa y permita que el alumnado ordene mentalmente la secuencia.",
+          "Termine verificando si la lectura o escritura quedó fiel a la consigna."
+        ]
+      ][variant]
+    },
+    {
+      test: /\bsonid[oa]s?\b|\bescucha\b/.test(lowerLead),
+      lines: [
+        [
+          `Abra una escucha guiada alrededor de ${plainLead} para descubrir el sonido clave${resourceText}.`,
+          "Invite a identificarlo, repetirlo y darle nombre antes de responder.",
+          "Luego confirme si lo vincularon con la imagen o situación que lo representa."
+        ],
+        [
+          `Con ${plainLead}, transforme la escucha en una búsqueda atenta${resourceText}.`,
+          "Pida que distingan el sonido principal y que lo expliquen con una palabra precisa.",
+          "Cierre comprobando si la relación entre sonido e imagen quedó clara."
+        ],
+        [
+          `Haga sonar ${plainLead} como una pista que hay que reconocer${resourceText}.`,
+          "Deje un momento de atención y luego solicite una respuesta breve y consciente.",
+          "Finalice viendo si el grupo conectó bien la fuente con lo escuchado."
+        ]
+      ][variant]
+    },
+    {
+      test: /\bn[ií]mero\b|\bconteo\b|\bcantidad\b/.test(lowerLead),
+      lines: [
+        [
+          `Proponga ${plainLead} como un reto breve de conteo o comparación${resourceText}.`,
+          "Acompañe con objetos o marcas visibles para que la cantidad no se pierda de vista.",
+          "Termine pidiendo que expliquen cómo llegaron al resultado."
+        ],
+        [
+          `Con ${plainLead}, ponga a prueba la relación entre cantidad y respuesta${resourceText}.`,
+          "Use el apoyo concreto solo si hace falta y deje visible la correspondencia uno a uno.",
+          "Cierre verificando que el conteo haya sido ordenado y preciso."
+        ],
+        [
+          `Tome ${plainLead} como una pequeña escena numérica${resourceText}.`,
+          "Pida observar, contar y comparar antes de responder.",
+          "Luego confirme si el grupo sostuvo el orden y la cantidad sin saltarse pasos."
+        ]
+      ][variant]
+    },
+    {
+      test: /\brelaciona\b|\bune\b|\bclasifica\b|\bordena\b/.test(lowerLead),
+      lines: [
+        [
+          `Transforme ${plainLead} en una decisión que el grupo deba justificar${resourceText}.`,
+          "Modele un caso inicial, deje clara la regla y permita que el alumnado siga el mismo criterio.",
+          "Cierre revisando si la clasificación o el orden se sostuvieron hasta el final."
+        ],
+        [
+          `Con ${plainLead}, pida que el grupo compare y elija con criterio${resourceText}.`,
+          "Muéstreles primero la regla y luego observe si la aplican sin cambiarla a mitad del camino.",
+          "Finalice comprobando que cada decisión tenga una razón clara."
+        ],
+        [
+          `Use ${plainLead} como una oportunidad para ordenar con intención${resourceText}.`,
+          "Presente el ejemplo, deje espacio para que expliquen por qué va ahí cada elemento y corrija solo lo necesario.",
+          "Termine viendo si la lógica quedó estable y visible."
+        ]
+      ][variant]
+    },
+    {
+      test: /\bobserva\b|\bidentifica\b|\bencuentra\b|\bubica\b/.test(lowerLead),
+      lines: [
+        [
+          `Abra la mirada sobre ${plainLead} como si fuera una pista por descifrar${resourceText}.`,
+          "Oriente la observación hacia el detalle que sí importa y deje que lo nombren con precisión.",
+          "Finalice con una respuesta breve que confirme la identificación."
+        ],
+        [
+          `Con ${plainLead}, convierta la observación en una búsqueda concreta${resourceText}.`,
+          "Pida que describan lo que vieron antes de responder para afinar la atención.",
+          "Cierre verificando que la respuesta coincida con el objetivo de la consigna."
+        ],
+        [
+          `Tome ${plainLead} como una pista que obliga a mirar con cuidado${resourceText}.`,
+          "Haga que el grupo ubique, explique y compare lo encontrado antes de cerrar.",
+          "Luego confirme si la identificación fue exacta y no solo aproximada."
+        ]
+      ][variant]
+    }
+  ].find((item) => item.test);
+
+  const fallbackLines = [
+    `Con ${plainLead || "la consigna"}, abra una secuencia clara y exigente${resourceText}.`,
+    "Sitúe al grupo frente al modelo, deje una primera lectura atenta y pida una respuesta breve para comprobar comprensión.",
+    "Cierre con una señal concreta de logro y un ajuste puntual si alguien todavía necesita acompañamiento."
+  ];
+
+  return (templates?.lines || fallbackLines).join(" ");
+}
+
+function _unidadBuildTeacherActionGuidance(lead = "", recursos = [], grado = "", index = 0) {
+  const text = String(lead || "").toLowerCase();
+  const branch = [
+    {
+      test: /\bletra\b|\btraza\b|\bcopia\b|\bescribe\b|\brepasa\b/.test(text),
+      lines: [
+        "Modele el recorrido con pausa, marque el punto de arranque y haga visible cómo se cierra cada movimiento.",
+        "Invite a comparar su propio trazo con el modelo y a corregir el gesto antes de llenar toda la línea.",
+        "Observe postura, agarre y regularidad; eso le dirá si ya pueden avanzar con mayor autonomía."
+      ]
+    },
+    {
+      test: /\bfrase\b|\bpalabra\b|\blee\b/.test(text),
+      lines: [
+        "Lea la consigna como quien abre una pista breve, subraye el pulso de la frase y deje claro qué parte se transforma.",
+        "Pida que anticipen la respuesta antes de escribirla, para que la lectura no sea mecánica sino intencional.",
+        "Revise que el orden, la separación y el sentido final mantengan la idea original sin perder claridad."
+      ]
+    },
+    {
+      test: /\bsonid[oa]s?\b|\bescucha\b/.test(text),
+      lines: [
+        "Abra un momento de escucha atenta y deje que el sonido aparezca antes de nombrarlo.",
+        "Pida que lo repitan o lo describan con una palabra breve, para convertir la percepción en comprensión.",
+        "Compruebe que lo asocien con su fuente, su imagen o su uso real dentro de la actividad."
+      ]
+    },
+    {
+      test: /\bn[ií]mero\b|\bconteo\b|\bcantidad\b/.test(text),
+      lines: [
+        "Presente la cantidad como una escena breve y pida que la recorran con la vista antes de responder.",
+        "Muestre la correspondencia uno a uno con material concreto o marcas visibles para sostener el conteo.",
+        "Si aparece duda, regrese al modelo y haga visible dónde se perdió la relación."
+      ]
+    },
+    {
+      test: /\brelaciona\b|\bune\b|\bclasifica\b|\bordena\b/.test(text),
+      lines: [
+        "Abra con un ejemplo que deje ver el criterio y luego pida que lo sostengan en silencio y con precisión.",
+        "Solicite que justifiquen cada decisión, no solo que acomoden los elementos.",
+        "Observe si el criterio se mantiene igual de principio a fin o si cambian la regla a mitad del camino."
+      ]
+    },
+    {
+      test: /\bobserva\b|\bidentifica\b|\bencuentra\b|\bubica\b/.test(text),
+      lines: [
+        "Dirija la mirada al detalle que realmente importa y convierta la observación en una búsqueda breve.",
+        "Pida una respuesta corta, precisa y verificable para confirmar que sí encontraron lo que debían.",
+        "Si el grupo duda, vuelva al ejemplo visible y cierre con una corrección mínima pero clara."
+      ]
+    }
+  ].find((item) => item.test);
+
+  const lines = branch?.lines || [
+    "Abra la consigna con un ejemplo visible y deje claro qué parte debe resolver el grupo.",
+    "Acompañe el procedimiento con observación puntual, sin saturar la explicación.",
+    "Cierre con una verificación breve que confirme comprensión y orden de trabajo."
+  ];
+  return lines.map((line, i) => `${i === 0 && index % 2 === 1 ? "Además, " : ""}${line}`).join(" ");
+}
+
+function _unidadBuildTeacherActivityGuidance({
+  lead = "",
+  detalle = "",
+  recursos = [],
+  grado = "",
+  index = 0
+} = {}) {
+  const leadText = String(lead || "").trim();
+  const detalleText = String(detalle || "").trim();
+  const base = _unidadBuildTeacherActionGuidance(leadText, recursos, grado, index);
+  const focus = detalleText
+    ? `Tome como foco ${detalleText.toLowerCase()} y pida que el grupo lo resuelva con el modelo visible.`
+    : "Pida que el grupo resuelva el modelo visible con orden y precisión.";
+  const cierre = _unidadBuildTeacherClosingGuidance(leadText, grado, index);
+  return `${base} ${focus} ${cierre}`.trim();
+}
+
+function _unidadBuildTeacherNoteHtml({
+  index = 0,
+  lead = "",
+  detalle = "",
+  modalidad = "individual",
+  recursos = [],
+  grado = "",
+  contexto = "",
+  cierre = ""
+} = {}) {
+  const leadBase = _unidadStripIcTokens(String(lead || "")).trim();
+  const modalidadBase = String(modalidad || "individual").trim();
+  const recursoText = (Array.isArray(recursos) && recursos.length)
+    ? `Integre ${recursos.join(", ")} como apoyo concreto en el momento indicado.`
+    : "Modele un ejemplo breve antes de iniciar.";
+  const cierreBase = String(cierre || "").trim() || (index % 2 === 0
+    ? "Cierre con una verificación rápida."
+    : "Pida que expliquen un paso con sus palabras.");
+  const evidencia = _unidadInferTeacherEvidence(leadBase || lead, recursos, grado);
+  const answerHtml = evidencia
+    ? `<div class="answer"><span style="color:mediumvioletred;">Respuesta: ${_escapeHtmlUnidad(evidencia)}</span></div>`
+    : "";
+  const contextoLine = String(contexto || "").trim();
+  const guidance = _unidadBuildTeacherActivityGuidance({
+    lead: leadBase || lead,
+    detalle,
+    recursos,
+    grado,
+    index
+  });
+  const opener = _unidadBuildTeacherCreativeLead(leadBase || lead, recursos, grado, index);
+  const development = guidance;
+  const ending = [
+    cierreBase,
+    "Observe la respuesta del grupo, ajuste el apoyo según lo que vea y cierre con una señal breve de logro."
+  ].filter(Boolean).join(" ");
+  const reference = `En la actividad ${index + 1}, `;
+  const singleParagraph = [
+    reference,
+    opener,
+    recursoText,
+    development,
+    ending
+  ].filter(Boolean).join(" ");
+
+  return `
+      <div class="unidad-teacher-general-item">
+        ${contextoLine ? `<p>${_escapeHtmlUnidad(contextoLine)}</p>` : ""}
+        <p>${_escapeHtmlUnidad(singleParagraph)}</p>
+        ${answerHtml}
+      </div>
+    `;
+}
+
+function _unidadBuildTeacherClosingGuidance(lead = "", grado = "", index = 0) {
+  const text = String(lead || "").toLowerCase();
+  if (/\bletra\b|\btraza\b|\bcopia\b|\bescribe\b/.test(text)) {
+    return index % 2 === 0
+      ? "Cierre revisando la postura, el sentido del trazo y un modelo correcto."
+      : "Cierre pidiendo que comparen su trabajo con el modelo visible."
+  }
+  if (/\bfrase\b|\bpalabra\b/.test(text)) {
+    return index % 2 === 0
+      ? "Cierre con lectura breve o revisión de escritura."
+      : "Cierre verificando que la frase conserve orden y sentido."
+  }
+  if (/\bn[ií]mero\b|\bconteo\b/.test(text)) {
+    return index % 2 === 0
+      ? "Cierre revisando el conteo y la correspondencia uno a uno."
+      : "Cierre pidiendo que expliquen cómo obtuvieron la respuesta."
+  }
+  if (_unidadIsPrimerGrado(grado)) {
+    return index % 2 === 0
+      ? "Cierre con una comprobación oral muy breve."
+      : "Cierre con observación del trabajo terminado."
+  }
+  return index % 2 === 0
+    ? "Cierre con una evidencia breve del procedimiento."
+    : "Cierre con una verificación rápida del resultado."
+}
+
+function _unidadBuildMathContextualizationPedagogicaHTML({
+  subtema = "",
+  grado = "",
+  tituloCreativo = ""
+} = {}) {
+  const safeSubtema = String(tituloCreativo || formatearSubtema(subtema) || "Matemáticas").trim();
+  const campoFormativo = "Saberes y Pensamiento Científico";
+  const nivelTaxonomico = _unidadIsPrimerGrado(grado)
+    ? "Comprensión y aplicación concreta"
+    : _unidadIsLowerPrimaryGrade(grado)
+      ? "Análisis guiado y comparación"
+      : "Análisis, aplicación y argumentación";
+  const proceso = _unidadIsPrimerGrado(grado)
+    ? "Reconocer, contar, trazar y comprobar"
+    : "Representar, comparar, resolver y comprobar";
+  const evidencia = _unidadIsPrimerGrado(grado)
+    ? "Respuesta breve, trazo visible o conteo correcto"
+    : "Procedimiento visible, explicación breve y resultado verificable";
+  const apoyo = _unidadIsPrimerGrado(grado)
+    ? "Material concreto, modelo visible y consigna corta"
+    : "Material manipulativo, registro breve y ejemplo modelado";
+
+  return `
+    <section class="unidad-teacher-note-section unidad-teacher-math-context">
+      <h3 style="color:#0f766e;">Contextualización pedagógica de Matemáticas</h3>
+      <table class="unidad-math-context-table">
+        <tbody>
+          <tr>
+            <th>Subtema</th>
+            <td>${_escapeHtmlUnidad(safeSubtema)}</td>
+          </tr>
+          <tr>
+            <th>Campo formativo</th>
+            <td>${_escapeHtmlUnidad(campoFormativo)}</td>
+          </tr>
+          <tr>
+            <th>Nivel taxonómico</th>
+            <td>${_escapeHtmlUnidad(nivelTaxonomico)}</td>
+          </tr>
+          <tr>
+            <th>Proceso matemático</th>
+            <td>${_escapeHtmlUnidad(proceso)}</td>
+          </tr>
+          <tr>
+            <th>Evidencia</th>
+            <td>${_escapeHtmlUnidad(evidencia)}</td>
+          </tr>
+          <tr>
+            <th>Apoyo concreto</th>
+            <td>${_escapeHtmlUnidad(apoyo)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  `;
+}
+
+function _unidadTeacherNotesMatchesSharedTemplate(html = "") {
+  const source = String(html || "");
+  if (!source.trim()) return false;
+  return /<h3[^>]*>\s*Actividad General\s*<\/h3>/i.test(source)
+    && /<h3[^>]*>\s*Actividad de ampliación\s*<\/h3>/i.test(source)
+    && /<h3[^>]*>\s*Actividad de refuerzo\s*<\/h3>/i.test(source)
+    && /<h3[^>]*>\s*Neurolog[ií]a aplicada\s*<\/h3>/i.test(source);
+}
+
+function _unidadTeacherNotesHasMinimumBody(html = "") {
+  const source = String(html || "");
+  if (!source.trim()) return false;
+  const generalItems = (source.match(/<div class="unidad-teacher-general-item">[\s\S]*?<\/div>/gi) || []);
+  if (!generalItems.length) return false;
+  return generalItems.some((block) => {
+    const plain = String(block || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return plain.length >= 40;
+  });
+}
+
+
+function _unidadIsPrimerActionChip(value = "") {
+  const safe = String(value || "").replace(/\s+/g, " ").trim();
+  if (!safe) return false;
+  return /^(?:IC\.?\s+)?(?:OBSERVA(?: VIDEO)?|PINTURA DIGITAL MULTICOLOR|HUELLAS PINTURA DIGITAL|SEÑALA MULTICOLOR|ORDENA\/CLASIFICA|ESCRIBE NUMERO|UNE LOS PUNTOS|PRODUCCION PERSONAL|RELACIONA MULTICOLOR|COLOREA MULTICOLOR|COLOREA GENERICO|COLOREA ROJO|COLOREA AZUL|CIRCULA MULTICOLOR|CIRCULA GENERICO|CIRCULA ROJO|CIRCULA AZUL|CIRCULA LAPIZ|TRAZA MULTICOLOR|TRAZA GENERICO|TRAZA ROJO|TRAZA AZUL|TRAZA VERDE|TRAZA LAPIZ|EN RECTANGULO LAPIZ|EN RECTANGULO GENERICO|EN RECTANGULO AZUL|EN RECTANGULO ROJO|SUBRAYA LAPIZ|SUBRAYA GENERICO|SUBRAYA ROJO|SUBRAYA AZUL|BLOQUES LOGICOS|REGLETAS|REKENREK|OBSERVA|ENCUENTRA|ESCRIBE|LEE|DESCRIBE|COMENTA|CANTA|INDAGA|INVESTIGA|IMAGINA|ESCUCHA|RESUELVE|CUENTA|NO CUENTES|SEÑALA|JUEGO|COMPARA|PALOMEA|PEGA|CORTA|CONSTRUYE|RELACIONA|TACHA|DIBUJA)$/i.test(safe);
 }
 
 function _unidadCompetenciaPrimariaTexto(subtema = "", categoria = "", { lectura = false } = {}) {
@@ -23640,6 +24756,7 @@ function _unidadCompetenciaPrimariaTexto(subtema = "", categoria = "", { lectura
   const mapa = {
     Artes: "Expresión oral",
     Ortografia: "Estructuras lingüísticas",
+    TrazosDeLetras: "Expresión escrita",
     Gramatica: "Estructuras lingüísticas",
     ExpresionEscrita: "Expresión escrita",
     ExpresionOral: "Expresión oral",
@@ -23683,6 +24800,7 @@ function _unidadHabilidadCognitivaPorSubtema(subtema = "", categoria = "", { lec
   const mapa = {
     Artes: "ECM",
     Ortografia: "ERM",
+    TrazosDeLetras: "ERM",
     Gramatica: "ERS",
     ExpresionEscrita: "NCM",
     ExpresionOral: "ECM",
@@ -23725,6 +24843,7 @@ function _unidadEjeArticuladorPorSubtema(subtema = "", categoria = "", { lectura
   const mapa = {
     Artes: { nombre: "Educación estética", sello: "VI" },
     Ortografia: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
+    TrazosDeLetras: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
     Gramatica: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
     ExpresionEscrita: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
     ExpresionOral: { nombre: "Fomento a la lectura y la escritura", sello: "V" },
@@ -23874,6 +24993,7 @@ window.generarProgramaSintetico = function (secuenciaActual) {
 window.generarRutaSugerida = function (subtemasOrdenados, tablaHTML = "") {
   const coloresPorCategoria = {
     "Ortografía": "#a3d3f5",          // azul claro
+    "TrazosDeLetras": "#f8d0dd",      // rosa claro
     "Gramatica": "#d0e6ff",           // celeste
     "ExpresionEscrita": "#c7e8b4",    // verde claro
     "ExpresionOral": "#f9d5a7",       // naranja claro
@@ -24150,56 +25270,131 @@ window.generarEstrategiaMatematica = function (subtema) {
   `;
 };
 
-async function generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo) {
-  const claveFicha = claveFichaActualGlobal || "(Ficha no detectada)";
-  let bloqueNotasFicha = `
-    <h4>Notas del maestro para las fichas de refuerzo (${formatearSubtema(subtema)})</h4>
-    <p>Estas fichas están pensadas como actividades de refuerzo para profundizar el tema <strong>${tituloCreativo}</strong>. Se recomienda trabajarlas en la segunda mitad de la semana, después de las actividades principales.</p>
-  `;
+async function generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo, grado = "", nivel = "", fuenteHtml = "", fuenteHtmlLimpia = "") {
+  const claveDetectada = _unidadDetectFichaClaveFromActivities(actividadesFichas);
+  const claveGlobal = String(window.claveFichaActualGlobal || claveFichaActualGlobal || "").trim();
+  const claveEditorial = _unidadEtiquetaEditorialRecurso({ subtema, categoria: categoriaPorSubtema[subtema] || "General", tipoRecurso: "fichas" });
+  const claveFicha = claveGlobal || claveDetectada || claveEditorial || `Ficha ${formatearSubtema(subtema)}`;
+  const actividadesComoNormales = (Array.isArray(actividadesFichas) ? actividadesFichas : [])
+    .map((actividadHTML) => `<div class="activity">${String(actividadHTML || "").trim()}</div>`)
+    .join("");
+  const promptFuente = String(fuenteHtml || actividadesComoNormales || "").trim();
+  const fallbackFuente = String(fuenteHtmlLimpia || actividadesComoNormales || promptFuente || "").trim();
 
-  for (let idx = 0; idx < actividadesFichas.length; idx++) {
-    const actividadHTML = actividadesFichas[idx];
-    const textoPlano = actividadHTML.replace(/<[^>]*>/g, "").trim();
-
-    const t = textoPlano.toUpperCase();
-    const modalidad = (t.includes("T. IND") || t.includes("INDIVIDUAL")) ? "individual"
-      : (t.includes("T. PAR") || t.includes("PAREJAS")) ? "en parejas"
-        : (t.includes("T. EQUI") || t.includes("EQUIPO")) ? "en equipo"
-          : "individual";
-
-    const promptGemini = `
-Eres experto en didáctica. Analiza la siguiente ficha de refuerzo para modalidad: ${modalidad}.
-
-Debes generar **notas para el maestro**, en **2 o 3 párrafos**, separados con etiquetas HTML <p>. 
-
-Incluye:
-1. Qué debe explicar antes de iniciar la ficha.
-2. Cómo organizar el aula y gestionar el tiempo.
-3. Qué recursos debe preparar.
-4. Cómo apoyar a estudiantes con barreras de aprendizaje.
-
-La respuesta debe estar en formato HTML válido (solo <p>, <strong> para títulos). NO uses listas.
-
----
-Ficha:
-${textoPlano}
----`;
-
-    const respuestaGemini = await enviarPrompt([{ role: "user", text: promptGemini }]);
-    const notasGemini = respuestaGemini
-      .replace(/```html|```/g, "") // elimina envoltorios de código
-      .replace(/\n/g, "")          // limpia saltos de línea sueltos
-      .trim();
-
-    bloqueNotasFicha += `
-      <div class="nota-ficha">
-        <p><strong>Actividad de refuerzo ${idx + 1} (${modalidad})</strong></p>
-        ${notasGemini}
+  return _unidadGenerarNotasMaestroSeccion({
+    promptContenidoActividades: promptFuente,
+    fallbackContenidoActividades: fallbackFuente,
+    categoria: categoriaPorSubtema[subtema] || "General",
+    subtema,
+    tituloCreativo,
+    tituloSeccion: claveFicha,
+    grado,
+    nivel: nivel || selectNivel?.value || "",
+    expectedActivityCount: Array.isArray(actividadesFichas) ? actividadesFichas.length : 0,
+    headingHtml: `
+      <div class="unidad-ficha-notes-heading" style="margin:0 0 18px 0;">
+        <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(claveFicha)}</h4>
       </div>
-    `;
+    `,
+    esFicha: true,
+    fichaClave: claveFicha
+  });
+}
+
+async function _unidadGenerarNotasMaestroSeccion({
+  promptContenidoActividades = "",
+  fallbackContenidoActividades = "",
+  categoria = "",
+  subtema = "",
+  tituloCreativo = "",
+  tituloSeccion = "",
+  grado = "",
+  nivel = "",
+  expectedActivityCount = 0,
+  headingHtml = "",
+  esFicha = false,
+  fichaClave = ""
+} = {}) {
+  const promptCompartido = construirPromptNotasMaestro(
+    String(promptContenidoActividades || ""),
+    String(nivel || selectNivel?.value || ""),
+    String(grado || selectGrado?.value || ""),
+    subtema,
+    tituloCreativo,
+    "",
+    Math.max(Number(expectedActivityCount) || 0, 5),
+    {},
+    {
+      categoria,
+      tituloSeccion: tituloSeccion || tituloCreativo || formatearSubtema(subtema),
+      esFicha,
+      fichaClave
+    }
+  );
+
+  let respuestaCompartida = "";
+  try {
+    respuestaCompartida = await enviarPrompt([{ role: "user", text: promptCompartido }]);
+  } catch (_) {
+    respuestaCompartida = "";
   }
 
-  return bloqueNotasFicha;
+  const cleanTeacherHtml = (html = "") => String(html || "").replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
+  const htmlCompartido = (respuestaCompartida || "").replace(/```html|```/g, "").trim();
+  const htmlCompartidoLimpio = _unidadCleanTeacherNotesHtml(cleanTeacherHtml(htmlCompartido));
+  const htmlFallbackLimpio = String(fallbackContenidoActividades || promptContenidoActividades || "");
+  const tituloEsperado = String(tituloSeccion || tituloCreativo || "").trim();
+  const respuestaGeminiUtil = htmlCompartidoLimpio.trim().length >= 120 && (
+    !esFicha
+      ? true
+      : !tituloEsperado || new RegExp(_unidadEscapeRegExp(tituloEsperado), "i").test(htmlCompartidoLimpio) || /ficha/i.test(htmlCompartidoLimpio)
+  );
+  const bloqueCompartidoBase = _unidadBuildTeacherNotesStructuredHtml({
+    contenidoActividades: htmlFallbackLimpio,
+    categoria,
+    subtema,
+    tituloCreativo: tituloSeccion || tituloCreativo,
+    grado,
+    expectedActivityCount: Number(expectedActivityCount) || 0,
+    rawHtml: htmlCompartidoLimpio,
+    headingHtml,
+    esFicha,
+    fichaClave
+  });
+
+  const injectHeadingHtml = (html = "") => {
+    const source = String(html || "");
+    const heading = String(headingHtml || "").trim();
+    if (!source.trim() || !heading || typeof DOMParser === "undefined") return source;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(source, "text/html");
+    const root = doc.body.firstElementChild;
+    if (!root) return source;
+
+    const wrap = doc.createElement("div");
+    wrap.innerHTML = heading;
+    Array.from(wrap.childNodes).reverse().forEach((node) => {
+      root.insertBefore(node, root.firstChild);
+    });
+    return root.outerHTML;
+  };
+
+  if (esFicha) {
+    return _unidadEnsureNeurologySectionHtml(bloqueCompartidoBase);
+  }
+
+  if (respuestaGeminiUtil) {
+    return _unidadEnsureNeurologySectionHtml(injectHeadingHtml(htmlCompartidoLimpio));
+  }
+
+  return (_unidadTeacherNotesMatchesSharedTemplate(htmlCompartidoLimpio) && _unidadTeacherNotesHasMinimumBody(htmlCompartidoLimpio))
+    ? _unidadEnsureNeurologySectionHtml(injectHeadingHtml(htmlCompartidoLimpio))
+    : _unidadEnsureNeurologySectionHtml(bloqueCompartidoBase);
+}
+
+async function _unidadGenerarNotasMaestroCompartidas(options = {}) {
+  return _unidadGenerarNotasMaestroSeccion(options);
 }
 
 
@@ -24243,6 +25438,7 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
   window.ultimaCategoriaIntentada = categoria;
   _unidadSetSaveNeeded(true);
   setCategoriaSpinnerUI(categoria, true);
+  _unidadSetResultLoadingOverlay(true, `Preparando ${formatearSubtema(categoria)}…`);
   const statusCategoriaId = `spinner-categoria-${categoria.replace(/\s+/g, "-")}`;
   try {
     // Verificar si ya existe este contenedor
@@ -24641,18 +25837,27 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         actualizarSpinnerProceso(statusId, `Preparando título del proyecto <strong>${formatearSubtema(subtema)}</strong>...`);
         assertProyectosActivo(tokenProy);
         verificarCancelacionProyectos();
-        const tituloCreativoProyecto = await generarTituloCreativoUnico({
-          subtema,
-          nivel,
-          grado: gradoTexto,
-          tipo: "proyecto",
-          statusId,
-          maxIntentos: 3
-        });
+        let tituloCreativoProyecto;
+        try {
+          tituloCreativoProyecto = typeof generarTituloCreativoUnico === "function"
+            ? await generarTituloCreativoUnico({
+                subtema,
+                nivel,
+                grado: gradoTexto,
+                tipo: "proyecto",
+                statusId,
+                maxIntentos: 3
+              })
+            : formatearSubtema(subtema);
+        } catch (e) {
+          tituloCreativoProyecto = formatearSubtema(subtema);
+        }
         assertProyectosActivo(tokenProy);
         const instruccionesProyectoBase = window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
         const stylePromptProyecto = _unidadIsStyleSelectorEnabled(categoria)
           ? buildUnidadActivityStylePromptContext(categoria, {
+            grado: gradoTexto,
+            subtema,
             relatedReading: debeUsarLecturaProyecto,
             withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
           })
@@ -24817,7 +26022,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const categoriaEditorialProyecto = _unidadEtiquetaCategoriaCampo(categoria, subtema);
         const subcategoriaEditorialAlumnoProyecto = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
         const campoProyecto = _unidadCampoFormativoDeCategoria(categoria);
-        document.getElementById(bloqueId).innerHTML = `
+      document.getElementById(bloqueId).innerHTML = `
                 <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;" id="${bloqueId}-layout">
                     <div id="${proyectoAlumnoColId}" class="col-alumno" style="flex:1; min-width:300px;">
                         ${tablaInicialProyectoHTML}
@@ -25048,16 +26253,25 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           ? `📌 Modo importado activo para: ${subtema}`
           : `📌 Preparando prompt del título para: ${subtema}`
       );
-      const tituloCreativoLimpioBase = importedUsesOwnHeading
-        ? tituloRenderSubtema
-        : await generarTituloCreativoUnico({
-          subtema,
-          nivel,
-          grado: gradoTexto,
-          tipo: "subtema",
-          statusId,
-          maxIntentos: 3
-        });
+      let tituloCreativoLimpioBase;
+        if (importedUsesOwnHeading) {
+          tituloCreativoLimpioBase = tituloRenderSubtema;
+        } else {
+          try {
+            tituloCreativoLimpioBase = typeof generarTituloCreativoUnico === "function"
+              ? await generarTituloCreativoUnico({
+                  subtema,
+                  nivel,
+                  grado: gradoTexto,
+                  tipo: "subtema",
+                  statusId,
+                  maxIntentos: 3
+                })
+              : formatearSubtema(subtema);
+          } catch (e) {
+            tituloCreativoLimpioBase = formatearSubtema(subtema);
+          }
+        }
 
       // ===== Flujo normal (otras categorías) =====
       try {
@@ -25082,6 +26296,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const instruccionesAdicionalesBase = window.instruccionesGeminiPorCategoria?.[categoria] || '';
         const stylePromptCategoria = _unidadIsStyleSelectorEnabled(categoria)
           ? buildUnidadActivityStylePromptContext(categoria, {
+            grado: gradoTexto,
+            subtema,
             relatedReading: relacionadaFinal,
             withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
           })
@@ -25199,6 +26415,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   </div>
               </div>
             `;
+        _unidadSetResultLoadingOverlay(false);
         let htmlAlumno = "";
         if (importedTextPayload) {
           const importedSource = String(
@@ -25233,6 +26450,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           .replace(/Actividad\s*\d+\.?\s*(Recortable\s+[Pp]?\d+\w*:)/gi, '$1')
           .replace(/Actividad\s*\d+\.?\s*(Ficha\s+[Pp]?\d+\w*:)/gi, '$1');
 
+        htmlAlumno = _unidadEnsureAnswersUnderEachStep(htmlAlumno);
+
         // ---- Datos del bloque (T/AE/C/P) ----
         const T = objetivoT;
         const AE = objetivoAE;
@@ -25260,13 +26479,29 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
         let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
         htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto);
-        let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
-        htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados);
+	        htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
+	        htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
+	        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
+	        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
+	        let recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
+	        if (!recursosGenerados?.fichas?.generado && generarFichas) {
+	          const fichaEsperada = String(
+	            window.claveFichaActualGlobal
+	            || (typeof obtenerClaveFicha === "function" ? obtenerClaveFicha(unidadActual) : "")
+	            || ""
+	          ).trim();
+	          if (fichaEsperada) {
+	            recursosGenerados.fichas.generado = true;
+	            recursosGenerados.fichas.clave = fichaEsperada;
+	          }
+	        }
+	        htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
+        htmlAlumnoLimpio = _unidadEnsureFichaMetadataSection(htmlAlumnoLimpio, {
+          subtema,
+          categoria,
+          fichaClave: recursosGenerados?.fichas?.clave || ""
+        });
+        htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados, subtema, categoria);
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
 
@@ -25308,10 +26543,29 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         }
         htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto);
+        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
-        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema, categoria });
+        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema, categoria, grado: gradoTexto });
+        htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
+        const htmlAlumnoSinFichas = _unidadEliminarBloquesHtmlPorSelector(
+          htmlAlumnoLimpio,
+          '.activity[data-ficha="true"], .activity-fichas'
+        );
+        const htmlAlumnoSoloFichas = _unidadExtraerBloquesHtmlPorSelector(
+          htmlAlumnoLimpio,
+          '.activity[data-ficha="true"], .activity-fichas'
+        );
+        const {
+          actividadesNormales: actividadesNormalesLimpias,
+          actividadesFichas: actividadesFichasLimpias
+        } = extraerActividades(htmlAlumnoLimpio);
+        const htmlAlumnoSoloNormales = actividadesNormalesLimpias
+          .map((actividadHTML) => `<div class="activity">${String(actividadHTML || "").trim()}</div>`)
+          .join("");
+        const htmlAlumnoSoloFichasNormalizado = (htmlAlumnoSoloFichas || actividadesFichasLimpias
+          .map((actividadHTML) => `<div class="activity">${String(actividadHTML || "").trim()}</div>`)
+          .join(""));
         let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
@@ -25383,7 +26637,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colAlumnoContenidoId = `${bloqueId}-alumno-contenido`;
         document.getElementById(bloqueId).innerHTML = `
             <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
-                <div id="${colAlumnoId}" class="col-alumno" style="flex:1; min-width:300px;">
+                <div id="${colAlumnoId}" class="col-alumno" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="alumno" style="flex:1; min-width:300px;">
+                    ${_unidadBuildSubtemaRegenerateButtonHtml({ categoria, subtema, target: "alumno" })}
                     ${lecturaNomenclaturaHTML}
                     ${importedUsesOwnHeading ? "" : tablaInicialHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
@@ -25399,7 +26654,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     ${importedUsesOwnHeading ? "" : etiquetaInterdisc}
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
-                <div id="${colMaestroId}" class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                <div id="${colMaestroId}" class="col-maestro" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                    ${_unidadBuildSubtemaRegenerateButtonHtml({ categoria, subtema, target: "maestro" })}
                     ${importedUsesOwnHeading ? "" : soporteLecturaMaestroHTML}
                     ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
@@ -25417,57 +26673,81 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 </div>
             </div>
           `;
+        _unidadSetResultLoadingOverlay(false);
         if (!importedUsesOwnHeading) {
           _unidadRegisterTemarioSubcategoria({
             subtema,
             categoria,
-            titulo: formatearSubtema(subtema),
-            descripcion: AE || T || C || P || formatearSubtema(subtema)
+            titulo: tituloCreativoLimpioBase || formatearSubtema(subtema),
+            descripcion: AE || T || C || P || tituloCreativoLimpioBase || formatearSubtema(subtema),
+            contenido: htmlAlumnoConApoyoVisual
           });
           _unidadRefreshTemarioUnidadMount();
         }
         await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoConApoyoVisual);
 
-        const promptNotas = construirPromptNotasMaestro(
-          htmlAlumno,
-          nivel,
-          gradoTexto,
-          subtema,
-          tituloCreativoLimpioBase || importedOwnTitle || formatearSubtema(subtema),
-          claveFichaActual
-        );
-
         actualizarSpinnerProceso(statusId, `Generando notas del maestro para <strong>${formatearSubtema(subtema)}</strong>...`);
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
-        let respuestaMaestro = "";
-        try {
-          respuestaMaestro = await enviarPrompt([{ role: "user", text: promptNotas }]);
-          logVisual(`✅ Notas del maestro listas para ${subtema}`);
-        } catch (errorNotas) {
-          console.warn(`Notas del maestro en fallback local para ${categoria}/${subtema}:`, errorNotas);
-          logVisual(`⚠️ Notas del maestro generadas con fallback local para ${subtema}`);
+        let notasFinalesColMaestro = "";
+        if (htmlAlumnoSinFichas.trim()) {
+          notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion({
+            promptContenidoActividades: htmlAlumnoSinFichas || htmlAlumnoSoloNormales,
+            fallbackContenidoActividades: htmlAlumnoSinFichas || htmlAlumnoSoloNormales,
+            categoria,
+            subtema,
+            tituloCreativo: tituloCreativoLimpioBase,
+            tituloSeccion: tituloCreativoLimpioBase,
+            grado: gradoTexto,
+            nivel,
+            expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad
+          });
         }
+        logVisual(`✅ Notas del maestro listas para ${subtema}`);
 
-        const htmlMaestro = (respuestaMaestro || "").replace(/```html|```/g, "").trim();
-        const htmlMaestroLimpio = cleanHTML(htmlMaestro);
-
-        let notasFinalesColMaestro = _unidadBuildTeacherNotesStructuredHtml({
-          contenidoActividades: htmlAlumnoLimpio,
-          categoria,
-          subtema,
-          tituloCreativo: tituloCreativoLimpioBase,
-          grado: gradoTexto,
-          expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad,
-          rawHtml: htmlMaestroLimpio
-        });
-
-        if (actividadesFichas && actividadesFichas.length > 0) {
-          const bloqueNotasFicha = await generarNotasDeFichas(actividadesFichas, subtema, tituloCreativoLimpioBase);
+        if (actividadesFichasLimpias && actividadesFichasLimpias.length > 0) {
+          const claveFichaSeccion = String(
+            window.claveFichaActualGlobal
+            || claveFichaActualGlobal
+            || _unidadDetectFichaClaveFromActivities(actividadesFichasLimpias)
+            || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" })
+            || `Ficha ${formatearSubtema(subtema)}`
+          ).trim();
+          const bloqueNotasFicha = _unidadCleanTeacherNotesHtml(
+            await _unidadGenerarNotasMaestroSeccion({
+              promptContenidoActividades: htmlAlumnoSoloFichasNormalizado || htmlAlumnoSoloFichas,
+              fallbackContenidoActividades: htmlAlumnoSoloFichasNormalizado || htmlAlumnoSoloFichas || htmlAlumnoLimpio,
+              categoria,
+              subtema,
+              tituloCreativo: tituloCreativoLimpioBase,
+              tituloSeccion: claveFichaSeccion,
+              grado: gradoTexto,
+              nivel,
+              expectedActivityCount: actividadesFichasLimpias.length,
+              esFicha: true,
+              fichaClave: claveFichaSeccion,
+              headingHtml: `
+                <div class="unidad-ficha-notes-heading" style="margin:0 0 18px 0;">
+                  <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(claveFichaSeccion)}</h4>
+                </div>
+              `
+            })
+          );
           notasFinalesColMaestro += `
-                    <hr>
-                    <h3 style="margin-top:20px;">Notas adicionales para las fichas de refuerzo</h3>
                     ${bloqueNotasFicha}
                 `;
+        }
+
+        if (String(categoria || "").trim() === "Matemáticas") {
+          const bloqueContextoMatematico = _unidadBuildMathContextualizationPedagogicaHTML({
+            subtema,
+            grado: gradoTexto,
+            tituloCreativo: tituloCreativoLimpioBase
+          });
+          if (!/Contextualización pedagógica de Matemáticas/i.test(notasFinalesColMaestro)) {
+            notasFinalesColMaestro += `
+                    ${bloqueContextoMatematico}
+                `;
+          }
         }
 
         actualizarSpinnerProceso(statusId, `Renderizando resultados de <strong>${formatearSubtema(subtema)}</strong>...`);
@@ -25547,6 +26827,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             alert(`❌ Ocurrió un error al generar la categoría "${categoria}".`);
         }
     } finally {
+        _unidadSetResultLoadingOverlay(false);
         document.getElementById(statusCategoriaId)?.remove();
         setCategoriaSpinnerUI(categoria, false);
         if (categoria === "Proyectos") {
@@ -25599,6 +26880,7 @@ function formatearSubtema(nombre) {
   const reemplazos = {
     "ExpresionOral": "Expresión oral",
     "ExpresionEscrita": "Expresión escrita",
+    "TrazosDeLetras": "Trazos de letras",
     "ExpresiónOral": "Expresión oral",
     "ExpresiónEscrita": "Expresión escrita",
     "ComprensionLectora": "Comprensión Lectora",
@@ -26016,11 +27298,11 @@ function extraerActividades(contenidoActividades) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
       const root = doc.body.firstElementChild || doc.body;
-      const actividadesFichas = Array.from(root.querySelectorAll(".activity-fichas"))
+      const actividadesFichas = Array.from(root.querySelectorAll('.activity[data-ficha="true"], .activity-fichas'))
         .map((node) => String(node.innerHTML || "").trim())
         .filter(Boolean);
       const actividadesNormales = Array.from(root.querySelectorAll(".activity"))
-        .filter((node) => !node.closest(".activity-fichas"))
+        .filter((node) => !node.matches('[data-ficha="true"]') && !node.closest(".activity-fichas"))
         .map((node) => String(node.innerHTML || "").trim())
         .filter(Boolean);
 
@@ -26033,9 +27315,9 @@ function extraerActividades(contenidoActividades) {
     }
   }
 
-  const fichasMatch = [...source.matchAll(/<div class="activity-fichas">([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
-  const contenidoSinFichas = source.replace(/<div class="activity-fichas">[\s\S]*?<\/div>/g, "");
-  const actividadesMatch = [...contenidoSinFichas.matchAll(/<div class="activity">([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
+  const fichasMatch = [...source.matchAll(/<div\b[^>]*class="[^"]*\bactivity\b[^"]*"[^>]*data-ficha=(?:"true"|'true')[^>]*>([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
+  const contenidoSinFichas = source.replace(/<div\b[^>]*class="[^"]*\bactivity\b[^"]*"[^>]*data-ficha=(?:"true"|'true')[^>]*>[\s\S]*?<\/div>/g, "");
+  const actividadesMatch = [...contenidoSinFichas.matchAll(/<div\b[^>]*class="[^"]*\bactivity\b[^"]*"[^>]*>([\s\S]*?)<\/div>/g)].map((m) => m[1].trim());
 
   return {
     actividadesNormales: actividadesMatch,
@@ -26043,8 +27325,59 @@ function extraerActividades(contenidoActividades) {
   };
 }
 
+function _unidadExtraerBloquesHtmlPorSelector(html = "", selector = "") {
+  const source = String(html || "");
+  const safeSelector = String(selector || "").trim();
+  if (!source.trim() || !safeSelector || typeof DOMParser === "undefined") return "";
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild || doc.body;
+    const nodes = Array.from(root.querySelectorAll(safeSelector));
+    return nodes.map((node) => String(node.outerHTML || "").trim()).filter(Boolean).join("");
+  } catch (_) {
+    return "";
+  }
+}
+
+function _unidadEliminarBloquesHtmlPorSelector(html = "", selector = "") {
+  const source = String(html || "");
+  const safeSelector = String(selector || "").trim();
+  if (!source.trim() || !safeSelector || typeof DOMParser === "undefined") return source;
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild || doc.body;
+    Array.from(root.querySelectorAll(safeSelector)).forEach((node) => node.remove());
+    return root.innerHTML.trim();
+  } catch (_) {
+    return source;
+  }
+}
+
 function _unidadEscapeRegExp(text = "") {
   return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function _unidadDetectFichaClaveFromText(text = "") {
+  const safe = String(text || "").replace(/\s+/g, " ").trim();
+  if (!safe) return "";
+  const match = safe.match(/\bficha\s+[a-z0-9]+[a-z0-9-]*\b/i);
+  return match ? String(match[0]).trim() : "";
+}
+
+function _unidadDetectFichaClaveFromActivities(activities = []) {
+  const list = Array.isArray(activities) ? activities : [activities];
+  for (const item of list) {
+    const direct = _unidadDetectFichaClaveFromText(item);
+    if (direct) return direct;
+    const plain = String(item || "").replace(/<[^>]*>/g, " ");
+    const fromPlain = _unidadDetectFichaClaveFromText(plain);
+    if (fromPlain) return fromPlain;
+  }
+  return "";
 }
 
 function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
@@ -26089,6 +27422,7 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   const source = String(html || "");
   if (!source.trim() || typeof DOMParser === "undefined") return source;
 
+  const MODALITY_TOKEN_REGEX = /\[(?:IC\.?\s*T\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?)|IC\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?))\]/gi;
   const MODALITY_BADGES = [
     { regex: /\[IC\.?\s*T\.?\s*IND(?:IVIDUAL)?\]/i, label: "IC. T. IND", icon: "fa-solid fa-user", color: "#0f766e", bg: "#ccfbf1" },
     { regex: /\[IC\.?\s*T\.?\s*PAR(?:ES)?\]/i, label: "IC. T. PAR", icon: "fa-solid fa-user-group", color: "#1d4ed8", bg: "#dbeafe" },
@@ -26133,17 +27467,23 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   };
 
   activities.forEach((activity) => {
+    activity.innerHTML = _unidadNormalizeMalformedIcTokens(activity.innerHTML || "");
     const blockText = activity.textContent || "";
-    const explicitAscChips = _unidadExtractExplicitAscChips(activity.innerHTML || blockText);
+    const catalogAscChips = _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
+    const explicitAscChips = _unidadExtractExplicitAscChips(activity.innerHTML || blockText).filter((chip) => {
+      const normalizedChip = String(chip || "").replace(/\s+/g, " ").trim().toUpperCase();
+      return catalogAscChips.some((catalogChip) => String(catalogChip || "").replace(/\s+/g, " ").trim().toUpperCase() === normalizedChip);
+    });
     const ascChips = explicitAscChips.length
       ? explicitAscChips
-      : _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
+      : catalogAscChips;
     const detected = ICONS.filter(ic => ic.regex.test(blockText));
     const detectedModality = MODALITY_BADGES.find((badge) => badge.regex.test(blockText));
     if (!detected.length && !detectedModality && !ascChips.length) return;
 
-    // Only target the first <p> — the main instruction
-    const firstP = activity.querySelector("p");
+    // Only target the first instructional node, never the ficha title/heading.
+    const firstP = Array.from(activity.querySelectorAll("p, li"))
+      .find((node) => !node.classList?.contains("unidad-ficha-item-title") && !node.closest(".answer"));
     if (!firstP) return;
 
     // Avoid injecting twice
@@ -26157,7 +27497,10 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
     }
 
     firstP.innerHTML = firstP.innerHTML
-      .replace(/\[(?:IC\.?|IC)\s*[^\]]+\]/gi, " ")
+      .replace(/\[(?:IC\.?|IC)\s*\[(?:IC\.?|IC)\s*[^\]]+\]\]/gi, " ")
+      .replace(MODALITY_TOKEN_REGEX, " ")
+      .replace(/(^|\s)\]+/g, "$1")
+      .replace(/\[\s*(?=\s|$)/g, " ")
       .replace(/\s{2,}/g, " ")
       .trim();
 
@@ -26174,7 +27517,8 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
       badgeContainer.appendChild(modalityChip);
     }
 
-    ascChips.forEach((chipLabel) => {
+    if (ascChips.length > 0) {
+      const chipLabel = ascChips[0]; // Solo uno como se pidió
       const theme = _unidadAscThemePorChip(chipLabel);
       const chip = doc.createElement("span");
       chip.className = "unidad-ic-asc-badge";
@@ -26182,7 +27526,8 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
       chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:${theme.bg};color:${theme.text};font-size:10px;font-weight:700;border:1px solid ${theme.border};white-space:nowrap;`;
       chip.innerHTML = `<i class="fa-solid fa-book-open-reader" style="font-size:9px;"></i> ${_escapeHtmlUnidad(chipLabel)}`;
       badgeContainer.appendChild(chip);
-    });
+    }
+
 
     detected.forEach(ic => {
       const chip = doc.createElement("span");
@@ -26247,15 +27592,16 @@ function _unidadInferGeneratedResourcesFromHtml(html = "") {
 function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}) {
   const source = String(html || "");
   if (!source.trim()) return source;
-  const matches = [...source.matchAll(/<div class="activity">([\s\S]*?)<\/div>/g)];
+  const matches = [...source.matchAll(/(<div\b[^>]*class="[^"]*\bactivity\b[^"]*"[^>]*>)([\s\S]*?)<\/div>/g)];
   if (!matches.length) return source;
 
   const resources = _unidadBuildMissingResourceMentionsConfig(recursos);
   if (!resources.length) return source;
 
   const blocks = matches.map((match) => ({
+    openTag: match[1],
     full: match[0],
-    inner: String(match[1] || "")
+    inner: String(match[2] || "")
   }));
   const usedIndexes = new Set();
   let changed = false;
@@ -26280,17 +27626,60 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}) {
     } else {
       block.inner = `${block.inner}\n<p>${resource.sentence}</p>`;
     }
-    block.full = `<div class="activity">${block.inner}</div>`;
+    block.full = `${block.openTag}${block.inner}</div>`;
     changed = true;
   });
 
   if (!changed) return source;
   let cursor = 0;
-  return source.replace(/<div class="activity">([\s\S]*?)<\/div>/g, () => {
+  return source.replace(/<div\b[^>]*class="[^"]*\bactivity\b[^"]*"[^>]*>[\s\S]*?<\/div>/g, () => {
     const block = blocks[cursor];
     cursor += 1;
     return block?.full || "";
   });
+}
+
+function _unidadEnsureFichaBlocksHaveActivityClass(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  const isFichaHeading = (node) => {
+    if (!node || !/^H[1-6]$/.test(node.tagName || "")) return false;
+    const text = String(node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!text) return false;
+    return /^ficha\b/i.test(text) || /\bficha\b/i.test(text) || text === String(window.claveFichaActualGlobal || claveFichaActualGlobal || "").trim().toLowerCase();
+  };
+
+  Array.from(root.querySelectorAll(".activity-fichas, .activity[data-ficha='true']")).forEach((block) => {
+    if (!block.classList.contains("activity")) block.classList.add("activity");
+    if (block.classList.contains("activity-fichas")) block.classList.remove("activity-fichas");
+    block.setAttribute("data-ficha", "true");
+  });
+
+  let fichaActiva = false;
+  Array.from(root.children).forEach((node) => {
+    if (!(node instanceof Element)) return;
+    if (/^H[1-6]$/.test(node.tagName || "")) {
+      fichaActiva = isFichaHeading(node);
+      return;
+    }
+    if (!fichaActiva) return;
+
+    if (node.classList?.contains("activity")) {
+      node.setAttribute("data-ficha", "true");
+      return;
+    }
+
+    const activities = Array.from(node.querySelectorAll?.(".activity") || []);
+    activities.forEach((activity) => activity.setAttribute("data-ficha", "true"));
+  });
+
+  return root.innerHTML;
 }
 
 function _unidadNormalizeActivityLeadStrong(html = "") {
@@ -26350,71 +27739,79 @@ function _unidadNormalizeAscNumberedSteps(html = "") {
   return root.innerHTML;
 }
 
-function _unidadReplaceActionWordsWithPrimerKeysInText(text = "") {
-  let next = String(text || "");
-  const replacements = [
-    ["Observa video", "[IC OBSERVA VIDEO]"],
-    ["Pintura digital multicolor", "[IC PINTURA DIGITAL MULTICOLOR]"],
-    ["Huellas pintura digital", "[IC HUELLAS PINTURA DIGITAL]"],
-    ["Señala multicolor", "[IC SEÑALA MULTICOLOR]"],
-    ["Ordena/clasifica", "[IC ORDENA/CLASIFICA]"],
-    ["Escribe número", "[IC ESCRIBE NUMERO]"],
-    ["Une los puntos", "[IC UNE LOS PUNTOS]"],
-    ["Producción personal", "[IC PRODUCCION PERSONAL]"],
-    ["Relaciona multicolor", "[IC RELACIONA MULTICOLOR]"],
-    ["Colorea multicolor", "[IC COLOREA MULTICOLOR]"],
-    ["Colorea genérico", "[IC COLOREA GENERICO]"],
-    ["Colorea rojo", "[IC COLOREA ROJO]"],
-    ["Colorea azul", "[IC COLOREA AZUL]"],
-    ["Circula multicolor", "[IC CIRCULA MULTICOLOR]"],
-    ["Circula genérico", "[IC CIRCULA GENERICO]"],
-    ["Circula rojo", "[IC CIRCULA ROJO]"],
-    ["Circula azul", "[IC CIRCULA AZUL]"],
-    ["Circula lápiz", "[IC CIRCULA LAPIZ]"],
-    ["Traza multicolor", "[IC TRAZA MULTICOLOR]"],
-    ["Traza genérico", "[IC TRAZA GENERICO]"],
-    ["Traza rojo", "[IC TRAZA ROJO]"],
-    ["Traza azul", "[IC TRAZA AZUL]"],
-    ["Traza verde", "[IC TRAZA VERDE]"],
-    ["Traza lápiz", "[IC TRAZA LAPIZ]"],
-    ["En rectángulo lápiz", "[IC EN RECTANGULO LAPIZ]"],
-    ["En rectángulo genérico", "[IC EN RECTANGULO GENERICO]"],
-    ["En rectángulo azul", "[IC EN RECTANGULO AZUL]"],
-    ["En rectángulo rojo", "[IC EN RECTANGULO ROJO]"],
-    ["Subraya lápiz", "[IC SUBRAYA LAPIZ]"],
-    ["Subraya genérico", "[IC SUBRAYA GENERICO]"],
-    ["Subraya rojo", "[IC SUBRAYA ROJO]"],
-    ["Subraya azul", "[IC SUBRAYA AZUL]"],
-    ["Bloques lógicos", "[IC BLOQUES LOGICOS]"],
-    ["Regletas", "[IC REGLETAS]"],
-    ["Rekenrek", "[IC REKENREK]"],
-    ["Observa", "[IC OBSERVA]"],
-    ["Encuentra", "[IC ENCUENTRA]"],
-    ["Escribe", "[IC ESCRIBE]"],
-    ["Lee", "[IC LEE]"],
-    ["Describe", "[IC DESCRIBE]"],
-    ["Comenta", "[IC COMENTA]"],
-    ["Canta", "[IC CANTA]"],
-    ["Indaga", "[IC INDAGA]"],
-    ["Investiga", "[IC INVESTIGA]"],
-    ["Imagina", "[IC IMAGINA]"],
-    ["Escucha", "[IC ESCUCHA]"],
-    ["Resuelve", "[IC RESUELVE]"],
-    ["Cuenta", "[IC CUENTA]"],
-    ["No cuentes", "[IC NO CUENTES]"],
-    ["Señala", "[IC SEÑALA]"],
-    ["Juego", "[IC JUEGO]"],
-    ["Compara", "[IC COMPARA]"],
-    ["Palomea", "[IC PALOMEA]"],
-    ["Pega", "[IC PEGA]"],
-    ["Corta", "[IC CORTA]"],
-    ["Construye", "[IC CONSTRUYE]"],
-    ["Relaciona", "[IC RELACIONA]"],
-    ["Tacha", "[IC TACHA]"],
-    ["Dibuja", "[IC DIBUJA]"]
-  ];
+const PRIMER_GRADO_VERB_MAPPINGS = [
+  ["Observa video", "[IC OBSERVA VIDEO]"],
+  ["Pintura digital multicolor", "[IC PINTURA DIGITAL MULTICOLOR]"],
+  ["Huellas pintura digital", "[IC HUELLAS PINTURA DIGITAL]"],
+  ["Señala multicolor", "[IC SEÑALA MULTICOLOR]"],
+  ["Ordena/clasifica", "[IC ORDENA/CLASIFICA]"],
+  ["Escribe número", "[IC ESCRIBE NUMERO]"],
+  ["Une los puntos", "[IC UNE LOS PUNTOS]"],
+  ["Producción personal", "[IC PRODUCCION PERSONAL]"],
+  ["Relaciona multicolor", "[IC RELACIONA MULTICOLOR]"],
+  ["Colorea multicolor", "[IC COLOREA MULTICOLOR]"],
+  ["Colorea genérico", "[IC COLOREA GENERICO]"],
+  ["Colorea rojo", "[IC COLOREA ROJO]"],
+  ["Colorea azul", "[IC COLOREA AZUL]"],
+  ["Circula multicolor", "[IC CIRCULA MULTICOLOR]"],
+  ["Circula genérico", "[IC CIRCULA GENERICO]"],
+  ["Circula rojo", "[IC CIRCULA ROJO]"],
+  ["Circula azul", "[IC CIRCULA AZUL]"],
+  ["Circula lápiz", "[IC CIRCULA LAPIZ]"],
+  ["Traza multicolor", "[IC TRAZA MULTICOLOR]"],
+  ["Traza genérico", "[IC TRAZA GENERICO]"],
+  ["Traza rojo", "[IC TRAZA ROJO]"],
+  ["Traza azul", "[IC TRAZA AZUL]"],
+  ["Traza verde", "[IC TRAZA VERDE]"],
+  ["Traza lápiz", "[IC TRAZA LAPIZ]"],
+  ["En rectángulo lápiz", "[IC EN RECTANGULO LAPIZ]"],
+  ["En rectángulo genérico", "[IC EN RECTANGULO GENERICO]"],
+  ["En rectángulo azul", "[IC EN RECTANGULO AZUL]"],
+  ["En rectángulo rojo", "[IC EN RECTANGULO ROJO]"],
+  ["Subraya lápiz", "[IC SUBRAYA LAPIZ]"],
+  ["Subraya genérico", "[IC SUBRAYA GENERICO]"],
+  ["Subraya rojo", "[IC SUBRAYA ROJO]"],
+  ["Subraya azul", "[IC SUBRAYA AZUL]"],
+  ["Bloques lógicos", "[IC BLOQUES LOGICOS]"],
+  ["Regletas", "[IC REGLETAS]"],
+  ["Rekenrek", "[IC REKENREK]"],
+  ["Identifica", "[IC IDENTIFICA]"],
+  ["Piensa", "[IC PIENSA]"],
+  ["Ubica", "[IC UBICA]"],
+  ["Explica", "[IC EXPLICA]"],
+  ["Analiza", "[IC ANALIZA]"],
+  ["Completa", "[IC COMPLETA]"],
+  ["Observa", "[IC OBSERVA]"],
+  ["Encuentra", "[IC ENCUENTRA]"],
+  ["Escribe", "[IC ESCRIBE]"],
+  ["Lee", "[IC LEE]"],
+  ["Describe", "[IC DESCRIBE]"],
+  ["Comenta", "[IC COMENTA]"],
+  ["Canta", "[IC CANTA]"],
+  ["Indaga", "[IC INDAGA]"],
+  ["Investiga", "[IC INVESTIGA]"],
+  ["Imagina", "[IC IMAGINA]"],
+  ["Escucha", "[IC ESCUCHA]"],
+  ["Resuelve", "[IC RESUELVE]"],
+  ["Cuenta", "[IC CUENTA]"],
+  ["No cuentes", "[IC NO CUENTES]"],
+  ["Señala", "[IC SEÑALA]"],
+  ["Juego", "[IC JUEGO]"],
+  ["Compara", "[IC COMPARA]"],
+  ["Palomea", "[IC PALOMEA]"],
+  ["Pega", "[IC PEGA]"],
+  ["Corta", "[IC CORTA]"],
+  ["Construye", "[IC CONSTRUYE]"],
+  ["Relaciona", "[IC RELACIONA]"],
+  ["Tacha", "[IC TACHA]"],
+  ["Dibuja", "[IC DIBUJA]"]
+];
 
-  replacements.forEach(([phrase, token]) => {
+function _unidadReplaceActionWordsWithPrimerKeysInText(text = "") {
+  let next = _unidadNormalizeMalformedIcTokens(text);
+  if (/\[(?:IC\.?|IC)\s*[^\]]+\]/i.test(next)) return next;
+
+  PRIMER_GRADO_VERB_MAPPINGS.forEach(([phrase, token]) => {
     const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), token);
   });
@@ -26422,9 +27819,32 @@ function _unidadReplaceActionWordsWithPrimerKeysInText(text = "") {
   return next;
 }
 
-function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "") {
+function _unidadInferPrimerGradoInstructionFallbackToken(text = "") {
+  const safe = String(text || "");
+  if (!safe.trim()) return "";
+
+  // 1. Priorizar mapeo de verbos oficial de primero
+  for (const [phrase, token] of PRIMER_GRADO_VERB_MAPPINGS) {
+    if (new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(safe)) {
+      return token;
+    }
+  }
+
+  // 2. Fallbacks genéricos si no hay coincidencia exacta
+  const lower = safe.toLowerCase();
+  if (/\b(observa|mira|visualiza|ve)\b/.test(lower) && /\bvideo\b/.test(lower)) return "[IC OBSERVA VIDEO]";
+  if (/\b(lee|lectura|texto|historia|cuento|relato)\b/.test(lower)) return "[IC LEE]";
+  if (/\b(dibuja|dibujo|ilustra|pinta|traza|traza|calca)\b/.test(lower)) return "[IC DIBUJA]";
+  if (/\b(encuentra|busca|localiza|identifica|señala|senala)\b/.test(lower)) return "[IC ENCUENTRA]";
+  if (/\b(escribe|redacta|anota|completa|copia)\b/.test(lower)) return "[IC ESCRIBE]";
+  if (/\b(observa|mira|revisa)\b/.test(lower)) return "[IC OBSERVA]";
+  return "";
+}
+
+function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subtema = "") {
   const source = String(html || "");
   if (!source.trim() || !_unidadIsPrimerGrado(grado) || typeof DOMParser === "undefined") return source;
+  if (_unidadNormalizarSubtemaKey(subtema) === "TrazosDeLetras") return source;
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
@@ -26434,9 +27854,72 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "") {
   const targets = Array.from(root.querySelectorAll(".activity p, .activity li, .activity-fichas p, .activity-fichas li"));
   targets.forEach((node) => {
     if (node.closest(".answer")) return;
-    const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(node.textContent || "");
-    if (replaced !== (node.textContent || "")) {
-      node.textContent = replaced;
+    const nodeText = String(node.textContent || "");
+    if (!nodeText.trim()) return;
+
+    const walker = doc.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    textNodes.forEach((textNode) => {
+      const current = String(textNode.nodeValue || "");
+      if (!current.trim()) return;
+      if (/\[(?:IC\.?|IC)\s*[^\]]+\]/i.test(current)) {
+        textNode.nodeValue = _unidadNormalizeMalformedIcTokens(current);
+        return;
+      }
+      const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(current);
+      if (replaced !== current) {
+        textNode.nodeValue = replaced;
+      }
+    });
+
+    const currentReplacedText = String(node.textContent || "");
+    const hasIcToken = /\[IC[^\]]+\]/i.test(currentReplacedText);
+
+    if (!hasIcToken) {
+      let fallbackToken = "";
+      for (const [phrase, token] of PRIMER_GRADO_VERB_MAPPINGS) {
+        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (new RegExp(`\\b${escaped}\\b`, "i").test(nodeText)) {
+          fallbackToken = token;
+          break;
+        }
+      }
+
+      if (!fallbackToken) {
+        const cleanForInfer = nodeText.replace(/\s+/g, " ").trim();
+        fallbackToken = _unidadInferPrimerGradoInstructionFallbackToken(cleanForInfer);
+      }
+
+      if (fallbackToken) {
+        let targetTextNode = null;
+        for (const textNode of textNodes) {
+           const parent = textNode.parentElement;
+           if (parent && (
+               parent.closest('.modalidad-individual, .modalidad-parejas, .modalidad-equipo, .modalidad-plenaria, .unidad-ic-resource-badges, .unidad-actividad-badge') ||
+               parent.classList.contains('modalidad-individual') || parent.classList.contains('modalidad-parejas') || parent.classList.contains('modalidad-equipo') || parent.classList.contains('modalidad-plenaria')
+           )) {
+             continue;
+           }
+           if (String(textNode.nodeValue || "").trim()) {
+             targetTextNode = textNode;
+             break;
+           }
+        }
+
+        if (!targetTextNode && textNodes.length) {
+          targetTextNode = textNodes[0];
+        }
+
+        if (targetTextNode) {
+          const original = String(targetTextNode.nodeValue || "");
+          const numberedMatch = original.match(/^(\s*\d+\.\s*)?(.*)$/s);
+          const numberPrefix = String(numberedMatch?.[1] || "");
+          const rest = String(numberedMatch?.[2] || original);
+          targetTextNode.nodeValue = `${numberPrefix}${fallbackToken} ${rest}`.replace(/\s{2,}/g, " ");
+        }
+      }
     }
   });
 
@@ -26505,7 +27988,8 @@ function _unidadResolveTemarioImportance({
   subtema = "",
   titulo = "",
   descripcion = "",
-  categoria = ""
+  categoria = "",
+  contenido = ""
 } = {}) {
   const normalize = (text = "") => String(text || "")
     .toLowerCase()
@@ -26531,12 +28015,15 @@ function _unidadResolveTemarioImportance({
     lectura?.contenido
   ].filter(Boolean).join(" ");
 
-  const sourceTokens = tokenize(`${subtema} ${titulo} ${descripcion} ${categoria}`);
+  const contenidoPlano = _htmlAPlainText(contenido || "");
+  const sourceTokens = tokenize(`${subtema} ${titulo} ${descripcion} ${categoria} ${contenidoPlano}`);
   const contextTokens = new Set(tokenize(readingContext));
 
   const overlap = sourceTokens.filter((token) => contextTokens.has(token)).length;
-  if (overlap >= 3) return 3;
-  if (overlap >= 1) return 2;
+  const density = sourceTokens.length ? overlap / sourceTokens.length : 0;
+
+  if (overlap >= 8 || density >= 0.34) return 3;
+  if (overlap >= 3 || density >= 0.12) return 2;
   return 1;
 }
 
@@ -26545,7 +28032,8 @@ function _unidadRegisterTemarioSubcategoria({
   categoria = "",
   titulo = "",
   descripcion = "",
-  importancia = 1
+  importancia = 1,
+  contenido = ""
 } = {}) {
   const key = String(subtema || "").trim();
   if (!key) return;
@@ -26555,7 +28043,7 @@ function _unidadRegisterTemarioSubcategoria({
     categoria: String(categoria || "").trim(),
     titulo: String(titulo || formatearSubtema(key)).trim() || formatearSubtema(key),
     descripcion: _unidadBuildTemarioDescripcion(_unidadConvertAeToIndicadorPrimeraPersona(descripcion)),
-    importancia: Math.max(1, Math.min(3, parseInt(importancia, 10) || _unidadResolveTemarioImportance({ subtema: key, titulo, descripcion, categoria })))
+    importancia: Math.max(1, Math.min(3, parseInt(importancia, 10) || _unidadResolveTemarioImportance({ subtema: key, titulo, descripcion, categoria, contenido })))
   };
 }
 
@@ -26568,10 +28056,14 @@ function _unidadBuildTemarioUnidadHTML() {
   const items = entries.map((entry) => {
     const stars = _unidadBuildTemarioStars(entry.importancia);
     return `
-      <div style="margin-bottom:14px;">
-        <p style="margin:0 0 4px 0; font-weight:800; color:#0f172a;">${_escapeHtmlUnidad(entry.titulo)} ${stars}</p>
-        <p style="margin:0; color:#475569; line-height:1.45;">${_escapeHtmlUnidad(entry.descripcion || "Descripción pendiente.")}</p>
-      </div>
+      <tr>
+        <td style="padding:10px 12px; border:1px solid #dbe7f3; vertical-align:top; width:38%; background:#f8fbff;">
+          <p style="margin:0; font-weight:800; color:#0f172a; line-height:1.35;">${_escapeHtmlUnidad(entry.titulo)} ${stars}</p>
+        </td>
+        <td style="padding:10px 12px; border:1px solid #dbe7f3; vertical-align:top; background:#ffffff;">
+          <p style="margin:0; color:#475569; line-height:1.45;">${_escapeHtmlUnidad(entry.descripcion || "Descripción pendiente.")}</p>
+        </td>
+      </tr>
     `;
   }).join("");
 
@@ -26579,7 +28071,11 @@ function _unidadBuildTemarioUnidadHTML() {
     <div class="unidad-temario-resumen" style="margin:18px 0 26px; padding:18px 20px; border:1px solid #dbe7f3; border-radius:18px; background:#f8fbff;">
       <h3 style="margin:0 0 14px 0; color:#0f172a; font-size:1.6rem; font-weight:800;">Unidad ${_escapeHtmlUnidad(unidadLabel || "")}</h3>
       <div class="unidad-temario-resumen-lista">
-        ${items}
+        <table style="width:100%; border-collapse:collapse; border-spacing:0; border-radius:12px; overflow:hidden; background:#ffffff;">
+          <tbody>
+            ${items}
+          </tbody>
+        </table>
       </div>
     </div>
   `;
@@ -26614,7 +28110,7 @@ function _unidadStripTeacherOnlySectionsFromAlumnoHtml(html = "") {
     const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
     if (!isTeacherOnlyTitle(text)) return;
 
-    const block = node.closest(".activity, .activity-fichas, .unidad-teacher-extension, .unidad-teacher-reinforcement");
+    const block = node.closest(".activity, .activity-fichas, .unidad-teacher-note-section");
     if (block) {
       block.remove();
       return;
@@ -26637,13 +28133,18 @@ function _unidadBuildTeacherNotesStructuredHtml({
   tituloCreativo = "",
   grado = "",
   expectedActivityCount = 0,
-  rawHtml = ""
+  rawHtml = "",
+  headingHtml = "",
+  esFicha = false,
+  fichaClave = ""
 } = {}) {
-  const { actividadesNormales } = extraerActividades(String(contenidoActividades || ""));
+  const { actividadesNormales, actividadesFichas } = extraerActividades(String(contenidoActividades || ""));
+  const actividadesBase = esFicha ? actividadesFichas : actividadesNormales;
+  const actividadesFallback = actividadesBase.length ? actividadesBase : [...actividadesNormales, ...actividadesFichas];
   const cappedActivities = (
     Number.isFinite(parseInt(expectedActivityCount, 10)) && parseInt(expectedActivityCount, 10) > 0
-      ? actividadesNormales.slice(0, parseInt(expectedActivityCount, 10))
-      : actividadesNormales
+      ? actividadesFallback.slice(0, parseInt(expectedActivityCount, 10))
+      : actividadesFallback
   );
   if (!cappedActivities.length) {
     return `
@@ -26656,12 +28157,8 @@ function _unidadBuildTeacherNotesStructuredHtml({
     `;
   }
 
-  const stripIcBadges = (text = "") => String(text || "")
-    .replace(/\[\s*IC\.?\s*[^\]]+\]/gi, " ")
-    .replace(/\bIC\.?\s*(?:T\.)?\s*[A-ZÁÉÍÓÚÑ/]+(?:\s+[A-ZÁÉÍÓÚÑ/]+)*/gi, " ")
-    .replace(/\bIC\.?\s*(?:Recortable|Ficha|Anexo|Video|Oral)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const stripIcBadges = (text = "") => _unidadStripIcTokens(text);
+  const fichaTitulo = String(fichaClave || tituloCreativo || formatearSubtema(subtema)).trim() || formatearSubtema(subtema);
 
   const detectModalidad = (text = "") => {
     const t = String(text || "").toUpperCase();
@@ -26699,64 +28196,82 @@ function _unidadBuildTeacherNotesStructuredHtml({
   };
 
   const tituloSeguro = String(tituloCreativo || formatearSubtema(subtema)).trim();
-  const metacognitivas = [
-    "¿Qué hiciste primero para resolver la actividad?",
-    "¿Cómo comprobaste que tu respuesta era correcta?",
-    "¿Qué apoyo necesitaron algunos alumnos para avanzar?"
-  ];
-  const verbosDocentes = [
-    "guíe al alumno",
-    "acompañe al alumno",
-    "oriente al alumno",
-    "invite al alumno a desarrollar",
-    "conduzca al alumno en",
-    "pida al alumno que realice"
-  ];
   const actividadesHtml = cappedActivities.map((activityHtml, index) => {
     const lead = extractLead(activityHtml);
     const plain = stripIcBadges(String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
     const plainRaw = String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const modalidad = detectModalidad(plainRaw);
     const recursos = detectRecursos(plain);
-    const verboDocente = verbosDocentes[index % verbosDocentes.length];
-    const recursoText = recursos.length
-      ? `Use ${recursos.join(", ")} como apoyo concreto.`
-      : `Modele brevemente antes de iniciar.`;
-    const metaList = index === 0
-      ? `<ol class="unidad-teacher-metacognition">${metacognitivas.map((item) => `<li>${item}</li>`).join("")}</ol>`
-      : "";
-    return `
-      <div class="unidad-teacher-general-item">
-        <p>En la actividad ${index + 1}, ${verboDocente} "${_escapeHtmlUnidad(lead)}" en modalidad ${modalidad.toLowerCase()}. ${recursoText}</p>
-        <p>Pida una explicación breve del procedimiento y cierre con verificación rápida.</p>
-        ${metaList}
-      </div>
-    `;
+    const cierre = esFicha
+      ? (index % 2 === 0
+        ? `Cierre con verificación breve de la ficha ${fichaTitulo}.`
+        : `Pida que expliquen cómo resolvieron la ficha ${fichaTitulo}.`)
+      : (index % 3 === 0
+        ? "Cierre con verificación breve."
+        : index % 3 === 1
+          ? "Pida que expliquen un paso."
+          : "Revise el producto con el grupo.");
+    return _unidadBuildTeacherNoteHtml({
+      index,
+      lead: lead || `Actividad ${index + 1}`,
+      modalidad,
+      recursos,
+      grado,
+      contexto: esFicha ? `Ficha de refuerzo ${fichaTitulo}.` : "",
+      cierre
+    });
   }).join("");
 
-  const refuerzo = `
-    <div class="unidad-teacher-reinforcement">
-      <h3>Actividad de refuerzo</h3>
-      <p>Trabaje una versión guiada del mismo contenido con menos carga verbal, ejemplo resuelto y apoyos visuales para asegurar comprensión.</p>
-    </div>
-  `;
+  const actividadAmpliacionHtml = (() => {
+    const scored = cappedActivities
+      .map((activityHtml) => {
+        const plain = stripIcBadges(String(activityHtml || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+        const resourceScore = /video|anexo|recortable/i.test(plain) ? 2 : 0;
+        return { activityHtml, plain, score: plain.length + resourceScore * 80 };
+      })
+      .sort((a, b) => b.score - a.score);
+    return scored[0]?.activityHtml || cappedActivities[0] || "";
+  })();
+  const actividadAmpliacionLead = extractLead(actividadAmpliacionHtml) || tituloSeguro;
 
-  const neurologia = `
-    <aside class="unidad-teacher-neurology">
-      <h3>Neurología aplicada</h3>
-      <p>Cuando los alumnos formulen buenas preguntas, recupérelas en voz alta, escríbalas en un espacio visible y reutilícelas durante la sesión. Esto fortalece memoria de trabajo, atención sostenida y recuperación activa del aprendizaje.</p>
-      <p>Alterne momentos de observación, verbalización y acción para favorecer distintas rutas de procesamiento. Si un alumno se bloquea, reduzca la tarea, ofrezca una pista concreta y vuelva a incrementar el desafío cuando recupere seguridad.</p>
-    </aside>
-  `;
+  const mathContext = String(categoria || "").trim() === "Matemáticas"
+    ? _unidadBuildMathContextualizationPedagogicaHTML({ subtema, grado, tituloCreativo: tituloSeguro })
+    : "";
 
-  return `
-    <div class="unidad-teacher-notes asc-teacher-layout">
-      <h3>Actividad General</h3>
-      ${actividadesHtml}
-      ${refuerzo}
-      ${neurologia}
-    </div>
-  `;
+  const ampliacionTexto = esFicha
+    ? `Tome como ampliación la ficha de refuerzo "${fichaTitulo}" y llévela un paso más allá: pida al grupo que retome una de sus actividades, la resuelva con mayor profundidad y explique qué cambiaría para volverla más exigente sin perder su propósito didáctico. Si la ficha ya incluye apoyos visuales o manipulativos, úselo como punto de partida para subir el nivel de análisis y consolidar el mismo contenido desde otra exigencia.`
+    : `Tome como ampliación la actividad real "${actividadAmpliacionLead}" y llévela un paso más allá: pida al grupo que la resuelva con mayor profundidad, que compare dos maneras de hacerlo y que explique cuál resulta más eficiente o completa. Si la consigna ya incluye una lectura, un recurso visual o un material manipulativo, úselo como punto de partida para aumentar el reto sin cambiar el sentido de la actividad original; el objetivo es enriquecer la misma tarea, no inventar otra distinta.`;
+
+  const refuerzoTexto = esFicha
+    ? `Trabaje la ficha de refuerzo "${fichaTitulo}" con una versión guiada, apoyos visuales y un ritmo más lento para asegurar que cada actividad conserve el mismo contenido, pero con menos carga cognitiva. Presente la consigna por pasos cortos, modele el procedimiento clave y verifique que el estudiante pueda identificar qué se le pide antes de responder. Cierre con una comprobación breve que confirme si ya puede repetir la idea principal de la ficha con seguridad y sin perder su propósito de refuerzo.`
+    : `Trabaje una versión guiada del mismo contenido con ejemplo resuelto, apoyo visual y acompañamiento cercano para asegurar comprensión. Presente la tarea en pasos cortos, modele el procedimiento clave, verifique que el estudiante identifique qué debe hacer antes de responder y ofrezca una pista concreta solo cuando sea necesario. Cierre con una comprobación breve que confirme si ya puede repetir la idea principal con seguridad y sin perder el sentido de la actividad.`;
+
+  const ampliacion = _unidadBuildTeacherNotesSectionHtml({
+    title: "Actividad de ampliación",
+    tone: "#7c3aed",
+    paragraphs: [ampliacionTexto]
+  });
+
+  const refuerzo = _unidadBuildTeacherNotesSectionHtml({
+    title: "Actividad de refuerzo",
+    tone: "#dc2626",
+    paragraphs: [refuerzoTexto]
+  });
+
+  const neurologia = _unidadBuildTeacherNotesNeurologyHtml({
+    lines: [
+      "Cuando el grupo avance, recupere en voz alta la idea clave, escríbala visible y pídales que la expliquen con sus palabras.",
+      "Alternar observación, verbalización y acción ayuda a sostener la atención, fortalecer la memoria de trabajo y ajustar el andamiaje sin saturar la carga verbal."
+    ]
+  });
+
+  return _unidadBuildTeacherNotesShellHtml({
+    headingHtml,
+    preGeneralHtml: esFicha ? _unidadBuildFichaTeacherMetadataHtml({ subtema, categoria, fichaClave }) : "",
+    generalTitle: "Actividad General",
+    generalItemsHtml: actividadesHtml,
+    sectionsHtml: [mathContext, ampliacion, refuerzo, neurologia].filter(Boolean)
+  });
 }
 
 function _unidadEnsureFichaTitles(html = "", recursos = {}) {
@@ -26769,7 +28284,7 @@ function _unidadEnsureFichaTitles(html = "", recursos = {}) {
   const root = doc.body.firstElementChild;
   if (!root) return source;
 
-  const fichaBlocks = Array.from(root.querySelectorAll(".activity-fichas"));
+  const fichaBlocks = Array.from(root.querySelectorAll('.activity[data-ficha="true"], .activity-fichas'));
   if (!fichaBlocks.length) return source;
 
   const hasGeneralHeading = Array.from(root.children).some((node) => {
@@ -26797,6 +28312,19 @@ function _unidadEnsureFichaTitles(html = "", recursos = {}) {
 
   fichaBlocks.forEach((block, index) => {
     if (!(block instanceof Element)) return;
+    const firstInstructionNode = Array.from(block.querySelectorAll("p, li")).find((node) => !node.closest(".answer"));
+    const titleWithIc = Array.from(block.children).find((node) => {
+      const text = String(node.textContent || "").trim();
+      return /^H[1-6]$/.test(node.tagName || "") && /\[IC[^\]]+\]/i.test(text);
+    });
+    if (titleWithIc && firstInstructionNode) {
+      const badgeTokens = (String(titleWithIc.textContent || "").match(/\[IC[^\]]+\]/gi) || []).join(" ");
+      titleWithIc.textContent = String(titleWithIc.textContent || "").replace(/\s*\[IC[^\]]+\]/gi, "").trim();
+      if (badgeTokens) {
+        firstInstructionNode.textContent = `${String(firstInstructionNode.textContent || "").trim()} ${badgeTokens}`.trim();
+      }
+    }
+
     const firstMeaningful = Array.from(block.children).find((node) => {
       const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
       return text.length > 0;
@@ -26804,18 +28332,61 @@ function _unidadEnsureFichaTitles(html = "", recursos = {}) {
     const firstText = String(firstMeaningful?.textContent || "").replace(/\s+/g, " ").trim();
     if (/^ficha\b/i.test(firstText)) return;
 
-    if (block.querySelector(":scope > .unidad-ficha-item-title")) return;
-
-    const title = doc.createElement("p");
-    title.className = "unidad-ficha-item-title";
-    title.innerHTML = `<strong>${fichaClave} - Actividad ${index + 1}.</strong>`;
-    block.prepend(title);
+    const existingTitle = block.querySelector(":scope > .unidad-ficha-item-title");
+    if (existingTitle) existingTitle.remove();
   });
 
   return root.innerHTML;
 }
 
-function _unidadEnsureFinalResourceTitles(html = "", recursos = {}) {
+function _unidadEnsureFichaMetadataSection(html = "", { subtema = "", categoria = "", fichaClave = "" } = {}) {
+  const source = String(html || "");
+  const safeFichaClave = String(fichaClave || "").trim();
+  if (!source.trim() || !safeFichaClave || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  let heading = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6"))
+    .find((node) => String(node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === safeFichaClave.toLowerCase());
+  if (!heading) {
+    const firstFichaBlock = root.querySelector('.activity[data-ficha="true"], .activity-fichas');
+    if (!firstFichaBlock) return source;
+    heading = doc.createElement("h3");
+    heading.className = "unidad-ficha-heading";
+    heading.style.marginTop = "24px";
+    heading.textContent = safeFichaClave;
+    root.insertBefore(heading, firstFichaBlock);
+  }
+
+  const prev = heading.previousElementSibling;
+  if (prev?.classList?.contains("unidad-ficha-metadatos-etiquetas")) return source;
+
+  const wrapper = doc.createElement("div");
+  wrapper.className = "unidad-ficha-metadatos-etiquetas unidad-metadatos-etiquetas";
+  wrapper.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;";
+
+  const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" });
+  const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
+
+  const campo = _unidadCampoFormativoDeCategoria(categoria);
+  wrapper.innerHTML = `
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
+    ${_unidadRenderEjeArticuladorHTML(subtema, categoria)}
+    ${campo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_escapeHtmlUnidad(campo)}</span>` : ""}
+    ${_unidadRenderHabilidadCognitivaHTML(subtema, categoria)}
+    ${_unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: "Ficha" })}
+  `;
+
+  root.insertBefore(wrapper, heading);
+  return root.innerHTML;
+}
+
+function _unidadEnsureFinalResourceTitles(html = "", recursos = {}, subtema = "", categoria = "") {
   const source = String(html || "");
   if (!source.trim() || typeof DOMParser === "undefined") return source;
 
@@ -26829,19 +28400,22 @@ function _unidadEnsureFinalResourceTitles(html = "", recursos = {}) {
       key: "anexos",
       title: String(recursos?.anexos?.clave || "").trim(),
       match: /\banexo\s+[Pp]?\d+\w*/i,
-      headingClass: "unidad-anexo-heading"
+      headingClass: "unidad-anexo-heading",
+      recursoType: "anexos"
     },
     {
       key: "recortables",
       title: String(recursos?.recortables?.clave || "").trim(),
       match: /\brecortable\s+[Pp]?\d+\w*/i,
-      headingClass: "unidad-recortable-heading"
+      headingClass: "unidad-recortable-heading",
+      recursoType: "recortables"
     },
     {
       key: "videos",
       title: String(recursos?.videos?.clave || "").trim() ? `Guion de video: "${String(recursos?.videos?.clave || "").trim()}"` : "",
       match: /guion de video:\s*"[^"]+"|video\s+"[^"]+"/i,
-      headingClass: "unidad-video-heading"
+      headingClass: "unidad-video-heading",
+      recursoType: "videos"
     }
   ].filter((item) => item.title);
 
@@ -26864,11 +28438,24 @@ function _unidadEnsureFinalResourceTitles(html = "", recursos = {}) {
       heading.className = config.headingClass;
       heading.textContent = config.title;
 
+      const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: config.recursoType });
+      const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
+      const wrapper = doc.createElement("div");
+      wrapper.className = "unidad-metadatos-etiquetas unidad-recurso-adicional-metadatos";
+      wrapper.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;margin-top:10px;";
+      wrapper.innerHTML = `
+        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
+      `;
+
       if (block.firstChild) {
-        block.insertBefore(heading, block.firstChild);
-        block.insertBefore(doc.createTextNode(" "), heading.nextSibling);
+        block.insertBefore(wrapper, block.firstChild);
+        block.insertBefore(heading, wrapper);
+        block.insertBefore(doc.createElement("br"), wrapper);
       } else {
         block.appendChild(heading);
+        block.appendChild(wrapper);
       }
     });
   });
@@ -26915,7 +28502,7 @@ function construirTablaCandelarizacionMejorada(filas = [], opts = {}) {
   return `
     <h4 style="margin-top:10px;">${titulo}</h4>
     <p>Plan sugerido: <strong>${sesiones}</strong> sesiones, <strong>${totalMin} minutos</strong> totales, distribuido en <strong>${semanas}</strong> semana(s). Cada sesión cubre una subcategoría/subtema.</p>
-    <table style="border-collapse:collapse;font-size:11px;width:100%;min-width:560px;margin-top:5px;">
+    <table style="border-collapse:collapse;font-size:11px;width:100%;min-width:560px;margin-top:5px;margin-bottom:16px;">
       <thead>
         <tr style="background:#f9f9f9;">
           <th style="border:1px solid #ccc;padding:4px 6px;">Semana</th>
@@ -26943,61 +28530,47 @@ function construirPromptNotasMaestro(
   tituloCreativo = "",
   tituloVideoGenerado,
   minutosTotales,
-  recursosGlobales = {}
+  recursosGlobales = {},
+  opciones = {}
 ) {
-  // Extraer claves de recursos del contenido HTML si no se proporcionan
-  const extraerClave = (patron) => {
-    const match = contenidoActividades.match(patron);
-    return match ? match[0] : `(${patron.toString().replace(/\\(.)/g, '$1')} no detectado)`;
-  };
-
-  const claveFicha = extraerClave(/Ficha\s+[Pp]?\d+\w*/i) || "(Ficha no detectada)";
-  const claveRecortable = extraerClave(/Recortable\s+[Pp]?\d+\w*/i) || "(Recortable no detectado)";
-  const claveAnexo = extraerClave(/Anexo\s+[Pp]?\d+\w*/i) || "(Anexo no detectado)";
-  const tituloVideo = extraerClave(/video\s+"([^"]+)"/i) || "(Video no detectado)";
-
-  const categoria = categoriaPorSubtema[subtema] || "General";
-  const tituloFinal = tituloCreativo || formatearSubtema(subtema);
+  const categoria = String(opciones?.categoria || categoriaPorSubtema[subtema] || "General").trim() || "General";
+  const tituloSeccion = String(opciones?.tituloSeccion || tituloCreativo || formatearSubtema(subtema)).trim() || formatearSubtema(subtema);
+  const esFicha = !!opciones?.esFicha;
+  const fichaClave = String(opciones?.fichaClave || window.claveFichaActualGlobal || claveFichaActualGlobal || "").trim();
+  const claveRecortable = window.claveRecortableActualGlobal || "";
+  const claveAnexo = window.claveAnexoActualGlobal || "";
+  const tituloVideoGeneradoLocal = String(window.tituloVideoGeneradoGlobal || tituloVideoGenerado || tituloSeccion || formatearSubtema(subtema)).trim();
 
   const { actividadesNormales, actividadesFichas } = extraerActividades(contenidoActividades);
+  const tipoSeccion = esFicha ? "ficha de refuerzo" : "subtema";
+  const instruccionFichas = esFicha
+    ? "Para fichas, evita una plantilla repetida entre actividades. Cada párrafo debe abrir de una forma distinta, con una imagen o verbo pedagógico propio, y debe sonar más creativo que mecánico."
+    : "";
+  const instruccionFuenteSeccion = esFicha
+    ? `Usa únicamente las actividades de la ficha ${fichaClave || tituloSeccion}; no mezcles actividades de la columna general del subtema.`
+    : "Usa únicamente las actividades generales de la columna del alumno; ignora cualquier ficha de refuerzo si aparece en el HTML de entrada.";
 
-
-  if (actividadesNormales.length === 0 && actividadesFichas.length === 0) {
+  const actividadesBase = esFicha ? actividadesFichas : actividadesNormales;
+  if (!actividadesBase.length) {
     return "<p>❌ No se detectaron actividades para generar notas del maestro.</p>";
   }
 
-  // ✅ detectar recurso ahora usa SIEMPRE las variables recibidas
-  function detectarRecurso(textoPlano, tipo = "normal") {
-    if (/ficha\s*\d+/i.test(textoPlano)) {
-      return tipo === "ficha"
-        ? "Esta ficha complementa la actividad principal; úsala como refuerzo después de que los alumnos hayan trabajado el tema."
-        : `Usa la ${claveFichaActualGlobal} (actividad de refuerzo) durante esta actividad.`;
-    }
-    if (/recortable\s*\d+/i.test(textoPlano)) {
-      return tipo === "ficha"
-        ? "Entrega el recortable para que los alumnos lo manipulen y refuercen visualmente el aprendizaje (actividad de ampliación)."
-        : `Utiliza el ${claveRecortable} como material de apoyo para ampliar el conocimiento.`;
-    }
-    if (/anexo\s*/i.test(textoPlano)) {
-      return tipo === "ficha"
-        ? "Muestra el anexo visual como apoyo complementario para facilitar la explicación del tema (actividad de ampliación)."
-        : `Muestra el ${claveAnexo} para facilitar la explicación y ampliar el conocimiento.`;
-    }
-    if (/video/i.test(textoPlano)) {
-      return tipo === "ficha"
-        ? "Proyecta el video antes de la discusión grupal para contextualizar el tema y generar interés (actividad de ampliación)."
-        : `Proyecta el video "${tituloVideoGenerado}" antes de comenzar para ampliar el contexto.`;
-    }
-    return "Actividad general del libro del alumno.";
-  }
+  const seleccionarActividadAmpliacion = () => {
+    const pool = actividadesNormales.length ? actividadesNormales : actividadesBase;
+    const scored = pool
+      .map((actividadHTML) => {
+        const plain = _unidadStripIcTokens(String(actividadHTML || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+        const resourceScore = /video|anexo|recortable|ficha/i.test(plain) ? 2 : 0;
+        return { plain, score: plain.length + resourceScore * 80 };
+      })
+      .sort((a, b) => b.score - a.score);
+    return scored[0]?.plain || "la actividad seleccionada";
+  };
+  const actividadAmpliacionBase = seleccionarActividadAmpliacion();
 
-  if (actividadesFichas && actividadesFichas.length > 0) {
-    const bloqueNotasFicha = generarNotasDeFichas(actividadesFichas, subtema, tituloCreativo);
-  }
-
-  // ✅ Procesar actividades normales — todas son Generales (las actividades del alumno siempre son generales)
-  const listaNormales = actividadesNormales.map((a, i) => {
-    const textoPlano = a.replace(/<[^>]*>/g, "").trim();
+  // ✅ Procesar solo la fuente correspondiente: subtema o ficha
+  const listaNormales = actividadesBase.map((a, i) => {
+    const textoPlano = _unidadStripIcTokens(a.replace(/<[^>]*>/g, "").trim());
 
     // Extraer recursos específicos
     const fichaMatch = textoPlano.match(/ficha\s+(\d+\w*)/i);
@@ -27017,45 +28590,13 @@ function construirPromptNotasMaestro(
     if (recortableMatch) recursosTexto += `\nRecurso: Utilizar el ${recortableMatch[0]} como material manipulativo.`;
     if (anexoMatch) recursosTexto += `\nRecurso: Consultar el ${anexoMatch[0]} como referencia visual.`;
 
-    const tituloCorto = textoPlano.split(".")[0];
+    const tituloCorto = textoPlano.replace(/\s+/g, " ").trim();
 
-    return `[ACTIVIDAD GENERAL ${i + 1}]
+    return `[ACTIVIDAD ${i + 1}]
       Título: ${tituloCorto}.
       Modalidad: ${modalidad}
       ${recursosTexto}`;
   }).join("\n\n");
-
-
-  // ✅ Procesar fichas
-  const listaFichas = actividadesFichas.map((a, i) => {
-    const textoPlano = a.replace(/<[^>]*>/g, "").trim();
-    const modalidad = textoPlano.includes("[IC T. IND]") ? "Trabajo individual"
-      : textoPlano.includes("[IC T. PAR]") ? "Trabajo en parejas"
-        : textoPlano.includes("[IC T. EQUI]") ? "Trabajo en equipo"
-          : "Sin modalidad";
-
-    const recursoExtra = detectarRecurso(textoPlano, "ficha");
-
-    return `
-      <div style="margin-top:10px;">
-        <p><strong>Ficha ${claveFichaActualGlobal} - Actividad ${i + 1}:</strong> ${textoPlano}</p>
-        <p><em>Modalidad:</em> ${modalidad}</p>
-        <p><em>Recomendación para el maestro:</em> Úsala como refuerzo o ampliación en la segunda mitad de la semana. ${recursoExtra}</p>
-      </div>
-    `;
-  }).join("\n");
-
-
-  // ✅ Combinar lista final
-  let listaActividadesFinal = listaNormales;
-  if (actividadesFichas.length > 0) {
-    listaActividadesFinal += `
-
-    --- FICHAS DETECTADAS ---
-    ${listaFichas}`;
-  }
-
-  const totalActividades = actividadesNormales.length + actividadesFichas.length;
 
   // 🧠 Calcular tiempos estimados según dificultad
   const evaluarDificultad = txt =>
@@ -27065,7 +28606,7 @@ function construirPromptNotasMaestro(
   let totalMinutosUnidad = 0;
   let bloquesPorSubtema = {};
 
-  actividadesNormales.forEach((act, index) => {
+  actividadesBase.forEach((act, index) => {
     const texto = act.replace(/<[^>]*>/g, "").trim();
 
     const modalidadTrabajo =
@@ -27097,7 +28638,7 @@ function construirPromptNotasMaestro(
 
       // ✅ Videos
       if (/video/i.test(texto)) {
-        materiales.push(`Video "${tituloVideoGenerado}"`);
+        materiales.push(`Video "${tituloVideoGeneradoLocal}"`);
       }
 
       // ✅ Filtra valores vacíos o undefined para evitar comas iniciales
@@ -27108,7 +28649,7 @@ function construirPromptNotasMaestro(
     }
 
 
-    const nombreSubtema = formatearSubtema(subtema);
+    const nombreSubtema = tituloSeccion || formatearSubtema(subtema);
     if (!bloquesPorSubtema[nombreSubtema]) bloquesPorSubtema[nombreSubtema] = [];
 
     const tiempo = evaluarDificultad(texto);
@@ -27147,80 +28688,39 @@ function construirPromptNotasMaestro(
   });
 
   const tablaCandelarizacion = construirTablaCandelarizacionMejorada(filasCalendar);
-
-  // ✅ Notas de fichas (solo si existen)
-  let bloqueNotasFicha = "";
-  if (actividadesFichas.length > 0) {
-    actividadesFichas.forEach((actividad, idx) => {
-      const textoPlano = actividad.replace(/<[^>]*>/g, "").trim();
-
-      // Extraer solo propósito resumido (20 primeras palabras)
-      const textoPropósito = textoPlano
-        .split(" ")
-        .slice(0, 20)
-        .join(" ") + "...";
-
-      // Detectar modalidad
-      const modalidad = actividad.includes("[IC T. IND]") ? "Trabajo individual"
-        : actividad.includes("[IC T. PAR]") ? "Trabajo en parejas"
-          : actividad.includes("[IC T. EQUI]") ? "Trabajo en equipo"
-            : "Sin modalidad";
-
-      // Detectar recursos asociados
-      const videoMatch = textoPlano.match(/video\s+"([^"]+)"/i);
-      const recortableMatch = textoPlano.match(/recortable\s+(\d+\w*)/i);
-      const anexoMatch = textoPlano.match(/anexo\s+(\d+\w*)/i);
-      const fichaMatch = textoPlano.match(/ficha\s+(\d+\w*)/i) || [claveFichaActualGlobal];
-
-      let tipoActividad = "Refuerzo";
-      let recursosTexto = `Usando ${fichaMatch[0]}`;
-
-      if (videoMatch) {
-        tipoActividad = "Ampliación";
-        recursosTexto += ` y el video "${videoMatch[1]}"`;
-      }
-      if (recortableMatch) {
-        tipoActividad = "Ampliación";
-        recursosTexto += ` y el ${recortableMatch[0]}`;
-      }
-      if (anexoMatch) {
-        tipoActividad = "Ampliación";
-        recursosTexto += ` y el ${anexoMatch[0]}`;
-      }
-
-      // ✅ SOLO mostramos nota de maestro, sin repetir texto literal
-      bloqueNotasFicha += `
-        <p><strong>Actividad ${idx + 1} (${tipoActividad})</strong></p>
-        <p style="margin-bottom:10px;">
-          <strong>"Desarrolle esta actividad como refuerzo durante la segunda mitad de la semana ${modalidad}, 
-          ${recursosTexto} para reforzar el tema "${tituloCreativo}"." </strong>
-          ${modalidad === "Trabajo individual" ? "Supervise el avance de cada estudiante de manera personalizada." : "Facilite la interacción y apoyo entre compañeros."}
-        </p>
-        <p style="margin-bottom:15px;"><em>Estrategia simplificada para estudiantes con barreras de aprendizaje:</em> 
-          Ofrezca apoyos visuales, plantillas guiadas o permita respuestas orales. Acompañe paso a paso según sea necesario.</p>
-      `;
-    });
-  }
-
+  const esPrimariaBaja = _unidadIsPrimerGrado(grado) || _unidadIsLowerPrimaryGrade(grado);
 
   // Detectar si hay recursos disponibles para sugerir en Refuerzo
   const recursoRefuerzo = claveFichaActualGlobal
-    ? `Puede apoyarse en la ${claveFichaActualGlobal}`
+    ? `Puede apoyarse en la ${fichaClave || claveFichaActualGlobal}`
     : claveRecortable
       ? `Puede apoyarse en el ${claveRecortable}`
       : claveAnexo
         ? `Puede apoyarse en el ${claveAnexo}`
-        : "";
+        : "Sugiere una actividad manipulativa o simplificada para consolidar.";
 
   // ✅ PROMPT FINAL para maestro
   return `
   IMPORTANTE: No repitas ni reformules el texto de las actividades del alumno. SOLO describe estrategias y orientaciones para el maestro.
-  ESTRICTAMENTE PROHIBIDO: No incluyas etiquetas HTML de iconos (como <i class="fas fa-*"></i> o similares) formatea usando texto plano o tags básicos (p, strong, br).
+  ESTRICTAMENTE PROHIBIDO: No incluyas etiquetas HTML de iconos (como <i class="fas fa-*"></i> o similares).
+  NO incluyas las etiquetas textuales [IC ...] ni menciones términos como "iconos de modalidad" o "etiquetas IC" en la respuesta final. Formatea el texto usando tags básicos (p, strong, br).
+  NO uses frases fijas repetidas como "Invite a describir..." en todas las actividades. Cada actividad debe sonar distinta y debe depender del contenido real.
+  PROHIBIDO empezar cada párrafo con fórmulas repetidas como "trabaje sobre", "aclarar el objetivo", "explique con calma" o "modele el primer paso". Cambia la apertura de cada actividad y usa un giro creativo ligado al contenido concreto.
+  Evita plantillas mecánicas. La redacción debe sonar docente, pero no genérica: usa verbos distintos, una imagen breve del contenido y una intención pedagógica específica.
+  Cada párrafo de actividad debe tener una apertura, un desarrollo y un cierre diferentes; no repitas la misma estructura sintáctica entre actividades consecutivas.
+  La sección actual corresponde a un ${tipoSeccion}; usa exactamente la misma lógica para subtema o ficha y cambia solo el título de la sección.
+  ${instruccionFuenteSeccion}
+  ${instruccionFichas}
+  - Base obligatoria para la actividad de ampliación: "${actividadAmpliacionBase}".
+  - No reemplaces esa base por una idea nueva; la ampliación debe derivarse de esa actividad real.
+  ${esPrimariaBaja ? "- En Primaria baja usa frases más simples y una sola acción por oración, pero conserva 1 o 2 párrafos completos por actividad." : ""}
+  - Cuando haya una evidencia clara del trabajo esperado, usa también un bloque <div class=\"answer\"> con la respuesta o evidencia docente esperada.
+  ${String(categoria || "").trim() === "Matemáticas" ? "- En Matemáticas agrega al final una tabla de contextualización pedagógica específica de la sección." : ""}
 
-  <h2 style="margin-top:20px; margin-bottom:20px;">${tituloCreativo}</h2>
+  <h2 style="margin-top:20px; margin-bottom:20px;">${tituloSeccion}</h2>
 
-  Estas son las actividades del libro del alumno para el subtema (nivel **${nivel}**, grado **${grado}**).
-  TODAS son Actividades Generales — corresponden al trabajo ordinario de la clase:
+  Estas son las actividades del libro del alumno para la sección actual (nivel **${nivel}**, grado **${grado}**).
+  TODAS se redactan con la misma lógica pedagógica:
 
   ${listaNormales}
 
@@ -27231,30 +28731,45 @@ function construirPromptNotasMaestro(
   ESTRUCTURA FIJA (en este orden):
 
   1️⃣ <h3 style="color:#1d4ed8;">Actividad General</h3>
-     - Escribe orientaciones breves para el maestro sobre cada actividad listada arriba.
-     - 1 párrafo corto por actividad. Incluye modalidad y recursos mencionados.
-     - Menciona explícitamente los recursos: ficha, recortable, anexo, video cuando aplique.
+     - Analiza el contenido real de cada actividad y redacta orientaciones específicas para el docente.
+     - Redacta UN SOLO párrafo amplio por actividad. Describe cómo dirigir la clase, qué modelar, qué observar y cómo cerrar.
+     - La referencia a la actividad debe ir dentro del párrafo, sin encabezado visible ni títulos repetidos.
+     - Debe verse con naturalidad qué actividad está explicando, por ejemplo con "En la actividad 1..." o una variante equivalente.
+     - Incluye modalidad y recursos solo si aportan a la conducción docente.
+     - Si el grado es bajo, usa menos palabras y verbos simples.
+     - No uses preguntas fijas al alumnado ni listas de metacognición.
+     - Si necesitas evidenciar la respuesta o cierre esperado, usa un bloque <div class="answer"> breve.
 
   2️⃣ <h3 style="color:#7c3aed;">Actividad de ampliación</h3>
-     - CREA (no copies del alumno) una actividad NUEVA de enriquecimiento para estudiantes avanzados.
-     - Debe estar relacionada con el tema "${tituloCreativo}".
-     - Puede incorporar recursos digitales, trabajo colaborativo o proyectos creativos.
-     - Si existe video o recortable, puedes sugerirlo aquí también.
+     - NO inventes una actividad nueva: parte de la base obligatoria indicada arriba y conviértela en ampliación.
+     - Mantén la relación con el contenido original, pero eleva la exigencia, la profundidad o el nivel de análisis.
+     - Puedes integrar recursos digitales, trabajo colaborativo o un reto adicional, pero sin cambiar la base de la actividad elegida.
+     - Redacta UN SOLO párrafo largo, completo y desarrollado. No lo dejes en una sola línea.
 
   3️⃣ <h3 style="color:#dc2626;">Actividad de refuerzo</h3>
-     - CREA (no copies del alumno) una sugerencia de apoyo para estudiantes con dificultades.
+     - SÍ inventa una actividad NUEVA de apoyo para estudiantes con dificultades.
      - Debe ser una actividad más sencilla o simplificada del mismo tema.
      - ${recursoRefuerzo ? recursoRefuerzo + " para ejercitar y fortalecer los prerrequisitos." : "Sugiere una actividad manipulativa o simplificada para consolidar."}
+     - Redacta UN SOLO párrafo largo, completo y desarrollado. No lo dejes en una sola línea.
      - Recuerde que de forma lúdica se favorecen los procesos de aprendizaje.
+     - Redacta la orientación como guía docente, no como una lista de preguntas.
 
   4️⃣ <h3 style="color:#10b981;">Neurología aplicada</h3>
      - Cierra SIEMPRE con un bloque final de neurología aplicada.
-     - Redacta recomendaciones breves, concretas y accionables para memoria de trabajo, atención, recuperación activa, modelado y andamiaje.
+     - Redacta UN SOLO PÁRRAFO largo, completo y fluido. No uses dos párrafos, listas ni viñetas.
+     - Hazlo aproximadamente del doble de largo que el párrafo anterior y mantén una sola continuidad textual.
+     - Incluye recomendaciones breves, concretas y accionables para memoria de trabajo, atención, recuperación activa, modelado y andamiaje.
+
+  ${String(categoria || "").trim() === "Matemáticas" ? `
+  5️⃣ <h3 style="color:#0f766e;">Contextualización pedagógica de Matemáticas</h3>
+     - Agrega una tabla breve con: Subtema, Campo formativo, Nivel taxonómico, Proceso matemático, Evidencia y Apoyo concreto.
+     - La tabla debe ser específica del subtema y no genérica.
+  ` : ""}
   ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   📌 **Distribución del tiempo:**
-  - Tema: "${tituloCreativo}"
-  - Actividades generales detectadas: ${actividadesNormales.length}
+  - Tema: "${tituloSeccion}"
+  - Actividades detectadas: ${actividadesBase.length}
   - Tiempo total sugerido: ${minutosTotales} minutos
 
   📌 **Reflexión global al final:**
@@ -27265,12 +28780,12 @@ function construirPromptNotasMaestro(
 
   ⚠️ **Restricciones:**
   - NO copies ni reformules las actividades del alumno.
-  - Las secciones Ampliación y Refuerzo son actividades NUEVAS creadas por ti, no reformulaciones de las del alumno.
-  - Máximo 1 párrafo corto por actividad general.
+  - La sección de Ampliación debe derivarse de una actividad real del alumno; la de Refuerzo sí puede ser una actividad nueva.
+  - Cada actividad general puede ocupar 1 o 2 párrafos amplios si el contenido lo necesita.
   - Una sola reflexión de cierre.
   - NO elimines la tabla de candelarización.
   - NO incluyas ninguna etiqueta de clase de icono (como <i> o similares) en el HTML.
-  - RESPETA el orden: Generales → Ampliación → Refuerzo → Neurología aplicada.
+  - RESPETA el orden: Actividades → Ampliación → Refuerzo → Neurología aplicada.
   `;
 }
 
@@ -27479,9 +28994,10 @@ function construirPromptNotasMaestroProyecto(
 
     ${bloquesFases.join("\n")}
 
-    <h3>Reflexión Global del Maestro</h3>
-    <p>Integre evidencias por fase, retroalimente con criterios visibles y conecte el producto final con el contexto.
+    <h3 style="margin-bottom:14px;">Reflexión Global del Maestro</h3>
+    <p style="margin-bottom:28px;">Integre evidencias por fase, retroalimente con criterios visibles y conecte el producto final con el contexto.
     Ajuste tiempos, roles y apoyos con base en la observación y rúbricas de fase.</p>
+    <div style="height:16px;"></div>
 
     ${candelarizacion}
   `;
@@ -27508,15 +29024,18 @@ function setupScrollButtonsForModal({
 }) {
   // Busca el modal y su contenedor de scroll
   const modal = document.querySelector(modalSelector);
+  if (!modal) return;
   const content = modal.querySelector(contentSelector) || modal;
+  const resultContainer = modal.querySelector('#resultadoUnidadGenerada') || null;
+  const scroller = resultContainer || content;
 
   // Util para hacer scroll suave
-  const go = (pos) => content.scrollTo({ top: pos, behavior: 'auto' });
+  const go = (pos) => scroller.scrollTo({ top: pos, behavior: 'auto' });
 
   // Calcula posiciones seguras
   const topPos = () => 0;
-  const middlePos = () => Math.max(0, (content.scrollHeight - content.clientHeight) / 2);
-  const bottomPos = () => content.scrollHeight;
+  const middlePos = () => Math.max(0, (scroller.scrollHeight - scroller.clientHeight) / 2);
+  const bottomPos = () => scroller.scrollHeight;
 
   // Engancha botones si existen
   const btnTop = document.getElementById(topBtnId);
@@ -27528,20 +29047,26 @@ function setupScrollButtonsForModal({
   const btnBottom = document.getElementById(bottomBtnId);
   if (btnBottom) btnBottom.addEventListener('click', () => go(bottomPos()));
 
-  // Navegación por categorías usando la columna de alumno
-  const getCategoriaTargets = () => {
-    const bloques = Array.from(content.querySelectorAll('.bloque-categoria'));
+  // Navegación por subcategorías usando los bloques reales renderizados.
+  const getSubtemaTargets = () => {
+    const bloques = Array.from(resultContainer.querySelectorAll('.bloque-subtema'));
     return bloques
-      .map(b => b.querySelector('.col-alumno') || b)
+      .map((b) => b.querySelector('.col-alumno') || b)
       .filter(Boolean);
   };
 
+  const getRelativeScrollTop = (el) => {
+    const contentRect = scroller.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    return Math.max(0, scroller.scrollTop + (elRect.top - contentRect.top) - 10);
+  };
+
   const findCurrentIndex = (targets) => {
-    const scrollTop = content.scrollTop;
+    const scrollTop = scroller.scrollTop;
     let closestIdx = 0;
     let minDelta = Infinity;
     targets.forEach((el, idx) => {
-      const y = el.offsetTop - content.offsetTop;
+      const y = getRelativeScrollTop(el);
       const delta = Math.abs(y - scrollTop);
       if (delta < minDelta) {
         minDelta = delta;
@@ -27551,22 +29076,21 @@ function setupScrollButtonsForModal({
     return closestIdx;
   };
 
-  const goToCategoria = (direction) => {
-    const targets = getCategoriaTargets();
+  const goToSubtema = (direction) => {
+    const targets = getSubtemaTargets();
     if (!targets.length) return;
     const currentIdx = findCurrentIndex(targets);
     const nextIdx = direction === 'next'
       ? Math.min(currentIdx + 1, targets.length - 1)
       : Math.max(currentIdx - 1, 0);
-    const y = targets[nextIdx].offsetTop - content.offsetTop - 10;
-    go(Math.max(0, y));
+    go(getRelativeScrollTop(targets[nextIdx]));
   };
 
   const btnPrevCat = prevCatBtnId ? document.getElementById(prevCatBtnId) : null;
-  if (btnPrevCat) btnPrevCat.addEventListener('click', () => goToCategoria('prev'));
+  if (btnPrevCat) btnPrevCat.addEventListener('click', () => goToSubtema('prev'));
 
   const btnNextCat = nextCatBtnId ? document.getElementById(nextCatBtnId) : null;
-  if (btnNextCat) btnNextCat.addEventListener('click', () => goToCategoria('next'));
+  if (btnNextCat) btnNextCat.addEventListener('click', () => goToSubtema('next'));
 
   // Accesibilidad extra (teclas rápidas cuando el modal está visible)
   modal.addEventListener('keydown', (e) => {
@@ -27574,8 +29098,8 @@ function setupScrollButtonsForModal({
     if (e.altKey && e.key === 'ArrowUp') go(topPos());
     if (e.altKey && e.key === 'ArrowDown') go(bottomPos());
     if (e.altKey && (e.key === 'm' || e.key === 'M')) go(middlePos());
-    if (e.altKey && e.key === 'ArrowRight') goToCategoria('next');
-    if (e.altKey && e.key === 'ArrowLeft') goToCategoria('prev');
+    if (e.altKey && e.key === 'ArrowRight') goToSubtema('next');
+    if (e.altKey && e.key === 'ArrowLeft') goToSubtema('prev');
   });
 }
 
@@ -27839,6 +29363,28 @@ function limpiarHTML(html = "") {
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
 
+  // 0) Normalizar etiquetas visuales para exportación Word
+  tmp.querySelectorAll(".unidad-metadatos-etiquetas").forEach((group) => {
+    const wrapper = document.createElement("div");
+    wrapper.setAttribute("data-word-export-meta", "1");
+    Array.from(group.children).forEach((child) => {
+      const line = document.createElement("p");
+      line.innerHTML = child.innerHTML;
+      wrapper.appendChild(line);
+    });
+    group.replaceWith(wrapper);
+  });
+
+  tmp.querySelectorAll(".unidad-ic-modality-badge, .unidad-ic-asc-badge, .unidad-ic-resource-badge, .unidad-ic-pleca-badge").forEach((badge) => {
+    const raw = String(badge.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!raw) return;
+    const normalized = /^\[.*\]$/.test(raw) ? raw : `[${raw}]`;
+    const textNode = document.createTextNode(normalized);
+    badge.replaceWith(textNode);
+  });
+
   // 1) Quitar controles de interfaz que no sirven en el Word
   tmp.querySelectorAll(
     "button, input, textarea, select, .btn, .acciones-unidad, .acciones-subtema, .icono-control, .no-export"
@@ -27857,6 +29403,14 @@ function limpiarHTML(html = "") {
     el.removeAttribute("class");
   });
 
+  // 4.1) En Word, cada etiqueta curricular debe quedar en una línea independiente.
+  tmp.querySelectorAll("[data-word-export-meta]").forEach((group) => {
+    group.querySelectorAll("p").forEach((line) => {
+      line.style.margin = "0 0 6px 0";
+      line.style.display = "block";
+    });
+  });
+
   // 5) Quitar TODOS los estilos inline excepto el color
   tmp.querySelectorAll("*").forEach(el => {
     if (el.hasAttribute("style")) {
@@ -27873,6 +29427,10 @@ function limpiarHTML(html = "") {
         el.removeAttribute("style");
       }
     }
+  });
+
+  tmp.querySelectorAll("[data-word-export-meta]").forEach((group) => {
+    group.removeAttribute("data-word-export-meta");
   });
 
   return tmp.innerHTML;
@@ -27993,7 +29551,11 @@ document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
           }
           .subtema-completo {
             margin-bottom: 30px;
+            page-break-before: always;
             page-break-inside: avoid;
+          }
+          .subtema-completo:first-child {
+            page-break-before: auto;
           }
           hr {
             margin: 30px 0;
@@ -28040,7 +29602,18 @@ document.getElementById("btnDescargarMaestro")?.addEventListener("click", () => 
   const htmlCompleto = `
     <!DOCTYPE html>
     <html>
-      <head><meta charset="utf-8"></head>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          .col-maestro {
+            page-break-before: always;
+            page-break-inside: avoid;
+          }
+          .col-maestro:first-of-type {
+            page-break-before: auto;
+          }
+        </style>
+      </head>
       <body>${htmlMaestroLimpio}</body>
     </html>
   `;
@@ -28099,6 +29672,8 @@ document.getElementById("btnDescargarWordEditor")?.addEventListener("click", () 
           body { font-family: Arial, sans-serif; margin: 20px; }
           .activity { margin-bottom: 20px; }
           .activity-fichas { background: #f5f5f5; padding: 10px; margin-bottom: 15px; }
+          .subtema-completo { page-break-before: always; page-break-inside: avoid; }
+          .subtema-completo:first-child { page-break-before: auto; }
           h1, h2, h3, h4 { color: #2c3e50; }
           table { border-collapse: collapse; width: 100%; margin: 10px 0; }
           table, th, td { border: 1px solid #ddd; }
@@ -28145,7 +29720,18 @@ document.getElementById("btnDescargarMaestroEditor")?.addEventListener("click", 
   const htmlCompleto = `
     <!DOCTYPE html>
     <html>
-      <head><meta charset="utf-8"></head>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          .col-maestro {
+            page-break-before: always;
+            page-break-inside: avoid;
+          }
+          .col-maestro:first-of-type {
+            page-break-before: auto;
+          }
+        </style>
+      </head>
       <body>${htmlMaestroLimpio}</body>
     </html>
   `;

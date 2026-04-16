@@ -1,5 +1,7 @@
 const STYLE_ORDER = [
   "asc",
+  "trazos_y_letras",
+  "educativo",
   "competencial",
   "indagacion",
   "dinamico",
@@ -34,6 +36,49 @@ const STYLE_CATALOG = {
       "Diseña actividades guiadas, claras y con estructura editorial consistente.",
       "Cada actividad debe tener una ruta explícita de trabajo y una respuesta esperada verificable.",
       "Prioriza claridad, progresión, orden y usabilidad para material didáctico impreso o digital."
+    ]
+  },
+  trazos_y_letras: {
+    id: "trazos_y_letras",
+    label: "Trazos y letras",
+    shortLabel: "Trazos",
+    summary: "Trazos guiados, copia visible y lectura inicial.",
+    pillars: ["motricidad fina", "direccionalidad", "copia guiada", "lectura inicial"],
+    verbs: ["traza", "repasa", "copia", "lee", "completa"],
+    strengths: [
+      "Sirve para alfabetización inicial con modelo visible y ejercicios breves.",
+      "Organiza actividades tipo cuaderno de trazos sin sobrecargar con pasos internos."
+    ],
+    risks: [
+      "No conviene usarlo como formato dominante en subtemas que requieren análisis o producción extensa.",
+      "Pierde valor si se convierte en escritura libre sin apoyo visual claro."
+    ],
+    promptDirectives: [
+      "Diseña actividades de alfabetización inicial centradas en trazo de letras, sílabas, palabras o frases muy breves.",
+      "Cada actividad debe tener una instrucción directa, un modelo de escritura o renglón visible y una respuesta esperada en formato de copia o trazo.",
+      "Evita subinstrucciones largas, listas internas y explicaciones abstractas; debe sentirse como cuaderno de trazos."
+    ]
+  },
+  educativo: {
+    id: "educativo",
+    label: "Estilo Educativo",
+    shortLabel: "Educativo",
+    summary: "Comprensión guiada, correspondencia imagen-texto y lectura situada.",
+    pillars: ["lectura comprensiva", "relación visual", "selección precisa", "evidencia textual"],
+    verbs: ["encuentra", "relaciona", "selecciona", "compara", "justifica"],
+    strengths: [
+      "Convierte la comprensión lectora en tareas observables y editoriales.",
+      "Sirve para ejercicios de imagen-oración, nombres propios y correspondencia exacta.",
+      "Favorece lectura con evidencia concreta y no con respuestas genéricas."
+    ],
+    risks: [
+      "Puede volverse mecánico si no se conecta con una secuencia o propósito claro.",
+      "Necesita estímulos visuales o textuales concretos para evitar ambigüedad."
+    ],
+    promptDirectives: [
+      "Diseña actividades de comprensión lectora con correspondencia imagen-texto, selección de oraciones correctas, rastreo de nombres propios o relación entre personajes y acciones.",
+      "Haz que cada actividad dependa de una evidencia visible o textual concreta y no de preguntas vacías.",
+      "Evita formatos genéricos; las tareas deben parecer ejercicios editoriales de lectura comprensiva, con precisión y claridad."
     ]
   },
   competencial: {
@@ -281,7 +326,7 @@ const CATEGORY_STYLE_DEFAULTS = {
 };
 
 const CATEGORY_STYLE_SUGGESTIONS = {
-  "Lenguaje y comunicación": ["asc", "competencial", "hibrido"],
+  "Lenguaje y comunicación": ["asc", "trazos_y_letras", "educativo", "competencial", "hibrido"],
   "Ciencias experimentales": ["indagacion", "competencial", "hibrido", "proyecto"],
   "Ciencias sociales": ["competencial", "indagacion", "asc", "proyecto"],
   "Formación socioemocional": ["sel", "competencial", "asc"],
@@ -367,11 +412,23 @@ function buildUnidadCombinedStylePromptBlock(styleIds = []) {
   ].filter(Boolean).join("\n\n");
 }
 
-function buildUnidadStyleFormatContract(styleIds = []) {
+function _isPrimerGradoValue(value = "") {
+  const safe = String(value || "").trim().toLowerCase();
+  return safe === "primero" || /^1\b/.test(safe) || /\bprimer\b/.test(safe);
+}
+
+function buildUnidadStyleFormatContract(styleIds = [], options = {}) {
   const active = normalizeStyleIds(styleIds);
   const dominantId = getUnidadDominantStyleId(active);
   const dominant = STYLE_CATALOG[dominantId];
   const hasAscMix = active.includes("asc") && active.length > 1;
+  const isPrimerGrado = _isPrimerGradoValue(options?.grado || options?.gradoTexto || options?.grade || "");
+
+  const firstGradeRules = isPrimerGrado ? [
+    "PRIMERO: escribe instrucciones muy cortas, de una sola idea.",
+    "PRIMERO: cada subinstrucción debe ser breve y directa.",
+    "PRIMERO: evita explicaciones largas, dobles oraciones y texto sobrante."
+  ] : [];
 
   const commonIntro = [
     `CONTRATO DE FORMATO OBLIGATORIO: usa ${dominant.label} como estructura rectora.`,
@@ -387,6 +444,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
   const contracts = {
     asc: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato ASC obligatorio: instrucción principal + subinstrucciones + respuesta esperada.",
       "REGLA ASC CRÍTICA: NO sustituyas este formato por bloques tipo challenge, inquiry-block, quiz-block, diagnostic-block, assessment-block, project-block, sel-block, structured-block, hybrid-block o ai-block.",
       "REGLA ASC CRÍTICA: cada actividad debe conservar párrafo inicial numerado + lista <ol type=\"a\" class=\"steps\"> + bloque final <div class=\"answer\">.",
@@ -407,8 +465,43 @@ function buildUnidadStyleFormatContract(styleIds = []) {
       "No cambies 'Respuesta:' por 'Respuesta esperada', 'Clave', 'Criterio' ni otras variantes cuando el estilo rector sea ASC.",
       "Si el usuario seleccionó solo ASC, TODO el bloque debe quedar en formato ASC sin excepciones."
     ],
+    trazos_y_letras: [
+      ...commonIntro,
+      ...firstGradeRules,
+      "Formato Trazos y letras obligatorio: instrucción directa + modelo de escritura o espacio de trazo + respuesta esperada como muestra visual.",
+      "NO uses listas <ol>, <ul> ni subinstrucciones internas; cada actividad debe ser un bloque simple y limpio.",
+      "El contenido debe sentirse como cuaderno de trazos o lectura inicial guiada.",
+      "Usa esta plantilla exacta como referencia estructural:",
+      `<div class="activity">
+  <p>1. <strong>[Instrucción breve de trazo, copia o lectura inicial].</strong> [IC T. IND]</p>
+  <div class="trace-model">[Modelo, renglón, sílaba, palabra o frase para copiar/trazar]</div>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Respuesta: [modelo exacto que el alumno debe trazar o copiar]</span>
+  </div>
+</div>`,
+      "Evita consignas abstractas, análisis largos o desarrollo abierto.",
+      "Prioriza direccionalidad, repetición útil, legibilidad y frases muy cortas cuando corresponda."
+    ],
+    educativo: [
+      ...commonIntro,
+      ...firstGradeRules,
+      "Formato Educativo obligatorio: comprensión guiada + evidencia visible o textual + respuesta comprobable.",
+      "Diseña ejercicios tipo lectura editorial: relacionar oración e imagen, elegir la oración correcta, identificar nombres propios, marcar correspondencias o completar apoyos breves.",
+      "No uses preguntas genéricas ni bloques largos de explicación; cada actividad debe sentirse como un ejercicio de comprensión concreta.",
+      "Usa esta plantilla como guía:",
+      `<div class="activity">
+  <p>1. <strong>[Consigna de comprensión guiada].</strong> [IC T. IND]</p>
+  <div class="educative-block"><strong>Estímulo:</strong> [imagen, texto breve, lista de oraciones o nombres]</div>
+  <div class="educative-block"><strong>Acción:</strong> [relaciona, selecciona, marca, compara o completa]</div>
+  <div class="answer">
+    <span style="color:mediumvioletred;">Respuesta esperada (directa): [correspondencia o elección correcta]</span>
+  </div>
+</div>`,
+      "Asegura que la consigna dependa de una evidencia observable y que la respuesta se pueda verificar sin ambigüedad."
+    ],
     competencial: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Competencial obligatorio: situación o reto + decisión o resolución + evidencia + criterio de logro.",
       "NO uses el formato ASC de subinstrucciones a), b), c), d) salvo que sea indispensable en una sola actividad.",
       "Usa esta plantilla como guía:",
@@ -427,6 +520,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     indagacion: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Indagación obligatorio: pregunta guía + hipótesis + evidencias + conclusión.",
       "NO uses el formato ASC de instrucción principal con lista de subinstrucciones tradicionales.",
       "Usa esta plantilla como guía:",
@@ -442,6 +536,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     dinamico: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Dinámico obligatorio: reto breve + secuencia rápida de ejercicios variados + comprobación ágil.",
       "NO uses bloques largos de explicación ni el molde ASC tradicional.",
       "Usa esta plantilla como guía:",
@@ -460,6 +555,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     quiz: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Quiz - Examen obligatorio: batería de reactivos variados (opción múltiple, abierta, relación, completar).",
       "Usa estos ejemplos de estructura dentro de <div class=\"activity\">:",
       `<!-- Ejemplo Opción Múltiple -->
@@ -498,6 +594,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     diagnostico: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Diagnóstico obligatorio: reactivo de entrada + respuesta diagnóstica + lectura docente del punto de partida.",
       "Debe parecer evaluación diagnóstica o examen de conocimientos previos, NO actividad abierta genérica ni formato ASC tradicional.",
       "Cada actividad debe medir qué trae el alumno antes de enseñar el contenido, no verificar dominio final.",
@@ -515,6 +612,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     evaluacion: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Evaluación obligatorio: reactivo de logro + demanda cognitiva + criterio claro de corrección.",
       "NO uses el molde ASC tradicional ni lo conviertas en práctica abierta.",
       "Usa esta plantilla como guía:",
@@ -530,6 +628,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     proyecto: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Proyecto obligatorio: reto + producto o entregable + acciones de fase + evidencia.",
       "NO uses el formato ASC con subinstrucciones escolares estándar.",
       "Usa esta plantilla como guía:",
@@ -545,6 +644,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     sel: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato SEL obligatorio: situación humana + reflexión personal + diálogo o acuerdo + cierre reflexivo.",
       "NO uses el formato ASC con respuesta única cerrada como si fuera ejercicio de libro.",
       "Usa esta plantilla como guía:",
@@ -560,6 +660,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     estructurado: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Estructurado obligatorio: consigna + práctica guiada + práctica autónoma + verificación.",
       "Puedes usar pasos, pero NO copies el patrón ASC literal de subinstrucciones y respuesta editorial.",
       "Usa esta plantilla como guía:",
@@ -575,6 +676,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     hibrido: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato Híbrido obligatorio: consigna integradora + fuentes o soportes + síntesis entre recursos.",
       "NO uses el formato ASC tradicional.",
       "Usa esta plantilla como guía:",
@@ -590,6 +692,7 @@ function buildUnidadStyleFormatContract(styleIds = []) {
     ],
     ia_critica: [
       ...commonIntro,
+      ...firstGradeRules,
       "Formato IA Crítica obligatorio: respuesta inicial de IA + verificación humana + mejora + juicio final.",
       "NO uses el formato ASC tradicional.",
       "Usa esta plantilla como guía:",
@@ -652,6 +755,7 @@ function buildUnidadStyleExecutionContract(styleIds = [], options = {}) {
   const hasAscMix = active.includes("asc") && active.length > 1;
   const relatedReading = options.relatedReading === true;
   const withResources = options.withResources === true;
+  const isPrimerGrado = _isPrimerGradoValue(options?.grado || options?.gradoTexto || options?.grade || "");
   const lines = [
     `CONTRATO DE ESTILO: ${active.map((id) => STYLE_CATALOG[id].label).join(" + ")}.`,
     `FORMATO RECTOR INNEGOCIABLE: ${STYLE_CATALOG[dominantId].label}.`,
@@ -677,8 +781,20 @@ function buildUnidadStyleExecutionContract(styleIds = [], options = {}) {
     active.includes("quiz")
       ? "Asegura reactivos cortos, opciones claras y retroalimentación rápida."
       : "",
+    isPrimerGrado
+      ? "PRIMERO: usa frases muy cortas y una sola idea por instrucción."
+      : "",
+    isPrimerGrado
+      ? "PRIMERO: reduce al mínimo las subinstrucciones y evita repeticiones."
+      : "",
     active.includes("asc") && !hasAscMix
       ? "Si ASC es el formato rector, conserva exactamente la secuencia: instrucción principal + subinstrucciones + bloque final con etiqueta 'Respuesta:'."
+      : "",
+    active.includes("trazos_y_letras")
+      ? "Asegura instrucción directa, modelo visible de escritura y respuesta esperada como trazo, copia o frase breve, sin subinstrucciones."
+      : "",
+    active.includes("educativo")
+      ? "Asegura comprensión guiada, correspondencia imagen-texto, nombres propios o selección de la oración correcta con evidencia verificable."
       : "",
     hasAscMix
       ? "Si ASC está combinado con otros estilos, úsalo para reforzar claridad editorial, secuenciación visible y respuesta verificable, pero permite mezcla estructural real."
