@@ -6,7 +6,7 @@
   const LAUNCHER_ID = 'updateBannerLauncher';
   const DEFAULT_TITLE = 'Actualización disponible de Charly Brown';
   const DEFAULT_MESSAGE = 'Hay cambios nuevos en la aplicación. Revisa el resumen y recarga cuando estés listo.';
-  const POST_CLEAR_REDIRECT_PATH = '/index.html';
+  const POST_CLEAR_REDIRECT_PATH = '/';
   const WINDOW_NAME_PREFIX = '__cbAppliedVersion__:';
   const HARD_RESET_PARAM = 'cbHardReset';
   const HARD_RESET_DONE_PARAM = 'cbHardResetDone';
