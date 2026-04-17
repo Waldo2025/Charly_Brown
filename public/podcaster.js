@@ -18,6 +18,7 @@ import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-confi
 
 const STORAGE_KEY_BASE = "cb_podcaster_sessions_v2";
 const LEGACY_STORAGE_KEY = "cb_podcaster_sessions_v1";
+const COMPOSER_GENERATION_MODE_KEY = "cb_podcaster_composer_mode_v1";
 const PANEL_MUSIC_STORAGE_KEY_BASE = "cb_podcaster_panel_music_v1";
 const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
 const PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY = "cb_podcast_studio_inspector_collapsed_v1";
@@ -42,6 +43,10 @@ const DISFLUENCY_LEVEL_MAX = Object.freeze({
   errorLevel: 300,
   stutterLevel: 100
 });
+const VIDEO_SCENE_MAX_SEC = 8;
+const VIDEO_SCENE_IMAGE_PROMPT_COUNT = 3;
+const VIDEO_DIALOGUE_MAX_SEC = 6;
+const VIDEO_SCENE_GAP_SEC = 2;
 const SHORT_SCENE_MIN_SEC = 6;
 const SHORT_SCENE_MAX_SEC = 7;
 const PANEL_CONNECT_SCENE_MAX_SEC = 8;
@@ -159,6 +164,9 @@ const els = {
   liveStatusText: document.getElementById("liveStatusText"),
   addRowBtn: document.getElementById("addRowBtn"),
   duplicateRowBtn: document.getElementById("duplicateRowBtn"),
+  openVideoEditorBtn: document.getElementById("openVideoEditorBtn"),
+  scriptPanelTitle: document.getElementById("scriptPanelTitle"),
+  scriptPanelSubtitle: document.getElementById("scriptPanelSubtitle"),
   demoPromptBtn: document.getElementById("demoPromptBtn"),
   sessionList: document.getElementById("sessionList"),
   newSessionBtn: document.getElementById("newSessionBtn"),
@@ -228,6 +236,14 @@ const els = {
   podcastPlaybackStatus: document.getElementById("podcastPlaybackStatus"),
   togglePodcastVideoBtn: document.getElementById("togglePodcastVideoBtn"),
   podcastVideoModal: document.getElementById("podcastVideoModal"),
+  creativeVideoModal: document.getElementById("creativeVideoModal"),
+  creativeVideoShell: document.getElementById("creativeVideoShell"),
+  closeCreativeVideoBtn: document.getElementById("closeCreativeVideoBtn"),
+  saveSessionCreativeBtn: document.getElementById("saveSessionCreativeBtn"),
+  creativeGlobalVoiceName: document.getElementById("creativeGlobalVoiceName"),
+  creativeVideoTimelineList: document.getElementById("creativeVideoTimelineList"),
+  creativeVideoInspectorScene: document.getElementById("creativeVideoInspectorScene"),
+  creativeVideoInspectorEditor: document.getElementById("creativeVideoInspectorEditor"),
   podcastVideoLoader: document.getElementById("podcastVideoLoader"),
   closePodcastVideoBtn: document.getElementById("closePodcastVideoBtn"),
   podcastVideoShell: document.getElementById("podcastVideoShell"),
@@ -364,7 +380,13 @@ let musicConfigOpen = false;
 let audioTrackMixOpen = false;
 let scriptSetupOpen = false;
 let pendingScriptPrompt = "";
-let composerGenerationMode = "script";
+let composerGenerationMode = (() => {
+  try {
+    return window.localStorage.getItem(COMPOSER_GENERATION_MODE_KEY) === "video" ? "video" : "script";
+  } catch (_) {
+    return "script";
+  }
+})();
 let rowDisfluencyConfigOpenId = null;
 let dialogueVideoDirectiveRequest = null;
 let podcastVideoState = {
@@ -394,6 +416,10 @@ let podcastVideoState = {
   timelineLastInteractedRowId: "",
   timelineJustDraggedUntil: 0,
   zoomed: false
+};
+let creativeVideoState = {
+  enabled: false,
+  activeRowId: ""
 };
 let podcastLipSyncState = {
   rafId: 0,
@@ -1993,6 +2019,8 @@ function createDefaultRows() {
       mediaCue: "Intro musical",
       text: "Bienvenidos a nuestro podcast. Hoy abrimos una conversación útil y accionable.",
       notes: "Abrir con energía tranquila.",
+      scenePrompt: "",
+      imagePrompts: [],
       disfluencyConfig: { ...DEFAULT_DISFLUENCY_CONFIG }
     },
     {
@@ -2003,6 +2031,8 @@ function createDefaultRows() {
       mediaCue: "Sin media",
       text: "Vamos a tomar una idea y convertirla en un episodio claro, dinámico y listo para producción.",
       notes: "Mantener ritmo conversacional.",
+      scenePrompt: "",
+      imagePrompts: [],
       disfluencyConfig: { ...DEFAULT_DISFLUENCY_CONFIG }
     }
   ];
@@ -2331,6 +2361,278 @@ function normalizeReferenceImageMap(raw = {}) {
   return next;
 }
 
+function normalizeVideoImagePrompts(raw = []) {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw || "")
+      .split(/\n+/)
+      .map((item) => String(item || "").trim());
+  const seen = new Set();
+  return values
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, VIDEO_SCENE_IMAGE_PROMPT_COUNT);
+}
+
+function normalizeVideoContentType(value = "") {
+  const clean = String(value || "").trim().toLowerCase();
+  if (clean === "educational" || clean === "video-educativo" || clean === "video_educativo") return "educational";
+  if (clean === "videopodcast" || clean === "video-podcast" || clean === "video_podcast") return "videopodcast";
+  return "none";
+}
+
+function resolveVideoContentType(session = null, options = {}) {
+  const explicit = normalizeVideoContentType(
+    options?.videoContentType
+    || session?.script?.videoContentType
+    || session?.videoContentType
+  );
+  if (explicit !== "none") return explicit;
+  if (session?.script?.videoMode === true || session?.videoMode === true) return "educational";
+  if (options?.assumeVideoPodcast === true) return "videopodcast";
+  return "none";
+}
+
+function withSessionVideoContentType(session = {}, videoContentType = "none") {
+  const normalizedType = normalizeVideoContentType(videoContentType);
+  const persistedType = normalizedType === "none" ? null : normalizedType;
+  return {
+    ...session,
+    videoContentType: persistedType,
+    script: {
+      ...(session?.script || {}),
+      videoContentType: persistedType,
+      videoMode: normalizedType === "educational"
+    }
+  };
+}
+
+function isEducationalVideoMode(session = null) {
+  return resolveVideoContentType(session) === "educational";
+}
+
+function isVideoPodcastMode(session = null) {
+  return resolveVideoContentType(session) === "videopodcast";
+}
+
+function getPanelModeCopy(session = null) {
+  const videoContentType = resolveVideoContentType(session);
+  const videoMode = videoContentType === "educational" || composerGenerationMode === "video";
+  return {
+    videoContentType,
+    videoMode,
+    shellTitle: videoMode ? "Snoopy Video Creator Creativo" : "Video del podcast",
+    shellAriaLabel: videoMode ? "Panel creativo de video" : "Video compuesto del podcast",
+    loaderAriaLabel: videoMode ? "Abriendo Snoopy Video Creator Creativo" : "Abriendo Snoopy Podcast Creator",
+    loaderBrand: videoMode ? "Snoopy Video Creator Creativo" : "Snoopy Podcast Creator",
+    loaderSubtitle: videoMode ? "Preparando panel creativo de video..." : "Preparando el estudio de video...",
+    brandTitle: videoMode ? "Snoopy Video Creator Creativo" : "Snoopy Podcast Creator",
+    inspectorTitle: videoMode ? "Inspector de video" : "Inspector",
+    inspectorSceneLabel: videoMode ? "Secuencia activa: --" : "Escena activa: --",
+    inspectorEmpty: videoMode
+      ? "Selecciona una secuencia para editar su dirección visual y apoyos pedagógicos."
+      : "Selecciona una escena en el timeline para editar su diálogo y parámetros.",
+    inspectorSectionTitle: videoMode ? "Escena seleccionada" : "Escena seleccionada",
+    footerNote: videoMode
+      ? "Audio principal del montaje: Gemini Live por secuencia."
+      : "Audio principal del montaje: Gemini Live por escena.",
+    rowScenarioLabel: videoMode ? "Escenario educativo" : "Escenario",
+    rowScenarioPlaceholder: videoMode
+      ? "Ej: aula digital, laboratorio visual, infografía animada"
+      : "Ej: Cabina premium, loft editorial, radio nocturna",
+    scenePromptLabel: videoMode ? "Concepto visual" : "Escena visual",
+    scenePromptPlaceholder: videoMode
+      ? "Describe plano, cámara, recursos pedagógicos, gráficos y atmósfera"
+      : "Describe cámara, encuadre, iluminación, acción y atmósfera",
+    videoDirectiveLabel: videoMode ? "Dirección pedagógica" : "Dirección manual",
+    videoDirectivePlaceholder: videoMode
+      ? "Override manual para reforzar intención didáctica, ritmo visual o composición"
+      : "Override manual para la escena de video",
+    imagePromptsLabel: videoMode ? "Prompts visuales" : "Prompts de imagen",
+    imagePromptsPlaceholder: videoMode
+      ? "Una línea por referencia visual, gráfico o plano de apoyo"
+      : "Una línea por imagen o variación visual",
+    emptyRowEditor: videoMode
+      ? "Selecciona una secuencia en el timeline para editar sus recursos visuales."
+      : "Selecciona una escena en el timeline para editar su diálogo y parámetros."
+  };
+}
+
+function isCreativeVideoMode(session = null) {
+  return isEducationalVideoMode(session);
+}
+
+function normalizeCreativeVideoConfig(raw = {}) {
+  const formatRaw = String(raw?.voiceMimeType || raw?.voiceFormat || "").trim().toLowerCase();
+  const voiceMimeType = ["audio/ogg", "audio/wav", "audio/mpeg"].includes(formatRaw)
+    ? formatRaw
+    : "audio/ogg";
+  return {
+    enabled: raw?.enabled === true,
+    globalVoiceName: normalizeLiveVoiceName(String(raw?.globalVoiceName || "").trim(), "Kore"),
+    voiceMimeType
+  };
+}
+
+function getCreativeVideoConfig(session = null) {
+  return normalizeCreativeVideoConfig((session || getActiveSession())?.creativeVideoConfig || {});
+}
+
+function normalizeCreativeRow(row = {}, index = 0) {
+  const sanitizeCreativeText = (value = "") => rewriteScenarioPromptForEducationalVideo(
+    String(value || "")
+      .replace(/\bbienvenid[oa]s?\s+a\s+nuestro\s+podcast\b/gi, "Bienvenidos a este video educativo")
+      .replace(/\bguion\s+de\s+podcast\b/gi, "guion técnico de video")
+      .replace(/\blocutor(?:es)?\b/gi, "narración")
+      .replace(/\bhost(?:s)?\b/gi, "narración")
+      .replace(/\bnarrador\s*\((?:[^)]*)\)/gi, "Narrador")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+  const durationSec = Math.max(VIDEO_SCENE_MAX_SEC, Math.min(180, Number(row?.durationSec) || VIDEO_SCENE_MAX_SEC));
+  const voiceOverText = sanitizeCreativeText(
+    row?.voiceOverText
+    || row?.text
+    || ""
+  );
+  const sceneDescription = sanitizeCreativeText(
+    row?.sceneDescription
+    || row?.scenePrompt
+    || ""
+  );
+  const rowTransition = sanitizeCreativeText(row?.transition || "");
+  const rowVisualNotes = sanitizeCreativeText(row?.visualNotes || row?.visual || "");
+  const rowNotes = sanitizeCreativeText(row?.notes || "");
+  const transition = rowTransition
+    || (looksLikeTransitionOnly(rowNotes) ? rowNotes : "")
+    || (looksLikeTransitionOnly(rowVisualNotes) ? rowVisualNotes : "");
+  const visualNotes = rowVisualNotes || (looksLikeTransitionOnly(rowNotes) ? "" : rowNotes);
+  const onScreenText = sanitizeCreativeText(
+    buildOnScreenText(row?.onScreenText || "", {
+      voiceOver: voiceOverText,
+      sceneDescription,
+      visual: visualNotes || row?.visual || ""
+    })
+  );
+  const fallbackScenePrompt = sceneDescription || `Escena didáctica ${index + 1}: recurso visual claro en formato 16:9 para reforzar la explicación.`;
+  const fallbackVoiceOver = voiceOverText || `Explica la idea clave de la secuencia ${index + 1} con lenguaje claro y directo.`;
+  const scenePrompt = sanitizeCreativeText(row?.scenePrompt || fallbackScenePrompt);
+  const directive = sanitizeCreativeText(
+    row?.videoDirective
+    || transition
+    || `Objetivo pedagógico de la secuencia ${index + 1}: enseñar una idea concreta con apoyo visual claro.`
+  );
+  const imagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || [])
+    .map((prompt) => sanitizeCreativeText(prompt))
+    .filter(Boolean);
+  return {
+    ...row,
+    id: String(row?.id || makeId("row")).trim() || makeId("row"),
+    speaker: "Narrador",
+    expression: "Neutral",
+    mediaCue: MEDIA_CUES.includes(String(row?.mediaCue || "")) ? String(row.mediaCue) : "Sin media",
+    durationSec,
+    voiceOverText: fallbackVoiceOver,
+    sceneDescription: sceneDescription || fallbackScenePrompt,
+    onScreenText: onScreenText || summarizeOnScreenTextFromVoiceOver(fallbackVoiceOver),
+    transition: transition || "Sin transición específica.",
+    visualNotes,
+    text: fallbackVoiceOver,
+    notes: visualNotes || transition,
+    scenePrompt,
+    videoDirective: directive,
+    imagePrompts: imagePrompts.length ? imagePrompts : [scenePrompt]
+  };
+}
+
+function resolveScenarioForVideoMode(session = null, host = "", fallback = "") {
+  const base = String(
+    fallback
+    || getSpeakerScenarioMap(session)?.[host]
+    || DEFAULT_SPEAKER_SCENARIO_MAP[host]
+    || "Cabina premium de podcast"
+  ).replace(/\s+/g, " ").trim() || "Cabina premium de podcast";
+  return isEducationalVideoMode(session)
+    ? rewriteScenarioPromptForEducationalVideo(base)
+    : base;
+}
+
+function normalizeVideoScenePrompt(value = "", row = null, session = null) {
+  const prompt = String(value || "").replace(/\s+/g, " ").trim();
+  if (prompt) return prompt.slice(0, 1200);
+  const speakerLabel = String(row?.speaker || "").trim() || "Host A";
+  const speakerName = resolveSpeakerDisplayName(speakerLabel, session);
+  const expression = String(row?.expression || "Neutral").trim() || "Neutral";
+  const scenario = resolveScenarioForVideoMode(session, speakerLabel);
+  const text = String(row?.text || "").replace(/\s+/g, " ").trim();
+  const notes = String(row?.notes || "").replace(/\s+/g, " ").trim();
+  const directive = String(row?.videoDirective || "").replace(/\s+/g, " ").trim();
+  return [
+    `Toma de video educativo de ${speakerName} (${speakerLabel}).`,
+    `Escenario: ${scenario || "entorno visual educativo premium"}.`,
+    `Expresión: ${expression}.`,
+    text ? `Diálogo: ${text}` : "",
+    notes ? `Notas visuales: ${notes}` : "",
+    directive ? `Prioridad manual: ${directive}` : "",
+    "Plano cinematográfico limpio, coherente con un video educativo, iluminación controlada y composición horizontal 16:9."
+  ].filter(Boolean).join(" ").trim().slice(0, 1200);
+}
+
+function buildVideoSceneImagePrompts(row = null, session = null) {
+  const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
+  const speakerLabel = String(row?.speaker || "").trim() || "Host A";
+  const speakerName = resolveSpeakerDisplayName(speakerLabel, session);
+  const expression = String(row?.expression || "Neutral").trim() || "Neutral";
+  const scenario = resolveScenarioForVideoMode(session, speakerLabel);
+  const text = String(row?.text || "").replace(/\s+/g, " ").trim();
+  const directive = String(row?.videoDirective || "").replace(/\s+/g, " ").trim();
+  const base = scenePrompt || [
+    `Video educativo de ${speakerName} en ${scenario || "entorno visual educativo premium"}.`,
+    `Expresión ${expression}.`,
+    text ? `El diálogo debe reflejar: ${text}` : "",
+    directive ? `Cumple también: ${directive}` : ""
+  ].filter(Boolean).join(" ").trim();
+  const prompts = [
+    `${base} Imagen principal cinematográfica horizontal 16:9, encuadre medio, iluminación editorial, look premium, sin texto en pantalla.`,
+    `${base} Variante en plano más cerrado, énfasis en rostro, manos y recursos visuales de apoyo, continuidad total de la escena.`,
+    `${base} Toma de apoyo o recurso visual, profundidad de campo suave, atmósfera didáctica, composición limpia y lista para edición.`
+  ];
+  return normalizeVideoImagePrompts(prompts);
+}
+
+function hasVideoSceneMetadata(row = {}) {
+  return Boolean(
+    String(row?.scenePrompt || "").trim()
+    || normalizeVideoImagePrompts(row?.imagePrompts || []).length
+  );
+}
+
+function enrichVideoSceneRow(row = {}, session = null) {
+  const normalizedRow = { ...row };
+  normalizedRow.scenePrompt = normalizeVideoScenePrompt(normalizedRow.scenePrompt || "", normalizedRow, session);
+  normalizedRow.imagePrompts = normalizeVideoImagePrompts(
+    normalizedRow.imagePrompts?.length ? normalizedRow.imagePrompts : buildVideoSceneImagePrompts(normalizedRow, session)
+  );
+  if (!normalizedRow.videoDirective && normalizedRow.scenePrompt) {
+    normalizedRow.videoDirective = normalizedRow.scenePrompt;
+  }
+  return normalizedRow;
+}
+
+function enrichVideoScriptPayload(script = {}, session = null) {
+  const rows = Array.isArray(script?.rows) ? script.rows : [];
+  return {
+    ...script,
+    rows: rows.map((row) => enrichVideoSceneRow(row, session))
+  };
+}
+
 function getSpeakerReferenceImageMap(session = null) {
   return normalizeReferenceImageMap(session?.speakerReferenceImageMap || {});
 }
@@ -2391,7 +2693,10 @@ function findReusablePortraitForSpeaker(session = null, speaker = "", options = 
   const key = normalizeSpeakerLabel(speaker, "");
   if (!activeSession || !key) return null;
   const desiredScenario = String(
-    options.scenarioPrompt || resolveSpeakerStudioScenarioPrompt(activeSession, key, { expression: options.expression })
+    options.scenarioPrompt || resolveSpeakerStudioScenarioPrompt(activeSession, key, {
+      expression: options.expression,
+      contentMode: isEducationalVideoMode(activeSession) ? "educational" : "podcast"
+    })
   ).replace(/\s+/g, " ").trim();
   const desiredScenarioAsset = options.scenarioAsset && typeof options.scenarioAsset === "object" ?
     options.scenarioAsset :
@@ -2516,6 +2821,8 @@ function normalizeDialogueVideoMap(raw = {}) {
       variant: String(clip.variant || "").trim(),
       promptVersion: String(clip.promptVersion || "podcaster_veo_v1").trim() || "podcaster_veo_v1",
       videoDirective: String(clip.videoDirective || "").replace(/\s+/g, " ").trim(),
+      scenePrompt: String(clip.scenePrompt || "").replace(/\s+/g, " ").trim(),
+      imagePrompts: normalizeVideoImagePrompts(clip.imagePrompts || []),
       durationSec: Math.max(0, Number(clip.durationSec) || 0),
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       segments,
@@ -2708,14 +3015,20 @@ function getRowSourceDurationMs(row = null, session = null) {
   const videoMs = Math.max(0, Number(videoClip?.durationSec) || 0) * 1000;
   const audioMs = Math.max(0, Number(audioClip?.durationSec) || 0) * 1000;
   const rowMs = Math.max(0, Number(row?.durationSec) || 0) * 1000;
-  const candidate = audioMs > 0
-    ? audioMs
-    : rowMs > 0
-      ? rowMs
-      : videoMs > 0
-        ? videoMs
-        : 800;
-  return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(candidate || 8000));
+  const isVideoEducational = isEducationalVideoMode(session);
+  const candidate = isVideoEducational
+    ? (videoMs > 0 ? videoMs : (rowMs > 0 ? rowMs : (audioMs > 0 ? audioMs : VIDEO_SCENE_MAX_SEC * 1000)))
+    : (audioMs > 0
+      ? audioMs
+      : rowMs > 0
+        ? rowMs
+        : videoMs > 0
+          ? videoMs
+          : 800);
+  const bounded = isVideoEducational
+    ? Math.min(VIDEO_SCENE_MAX_SEC * 1000, Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, candidate || (VIDEO_SCENE_MAX_SEC * 1000)))
+    : Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, candidate || 8000);
+  return Math.round(bounded);
 }
 
 function buildDefaultTimelineClipsByRowId(session = null) {
@@ -2881,48 +3194,70 @@ function getReorderableTimelineTrackIds(session = null) {
     .filter((trackId) => Object.values(clips).some((clip) => String(clip?.trackId || "").trim() === trackId));
 }
 
+function canReorderTimelineLayout(session = null) {
+  const activeSession = session || getActiveSession();
+  const rowCount = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows.length : 0;
+  if (rowCount < 2) return false;
+  if (isEducationalVideoMode(activeSession)) return true;
+  return getReorderableTimelineTrackIds(activeSession).length >= 2;
+}
+
 function reorderTimelineClipsByTracks() {
   const session = getActiveSession();
   if (!session) return false;
   const trackIds = getReorderableTimelineTrackIds(session);
-  if (trackIds.length < 2) return false;
+  if (!canReorderTimelineLayout(session)) return false;
   const rows = session?.script?.rows || [];
   const rowById = new Map(rows.map((row) => [String(row?.id || "").trim(), row]));
   const rowIndexById = new Map(rows.map((row, index) => [String(row?.id || "").trim(), index]));
+  const educationalVideoMode = isEducationalVideoMode(session);
   upsertPodcastVideoConfig((cfg) => {
     const clips = ensureTimelineClipsByRowId(session, { persist: false });
     const nextClips = { ...clips };
-    const perTrack = trackIds.map((trackId) => (
-      Object.values(clips)
-        .filter((clip) => String(clip?.trackId || "").trim() === trackId)
-        .sort((a, b) => (
-          Number(a.startMs || 0) - Number(b.startMs || 0)
-          || Number(rowIndexById.get(String(a?.rowId || "").trim()) || 0) - Number(rowIndexById.get(String(b?.rowId || "").trim()) || 0)
-        ))
-    ));
-    const ordered = [];
-    let pending = true;
-    for (let round = 0; pending; round += 1) {
-      pending = false;
-      perTrack.forEach((items) => {
-        const clip = items[round];
-        if (!clip) return;
-        pending = true;
-        ordered.push(clip);
-      });
-    }
+    const ordered = educationalVideoMode
+      ? rows
+        .map((row) => clips[String(row?.id || "").trim()])
+        .filter(Boolean)
+      : (() => {
+        const perTrack = trackIds.map((trackId) => (
+          Object.values(clips)
+            .filter((clip) => String(clip?.trackId || "").trim() === trackId)
+            .sort((a, b) => (
+              Number(a.startMs || 0) - Number(b.startMs || 0)
+              || Number(rowIndexById.get(String(a?.rowId || "").trim()) || 0) - Number(rowIndexById.get(String(b?.rowId || "").trim()) || 0)
+            ))
+        ));
+        const queue = [];
+        let pending = true;
+        for (let round = 0; pending; round += 1) {
+          pending = false;
+          perTrack.forEach((items) => {
+            const clip = items[round];
+            if (!clip) return;
+            pending = true;
+            queue.push(clip);
+          });
+        }
+        return queue;
+      })();
+    const primaryTrackId = String(trackIds[0] || "").trim() || "speaker:unknown";
     let cursorMs = 0;
     ordered.forEach((clip, index) => {
       const rowId = String(clip?.rowId || "").trim();
       if (!rowId) return;
       const row = rowById.get(rowId) || null;
-      const sourceDurationMs = getRowSourceDurationMs(row, session);
+      const clipEffectiveDurationMs = getTimelineClipEffectiveDurationMs(clip);
+      const sourceDurationMs = Math.max(
+        clipEffectiveDurationMs,
+        getRowSourceDurationMs(row, session)
+      );
       const normalized = normalizeTimelineClipItem({
         ...clip,
         sourceDurationMs,
         trimInMs: 0,
-        trimOutMs: sourceDurationMs,
+        trimOutMs: clipEffectiveDurationMs,
         startMs: snapTimelineMs(cursorMs),
+        trackId: educationalVideoMode ? primaryTrackId : String(clip?.trackId || "").trim(),
         zIndex: Math.max(1, index + 1)
       }, rowId);
       if (!normalized) return;
@@ -2946,7 +3281,12 @@ function reorderTimelineClipsByTracks() {
   if (firstOrderedRowId) {
     selectTimelineSceneRow(firstOrderedRowId, { syncStage: true });
   }
-  setGenerationStatus(`Tracks reordenados: ${trackIds.length} pistas intercaladas`, "is-live");
+  setGenerationStatus(
+    educationalVideoMode
+      ? "Timeline reordenado: secuencias acomodadas escena tras escena, sin encimes."
+      : `Tracks reordenados: ${trackIds.length} pistas intercaladas`,
+    "is-live"
+  );
   return true;
 }
 
@@ -3261,9 +3601,11 @@ function createSession(overrides = {}) {
     script: {
       episodeTitle: "Sin título todavía",
       summary: "",
+      videoContentType: null,
       hosts: [...DEFAULT_HOSTS],
       rows: createDefaultRows()
     },
+    videoContentType: null,
     speakerVoiceMap: baseVoiceMap,
     speakerExpressionMap: baseExpressionMap,
     speakerNameMap: baseNameMap,
@@ -3287,6 +3629,10 @@ function createSession(overrides = {}) {
     podcastVideoConfig: normalizePodcastVideoConfig({
       enabled: false,
       editorEnabled: true
+    }),
+    creativeVideoConfig: normalizeCreativeVideoConfig({
+      enabled: false,
+      globalVoiceName: "Kore"
     }),
     ...overrides
   };
@@ -3529,6 +3875,10 @@ function ensureSession() {
       dialogueAudioMap: normalizedDialogueAudioMap
     }, { log: false });
     const normalizedVideoConfig = normalizePodcastVideoConfig(session.podcastVideoConfig || {});
+    const normalizedCreativeVideoConfig = normalizeCreativeVideoConfig(session.creativeVideoConfig || {});
+    const resolvedVideoContentType = resolveVideoContentType(session);
+    const persistedVideoContentType = resolvedVideoContentType === "none" ? null : resolvedVideoContentType;
+    const resolvedLegacyVideoMode = resolvedVideoContentType === "educational";
     const sameVoiceMap = JSON.stringify(trimmedVoiceMap) === JSON.stringify(session.speakerVoiceMap || {});
     const sameExpressionMap = JSON.stringify(normalizedExpressionMap) === JSON.stringify(session.speakerExpressionMap || {});
     const sameNameMap = JSON.stringify(normalizedNameMap) === JSON.stringify(session.speakerNameMap || {});
@@ -3542,10 +3892,14 @@ function ensureSession() {
     const sameDialogueVideoMap = JSON.stringify(reconciledMedia.dialogueVideoMap) === JSON.stringify(session.dialogueVideoMap || {});
     const sameDialogueAudioMap = JSON.stringify(reconciledMedia.dialogueAudioMap) === JSON.stringify(session.dialogueAudioMap || {});
     const sameVideoConfig = JSON.stringify(normalizedVideoConfig) === JSON.stringify(session.podcastVideoConfig || {});
-    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig) return session;
+    const sameCreativeVideoConfig = JSON.stringify(normalizedCreativeVideoConfig) === JSON.stringify(session.creativeVideoConfig || {});
+    const sameVideoContentType = normalizeVideoContentType(session?.script?.videoContentType || session?.videoContentType) === resolvedVideoContentType;
+    const sameLegacyVideoMode = Boolean(session?.script?.videoMode === true) === resolvedLegacyVideoMode;
+    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig && sameCreativeVideoConfig && sameVideoContentType && sameLegacyVideoMode) return session;
     changed = true;
     return {
       ...session,
+      videoContentType: persistedVideoContentType,
       speakerVoiceMap: trimmedVoiceMap,
       speakerExpressionMap: normalizedExpressionMap,
       speakerNameMap: normalizedNameMap,
@@ -3558,7 +3912,13 @@ function ensureSession() {
       scenarioReferenceImageMap: normalizedScenarioReferenceImageMap,
       dialogueVideoMap: reconciledMedia.dialogueVideoMap,
       dialogueAudioMap: reconciledMedia.dialogueAudioMap,
-      podcastVideoConfig: normalizedVideoConfig
+      podcastVideoConfig: normalizedVideoConfig,
+      creativeVideoConfig: normalizedCreativeVideoConfig,
+      script: {
+        ...(session?.script || {}),
+        videoContentType: persistedVideoContentType,
+        videoMode: resolvedLegacyVideoMode
+      }
     };
   });
   if (changed) persistSessions();
@@ -3593,7 +3953,16 @@ function countTotalDuration(rows = []) {
   return rows.reduce((acc, row) => acc + (Number(row.durationSec) || 0), 0);
 }
 
-function buildScriptAssistantReply(script = {}, options = {}) {
+function toMarkdownTableCell(value = "") {
+  return String(value || "")
+    .replace(/\r\n?/g, " ")
+    .replace(/\n/g, " ")
+    .replace(/\|/g, "\\|")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildPodcastAssistantReply(script = {}, options = {}) {
   const isRefinement = options?.isRefinement === true;
   const session = options?.session || null;
   const episodeTitle = String(script.episodeTitle || "Podcast desde una idea").trim();
@@ -3605,10 +3974,18 @@ function buildScriptAssistantReply(script = {}, options = {}) {
   const duration = secondsToClock(countTotalDuration(rows));
   const previewLimit = 24;
   const isTruncatedPreview = rows.length > previewLimit;
-  const previewLines = rows
+  const previewRows = rows
     .slice(0, previewLimit)
-    .map((row, index) => `${index + 1}. ${resolveSpeakerDisplayName(String(row.speaker || "Host A").trim(), session)}: ${replaceHostTokensWithNames(String(row.text || "").trim(), session)}`)
+    .map((row, index) => {
+      const speaker = resolveSpeakerDisplayName(String(row.speaker || "Host A").trim(), session);
+      const text = replaceHostTokensWithNames(String(row.text || "").trim(), session);
+      const durationSec = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
+      const media = String(row?.mediaCue || "Sin media").trim() || "Sin media";
+      return `| ${index + 1} | ${toMarkdownTableCell(speaker)} | ${toMarkdownTableCell(secondsToClock(durationSec))} (${durationSec}s) | ${toMarkdownTableCell(text)} | ${toMarkdownTableCell(media)} |`;
+    })
     .join("\n");
+  const tableHeader = "| Escena | Locutor | Tiempo | Guion | Media |\n| --- | --- | --- | --- | --- |";
+  const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
 
   return [
     isRefinement
@@ -3621,11 +3998,86 @@ function buildScriptAssistantReply(script = {}, options = {}) {
     `Duración estimada: ${duration}.`,
     `Escenas generadas: ${rows.length}.`,
     "",
-    previewLines ? `Avance del guión${isTruncatedPreview ? " (parcial)" : ""}:\n${previewLines}` : "",
+    previewTable ? `Guión en tabla${isTruncatedPreview ? " (parcial)" : ""}:\n${previewTable}` : "",
     isTruncatedPreview ? `Mostrando ${previewLimit} de ${rows.length} escenas. El resto está en la tabla del panel derecho.` : "",
     "",
     "En el panel derecho puedes ajustar diálogo, locutor, expresión, duración y media de cada escena."
   ].filter(Boolean).join("\n");
+}
+
+function buildEducationalVideoAssistantReply(script = {}, options = {}) {
+  const isRefinement = options?.isRefinement === true;
+  const episodeTitle = String(script.episodeTitle || "Video educativo desde una idea").trim();
+  const summary = String(script.summary || "Ya preparé una primera versión del video creativo.").trim();
+  const rows = Array.isArray(script.rows) ? script.rows : [];
+  const duration = secondsToClock(countTotalDuration(rows));
+  const creativeConfig = normalizeCreativeVideoConfig(script?.creativeVideoConfig || getCreativeVideoConfig(options?.session || null));
+  const voiceLabel = String(creativeConfig.globalVoiceName || "Kore").trim() || "Kore";
+  const voiceMimeType = String(creativeConfig.voiceMimeType || "audio/ogg").trim() || "audio/ogg";
+  const voiceFormatLabel = voiceMimeType.replace(/^audio\//i, "").toUpperCase();
+  const previewLimit = 24;
+  const isTruncatedPreview = rows.length > previewLimit;
+  const previewRows = rows
+    .slice(0, previewLimit)
+    .map((row, index) => {
+      const seconds = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
+      const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
+      const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+      const transition = String(row?.transition || "").replace(/\s+/g, " ").trim() || "Sin transición específica.";
+      const visualElement = String(
+        row?.visual
+        || row?.elementoVisual
+        || row?.visualNotes
+        || (Array.isArray(row?.imagePrompts) ? row.imagePrompts[0] : "")
+        || sceneDescription
+        || ""
+      ).replace(/\s+/g, " ").trim() || "Definir elemento visual.";
+      const onScreenText = buildOnScreenText(row?.onScreenText || "", {
+        voiceOver,
+        sceneDescription,
+        visual: visualElement
+      });
+      const startSec = rows
+        .slice(0, index)
+        .reduce((acc, item) => acc + Math.max(SHORT_SCENE_MIN_SEC, Number(item?.durationSec) || SHORT_SCENE_MAX_SEC), 0);
+      const endSec = startSec + seconds;
+      return {
+        time: `${secondsToClock(startSec)}-${secondsToClock(endSec)}`,
+        script: voiceOver || "Definir voz en off de la escena.",
+        sceneDescription: sceneDescription || "Definir descripción de escena.",
+        onScreenText,
+        transition,
+        visual: visualElement
+      };
+    })
+    .map((item) => `| ${item.time} | ${item.script.replace(/\|/g, "\\|")} | ${item.sceneDescription.replace(/\|/g, "\\|")} | ${(item.onScreenText || "").replace(/\|/g, "\\|")} | ${item.transition.replace(/\|/g, "\\|")} | ${item.visual.replace(/\|/g, "\\|")} |`)
+    .join("\n");
+  const tableHeader = "| Tiempo | Guion | Descripción de escena | Texto en pantalla | Transición | Elemento visual |\n| --- | --- | --- | --- | --- | --- |";
+  const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
+
+  return [
+    isRefinement
+      ? `Listo. Actualicé tu guión de video educativo: "${episodeTitle}".`
+      : `Listo. Preparé un primer guión de video educativo para "${episodeTitle}".`,
+    "",
+    `${summary}`,
+    "",
+    `Duración estimada: ${duration}.`,
+    `Escenas creativas generadas: ${rows.length}.`,
+    `Voz global: ${voiceLabel} (${voiceFormatLabel}).`,
+    "",
+    previewTable ? `Guión técnico en tabla${isTruncatedPreview ? " (parcial)" : ""}:\n${previewTable}` : "",
+    isTruncatedPreview ? `Mostrando ${previewLimit} de ${rows.length} escenas. El resto está en la tabla del panel derecho.` : "",
+    "",
+    "Campos del panel creativo: Tiempo, Guion (voz en off), Descripción de escena, Texto en pantalla, Transición y Elemento visual."
+  ].filter(Boolean).join("\n");
+}
+
+function buildScriptAssistantReply(script = {}, options = {}) {
+  const videoMode = options?.videoMode === true || script?.videoMode === true;
+  return videoMode
+    ? buildEducationalVideoAssistantReply(script, options)
+    : buildPodcastAssistantReply(script, options);
 }
 
 function getExpressionVoiceStyle(expression = "") {
@@ -3950,20 +4402,27 @@ function resolveActiveScenarioVariant(session = null, speaker = "") {
 function resolveSpeakerStudioScenarioPrompt(session = null, speaker = "", options = {}) {
   const key = String(speaker || "").trim();
   if (!key) return GLOBAL_SCENARIO_BASE_LABEL;
+  const educational = String(options?.contentMode || "").trim().toLowerCase() === "educational"
+    || options?.videoMode === true
+    || isEducationalVideoMode(session);
   const explicitScenario = String(options?.scenario || "").replace(/\s+/g, " ").trim();
-  if (explicitScenario) return explicitScenario;
+  if (explicitScenario) {
+    return educational ? rewriteScenarioPromptForEducationalVideo(explicitScenario) : explicitScenario;
+  }
   const selectedGlobalScenario = String(resolveActiveGlobalScenarioVariant(session)?.prompt || "").replace(/\s+/g, " ").trim();
   const activeVariantText = String(resolveActiveScenarioVariant(session, key)?.text || "").replace(/\s+/g, " ").trim();
   const draftScenarioMap = collectGlobalSpeakerDraft(session)?.scenarioMap || {};
   const draftScenario = String(draftScenarioMap[key] || "").replace(/\s+/g, " ").trim();
   const speakerScenario = String(getSpeakerScenarioMap(session)?.[key] || "").replace(/\s+/g, " ").trim();
   const hostScenario = activeVariantText || draftScenario || speakerScenario;
-  if (selectedGlobalScenario && hostScenario && hostScenario !== selectedGlobalScenario) {
-    return `${selectedGlobalScenario}. Variacion obligatoria para ${key}: ${hostScenario}. Mantener exactamente el mismo set base y solo variar zona, angulo y bloqueo del locutor dentro de ese escenario.`
+  const nextSelectedScenario = educational ? rewriteScenarioPromptForEducationalVideo(selectedGlobalScenario) : selectedGlobalScenario;
+  const nextHostScenario = educational ? rewriteScenarioPromptForEducationalVideo(hostScenario) : hostScenario;
+  if (nextSelectedScenario && nextHostScenario && nextHostScenario !== nextSelectedScenario) {
+    return `${nextSelectedScenario}. Variacion obligatoria para ${key}: ${nextHostScenario}. Mantener exactamente el mismo set base y solo variar zona, angulo y bloqueo del locutor dentro de ese escenario.`
       .replace(/\s+/g, " ")
       .trim();
   }
-  return selectedGlobalScenario || hostScenario || GLOBAL_SCENARIO_BASE_LABEL;
+  return nextSelectedScenario || nextHostScenario || (educational ? "Entorno visual educativo premium" : GLOBAL_SCENARIO_BASE_LABEL);
 }
 
 function resolveActiveGlobalScenarioAsset(session = null) {
@@ -3991,21 +4450,30 @@ async function ensureActiveGlobalScenarioAssetReady(session = null) {
   throw new Error("El escenario global seleccionado no tiene imagen generada todavía. Usa el botón de generar escenario primero.");
 }
 
-function buildGlobalScenarioVariantText(variantIndex = 0, revision = 0) {
-  return buildScenarioVariantText(GLOBAL_SCENARIO_BASE_LABEL, "", variantIndex, revision);
+function buildGlobalScenarioVariantText(variantIndex = 0, revision = 0, options = {}) {
+  const videoMode = options?.videoMode === true;
+  const baseLabel = videoMode ? "Entorno visual educativo premium" : GLOBAL_SCENARIO_BASE_LABEL;
+  return buildScenarioVariantText(baseLabel, "", variantIndex, revision);
 }
 
-function normalizeGlobalScenarioDeck(raw = null) {
+function normalizeGlobalScenarioDeck(raw = null, options = {}) {
   const safe = raw && typeof raw === "object" ? raw : {};
   const rawItems = Array.isArray(safe.items) ? safe.items : [];
+  const videoMode = options?.videoMode === true;
   const used = new Set();
   const items = [0, 1].map((index) => {
     const rawItem = rawItems[index] && typeof rawItems[index] === "object" ? rawItems[index] : {};
     let revision = Math.max(0, Number(rawItem.revision) || 0);
-    let prompt = String(rawItem.prompt || buildGlobalScenarioVariantText(index, revision)).replace(/\s+/g, " ").trim();
+    let prompt = String(rawItem.prompt || buildGlobalScenarioVariantText(index, revision, options)).replace(/\s+/g, " ").trim();
+    if (videoMode) {
+      prompt = rewriteScenarioPromptForEducationalVideo(prompt);
+    }
     while (!prompt || used.has(prompt)) {
       revision += 1;
-      prompt = buildGlobalScenarioVariantText(index, revision);
+      prompt = buildGlobalScenarioVariantText(index, revision, options);
+      if (videoMode) {
+        prompt = rewriteScenarioPromptForEducationalVideo(prompt);
+      }
     }
     used.add(prompt);
     return {
@@ -4030,7 +4498,9 @@ function normalizeGlobalScenarioDeck(raw = null) {
 }
 
 function getGlobalScenarioDeck(session = null) {
-  return normalizeGlobalScenarioDeck(session?.globalScenarioDeck || null);
+  return normalizeGlobalScenarioDeck(session?.globalScenarioDeck || null, {
+    videoMode: isEducationalVideoMode(session)
+  });
 }
 
 function resolveActiveGlobalScenarioVariant(session = null) {
@@ -4342,7 +4812,7 @@ function consumeImportedVideoPromptBridge(options = {}) {
     prompt
   }), { render: false });
   if (els.promptInput) {
-    els.promptInput.value = prompt;
+    setPromptInputContent(prompt);
   }
   setComposerGenerationMode(String(payload?.mode || "").trim() === "video" ? "video" : "script");
   if (els.generationStatus) {
@@ -5195,6 +5665,7 @@ function buildSpeakerMapsForHosts(hosts = [], session = null, snapshots = {}) {
   const expressionSource = { ...getSpeakerExpressionMap(session), ...(snapshots?.speakerExpressionMap || {}) };
   const nameSource = { ...getSpeakerNameMap(session), ...(snapshots?.speakerNameMap || {}) };
   const scenarioSource = { ...getSpeakerScenarioMap(session), ...(snapshots?.speakerScenarioMap || {}) };
+  const educational = isEducationalVideoMode(session) || snapshots?.videoMode === true;
   const voiceMap = {};
   const expressionMap = {};
   const nameMap = {};
@@ -5205,7 +5676,8 @@ function buildSpeakerMapsForHosts(hosts = [], session = null, snapshots = {}) {
     voiceMap[key] = normalizeLiveVoiceName(voiceSource[key], resolveSpeakerVoiceName(key, session));
     expressionMap[key] = EXPRESSIONS.includes(expressionSource[key]) ? expressionSource[key] : "Neutral";
     nameMap[key] = String(nameSource[key] || DEFAULT_SPEAKER_NAME_MAP[key] || key).trim() || key;
-    scenarioMap[key] = String(scenarioSource[key] || DEFAULT_SPEAKER_SCENARIO_MAP[key] || "Cabina premium de podcast").replace(/\s+/g, " ").trim() || "Cabina premium de podcast";
+    const scenarioValue = String(scenarioSource[key] || DEFAULT_SPEAKER_SCENARIO_MAP[key] || "Cabina premium de podcast").replace(/\s+/g, " ").trim() || "Cabina premium de podcast";
+    scenarioMap[key] = educational ? rewriteScenarioPromptForEducationalVideo(scenarioValue) : scenarioValue;
   });
   return { voiceMap, expressionMap, nameMap, scenarioMap };
 }
@@ -5213,17 +5685,34 @@ function buildSpeakerMapsForHosts(hosts = [], session = null, snapshots = {}) {
 function addScriptAssistantMessage(script = {}, options = {}) {
   const session = options?.session || getActiveSession();
   const preserveExactRows = options?.preserveExactRows === true;
+  const explicitVideoType = normalizeVideoContentType(
+    options?.videoContentType
+    || script?.videoContentType
+    || session?.script?.videoContentType
+  );
+  const videoMode = options?.videoMode === true
+    || explicitVideoType === "educational"
+    || (explicitVideoType === "none" && Array.isArray(script?.rows) && script.rows.some((row) => hasVideoSceneMetadata(row)));
+  const videoContentType = explicitVideoType !== "none"
+    ? explicitVideoType
+    : (videoMode ? "educational" : "none");
   const normalized = normalizeScriptPayload(script || {}, {
     session,
     disfluencyDefaults: session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG,
     speakerNameMap: options?.snapshots?.speakerNameMap || {},
-    skipOptimize: preserveExactRows
+    skipOptimize: preserveExactRows,
+    videoMode,
+    videoContentType
   });
   const hosts = Array.isArray(normalized?.hosts) && normalized.hosts.length ? normalized.hosts : getSpeakerOptions(session);
-  const maps = buildSpeakerMapsForHosts(hosts, session, options?.snapshots || {});
+  const maps = buildSpeakerMapsForHosts(hosts, session, {
+    ...(options?.snapshots || {}),
+    videoMode
+  });
   const text = buildScriptAssistantReply(normalized, {
     isRefinement: options?.isRefinement === true,
-    session
+    session,
+    videoMode
   });
   addChatMessage("assistant", text, {
     scriptSnapshot: normalized,
@@ -5356,8 +5845,19 @@ function setScriptSetupOpen(isOpen) {
 
 function setComposerGenerationMode(mode = "script") {
   composerGenerationMode = String(mode || "").trim() === "video" ? "video" : "script";
+  try {
+    window.localStorage.setItem(COMPOSER_GENERATION_MODE_KEY, composerGenerationMode);
+  } catch (_) {
+    // noop
+  }
   if (els.composerModeToggle) {
     els.composerModeToggle.checked = composerGenerationMode === "video";
+  }
+  const session = getActiveSession();
+  if (session) {
+    renderScript(session);
+    renderPodcastVideoShell(session);
+    syncCreativeVideoToggleButton();
   }
 }
 
@@ -5367,8 +5867,8 @@ function readScriptSetupConfig() {
   const sceneCount = Math.max(1, Math.min(220, Number(els.scriptSetupSceneCount?.value || 24)));
   const minWordsRaw = Math.max(1, Math.min(200, Number(els.scriptSetupMinWords?.value || 14)));
   const maxWordsRaw = Math.max(1, Math.min(260, Number(els.scriptSetupMaxWords?.value || 20)));
-  const minWords = videoMode ? 10 : Math.min(minWordsRaw, maxWordsRaw);
-  const maxWords = videoMode ? 15 : Math.max(minWordsRaw, maxWordsRaw);
+  const minWords = videoMode ? 0 : Math.min(minWordsRaw, maxWordsRaw);
+  const maxWords = videoMode ? 0 : Math.max(minWordsRaw, maxWordsRaw);
   if (els.scriptSetupSpeakerCount) els.scriptSetupSpeakerCount.value = String(hostCount);
   if (els.scriptSetupSceneCount) els.scriptSetupSceneCount.value = String(sceneCount);
   if (els.scriptSetupMinWords) els.scriptSetupMinWords.value = String(minWords);
@@ -5426,6 +5926,7 @@ function composeScriptPromptWithSetup(prompt = "", setup = {}) {
   const minWords = Math.max(1, Math.min(260, Number(setup?.minWords) || 14));
   const maxWords = Math.max(minWords, Math.min(260, Number(setup?.maxWords) || 20));
   const videoMode = setup?.videoMode === true;
+  const effectivePrompt = videoMode ? rewritePromptForEducationalVideo(basePrompt) : basePrompt;
   const voiceMap = setup?.speakerVoiceMap && typeof setup.speakerVoiceMap === "object"
     ? setup.speakerVoiceMap
     : {};
@@ -5435,21 +5936,38 @@ function composeScriptPromptWithSetup(prompt = "", setup = {}) {
   const voiceLines = hosts.map((host) => `${host}=${normalizeLiveVoiceName(voiceMap[host], resolveSpeakerVoiceName(host, getActiveSession()))}`);
   const nameLines = hosts.map((host) => `${host}=${String(nameMap[host] || getSpeakerNameMap(getActiveSession())?.[host] || host).trim() || host}`);
   return [
-    basePrompt,
+    effectivePrompt,
     "",
     "Parámetros obligatorios de guión:",
-    `- Usa exactamente ${hosts.length} locutores.`,
-    `- Locutores obligatorios: ${hosts.join(", ")}.`,
-    `- Nombre visible por locutor: ${nameLines.join(" | ")}.`,
-    `- Voces obligatorias por locutor: ${voiceLines.join(" | ")}.`,
     videoMode
-      ? `- Genera exactamente ${sceneCount} escenas para video (Veo), respetando la cantidad configurada.`
+      ? "- Usa voz en off narrativa única; no uses locutores ni hosts."
+      : `- Usa exactamente ${hosts.length} locutores.`,
+    videoMode ? "" : `- Locutores obligatorios: ${hosts.join(", ")}.`,
+    videoMode ? "" : `- Nombre visible por locutor: ${nameLines.join(" | ")}.`,
+    videoMode ? "" : `- Voces obligatorias por locutor: ${voiceLines.join(" | ")}.`,
+    videoMode
+      ? `- Genera exactamente ${sceneCount} escenas para video educativo (Veo), respetando la cantidad configurada.`
       : `- Genera exactamente ${sceneCount} escenas.`,
-    `- Cada escena debe tener entre ${minWords} y ${maxWords} palabras.`,
     videoMode
-      ? "- Cada escena debe poder funcionar como toma corta de video, durar menos de 8 segundos y terminar con frase completa."
+      ? `- Separa el guion por frases completas: cada escena debe cerrar al final de oración (punto y seguido/final).`
+      : `- Cada escena debe tener entre ${minWords} y ${maxWords} palabras.`,
+    videoMode
+      ? [
+        `- Cada escena debe durar ${VIDEO_SCENE_MAX_SEC} segundos, con narración objetivo de ~${VIDEO_DIALOGUE_MAX_SEC} segundos.`,
+        "- Regla principal: una frase completa por escena; no mezcles frases distintas en la misma escena.",
+        "- No cortes frases a la mitad; divide solo al finalizar oración (punto y seguido o punto final).",
+        "- Solo si una frase es muy larga, divídela en subfrases naturales (coma/punto y coma) para mantener ritmo.",
+        "- Cada escena debe incluir voiceOverText y sceneDescription.",
+        "- Cada escena debe incluir scenePrompt con dirección visual didáctica, y imagePrompts con una lista corta de prompts para generar las imágenes de la escena.",
+        `- imagePrompts debe incluir entre 1 y ${VIDEO_SCENE_IMAGE_PROMPT_COUNT} prompts por escena, sin duplicados.`,
+        "- Puedes añadir onScreenText y visualNotes por escena cuando aporten claridad.",
+        "- Cada escena debe incluir videoDirective con una intención pedagógica clara (qué enseñar y qué acción hacer).",
+        "- Si falta alguna indicación visual, infiérela a partir del objetivo de aprendizaje y del contenido narrado."
+      ].join("\n")
       : "",
-    "- Mantén coherencia conversacional y evita dividir ideas cortas en escenas innecesarias."
+    videoMode
+      ? "- Mantén coherencia didáctica entre escenas, progresión pedagógica y enfoque visual consistente."
+      : "- Mantén coherencia conversacional y evita dividir ideas cortas en escenas innecesarias."
   ].join("\n");
 }
 
@@ -5493,11 +6011,11 @@ function renderScriptSetupSpeakerFields(hostCount = 2, seedHosts = [], seedVoice
 function syncScriptSetupVideoModeUi() {
   const videoMode = Boolean(els.scriptSetupVideoMode?.checked);
   if (els.scriptSetupMinWords) {
-    if (videoMode) els.scriptSetupMinWords.value = "10";
+    if (videoMode) els.scriptSetupMinWords.value = "";
     els.scriptSetupMinWords.disabled = videoMode;
   }
   if (els.scriptSetupMaxWords) {
-    if (videoMode) els.scriptSetupMaxWords.value = "15";
+    if (videoMode) els.scriptSetupMaxWords.value = "";
     els.scriptSetupMaxWords.disabled = videoMode;
   }
 }
@@ -5529,6 +6047,10 @@ function normalizeGenerationConstraints(raw = {}) {
     maxWords = Math.max(minWords, 260);
   } else if (!minWords && maxWords) {
     minWords = 1;
+  }
+  if (videoMode) {
+    minWords = 0;
+    maxWords = 0;
   }
   const hostsRaw = Array.isArray(raw?.hosts) ? raw.hosts : [];
   const hosts = [];
@@ -5613,7 +6135,7 @@ function forceHostsAndAlternation(script = {}, constraints = {}, session = null)
   });
   const videoMode = constraints?.videoMode === true;
   const baseRows = videoMode
-    ? enforceVideoSceneRows(rows, { minWords: 10, maxWords: 15 })
+    ? enforceVideoSceneRows(rows, { targetDialogueSec: VIDEO_DIALOGUE_MAX_SEC })
     : rows;
   const forcedRows = baseRows.map((row, index) => {
     const expected = hosts[index % Math.max(1, hosts.length)] || hosts[0] || "Host A";
@@ -5629,7 +6151,7 @@ function forceHostsAndAlternation(script = {}, constraints = {}, session = null)
       speaker: videoMode
         ? resolved
         : (hosts.length > 1 ? expected : resolved),
-      text: maxWords > 0 ? trimWords(text, maxWords) : text
+      text: (!videoMode && maxWords > 0) ? trimWords(text, maxWords) : text
     };
   });
   return normalizeScriptPayload({
@@ -5652,7 +6174,9 @@ async function generateWithGeminiStrictConstraints(prompt, sessionSnapshot, cons
       ].join("\n")
       : "";
     const composedPrompt = [prompt, fixInstruction].filter(Boolean).join("\n\n");
-    const generated = await generateWithGemini(composedPrompt, sessionSnapshot, strict);
+    const generated = strict.videoMode === true
+      ? await generateEducationalVideoScript(composedPrompt, sessionSnapshot, strict)
+      : await generatePodcastScript(composedPrompt, sessionSnapshot, strict);
     const normalized = forceHostsAndAlternation(generated, strict, sessionSnapshot);
     const issues = validateScriptConstraints(normalized, strict);
     lastScript = normalized;
@@ -6062,7 +6586,7 @@ function buildCloudSessionPayload(session = null) {
     script: {
       episodeTitle: String(source?.script?.episodeTitle || "Podcast").slice(0, 220),
       summary: String(source?.script?.summary || "").slice(0, 5000),
-      hosts: getSpeakerOptions(source).slice(0, 10),
+      hosts: isCreativeVideoMode(source) ? ["Narrador"] : getSpeakerOptions(source).slice(0, 10),
       rows: rows.slice(0, 400).map((row) => ({
         id: String(row?.id || makeId("row")).trim(),
         speaker: normalizeSpeakerLabel(row?.speaker || "Host A", "Host A"),
@@ -6071,6 +6595,14 @@ function buildCloudSessionPayload(session = null) {
         mediaCue: MEDIA_CUES.includes(String(row?.mediaCue || "")) ? String(row.mediaCue) : "Sin media",
         text: String(row?.text || "").slice(0, 10000),
         notes: String(row?.notes || "").slice(0, 4000),
+        voiceOverText: String(row?.voiceOverText || "").slice(0, 10000),
+        sceneDescription: String(row?.sceneDescription || "").slice(0, 4000),
+        onScreenText: String(row?.onScreenText || "").slice(0, 1200),
+        transition: String(row?.transition || "").slice(0, 800),
+        visualNotes: String(row?.visualNotes || "").slice(0, 4000),
+        scenePrompt: String(row?.scenePrompt || "").slice(0, 4000),
+        videoDirective: String(row?.videoDirective || "").slice(0, 4000),
+        imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
         disfluencyConfig: normalizeDisfluencyConfig(row?.disfluencyConfig || {})
       }))
     },
@@ -6188,7 +6720,8 @@ function buildCloudSessionPayload(session = null) {
     speakerPortraitMap: getSpeakerPortraitMap(source),
     dialogueVideoMap: getDialogueVideoMap(source),
     dialogueAudioMap: getDialogueAudioMap(source),
-    podcastVideoConfig: normalizePodcastVideoConfig(source?.podcastVideoConfig || {})
+    podcastVideoConfig: normalizePodcastVideoConfig(source?.podcastVideoConfig || {}),
+    creativeVideoConfig: normalizeCreativeVideoConfig(source?.creativeVideoConfig || {})
   };
 }
 
@@ -6445,6 +6978,7 @@ function collectGlobalSpeakerDraft(session = null) {
   const baseExpressionMap = getSpeakerExpressionMap(session);
   const baseNameMap = getSpeakerNameMap(session);
   const baseScenarioMap = getSpeakerScenarioMap(session);
+  const panelCopy = getPanelModeCopy(session);
   const voiceMap = { ...baseVoiceMap };
   const expressionMap = { ...baseExpressionMap };
   const nameMap = { ...baseNameMap };
@@ -6465,7 +6999,9 @@ function collectGlobalSpeakerDraft(session = null) {
     voiceMap[host] = normalizeLiveVoiceName(rawVoice, resolveSpeakerVoiceName(host, session));
     expressionMap[host] = EXPRESSIONS.includes(rawExpression) ? rawExpression : (expressionMap[host] || "Neutral");
     nameMap[host] = rawName || nameMap[host] || DEFAULT_SPEAKER_NAME_MAP[host] || host;
-    scenarioMap[host] = rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast";
+    scenarioMap[host] = panelCopy.videoMode
+      ? rewriteScenarioPromptForEducationalVideo(rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast")
+      : rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast";
   }));
   return { voiceMap, expressionMap, nameMap, scenarioMap };
 }
@@ -6475,11 +7011,12 @@ function buildSpeakerSettingsMarkup(hosts = [], session = null, draft = null) {
   const sourceExpressionMap = draft?.expressionMap || getSpeakerExpressionMap(session);
   const sourceNameMap = draft?.nameMap || getSpeakerNameMap(session);
   const sourceScenarioMap = draft?.scenarioMap || getSpeakerScenarioMap(session);
+  const panelCopy = getPanelModeCopy(session);
   return hosts.map((host) => {
     const voiceName = normalizeLiveVoiceName(sourceVoiceMap[host], resolveSpeakerVoiceName(host, session));
     const expression = EXPRESSIONS.includes(sourceExpressionMap[host]) ? sourceExpressionMap[host] : "Neutral";
     const speakerName = String(sourceNameMap[host] || DEFAULT_SPEAKER_NAME_MAP[host] || host).trim() || host;
-    const scenario = String(sourceScenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast";
+    const scenario = resolveScenarioForVideoMode(session, host, sourceScenarioMap[host]);
     const isActive = String(podcastVideoState.activeSpeaker || "").trim() === host;
     return `
       <article class="global-speaker-row${isActive ? " is-active" : ""}" data-host-name="${escapeHtml(host)}">
@@ -6501,8 +7038,8 @@ function buildSpeakerSettingsMarkup(hosts = [], session = null, draft = null) {
           </select>
         </label>
         <label class="global-speaker-field">
-          <span>Escenario</span>
-          <input data-field="scenario" type="text" value="${escapeHtml(scenario)}" placeholder="Ej: Cabina premium, loft editorial, radio nocturna">
+          <span>${escapeHtml(panelCopy.rowScenarioLabel)}</span>
+          <input data-field="scenario" type="text" value="${escapeHtml(scenario)}" placeholder="${escapeHtml(panelCopy.rowScenarioPlaceholder)}">
         </label>
       </article>
     `;
@@ -6607,6 +7144,7 @@ function persistSpeakerIdentityDraft() {
   if (!session) return;
   const hosts = getSpeakerOptions(session);
   const draft = collectGlobalSpeakerDraft(session);
+  const panelCopy = getPanelModeCopy(session);
   const voiceMap = {};
   const expressionMap = {};
   const nameMap = {};
@@ -6615,7 +7153,9 @@ function persistSpeakerIdentityDraft() {
     voiceMap[host] = normalizeLiveVoiceName(draft.voiceMap[host], resolveSpeakerVoiceName(host, session));
     expressionMap[host] = EXPRESSIONS.includes(draft.expressionMap[host]) ? draft.expressionMap[host] : "Neutral";
     nameMap[host] = String(draft.nameMap?.[host] || DEFAULT_SPEAKER_NAME_MAP[host] || host).trim() || host;
-    scenarioMap[host] = String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast";
+    scenarioMap[host] = panelCopy.videoMode
+      ? rewriteScenarioPromptForEducationalVideo(String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast")
+      : String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast";
   });
   upsertActiveSession((current) => ({
     ...current,
@@ -6714,7 +7254,9 @@ function regenerateGlobalScenarioVariant(scenarioId = "") {
         ? {
           ...item,
           revision: nextRevision,
-          prompt: buildGlobalScenarioVariantText(idx, nextRevision),
+          prompt: buildGlobalScenarioVariantText(idx, nextRevision, {
+            videoMode: isEducationalVideoMode(current)
+          }),
           status: "idle",
           errorMessage: ""
         }
@@ -6725,6 +7267,8 @@ function regenerateGlobalScenarioVariant(scenarioId = "") {
       globalScenarioDeck: normalizeGlobalScenarioDeck({
         activeId: deck.activeId,
         items: nextItems
+      }, {
+        videoMode: isEducationalVideoMode(current)
       })
     };
   }, { render: false });
@@ -6761,6 +7305,8 @@ async function generateGlobalScenarioImage(scenarioId = "", options = {}) {
               }
               : entry
           ))
+        }, {
+          videoMode: isEducationalVideoMode(current)
         })
       };
     }, { render: false });
@@ -6825,6 +7371,8 @@ async function generateGlobalScenarioImage(scenarioId = "", options = {}) {
               }
               : entry
           ))
+        }, {
+          videoMode: isEducationalVideoMode(current)
         })
       };
     }, { render: false });
@@ -7115,7 +7663,7 @@ function updatePodcastVideoTransportUi() {
   if (els.podcastVideoNextBtn) els.podcastVideoNextBtn.disabled = !rows.length;
   if (els.generateAllDialogueVideosBtn) els.generateAllDialogueVideosBtn.disabled = podcastVideoState.busy || !rows.length;
   if (els.regenerateAllDialogueVideosBtn) els.regenerateAllDialogueVideosBtn.disabled = podcastVideoState.busy || !rows.length;
-  if (els.reorderTimelineTracksBtn) els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || getReorderableTimelineTrackIds(getActiveSession()).length < 2;
+  if (els.reorderTimelineTracksBtn) els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || !canReorderTimelineLayout(getActiveSession());
 }
 
 function resolveSceneNumberByRowId(rowId = "", session = null) {
@@ -7678,6 +8226,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   const renderUploadedGroupRow = (groupTrack = null, rowIndex = 0) => {
     const safeTrack = normalizePanelMusicTrack(groupTrack);
     const trackIndex = Math.max(0, Math.floor(Number(rowIndex) || 0));
+    const isTrackEnabled = safeTrack?.enabledInSession !== false;
     const group = uploadedGroupMap.get(trackIndex) || null;
     const groupSegments = Array.isArray(group?.segments) ? group.segments : [];
     const groupMutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(safeTrack?.mutedLoopIndexes || []));
@@ -7704,10 +8253,10 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
         ? `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · Loop ${loopIndex + 1}`
         : `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · ${safeTrack?.name || "Audio"}`;
       return `
-        <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(title)}">
+        <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(title)}">
           <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar inicio de audio"></button>
           <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar final de audio"></button>
-          <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
+          <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
             <i class="fas ${isMutedLoop ? "fa-volume-mute" : "fa-volume-up"}" aria-hidden="true"></i>
           </button>
           <span>${escapeHtml(`${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · ${groupSegments.length > 1 ? `Loop ${loopIndex + 1}` : (safeTrack?.name || "Audio")} · ${montageMusicVolume}% · ${montageStabilize ? "Estabilizado" : "Sin estabilizar"}`)}</span>
@@ -7718,6 +8267,12 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
       <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track-uploaded-${trackIndex}" data-track-index="-1">
         <div class="podcast-video-track-label is-locked">
           <span>${escapeHtml(rowTitle)}</span>
+          <button class="row-icon-btn" type="button" data-action="timeline-toggle-uploaded-track-enabled" data-track-index="${trackIndex}" title="${isTrackEnabled ? "Deshabilitar track en esta sesión" : "Habilitar track en esta sesión"}">
+            <i class="fas ${isTrackEnabled ? "fa-volume-up" : "fa-volume-mute"}"></i>
+          </button>
+          <button class="row-icon-btn" type="button" data-action="timeline-delete-uploaded-track" data-track-index="${trackIndex}" title="Eliminar track">
+            <i class="fas fa-trash"></i>
+          </button>
           ${rowIndex === 0 ? `<button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio">
             <i class="fas fa-sliders-h"></i>
           </button>` : ""}
@@ -7755,10 +8310,10 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
               const isMutedLoop = panelMutedLoopIndexes.has(loopIndex);
               const isActiveLoop = Number(podcastAudioTrackUiState.activeLoopIndex) === loopIndex;
               return `
-                <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-loop-index="${loopIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
+                <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
                   <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" aria-label="Recortar inicio de audio"></button>
                   <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" aria-label="Recortar final de audio"></button>
-                  <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-loop-index="${loopIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
+                  <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
                     <i class="fas ${isMutedLoop ? "fa-volume-mute" : "fa-volume-up"}" aria-hidden="true"></i>
                   </button>
                   <span data-action="timeline-drag-audio-track" data-loop-index="${loopIndex}">${escapeHtml(`${panelTrackLabel} · Loop ${loopIndex + 1} · ${montageMusicVolume}% · ${montageStabilize ? "Estabilizado" : "Sin estabilizar"}`)}</span>
@@ -8866,16 +9421,21 @@ function syncPodcastStudioInspector(session = null) {
   const rows = activeSession?.script?.rows || [];
   const activeRow = rows.find((row) => String(row?.id || "").trim() === String(podcastVideoState.activeRowId || "").trim()) || rows[0] || null;
   const cfg = getPodcastVideoConfig(activeSession);
+  const panelCopy = getPanelModeCopy(activeSession);
+  if (els.podcastStudioInspector) {
+    els.podcastStudioInspector.classList.toggle("is-video-educativo", panelCopy.videoMode);
+    els.podcastStudioInspector.setAttribute("aria-label", panelCopy.inspectorTitle);
+  }
   if (els.podcastStudioInspectorScene) {
     const label = activeRow
-      ? `Escena ${resolveSceneNumberByRowId(activeRow.id, activeSession)} · ${resolveSpeakerDisplayName(activeRow.speaker, activeSession)}`
-      : "Escena activa: --";
+      ? `${panelCopy.videoMode ? "Secuencia" : "Escena"} ${resolveSceneNumberByRowId(activeRow.id, activeSession)} · ${resolveSpeakerDisplayName(activeRow.speaker, activeSession)}`
+      : panelCopy.inspectorSceneLabel;
     els.podcastStudioInspectorScene.textContent = label;
   }
   if (els.podcastStudioInspectorRowEditor) {
     els.podcastStudioInspectorRowEditor.innerHTML = activeRow
       ? buildInspectorScriptRowMarkup(activeSession, activeRow, rows.findIndex((row) => row?.id === activeRow.id))
-      : `<div class="podcast-studio-row-editor-empty">Selecciona una escena en el timeline para editar su diálogo y parámetros.</div>`;
+      : `<div class="podcast-studio-row-editor-empty">${escapeHtml(panelCopy.emptyRowEditor)}</div>`;
   }
   if (els.podcastStudioMasterVolume) {
     els.podcastStudioMasterVolume.value = String(Math.round(cfg.masterVolume));
@@ -9126,7 +9686,10 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const voiceProfile = resolveAgentVoiceProfile(voiceName, voiceName);
   const counterpartSpeakerLabel = getSpeakerOptions(session).find((host) => host !== speakerLabel) || "";
   const counterpartSpeakerName = counterpartSpeakerLabel ? resolveSpeakerDisplayName(counterpartSpeakerLabel, session) : "";
-  const scenarioPrompt = resolveSpeakerStudioScenarioPrompt(session, speakerLabel, { expression: row.expression });
+  const scenarioPrompt = resolveSpeakerStudioScenarioPrompt(session, speakerLabel, {
+    expression: row.expression,
+    contentMode: isEducationalVideoMode(session) ? "educational" : "podcast"
+  });
   const pendingKey = `${sessionId}:${key}`;
   if (dialogueVideoGenerationTasks.has(pendingKey)) {
     logPodcastBatchDebug("generate-row-await-existing-task", {
@@ -9145,6 +9708,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const videoCfg = getPodcastVideoConfig(session);
   const cheapVideoMode = options.cheapVideoMode === true || videoCfg.cheapVideoMode === true;
   const videoDirective = String(options.videoDirective || row?.videoDirective || "").replace(/\s+/g, " ").trim();
+  const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
+  const imagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || []);
   const performanceDirective = buildScenePerformanceDirective(row, videoDirective);
   const syncStageAfterGenerate = options.syncStageAfterGenerate !== false;
   let portrait = resolvePortraitForSpeaker(session, row.speaker);
@@ -9204,6 +9769,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         const requestBody = {
           sessionId: session.id,
           rowId: key,
+          videoMode: isEducationalVideoMode(session),
+          contentMode: isEducationalVideoMode(session) ? "educational" : "podcast",
           speakerLabel,
           speakerName: resolveSpeakerDisplayName(speakerLabel, session),
           counterpartSpeakerLabel,
@@ -9213,6 +9780,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           expression: String(row.expression || "Neutral").trim() || "Neutral",
           scenarioPrompt,
           videoDirective,
+          scenePrompt,
+          imagePrompts,
           performanceDirective,
           text: segmentText.slice(0, 1600),
           targetSpeechLine: segmentText.slice(0, 1600),
@@ -9321,6 +9890,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
             variant: String(first.variant || "").trim(),
             promptVersion: "podcaster_veo_v1",
             videoDirective,
+            scenePrompt,
+            imagePrompts,
             durationSec: Math.max(0, Number(totalVideoDurationSec) || 0),
             targetSpeechLine: dialogueText.slice(0, 2200),
             segments: generatedSegments,
@@ -9440,6 +10011,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
         body: JSON.stringify({
           sessionId: session.id,
           rowId: key,
+          contentMode: isEducationalVideoMode(session) ? "educational" : "podcast",
           speakerLabel,
           speakerName: resolveSpeakerDisplayName(speakerLabel, session),
           voiceName: resolveSpeakerVoiceName(speakerLabel, session),
@@ -9950,8 +10522,150 @@ async function playPodcastStudioMontage(startAtMs = null) {
   return podcastStudioPlayback.playPodcastStudioMontage(startAtMs);
 }
 
+function syncCreativeVideoToggleButton() {
+  const panelCopy = getPanelModeCopy(getActiveSession());
+  const isOpen = creativeVideoState.enabled === true;
+  if (!els.togglePodcastVideoBtn) return;
+  els.togglePodcastVideoBtn.classList.toggle("is-active", isOpen);
+  els.togglePodcastVideoBtn.setAttribute("title", isOpen
+    ? (panelCopy.videoMode ? "Ocultar Snoopy Video Creator Creativo" : "Ocultar video")
+    : (panelCopy.videoMode ? "Mostrar Snoopy Video Creator Creativo" : "Mostrar video"));
+}
+
+function setCreativeVideoOpen(isOpen) {
+  creativeVideoState.enabled = Boolean(isOpen);
+  if (!creativeVideoState.enabled) {
+    creativeVideoState.activeRowId = "";
+  }
+  if (els.creativeVideoModal) {
+    els.creativeVideoModal.hidden = !creativeVideoState.enabled;
+  }
+  syncCreativeVideoToggleButton();
+  upsertActiveSession((session) => ({
+    ...session,
+    creativeVideoConfig: normalizeCreativeVideoConfig({
+      ...(session.creativeVideoConfig || {}),
+      enabled: creativeVideoState.enabled
+    })
+  }), { render: false });
+}
+
+function closeCreativeVideoModal() {
+  setCreativeVideoOpen(false);
+}
+
+function openCreativeVideoModal() {
+  setCreativeVideoOpen(true);
+  renderCreativeVideoShell(getActiveSession());
+}
+
+function renderCreativeTimeline(session = null) {
+  if (!els.creativeVideoTimelineList) return;
+  const activeSession = session || getActiveSession();
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  els.creativeVideoTimelineList.innerHTML = rows.map((row, index) => {
+    const active = String(row?.id || "").trim() === String(creativeVideoState.activeRowId || "").trim();
+    const duration = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
+    const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
+    return `
+      <button class="creative-timeline-row${active ? " is-active" : ""}" type="button" data-action="select-creative-row" data-row-id="${escapeHtml(String(row?.id || "").trim())}">
+        <strong>Secuencia ${index + 1}</strong>
+        <span>${escapeHtml(secondsToClock(duration))} · ${escapeHtml(trimWords(voiceOver, 10) || "Sin voz en off")}</span>
+      </button>
+    `;
+  }).join("");
+}
+
+function renderCreativeInspector(session = null) {
+  const activeSession = session || getActiveSession();
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  if (!rows.length) {
+    if (els.creativeVideoInspectorScene) {
+      els.creativeVideoInspectorScene.textContent = "Secuencia activa: --";
+    }
+    if (els.creativeVideoInspectorEditor) {
+      els.creativeVideoInspectorEditor.innerHTML = `<div class="creative-editor-empty">No hay escenas disponibles en el guión.</div>`;
+    }
+    return;
+  }
+  if (!creativeVideoState.activeRowId || !rows.some((row) => String(row?.id || "").trim() === String(creativeVideoState.activeRowId || "").trim())) {
+    creativeVideoState.activeRowId = String(rows[0]?.id || "").trim();
+  }
+  const activeRow = rows.find((row) => String(row?.id || "").trim() === String(creativeVideoState.activeRowId || "").trim()) || rows[0];
+  const activeIndex = Math.max(0, rows.findIndex((row) => String(row?.id || "").trim() === String(activeRow?.id || "").trim()));
+  if (els.creativeVideoInspectorScene) {
+    els.creativeVideoInspectorScene.textContent = `Secuencia activa: ${activeIndex + 1}`;
+  }
+  if (!els.creativeVideoInspectorEditor) return;
+  els.creativeVideoInspectorEditor.innerHTML = `
+    <label class="row-field">
+      <span>Tiempo</span>
+      <input type="number" min="${SHORT_SCENE_MIN_SEC}" max="180" step="1" data-field="durationSec" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(Math.max(SHORT_SCENE_MIN_SEC, Number(activeRow?.durationSec) || SHORT_SCENE_MAX_SEC)))}">
+    </label>
+    <label class="row-field">
+      <span>Guion</span>
+      <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Narración de la escena">${escapeHtml(String(activeRow?.voiceOverText || activeRow?.text || "").trim())}</textarea>
+    </label>
+    <label class="row-field">
+      <span>Descripción de escena</span>
+      <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué se ve en cámara">${escapeHtml(String(activeRow?.sceneDescription || activeRow?.scenePrompt || "").trim())}</textarea>
+    </label>
+    <label class="row-field">
+      <span>Texto en pantalla</span>
+      <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(activeRow?.onScreenText || "").trim())}" placeholder="Texto breve en pantalla">
+    </label>
+    <label class="row-field">
+      <span>Transición</span>
+      <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Ej: corte rápido, disolvencia, barrido">${escapeHtml(String(activeRow?.transition || activeRow?.visualNotes || activeRow?.notes || "").trim())}</textarea>
+    </label>
+    <label class="row-field">
+      <span>Elemento visual</span>
+      <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué elemento visual refuerza la explicación">${escapeHtml(String(activeRow?.visualNotes || activeRow?.visual || "").trim())}</textarea>
+    </label>
+  `;
+}
+
+function renderCreativeVideoShell(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession || !isCreativeVideoMode(activeSession)) {
+    if (els.creativeVideoModal) els.creativeVideoModal.hidden = true;
+    return;
+  }
+  const cfg = getCreativeVideoConfig(activeSession);
+  const shouldBeOpen = cfg.enabled === true || creativeVideoState.enabled === true;
+  creativeVideoState.enabled = shouldBeOpen;
+  if (els.creativeVideoModal) {
+    els.creativeVideoModal.hidden = !shouldBeOpen;
+  }
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  const normalizedRows = rows.map((row, index) => normalizeCreativeRow(row, index));
+  const rowsChanged = JSON.stringify(normalizedRows) !== JSON.stringify(rows);
+  if (rowsChanged) {
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        hosts: ["Narrador"],
+        rows: normalizedRows
+      }
+    }), { render: false });
+  }
+  const resolvedCfg = getCreativeVideoConfig(getActiveSession() || activeSession);
+  if (els.creativeGlobalVoiceName) {
+    const selected = normalizeLiveVoiceName(resolvedCfg.globalVoiceName, "Kore");
+    els.creativeGlobalVoiceName.innerHTML = buildVoiceOptions(selected);
+  }
+  if (els.creativeVideoShell) {
+    els.creativeVideoShell.setAttribute("aria-label", "Snoopy Video Creator Creativo");
+  }
+  renderCreativeTimeline(getActiveSession() || activeSession);
+  renderCreativeInspector(getActiveSession() || activeSession);
+  syncCreativeVideoToggleButton();
+}
+
 function setPodcastVideoOpen(isOpen) {
   podcastVideoState.enabled = Boolean(isOpen);
+  const panelCopy = getPanelModeCopy(getActiveSession());
   if (!podcastVideoState.enabled) {
     setAudioTrackMixOpen(false);
     podcastVideoState.activeRowId = "";
@@ -9965,7 +10679,9 @@ function setPodcastVideoOpen(isOpen) {
   }
   if (els.togglePodcastVideoBtn) {
     els.togglePodcastVideoBtn.classList.toggle("is-active", podcastVideoState.enabled);
-    els.togglePodcastVideoBtn.setAttribute("title", podcastVideoState.enabled ? "Ocultar video" : "Mostrar video");
+    els.togglePodcastVideoBtn.setAttribute("title", podcastVideoState.enabled
+      ? (panelCopy.videoMode ? "Ocultar panel de video educativo" : "Ocultar video")
+      : (panelCopy.videoMode ? "Mostrar panel de video educativo" : "Mostrar video"));
   }
   syncPodcastVideoSpeakerCardVisibility();
   upsertActiveSession((session) => ({
@@ -9985,6 +10701,14 @@ function setPodcastVideoLoaderOpen(isOpen = false) {
 }
 
 async function openPodcastVideoModalWithLoader() {
+  const preOpenSession = getActiveSession();
+  if (preOpenSession) {
+    const currentType = resolveVideoContentType(preOpenSession);
+    if (currentType === "none") {
+      const inferredType = composerGenerationMode === "video" ? "educational" : "videopodcast";
+      upsertActiveSession((session) => withSessionVideoContentType(session, inferredType), { render: false });
+    }
+  }
   const runToken = ++podcastVideoOpenRunToken;
   if (els.podcastVideoModal) {
     els.podcastVideoModal.hidden = false;
@@ -9995,7 +10719,7 @@ async function openPodcastVideoModalWithLoader() {
   setPodcastVideoOpen(true);
   renderPodcastVideoShell(getActiveSession());
   setPodcastVideoRow(resolveTargetVideoRowId(getActiveSession()), { syncStage: true });
-  setPodcastVideoStatus("Video activado");
+  setPodcastVideoStatus(getPanelModeCopy(getActiveSession()).videoMode ? "Video educativo activado" : "Video activado");
   setPodcastVideoLoaderOpen(false);
 }
 
@@ -10004,13 +10728,14 @@ function closePodcastVideoModal() {
   setPodcastVideoLoaderOpen(false);
   stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
   setAudioTrackMixOpen(false);
+  const panelCopy = getPanelModeCopy(getActiveSession());
   podcastVideoState.enabled = false;
   if (els.podcastVideoModal) {
     els.podcastVideoModal.hidden = true;
   }
   if (els.togglePodcastVideoBtn) {
     els.togglePodcastVideoBtn.classList.remove("is-active");
-    els.togglePodcastVideoBtn.setAttribute("title", "Mostrar video");
+    els.togglePodcastVideoBtn.setAttribute("title", panelCopy.videoMode ? "Mostrar panel de video educativo" : "Mostrar video");
   }
   syncPodcastVideoSpeakerCardVisibility();
   upsertActiveSession((session) => ({
@@ -10087,7 +10812,10 @@ async function generateSpeakerPortrait(speaker = "", options = {}) {
   const voiceName = resolveConfiguredSpeakerVoiceForGeneration(key, session);
   const expression = getSpeakerExpressionMap(session)[key] || "Neutral";
   const voiceProfile = resolveAgentVoiceProfile(voiceName, voiceName);
-  const scenarioPrompt = resolveSpeakerStudioScenarioPrompt(session, key, { expression });
+  const scenarioPrompt = resolveSpeakerStudioScenarioPrompt(session, key, {
+    expression,
+    contentMode: isEducationalVideoMode(session) ? "educational" : "podcast"
+  });
   const modelCandidates = buildPortraitImageModelChain();
   const portraitMap = getSpeakerPortraitMap(session);
   const speakerReferenceImage = getSpeakerReferenceImageMap(session)[key] || null;
@@ -10369,6 +11097,11 @@ function renderPodcastPortraitStrip(session = null, options = {}) {
 function renderPodcastVideoShell(session = null) {
   const activeSession = session || getActiveSession();
   if (!activeSession) return;
+  if (els.creativeVideoModal) {
+    els.creativeVideoModal.hidden = true;
+  }
+  creativeVideoState.enabled = false;
+  const panelCopy = getPanelModeCopy(activeSession);
   resetPodcastStudioSessionUiState(activeSession);
   setPodcastStudioInspectorCollapsed(podcastStudioInspectorCollapsed);
   ensureTimelineClipsByRowId(activeSession, { persist: !podcastVideoState.montageActive });
@@ -10378,11 +11111,38 @@ function renderPodcastVideoShell(session = null) {
   podcastVideoState.enabled = shouldBeOpen;
   if (els.podcastVideoModal) {
     els.podcastVideoModal.hidden = !shouldBeOpen;
+    els.podcastVideoModal.setAttribute("aria-label", panelCopy.shellAriaLabel);
+  }
+  if (els.podcastVideoShell) {
+    els.podcastVideoShell.classList.toggle("is-video-educativo", panelCopy.videoMode);
+    els.podcastVideoShell.setAttribute("aria-label", panelCopy.shellAriaLabel);
   }
   syncPodcastVideoSpeakerCardVisibility();
   if (els.togglePodcastVideoBtn) {
     els.togglePodcastVideoBtn.classList.toggle("is-active", shouldBeOpen);
-    els.togglePodcastVideoBtn.setAttribute("title", shouldBeOpen ? "Ocultar video" : "Mostrar video");
+    els.togglePodcastVideoBtn.setAttribute("title", shouldBeOpen
+      ? (panelCopy.videoMode ? "Ocultar panel de video educativo" : "Ocultar video")
+      : (panelCopy.videoMode ? "Mostrar panel de video educativo" : "Mostrar video"));
+  }
+  if (els.podcastVideoLoader) {
+    els.podcastVideoLoader.setAttribute("aria-label", panelCopy.loaderAriaLabel);
+    const loaderStrong = els.podcastVideoLoader.querySelector(".podcast-video-loader-card strong");
+    const loaderSpan = els.podcastVideoLoader.querySelector(".podcast-video-loader-card span");
+    const loaderLogo = els.podcastVideoLoader.querySelector(".podcast-video-loader-logo");
+    if (loaderStrong) loaderStrong.textContent = panelCopy.loaderBrand;
+    if (loaderSpan) loaderSpan.textContent = panelCopy.loaderSubtitle;
+    if (loaderLogo) loaderLogo.alt = panelCopy.loaderBrand;
+  }
+  const brandTitle = els.podcastVideoShell?.querySelector(".podcast-brand-title span");
+  if (brandTitle) brandTitle.textContent = panelCopy.brandTitle;
+  const inspectorTitle = els.podcastStudioInspector?.querySelector("h4");
+  if (inspectorTitle) inspectorTitle.textContent = panelCopy.inspectorTitle;
+  const inspectorSectionTitle = els.podcastVideoShell?.querySelector(".inspector-scene-panel-head");
+  if (inspectorSectionTitle) inspectorSectionTitle.textContent = panelCopy.inspectorSectionTitle;
+  const studioNote = els.podcastVideoShell?.querySelector(".podcast-studio-note");
+  if (studioNote) studioNote.textContent = panelCopy.footerNote;
+  if (els.podcastStudioInspectorScene && !els.podcastStudioInspectorScene.textContent.trim()) {
+    els.podcastStudioInspectorScene.textContent = panelCopy.inspectorSceneLabel;
   }
   renderPodcastPortraitStrip(activeSession, { reason: "shell" });
   const rows = activeSession?.script?.rows || [];
@@ -10446,7 +11206,7 @@ function updatePodcastPlayerUi() {
     els.regenerateAllDialogueVideosBtn.disabled = podcastVideoState.busy || !rows.length;
   }
   if (els.reorderTimelineTracksBtn) {
-    els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || getReorderableTimelineTrackIds(getActiveSession()).length < 2;
+    els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || !canReorderTimelineLayout(getActiveSession());
   }
   if (els.generateDialogueAudioBtn) {
     const session = getActiveSession();
@@ -10684,12 +11444,20 @@ async function startPodcastPlayback(startIndex = 0) {
 }
 
 async function rebalanceScriptWithGemini(sessionSnapshot, baseScript, hosts = []) {
-  const prompt = [
-    "Reajusta el guion actual para distribuir escenas entre locutores.",
-    `Usa exactamente estos locutores: ${hosts.join(", ")}.`,
-    "Mantén la historia general, mejora la naturalidad conversacional y conserva duración aproximada por escena.",
-    "No elimines escenas; conserva el mismo número de filas."
-  ].join("\n");
+  const videoMode = isEducationalVideoMode({ ...sessionSnapshot, script: baseScript });
+  const prompt = videoMode
+    ? [
+      "Reajusta el guion educativo actual para distribuir secuencias entre locutores.",
+      `Usa exactamente estos locutores: ${hosts.join(", ")}.`,
+      "Mantén progresión didáctica, claridad pedagógica y soporte visual por escena.",
+      "No elimines escenas; conserva el mismo número de filas."
+    ].join("\n")
+    : [
+      "Reajusta el guion actual para distribuir escenas entre locutores.",
+      `Usa exactamente estos locutores: ${hosts.join(", ")}.`,
+      "Mantén la historia general, mejora la naturalidad conversacional y conserva duración aproximada por escena.",
+      "No elimines escenas; conserva el mismo número de filas."
+    ].join("\n");
   const snapshot = {
     ...sessionSnapshot,
     script: {
@@ -10697,7 +11465,9 @@ async function rebalanceScriptWithGemini(sessionSnapshot, baseScript, hosts = []
       hosts: [...hosts]
     }
   };
-  const generated = await generateWithGemini(prompt, snapshot);
+  const generated = videoMode
+    ? await generateEducationalVideoScript(prompt, snapshot, { hosts, hostCount: hosts.length, videoMode: true })
+    : await generatePodcastScript(prompt, snapshot, { hosts, hostCount: hosts.length, videoMode: false });
   const rows = (baseScript.rows || []).map((row, index) => {
     const candidate = generated?.rows?.[index] || {};
     const speaker = hosts.includes(candidate.speaker) ? candidate.speaker : (row.speaker || hosts[0]);
@@ -10809,6 +11579,123 @@ async function applyGlobalConfig() {
   }));
 }
 
+function sanitizeChatHtml(input = "") {
+  const source = String(input || "").trim();
+  if (!source) return "";
+  const allowedTags = new Set(["TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "P", "DIV", "SPAN", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI"]);
+  const allowedAttrs = new Set(["style", "colspan", "rowspan", "align", "valign", "bgcolor", "width", "height"]);
+  const sanitizeStyle = (styleValue = "") => String(styleValue || "")
+    .replace(/expression\s*\([^)]*\)/gi, "")
+    .replace(/url\s*\(\s*['"]?\s*javascript:[^)]+\)/gi, "")
+    .replace(/behavior\s*:[^;]+;?/gi, "")
+    .trim();
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild;
+    if (!root) return "";
+    const walk = (node) => {
+      if (!(node instanceof Element)) return;
+      const tag = String(node.tagName || "").toUpperCase();
+      if (!allowedTags.has(tag)) {
+        const text = doc.createTextNode(node.textContent || "");
+        node.replaceWith(text);
+        return;
+      }
+      Array.from(node.attributes).forEach((attr) => {
+        const name = String(attr.name || "").toLowerCase();
+        if (name.startsWith("on") || !allowedAttrs.has(name)) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+        if (name === "style") {
+          const safeStyle = sanitizeStyle(attr.value);
+          if (safeStyle) node.setAttribute("style", safeStyle);
+          else node.removeAttribute("style");
+        }
+      });
+      Array.from(node.children).forEach((child) => walk(child));
+    };
+    Array.from(root.children).forEach((child) => walk(child));
+    return root.innerHTML.trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function splitMarkdownTableCells(line = "") {
+  const source = String(line || "").trim();
+  if (!source.includes("|")) return [];
+  const normalized = source.startsWith("|") ? source.slice(1) : source;
+  const tailTrimmed = normalized.endsWith("|") ? normalized.slice(0, -1) : normalized;
+  return tailTrimmed.split("|").map((cell) => String(cell || "").trim());
+}
+
+function isMarkdownDividerCell(cell = "") {
+  return /^:?-{3,}:?$/.test(String(cell || "").trim());
+}
+
+function convertMarkdownTableAt(lines = [], startIndex = 0) {
+  const headerCells = splitMarkdownTableCells(lines[startIndex] || "");
+  const dividerCells = splitMarkdownTableCells(lines[startIndex + 1] || "");
+  if (!headerCells.length || !dividerCells.length) return null;
+  if (headerCells.length !== dividerCells.length) return null;
+  if (!dividerCells.every((cell) => isMarkdownDividerCell(cell))) return null;
+
+  const rows = [];
+  let index = startIndex + 2;
+  while (index < lines.length) {
+    const rowLine = String(lines[index] || "");
+    if (!rowLine.includes("|")) break;
+    const rowCells = splitMarkdownTableCells(rowLine);
+    if (rowCells.length !== headerCells.length) break;
+    rows.push(rowCells);
+    index += 1;
+  }
+
+  if (!rows.length) return null;
+  const headHtml = `<thead><tr>${headerCells.map((cell) => `<th>${escapeHtml(cell)}</th>`).join("")}</tr></thead>`;
+  const bodyHtml = `<tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  return {
+    html: `<table>${headHtml}${bodyHtml}</table>`,
+    nextIndex: index
+  };
+}
+
+function renderChatTextWithMarkdownTables(text = "") {
+  const source = String(text || "").replace(/\r\n?/g, "\n");
+  if (!source.trim()) return "";
+  const lines = source.split("\n");
+  const htmlChunks = [];
+  const textBuffer = [];
+  const flushTextBuffer = () => {
+    if (!textBuffer.length) return;
+    htmlChunks.push(escapeHtml(textBuffer.join("\n")).replace(/\n/g, "<br>"));
+    textBuffer.length = 0;
+  };
+
+  let index = 0;
+  while (index < lines.length) {
+    const parsed = convertMarkdownTableAt(lines, index);
+    if (parsed) {
+      flushTextBuffer();
+      htmlChunks.push(parsed.html);
+      index = parsed.nextIndex;
+      continue;
+    }
+    textBuffer.push(lines[index]);
+    index += 1;
+  }
+  flushTextBuffer();
+  return htmlChunks.join("<br>");
+}
+
+function renderChatMessageBody(message = {}) {
+  const html = sanitizeChatHtml(message?.html || "");
+  if (html) return html;
+  return renderChatTextWithMarkdownTables(String(message?.text || ""));
+}
+
 function renderChat(session) {
   const messages = session.chat || [];
   const visibleMessages = messages.filter((message, index) => {
@@ -10818,7 +11705,7 @@ function renderChat(session) {
   const target = els.chatFeedMessages || els.chatFeed;
   target.innerHTML = visibleMessages.map((message) => `
     <article class="chat-message ${message.role === "user" || message.role === "system" ? escapeHtml(message.role) : "assistant"}" data-message-id="${escapeHtml(message.id || "")}">
-      <div class="chat-message-body">${escapeHtml(message.text)}</div>
+      <div class="chat-message-body">${renderChatMessageBody(message)}</div>
       <div class="chat-message-actions">
         ${message.role === "assistant"
           ? (() => {
@@ -10845,6 +11732,24 @@ function renderChat(session) {
 function renderScript(session) {
   const script = session.script || {};
   const rows = script.rows || [];
+  const panelCopy = getPanelModeCopy(session);
+  if (els.sidepanel) {
+    els.sidepanel.classList.toggle("is-video-mode", panelCopy.videoMode);
+  }
+  if (els.scriptPanelTitle) {
+    els.scriptPanelTitle.textContent = panelCopy.videoMode ? "Tabla de guion de video educativo" : "Tabla de diálogo";
+  }
+  if (els.scriptPanelSubtitle) {
+    els.scriptPanelSubtitle.textContent = panelCopy.videoMode
+      ? "Vista video: Tiempo, Guion, Descripción de escena, Texto en pantalla, Transición y Elemento visual."
+      : "Vista podcast: lista compacta editable tipo inspector.";
+  }
+  if (els.openVideoEditorBtn) {
+    els.openVideoEditorBtn.hidden = !panelCopy.videoMode;
+    els.openVideoEditorBtn.disabled = !panelCopy.videoMode || rows.length === 0;
+    els.openVideoEditorBtn.setAttribute("title", "Pasar guión al editor de video Snoopy Creator");
+    els.openVideoEditorBtn.setAttribute("aria-label", "Pasar guión al editor de video Snoopy Creator");
+  }
   logPodcasterLiveDebug("render-script-voice-map", {
     sessionId: session?.id,
     speakerVoiceMap: getSpeakerVoiceMap(session)
@@ -10863,9 +11768,11 @@ function renderScript(session) {
           <div class="drag-handle" aria-label="Reordenar fila">
             <i class="fas fa-grip-vertical"></i>
           </div>
-          <span class="row-chip">Escena ${index + 1}</span>
-          <span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>
-          <span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>
+          <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${index + 1}</span>
+          ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
+          ${panelCopy.videoMode ? "" : `<span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>`}
+          ${hasVideoSceneMetadata(row) ? `<span class="row-chip row-chip-scenario">${panelCopy.videoMode ? "Video educativo" : "Video"}</span>` : ""}
+          ${normalizeVideoImagePrompts(row.imagePrompts || []).length ? `<span class="row-chip row-chip-selected">${escapeHtml(`${normalizeVideoImagePrompts(row.imagePrompts || []).length} imgs`)}</span>` : ""}
           <span class="row-chip row-chip-elapsed" data-row-play-elapsed="${escapeHtml(row.id)}">0:00</span>
         </div>
         <div class="row-actions">
@@ -10926,13 +11833,62 @@ function renderScript(session) {
 function buildScriptRowEditorMarkup(session, row) {
   const speakerVoiceMap = getSpeakerVoiceMap(session);
   const host = String(row?.speaker || "").trim() || "Host A";
-  const scenario = String(getSpeakerScenarioMap(session)?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast";
+  const panelCopy = getPanelModeCopy(session);
+  if (panelCopy.videoMode) {
+    const creativeRow = normalizeCreativeRow(row);
+    return `
+      <div class="script-row-grid">
+        <label class="row-field">
+          <span>Tiempo</span>
+          <input type="number" min="${SHORT_SCENE_MIN_SEC}" max="180" data-field="durationSec" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.durationSec)}">
+        </label>
+        <label class="row-field wide">
+          <span>Guion</span>
+          <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.voiceOverText || "")}</textarea>
+        </label>
+        <label class="row-field wide">
+          <span>Descripción de escena</span>
+          <textarea rows="4" data-field="sceneDescription" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.sceneDescription || "")}</textarea>
+        </label>
+        <label class="row-field wide">
+          <span>Texto en pantalla</span>
+          <input type="text" data-field="onScreenText" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.onScreenText || "")}" placeholder="Opcional">
+        </label>
+        <label class="row-field wide">
+          <span>Transición</span>
+          <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.transition || creativeRow.visualNotes || "")}</textarea>
+        </label>
+        <label class="row-field wide">
+          <span>Elemento visual</span>
+          <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.visualNotes || creativeRow.visual || "")}</textarea>
+        </label>
+      </div>
+    `;
+  }
+  const scenario = resolveScenarioForVideoMode(session, host);
+  const imagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || []).map((prompt) => (
+    isEducationalVideoMode(session)
+      ? rewriteScenarioPromptForEducationalVideo(prompt)
+      : prompt
+  ));
   return `
     <textarea class="dialog-editor" data-field="text" data-row-id="${escapeHtml(row.id)}">${escapeHtml(row.text)}</textarea>
     <div class="script-row-grid">
       <label class="global-speaker-field global-speaker-field-scenario global-speaker-field-scenario-wide">
-        <span>Escenario</span>
-        <input data-field="scenario" data-host-name="${escapeHtml(host)}" type="text" value="${escapeHtml(scenario)}" placeholder="Ej: Cabina premium, loft editorial, radio nocturna">
+        <span>${escapeHtml(panelCopy.rowScenarioLabel)}</span>
+        <input data-field="scenario" data-host-name="${escapeHtml(host)}" type="text" value="${escapeHtml(scenario)}" placeholder="${escapeHtml(panelCopy.rowScenarioPlaceholder)}">
+      </label>
+      <label class="row-field wide">
+        <span>${escapeHtml(panelCopy.scenePromptLabel)}</span>
+        <textarea rows="3" data-field="scenePrompt" data-row-id="${escapeHtml(row.id)}" placeholder="${escapeHtml(panelCopy.scenePromptPlaceholder)}">${escapeHtml(isEducationalVideoMode(session) ? normalizeVideoScenePrompt(row.scenePrompt || "", row, session) : (row.scenePrompt || ""))}</textarea>
+      </label>
+      <label class="row-field wide">
+        <span>${escapeHtml(panelCopy.videoDirectiveLabel)}</span>
+        <textarea rows="2" data-field="videoDirective" data-row-id="${escapeHtml(row.id)}" placeholder="${escapeHtml(panelCopy.videoDirectivePlaceholder)}">${escapeHtml(isEducationalVideoMode(session) ? rewriteScenarioPromptForEducationalVideo(row.videoDirective || "") : (row.videoDirective || ""))}</textarea>
+      </label>
+      <label class="row-field wide">
+        <span>${escapeHtml(panelCopy.imagePromptsLabel)}</span>
+        <textarea rows="4" data-field="imagePrompts" data-row-id="${escapeHtml(row.id)}" placeholder="${escapeHtml(panelCopy.imagePromptsPlaceholder)}">${escapeHtml(imagePrompts.join("\n"))}</textarea>
       </label>
       <label class="row-field">
         <span>Locutor</span>
@@ -10972,13 +11928,14 @@ function buildScriptRowEditorMarkup(session, row) {
 
 function buildInspectorScriptRowMarkup(session, row, index = -1) {
   const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
+  const panelCopy = getPanelModeCopy(session);
   return `
     <article class="script-row script-row-inspector" data-row-id="${escapeHtml(row.id)}">
       <div class="script-row-head script-row-head-inspector">
         <div class="row-head-left">
-          <span class="row-chip">Escena ${safeIndex + 1}</span>
-          <span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>
-          <span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>
+          <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${safeIndex + 1}</span>
+          ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
+          ${panelCopy.videoMode ? "" : `<span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>`}
         </div>
       </div>
       ${buildScriptRowEditorMarkup(session, row)}
@@ -11102,9 +12059,494 @@ function setupPodcastStudioInspectorResize() {
 
 function autoResizePrompt() {
   if (!els.promptInput) return;
-  els.promptInput.style.height = "0px";
-  const nextHeight = Math.min(els.promptInput.scrollHeight, 180);
-  els.promptInput.style.height = `${Math.max(34, nextHeight)}px`;
+  const node = els.promptInput;
+  node.style.height = "0px";
+  const nextHeight = Math.min(node.scrollHeight, 180);
+  node.style.height = `${Math.max(34, nextHeight)}px`;
+  node.style.overflowY = node.scrollHeight > 180 ? "auto" : "hidden";
+}
+
+function normalizePromptClipboardText(text = "") {
+  return String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ");
+}
+
+function getPromptInputPlainText() {
+  if (!els.promptInput) return "";
+  if (typeof els.promptInput.value === "string") {
+    return normalizePromptClipboardText(els.promptInput.value).trim();
+  }
+  return normalizePromptClipboardText(els.promptInput.innerText || els.promptInput.textContent || "").trim();
+}
+
+function getPromptInputHtml() {
+  if (!els.promptInput) return "";
+  if (typeof els.promptInput.value === "string") {
+    return escapeHtml(els.promptInput.value).replace(/\n/g, "<br>");
+  }
+  return String(els.promptInput.innerHTML || "")
+    .replace(/^(?:\s|<br\s*\/?>|&nbsp;)+$/i, "")
+    .trim();
+}
+
+function setPromptInputContent(content = "", options = {}) {
+  if (!els.promptInput) return;
+  const text = String(content || "");
+  const html = String(options?.html || "").trim();
+  if (typeof els.promptInput.value === "string") {
+    els.promptInput.value = text;
+    return;
+  }
+  if (html) {
+    els.promptInput.innerHTML = html;
+    return;
+  }
+  els.promptInput.textContent = text;
+}
+
+function buildMarkdownTableFromRows(rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell || "").replace(/\s+/g, " ").trim()))
+    .filter((row) => row.some(Boolean));
+  if (!normalizedRows.length) return "";
+  const columnCount = Math.max(2, ...normalizedRows.map((row) => row.length));
+  const paddedRows = normalizedRows.map((row) => {
+    const next = row.slice(0, columnCount);
+    while (next.length < columnCount) next.push("");
+    return next;
+  });
+  const escapeCell = (value = "") => String(value || "").replace(/\|/g, "\\|").trim();
+  const header = paddedRows[0].map(escapeCell);
+  const divider = header.map(() => "---");
+  const body = paddedRows.slice(1).map((row) => row.map(escapeCell));
+  if (!body.length) {
+    body.push(Array.from({ length: columnCount }, () => ""));
+  }
+  return [
+    `| ${header.join(" | ")} |`,
+    `| ${divider.join(" | ")} |`,
+    ...body.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+
+function parseHtmlTableToRows(html = "") {
+  const source = String(html || "").trim();
+  const lower = source.toLowerCase();
+  if (!source || (!lower.includes("<table") && !lower.includes("<tr"))) return [];
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(source, "text/html");
+    const rowNodes = Array.from(doc.querySelectorAll("table tr, tr"));
+    if (!rowNodes.length) return [];
+    const rows = rowNodes
+      .map((tr) => Array.from(tr.querySelectorAll("th,td")).map((cell) => String(cell.textContent || "").trim()))
+      .filter((row) => row.some(Boolean));
+    return rows;
+  } catch (_) {
+    return [];
+  }
+}
+
+function parsePlainTextTableToRows(text = "") {
+  const source = normalizePromptClipboardText(text);
+  if (!source) return [];
+  const lines = source
+    .split("\n")
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+
+  const parseWithDelimiter = (delimiter) => {
+    const rows = lines
+      .map((line) => line.split(delimiter).map((cell) => String(cell || "").trim()))
+      .filter((row) => row.some(Boolean));
+    if (!rows.length) return [];
+    const rowWithTwoColumnsCount = rows.filter((row) => row.length >= 2).length;
+    if (!rowWithTwoColumnsCount) return [];
+    if (rows.length >= 2) return rows.filter((row) => row.length >= 2);
+    return rows[0].length >= 2 ? rows : [];
+  };
+
+  const tabRows = parseWithDelimiter("\t");
+  if (tabRows.length) return tabRows;
+
+  const pipeRows = lines
+    .filter((line) => /\|/.test(line))
+    .map((line) => line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => String(cell || "").trim()))
+    .filter((row) => row.some(Boolean));
+  if (pipeRows.length >= 2) {
+    const maybeDivider = pipeRows[1].every((cell) => /^:?-{2,}:?$/.test(cell));
+    return maybeDivider ? [pipeRows[0], ...pipeRows.slice(2)] : pipeRows;
+  }
+
+  const commaRows = parseWithDelimiter(",");
+  if (commaRows.length >= 2) {
+    const expectedColumns = commaRows[0].length;
+    const isConsistent = expectedColumns >= 2 && commaRows.every((row) => row.length === expectedColumns);
+    if (isConsistent) return commaRows;
+  }
+
+  const semicolonRows = parseWithDelimiter(";");
+  if (semicolonRows.length >= 2) {
+    const expectedColumns = semicolonRows[0].length;
+    const isConsistent = expectedColumns >= 2 && semicolonRows.every((row) => row.length === expectedColumns);
+    if (isConsistent) return semicolonRows;
+  }
+
+  const spacedRows = lines
+    .map((line) => line.split(/\s{2,}/).map((cell) => String(cell || "").trim()).filter(Boolean))
+    .filter((row) => row.length >= 2);
+  if (spacedRows.length >= 2) {
+    const expectedColumns = spacedRows[0].length;
+    const isConsistent = expectedColumns >= 2 && spacedRows.every((row) => row.length === expectedColumns);
+    if (isConsistent) return spacedRows;
+  }
+
+  return [];
+}
+
+function insertPromptInputText(text = "") {
+  if (!els.promptInput) return;
+  const normalized = String(text || "");
+  const input = els.promptInput;
+  if (typeof input.value === "string") {
+    const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+    const end = Number.isFinite(input.selectionEnd) ? input.selectionEnd : input.value.length;
+    if (typeof input.setRangeText === "function") {
+      input.setRangeText(normalized, start, end, "end");
+    } else {
+      input.value = `${input.value.slice(0, start)}${normalized}${input.value.slice(end)}`;
+      const caret = start + normalized.length;
+      input.selectionStart = caret;
+      input.selectionEnd = caret;
+    }
+    return;
+  }
+  input.focus();
+  try {
+    document.execCommand("insertText", false, normalized);
+  } catch (_) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) {
+      input.textContent = `${input.textContent || ""}${normalized}`;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(normalized));
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
+
+function insertPromptInputHtml(html = "") {
+  if (!els.promptInput) return;
+  const normalized = String(html || "").trim();
+  if (!normalized) return;
+  if (typeof els.promptInput.value === "string") {
+    insertPromptInputText(normalized.replace(/<[^>]+>/g, " "));
+    return;
+  }
+  els.promptInput.focus();
+  try {
+    document.execCommand("insertHTML", false, normalized);
+  } catch (_) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) {
+      els.promptInput.innerHTML += normalized;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const fragment = range.createContextualFragment(normalized);
+    range.insertNode(fragment);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
+
+function buildHtmlTableFromRows(rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell || "").trim()))
+    .filter((row) => row.some(Boolean));
+  if (!normalizedRows.length) return "";
+  const head = normalizedRows[0];
+  const body = normalizedRows.slice(1);
+  return [
+    "<table><thead><tr>",
+    ...head.map((cell) => `<th>${escapeHtml(cell)}</th>`),
+    "</tr></thead><tbody>",
+    ...body.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`),
+    "</tbody></table>"
+  ].join("");
+}
+
+function normalizeVideoTableHeaderKey(label = "") {
+  const clean = String(label || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "";
+  if (/(tiempo|duracion|duration|time)/.test(clean)) return "time";
+  if (/(guion|gui[oó]n|voz en off|voice.?over|narracion|narration)/.test(clean)) return "script";
+  if (/(descripcion de escena|descripci[oó]n de escena|scene description|descripcion escena)/.test(clean)) return "sceneDescription";
+  if (/(texto en pantalla|on.?screen|caption|subt[ií]tulo)/.test(clean)) return "onScreenText";
+  if (/(transicion|transition|corte|fade|barrido)/.test(clean)) return "transition";
+  if (/(elemento visual|recurso visual|notas visuales|visual notes|visual|imagen|fondo)/.test(clean)) return "visual";
+  return "";
+}
+
+function normalizeEducationalVideoTableRows(rows = []) {
+  const sourceRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => (
+      Array.isArray(row)
+        ? row.map((cell) => String(cell || "").replace(/\s+/g, " ").trim())
+        : [
+          String(row?.time || "").replace(/\s+/g, " ").trim(),
+          String(row?.script || "").replace(/\s+/g, " ").trim(),
+          String(row?.sceneDescription || "").replace(/\s+/g, " ").trim(),
+          String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
+          String(row?.transition || "").replace(/\s+/g, " ").trim(),
+          String(row?.visual || "").replace(/\s+/g, " ").trim()
+        ]
+    ))
+    .filter((row) => row.some(Boolean));
+  if (!sourceRows.length) return [];
+  const headerKeys = sourceRows[0].map((cell) => normalizeVideoTableHeaderKey(cell));
+  const hasKnownHeader = headerKeys.filter(Boolean).length >= 2;
+  const dataRows = hasKnownHeader ? sourceRows.slice(1) : sourceRows;
+  return dataRows
+    .map((row) => {
+      const byIndex = {
+        time: row[0] || "",
+        script: row[1] || "",
+        sceneDescription: row[2] || "",
+        onScreenText: row[3] || "",
+        transition: row[4] || "",
+        visual: row[5] || ""
+      };
+      if (row.length === 4) {
+        byIndex.transition = row[2] || byIndex.transition || "";
+        byIndex.visual = row[3] || byIndex.visual || "";
+      }
+      if (hasKnownHeader) {
+        headerKeys.forEach((key, index) => {
+          if (!key) return;
+          byIndex[key] = row[index] || byIndex[key] || "";
+        });
+      }
+      const sceneDescription = String(byIndex.sceneDescription || "").trim();
+      const visual = String(byIndex.visual || "").trim();
+      return {
+        time: String(byIndex.time || "").trim() || "00:00-00:08",
+        script: String(byIndex.script || "").trim() || "Definir voz en off.",
+        sceneDescription: sceneDescription || visual || "Definir descripción de escena.",
+        onScreenText: String(byIndex.onScreenText || "").trim(),
+        transition: String(byIndex.transition || "").trim() || "Corte limpio",
+        visual: visual || sceneDescription || "Definir elemento visual."
+      };
+    })
+    .filter((row) => row.script || row.sceneDescription || row.visual);
+}
+
+function buildEducationalVideoTableHtml(rows = []) {
+  const normalizedRows = normalizeEducationalVideoTableRows(rows.map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual]));
+  if (!normalizedRows.length) return "";
+  const body = normalizedRows
+    .map((row) => `
+      <tr>
+        <td>${escapeHtml(row.time)}</td>
+        <td>${escapeHtml(row.script)}</td>
+        <td>${escapeHtml(row.sceneDescription)}</td>
+        <td>${escapeHtml(row.onScreenText || "")}</td>
+        <td>${escapeHtml(row.transition)}</td>
+        <td>${escapeHtml(row.visual)}</td>
+      </tr>
+    `)
+    .join("");
+  return `
+    <p><strong>Tabla base de guión de video educativo</strong></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Tiempo</th>
+          <th>Guion</th>
+          <th>Descripción de escena</th>
+          <th>Texto en pantalla</th>
+          <th>Transición</th>
+          <th>Elemento visual</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  `.trim();
+}
+
+function buildEducationalVideoTableMarkdown(rows = []) {
+  const normalizedRows = normalizeEducationalVideoTableRows(rows.map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual]));
+  if (!normalizedRows.length) return "";
+  const head = "| Tiempo | Guion | Descripción de escena | Texto en pantalla | Transición | Elemento visual |\n| --- | --- | --- | --- | --- | --- |";
+  const body = normalizedRows.map((row) => (
+    `| ${toMarkdownTableCell(row.time)} | ${toMarkdownTableCell(row.script)} | ${toMarkdownTableCell(row.sceneDescription)} | ${toMarkdownTableCell(row.onScreenText || "")} | ${toMarkdownTableCell(row.transition)} | ${toMarkdownTableCell(row.visual)} |`
+  )).join("\n");
+  return `${head}\n${body}`;
+}
+
+async function structureEducationalVideoTableWithGemini(prompt = "", sessionSnapshot = null) {
+  const cleanPrompt = String(prompt || "").trim();
+  if (!cleanPrompt) return [];
+  const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
+  const responseSchema = {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            tiempo: { type: "string" },
+            guion: { type: "string" },
+            descripcionEscena: { type: "string" },
+            textoPantalla: { type: "string" },
+            transicion: { type: "string" },
+            elementoVisual: { type: "string" }
+          },
+          required: ["tiempo", "guion", "descripcionEscena", "textoPantalla", "transicion", "elementoVisual"]
+        }
+      }
+    },
+    required: ["rows"]
+  };
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: "Eres un editor técnico de guión de video educativo. Estructura la entrada del usuario en filas tabulares con columnas exactas: tiempo, guion, descripcionEscena, textoPantalla, transicion, elementoVisual. En textoPantalla escribe una frase clave corta (keywords entendibles), no repitas descripcionEscena ni elementoVisual y evita frases largas. No inventes narrativas largas; solo organiza y normaliza. Responde solo JSON válido."
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          conversationContext ? `Conversación reciente:\n${conversationContext}` : "",
+          `Entrada del usuario para estructurar tabla:\n${cleanPrompt}`
+        ].filter(Boolean).join("\n\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema
+    }
+  };
+  const data = await authFetchJson("/api/gemini/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      model: els.scriptModelSelect.value,
+      payload
+    })
+  });
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  const parsed = JSON.parse(rawText);
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  return normalizeEducationalVideoTableRows(
+    rows.map((row) => [row?.tiempo, row?.guion, row?.descripcionEscena, row?.textoPantalla, row?.transicion, row?.elementoVisual])
+  );
+}
+
+async function prepareVideoPromptPreviewForUser(promptText = "", promptHtml = "", sessionSnapshot = null) {
+  const htmlRows = parseHtmlTableToRows(promptHtml);
+  const textRows = parsePlainTextTableToRows(promptText);
+  const localRows = normalizeEducationalVideoTableRows(htmlRows.length ? htmlRows : textRows);
+  let rows = localRows;
+  try {
+    const inputForGemini = localRows.length
+      ? buildEducationalVideoTableMarkdown(localRows)
+      : String(promptText || "");
+    const geminiRows = await structureEducationalVideoTableWithGemini(inputForGemini, sessionSnapshot);
+    if (geminiRows.length) {
+      if (localRows.length) {
+        rows = geminiRows.map((row, index) => {
+          const localRow = localRows[index] || null;
+          if (!localRow) return row;
+          return {
+            time: String(localRow.time || row.time || "").trim() || "00:00-00:08",
+            script: String(localRow.script || row.script || "").trim() || "Definir voz en off.",
+            sceneDescription: String(localRow.sceneDescription || row.sceneDescription || row.visual || "").trim() || "Definir descripción de escena.",
+            onScreenText: String(localRow.onScreenText || row.onScreenText || "").trim(),
+            transition: String(localRow.transition || row.transition || "").trim() || "Corte limpio",
+            visual: String(localRow.visual || row.visual || row.sceneDescription || "").trim() || "Definir elemento visual."
+          };
+        });
+      } else {
+        rows = geminiRows;
+      }
+    }
+  } catch (_) {
+    // fallback local
+  }
+  rows = normalizeEducationalVideoTableRows(
+    rows.map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual])
+  ).map((row) => ({
+    ...row,
+    onScreenText: buildOnScreenText(row.onScreenText || "", {
+      voiceOver: row.script || "",
+      sceneDescription: row.sceneDescription || "",
+      visual: row.visual || ""
+    })
+  }));
+  try {
+    const refinedRows = await enhanceEducationalVideoOnScreenTextWithGemini(rows, sessionSnapshot);
+    if (Array.isArray(refinedRows) && refinedRows.length) {
+      rows = refinedRows;
+    }
+  } catch (_) {
+    // fallback local
+  }
+  if (!rows.length) {
+    return {
+      userMessageText: promptText,
+      userMessageHtml: promptHtml,
+      generationPrompt: promptText
+    };
+  }
+  const tableMarkdown = buildEducationalVideoTableMarkdown(rows);
+  return {
+    userMessageText: `Tabla base de guión de video educativo:\n${tableMarkdown}`,
+    userMessageHtml: buildEducationalVideoTableHtml(rows),
+    generationPrompt: [
+      String(promptText || "").trim(),
+      "Usa esta tabla base estructurada para construir el guión final:",
+      tableMarkdown
+    ].filter(Boolean).join("\n\n")
+  };
+}
+
+function handlePromptInputPaste(event) {
+  if (!els.promptInput) return;
+  const clipboardData = event?.clipboardData || window.clipboardData;
+  if (!clipboardData) return;
+  const html = clipboardData.getData("text/html");
+  const plainText = clipboardData.getData("text/plain")
+    || clipboardData.getData("text")
+    || clipboardData.getData("Text")
+    || "";
+  if (/<table[\s>]/i.test(html || "")) {
+    window.setTimeout(autoResizePrompt, 0);
+    return;
+  }
+  const htmlRows = parseHtmlTableToRows(html);
+  const plainRows = parsePlainTextTableToRows(plainText);
+  const rows = htmlRows.length ? htmlRows : plainRows;
+  if (!rows.length) return;
+  const htmlTable = buildHtmlTableFromRows(rows);
+  if (!htmlTable) return;
+  event.preventDefault();
+  insertPromptInputHtml(htmlTable);
+  autoResizePrompt();
 }
 
 function renderSessions() {
@@ -11150,8 +12592,9 @@ function render() {
   ensureSession();
   const session = getActiveSession();
   if (!session) return;
+  document.title = getPanelModeCopy(session).videoMode ? "Snoopy Video Creator Creativo" : "Snoopy Podcast Creator";
   syncPanelMusicStateFromSession(session);
-  els.promptInput.value = session.prompt || "";
+  setPromptInputContent(session.prompt || "", { html: session.promptHtml || "" });
   renderChat(session);
   renderScript(session);
   syncGlobalConfigPanel(session);
@@ -11192,8 +12635,9 @@ function splitTextIntoSentences(text = "") {
 }
 
 function enforceVideoSceneRows(rows = [], options = {}) {
-  const minWords = Math.max(1, Number(options?.minWords) || 10);
-  const maxWords = Math.max(minWords, Number(options?.maxWords) || 15);
+  const targetDialogueSec = Math.max(1, Number(options?.targetDialogueSec) || VIDEO_DIALOGUE_MAX_SEC);
+  const splitLongSentenceSec = Math.max(targetDialogueSec + 0.8, Number(options?.splitLongSentenceSec) || (targetDialogueSec + 0.8));
+  const maxWordsPerChunk = Math.max(6, Math.round(targetDialogueSec * SPEECH_WORDS_PER_SEC));
   const output = [];
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const speaker = String(row?.speaker || "").trim() || "Host A";
@@ -11202,54 +12646,39 @@ function enforceVideoSceneRows(rows = [], options = {}) {
     const notes = String(row?.notes || "").trim();
     const sentences = splitTextIntoSentences(row?.text || "");
     if (!sentences.length) return;
-    let bucket = [];
-    let bucketWords = 0;
     let firstChunkForRow = true;
-    const flush = (keepMedia = false) => {
-      if (!bucket.length) return;
-      const text = bucket.join(" ").replace(/\s+/g, " ").trim();
+    const pushScene = (text = "", keepMedia = false) => {
+      const cleanText = ensureCompleteSentence(text);
+      if (!cleanText) return;
       output.push({
         id: makeId("row"),
         speaker,
         expression,
-        durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC)),
+        durationSec: VIDEO_SCENE_MAX_SEC,
         mediaCue: keepMedia ? mediaCue : "Sin media",
-        text,
+        text: cleanText,
         notes,
         disfluencyConfig: normalizeDisfluencyConfig(row?.disfluencyConfig || {})
       });
-      bucket = [];
-      bucketWords = 0;
       firstChunkForRow = false;
     };
-    sentences.forEach((sentence, index) => {
-      const words = countWords(sentence);
-      if (!bucket.length) {
-        bucket.push(sentence);
-        bucketWords = words;
-        if (bucketWords >= minWords && bucketWords <= maxWords) {
-          flush(firstChunkForRow);
-        }
+    sentences.forEach((sentence) => {
+      const cleanSentence = ensureCompleteSentence(sentence);
+      if (!cleanSentence) return;
+      const sentenceSec = estimateSpeechDurationSec(cleanSentence);
+      if (sentenceSec <= splitLongSentenceSec) {
+        pushScene(cleanSentence, firstChunkForRow);
         return;
       }
-      const nextWords = bucketWords + words;
-      if (nextWords <= maxWords) {
-        bucket.push(sentence);
-        bucketWords = nextWords;
-        if (bucketWords >= minWords) {
-          flush(firstChunkForRow);
-        }
+      const chunks = splitLongSentenceIntoChunks(cleanSentence, maxWordsPerChunk);
+      if (!chunks.length) {
+        pushScene(cleanSentence, firstChunkForRow);
         return;
       }
-      // Si excede, cerramos la escena actual completa y continuamos con la siguiente frase.
-      flush(firstChunkForRow);
-      bucket.push(sentence);
-      bucketWords = words;
-      if (bucketWords >= minWords && bucketWords <= maxWords) {
-        flush(false);
-      }
+      chunks.forEach((chunk, chunkIndex) => {
+        pushScene(chunk, firstChunkForRow && chunkIndex === 0);
+      });
     });
-    flush(firstChunkForRow);
   });
   return output;
 }
@@ -11400,6 +12829,7 @@ function coerceRowsToHosts(rows = [], hosts = []) {
 }
 
 function applyScriptGenerationConstraints(script = {}, constraints = {}, session = null) {
+  const videoMode = constraints?.videoMode === true;
   const hasHostCount = Number.isFinite(Number(constraints?.hostCount)) && Number(constraints.hostCount) > 0;
   const hasSceneCount = Number.isFinite(Number(constraints?.sceneCount)) && Number(constraints.sceneCount) > 0;
   const hasWordBounds = Number.isFinite(Number(constraints?.minWords)) || Number.isFinite(Number(constraints?.maxWords));
@@ -11415,16 +12845,23 @@ function applyScriptGenerationConstraints(script = {}, constraints = {}, session
   let rows = Array.isArray(script?.rows) ? script.rows.map((row) => ({ ...row })) : [];
   rows = coerceRowsToHosts(rows, forcedHosts);
   if (hasWordBounds) {
-    rows = enforceSceneWordBounds(rows, {
-      minWords: Number(constraints?.minWords) || 1,
-      maxWords: Number(constraints?.maxWords) || 260
-    });
+    rows = videoMode
+      ? enforceVideoSceneRows(rows, {
+        minWords: Number(constraints?.minWords) || 12,
+        maxWords: Number(constraints?.maxWords) || 15
+      })
+      : enforceSceneWordBounds(rows, {
+        minWords: Number(constraints?.minWords) || 1,
+        maxWords: Number(constraints?.maxWords) || 260
+      });
   }
   if (hasSceneCount) {
-    rows = enforceExactSceneCount(rows, Number(constraints.sceneCount), {
-      minWords: Number(constraints?.minWords) || 1,
-      maxWords: Number(constraints?.maxWords) || 260
-    });
+    rows = videoMode
+      ? rows.slice(0, Math.max(1, Number(constraints.sceneCount) || rows.length))
+      : enforceExactSceneCount(rows, Number(constraints.sceneCount), {
+        minWords: Number(constraints?.minWords) || 1,
+        maxWords: Number(constraints?.maxWords) || 260
+      });
   }
   rows = coerceRowsToHosts(rows, forcedHosts);
   return normalizeScriptPayload({
@@ -11530,18 +12967,46 @@ function scriptNeedsCompaction(script = {}) {
 }
 
 function compactScriptForPanelConnection(script = {}, session = null) {
+  const inferredVideoMode = Boolean(
+    script?.videoMode === true
+    || isEducationalVideoMode(session)
+    || (Array.isArray(script?.rows) && script.rows.some((row) => (
+      hasVideoSceneMetadata(row)
+      || String(row?.voiceOverText || "").trim()
+      || String(row?.sceneDescription || "").trim()
+      || String(row?.onScreenText || "").trim()
+      || String(row?.visualNotes || "").trim()
+    )))
+  );
   const normalized = normalizeScriptPayload(script || {}, {
     session,
     disfluencyDefaults: script?.disfluencyDefaults || session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG,
-    skipOptimize: true
+    skipOptimize: true,
+    videoMode: inferredVideoMode
   });
   if (Array.isArray(normalized?.rows)) {
-    normalized.rows = normalized.rows.map((row) => {
+    normalized.rows = normalized.rows.map((row, index) => {
+      const videoMode = isEducationalVideoMode(normalized) || isEducationalVideoMode(session) || row?.videoMode === true;
+      const scenePrompt = videoMode
+        ? rewriteScenarioPromptForEducationalVideo(
+          String(row?.scenePrompt || row?.sceneDescription || "").replace(/\s+/g, " ").trim()
+          || `Escena didáctica ${index + 1}: apoyo visual limpio y pedagógico en 16:9.`
+        )
+        : sanitizeSpeakerMentionsInDialogue(String(row?.scenePrompt || "").replace(/\s+/g, " ").trim(), session, normalized.hosts);
+      const imagePrompts = normalizeVideoImagePrompts(row.imagePrompts || []).map((prompt) => {
+        const sanitizedPrompt = sanitizeSpeakerMentionsInDialogue(prompt, session, normalized.hosts);
+        return videoMode ? rewriteScenarioPromptForEducationalVideo(sanitizedPrompt) : sanitizedPrompt;
+      });
       const sanitizedRow = {
         ...row,
         text: sanitizeSpeakerMentionsInDialogue(row.text, session, normalized.hosts),
         notes: sanitizeSpeakerMentionsInDialogue(row.notes, session, normalized.hosts),
-        videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim()
+        transition: String(row?.transition || row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim(),
+        videoDirective: videoMode
+          ? rewriteScenarioPromptForEducationalVideo(String(row?.videoDirective || "").replace(/\s+/g, " ").trim())
+          : String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+        scenePrompt,
+        imagePrompts
       };
       sanitizedRow.disfluencyConfig = normalizeDisfluencyConfig(
         sanitizedRow?.disfluencyConfig || script?.disfluencyDefaults || session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG
@@ -11619,6 +13084,18 @@ function normalizeScriptPayload(raw = {}, options = {}) {
   const fallbackRows = createDefaultRows();
   const optionHosts = Array.isArray(options?.hosts) ? options.hosts : [];
   const sourceSession = options?.session || null;
+  const resolvedVideoContentType = (() => {
+    const explicitType = normalizeVideoContentType(
+      options?.videoContentType
+      || raw?.videoContentType
+      || sourceSession?.script?.videoContentType
+      || sourceSession?.videoContentType
+    );
+    if (explicitType !== "none") return explicitType;
+    if (options?.videoMode === true || raw?.videoMode === true) return "educational";
+    return "none";
+  })();
+  const videoMode = resolvedVideoContentType === "educational";
   const defaultDisfluencyConfig = normalizeDisfluencyConfig(
     options?.disfluencyDefaults || raw?.disfluencyDefaults || sourceSession?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG
   );
@@ -11633,7 +13110,9 @@ function normalizeScriptPayload(raw = {}, options = {}) {
     : optionHosts
       .map((host) => normalizeSpeakerLabel(host, ""))
       .filter(Boolean);
-  const normalizedHosts = hosts.length ? hosts : ["Host A", "Host B"];
+  const normalizedHosts = videoMode
+    ? ["Narrador"]
+    : (hosts.length ? hosts : ["Host A", "Host B"]);
   const normalizedNameMap = buildSpeakerNameMap(normalizedHosts, sourceNameMap);
   const aliasMap = buildSpeakerAliasMap(normalizedHosts, { nameMap: normalizedNameMap });
   const baseRows = Array.isArray(raw.rows) && raw.rows.length
@@ -11658,13 +13137,20 @@ function normalizeScriptPayload(raw = {}, options = {}) {
         : rawText;
       return {
         id: makeId("row"),
-        speaker: normalizedSpeaker,
+        speaker: videoMode ? "Narrador" : normalizedSpeaker,
         expression: EXPRESSIONS.includes(row?.expression) ? row.expression : "Neutral",
         durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC)),
         mediaCue: MEDIA_CUES.includes(row?.mediaCue) ? row.mediaCue : "Sin media",
         text: sanitizeSpeakerMentionsInDialogue(normalizedText || fallbackRows[index % fallbackRows.length].text, sourceSession, normalizedHosts),
         notes: sanitizeSpeakerMentionsInDialogue(String(row?.notes || "").trim(), sourceSession, normalizedHosts),
+        voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
+        sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+        onScreenText: String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
+        transition: String(row?.transition || row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim(),
+        visualNotes: String(row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim(),
         videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+        scenePrompt: String(row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+        imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
         disfluencyConfig: normalizeDisfluencyConfig(
           row?.disfluencyConfig || defaultDisfluencyConfig || fallbackRows[index % fallbackRows.length]?.disfluencyConfig || {}
         )
@@ -11678,12 +13164,18 @@ function normalizeScriptPayload(raw = {}, options = {}) {
       minSec: SHORT_SCENE_MIN_SEC,
       hosts: normalizedHosts
     });
+  const normalizedRows = videoMode
+    ? rows.map((row, index) => normalizeCreativeRow(row, index))
+    : rows;
 
   return {
-    episodeTitle: String(raw.episodeTitle || "Podcast desde una idea").trim(),
+    episodeTitle: String(raw.episodeTitle || (videoMode ? "Video educativo desde una idea" : "Podcast desde una idea")).trim(),
     summary: String(raw.summary || "").trim(),
+    videoContentType: resolvedVideoContentType === "none" ? null : resolvedVideoContentType,
+    videoMode,
     hosts: normalizedHosts,
-    rows
+    rows: normalizedRows,
+    creativeVideoConfig: normalizeCreativeVideoConfig(raw?.creativeVideoConfig || sourceSession?.creativeVideoConfig || {})
   };
 }
 
@@ -11697,13 +13189,20 @@ function buildChatContext(session = {}) {
 
 function buildScriptContext(script = {}) {
   const rows = Array.isArray(script.rows) ? script.rows : [];
+  const videoType = resolveVideoContentType({ script });
+  const videoMode = videoType === "educational";
   return [
+    `Tipo de contenido: ${videoMode ? "Video educativo" : (videoType === "videopodcast" ? "Video podcast" : "Podcast")}`,
     `Titulo actual: ${String(script.episodeTitle || "Sin titulo").trim()}`,
     `Resumen actual: ${String(script.summary || "Sin resumen").trim()}`,
-    `Hosts actuales: ${Array.isArray(script.hosts) && script.hosts.length ? script.hosts.join(", ") : "Host A, Host B"}`,
+    videoMode
+      ? `Voz en off global actual: ${String(script?.creativeVideoConfig?.globalVoiceName || getCreativeVideoConfig()?.globalVoiceName || "Kore")}`
+      : `Hosts actuales: ${Array.isArray(script.hosts) && script.hosts.length ? script.hosts.join(", ") : "Host A, Host B"}`,
     "Guion actual:",
     rows.map((row, index) => (
-      `${index + 1}. [${row.speaker} | ${row.expression} | ${row.durationSec}s | ${row.mediaCue}] ${row.text}${row.notes ? ` (${row.notes})` : ""}`
+      videoMode
+        ? `${index + 1}. [${row.durationSec}s] VO: ${String(row?.voiceOverText || row?.text || "").trim()}${String(row?.sceneDescription || row?.scenePrompt || "").trim() ? `\n   Escena: ${String(row?.sceneDescription || row?.scenePrompt || "").trim()}` : ""}${String(row?.transition || "").trim() ? `\n   Transición: ${String(row?.transition || "").trim()}` : ""}${String(row?.onScreenText || "").trim() ? `\n   Texto en pantalla: ${String(row?.onScreenText || "").trim()}` : ""}${String(row?.visualNotes || row?.notes || "").trim() ? `\n   Notas visuales: ${String(row?.visualNotes || row?.notes || "").trim()}` : ""}`
+        : `${index + 1}. [${row.speaker} | ${row.expression} | ${row.durationSec}s | ${row.mediaCue}] ${row.text}${row.notes ? ` (${row.notes})` : ""}${row.scenePrompt ? `\n   Escena visual: ${row.scenePrompt}` : ""}${row.videoDirective ? `\n   Dirección manual: ${row.videoDirective}` : ""}${normalizeVideoImagePrompts(row.imagePrompts || []).length ? `\n   Prompts de imagen: ${normalizeVideoImagePrompts(row.imagePrompts || []).join(" || ")}` : ""}`
     )).join("\n")
   ].join("\n");
 }
@@ -11831,6 +13330,521 @@ function extractRequestedSceneWordRange(prompt = "") {
   return { minWords: boundedMin, maxWords: boundedMax };
 }
 
+function parseSecondsToken(value = "") {
+  const token = String(value || "").trim().toLowerCase().replace(/[^\d:.,]/g, "");
+  if (!token) return 0;
+  const normalized = token.replace(",", ".");
+  if (normalized.includes(":")) {
+    const parts = normalized.split(":").map((part) => Number(part) || 0);
+    if (parts.some((part) => !Number.isFinite(part))) return 0;
+    if (parts.length === 3) return Math.max(0, (parts[0] * 3600) + (parts[1] * 60) + parts[2]);
+    if (parts.length === 2) return Math.max(0, (parts[0] * 60) + parts[1]);
+  }
+  return Math.max(0, Number(normalized) || 0);
+}
+
+function parseDurationSecFromRangeLabel(value = "", fallback = SHORT_SCENE_MAX_SEC) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(fallback) || SHORT_SCENE_MAX_SEC));
+  const rangeMatch = text.match(/(\d[\d:.,]*)\s*(?:-|–|—|a|hasta)\s*(\d[\d:.,]*)/i);
+  if (rangeMatch) {
+    const start = parseSecondsToken(rangeMatch[1]);
+    const end = parseSecondsToken(rangeMatch[2]);
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(end - start)));
+    }
+  }
+  const singleMatch = text.match(/(\d[\d:.,]*)\s*(?:s|seg|secs|segundos?)?/i);
+  if (singleMatch) {
+    const duration = parseSecondsToken(singleMatch[1]);
+    if (Number.isFinite(duration) && duration > 0) {
+      return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(duration)));
+    }
+  }
+  return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(fallback) || SHORT_SCENE_MAX_SEC));
+}
+
+function isLikelyCreativeVideoTableHeader(header = []) {
+  const labels = (Array.isArray(header) ? header : []).map((cell) => String(cell || "").toLowerCase());
+  const hasTime = labels.some((label) => /tiempo|duraci[oó]n|time/.test(label));
+  const hasScript = labels.some((label) => /gui[oó]n|voz en off|narraci[oó]n|guion|voice.?over/.test(label));
+  const hasVisual = labels.some((label) => /elemento visual|visual|escena|descripci[oó]n|imagen/.test(label));
+  return hasTime && hasScript && hasVisual;
+}
+
+function extractCreativeVideoTableColumns(header = []) {
+  const labels = (Array.isArray(header) ? header : []).map((cell) => String(cell || "").toLowerCase());
+  const findIndex = (regexp) => labels.findIndex((label) => regexp.test(label));
+  return {
+    time: findIndex(/tiempo|duraci[oó]n|time/),
+    script: findIndex(/gui[oó]n|voz en off|narraci[oó]n|guion|voice.?over/),
+    transition: findIndex(/transici[oó]n|transicion|transition/),
+    visual: findIndex(/elemento visual|escena|visual|descripci[oó]n|imagen/),
+    onScreenText: findIndex(/texto en pantalla|on.?screen|subt[ií]tulo|caption/)
+  };
+}
+
+function deriveMediaCueFromTransition(transition = "") {
+  const clean = String(transition || "").toLowerCase();
+  if (!clean) return "Sin media";
+  if (clean.includes("cta") || clean.includes("final")) return "CTA final";
+  if (clean.includes("trans")) return "Transición";
+  if (clean.includes("intro")) return "Intro musical";
+  if (clean.includes("efecto")) return "Efecto sutil";
+  return "Sin media";
+}
+
+function normalizeSimpleText(value = "") {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeComparableCreativeText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeOnScreenTextFromVoiceOver(text = "", options = {}) {
+  const maxWords = Math.max(4, Number(options?.maxWords) || 8);
+  const source = normalizeSimpleText(text)
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[¡!¿?"“”]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!source) return "";
+  const firstSentence = String((source.match(/[^.!?]+/) || [source])[0] || source).trim();
+  const words = firstSentence.split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  const picked = words.slice(0, maxWords);
+  const summary = picked.join(" ").replace(/[.,;:!?]+$/g, "").trim();
+  return summary;
+}
+
+async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionSnapshot = null) {
+  const normalizedRows = normalizeEducationalVideoTableRows(
+    (Array.isArray(rows) ? rows : []).map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual])
+  );
+  if (!normalizedRows.length) return normalizedRows;
+  const responseSchema = {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            index: { type: "number" },
+            onScreenText: { type: "string" }
+          },
+          required: ["index", "onScreenText"]
+        }
+      }
+    },
+    required: ["rows"]
+  };
+  const compactRows = normalizedRows.map((row, index) => ({
+    index,
+    guion: row.script,
+    descripcionEscena: row.sceneDescription,
+    transicion: row.transition,
+    elementoVisual: row.visual,
+    textoPantallaActual: row.onScreenText
+  }));
+  const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: "Eres editor de guión técnico de video educativo. Reescribe SOLO texto en pantalla por fila con estilo claro y coherente. Debe ser una frase breve de 4 a 9 palabras, comprensible para estudiantes, y NO debe duplicar literalmente la descripción de escena, transición ni elemento visual. Responde solo JSON válido."
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          conversationContext ? `Conversación reciente:\n${conversationContext}` : "",
+          `Filas a corregir:\n${JSON.stringify(compactRows)}`
+        ].filter(Boolean).join("\n\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema
+    }
+  };
+  const data = await authFetchJson("/api/gemini/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      model: els.scriptModelSelect.value,
+      payload
+    })
+  });
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  const parsed = JSON.parse(rawText);
+  const mapped = new Map();
+  (Array.isArray(parsed?.rows) ? parsed.rows : []).forEach((item) => {
+    const index = Number(item?.index);
+    if (!Number.isFinite(index) || index < 0) return;
+    mapped.set(index, String(item?.onScreenText || "").trim());
+  });
+  return normalizedRows.map((row, index) => ({
+    ...row,
+    onScreenText: buildOnScreenText(mapped.get(index) || row.onScreenText || "", {
+      voiceOver: row.script || "",
+      sceneDescription: row.sceneDescription || "",
+      visual: row.visual || ""
+    })
+  }));
+}
+
+function buildOnScreenText(value = "", options = {}) {
+  const explicit = normalizeSimpleText(value);
+  const voiceOver = normalizeSimpleText(options?.voiceOver || options?.voiceOverText || "");
+  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
+  const visual = normalizeSimpleText(options?.visual || options?.visualNotes || "");
+  const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual);
+  if (!explicit) return fallback;
+  if (looksLikeTransitionOnly(explicit)) return fallback;
+  const explicitNorm = normalizeComparableCreativeText(explicit);
+  const visualNorm = normalizeComparableCreativeText(visual);
+  const sceneNorm = normalizeComparableCreativeText(sceneDescription);
+  if (explicitNorm && (explicitNorm === visualNorm || explicitNorm === sceneNorm)) {
+    return fallback || explicit;
+  }
+  if (countWords(explicit) > 12) {
+    return summarizeOnScreenTextFromVoiceOver(explicit) || fallback || explicit;
+  }
+  return explicit;
+}
+
+function looksLikeTransitionOnly(text = "") {
+  const clean = normalizeSimpleText(text).toLowerCase();
+  if (!clean) return true;
+  if (clean.length <= 24) {
+    if (/^(corte|corte rápido|corte rapido|disolvencia|fundido|barrido|zoom|paneo|fade|match cut|jump cut)/.test(clean)) {
+      return true;
+    }
+  }
+  return /\b(corte|disolvencia|fundido|barrido|zoom|paneo|fade|transici[oó]n)\b/.test(clean) && clean.length <= 36;
+}
+
+function ensureCompleteSentence(text = "") {
+  const clean = normalizeSimpleText(text);
+  if (!clean) return "";
+  if (/[.!?]$/.test(clean)) return clean;
+  return `${clean}.`;
+}
+
+function splitLongSentenceIntoChunks(sentence = "", maxWords = 14) {
+  const source = normalizeSimpleText(sentence);
+  if (!source) return [];
+  const safeMaxWords = Math.max(4, Number(maxWords) || 14);
+  const words = source.split(/\s+/).filter(Boolean);
+  if (words.length <= safeMaxWords) {
+    return [ensureCompleteSentence(source)];
+  }
+  const clauses = source.split(/(?<=[,;:])\s+/).map((item) => normalizeSimpleText(item)).filter(Boolean);
+  if (clauses.length > 1) {
+    const output = [];
+    let bucket = "";
+    let bucketWords = 0;
+    clauses.forEach((clause) => {
+      const clauseWords = countWords(clause);
+      if (!bucket) {
+        bucket = clause;
+        bucketWords = clauseWords;
+        return;
+      }
+      if ((bucketWords + clauseWords) <= safeMaxWords) {
+        bucket = `${bucket} ${clause}`.replace(/\s+/g, " ").trim();
+        bucketWords += clauseWords;
+        return;
+      }
+      output.push(ensureCompleteSentence(bucket));
+      bucket = clause;
+      bucketWords = clauseWords;
+    });
+    if (bucket) output.push(ensureCompleteSentence(bucket));
+    if (output.length) return output;
+  }
+  return splitByMaxWords(source, safeMaxWords)
+    .map((chunk) => ensureCompleteSentence(chunk))
+    .filter(Boolean);
+}
+
+function splitNarrationIntoCompleteScenes(text = "", options = {}) {
+  const source = normalizeSimpleText(text);
+  if (!source) return [];
+  const targetDialogueSec = Math.max(1, Number(options?.targetDialogueSec) || VIDEO_DIALOGUE_MAX_SEC);
+  const splitLongSentenceSec = Math.max(targetDialogueSec + 0.8, Number(options?.splitLongSentenceSec) || (targetDialogueSec + 0.8));
+  const maxWordsPerChunk = Math.max(6, Math.round(targetDialogueSec * SPEECH_WORDS_PER_SEC));
+  const sentences = splitTextIntoSentences(source);
+  if (!sentences.length) {
+    return splitLongSentenceIntoChunks(source, maxWordsPerChunk);
+  }
+  const output = [];
+  sentences.forEach((sentence) => {
+    const cleanSentence = ensureCompleteSentence(sentence);
+    if (!cleanSentence) return;
+    if (estimateSpeechDurationSec(cleanSentence) <= splitLongSentenceSec) {
+      output.push(cleanSentence);
+      return;
+    }
+    const chunks = splitLongSentenceIntoChunks(cleanSentence, maxWordsPerChunk);
+    if (!chunks.length) {
+      output.push(cleanSentence);
+      return;
+    }
+    output.push(...chunks.map((chunk) => ensureCompleteSentence(chunk)).filter(Boolean));
+  });
+  return output.length ? output : [ensureCompleteSentence(source)];
+}
+
+function buildFallbackSceneDescriptionFromVoiceOver(voiceOver = "", transition = "", index = 0) {
+  const narration = normalizeSimpleText(voiceOver);
+  const transitionHint = normalizeSimpleText(transition);
+  const topic = trimWords(narration || `secuencia ${index + 1}`, 14);
+  const parts = [
+    `Plano didáctico en 16:9 que representa visualmente: ${topic}.`,
+    "Usar recursos gráficos claros (mapa, iconos o texto breve) para reforzar comprensión.",
+    transitionHint ? `Transición sugerida: ${transitionHint}.` : ""
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+function isWeakCreativeSceneDescription(row = {}) {
+  const sceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
+  const transition = normalizeSimpleText(row?.transition || row?.visualNotes || row?.videoDirective || row?.notes || "");
+  if (!sceneDescription) return true;
+  if (looksLikeTransitionOnly(sceneDescription)) return true;
+  if (transition && sceneDescription.toLowerCase() === transition.toLowerCase()) return true;
+  return false;
+}
+
+async function enrichCreativeRowsSceneDescriptionsWithGemini(rows = [], options = {}) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const weakIndexes = sourceRows
+    .map((row, index) => (isWeakCreativeSceneDescription(row) ? index : -1))
+    .filter((index) => index >= 0);
+  if (!weakIndexes.length) return sourceRows;
+
+  const compactRows = sourceRows.map((row, index) => ({
+    index,
+    voiceOverText: normalizeSimpleText(row?.voiceOverText || row?.text || ""),
+    transition: normalizeSimpleText(row?.transition || row?.visualNotes || row?.videoDirective || row?.notes || ""),
+    sceneDescription: normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "")
+  }));
+
+  const responseSchema = {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            index: { type: "number" },
+            sceneDescription: { type: "string" }
+          }
+        }
+      }
+    }
+  };
+
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: "Eres un director visual de videos educativos. Tu tarea es redactar descripciones de escena claras, cinematográficas y pedagógicas. Nunca devuelvas transiciones como descripción de escena. Responde solo JSON válido."
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          "Completa o mejora sceneDescription solo para los índices solicitados.",
+          "Formato esperado por fila: sceneDescription describe qué se ve en cámara (composición, sujeto visual, recurso gráfico, atmósfera).",
+          "No escribas 'corte rápido', 'zoom' o transiciones como descripción principal.",
+          `Indices objetivo: ${weakIndexes.join(", ")}`,
+          `Filas actuales: ${JSON.stringify(compactRows)}`
+        ].join("\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema
+    }
+  };
+
+  const data = await authFetchJson("/api/gemini/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      model: els.scriptModelSelect.value,
+      payload
+    })
+  });
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  const parsed = JSON.parse(rawText);
+  const generatedRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  const byIndex = new Map();
+  generatedRows.forEach((item) => {
+    const index = Number(item?.index);
+    if (!Number.isFinite(index)) return;
+    const value = rewriteScenarioPromptForEducationalVideo(normalizeSimpleText(item?.sceneDescription || ""));
+    if (!value) return;
+    byIndex.set(index, value);
+  });
+
+  return sourceRows.map((row, index) => {
+    const generated = byIndex.get(index);
+    const fallback = buildFallbackSceneDescriptionFromVoiceOver(
+      row?.voiceOverText || row?.text || "",
+      row?.transition || row?.visualNotes || row?.videoDirective || row?.notes || "",
+      index
+    );
+    const resolved = generated || (!isWeakCreativeSceneDescription(row)
+      ? normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "")
+      : fallback);
+    return normalizeCreativeRow({
+      ...row,
+      sceneDescription: resolved,
+      scenePrompt: resolved
+    }, index);
+  });
+}
+
+function buildCreativeVideoScriptFromPromptTable(prompt = "", session = null) {
+  const parsedRows = parsePlainTextTableToRows(prompt);
+  const tableRows = normalizeEducationalVideoTableRows(parsedRows);
+  if (!tableRows.length) return null;
+
+  const creativeRows = tableRows.map((row, index) => {
+    const timeValue = String(row?.time || "").trim();
+    const scriptText = String(row?.script || "").replace(/\s+/g, " ").trim();
+    const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
+    const visual = String(row?.visual || "").replace(/\s+/g, " ").trim();
+    const sceneDescriptionInput = String(row?.sceneDescription || "").replace(/\s+/g, " ").trim();
+    const onScreen = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
+    const fallbackDuration = Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(estimateSpeechDurationSec(scriptText))));
+    const durationSec = parseDurationSecFromRangeLabel(timeValue, fallbackDuration);
+    const seedSceneDescription = sceneDescriptionInput || "";
+    const sceneDescription = (!seedSceneDescription || looksLikeTransitionOnly(seedSceneDescription) || seedSceneDescription.toLowerCase() === transition.toLowerCase())
+      ? buildFallbackSceneDescriptionFromVoiceOver(scriptText, transition, index)
+      : seedSceneDescription;
+    const directiveBase = transition
+      ? `Transición sugerida: ${transition}.`
+      : "Transición sugerida: corte limpio.";
+    return normalizeCreativeRow({
+      id: makeId("row"),
+      durationSec,
+      voiceOverText: scriptText || `Narración de la secuencia ${index + 1}.`,
+      sceneDescription,
+      onScreenText: buildOnScreenText(onScreen || "", {
+        voiceOver: scriptText || "",
+        sceneDescription,
+        visual
+      }),
+      transition: transition || "Sin transición específica.",
+      visualNotes: visual,
+      mediaCue: deriveMediaCueFromTransition(transition),
+      videoDirective: `${directiveBase} Mantener claridad didáctica y ritmo narrativo.`,
+      scenePrompt: sceneDescription,
+      imagePrompts: [visual || sceneDescription]
+    }, index);
+  });
+
+  const topic = trimWords(
+    String(creativeRows[0]?.voiceOverText || creativeRows[0]?.sceneDescription || "Video creativo"),
+    8
+  );
+  const sessionVoice = getCreativeVideoConfig(session)?.globalVoiceName || "Kore";
+  return normalizeScriptPayload({
+    videoMode: true,
+    episodeTitle: `Guion técnico desde tabla: ${topic}`,
+    summary: "Tabla convertida automáticamente al formato del panel creativo.",
+    hosts: ["Narrador"],
+    creativeVideoConfig: normalizeCreativeVideoConfig({
+      ...(session?.creativeVideoConfig || {}),
+      globalVoiceName: sessionVoice,
+      voiceMimeType: "audio/ogg"
+    }),
+    rows: creativeRows
+  }, {
+    session,
+    videoMode: true
+  });
+}
+
+function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null, session = null) {
+  const baseScript = normalizeScriptPayload(script || {}, {
+    session,
+    videoMode: true,
+    skipOptimize: true
+  });
+  const authoritativeRows = Array.isArray(tableScript?.rows) ? tableScript.rows : [];
+  if (!authoritativeRows.length) return baseScript;
+  const generatedRows = Array.isArray(baseScript?.rows) ? baseScript.rows : [];
+  const mergedRows = authoritativeRows.map((tableRow, index) => {
+    const generatedRow = generatedRows[index] || {};
+    return normalizeCreativeRow({
+      ...generatedRow,
+      ...tableRow,
+      durationSec: Number(tableRow?.durationSec || generatedRow?.durationSec || SHORT_SCENE_MAX_SEC),
+      voiceOverText: String(tableRow?.voiceOverText || tableRow?.text || generatedRow?.voiceOverText || generatedRow?.text || "").trim(),
+      sceneDescription: String(tableRow?.sceneDescription || tableRow?.scenePrompt || generatedRow?.sceneDescription || generatedRow?.scenePrompt || "").trim(),
+      transition: String(tableRow?.transition || generatedRow?.transition || generatedRow?.visualNotes || generatedRow?.notes || "").trim(),
+      onScreenText: String(tableRow?.onScreenText || generatedRow?.onScreenText || "").trim(),
+      visual: String(tableRow?.visual || tableRow?.elementoVisual || generatedRow?.visual || "").trim(),
+      visualNotes: String(tableRow?.visual || tableRow?.visualNotes || generatedRow?.visualNotes || generatedRow?.notes || "").trim(),
+      scenePrompt: String(tableRow?.sceneDescription || tableRow?.scenePrompt || generatedRow?.scenePrompt || "").trim(),
+      imagePrompts: Array.isArray(tableRow?.imagePrompts) && tableRow.imagePrompts.length
+        ? tableRow.imagePrompts
+        : [String(tableRow?.visual || "").trim(), ...(generatedRow?.imagePrompts || [])].filter(Boolean)
+    }, index);
+  });
+  return normalizeScriptPayload({
+    ...baseScript,
+    videoMode: true,
+    hosts: ["Narrador"],
+    rows: mergedRows,
+    summary: String(baseScript?.summary || "Guion técnico ajustado desde tabla proporcionada por el usuario.").trim(),
+    creativeVideoConfig: normalizeCreativeVideoConfig({
+      ...(baseScript?.creativeVideoConfig || {}),
+      ...(tableScript?.creativeVideoConfig || {})
+    })
+  }, {
+    session,
+    videoMode: true,
+    skipOptimize: true
+  });
+}
+
+function rewritePromptForEducationalVideo(prompt = "") {
+  const text = String(prompt || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/\bpodcast\b/gi, "video educativo")
+    .replace(/\bpodcasts\b/gi, "videos educativos")
+    .replace(/\bepisodio\b/gi, "módulo")
+    .replace(/\bepisodios\b/gi, "módulos")
+    .replace(/\bhost\b/gi, "presentador")
+    .replace(/\bhosts\b/gi, "presentadores")
+    .replace(/\bconversacional\b/gi, "didáctico");
+}
+
+function rewriteScenarioPromptForEducationalVideo(prompt = "") {
+  const text = String(prompt || "").trim();
+  if (!text) return "";
+  return rewritePromptForEducationalVideo(text)
+    .replace(/\bcabina premium de podcast\b/gi, "entorno visual educativo premium")
+    .replace(/\bcabina de radio premium\b/gi, "entorno visual educativo premium")
+    .replace(/\bestudio editorial premium para podcast\/video podcast\b/gi, "entorno editorial educativo premium")
+    .replace(/\bpodcast\/video podcast\b/gi, "video educativo")
+    .replace(/\bpodcast\b/gi, "video educativo");
+}
+
 function enforceScriptMinimums(baseScript = {}, options = {}) {
   const minRows = Math.max(0, Number(options.minRows || 0));
   const minDurationSec = Math.max(0, Number(options.minDurationSec || 0));
@@ -11893,6 +13907,7 @@ function enforceScriptMinimums(baseScript = {}, options = {}) {
 
 function mergeWithPreviousScript(generated = {}, previous = {}, options = {}) {
   const preserveStructure = options?.preserveStructure === true;
+  const videoMode = options?.videoMode === true || generated?.videoMode === true || previous?.videoMode === true;
   const generatedRows = Array.isArray(generated?.rows) ? generated.rows : [];
   const previousRows = Array.isArray(previous?.rows) ? previous.rows : [];
   if (!previousRows.length) return generated;
@@ -11927,7 +13942,7 @@ function mergeWithPreviousScript(generated = {}, previous = {}, options = {}) {
 
   return {
     ...generated,
-    episodeTitle: String(generated?.episodeTitle || previous?.episodeTitle || "Podcast").trim(),
+    episodeTitle: String(generated?.episodeTitle || previous?.episodeTitle || (videoMode ? "Video educativo" : "Podcast")).trim(),
     summary: String(generated?.summary || previous?.summary || "").trim(),
     hosts: Array.isArray(generated?.hosts) && generated.hosts.length ? generated.hosts : (previous.hosts || ["Host A", "Host B"]),
     rows: optimizeRowsForShortScenes(mergedRows, {
@@ -11938,7 +13953,121 @@ function mergeWithPreviousScript(generated = {}, previous = {}, options = {}) {
   };
 }
 
-async function generateWithGemini(prompt, sessionSnapshot = null, constraints = null) {
+function buildScriptGenerationResponseSchema() {
+  return {
+    type: "object",
+    properties: {
+      episodeTitle: { type: "string" },
+      summary: { type: "string" },
+      hosts: {
+        type: "array",
+        items: { type: "string" }
+      },
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            speaker: { type: "string" },
+            expression: { type: "string" },
+            durationSec: { type: "number" },
+            mediaCue: { type: "string" },
+            text: { type: "string" },
+            notes: { type: "string" },
+            voiceOverText: { type: "string" },
+            sceneDescription: { type: "string" },
+            onScreenText: { type: "string" },
+            transition: { type: "string" },
+            visualNotes: { type: "string" },
+            videoDirective: { type: "string" },
+            scenePrompt: { type: "string" },
+            imagePrompts: {
+              type: "array",
+              items: { type: "string" }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function enforceEducationalVideoSemantics(script = {}, sessionSnapshot = null) {
+  const base = normalizeScriptPayload(script || {}, {
+    session: sessionSnapshot,
+    videoMode: true,
+    skipOptimize: true
+  });
+  const rows = Array.isArray(base?.rows) ? base.rows : [];
+  const normalizedRows = [];
+  rows.forEach((row, index) => {
+    const narration = normalizeSimpleText(row?.voiceOverText || row?.text || "");
+    const notes = String(row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim();
+    const transition = String(row?.transition || "").replace(/\s+/g, " ").trim()
+      || (String(row?.mediaCue || "").trim() && String(row?.mediaCue || "").trim() !== "Sin media"
+        ? String(row?.mediaCue || "").trim()
+        : "Corte limpio");
+    const objective = notes || `Desarrollar la idea principal de la secuencia ${index + 1}.`;
+    const sourceDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+    const sceneDescription = !sourceDescription || looksLikeTransitionOnly(sourceDescription)
+      ? buildFallbackSceneDescriptionFromVoiceOver(narration, notes || row?.videoDirective || "", index)
+      : sourceDescription;
+    const scenePrompt = rewriteScenarioPromptForEducationalVideo(
+      String(row?.scenePrompt || sceneDescription).replace(/\s+/g, " ").trim()
+    );
+    const directiveBase = String(row?.videoDirective || "").replace(/\s+/g, " ").trim();
+    const videoDirective = rewriteScenarioPromptForEducationalVideo(
+      directiveBase || `Objetivo pedagógico: ${objective}.`
+    );
+    const imagePrompts = normalizeVideoImagePrompts(
+      row?.imagePrompts?.length ? row.imagePrompts : buildVideoSceneImagePrompts({ ...row, scenePrompt }, sessionSnapshot)
+    ).map((prompt) => rewriteScenarioPromptForEducationalVideo(prompt));
+    const sceneSegments = splitNarrationIntoCompleteScenes(
+      narration || `Explica la idea clave de la secuencia ${index + 1} con lenguaje claro.`,
+      { targetDialogueSec: VIDEO_DIALOGUE_MAX_SEC }
+    );
+    sceneSegments.forEach((segment, segmentIndex) => {
+      const resolvedText = ensureCompleteSentence(segment) || `Explica la idea clave de la secuencia ${index + 1}.`;
+      const segmentObjective = segmentIndex === 0
+        ? objective
+        : `${objective} Continuación de la secuencia ${index + 1}.`;
+      normalizedRows.push({
+        ...row,
+        id: makeId("row"),
+        speaker: "Narrador",
+        expression: "Neutral",
+        durationSec: VIDEO_SCENE_MAX_SEC,
+        voiceOverText: resolvedText,
+        sceneDescription: sceneDescription || scenePrompt,
+        onScreenText: buildOnScreenText(row?.onScreenText || "", {
+          voiceOver: resolvedText,
+          sceneDescription: sceneDescription || scenePrompt,
+          visual: String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim()
+        }),
+        transition: segmentIndex === 0 ? transition : "Corte limpio",
+        visualNotes: segmentObjective,
+        notes: segmentObjective,
+        text: resolvedText,
+        scenePrompt,
+        videoDirective,
+        imagePrompts
+      });
+    });
+  });
+  return normalizeScriptPayload({
+    ...base,
+    videoMode: true,
+    hosts: ["Narrador"],
+    rows: normalizedRows
+  }, {
+    session: sessionSnapshot,
+    videoMode: true,
+    skipOptimize: true
+  });
+}
+
+async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, constraints = null, pipeline = "podcast") {
+  const videoMode = pipeline === "video";
   const constrainedHosts = Array.isArray(constraints?.hosts) && constraints.hosts.length
     ? constraints.hosts.map((host) => normalizeSpeakerLabel(host, "")).filter(Boolean)
     : [];
@@ -11956,10 +14085,13 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
   const forcedHostCount = Number(constraints?.hostCount) || constrainedHosts.length || 0;
   const forcedMinWords = Number(constraints?.minWords) || 0;
   const forcedMaxWords = Number(constraints?.maxWords) || 0;
-  const videoMode = constraints?.videoMode === true;
-  const strictAlternationRule = forcedHostCount > 1
-    ? "Balancea la conversación alternando locutores (Host A, Host B, Host A, Host B...). Solo repite el mismo locutor en escenas consecutivas si es estrictamente necesario para la explicación."
-    : "La secuencia de locutores NO tiene que alternar de forma fija; puede repetirse el mismo locutor en escenas consecutivas cuando el contenido lo requiera.";
+  const contentModeLabel = videoMode ? "video educativo" : "podcast";
+  const effectivePrompt = videoMode ? rewritePromptForEducationalVideo(prompt) : prompt;
+  const strictAlternationRule = videoMode
+    ? "Puedes repetir el mismo locutor en escenas consecutivas cuando ayude a la progresión pedagógica."
+    : (forcedHostCount > 1
+      ? "Balancea la conversación alternando locutores (Host A, Host B, Host A, Host B...). Solo repite el mismo locutor en escenas consecutivas si es estrictamente necesario para la explicación."
+      : "La secuencia de locutores NO tiene que alternar de forma fija; puede repetirse el mismo locutor en escenas consecutivas cuando el contenido lo requiera.");
   const shortenRequested = isShortenRequest(prompt);
   const rebuildRequested = isRebuildRequest(prompt);
   const speakerNameMap = getSpeakerNameMap(sessionSnapshot || {});
@@ -11979,51 +14111,43 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
   const dynamicMaxRowsFinal = requestedMaxRows
     ? Math.max(dynamicMinRowsFinal, requestedMaxRows)
     : Math.max(dynamicMinRowsFinal, dynamicMaxRowsBase);
-  const responseSchema = {
-    type: "object",
-    properties: {
-      episodeTitle: { type: "string" },
-      summary: { type: "string" },
-      hosts: {
-        type: "array",
-        items: { type: "string" }
-      },
-      rows: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            speaker: { type: "string" },
-            expression: { type: "string" },
-            durationSec: { type: "number" },
-            mediaCue: { type: "string" },
-            text: { type: "string" },
-            notes: { type: "string" }
-          }
-        }
-      }
-    }
-  };
+  const responseSchema = buildScriptGenerationResponseSchema();
 
   const contextualInstructions = [
     isRefinement
-      ? "Refina y mejora el guion actual usando el contexto de la conversacion y el guion existente."
-      : "Genera un guion nuevo de podcast a partir de la idea del usuario.",
-    "Entrega una estructura lista para UI tabular.",
-    "Cada fila debe ser util para produccion y contener texto conversacional natural.",
-    `Locutores preferidos para este episodio: ${preferredSpeakers.join(", ")}.`,
-    constrainedHosts.length ? `Locutores obligatorios para este episodio: ${constrainedHosts.join(", ")}.` : "",
-    `Si necesitas locutores extra, usa solo este catálogo: ${VOICES.join(", ")}.`,
-    "Los IDs de locutor (Host A, Host B, etc.) son solo metadatos internos para asignar turnos.",
-    "No menciones nombres propios de locutores dentro del diálogo.",
-    "No hagas que los locutores se llamen por su nombre entre ellos salvo que el usuario lo pida explícitamente.",
-    `Asignación de voz por locutor (no la mezcles): ${speakerVoiceLines.join(" | ")}.`,
-    "No escribas literalmente 'Host A', 'Host B', etc., dentro de los textos hablados.",
-    "Haz que interactúen entre sí de forma natural sin usar nombres, etiquetas ni vocativos de identidad.",
-    `Objetivo operativo: escenas cortas, entre ${SHORT_SCENE_MIN_SEC} y ${SHORT_SCENE_MAX_SEC} segundos aprox. Si un diálogo es largo, divídelo en más escenas consecutivas.`,
-    strictAlternationRule,
-    `Usa solo estas expresiones cuando sea posible: ${EXPRESSIONS.join(", ")}.`,
-    `Usa solo estas media cues cuando sea posible: ${MEDIA_CUES.join(", ")}.`,
+      ? (videoMode
+        ? "Refina y mejora el guion actual usando el contexto de la conversación y el guion existente. Mantén el enfoque de video educativo."
+        : "Refina y mejora el guion actual usando el contexto de la conversacion y el guion existente.")
+      : (videoMode
+        ? "Genera un guion nuevo de video educativo a partir de la idea del usuario."
+        : "Genera un guion nuevo de podcast a partir de la idea del usuario."),
+    videoMode
+      ? "Entrega una estructura lista para UI tabular de video educativo. No uses framing de podcast."
+      : "Entrega una estructura lista para UI tabular de podcast.",
+    videoMode
+      ? "Cada fila debe enseñar una idea concreta, con narrativa didáctica, apoyos visuales y tono claro."
+      : "Cada fila debe ser util para produccion y contener texto conversacional natural.",
+    videoMode
+      ? "Organiza mentalmente cada escena como fila de tabla con estas columnas: Tiempo, Guion, Descripción de escena, Texto en pantalla, Transición y Elemento visual."
+      : "",
+    videoMode ? "No uses locutores, hosts ni personajes. El guion es voz en off narrativa única." : `Locutores preferidos para este episodio: ${preferredSpeakers.join(", ")}.`,
+    videoMode ? "Define cada escena con: durationSec, voiceOverText, sceneDescription y transition." : (constrainedHosts.length ? `Locutores obligatorios para este episodio: ${constrainedHosts.join(", ")}.` : ""),
+    videoMode ? "Mapeo obligatorio: Tiempo=durationSec, Guion=voiceOverText, Descripción de escena=sceneDescription, Texto en pantalla=onScreenText, Transición=transition, Elemento visual=visualNotes." : "",
+    videoMode ? "Opcional por escena: onScreenText y visualNotes." : `Si necesitas locutores extra, usa solo este catálogo: ${VOICES.join(", ")}.`,
+    videoMode ? "La voz en off global se configura en el panel; no pidas voz por locutor." : "Los IDs de locutor (Host A, Host B, etc.) son solo metadatos internos para asignar turnos.",
+    videoMode ? "" : "No menciones nombres propios de locutores dentro del diálogo.",
+    videoMode ? "" : "No hagas que los locutores se llamen por su nombre entre ellos salvo que el usuario lo pida explícitamente.",
+    videoMode ? "" : `Asignación de voz por locutor (no la mezcles): ${speakerVoiceLines.join(" | ")}.`,
+    videoMode ? "" : "No escribas literalmente 'Host A', 'Host B', etc., dentro de los textos hablados.",
+    videoMode
+      ? "Evita entrevista, mesa redonda, conducción radial o cualquier estructura de podcast. Escribe como guion técnico de video creativo."
+      : "Haz que interactúen entre sí de forma natural sin usar nombres, etiquetas ni vocativos de identidad.",
+    videoMode
+      ? `Objetivo operativo: cada escena de video educativo dura ${VIDEO_SCENE_MAX_SEC} segundos con narración de ~${VIDEO_DIALOGUE_MAX_SEC} segundos y debe contener una frase completa (sin cortar oraciones).`
+      : `Objetivo operativo: escenas cortas, entre ${SHORT_SCENE_MIN_SEC} y ${SHORT_SCENE_MAX_SEC} segundos aprox. Si un diálogo es largo, divídelo en más escenas consecutivas.`,
+    videoMode ? "" : strictAlternationRule,
+    videoMode ? "" : `Usa solo estas expresiones cuando sea posible: ${EXPRESSIONS.join(", ")}.`,
+    videoMode ? "" : `Usa solo estas media cues cuando sea posible: ${MEDIA_CUES.join(", ")}.`,
     isRefinement && !shortenRequested ? `No reduzcas número de escenas por debajo de ${dynamicMinRowsFinal}, a menos que el usuario pida resumir.` : "",
     isRefinement && !shortenRequested && !rebuildRequested && existingRowsCount > 0 && !requestedSceneRange
       ? `Mantén exactamente ${existingRowsCount} escenas y preserva la estructura/base del guion actual, mejorando claridad y profundidad sin reiniciarlo desde cero.`
@@ -12031,13 +14155,21 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
     requestedSceneRange
       ? `El usuario pidió un rango de escenas entre ${requestedSceneRange.minRows} y ${requestedSceneRange.maxRows}. Devuelve una cantidad dentro de ese rango.`
       : "",
-    !videoMode && forcedSceneCount > 0 ? `Regla obligatoria: devuelve exactamente ${forcedSceneCount} escenas.` : "",
-    forcedHostCount > 0 ? `Regla obligatoria: usa exactamente ${Math.max(1, Math.min(VOICES.length, forcedHostCount))} locutores del catálogo permitido.` : "",
+    forcedSceneCount > 0 ? `Regla obligatoria: devuelve exactamente ${forcedSceneCount} escenas.` : "",
+    !videoMode && forcedHostCount > 0 ? `Regla obligatoria: usa exactamente ${Math.max(1, Math.min(VOICES.length, forcedHostCount))} locutores del catálogo permitido.` : "",
     forcedMinWords > 0 || forcedMaxWords > 0
       ? `Regla obligatoria: cada escena debe tener entre ${Math.max(1, forcedMinWords || 1)} y ${Math.max(Math.max(1, forcedMinWords || 1), forcedMaxWords || Math.max(1, forcedMinWords || 1))} palabras.`
       : "",
     videoMode ? "Regla obligatoria: si necesitas ampliar, crea más escenas del mismo locutor en lugar de cortar frases a la mitad." : "",
+    videoMode ? `Regla obligatoria: cada escena debe durar ${VIDEO_SCENE_MAX_SEC} segundos y la voz en off por escena debe rondar ${VIDEO_DIALOGUE_MAX_SEC} segundos.` : "",
+    videoMode ? "Regla obligatoria: no cortar frases; segmenta solo por oraciones completas." : "",
     videoMode ? "Regla obligatoria: cada escena debe terminar con frase completa (sin cortes)." : "",
+    videoMode ? "Regla obligatoria: devuelve voiceOverText en cada escena." : "",
+    videoMode ? "Regla obligatoria: devuelve sceneDescription en cada escena." : "",
+    videoMode ? "Regla obligatoria: devuelve transition en cada escena (ej: corte rápido, disolvencia, barrido)." : "",
+    videoMode ? "Regla obligatoria: devuelve scenePrompt e imagePrompts para cada escena." : "",
+    videoMode ? "Regla obligatoria: devuelve videoDirective en cada escena con acción pedagógica concreta." : "",
+    videoMode ? "Regla obligatoria: cada escena debe explicar o enseñar algo concreto y apoyarse en imagen o gráfico sugerido." : "",
     requestedMinDurationSec > 0 ? `La duración total debe ser como mínimo ${secondsToClock(requestedMinDurationSec)}.` : "",
     isRefinement ? "Conserva lo valioso del guion actual y modifica lo necesario segun la nueva instruccion." : ""
   ].filter(Boolean).join("\n");
@@ -12048,7 +14180,9 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
   const payload = {
     systemInstruction: {
       parts: [{
-        text: "Eres un productor senior de podcasts. Convierte la idea del usuario en una estructura profesional para un editor tipo studio creator. Si el usuario envia mensajes posteriores, debes revisar y mejorar el guion existente, no responder de forma aislada. Responde solo JSON valido, sin markdown."
+        text: videoMode
+          ? "Eres un guionista y productor senior de video creativo educativo. Convierte la idea del usuario en un guion técnico para un editor visual. No uses podcast, hosts ni escenarios por locutor. Devuelve escenas con durationSec, voiceOverText, sceneDescription y transition; además scenePrompt, imagePrompts y videoDirective para producción visual. Opcionalmente devuelve onScreenText y visualNotes. Si el usuario envía mensajes posteriores, revisa y mejora el guion existente. Responde solo JSON válido, sin markdown."
+          : "Eres un productor senior de podcasts. Convierte la idea del usuario en una estructura profesional para un editor tipo studio creator. Si el usuario envia mensajes posteriores, debes revisar y mejorar el guion existente, no responder de forma aislada. Responde solo JSON valido, sin markdown."
       }]
     },
     contents: [{
@@ -12058,7 +14192,7 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
           contextualInstructions,
           conversationContext ? `Conversacion reciente:\n${conversationContext}` : "",
           scriptContext ? `Guion actual editable:\n${scriptContext}` : "",
-          `Nueva instruccion del usuario: ${prompt}`
+          `Nueva instruccion del usuario (${contentModeLabel}): ${effectivePrompt}`
         ].join("\n")
       }]
     }],
@@ -12102,21 +14236,141 @@ async function generateWithGemini(prompt, sessionSnapshot = null, constraints = 
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
   const normalized = normalizeScriptPayload(JSON.parse(rawText), {
     session: sessionSnapshot,
-    skipOptimize: Number(constraints?.sceneCount) > 0
+    skipOptimize: Number(constraints?.sceneCount) > 0,
+    videoMode
   });
   if (Array.isArray(normalized?.rows)) {
     normalized.rows = normalized.rows.map((row) => ({
       ...row,
       text: sanitizeSpeakerMentionsInDialogue(row.text, sessionSnapshot, normalized.hosts),
       notes: sanitizeSpeakerMentionsInDialogue(row.notes, sessionSnapshot, normalized.hosts),
-      videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim()
+      videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+      scenePrompt: normalizeVideoScenePrompt(row?.scenePrompt || "", row, sessionSnapshot),
+      imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || [])
     }));
   }
   return normalized;
 }
 
-function generateFallbackScript(prompt) {
-  const topic = prompt.replace(/^escribe un guion para el podcast sobre/i, "").trim() || "una idea nueva";
+async function generatePodcastScript(prompt, sessionSnapshot = null, constraints = null) {
+  const safeConstraints = {
+    ...(constraints && typeof constraints === "object" ? constraints : {}),
+    videoMode: false
+  };
+  return generateScriptWithGeminiCore(prompt, sessionSnapshot, safeConstraints, "podcast");
+}
+
+async function generateEducationalVideoScript(prompt, sessionSnapshot = null, constraints = null) {
+  const safeConstraints = {
+    ...(constraints && typeof constraints === "object" ? constraints : {}),
+    videoMode: true
+  };
+  const generated = await generateScriptWithGeminiCore(prompt, sessionSnapshot, safeConstraints, "video");
+  return enforceEducationalVideoSemantics(generated, sessionSnapshot);
+}
+
+function generateFallbackScript(prompt, options = {}) {
+  const topic = String(prompt || "")
+    .replace(/^(?:genera(?:r)?|crea|haz|escribe(?:r)?)\s+(?:un\s+)?(?:video educativo|video|guion nuevo de video educativo|guion nuevo de podcast|guion)\s+(?:sobre|para|a partir de la idea del usuario[:.]?)\s*/i, "")
+    .replace(/^escribe(?:r)?\s+(?:un\s+)?guion\s+para\s+el\s+podcast\s+sobre/i, "")
+    .replace(/^nueva instrucción del usuario(?:\s*\([^)]+\))?:\s*/i, "")
+    .trim() || "una idea nueva";
+  const videoMode = options?.videoMode === true;
+  if (videoMode) {
+    return normalizeScriptPayload({
+      episodeTitle: `Video educativo sobre ${topic.slice(0, 42)}`,
+      summary: `Video educativo construido en modo demo alrededor de ${topic}.`,
+      videoMode: true,
+      hosts: ["Narrador"],
+      rows: [
+        {
+          speaker: "Narrador",
+          expression: "Neutral",
+          durationSec: 8,
+          mediaCue: "Sin media",
+          voiceOverText: `Vamos a entender ${topic} de forma clara y visual, paso a paso.`,
+          sceneDescription: `Introducción clara al tema ${topic}, con composición limpia y énfasis visual educativo.`,
+          onScreenText: `Introducción a ${topic}`.slice(0, 120),
+          visualNotes: "Abrir con objetivo didáctico.",
+          text: `Vamos a entender ${topic} de forma clara y visual, paso a paso.`,
+          notes: "Abrir con objetivo didáctico.",
+          scenePrompt: `Introducción clara al tema ${topic}, con composición limpia y énfasis visual educativo.`,
+          imagePrompts: [
+            `Portada o encuadre introductorio para un video educativo sobre ${topic}.`,
+            `Apoyo visual infográfico simple que muestre el tema ${topic}.`
+          ]
+        },
+        {
+          speaker: "Narrador",
+          expression: "Neutral",
+          durationSec: 8,
+          mediaCue: "Sin media",
+          voiceOverText: "Primero veamos la idea principal y por qué importa en un contexto real.",
+          sceneDescription: "Escena de explicación del concepto principal con apoyo visual de ejemplo.",
+          onScreenText: "Idea principal",
+          visualNotes: "Explicar concepto base.",
+          text: "Primero veamos la idea principal y por qué importa en un contexto real.",
+          notes: "Explicar concepto base.",
+          scenePrompt: "Escena de explicación del concepto principal con apoyo visual de ejemplo.",
+          imagePrompts: [
+            "Plano medio con apoyo gráfico de concepto.",
+            "Versión con iconos o esquema para reforzar comprensión."
+          ]
+        },
+        {
+          speaker: "Narrador",
+          expression: "Neutral",
+          durationSec: 8,
+          mediaCue: "Transición",
+          voiceOverText: "Después lo dividimos en tres pasos prácticos para que sea fácil de aplicar.",
+          sceneDescription: "Escena didáctica con tres bloques visuales o tarjetas numeradas.",
+          onScreenText: "3 pasos prácticos",
+          visualNotes: "Introducir pasos.",
+          text: "Después lo dividimos en tres pasos prácticos para que sea fácil de aplicar.",
+          notes: "Introducir pasos.",
+          scenePrompt: "Escena didáctica con tres bloques visuales o tarjetas numeradas.",
+          imagePrompts: [
+            "Tres pasos visuales en pantalla para explicar el proceso.",
+            "Plano con tarjetas o diagramas que apoyen el paso a paso."
+          ]
+        },
+        {
+          speaker: "Narrador",
+          expression: "Neutral",
+          durationSec: 8,
+          mediaCue: "Efecto sutil",
+          voiceOverText: "También revisaremos un error común y cómo evitarlo en un caso cotidiano.",
+          sceneDescription: "Escena con ejemplo de error común y solución visual comparativa.",
+          onScreenText: "Error común y solución",
+          visualNotes: "Mostrar advertencia práctica.",
+          text: "También revisaremos un error común y cómo evitarlo en un caso cotidiano.",
+          notes: "Mostrar advertencia práctica.",
+          scenePrompt: "Escena con ejemplo de error común y solución visual comparativa.",
+          imagePrompts: [
+            "Comparativa antes y después.",
+            "Elemento visual de advertencia con solución concreta."
+          ]
+        },
+        {
+          speaker: "Narrador",
+          expression: "Neutral",
+          durationSec: 8,
+          mediaCue: "CTA final",
+          voiceOverText: "Si te sirve, guarda esta guía y úsala como base para producir tu propio video educativo.",
+          sceneDescription: "Cierre limpio con resumen visual y llamado a la acción pedagógico.",
+          onScreenText: "Aplica esta guía hoy",
+          visualNotes: "Cerrar con llamado a acción.",
+          text: "Si te sirve, guarda esta guía y úsala como base para producir tu propio video educativo.",
+          notes: "Cerrar con llamado a acción.",
+          scenePrompt: "Cierre limpio con resumen visual y llamado a la acción pedagógico.",
+          imagePrompts: [
+            "Pantalla final con resumen visual.",
+            "Cierre editorial sobrio para material educativo."
+          ]
+        }
+      ]
+    }, { videoMode: true });
+  }
   return normalizeScriptPayload({
     episodeTitle: `Podcast sobre ${topic.slice(0, 42)}`,
     summary: `Episodio construido en modo demo alrededor de ${topic}.`,
@@ -12196,23 +14450,33 @@ async function isLocalApiReachable() {
 async function handleGenerate(prompt, options = {}) {
   const displayPrompt = String(options?.displayPrompt || prompt || "").trim();
   const generationPrompt = String(options?.generationPrompt || prompt || "").trim();
+  const userMessageText = String(options?.userMessageText || displayPrompt || generationPrompt).trim();
+  const userMessageHtml = String(options?.userMessageHtml || "").trim();
   if (!generationPrompt) return;
   const sessionBeforeUpdate = getActiveSession();
-  addChatMessage("user", displayPrompt || generationPrompt);
+  const explicitConstraints = normalizeGenerationConstraints(options?.constraints || {});
+  const authoritativeTableScript = explicitConstraints.videoMode === true
+    ? buildCreativeVideoScriptFromPromptTable(generationPrompt, sessionBeforeUpdate)
+    : null;
+  const effectiveGenerationPrompt = explicitConstraints.videoMode === true
+    ? rewritePromptForEducationalVideo(generationPrompt)
+    : generationPrompt;
+  addChatMessage("user", userMessageText || displayPrompt || generationPrompt, userMessageHtml ? { html: userMessageHtml } : {});
   setGenerationStatus("Paso 3/3: Generando contenido...", "is-busy");
 
   try {
     let script = null;
-    const explicitConstraints = normalizeGenerationConstraints(options?.constraints || {});
     const strictConfigMode = explicitConstraints.sceneCount > 0;
     const isRefinement = hasMeaningfulScript(sessionBeforeUpdate || {});
-    const requestedMinDurationSec = extractRequestedMinDurationSec(generationPrompt);
-    const requestedSceneRange = extractRequestedSceneRange(generationPrompt);
-    const requestedSceneWordRange = extractRequestedSceneWordRange(generationPrompt);
+    const requestedMinDurationSec = extractRequestedMinDurationSec(effectiveGenerationPrompt);
+    const requestedSceneRange = extractRequestedSceneRange(effectiveGenerationPrompt);
+    const requestedSceneWordRange = extractRequestedSceneWordRange(effectiveGenerationPrompt);
     const effectiveSceneRange = explicitConstraints.sceneCount > 0
       ? { minRows: explicitConstraints.sceneCount, maxRows: explicitConstraints.sceneCount }
       : requestedSceneRange;
-    const effectiveWordRange = (explicitConstraints.minWords > 0 || explicitConstraints.maxWords > 0)
+    const effectiveWordRange = explicitConstraints.videoMode === true
+      ? null
+      : (explicitConstraints.minWords > 0 || explicitConstraints.maxWords > 0)
       ? { minWords: explicitConstraints.minWords || 1, maxWords: explicitConstraints.maxWords || Math.max(1, explicitConstraints.minWords || 1) }
       : requestedSceneWordRange;
     const shortenRequested = isShortenRequest(generationPrompt);
@@ -12228,15 +14492,18 @@ async function handleGenerate(prompt, options = {}) {
     try {
       if (strictConfigMode) {
         setGenerationStatus("Paso 2/3: Analizando configuración + chat...", "is-busy");
-        const strictResult = await generateWithGeminiStrictConstraints(generationPrompt, sessionBeforeUpdate, explicitConstraints);
+        const strictResult = await generateWithGeminiStrictConstraints(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints);
         script = strictResult.script;
         if (strictResult.issues?.length) {
           addChatMessage("system", `No se pudo cumplir al 100% la configuración tras 3 intentos: ${strictResult.issues.join(" | ")}`);
         }
       } else {
-        script = await generateWithGemini(generationPrompt, sessionBeforeUpdate, explicitConstraints);
+        script = explicitConstraints.videoMode === true
+          ? await generateEducationalVideoScript(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints)
+          : await generatePodcastScript(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints);
         script = mergeWithPreviousScript(script, sessionBeforeUpdate?.script || {}, {
-          preserveStructure
+          preserveStructure,
+          videoMode: explicitConstraints.videoMode === true
         });
         if (Array.isArray(script?.rows) && script.rows.length > fallbackMaxRows) {
           script = {
@@ -12263,10 +14530,17 @@ async function handleGenerate(prompt, options = {}) {
           };
         }
       }
+      if (explicitConstraints.videoMode === true) {
+        script = enrichVideoScriptPayload(script, sessionBeforeUpdate);
+        if (authoritativeTableScript?.rows?.length) {
+          script = applyAuthoritativeCreativeTableToScript(script, authoritativeTableScript, sessionBeforeUpdate);
+        }
+      }
       addScriptAssistantMessage(script, {
         isRefinement,
         session: sessionBeforeUpdate,
-        preserveExactRows: strictConfigMode
+        preserveExactRows: strictConfigMode,
+        videoMode: explicitConstraints.videoMode === true
       });
     } catch (error) {
       if (sessionBeforeUpdate?.script?.rows?.length) {
@@ -12292,6 +14566,12 @@ async function handleGenerate(prompt, options = {}) {
             };
           }
         }
+        if (explicitConstraints.videoMode === true) {
+          script = enrichVideoScriptPayload(script, sessionBeforeUpdate);
+          if (authoritativeTableScript?.rows?.length) {
+            script = applyAuthoritativeCreativeTableToScript(script, authoritativeTableScript, sessionBeforeUpdate);
+          }
+        }
         let detail = `Gemini falló (${error.message}). Conservé tu guion actual y apliqué ajuste de duración/escenas en lugar de reemplazarlo por un demo corto.`;
         if (isNetworkFetchFailure(error)) {
           const apiUp = await isLocalApiReachable();
@@ -12304,7 +14584,9 @@ async function handleGenerate(prompt, options = {}) {
           detail
         );
       } else {
-        script = generateFallbackScript(prompt);
+        script = generateFallbackScript(effectiveGenerationPrompt, {
+          videoMode: explicitConstraints.videoMode === true
+        });
         if (strictConfigMode) {
           script = forceHostsAndAlternation(script, explicitConstraints, sessionBeforeUpdate);
         } else {
@@ -12327,7 +14609,15 @@ async function handleGenerate(prompt, options = {}) {
             };
           }
         }
-        addChatMessage("system", `No se pudo usar Gemini (${error.message}). Generé un borrador extendido para que sigas editando.`);
+        if (explicitConstraints.videoMode === true) {
+          script = enrichVideoScriptPayload(script, sessionBeforeUpdate);
+          if (authoritativeTableScript?.rows?.length) {
+            script = applyAuthoritativeCreativeTableToScript(script, authoritativeTableScript, sessionBeforeUpdate);
+          }
+        }
+        addChatMessage("system", explicitConstraints.videoMode === true
+          ? `No se pudo usar Gemini (${error.message}). Generé un borrador de video creativo extendido para que sigas editando.`
+          : `No se pudo usar Gemini (${error.message}). Generé un borrador extendido para que sigas editando.`);
       }
     }
 
@@ -12337,7 +14627,7 @@ async function handleGenerate(prompt, options = {}) {
       title: buildShortSessionTitle(script?.episodeTitle || displayPrompt || generationPrompt)
     }));
 
-    setGenerationStatus("Guion listo en el chat", "is-live");
+    setGenerationStatus(explicitConstraints.videoMode === true ? "Guión creativo de video listo en el chat" : "Guion listo en el chat", "is-live");
   } catch (error) {
     addChatMessage("system", `Fallo al generar el guion: ${error.message}`);
     setGenerationStatus("Error", "");
@@ -12513,7 +14803,7 @@ function handleScriptFieldUpdate(event) {
     return;
   }
 
-  const nextRender = field === "speaker";
+  const nextRender = field === "speaker" || field === "scenePrompt" || field === "imagePrompts";
   if (field === "speaker") {
     logPodcasterLiveDebug("speaker-change", {
       rowId,
@@ -12522,6 +14812,81 @@ function handleScriptFieldUpdate(event) {
     });
     stopRowAudio();
     stopGeminiLiveSession().catch(() => {});
+  }
+  if (field === "scenePrompt") {
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: (current.script?.rows || []).map((row) => (
+          row.id === rowId
+            ? {
+              ...row,
+              scenePrompt: isEducationalVideoMode(current)
+                ? rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
+                : String(target.value || "").replace(/\s+/g, " ").trim()
+            }
+            : row
+        ))
+      }
+    }), { render: nextRender });
+    return;
+  }
+  if (field === "videoDirective") {
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: (current.script?.rows || []).map((row) => (
+          row.id === rowId
+            ? {
+              ...row,
+              videoDirective: isEducationalVideoMode(current)
+                ? rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
+                : String(target.value || "").replace(/\s+/g, " ").trim()
+            }
+            : row
+        ))
+      }
+    }), { render: nextRender });
+    return;
+  }
+  if (field === "imagePrompts") {
+    const prompts = normalizeVideoImagePrompts(target.value || "").map((prompt) => (
+      isEducationalVideoMode(session)
+        ? rewriteScenarioPromptForEducationalVideo(prompt)
+        : prompt
+    ));
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: (current.script?.rows || []).map((row) => (
+          row.id === rowId
+            ? {
+              ...row,
+              imagePrompts: prompts
+            }
+            : row
+        ))
+      }
+    }), { render: nextRender });
+    return;
+  }
+  if (isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        hosts: ["Narrador"],
+        rows: current.script.rows.map((row, index) => (
+          row.id === rowId
+            ? normalizeCreativeRow({ ...row, [field]: value }, index)
+            : normalizeCreativeRow(row, index)
+        ))
+      }
+    }), { render: true });
+    return;
   }
   upsertActiveSession((current) => ({
     ...current,
@@ -12541,7 +14906,9 @@ function handleScriptFieldUpdate(event) {
           },
           speakerScenarioMap: {
             ...getSpeakerScenarioMap(current),
-            [value]: getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast"
+            [value]: isEducationalVideoMode(current)
+              ? rewriteScenarioPromptForEducationalVideo(getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast")
+              : getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast"
           }
         }
       : {}),
@@ -12563,15 +14930,25 @@ function attachEvents() {
   setupGlobalTooltipPortal();
   els.promptForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const prompt = els.promptInput.value.trim();
+    const prompt = getPromptInputPlainText();
+    const promptHtml = getPromptInputHtml();
     if (!prompt) return;
-    upsertActiveSession((session) => ({ ...session, prompt }));
-    els.promptInput.value = "";
+    upsertActiveSession((session) => ({ ...session, prompt, promptHtml }));
+    setPromptInputContent("");
     autoResizePrompt();
     if (composerGenerationMode === "video") {
-      addChatMessage("user", prompt);
-      addChatMessage("system", "Modo video seleccionado. La generación de guión para video todavía no está implementada.");
-      setGenerationStatus("Modo video pendiente", "");
+      setGenerationStatus("Paso 1/3: Estructurando tabla de video...", "is-busy");
+      const sessionSnapshot = getActiveSession();
+      const prepared = await prepareVideoPromptPreviewForUser(prompt, promptHtml, sessionSnapshot);
+      await handleGenerate(prompt, {
+        displayPrompt: prompt,
+        userMessageText: prepared.userMessageText,
+        userMessageHtml: prepared.userMessageHtml,
+        generationPrompt: prepared.generationPrompt,
+        constraints: {
+          videoMode: true
+        }
+      });
       return;
     }
     pendingScriptPrompt = prompt;
@@ -12580,7 +14957,7 @@ function attachEvents() {
   });
 
   els.demoPromptBtn.addEventListener("click", () => {
-    els.promptInput.value = demoPrompt;
+    setPromptInputContent(demoPrompt);
     autoResizePrompt();
   });
 
@@ -12674,6 +15051,8 @@ function attachEvents() {
             mediaCue: "Sin media",
             text: "Nueva línea de guión.",
             notes: "",
+            scenePrompt: "",
+            imagePrompts: [],
             disfluencyConfig: { ...DEFAULT_DISFLUENCY_CONFIG }
           }
         ]
@@ -13129,9 +15508,87 @@ function attachEvents() {
       await openPodcastVideoModalWithLoader();
     });
   }
+  if (els.openVideoEditorBtn) {
+    els.openVideoEditorBtn.addEventListener("click", async () => {
+      const session = getActiveSession();
+      if (!session) return;
+      if (!(session?.script?.rows || []).length) {
+        setGenerationStatus("No hay escenas para enviar al editor de video.", "");
+        return;
+      }
+      if (!isEducationalVideoMode(session)) {
+        const targetType = composerGenerationMode === "video" ? "educational" : "videopodcast";
+        upsertActiveSession((current) => withSessionVideoContentType(current, targetType), { render: false });
+      }
+      await openPodcastVideoModalWithLoader();
+      setGenerationStatus("Guion enviado al editor de video.", "is-live");
+    });
+  }
   if (els.closePodcastVideoBtn) {
     els.closePodcastVideoBtn.addEventListener("click", () => {
       closePodcastVideoModal();
+    });
+  }
+  if (els.closeCreativeVideoBtn) {
+    els.closeCreativeVideoBtn.addEventListener("click", () => {
+      closeCreativeVideoModal();
+    });
+  }
+  if (els.saveSessionCreativeBtn) {
+    els.saveSessionCreativeBtn.addEventListener("click", async () => {
+      await saveSessionToCloud();
+    });
+  }
+  if (els.creativeVideoTimelineList) {
+    els.creativeVideoTimelineList.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-action='select-creative-row']");
+      if (!btn) return;
+      creativeVideoState.activeRowId = String(btn.dataset.rowId || "").trim();
+      renderCreativeVideoShell(getActiveSession());
+    });
+  }
+  if (els.creativeVideoInspectorEditor) {
+    const handleCreativeField = (event) => {
+      const target = event.target.closest("[data-row-id][data-field]");
+      if (!target) return;
+      const rowId = String(target.dataset.rowId || "").trim();
+      const field = String(target.dataset.field || "").trim();
+      if (!rowId || !field) return;
+      const rawValue = field === "durationSec"
+        ? Number(target.value || 0)
+        : String(target.value || "");
+      upsertActiveSession((current) => ({
+        ...current,
+        script: {
+          ...current.script,
+          hosts: ["Narrador"],
+          rows: (current.script?.rows || []).map((row, index) => (
+            String(row?.id || "").trim() === rowId
+              ? normalizeCreativeRow({
+                ...row,
+                [field]: rawValue
+              }, index)
+              : normalizeCreativeRow(row, index)
+          ))
+        }
+      }), { render: false });
+      renderCreativeVideoShell(getActiveSession());
+    };
+    els.creativeVideoInspectorEditor.addEventListener("input", handleCreativeField);
+    els.creativeVideoInspectorEditor.addEventListener("change", handleCreativeField);
+  }
+  if (els.creativeGlobalVoiceName) {
+    els.creativeGlobalVoiceName.addEventListener("change", () => {
+      const voiceName = normalizeLiveVoiceName(String(els.creativeGlobalVoiceName.value || "").trim(), "Kore");
+      upsertActiveSession((session) => ({
+        ...session,
+        creativeVideoConfig: normalizeCreativeVideoConfig({
+          ...(session.creativeVideoConfig || {}),
+          enabled: creativeVideoState.enabled,
+          globalVoiceName: voiceName
+        })
+      }), { render: false });
+      renderCreativeVideoShell(getActiveSession());
     });
   }
   if (els.togglePodcastStudioInspectorBtn) {
@@ -13460,7 +15917,7 @@ function attachEvents() {
       if (podcastVideoState.busy) return;
       const ok = reorderTimelineClipsByTracks();
       if (!ok) {
-        setGenerationStatus("Se necesitan al menos 2 tracks con escenas", "");
+        setGenerationStatus("Se necesitan al menos 2 escenas para reordenar el timeline", "");
       }
     });
   }
@@ -13768,8 +16225,11 @@ function attachEvents() {
       const selectAudioLoopChip = event.target.closest("[data-action='timeline-select-audio-loop']");
       if (selectAudioLoopChip) {
         const trackIndex = Number(selectAudioLoopChip.dataset.trackIndex);
+        const trackKind = resolvePanelMusicTrackKind(selectAudioLoopChip.dataset.trackKind || panelMusicState.selectedTrackKind);
         if (Number.isFinite(trackIndex)) {
           selectUploadedPanelMusicTrackByIndex(trackIndex);
+        } else if (trackKind !== panelMusicState.selectedTrackKind) {
+          selectPanelMusicTrackKind(trackKind, { notify: false });
         }
         podcastAudioTrackUiState.activeLoopIndex = Math.max(0, Math.floor(Number(selectAudioLoopChip.dataset.loopIndex || 0) || 0));
         renderPodcastVideoTimeline(getActiveSession());
@@ -13779,11 +16239,32 @@ function attachEvents() {
       if (toggleAudioLoopMuteBtn) {
         event.preventDefault();
         const trackIndex = Number(toggleAudioLoopMuteBtn.dataset.trackIndex);
+        const trackKind = resolvePanelMusicTrackKind(toggleAudioLoopMuteBtn.dataset.trackKind || panelMusicState.selectedTrackKind);
         if (Number.isFinite(trackIndex)) {
           selectUploadedPanelMusicTrackByIndex(trackIndex);
+        } else if (trackKind !== panelMusicState.selectedTrackKind) {
+          selectPanelMusicTrackKind(trackKind, { notify: false });
         }
         const loopIndex = Math.max(0, Math.floor(Number(toggleAudioLoopMuteBtn.dataset.loopIndex || 0) || 0));
-        togglePanelMusicLoopMute(loopIndex, panelMusicState.selectedTrackKind);
+        togglePanelMusicLoopMute(loopIndex, trackKind);
+        return;
+      }
+      const toggleUploadedTrackEnabledBtn = event.target.closest("[data-action='timeline-toggle-uploaded-track-enabled']");
+      if (toggleUploadedTrackEnabledBtn) {
+        event.preventDefault();
+        const trackIndex = Math.max(0, Math.floor(Number(toggleUploadedTrackEnabledBtn.dataset.trackIndex || 0) || 0));
+        toggleSessionUploadedTrackEnabled(trackIndex);
+        return;
+      }
+      const deleteUploadedTrackBtn = event.target.closest("[data-action='timeline-delete-uploaded-track']");
+      if (deleteUploadedTrackBtn) {
+        event.preventDefault();
+        const trackIndex = Math.max(0, Math.floor(Number(deleteUploadedTrackBtn.dataset.trackIndex || 0) || 0));
+        const track = getPanelMusicUploadedTracks()[trackIndex] || null;
+        if (!track) return;
+        const confirmed = window.confirm(`Se eliminará ${track.slotLabel || `Audio ${trackIndex + 1}`} de esta sesión. ¿Deseas continuar?`);
+        if (!confirmed) return;
+        removeUploadedTrackAt(trackIndex);
         return;
       }
       const deleteSelectedGapBtn = event.target.closest("[data-action='timeline-delete-selected-gap']");
@@ -14056,6 +16537,7 @@ function attachEvents() {
   els.promptInput.addEventListener("input", () => {
     autoResizePrompt();
   });
+  els.promptInput.addEventListener("paste", handlePromptInputPaste);
 
   window.addEventListener("storage", (event) => {
     if (event.key !== PODCASTER_VIDEO_IMPORT_STORAGE_KEY || !event.newValue) return;
@@ -14122,6 +16604,11 @@ function attachEvents() {
             dialogueAudioMap: {}
           };
         });
+        const shouldFocusVideoSidepanel = composerGenerationMode === "video"
+          || isEducationalVideoMode({ ...updatedSession, script: nextScript });
+        if (shouldFocusVideoSidepanel) {
+          setSidepanelOpen(true);
+        }
         const audioResult = await generateDialogueAudioForConnectedScript(updatedSession, {
           regenerate: false,
           token: connectRun.token,
@@ -14239,6 +16726,10 @@ function attachEvents() {
       closePodcastVideoModal();
       return;
     }
+    if (floatingClose?.dataset?.action === "close-creative-video-modal") {
+      closeCreativeVideoModal();
+      return;
+    }
     if (floatingClose?.dataset?.action === "close-transition-picker-modal") {
       setPodcastTransitionPickerOpen(false);
       return;
@@ -14264,6 +16755,10 @@ function attachEvents() {
       }
       if (podcastVideoState.enabled) {
         closePodcastVideoModal();
+        return;
+      }
+      if (creativeVideoState.enabled) {
+        closeCreativeVideoModal();
       }
     }
   });
@@ -14404,7 +16899,7 @@ function init() {
     stopRowAudio();
     stopGeminiLiveSession().catch(() => {});
   });
-  els.promptInput.value = demoPrompt;
+  setPromptInputContent(demoPrompt);
   autoResizePrompt();
 }
 

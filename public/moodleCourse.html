@@ -308,8 +308,12 @@
             
             <div class="flex justify-end gap-3 mt-6">
                 <button id="btnGuardarInstruccionesGemini"
-                    class="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:bg-primary/90 transition-colors">
-                    Guardar Instrucciones
+                    type="button"
+                    class="btn-guardar-gemini px-4 py-2 text-sm font-semibold text-primary-foreground bg-primary rounded-md">
+                    <span class="btn-guardar-gemini__spinner" aria-hidden="true">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </span>
+                    <span class="btn-guardar-gemini__label">Guardar Instrucciones</span>
                 </button>
             </div>
         </div>
@@ -340,7 +344,7 @@
         <span>Creando módulo...</span>
       </div>
 
-      <div id="listaOpcionesModulo" class="grid gap-3 sm:grid-cols-2">
+      <div id="listaOpcionesModulo" class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <!-- Se llena dinámicamente -->
       </div>
 

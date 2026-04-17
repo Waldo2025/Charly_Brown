@@ -53,7 +53,7 @@
           </div>
           <div class="chat-scroll-region">
             <div id="chatEmptyState" class="chat-empty-state" aria-hidden="true">
-              <h1>Listo para crear tu podcast.</h1>
+              <h1>Listo para crear tu guión.</h1>
             </div>
             <div id="chatFeed" class="chat-feed" aria-live="polite">
               <div id="chatFeedMessages" class="chat-feed-messages"></div>
@@ -93,7 +93,14 @@
               </div>
 
               <label class="prompt-box">
-                <textarea id="promptInput" rows="1"></textarea>
+                <div
+                  id="promptInput"
+                  class="prompt-editor"
+                  contenteditable="true"
+                  role="textbox"
+                  aria-multiline="true"
+                  data-placeholder="Describe tu idea o pega una tabla de Word..."
+                ></div>
               </label>
 
               <div class="composer-footer">
@@ -131,7 +138,7 @@
             </div>
           </header>
 
-          <section class="podcast-player-shell" aria-label="Reproductor completo del podcast">
+          <section class="podcast-player-shell" aria-label="Reproductor completo del guión">
             <div class="podcast-player-meta">
               <strong id="hostSummary">Host A, Host B</strong>
               <strong id="durationSummary">0:00</strong>
@@ -162,10 +169,13 @@
           <section class="sidepanel-panel is-active" data-tab-panel="script">
             <div class="panel-toolbar">
               <div class="panel-toolbar-copy">
-                <h3>Tabla de diálogo</h3>
-                <p>Lista compacta editable tipo inspector.</p>
+                <h3 id="scriptPanelTitle">Tabla de diálogo</h3>
+                <p id="scriptPanelSubtitle">Lista compacta editable tipo inspector.</p>
               </div>
               <div class="panel-toolbar-actions">
+                <button id="openVideoEditorBtn" class="panel-icon-btn" type="button" title="Pasar guión al editor de video">
+                  <i class="fas fa-film"></i>
+                </button>
                 <button id="addRowBtn" class="panel-icon-btn" type="button" title="Agregar fila">
                   <i class="fas fa-plus"></i>
                 </button>
@@ -215,22 +225,22 @@
   </div>
   <div id="podcastVideoModal" class="floating-panel-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-podcast-video-modal" aria-label="Cerrar video"></button>
-    <section id="podcastVideoShell" class="podcast-video-shell floating-panel-card" aria-label="Video compuesto del podcast">
-      <div id="podcastVideoLoader" class="podcast-video-loader" hidden aria-live="polite" aria-label="Abriendo Snoopy Podcast Creator">
+    <section id="podcastVideoShell" class="podcast-video-shell floating-panel-card" aria-label="Video compuesto">
+      <div id="podcastVideoLoader" class="podcast-video-loader" hidden aria-live="polite" aria-label="Abriendo panel de video">
         <div class="podcast-video-loader-backdrop"></div>
         <div class="podcast-video-loader-card">
           <div class="podcast-video-loader-ripple ripple-a"></div>
           <div class="podcast-video-loader-ripple ripple-b"></div>
           <div class="podcast-video-loader-ripple ripple-c"></div>
-          <img src="SnoopyPodcastCreator.png" alt="Snoopy Podcast Creator" class="podcast-video-loader-logo">
-          <strong>Snoopy Podcast Creator</strong>
+          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator" class="podcast-video-loader-logo">
+          <strong>Snoopy Video Creator</strong>
           <span>Preparando el estudio de video...</span>
         </div>
       </div>
       <div class="floating-panel-head">
         <h3 class="podcast-brand-title">
-          <span>Snoopy Podcast Creator</span>
-          <img src="SnoopyPodcastCreator.png" alt="Snoopy Podcast Creator" class="podcast-brand-title-icon" loading="lazy">
+          <span>Snoopy Video Creator</span>
+          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator" class="podcast-brand-title-icon" loading="lazy">
         </h3>
         <div class="floating-panel-head-actions">
           <button id="saveSessionFloatingBtn" class="row-icon-btn" type="button" title="Guardar sesión en Firebase" aria-label="Guardar sesión en Firebase">
@@ -389,6 +399,45 @@
       </div>
     </section>
   </div>
+  <div id="creativeVideoModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-creative-video-modal" aria-label="Cerrar video creativo"></button>
+    <section id="creativeVideoShell" class="creative-video-shell floating-panel-card" aria-label="Snoopy Video Creator Creativo">
+      <div class="floating-panel-head">
+        <h3 class="podcast-brand-title">
+          <span>Snoopy Video Creator Creativo</span>
+          <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator Creativo" class="podcast-brand-title-icon" loading="lazy">
+        </h3>
+        <div class="floating-panel-head-actions">
+          <button id="saveSessionCreativeBtn" class="row-icon-btn" type="button" title="Guardar sesión en Firebase" aria-label="Guardar sesión en Firebase">
+            <i class="fas fa-cloud-upload-alt"></i>
+          </button>
+          <button id="closeCreativeVideoBtn" class="row-icon-btn" type="button" title="Cerrar video creativo">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+      <div class="creative-video-layout">
+        <aside class="creative-video-timeline">
+          <div class="creative-video-timeline-head">
+            <strong>Secuencias del guión</strong>
+            <span>Tiempo + voz en off + descripción</span>
+          </div>
+          <div id="creativeVideoTimelineList" class="creative-video-timeline-list" aria-live="polite"></div>
+        </aside>
+        <section class="creative-video-inspector">
+          <div class="creative-video-inspector-head">
+            <strong>Inspector creativo</strong>
+            <span id="creativeVideoInspectorScene">Secuencia activa: --</span>
+          </div>
+          <label class="row-field">
+            <span>Voz global en off</span>
+            <select id="creativeGlobalVoiceName"></select>
+          </label>
+          <div id="creativeVideoInspectorEditor" class="creative-video-inspector-editor" aria-live="polite"></div>
+        </section>
+      </div>
+    </section>
+  </div>
   <div id="podcastTransitionPickerModal" class="floating-panel-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-transition-picker-modal" aria-label="Cerrar selector de transición"></button>
     <section class="podcast-transition-picker floating-panel-card" aria-label="Selector de transición">
@@ -498,7 +547,7 @@
         </div>
         <label class="row-field wide">
           <span>Generar con IA</span>
-          <textarea id="panelMusicAiPrompt" rows="3" placeholder="Ej. Ambient instrumental cálido, pads suaves, piano sutil, sin voces, para podcast conversacional creativo."></textarea>
+          <textarea id="panelMusicAiPrompt" rows="3" placeholder="Ej. Ambient instrumental cálido, pads suaves, piano sutil, sin voces, para video educativo creativo."></textarea>
         </label>
         <div id="panelMusicTrackInfo" class="music-track-info">Sin canción seleccionada.</div>
       </div>
@@ -563,7 +612,7 @@
         <div id="scriptSetupSpeakerFields" class="script-setup-speaker-fields" aria-live="polite"></div>
         <label class="global-check-row">
           <input id="scriptSetupVideoMode" type="checkbox">
-          <span>Crear video a partir del podcast (forzar 10-15 palabras por escena)</span>
+          <span>Crear video educativo (separar por frases completas por escena)</span>
         </label>
         <label class="row-field">
           <span>Escenas</span>

@@ -4461,7 +4461,8 @@ body[data-page="moodlecourse.html"] .cb-selector-modulo-card {
     align-items: flex-start;
     gap: 0.85rem;
     width: 100%;
-    padding: 0.95rem 1rem;
+    min-height: 5.25rem;
+    padding: 0.85rem 0.9rem;
     border: 1px solid hsl(var(--border));
     border-radius: 1rem;
     background:
@@ -4497,13 +4498,13 @@ body[data-page="moodlecourse.html"] .cb-selector-modulo-card__icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2.55rem;
-    height: 2.55rem;
-    flex: 0 0 2.55rem;
-    border-radius: 0.9rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 2.25rem;
+    border-radius: 0.8rem;
     background: hsl(var(--selector-accent) / 0.12);
     color: hsl(var(--selector-accent));
-    font-size: 1rem;
+    font-size: 0.95rem;
 }
 
 body[data-page="moodlecourse.html"] .cb-selector-modulo-card__body {
@@ -4514,7 +4515,7 @@ body[data-page="moodlecourse.html"] .cb-selector-modulo-card__body {
 }
 
 body[data-page="moodlecourse.html"] .cb-selector-modulo-card__title {
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     font-weight: 700;
     line-height: 1.2;
 }
@@ -4528,7 +4529,7 @@ body[data-page="moodlecourse.html"] .cb-selector-modulo-card__meta {
 }
 
 body[data-page="moodlecourse.html"] .cb-selector-modulo-card__help {
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     line-height: 1.35;
     color: hsl(var(--muted-foreground));
 }
@@ -5261,6 +5262,76 @@ body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:hover,
 body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:active,
 body[data-page="moodlecourse.html"] #btnGuardarInstruccionesGemini:focus-visible {
     cursor: pointer !important;
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-width: 180px;
+    padding-inline: 1rem;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, hsl(var(--primary)) 92%, white 8%) 0%,
+            hsl(var(--primary)) 100%) !important;
+    border: 1px solid color-mix(in srgb, hsl(var(--primary)) 78%, black 22%);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.12) inset,
+        0 8px 18px rgba(37, 99, 235, 0.18);
+    transition:
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast),
+        filter var(--transition-fast),
+        background-color var(--transition-fast);
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.03);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.14) inset,
+        0 12px 24px rgba(37, 99, 235, 0.22);
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.08) inset,
+        0 6px 12px rgba(37, 99, 235, 0.18);
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini:focus-visible {
+    outline: 2px solid color-mix(in srgb, hsl(var(--primary)) 75%, white 25%);
+    outline-offset: 3px;
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini[disabled] {
+    cursor: progress !important;
+    opacity: 0.88;
+    transform: none;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.08) inset,
+        0 6px 14px rgba(37, 99, 235, 0.12);
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini__spinner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    font-size: 0.95rem;
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini.is-loading .btn-guardar-gemini__spinner {
+    display: inline-flex;
+}
+
+body[data-page="moodlecourse.html"] .btn-guardar-gemini.is-loading .btn-guardar-gemini__label {
+    opacity: 0.92;
 }
 
 /* Estudio grafico del modulo: override consolidado preview-first */

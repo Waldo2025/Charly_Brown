@@ -7443,7 +7443,9 @@ if (btnGenerar) {
         // Añadir módulo
         const btnAddModulo = document.getElementById("btnAddModulo");
         if (btnAddModulo) {
-            btnAddModulo.addEventListener("click", () => {
+            btnAddModulo.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 mostrarSelectorModulo(subtema);
             });
         }
@@ -9883,7 +9885,7 @@ function setModalSelectorModuloBusy(modal, busy = false) {
     const btnCerrar = modal.querySelector("#btnCerrarSelectorModulo");
     const status = modal.querySelector("#selectorModuloStatus");
 
-    modal.dataset.creando = busy ? "1" : "0";
+    modal.dataset.creating = busy ? "1" : "0";
     modal.setAttribute("aria-busy", busy ? "true" : "false");
 
     if (lista) {
@@ -9904,6 +9906,14 @@ function setModalSelectorModuloBusy(modal, busy = false) {
     if (status) {
         status.classList.toggle("hidden", !busy);
     }
+}
+
+function cerrarSelectorModulo(modal) {
+    if (!modal) return;
+    setModalSelectorModuloBusy(modal, false);
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+    modal.dataset.creating = "0";
 }
 
 function mostrarSelectorModulo(subtema) {
@@ -9959,8 +9969,10 @@ function mostrarSelectorModulo(subtema) {
             <i class="fas fa-chevron-right cb-selector-modulo-card__chevron" aria-hidden="true"></i>
         `;
 
-        btn.addEventListener("click", async () => {
-            if (modal?.dataset?.creando === "1") return;
+        btn.addEventListener("click", async (e) => {
+            e?.preventDefault?.();
+            e?.stopPropagation?.();
+            if (modal?.dataset?.creating === "1") return;
             setModalSelectorModuloBusy(modal, true);
             btn.classList.add("is-loading");
             if (status) {
@@ -9997,15 +10009,12 @@ function mostrarSelectorModulo(subtema) {
                 renderTemas();
                 const subtemaActual = obtenerSubtemaActualDesdeCurso(subtema.id) || subtema;
                 await cargarSubtema(subtemaActual, nuevoModuloId);
-                modal.classList.add("hidden");
-                modal.classList.remove("flex");
+                cerrarSelectorModulo(modal);
             } catch (error) {
                 console.error("No se pudo crear el módulo:", error);
                 alert(`No se pudo crear el módulo.\n${error?.message || ""}`);
             } finally {
-                if (modal) {
-                    setModalSelectorModuloBusy(modal, false);
-                }
+                if (modal) setModalSelectorModuloBusy(modal, false);
                 btn.classList.remove("is-loading");
                 if (status) {
                     status.classList.add("hidden");
@@ -10018,12 +10027,13 @@ function mostrarSelectorModulo(subtema) {
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
+    modal.dataset.creating = "0";
 
     // CANCELAR
-    btnCancelar.onclick = () => {
-        setModalSelectorModuloBusy(modal, false);
-        modal.classList.add("hidden");
-        modal.classList.remove("flex");
+    btnCancelar.onclick = (e) => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
+        cerrarSelectorModulo(modal);
     };
 
     if (btnCerrar) {
@@ -14070,6 +14080,12 @@ function inicializarEventosModalInstruccionesGemini() {
     if (!btnCerrar || !btnGuardar || !modal) return;
     if (btnGuardar.dataset.cbBound === "1") return;
 
+    const setGuardarBusy = (busy = false) => {
+        btnGuardar.disabled = !!busy;
+        btnGuardar.classList.toggle("is-loading", !!busy);
+        btnGuardar.setAttribute("aria-busy", busy ? "true" : "false");
+    };
+
     btnCerrar.addEventListener("click", () => {
         window.__moduloEditandoInstruccionesId = null;
         window.__moduloEditandoInstruccionesCursoId = null;
@@ -14110,24 +14126,26 @@ function inicializarEventosModalInstruccionesGemini() {
         const moduloId = window.__moduloEditandoInstruccionesId;
         const cursoIdModulo = String(window.__moduloEditandoInstruccionesCursoId || curso?.id || "").trim() || null;
         if (!moduloId) return;
-        const htmlNormalizado = normalizarHtmlLegacyImagenGemini(editor.innerHTML.trim());
-        if (htmlNormalizado !== editor.innerHTML.trim()) {
-            editor.innerHTML = sanitizarHtmlEditorial(htmlNormalizado);
-        }
-        const contenidoHTML = await prepararHtmlInstruccionesGeminiParaGuardar(
-            htmlNormalizado,
-            moduloId,
-            cursoIdModulo
-        );
-        const payloadLocal = {
-            instrucciones: contenidoHTML,
-            incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
-            incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
-            generarGrafico: checkGenerarGrafico?.checked === true,
-            ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
-        };
+        setGuardarBusy(true);
 
         try {
+            const htmlNormalizado = normalizarHtmlLegacyImagenGemini(editor.innerHTML.trim());
+            if (htmlNormalizado !== editor.innerHTML.trim()) {
+                editor.innerHTML = sanitizarHtmlEditorial(htmlNormalizado);
+            }
+            const contenidoHTML = await prepararHtmlInstruccionesGeminiParaGuardar(
+                htmlNormalizado,
+                moduloId,
+                cursoIdModulo
+            );
+            const payloadLocal = {
+                instrucciones: contenidoHTML,
+                incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
+                incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
+                generarGrafico: checkGenerarGrafico?.checked === true,
+                ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
+            };
+
             sincronizarModuloLocal(moduloId, cursoIdModulo, payloadLocal);
             await guardarModulo(moduloId, payloadLocal, cursoIdModulo);
 
@@ -14172,6 +14190,8 @@ function inicializarEventosModalInstruccionesGemini() {
         } catch (error) {
             console.error("No se pudieron guardar las instrucciones de Gemini del módulo:", error);
             alert(`No se pudieron guardar las instrucciones del módulo.\n${error?.message || ""}`);
+        } finally {
+            setGuardarBusy(false);
         }
     });
 

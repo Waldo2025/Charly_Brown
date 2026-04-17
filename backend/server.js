@@ -267,7 +267,9 @@ function buildBackendPodcasterCharacterPrompt({
   genderGroup = "",
   expression = "Neutral",
   counterpartSpeakerName = "",
+  contentMode = "podcast",
 }) {
+  const educational = String(contentMode || "").trim().toLowerCase() === "educational";
   return [
     `Retrato consistente del locutor ${speakerName || speakerLabel || "principal"}.`,
     voiceName ? `Voz asociada: ${voiceName}.` : "",
@@ -276,7 +278,9 @@ function buildBackendPodcasterCharacterPrompt({
     "Definir identidad consistente: facciones memorables, proporciones faciales estables, peinado reconocible, mirada segura, vestuario sobrio de locución premium.",
     "Evitar ambigüedad de género y evitar cambios de edad, etnia o complexión entre generaciones.",
     counterpartSpeakerName ? `${speakerName} es un personaje distinto de ${counterpartSpeakerName}; no mezclar sus rostros, peinados, siluetas ni rasgos.` : "",
-    "La imagen debe corresponder exactamente al locutor activo y no a otro host del podcast.",
+    educational
+      ? "La imagen debe corresponder exactamente al personaje activo y no a otro personaje del video educativo."
+      : "La imagen debe corresponder exactamente al locutor activo y no a otro host del podcast.",
     "No caricatura, no ilustración, no anime: retrato fotorealista de estudio."
   ].filter(Boolean).join(" ");
 }
@@ -288,7 +292,9 @@ function buildBackendPodcasterStudioScenePrompt({
   scenarioPrompt = "",
   expression = "Neutral",
   singleSubjectOnly = false,
+  contentMode = "podcast",
 }) {
+  const educational = String(contentMode || "").trim().toLowerCase() === "educational";
   const speakerIndex = normalizePodcasterSpeakerSlotIndex(speakerLabel);
   const stageZones = [
     "zona izquierda del escenario, cerca del micrófono principal izquierdo",
@@ -322,12 +328,20 @@ function buildBackendPodcasterStudioScenePrompt({
   const eyelineDirection = eyelineDirections[speakerIndex % eyelineDirections.length];
   const cleanScenario = String(scenarioPrompt || "Cabina de radio premium").replace(/\s+/g, " ").trim() || "Cabina de radio premium";
   const lines = [
-    `Escenario de locución consistente para ${speakerName || speakerLabel || "el locutor"}.`,
+    educational
+      ? `Escenario visual consistente para ${speakerName || speakerLabel || "el presentador"}.`
+      : `Escenario de locución consistente para ${speakerName || speakerLabel || "el locutor"}.`,
     `Escenario obligatorio: ${cleanScenario}.`,
-    "Convertir ese escenario en un set fotorealista de locución con tratamiento acústico visible, micrófono broadcast en brazo articulado, consola discreta y luz cinematográfica suave.",
+    educational
+      ? "Convertir ese escenario en un set fotorealista de video educativo con apoyo visual claro, elementos didácticos sutiles, iluminación limpia y composición editorial."
+      : "Convertir ese escenario en un set fotorealista de locución con tratamiento acústico visible, micrófono broadcast en brazo articulado, consola discreta y luz cinematográfica suave.",
     `Posición fija obligatoria dentro del set para ${speakerName || speakerLabel || "el locutor"}: ${zoneLabel}.`,
-    "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
-    "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
+    educational
+      ? "Importante: posicionar a cada personaje en una parte diferente del encuadre y ser consistente con ese ángulo."
+      : "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
+    educational
+      ? "Importante: en la escena solo debe aparecer el personaje correspondiente al plano."
+      : "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
     `Bloqueo corporal obligatorio: ${eyelineDirection.bodyAngle}.`,
     `Eyeline obligatorio: ${eyelineDirection.gaze}.`,
     `Ángulo de cámara sugerido: ${eyelineDirection.cameraAngle}.`,
@@ -343,13 +357,23 @@ function buildBackendPodcasterStudioScenePrompt({
     lines.push(
       "Retrato de sujeto único estricto: no agregar ninguna otra persona en el escenario.",
       "Prohibido segunda figura humana visible o parcial: no espalda, no hombro, no cabeza desenfocada, no perfil, no reflejo, no sombra humana.",
-      "La imagen debe parecer un retrato editorial limpio del locutor activo dentro del set."
+      educational
+        ? "La imagen debe parecer un retrato editorial limpio del personaje activo dentro del set educativo."
+        : "La imagen debe parecer un retrato editorial limpio del locutor activo dentro del set."
     );
   } else {
     lines.push(
-      "La escena debe sentirse como conversación entre locutores; el personaje atiende al interlocutor, no al espectador.",
-      counterpartSpeakerName ? `La mirada debe sugerir escucha activa hacia ${counterpartSpeakerName}, pero siempre con el interlocutor completamente fuera de cuadro.` : "",
-      "Priorizar miradas laterales, reacción conversacional y microgestos que indiquen escucha activa entre locutores."
+      educational
+        ? "La escena debe sentirse como explicación didáctica; el personaje atiende al contenido o a un recurso visual, no al espectador."
+        : "La escena debe sentirse como conversación entre locutores; el personaje atiende al interlocutor, no al espectador.",
+      counterpartSpeakerName
+        ? educational
+          ? `La mirada debe sugerir atención a un recurso o co-presentador fuera de cuadro, sin frontalidad directa.`
+          : `La mirada debe sugerir escucha activa hacia ${counterpartSpeakerName}, pero siempre con el interlocutor completamente fuera de cuadro.`
+        : "",
+      educational
+        ? "Priorizar miradas laterales, reacción didáctica y microgestos que ayuden a explicar el contenido."
+        : "Priorizar miradas laterales, reacción conversacional y microgestos que indiquen escucha activa entre locutores."
     );
   }
   return lines.filter(Boolean).join(" ");
@@ -487,11 +511,20 @@ function sanitizePodcasterSession(raw = {}) {
     text: clampText(row?.text || "", 12000),
     notes: clampText(row?.notes || "", 5000),
     videoDirective: clampText(row?.videoDirective || "", 1400),
+    scenePrompt: clampText(row?.scenePrompt || "", 1200),
+    imagePrompts: Array.isArray(row?.imagePrompts)
+      ? row.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+      : String(row?.imagePrompts || "")
+        .split(/\n+/)
+        .map((prompt) => clampText(prompt || "", 1200))
+        .filter(Boolean)
+        .slice(0, 3),
     disfluencyConfig: normalizeDisfluency(row?.disfluencyConfig || {})
   }));
   const hosts = Array.isArray(raw?.script?.hosts)
     ? raw.script.hosts.slice(0, 10).map((host) => clampText(host, 80)).filter(Boolean)
     : [];
+  const scriptVideoMode = raw?.script?.videoMode === true;
   const chat = Array.isArray(raw?.chat)
     ? raw.chat.slice(-220).map((msg, index) => ({
         id: clampText(msg?.id || `msg_${index + 1}`, 80) || `msg_${index + 1}`,
@@ -556,6 +589,14 @@ function sanitizePodcasterSession(raw = {}) {
       model: clampText(clip?.model || DEFAULT_PODCASTER_VIDEO_MODEL, 140) || DEFAULT_PODCASTER_VIDEO_MODEL,
       promptVersion: clampText(clip?.promptVersion || "podcaster_veo_v1", 80) || "podcaster_veo_v1",
       videoDirective: clampText(clip?.videoDirective || "", 1400),
+      scenePrompt: clampText(clip?.scenePrompt || "", 1200),
+      imagePrompts: Array.isArray(clip?.imagePrompts)
+        ? clip.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+        : String(clip?.imagePrompts || "")
+          .split(/\n+/)
+          .map((prompt) => clampText(prompt || "", 1200))
+          .filter(Boolean)
+          .slice(0, 3),
       durationSec: clampNumber(clip?.durationSec, 0, 240, 0),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
       segments,
@@ -709,8 +750,9 @@ function sanitizePodcasterSession(raw = {}) {
     updatedAt: clampText(raw?.updatedAt || new Date().toISOString(), 64),
     chat,
     script: {
-      episodeTitle: clampText(raw?.script?.episodeTitle || "Podcast", 220),
+      episodeTitle: clampText(raw?.script?.episodeTitle || (scriptVideoMode ? "Video educativo" : "Podcast"), 220),
       summary: clampText(raw?.script?.summary || "", 6000),
+      videoMode: scriptVideoMode,
       hosts,
       rows
     },
@@ -2302,6 +2344,16 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
     const scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
     const videoDirective = clampText(req.body?.videoDirective || "", 1400);
+    const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
+    const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
+    const educationalVideo = req.body?.educationalVideo === true || req.body?.videoMode === true || contentMode === "educational";
+    const imagePrompts = Array.isArray(req.body?.imagePrompts)
+      ? req.body.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+      : String(req.body?.imagePrompts || "")
+        .split(/\n+/)
+        .map((prompt) => clampText(prompt || "", 1200))
+        .filter(Boolean)
+        .slice(0, 3);
     const performanceDirective = clampText(req.body?.performanceDirective || "", 1800);
     const originalText = clampText(req.body?.originalText || "", 1600);
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
@@ -2404,19 +2456,34 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       voiceName,
       genderGroup,
       expression,
-      counterpartSpeakerName
+      counterpartSpeakerName,
+      contentMode: educationalVideo ? "educational" : "podcast"
     });
     const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
       speakerLabel,
       speakerName,
       counterpartSpeakerName,
       scenarioPrompt,
-      expression
+      expression,
+      contentMode: educationalVideo ? "educational" : "podcast"
     });
+    const sceneVisualPrompt = scenePrompt || [
+      `Escena de ${speakerName}.`,
+      scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
+      videoDirective ? `Prioridad manual: ${videoDirective}` : ""
+    ].filter(Boolean).join(" ").trim();
+    const sceneImagePromptList = imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
+      `${sceneVisualPrompt} Imagen principal horizontal 16:9.`,
+      `${sceneVisualPrompt} Variante en plano cerrado, y otra toma de apoyo del set.`
+    ] : []);
 
     const prompt = [
-      "Genera un video cinematográfico corto y realista para podcast.",
+      educationalVideo
+        ? "Genera un video educativo corto, claro y realista."
+        : "Genera un video cinematográfico corto y realista para podcast.",
       videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario sin romper identidad, sincronía labial ni continuidad del set: ${videoDirective}` : "",
+      sceneVisualPrompt ? `${educationalVideo ? "Dirección pedagógica de la escena" : "Dirección visual de la escena"}: ${sceneVisualPrompt}` : "",
+      sceneImagePromptList.length ? `Prompts de imagen para la escena: ${sceneImagePromptList.map((item, idx) => `${idx + 1}. ${item}`).join(" | ")}` : "",
       performanceDirective ? `Prioridad máxima de actuación visual: ejecuta estas acciones físicas o expresivas de forma visible en pantalla, sin convertirlas en texto en pantalla ni alterar el diálogo hablado: ${performanceDirective}` : "",
       `Locutor: ${speakerName} (${speakerLabel}).`,
       voiceName ? `Voz de referencia: ${voiceName}.` : "",
@@ -2441,17 +2508,37 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         : "Si no hay clip previo disponible, conserva continuidad narrativa usando el texto de la escena anterior.",
       "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base.",
       "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje.",
-      "Escena en cabina profesional de podcast con micrófono de estudio.",
-      "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
-      "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
-      "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
-      "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
-      "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
-      "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
+      educationalVideo
+        ? "Escena en entorno educativo profesional con apoyo visual limpio y composición editorial."
+        : "Escena en cabina profesional de podcast con micrófono de estudio.",
+      educationalVideo
+        ? "Usa el mismo entorno visual general del video, pero cada personaje debe ocupar una zona física distinta dentro del set."
+        : "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
+      educationalVideo
+        ? "Importante: posicionar a cada personaje en una parte diferente del escenario, y ser consistente con ese ángulo."
+        : "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
+      educationalVideo
+        ? "Importante: en la escena solo debe aparecer el personaje correspondiente al plano."
+        : "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
+      educationalVideo
+        ? "El personaje debe verse explicando en pantalla: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un recurso visual fuera de cámara o una referencia didáctica dentro del set."
+        : "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
+      educationalVideo
+        ? "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara."
+        : "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
+      educationalVideo
+        ? "Debe verse un solo personaje identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje."
+        : "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
       "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
-      "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
-      "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
-      "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
+      educationalVideo
+        ? "Si hace falta sugerir explicación, hacerlo solo con dirección de mirada, postura y composición del set; nunca agregando otra figura humana."
+        : "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
+      educationalVideo
+        ? "Solo se permiten microglances incidentales; la atención principal nunca debe caer directamente sobre la cámara."
+        : "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
+      educationalVideo
+        ? "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación limpia."
+        : "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
       dialogueAudioStoragePath || dialogueAudioUrl
         ? `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`
         : "",
@@ -2763,6 +2850,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         variant: resolvedVariant || null,
         promptVersion: "podcaster_veo_v1",
         videoDirective,
+        scenePrompt: sceneVisualPrompt,
+        imagePrompts: sceneImagePromptList,
+        contentMode: educationalVideo ? "educational" : "podcast",
         durationSec: inferredTargetDurationSec,
         targetSpeechLine: text,
         updatedAt: new Date().toISOString(),
@@ -2791,6 +2881,8 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const originalText = clampText(req.body?.originalText || "", 2000);
     const disfluencyInstruction = clampText(req.body?.disfluencyInstruction || "", 1800);
     const notes = clampText(req.body?.notes || "", 1200);
+    const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
+    const educationalAudio = req.body?.videoMode === true || contentMode === "educational";
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const model = normalizeModel(req.body?.model || "gemini-2.5-flash-preview-tts");
@@ -2807,7 +2899,9 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     }
 
     const prompt = [
-      "Interpreta una línea para podcast conversacional en español latino.",
+      educationalAudio
+        ? "Interpreta una línea para un video educativo en español latino, con tono claro, explicativo y natural."
+        : "Interpreta una línea para podcast conversacional en español latino.",
       `Locutor: ${speakerName} (${speakerLabel}).`,
       `Expresión: ${expression}.`,
       voiceName ? `Usa exactamente la voz ${voiceName}.` : "",

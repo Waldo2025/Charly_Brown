@@ -95,14 +95,13 @@ function _unidadBuildCategoryStyleUi(categoria = "") {
   const enabled = _unidadIsStyleSelectorEnabled(categoria);
   return `
     <div class="cb-unidad-style-toolbar" data-categoria="${_unidadEscapeHtml(categoria)}">
-      <label class="cb-unidad-style-toggle">
+      <label class="cb-unidad-style-toggle" aria-label="Activar o desactivar estilos educativos">
         <input type="checkbox" 
                class="cb-unidad-style-toggle-input" 
                data-action="toggle-style-selector" 
                data-categoria="${_unidadEscapeHtml(categoria)}" 
                ${enabled ? "checked" : ""}>
         <span class="cb-unidad-style-toggle-track"></span>
-        <span class="cb-unidad-style-toggle-label">Estilo educativo</span>
       </label>
       <div class="cb-unidad-style-selector-host" data-role="style-selector-host" style="${enabled ? "" : "display:none;"}">
         ${buildUnidadActivityStyleSelectorHtml(categoria)}
@@ -17967,11 +17966,13 @@ function _asegurarControladorAgenteUnidad() {
 }
 
 function abrirModalResultadoUnidad() {
+  _unidadSetResultLoadingOverlay(false);
   restaurarResultadoUnidadDesdeStorage();
   adaptarTablasResultadoResponsive();
   if (modalResultadoUnidad) {
     modalResultadoUnidad.style.display = "block";
   }
+  _unidadResultadoAplicarColumnaActiva();
   _inicializarFullscreenResultadoUnidad();
   _actualizarBotonFullscreenResultadoUnidad();
   _unidadRefreshFooterStyleSelector();
@@ -17986,11 +17987,33 @@ function _unidadSetResultLoadingOverlay(visible = false, text = "Preparando unid
   }
 }
 
+/**
+ * Toggle the visibility of the SyA panel in the result modal.
+ * Safe to call even if the panel does not exist in the DOM.
+ */
+function _unidadToggleResultSyaPanel(visible = false) {
+  const panel = document.getElementById("unidadResultSyaPanel");
+  if (!panel) return;
+  panel.style.display = visible ? "" : "none";
+}
+
+// Ensure global availability
+window._unidadToggleResultSyaPanel = _unidadToggleResultSyaPanel;
+
 function prepararNuevoResultadoUnidad() {
   const cont = document.getElementById("resultadoUnidadGenerada");
   if (cont) cont.innerHTML = "";
+  _unidadResultadoLimpiarColumnaActiva();
   limpiarResultadoUnidadEnStorage();
-  _unidadToggleResultSyaPanel(false);
+  try {
+    const toggleFn = window._unidadToggleResultSyaPanel || _unidadToggleResultSyaPanel;
+    if (typeof toggleFn === "function") {
+      toggleFn(false);
+    }
+  } catch (e) {
+    // Fail silently if function is missing or throws
+    console.debug("SyA panel toggle skip:", e);
+  }
   window.respuestaFinal = "";
   window.lecturaGlobalMostrada = false;
   window.debeInsertarLecturaLenguaje = true;
@@ -18054,54 +18077,51 @@ function detenerGeneracionUnidadGlobal() {
   window.stopRequestedUnidad = true;
   cancelarGeneracionProyectos();
   window.onGeminiStatus = null;
+  _unidadSetResultLoadingOverlay(false);
   logVisual("⏹ Generación de la unidad detenida por el usuario.");
 }
 
 async function regenerarResultadoUnidadDesdeToolbar() {
-  const categoriaObjetivo =
-    window.generandoCategoria ||
-    window.categoriaEnProceso ||
-    window.ultimaCategoriaFallida ||
-    window.ultimaCategoriaIntentada ||
-    "";
-
-  if (!categoriaObjetivo) {
-    alert("⚠️ No hay una categoría específica para reintentar todavía.");
-    return;
+  const btn = btnRegenerarResultadoUnidad || document.getElementById("btnRegenerarResultadoUnidad");
+  if (btn?.dataset?.loading === "1") return;
+  if (btn) {
+    btn.dataset.loading = "1";
+    btn.disabled = true;
   }
 
-  detenerGeneracionUnidadGlobal();
-  for (let i = 0; i < 30 && window.generandoCategoria; i++) {
-    await sleep(150);
+  const seleccionActiva = _unidadResultadoObtenerColumnaActiva();
+  try {
+    if (seleccionActiva?.categoria && seleccionActiva?.subtema) {
+      if (window.generandoCategoria || window.categoriaEnProceso) {
+        alert("⚠️ Espera a que termine la generación actual antes de regenerar una columna.");
+        return;
+      }
+
+      abrirModalResultadoUnidad();
+      if (seleccionActiva.target === "maestro") {
+        await _unidadRegenerarSoloMaestroSubtemaEnSitio(seleccionActiva);
+        return;
+      }
+
+      await _unidadRegenerarSoloAlumnoSubtemaEnSitio(seleccionActiva);
+      return;
+    }
+
+    alert("⚠️ Selecciona primero una columna de alumno o maestro para regenerarla.");
+  } finally {
+    if (btn) {
+      delete btn.dataset.loading;
+      btn.disabled = false;
+    }
   }
-  limpiarResultadoCategoria(categoriaObjetivo);
-  window.stopRequestedUnidad = false;
-  window.cancelarProyectos = false;
-  window.categoriaEnProceso = "";
-  window.generandoCategoria = null;
-  abrirModalResultadoUnidad();
-  window.ultimaCategoriaIntentada = categoriaObjetivo;
-  await generarSeccionCategoria(categoriaObjetivo);
 }
 
 function _unidadBuildSubtemaRegenerateButtonHtml({ categoria = "", subtema = "", target = "alumno" } = {}) {
-  const safeCategoria = _escapeHtmlUnidad(String(categoria || "").trim());
-  const safeSubtema = _escapeHtmlUnidad(String(subtema || "").trim());
-  const safeTarget = String(target || "").trim() === "maestro" ? "maestro" : "alumno";
-  const label = safeTarget === "maestro" ? "Regenerar maestro" : "Regenerar subtema";
-  const icon = safeTarget === "maestro" ? "fa-rotate-right" : "fa-rotate";
-  return `
-    <button type="button"
-      class="unidad-subtema-regenerate-btn"
-      data-action="regenerar-subtema-${safeTarget}"
-      data-categoria="${safeCategoria}"
-      data-subtema="${safeSubtema}"
-      data-target="${safeTarget}"
-      title="${label}"
-      aria-label="${label}">
-      <i class="fa-solid ${icon}" aria-hidden="true"></i>
-    </button>
-  `;
+  void categoria;
+  void subtema;
+  void target;
+  // El botón interno se retiró: la regeneración ahora se hace desde la selección activa.
+  return "";
 }
 
 async function _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria = "", subtema = "" } = {}) {
@@ -18130,16 +18150,15 @@ async function _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria = "", subte
   const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
   const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
   const tituloBase = String(colMaestro.querySelector("h4")?.textContent || colAlumno.querySelector("h4")?.textContent || formatearSubtema(safeSubtema)).trim();
-  const actividadesExtraidas = extraerActividades(htmlAlumno);
-  const htmlAlumnoSinFichas = _unidadEliminarBloquesHtmlPorSelector(
-    htmlAlumno,
-    '.activity[data-ficha="true"], .activity-fichas'
-  );
-  const htmlAlumnoSoloFichas = _unidadExtraerBloquesHtmlPorSelector(
-    htmlAlumno,
-    '.activity[data-ficha="true"], .activity-fichas'
-  );
-  const htmlAlumnoBaseParaNotas = htmlAlumnoSinFichas || htmlAlumno;
+  const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
+  const splitAlumno = separarSeccionesRecursos
+    ? _unidadSepararBloquesRecursosDeHtml(htmlAlumno)
+    : {
+      mainHtml: htmlAlumno,
+      resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+    };
+  const htmlAlumnoBaseParaNotas = splitAlumno.mainHtml || htmlAlumno;
+  const actividadesExtraidas = extraerActividades(htmlAlumnoBaseParaNotas);
 
   const notas = await _unidadGenerarNotasMaestroSeccion({
     promptContenidoActividades: htmlAlumnoBaseParaNotas,
@@ -18157,16 +18176,6 @@ async function _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria = "", subte
     await renderContenidoEnTiempoReal(colMaestroContenido, notas);
   }
 
-  if (htmlAlumnoSoloFichas.trim()) {
-    const claveFichaSeccion = String(
-      window.claveFichaActualGlobal
-      || claveFichaActualGlobal
-      || _unidadDetectFichaClaveFromActivities(extraerActividades(htmlAlumno).actividadesFichas || [])
-      || _unidadEtiquetaEditorialRecurso({ subtema: safeSubtema, categoria: safeCategoria, tipoRecurso: "fichas" })
-      || `Ficha ${formatearSubtema(safeSubtema)}`
-    ).trim();
-    void claveFichaSeccion;
-  }
 }
 
 async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtema = "" } = {}) {
@@ -18254,6 +18263,7 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
   const respuestaAlumno = await enviarPrompt([{ role: "user", text: promptCategoria }]);
   const cleanHTMLLocal = (html) => String(html || "").replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
   let htmlAlumnoLimpio = cleanHTMLLocal(String(respuestaAlumno || "").replace(/```html|```/g, "").trim());
+  const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
   htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
   htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
   htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
@@ -18275,9 +18285,184 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
   htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema: safeSubtema, categoria: safeCategoria, grado: gradoTexto });
   htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
 
+  if (separarSeccionesRecursos) {
+    const splitAlumno = _unidadSepararBloquesRecursosDeHtml(htmlAlumnoLimpio);
+    htmlAlumnoLimpio = splitAlumno.mainHtml || htmlAlumnoLimpio;
+  }
+
   const previewAlumno = document.getElementById(`${bloqueId}-alumno-contenido`);
   if (previewAlumno) {
     await renderContenidoEnTiempoReal(previewAlumno, htmlAlumnoLimpio);
+  }
+}
+
+let unidadResultadoColumnaActiva = null;
+window.unidadResultadoColumnaActiva = null;
+
+function _unidadResultadoColumnaKey({ categoria = "", subtema = "", target = "" } = {}) {
+  const safeTarget = String(target || "").trim() === "maestro" ? "maestro" : "alumno";
+  return `${safeTarget}::${String(categoria || "").trim()}::${String(subtema || "").trim()}`;
+}
+
+function _unidadResultadoNormalizarColumnaActiva(data = null) {
+  if (!data) return null;
+  const categoria = String(data.categoria || "").trim();
+  const subtema = String(data.subtema || "").trim();
+  const target = String(data.target || "").trim() === "maestro" ? "maestro" : "alumno";
+  if (!categoria || !subtema) return null;
+  return { categoria, subtema, target };
+}
+
+function _unidadResultadoObtenerColumnaActiva() {
+  return _unidadResultadoNormalizarColumnaActiva(unidadResultadoColumnaActiva);
+}
+
+function _unidadResultadoAplicarColumnaActiva() {
+  const container = document.getElementById("resultadoUnidadGenerada");
+  if (!container) return;
+  const active = _unidadResultadoObtenerColumnaActiva();
+  const activeKey = active ? _unidadResultadoColumnaKey(active) : "";
+
+  container.querySelectorAll(".col-alumno, .col-maestro").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const next = _unidadResultadoColumnaKey({
+      categoria: node.dataset.categoria || "",
+      subtema: node.dataset.subtema || "",
+      target: node.dataset.targetCol || (node.classList.contains("col-maestro") ? "maestro" : "alumno")
+    });
+    const isActive = !!activeKey && next === activeKey;
+    node.classList.toggle("is-active", isActive);
+    node.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function _unidadResultadoSeleccionarColumna(columnaEl) {
+  if (!(columnaEl instanceof HTMLElement)) return;
+  if (String(columnaEl.dataset.resourceBlock || "").trim() === "true") return;
+  const categoria = String(columnaEl.dataset.categoria || "").trim();
+  const subtema = String(columnaEl.dataset.subtema || "").trim();
+  const target = String(columnaEl.dataset.targetCol || (columnaEl.classList.contains("col-maestro") ? "maestro" : "alumno")).trim() === "maestro"
+    ? "maestro"
+    : "alumno";
+  if (!categoria || !subtema) return;
+  unidadResultadoColumnaActiva = { categoria, subtema, target };
+  window.unidadResultadoColumnaActiva = unidadResultadoColumnaActiva;
+  _unidadResultadoAplicarColumnaActiva();
+}
+
+function _unidadResultadoLimpiarColumnaActiva() {
+  unidadResultadoColumnaActiva = null;
+  window.unidadResultadoColumnaActiva = null;
+  _unidadResultadoAplicarColumnaActiva();
+}
+
+function _unidadSepararBloquesRecursosDeHtml(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") {
+    return {
+      mainHtml: source.trim(),
+      resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+    };
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild;
+    if (!root) {
+      return {
+        mainHtml: source.trim(),
+        resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+      };
+    }
+
+    const mainRoot = root.cloneNode(true);
+    const resourceParts = { ficha: [], anexo: [], recortable: [], video: [] };
+    const normalizeType = (value = "") => {
+      const safe = String(value || "").trim().toLowerCase();
+      if (safe === "fichas") return "ficha";
+      if (safe === "anexos") return "anexo";
+      if (safe === "recortables") return "recortable";
+      if (safe === "videos") return "video";
+      return ["ficha", "anexo", "recortable", "video"].includes(safe) ? safe : "";
+    };
+    const detectResourceType = (node) => {
+      if (!(node instanceof Element)) return false;
+      const explicit = normalizeType(node.dataset?.resourceType || "");
+      if (explicit) return explicit;
+      const sectionExplicit = normalizeType(node.dataset?.resourceSection || "");
+      if (sectionExplicit) return sectionExplicit;
+      if (node.matches('.activity[data-ficha="true"], .activity-fichas')) return "ficha";
+      if (node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading')) {
+        const headingText = String(node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading')?.textContent || "").toLowerCase();
+        if (/\bficha\b/.test(headingText)) return "ficha";
+        if (/\banexo\b/.test(headingText)) return "anexo";
+        if (/\brecortable\b/.test(headingText)) return "recortable";
+        if (/\bguion de video\b|\bvideo\b/.test(headingText)) return "video";
+      }
+      const titleNode = node.querySelector("strong, h1, h2, h3, h4, h5, h6");
+      const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (/\bficha\b/.test(titleText)) return "ficha";
+      if (/\banexo\b|\bsecci[oó]n de anexos?\b/.test(titleText)) return "anexo";
+      if (/\brecortable\b|\bsecci[oó]n de recortables?\b/.test(titleText)) return "recortable";
+      if (/\bguion de video\b|\bvideo\b|\bsecci[oó]n de videos?\b/.test(titleText)) return "video";
+      return "";
+    };
+    const resourceNodes = Array.from(root.children).filter((node) => {
+      if (!(node instanceof Element)) return false;
+      return !!detectResourceType(node)
+        || String(node.dataset?.resourceSection || "").trim() === "true"
+        || String(node.dataset?.resourceType || "").trim() !== ""
+        || node.classList.contains("bloque-recursos-subtema");
+    });
+
+    const _unidadLimpiaMetadatosFichaSeparada = (html = "") => {
+      const sourceHtml = String(html || "").trim();
+      if (!sourceHtml || typeof DOMParser === "undefined") return sourceHtml;
+      const parserLocal = new DOMParser();
+      const docLocal = parserLocal.parseFromString(`<div>${sourceHtml}</div>`, "text/html");
+      const rootLocal = docLocal.body.firstElementChild;
+      if (!rootLocal) return sourceHtml;
+      rootLocal.querySelectorAll(".unidad-ficha-metadatos-etiquetas").forEach((node) => node.remove());
+      return rootLocal.innerHTML.trim();
+    };
+
+    resourceNodes.forEach((node) => {
+      const resourceType = detectResourceType(node);
+      const htmlNode = resourceType === "ficha"
+        ? _unidadLimpiaMetadatosFichaSeparada(String(node.outerHTML || ""))
+        : String(node.outerHTML || "").trim();
+      if (resourceType && htmlNode) {
+        resourceParts[resourceType].push(htmlNode);
+      }
+      const nodeText = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      if (resourceType && !htmlNode && nodeText) {
+        resourceParts[resourceType].push(_escapeHtmlUnidad(nodeText));
+      }
+    });
+
+    resourceNodes.forEach((node) => {
+      const cloneNode = Array.from(mainRoot.children).find((candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        return String(candidate.outerHTML || "").trim() === String(node.outerHTML || "").trim();
+      });
+      if (cloneNode) cloneNode.remove();
+    });
+
+    const selector = '[data-resource-section="true"], [data-resource-type]';
+    Array.from(mainRoot.querySelectorAll(selector)).forEach((node) => node.remove());
+
+    return {
+      mainHtml: mainRoot.innerHTML.trim(),
+      resourcesByType: Object.fromEntries(
+        Object.entries(resourceParts).map(([key, value]) => [key, value.join("")])
+      )
+    };
+  } catch (_) {
+    return {
+      mainHtml: source.trim(),
+      resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+    };
   }
 }
 
@@ -18402,29 +18587,17 @@ btnRegenerarResultadoUnidad?.addEventListener("click", () => {
 });
 
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest?.(".unidad-subtema-regenerate-btn");
-  if (!btn) return;
-
-  const categoria = String(btn.dataset.categoria || "").trim();
-  const subtema = String(btn.dataset.subtema || "").trim();
-  const target = String(btn.dataset.target || "alumno").trim();
-  if (!categoria || !subtema) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-
-  if (target === "maestro") {
-    _unidadRegenerarSoloMaestroSubtemaEnSitio({ categoria, subtema }).catch((err) => {
-      console.error("Error regenerando maestro por subtema:", err);
-      alert("❌ No se pudo regenerar el maestro de este subtema.");
-    });
+  const columna = e.target.closest?.(".col-alumno, .col-maestro");
+  if (columna && modalResultadoUnidad?.contains(columna) && document.getElementById("resultadoUnidadGenerada")?.contains(columna)) {
+    _unidadResultadoSeleccionarColumna(columna);
     return;
   }
 
-  _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria, subtema }).catch((err) => {
-    console.error("Error regenerando alumno por subtema:", err);
-    alert("❌ No se pudo regenerar el alumno de este subtema.");
-  });
+  const btn = e.target.closest?.(".unidad-subtema-regenerate-btn");
+  if (btn) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 });
 
 function _unidadRefreshFooterStyleSelector() {
@@ -19205,6 +19378,7 @@ function conectarBotonGenerarTodo() {
       }, 3000);
 
     } catch (error) {
+      _unidadSetResultLoadingOverlay(false);
       btnActual.textContent = "❌ Error - Intentar nuevamente";
       setTimeout(() => {
         btnActual.textContent = originalText;
@@ -21475,6 +21649,7 @@ async function verificarSecuencia() {
       const tabla = document.createElement("table");
       tabla.className = "tabla-secuencia unidad-table";
       tabla.style.width = "100%";
+      tabla.style.tableLayout = "auto";
       tabla.innerHTML = `
         <thead>
           <tr>
@@ -21543,7 +21718,7 @@ async function verificarSecuencia() {
           if (op !== subtema) {
             const option = document.createElement("option");
             option.value = op;
-            option.textContent = op;
+            option.textContent = formatearSubtema(op);
             selectInterdisciplinariedad.appendChild(option);
           }
         });
@@ -21553,11 +21728,16 @@ async function verificarSecuencia() {
         // ya que esto provocaba una fuga de memoria exponencial que bloqueaba o enlentecía la UI (lag).
         // 14/04/2026 - Ahora se utiliza un simple select nativo con estilo mínimo.
         selectInterdisciplinariedad.style.width = "100%";
+        selectInterdisciplinariedad.style.minWidth = "160px";
+        selectInterdisciplinariedad.style.minHeight = "36px";
+        selectInterdisciplinariedad.style.display = "block";
         selectInterdisciplinariedad.style.padding = "4px 8px";
         selectInterdisciplinariedad.style.borderRadius = "6px";
         selectInterdisciplinariedad.style.border = "1px solid #cbd5e1";
         
         const interdiscWrap = document.createElement("div");
+        interdiscWrap.style.width = "100%";
+        interdiscWrap.style.minWidth = "160px";
         interdiscWrap.appendChild(selectInterdisciplinariedad);
 
         // Recursos
@@ -21598,8 +21778,13 @@ async function verificarSecuencia() {
 
         const tdRelacion = document.createElement("td");
         tdRelacion.appendChild(chkRelacion);
+        tdRelacion.style.width = "54px";
+        tdRelacion.style.minWidth = "54px";
+        tdRelacion.style.maxWidth = "54px";
+        tdRelacion.style.textAlign = "center";
 
         const tdInterdisc = document.createElement("td");
+        tdInterdisc.style.minWidth = "170px";
         tdInterdisc.appendChild(interdiscWrap);
 
         const tdRecort = document.createElement("td");
@@ -21663,7 +21848,7 @@ async function verificarSecuencia() {
                         data-categoria="${categoria}" 
                         title="Generar a partir de texto para esta categoría"
                         id="btn-ingesta-ia-${categoria.replace(/\s+/g, '-')}">
-                    <i class="fas fa-robot"></i>
+                    <i class="fas fa-font" aria-hidden="true"></i>
                 </button>
                 <span class="tooltiptext">Generar a partir de texto</span>
             </div>
@@ -22736,6 +22921,7 @@ window.construirPromptProyecto = function (
   const generarAnexosFinal = !!chkAnexo?.checked;
   const generarVideosFinal = !!chkVideo?.checked;
   const tieneRecortableFinal = !!chkRecortable?.checked;
+  const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
 
   // Claves/etiquetas para PROYECTOS: siempre con prefijo p (p1a, p1b, ...)
   const obtenerClaveFichaSafe = (window.obtenerClaveProyectoFicha || window.obtenerClaveFicha || ((u) => `Ficha p${u}a`));
@@ -22778,15 +22964,19 @@ window.construirPromptProyecto = function (
   if (generarVideosFinal) recursosOrdenados.push(`el ${claveVideo} "${tituloVideoGenerado}"`);
 
   const instruccionRecursos = recursosOrdenados.length
-    ? `IMPORTANTE: Usa cada uno de estos recursos **una sola vez** dentro de las actividades del proyecto (en fases distintas, si es posible). 
+    ? (separarSeccionesRecursos
+      ? `IMPORTANTE: Usa cada uno de estos recursos **una sola vez** dentro de las actividades del proyecto (en fases distintas, si es posible). 
   ${recursosOrdenados.map((r, i) => `- Actividad ${i + 1}: usa ${r}`).join("\n")}
   No vuelvas a mencionar estos recursos en otras actividades.`
+      : `IMPORTANTE: Integra estos recursos dentro de las fases y actividades del proyecto, sin separarlos al final.
+  ${recursosOrdenados.map((r, i) => `- Actividad ${i + 1}: integra ${r} de forma natural`).join("\n")}
+  No generes bloques independientes para estos recursos.`)
     : "";
 
   // Bloques a generar al FINAL del proyecto (como en otras categorías)
   let extraBloquesFinales = "";
 
-  if (generarFichasFinal) {
+  if (separarSeccionesRecursos && generarFichasFinal) {
     window.claveFichaActualGlobal = claveFichaActual;
     window.chkFichaActivo = true;
     extraBloquesFinales += `
@@ -22796,7 +22986,7 @@ window.construirPromptProyecto = function (
     `;
   }
 
-  if (generarAnexosFinal) {
+  if (separarSeccionesRecursos && generarAnexosFinal) {
     extraBloquesFinales += `
 <!-- ===== ANEXO VISUAL ===== -->
 <div class="activity" style="margin-top:30px;">
@@ -22809,7 +22999,7 @@ window.construirPromptProyecto = function (
 `;
   }
 
-  if (tieneRecortableFinal) {
+  if (separarSeccionesRecursos && tieneRecortableFinal) {
     extraBloquesFinales += `
 <!-- ===== RECORTABLE ===== -->
 <div class="activity" style="margin-top:30px;">
@@ -22821,7 +23011,7 @@ window.construirPromptProyecto = function (
 `;
   }
 
-  if (generarVideosFinal) {
+  if (separarSeccionesRecursos && generarVideosFinal) {
     extraBloquesFinales += `
 <!-- ===== GUION DE VIDEO ===== -->
 <div class="activity" style="margin-top:30px;">
@@ -23224,6 +23414,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   const generarAnexosFinal = (generarAnexos || (checkboxAnexos && checkboxAnexos.checked));
   const generarVideosFinal = (generarVideos || (checkboxVideos && checkboxVideos.checked));
   const tieneRecortable = (objetivosDelSubtema.some(o => o.recortable) || (checkboxRecortable && checkboxRecortable.checked));
+  const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
 
 
   objetivosDelSubtema.forEach(o => {
@@ -23359,6 +23550,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   if (tieneRecortable) {
     recursos.recortables.clave = obtenerClaveRecortable(unidadActual);
     recursos.recortables.generado = true;
+    window.claveRecortableActualGlobal = recursos.recortables.clave;
   }
 
   if (generarVideosFinal && tituloVideoGenerado) {
@@ -23374,21 +23566,14 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   if (recursos.videos.generado) recursosOrdenados.push(`el video "${recursos.videos.clave}"`);
 
   const instruccionRecursos = recursosOrdenados.length > 0
-    ? `IMPORTANTE: Cada uno de estos recursos debe usarse en **UNA sola actividad normal** y no repetirse:
-  ${recursosOrdenados.map((r, idx) => `- Actividad ${idx + 1}: usa ${r}`).join("\n")}
-
-  No vuelvas a mencionar estos recursos en otras actividades.
-  REGLA CRÍTICA: la mención del recurso debe quedar escrita DENTRO del contenido de la actividad normal, no solo inferida ni reservada para el bloque final.
-  REGLA CRÍTICA: cada recurso debe quedar anclado en una actividad normal DIFERENTE.
-  REGLA CRÍTICA: si el estilo rector no usa pasos ASC, de todos modos debes mencionar el recurso dentro del bloque del estilo activo.
-  REGLA CRÍTICA: ficha, anexo, recortable y video no pueden quedar "huérfanos"; si existen al final, deben haber sido mencionados antes en actividades normales.
-  - Ejemplos correctos:
-    * "Usa el recortable ${recursos.recortables.clave} para apoyar la actividad..."
-    * "Refuerza tu aprendizaje usando la ${recursos.fichas.clave}..."
-    * "Consulta el anexo visual ${recursos.anexos.clave} para resolver esta actividad..."
-    * "Mira el video '${recursos.videos.clave}' y responde..."
-
-  ⚠️ Las demás actividades normales NO deben volver a mencionar estos recursos.`
+    ? (separarSeccionesRecursos
+      ? `IMPORTANTE: Estos recursos NO deben mezclarse dentro de las actividades normales.
+  Deben aparecer como secciones independientes al final del subtema, cada una con su propio bloque.
+  Mantén las actividades normales libres de fichas, anexos, recortables y guion de video.
+  Si un recurso está activo, crea su sección aparte con contenido completo y coherente.`
+      : `IMPORTANTE: Estos recursos deben integrarse dentro del mismo subtema, sin bloques separados al final.
+  Las fichas, anexos, recortables y guion de video deben aparecer mezclados de forma natural dentro de las actividades normales o de sus explicaciones.
+  No generes secciones independientes para estos recursos.`)
     : "";
 
   const hasTrazosStyle = /ESTILOS PEDAG[ÓO]GICOS ACTIVOS:[\s\S]*Trazos y letras|FORMATO RECTOR INNEGOCIABLE:\s*Trazos y letras|CONTRATO DE FORMATO OBLIGATORIO:\s*usa Trazos y letras/i.test(String(instruccionesAdicionales || ""));
@@ -23397,13 +23582,13 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   // 4. BLOQUES FINALES UNIFICADOS
   let extraBloquesFinales = "";
 
-  // Fichas - solo si está activo
-  if (recursos.fichas.generado) {
+  // Fichas - solo si está activo y se separan recursos
+  if (separarSeccionesRecursos && recursos.fichas.generado) {
     extraBloquesFinales += `
-      🚨 OBLIGATORIO: genera EXACTAMENTE 1 ficha de refuerzo con clave <strong>${recursos.fichas.clave}</strong> y EXACTAMENTE 4 actividades.
-      - Usa la MISMA calidad pedagógica y la MISMA estructura de las actividades normales.
-      - El contenedor debe usar la misma clase base <div class="activity"> y marcar la ficha con data-ficha="true".
-      - Cada ficha debe profundizar/variar una actividad normal del subtema (no repetir literalmente).
+      🚨 OBLIGATORIO: genera EXACTAMENTE 1 sección de ficha de refuerzo con clave <strong>${recursos.fichas.clave}</strong>.
+      - La ficha debe ser una sección independiente, no una actividad mezclada con el subtema principal.
+      - Usa un bloque HTML completo y marcado con data-resource-section="true" y data-resource-type="ficha".
+      - La ficha debe mantener coherencia pedagógica y contener 4 actividades internas si corresponde.
       ${shouldUseTrazosFichaFormat ? `- Como este bloque usa formato Trazos y letras, cada actividad de ficha debe incluir SOLO:
         1) instrucción principal en negritas,
         2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
@@ -23418,12 +23603,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Anexos - solo si está activo
-  if (recursos.anexos.generado) {
+  if (separarSeccionesRecursos && recursos.anexos.generado) {
     extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 anexo visual:
+      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de anexo visual:
       - Clave: <strong>${recursos.anexos.clave}</strong>
-      - Formato: <div class="activity">...</div>
-      - Descripción visual detallada para reforzar el conocimiento de la actividad
+      - Formato: bloque independiente con data-resource-section="true" y data-resource-type="anexo"
+      - Descripción visual detallada para reforzar el conocimiento del subtema
       - Puede ser tablas comparativas, esquemas, mapas conceptuales, etc.
       - NO OMITIR ESTO BAJO NINGUNA CIRCUNSTANCIA
 
@@ -23440,13 +23625,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Videos - solo si está activo
-  if (recursos.videos.generado) {
+  if (separarSeccionesRecursos && recursos.videos.generado) {
     extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar **exactamente UN guion de video en tabla HTML al final del subtema**.
-
-      IMPORTANTE: SOLO UNA ACTIVIDAD debe usar el **video "${recursos.videos.clave}"**.  
-      - Menciónalo en el enunciado: "Mira el video "${recursos.videos.clave}" y responde...".  
-      - Al final del subtema, genera el guion del video a partir de una pregunta generadora.
+      🚨 OBLIGATORIO: DEBES generar **exactamente UNA sección de guion de video al final del subtema**.
+      - El video "${recursos.videos.clave}" no debe quedar dentro de una actividad normal.
+      - Debe presentarse como una sección independiente con data-resource-section="true" y data-resource-type="video".
+      - El guion del video nace de una pregunta generadora y se mantiene separado del bloque principal.
 
       GUION PROFESIONAL DE VIDEO:
       - El guion debe ser divertido, entretenido y captar la atención del alumno.
@@ -23477,12 +23661,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Recortables - solo si está activo
-  if (recursos.recortables.generado) {
+  if (separarSeccionesRecursos && recursos.recortables.generado) {
     extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 recortable:
+      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de recortable:
       - Clave: <strong>${recursos.recortables.clave}</strong>
-      - Formato: <div class="activity">...</div>
-      - Descripción visual completa de la actividad recortable
+      - Formato: bloque independiente con data-resource-section="true" y data-resource-type="recortable"
+      - Descripción visual completa de la sección recortable
       - Describe detalladamente cada tarjeta, imagen, pieza, color, texto, forma y tamaño.
       - Si hay categorías, grupos o instrucciones de uso, descríbelos con claridad.
       - Considera tamaño reducido para poder pegarlo en el libro de actividades.
@@ -23918,7 +24102,7 @@ function _unidadSubcategoriaEditorialCodigo(subtema = "", categoria = "") {
     ExpresionEscrita: "EXPRESION_ESCRITA",
     ExpresionOral: "EXPRESION_ORAL",
     Habilidades: "HABILIDADES_MAPA_MENTAL_Y_DICTADO",
-    ComprensionLectora: "LECTURA",
+    ComprensionLectora: "COMPRENSION_LECTORA",
     Naturales: "CIENCIAS_NATURALES",
     ConocimientoDelMedio: "CONOCIMIENTO_DEL_MEDIO",
     MiLocalidad: "HISTORIAS_PAISAJES_Y_CONVIVENCIA_EN_MI_LOCALIDAD",
@@ -24212,18 +24396,38 @@ function _unidadBuildFichaTeacherMetadataHtml({
 } = {}) {
   const safeFichaClave = String(fichaClave || "").trim();
   const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" });
-  const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
   const campo = _unidadCampoFormativoDeCategoria(categoria);
 
   return `
     <div class="unidad-ficha-metadatos-etiquetas unidad-metadatos-etiquetas" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;">
-      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
       <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
-      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
       ${_unidadRenderEjeArticuladorHTML(subtema, categoria)}
       ${campo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_escapeHtmlUnidad(campo)}</span>` : ""}
       ${_unidadRenderHabilidadCognitivaHTML(subtema, categoria)}
       ${_unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: safeFichaClave ? "Ficha" : "Ficha" })}
+    </div>
+  `;
+}
+
+function _unidadBuildResourceMetadataHtml({
+  subtema = "",
+  categoria = "",
+  tipoRecurso = "",
+  columna = "alumno",
+  etiquetaTitulo = ""
+} = {}) {
+  const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso });
+  const campo = _unidadCampoFormativoDeCategoria(categoria);
+  const etiqueta = String(etiquetaTitulo || "").trim();
+  return `
+    <div class="unidad-metadatos-etiquetas unidad-recurso-metadatos" style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;">
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+      <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
+      ${_unidadRenderEjeArticuladorHTML(subtema, categoria)}
+      ${campo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_escapeHtmlUnidad(campo)}</span>` : ""}
+      ${_unidadRenderHabilidadCognitivaHTML(subtema, categoria)}
+      ${_unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: etiqueta || "Recurso" })}
     </div>
   `;
 }
@@ -24564,6 +24768,31 @@ function _unidadBuildTeacherActionGuidance(lead = "", recursos = [], grado = "",
   return lines.map((line, i) => `${i === 0 && index % 2 === 1 ? "Además, " : ""}${line}`).join(" ");
 }
 
+function _unidadBuildTeacherResourceActionGuidance(recursos = []) {
+  const items = Array.isArray(recursos) ? recursos : [];
+  if (!items.length) return "";
+
+  const normalized = items
+    .map((item) => String(item || "").toLowerCase().trim())
+    .filter(Boolean);
+  const lines = [];
+
+  if (normalized.some((text) => /\bficha\b/.test(text))) {
+    lines.push("Use la ficha como actividad de refuerzo: léanla, resuélvanla paso a paso y verifiquen al final qué cambió respecto al modelo.");
+  }
+  if (normalized.some((text) => /\brecortable\b/.test(text))) {
+    lines.push("Con el recortable, convierta la consigna en una acción manipulativa: recortar, ordenar, pegar o armar antes de socializar el producto.");
+  }
+  if (normalized.some((text) => /\banexo\b/.test(text))) {
+    lines.push("Apóyese en el anexo como referencia visual: pida observar, comparar y explicar qué información extra aporta antes de responder.");
+  }
+  if (normalized.some((text) => /\bvideo\b/.test(text))) {
+    lines.push("Proyecte el video, haga una pausa para recuperar ideas clave y cierre con una síntesis oral de lo que deben observar o producir.");
+  }
+
+  return lines.join(" ");
+}
+
 function _unidadBuildTeacherActivityGuidance({
   lead = "",
   detalle = "",
@@ -24593,9 +24822,8 @@ function _unidadBuildTeacherNoteHtml({
 } = {}) {
   const leadBase = _unidadStripIcTokens(String(lead || "")).trim();
   const modalidadBase = String(modalidad || "individual").trim();
-  const recursoText = (Array.isArray(recursos) && recursos.length)
-    ? `Integre ${recursos.join(", ")} como apoyo concreto en el momento indicado.`
-    : "Modele un ejemplo breve antes de iniciar.";
+  const recursoText = _unidadBuildTeacherResourceActionGuidance(recursos)
+    || "Modele un ejemplo breve antes de iniciar.";
   const cierreBase = String(cierre || "").trim() || (index % 2 === 0
     ? "Cierre con una verificación rápida."
     : "Pida que expliquen un paso con sus palabras.");
@@ -26545,31 +26773,24 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
         recursosGenerados = _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio);
-        htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados);
-        htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema, categoria, grado: gradoTexto });
         htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
-        const htmlAlumnoSinFichas = _unidadEliminarBloquesHtmlPorSelector(
-          htmlAlumnoLimpio,
-          '.activity[data-ficha="true"], .activity-fichas'
-        );
-        const htmlAlumnoSoloFichas = _unidadExtraerBloquesHtmlPorSelector(
-          htmlAlumnoLimpio,
-          '.activity[data-ficha="true"], .activity-fichas'
-        );
-        const {
-          actividadesNormales: actividadesNormalesLimpias,
-          actividadesFichas: actividadesFichasLimpias
-        } = extraerActividades(htmlAlumnoLimpio);
-        const htmlAlumnoSoloNormales = actividadesNormalesLimpias
-          .map((actividadHTML) => `<div class="activity">${String(actividadHTML || "").trim()}</div>`)
-          .join("");
-        const htmlAlumnoSoloFichasNormalizado = (htmlAlumnoSoloFichas || actividadesFichasLimpias
-          .map((actividadHTML) => `<div class="activity">${String(actividadHTML || "").trim()}</div>`)
-          .join(""));
         let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
         }
+        const separarRecursosPorSeccion = Object.values(recursosGenerados).some((item) => Boolean(item?.generado));
+        if (!separarRecursosPorSeccion) {
+          htmlAlumnoConApoyoVisual = _unidadEnsureResourceMentionsInActivities(htmlAlumnoConApoyoVisual, recursosGenerados);
+          htmlAlumnoConApoyoVisual = _unidadInjectResourceIconsInActivities(htmlAlumnoConApoyoVisual, { subtema, categoria, grado: gradoTexto });
+        }
+        const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
+        const splitAlumnoRecursos = separarSeccionesRecursos
+          ? _unidadSepararBloquesRecursosDeHtml(htmlAlumnoConApoyoVisual)
+          : {
+            mainHtml: htmlAlumnoConApoyoVisual,
+            resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+          };
+        const htmlAlumnoSoloMain = splitAlumnoRecursos.mainHtml || htmlAlumnoConApoyoVisual;
 
         const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtema}']`)?.value;
         const etiquetaInterdisc = subtemaRelacionado
@@ -26604,26 +26825,21 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.debeInsertarLecturaLenguaje
         );
 
-        const lecturaNomenclaturaHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje)
-          ? `
-              <div class="lectura-global-categoria" style="margin-bottom:30px;">
-                <div id="unidadTemarioResumenMount">${_unidadBuildTemarioUnidadHTML()}</div>
-                <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
-                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_unidadEtiquetaEditorialSubcategoria({ subtema: "ComprensionLectora", categoria: "Lenguaje y comunicación", columna: "alumno" })}</span>
-                  ${_unidadRenderEjeArticuladorHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
-                  ${_unidadCampoFormativoDeCategoria("Lenguaje y comunicación") ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_unidadCampoFormativoDeCategoria("Lenguaje y comunicación")}</span>` : ""}
-                  ${_unidadRenderHabilidadCognitivaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true })}
-                  ${_unidadRenderCompetenciaPrimariaHTML("ComprensionLectora", "Lenguaje y comunicación", { lectura: true, label: "Lectura" })}
-                </div>
-                ${window.bloqueLecturaGlobalParaLenguaje || ""}
-              </div>`
-          : "";
         if (esPrimerSubtemaLenguaje) {
           htmlAlumnoConApoyoVisual = _unidadStripDuplicatedLectureBlocksFromHtml(htmlAlumnoConApoyoVisual);
         }
         const lecturaFuenteLenguaje = lectura || lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
-        const soporteLecturaMaestroHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje)
-          ? _bloqueMaestroLecturaSoporteUnidad(lecturaFuenteLenguaje)
+        const bloqueLecturaLenguajeSeparadoHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje && window.bloqueLecturaGlobalParaLenguaje && lecturaFuenteLenguaje)
+          ? `
+              <div class="bloque-subtema bloque-lectura-lenguaje" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:28px; flex-wrap:wrap;" data-categoria="${categoria}" data-subtema="ComprensionLectora">
+                  <div class="col-alumno" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="alumno" style="flex:1; min-width:300px;">
+                      ${window.bloqueLecturaGlobalParaLenguaje}
+                  </div>
+                  <div class="col-maestro" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                      ${_bloqueMaestroLecturaSoporteUnidad(lecturaFuenteLenguaje)}
+                  </div>
+              </div>
+          `
           : "";
 
         // Una vez insertada, marcar como ya insertada
@@ -26636,10 +26852,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const colMaestroId = `${bloqueId}-maestro`;
         const colAlumnoContenidoId = `${bloqueId}-alumno-contenido`;
         document.getElementById(bloqueId).innerHTML = `
+            ${bloqueLecturaLenguajeSeparadoHTML}
             <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                 <div id="${colAlumnoId}" class="col-alumno" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="alumno" style="flex:1; min-width:300px;">
-                    ${_unidadBuildSubtemaRegenerateButtonHtml({ categoria, subtema, target: "alumno" })}
-                    ${lecturaNomenclaturaHTML}
                     ${importedUsesOwnHeading ? "" : tablaInicialHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
@@ -26655,8 +26870,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                     <div id="${colAlumnoContenidoId}"></div>
                 </div>
                 <div id="${colMaestroId}" class="col-maestro" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                    ${_unidadBuildSubtemaRegenerateButtonHtml({ categoria, subtema, target: "maestro" })}
-                    ${importedUsesOwnHeading ? "" : soporteLecturaMaestroHTML}
                     ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
@@ -26680,19 +26893,19 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             categoria,
             titulo: tituloCreativoLimpioBase || formatearSubtema(subtema),
             descripcion: AE || T || C || P || tituloCreativoLimpioBase || formatearSubtema(subtema),
-            contenido: htmlAlumnoConApoyoVisual
+            contenido: htmlAlumnoSoloMain
           });
           _unidadRefreshTemarioUnidadMount();
         }
-        await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoConApoyoVisual);
+        await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoSoloMain);
 
         actualizarSpinnerProceso(statusId, `Generando notas del maestro para <strong>${formatearSubtema(subtema)}</strong>...`);
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
         let notasFinalesColMaestro = "";
-        if (htmlAlumnoSinFichas.trim()) {
+        if (htmlAlumnoSoloMain.trim()) {
           notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion({
-            promptContenidoActividades: htmlAlumnoSinFichas || htmlAlumnoSoloNormales,
-            fallbackContenidoActividades: htmlAlumnoSinFichas || htmlAlumnoSoloNormales,
+            promptContenidoActividades: htmlAlumnoSoloMain,
+            fallbackContenidoActividades: htmlAlumnoSoloMain,
             categoria,
             subtema,
             tituloCreativo: tituloCreativoLimpioBase,
@@ -26703,39 +26916,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           });
         }
         logVisual(`✅ Notas del maestro listas para ${subtema}`);
-
-        if (actividadesFichasLimpias && actividadesFichasLimpias.length > 0) {
-          const claveFichaSeccion = String(
-            window.claveFichaActualGlobal
-            || claveFichaActualGlobal
-            || _unidadDetectFichaClaveFromActivities(actividadesFichasLimpias)
-            || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" })
-            || `Ficha ${formatearSubtema(subtema)}`
-          ).trim();
-          const bloqueNotasFicha = _unidadCleanTeacherNotesHtml(
-            await _unidadGenerarNotasMaestroSeccion({
-              promptContenidoActividades: htmlAlumnoSoloFichasNormalizado || htmlAlumnoSoloFichas,
-              fallbackContenidoActividades: htmlAlumnoSoloFichasNormalizado || htmlAlumnoSoloFichas || htmlAlumnoLimpio,
-              categoria,
-              subtema,
-              tituloCreativo: tituloCreativoLimpioBase,
-              tituloSeccion: claveFichaSeccion,
-              grado: gradoTexto,
-              nivel,
-              expectedActivityCount: actividadesFichasLimpias.length,
-              esFicha: true,
-              fichaClave: claveFichaSeccion,
-              headingHtml: `
-                <div class="unidad-ficha-notes-heading" style="margin:0 0 18px 0;">
-                  <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(claveFichaSeccion)}</h4>
-                </div>
-              `
-            })
-          );
-          notasFinalesColMaestro += `
-                    ${bloqueNotasFicha}
-                `;
-        }
 
         if (String(categoria || "").trim() === "Matemáticas") {
           const bloqueContextoMatematico = _unidadBuildMathContextualizationPedagogicaHTML({
@@ -26750,11 +26930,114 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           }
         }
 
+        let bloqueRecursosHTML = "";
+        if (separarSeccionesRecursos) {
+          const resourceTypeLabels = {
+            ficha: "Ficha",
+            anexo: "Anexo",
+            recortable: "Recortable",
+            video: "Video"
+          };
+
+          const resourceSectionTitles = {
+            ficha: String(
+              window.claveFichaActualGlobal
+              || claveFichaActualGlobal
+              || _unidadDetectFichaClaveFromText(splitAlumnoRecursos.resourcesByType?.ficha || "")
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" })
+              || `Ficha ${formatearSubtema(subtema)}`
+            ).trim(),
+            anexo: String(
+              window.claveAnexoActualGlobal
+              || claveAnexoActualGlobal
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "anexos" })
+              || `Anexo visual ${formatearSubtema(subtema)}`
+            ).trim(),
+            recortable: String(
+              window.claveRecortableActualGlobal
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "recortables" })
+              || `Recortable ${formatearSubtema(subtema)}`
+            ).trim(),
+            video: String(
+              recursosGenerados?.videos?.clave
+              || _unidadInferGeneratedResourcesFromHtml(splitAlumnoRecursos.resourcesByType?.video || "")?.videos?.clave
+              || `Guion de video: "${formatearSubtema(subtema)}"`
+            ).trim()
+          };
+
+          const htmlMaestroRecursosByType = {};
+          for (const type of Object.keys(resourceTypeLabels)) {
+            const htmlAlumnoRecurso = splitAlumnoRecursos.resourcesByType?.[type] || "";
+            if (!htmlAlumnoRecurso.trim()) continue;
+            const esFicha = type === "ficha";
+            htmlMaestroRecursosByType[type] = _unidadCleanTeacherNotesHtml(
+              await _unidadGenerarNotasMaestroSeccion({
+                promptContenidoActividades: htmlAlumnoRecurso,
+                fallbackContenidoActividades: htmlAlumnoRecurso,
+                categoria,
+                subtema,
+                tituloCreativo: tituloCreativoLimpioBase,
+                tituloSeccion: resourceSectionTitles[type],
+                grado: gradoTexto,
+                nivel,
+                expectedActivityCount: 1,
+                esFicha,
+                fichaClave: esFicha ? resourceSectionTitles[type] : "",
+                headingHtml: `
+                  <div class="unidad-resource-notes-heading" style="margin:0 0 18px 0;">
+                    <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(resourceSectionTitles[type])}</h4>
+                  </div>
+                `
+              })
+            );
+          }
+
+          bloqueRecursosHTML = Object.keys(resourceTypeLabels)
+            .map((type) => {
+              const htmlAlumnoRecurso = splitAlumnoRecursos.resourcesByType?.[type] || "";
+              const htmlMaestroRecurso = htmlMaestroRecursosByType?.[type] || "";
+              if (!htmlAlumnoRecurso && !htmlMaestroRecurso) return "";
+              return `
+                <div class="bloque-subtema bloque-recursos-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:32px; flex-wrap:wrap;" data-resource-block="true" data-resource-section="true" data-resource-type="${type}">
+                    <div class="col-alumno" data-resource-block="true" data-resource-section="true" data-resource-type="${type}" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="alumno" style="flex:1; min-width:300px;">
+                        ${_unidadBuildResourceMetadataHtml({
+                          subtema,
+                          categoria,
+                          tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                          columna: "alumno",
+                          etiquetaTitulo: resourceSectionTitles[type]
+                        })}
+                        <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de ${resourceTypeLabels[type].toLowerCase()} del alumno</span>
+                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Separado del subtema principal</span>
+                        </div>
+                        ${htmlAlumnoRecurso || `<p style="color:#64748b;">Sin ${resourceTypeLabels[type].toLowerCase()} para el alumno en este subtema.</p>`}
+                    </div>
+                    <div class="col-maestro" data-resource-block="true" data-resource-section="true" data-resource-type="${type}" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                        ${_unidadBuildResourceMetadataHtml({
+                          subtema,
+                          categoria,
+                          tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                          columna: "maestro",
+                          etiquetaTitulo: resourceSectionTitles[type]
+                        })}
+                        <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de notas de ${resourceTypeLabels[type].toLowerCase()}</span>
+                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Bloque independiente del subtema</span>
+                        </div>
+                        ${htmlMaestroRecurso || `<p style="color:#64748b;">Sin notas de ${resourceTypeLabels[type].toLowerCase()} para este subtema.</p>`}
+                    </div>
+                </div>
+              `;
+            })
+            .filter(Boolean)
+            .join("");
+        }
+
         actualizarSpinnerProceso(statusId, `Renderizando resultados de <strong>${formatearSubtema(subtema)}</strong>...`);
         const colMaestro = document.getElementById(colMaestroId);
         if (colMaestro) {
           colMaestro.innerHTML = `
-              ${importedUsesOwnHeading ? "" : soporteLecturaMaestroHTML}
               ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
               <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
                   <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
@@ -26769,6 +27052,10 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
               <div id="${colMaestroId}-contenido"></div>
             `;
           await renderContenidoEnTiempoReal(document.getElementById(`${colMaestroId}-contenido`), notasFinalesColMaestro);
+        }
+
+        if (bloqueRecursosHTML) {
+          document.getElementById(bloqueId)?.insertAdjacentHTML("beforeend", bloqueRecursosHTML);
         }
 
 
@@ -27306,6 +27593,17 @@ function extraerActividades(contenidoActividades) {
         .map((node) => String(node.innerHTML || "").trim())
         .filter(Boolean);
 
+      if (!actividadesNormales.length && !actividadesFichas.length) {
+        const fallbackHtml = String(root.innerHTML || "").trim();
+        const fallbackText = String(root.textContent || "").replace(/\s+/g, " ").trim();
+        if (fallbackHtml && fallbackText) {
+          return {
+            actividadesNormales: [fallbackHtml],
+            actividadesFichas: []
+          };
+        }
+      }
+
       return {
         actividadesNormales,
         actividadesFichas
@@ -27323,6 +27621,11 @@ function extraerActividades(contenidoActividades) {
     actividadesNormales: actividadesMatch,
     actividadesFichas: fichasMatch
   };
+}
+
+function _unidadSeccionesRecursosSeparadas() {
+  const checkbox = document.getElementById("unidadSepararRecursos");
+  return checkbox ? !!checkbox.checked : true;
 }
 
 function _unidadExtraerBloquesHtmlPorSelector(html = "", selector = "") {
@@ -27659,6 +27962,8 @@ function _unidadEnsureFichaBlocksHaveActivityClass(html = "") {
     if (!block.classList.contains("activity")) block.classList.add("activity");
     if (block.classList.contains("activity-fichas")) block.classList.remove("activity-fichas");
     block.setAttribute("data-ficha", "true");
+    block.setAttribute("data-resource-type", "ficha");
+    block.setAttribute("data-resource-section", "true");
   });
 
   let fichaActiva = false;
@@ -27672,11 +27977,17 @@ function _unidadEnsureFichaBlocksHaveActivityClass(html = "") {
 
     if (node.classList?.contains("activity")) {
       node.setAttribute("data-ficha", "true");
+      node.setAttribute("data-resource-type", "ficha");
+      node.setAttribute("data-resource-section", "true");
       return;
     }
 
     const activities = Array.from(node.querySelectorAll?.(".activity") || []);
-    activities.forEach((activity) => activity.setAttribute("data-ficha", "true"));
+    activities.forEach((activity) => {
+      activity.setAttribute("data-ficha", "true");
+      activity.setAttribute("data-resource-type", "ficha");
+      activity.setAttribute("data-resource-section", "true");
+    });
   });
 
   return root.innerHTML;
@@ -28267,7 +28578,7 @@ function _unidadBuildTeacherNotesStructuredHtml({
 
   return _unidadBuildTeacherNotesShellHtml({
     headingHtml,
-    preGeneralHtml: esFicha ? _unidadBuildFichaTeacherMetadataHtml({ subtema, categoria, fichaClave }) : "",
+    preGeneralHtml: esFicha && !headingHtml ? _unidadBuildFichaTeacherMetadataHtml({ subtema, categoria, fichaClave }) : "",
     generalTitle: "Actividad General",
     generalItemsHtml: actividadesHtml,
     sectionsHtml: [mathContext, ampliacion, refuerzo, neurologia].filter(Boolean)
@@ -28351,6 +28662,14 @@ function _unidadEnsureFichaMetadataSection(html = "", { subtema = "", categoria 
 
   let heading = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6"))
     .find((node) => String(node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === safeFichaClave.toLowerCase());
+  const getTopLevelChild = (node) => {
+    let current = node;
+    while (current && current.parentElement && current.parentElement !== root) {
+      current = current.parentElement;
+    }
+    return current && current.parentElement === root ? current : null;
+  };
+  let anchorNode = heading ? getTopLevelChild(heading) : null;
   if (!heading) {
     const firstFichaBlock = root.querySelector('.activity[data-ficha="true"], .activity-fichas');
     if (!firstFichaBlock) return source;
@@ -28359,9 +28678,10 @@ function _unidadEnsureFichaMetadataSection(html = "", { subtema = "", categoria 
     heading.style.marginTop = "24px";
     heading.textContent = safeFichaClave;
     root.insertBefore(heading, firstFichaBlock);
+    anchorNode = heading;
   }
 
-  const prev = heading.previousElementSibling;
+  const prev = anchorNode?.previousElementSibling;
   if (prev?.classList?.contains("unidad-ficha-metadatos-etiquetas")) return source;
 
   const wrapper = doc.createElement("div");
@@ -28369,20 +28689,22 @@ function _unidadEnsureFichaMetadataSection(html = "", { subtema = "", categoria 
   wrapper.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;";
 
   const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" });
-  const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
 
   const campo = _unidadCampoFormativoDeCategoria(categoria);
   wrapper.innerHTML = `
-    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
+    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
     <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
-    <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
     ${_unidadRenderEjeArticuladorHTML(subtema, categoria)}
     ${campo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${_escapeHtmlUnidad(campo)}</span>` : ""}
     ${_unidadRenderHabilidadCognitivaHTML(subtema, categoria)}
     ${_unidadRenderCompetenciaPrimariaHTML(subtema, categoria, { label: "Ficha" })}
   `;
 
-  root.insertBefore(wrapper, heading);
+  if (anchorNode && anchorNode.parentElement === root) {
+    root.insertBefore(wrapper, anchorNode);
+  } else {
+    root.insertBefore(wrapper, root.firstChild);
+  }
   return root.innerHTML;
 }
 
@@ -28399,21 +28721,21 @@ function _unidadEnsureFinalResourceTitles(html = "", recursos = {}, subtema = ""
     {
       key: "anexos",
       title: String(recursos?.anexos?.clave || "").trim(),
-      match: /\banexo\s+[Pp]?\d+\w*/i,
+      match: /\banexo\s+[Pp]?\d+\w*|\bsecci[oó]n de anexos?\b/i,
       headingClass: "unidad-anexo-heading",
       recursoType: "anexos"
     },
     {
       key: "recortables",
       title: String(recursos?.recortables?.clave || "").trim(),
-      match: /\brecortable\s+[Pp]?\d+\w*/i,
+      match: /\brecortable\s+[Pp]?\d+\w*|\bsecci[oó]n de recortables?\b/i,
       headingClass: "unidad-recortable-heading",
       recursoType: "recortables"
     },
     {
       key: "videos",
       title: String(recursos?.videos?.clave || "").trim() ? `Guion de video: "${String(recursos?.videos?.clave || "").trim()}"` : "",
-      match: /guion de video:\s*"[^"]+"|video\s+"[^"]+"/i,
+      match: /guion de video:\s*"[^"]+"|video\s+"[^"]+"|\bsecci[oó]n de videos?\b/i,
       headingClass: "unidad-video-heading",
       recursoType: "videos"
     }
@@ -28421,18 +28743,18 @@ function _unidadEnsureFinalResourceTitles(html = "", recursos = {}, subtema = ""
 
   if (!configs.length) return source;
 
-  const activityBlocks = Array.from(root.querySelectorAll(".activity"));
-  activityBlocks.forEach((block) => {
+  const sectionBlocks = Array.from(root.children).filter((node) => node instanceof Element);
+  sectionBlocks.forEach((block) => {
     const blockText = String(block.textContent || "").replace(/\s+/g, " ").trim();
-    const isRegularActivity = /\[IC\s*T\./i.test(blockText) || !!block.querySelector(".answer, ol.steps");
-    if (isRegularActivity) return;
-
     const titleNode = Array.from(block.children).find((node) => /^H[1-6]$/.test(node.tagName || "") || (node.tagName || "") === "STRONG" || ((node.tagName || "") === "P" && node.querySelector("strong")));
     const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim();
 
     configs.forEach((config) => {
       if (!config.match.test(blockText)) return;
       if (titleText && titleText.toLowerCase().includes(config.title.toLowerCase())) return;
+
+      block.setAttribute("data-resource-type", config.recursoType);
+      block.setAttribute("data-resource-section", "true");
 
       const heading = doc.createElement("strong");
       heading.className = config.headingClass;
@@ -28554,6 +28876,17 @@ function construirPromptNotasMaestro(
   if (!actividadesBase.length) {
     return "<p>❌ No se detectaron actividades para generar notas del maestro.</p>";
   }
+  const recursosDetectados = [];
+  const fuenteDetectarRecursos = actividadesBase
+    .map((actividadHTML) => String(actividadHTML || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim())
+    .join(" ");
+  if (/\bficha\b/i.test(fuenteDetectarRecursos)) recursosDetectados.push("ficha");
+  if (/\brecortable\b/i.test(fuenteDetectarRecursos)) recursosDetectados.push("recortable");
+  if (/\banexo\b/i.test(fuenteDetectarRecursos)) recursosDetectados.push("anexo");
+  if (/\bvideo\b/i.test(fuenteDetectarRecursos)) recursosDetectados.push("video");
+  const instruccionRecursosDocentes = recursosDetectados.length
+    ? `Cuando una actividad incluya ${recursosDetectados.join(", ")}, conviértelo en una acción docente explícita: di qué hace el maestro con ese recurso, en qué momento se usa y para qué sirve dentro de la actividad.`
+    : "Si aparece alguna ficha, recortable, anexo o video en el contenido, no lo trates como adorno: intégralo como una acción pedagógica concreta dentro del párrafo.";
 
   const seleccionarActividadAmpliacion = () => {
     const pool = actividadesNormales.length ? actividadesNormales : actividadesBase;
@@ -28710,6 +29043,7 @@ function construirPromptNotasMaestro(
   Cada párrafo de actividad debe tener una apertura, un desarrollo y un cierre diferentes; no repitas la misma estructura sintáctica entre actividades consecutivas.
   La sección actual corresponde a un ${tipoSeccion}; usa exactamente la misma lógica para subtema o ficha y cambia solo el título de la sección.
   ${instruccionFuenteSeccion}
+  ${instruccionRecursosDocentes}
   ${instruccionFichas}
   - Base obligatoria para la actividad de ampliación: "${actividadAmpliacionBase}".
   - No reemplaces esa base por una idea nueva; la ampliación debe derivarse de esa actividad real.
@@ -28736,6 +29070,7 @@ function construirPromptNotasMaestro(
      - La referencia a la actividad debe ir dentro del párrafo, sin encabezado visible ni títulos repetidos.
      - Debe verse con naturalidad qué actividad está explicando, por ejemplo con "En la actividad 1..." o una variante equivalente.
      - Incluye modalidad y recursos solo si aportan a la conducción docente.
+     - Cuando aparezca ficha, recortable, anexo o video, no los menciones como material decorativo: explica qué debe hacer el maestro con ese recurso, cómo se usa y qué evidencia deja.
      - Si el grado es bajo, usa menos palabras y verbos simples.
      - No uses preguntas fijas al alumnado ni listas de metacognición.
      - Si necesitas evidenciar la respuesta o cierre esperado, usa un bloque <div class="answer"> breve.
