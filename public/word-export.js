@@ -26,6 +26,40 @@ const DEFAULT_STYLE_DEFINITIONS = {
   }
 };
 
+const TEN_ED_STYLE_MAP = Object.freeze({
+  title: "0100TITULO",
+  subtitle: "0102SUBTITULO",
+  subtitleLevel2: "0103SUBTITULONIVEL2",
+  campoFormativo: "0104CAMPOFORMATIVO",
+  sectionTitle: "0105TITULOSECCIONYCOMPETENCIA",
+  competencia: "0801COMPETENCIA",
+  ejeArticulador: "0802EJEARTICULADOR",
+  habilidades: "080502HABILIDADES",
+  body: "020000TEXTO",
+  literatura: "020001TEXTOLITERATURA",
+  instructions: "020100INSTRUCCION",
+  listNumber: "020200TEXTONUMERADONIVEL1",
+  listNumberLevel2: "020300TEXTONUMERADONIVEL2",
+  listBullet: "020202TEXTOBULLET",
+  listBulletLevel2: "020303TEXTOBULLETSNIVEL2",
+  tableText: "030000TABLASCUERPO",
+  tableTextCentered: "030004TABLASCUERPOCENTRADO",
+  tableTitleCentered: "030100TABLASTITULOCENTRADO",
+  tableTitleLeft: "030102TABLASTITULOIZQUIERDA",
+  answerAlumno: "080400RESPUESTAALUMNO",
+  answerChar: "ARESPUESTAALUMNO",
+  teacherNote: "1002SPEC"
+});
+
+const TEN_ED_SECTPR = Object.freeze(
+  '<w:sectPr w:rsidR="00B27AF3" w:rsidRPr="00061EE1">' +
+    '<w:pgSz w:w="12240" w:h="15840"/>' +
+    '<w:pgMar w:top="1417" w:right="1701" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/>' +
+    '<w:cols w:space="708"/>' +
+    '<w:docGrid w:linePitch="360"/>' +
+  "</w:sectPr>"
+);
+
 function escXml(value = "") {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -64,6 +98,22 @@ function normalizeStyleDefinitions(input = {}) {
 
 function pickZipCtor() {
   return window.htmlDocx?.JSZip || window.JSZip || null;
+}
+
+async function loadZipFromArrayBuffer(JSZipCtor, buffer) {
+  if (!JSZipCtor) throw new Error("JSZip no está disponible.");
+  if (typeof JSZipCtor.loadAsync === "function") return await JSZipCtor.loadAsync(buffer);
+  const zip = new JSZipCtor();
+  if (typeof zip.loadAsync === "function") return await zip.loadAsync(buffer);
+  // JSZip v2
+  return new JSZipCtor(buffer);
+}
+
+async function zipToBlob(zip) {
+  if (!zip) throw new Error("ZIP inválido.");
+  if (typeof zip.generateAsync === "function") return await zip.generateAsync({ type: "blob" });
+  if (typeof zip.generate === "function") return zip.generate({ type: "blob" });
+  throw new Error("No se pudo generar el blob del ZIP.");
 }
 
 function buildContentTypes() {
@@ -201,7 +251,8 @@ function buildNumberingXml() {
 </w:numbering>`;
 }
 
-function buildSectPr() {
+function buildSectPr(override = "") {
+  if (override && String(override).trim()) return String(override).trim();
   return `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
 }
 
@@ -229,19 +280,28 @@ function paragraphXml(runs = "", styleId = "CBBody", extraPpr = "") {
   return `<w:p><w:pPr><w:pStyle w:val="${styleId}"/>${extraPpr}</w:pPr>${runs || "<w:r><w:t></w:t></w:r>"}</w:p>`;
 }
 
-function listPpr(type = "ul") {
+function listPpr(type = "ul", level = 0) {
   const numId = type === "ol" ? 2 : 1;
-  return `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr>`;
+  const ilvl = Math.max(0, Math.min(8, Number(level || 0)));
+  return `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
 }
 
-function mapParagraphStyle(el) {
+function mapParagraphStyle(el, ctx = {}) {
   const declared = String(el?.getAttribute?.("data-word-style") || "").trim();
   if (declared) return declared;
+  const styleMap = ctx?.styleMap || null;
   const tag = String(el?.tagName || "").toLowerCase();
-  if (tag === "h1") return "CBTitle";
-  if (tag === "h2") return "CBHeading1";
-  if (tag === "h3") return "CBHeading2";
-  if (tag === "h4" || tag === "h5") return "CBHeading3";
+  if (styleMap) {
+    if (tag === "h1") return styleMap.title || TEN_ED_STYLE_MAP.title;
+    if (tag === "h2") return styleMap.subtitle || TEN_ED_STYLE_MAP.subtitle;
+    if (tag === "h3") return styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subtitleLevel2;
+    if (tag === "h4" || tag === "h5") return styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subtitleLevel2;
+  } else {
+    if (tag === "h1") return "CBTitle";
+    if (tag === "h2") return "CBHeading1";
+    if (tag === "h3") return "CBHeading2";
+    if (tag === "h4" || tag === "h5") return "CBHeading3";
+  }
   const cls = String(el?.className || "");
   const text = String(el?.textContent || "").trim();
   const ownText = String(el?.childNodes?.length
@@ -250,6 +310,26 @@ function mapParagraphStyle(el) {
       .map((node) => node.textContent || "")
       .join(" ")
     : text).replace(/\s+/g, " ").trim();
+  if (styleMap) {
+    const mode = String(ctx?.mode || "").toLowerCase();
+    if (/^campo formativo\b/i.test(text)) return styleMap.campoFormativo || TEN_ED_STYLE_MAP.campoFormativo;
+    if (/^competencia\b/i.test(text)) return styleMap.competencia || TEN_ED_STYLE_MAP.competencia;
+    if (/^eje articulador\b/i.test(text)) return styleMap.ejeArticulador || TEN_ED_STYLE_MAP.ejeArticulador;
+    if (/^habilidad cognitiva\b/i.test(text) || /^habilidades\b/i.test(text)) return styleMap.habilidades || TEN_ED_STYLE_MAP.habilidades;
+    if (/^t[ií]tulo secci[oó]n/i.test(text)) return styleMap.sectionTitle || TEN_ED_STYLE_MAP.sectionTitle;
+    if (/^actividad\b/i.test(text)) return styleMap.sectionTitle || TEN_ED_STYLE_MAP.sectionTitle;
+    if (/^subactividad\b/i.test(text)) return styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subtitleLevel2;
+    if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return styleMap.instructions || TEN_ED_STYLE_MAP.instructions;
+    if (/^sugerencia de respuesta\b/i.test(text) || /^respuesta\b/i.test(text) || /^respuesta esperada\b/i.test(text)) {
+      return styleMap.answerAlumno || TEN_ED_STYLE_MAP.answerAlumno;
+    }
+    if (mode === "maestro" && (/^nota\b/i.test(text) || /^orientaci[oó]n docente/i.test(text) || /docente|maestro/i.test(text))) {
+      return styleMap.teacherNote || TEN_ED_STYLE_MAP.teacherNote;
+    }
+    if (/^subtema\b/i.test(ownText)) return styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subtitleLevel2;
+    return styleMap.body || TEN_ED_STYLE_MAP.body;
+  }
+
   if (/^subcategor/i.test(text)) return "CBSubtopic";
   if (/^pregunta detonante/i.test(text) || /^lectura generadora/i.test(text) || /^titulo de la lectura relacionada/i.test(text)) return "CBHeading2";
   if (/^bibliograf/i.test(text) || /^sin[oó]nimos/i.test(text) || /^notas del maestro/i.test(text)) return "CBHeading3";
@@ -269,59 +349,160 @@ function mergeStyle(base = {}, patch = {}) {
   return { ...base, ...patch };
 }
 
-function inlineRuns(node, style = {}) {
+function inlineRuns(node, style = {}, ctx = {}) {
   if (!node) return "";
-  if (node.nodeType === Node.TEXT_NODE) return makeTextRun(node.textContent || "", style);
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = String(node.textContent || "");
+    if (!text) return "";
+    if (/^\s+$/.test(text)) return "";
+    const answerCharStyle = ctx?.useTemplateStyles ? String(ctx?.styleMap?.answerChar || "").trim() : "";
+    if (!answerCharStyle) return makeTextRun(text, style);
+
+    // En el template 10ED, la respuesta suele ir embebida en el mismo párrafo (p.ej. "… Respuesta: …").
+    // Aplicamos el estilo de carácter A_RESPUESTA ALUMNO desde la etiqueta "Respuesta:" / "Sugerencia de respuesta:".
+    const markers = [
+      "Sugerencia de respuesta:",
+      "Respuesta esperada:",
+      "Respuesta:"
+    ];
+    const lower = text.toLowerCase();
+    const idx = markers
+      .map((m) => ({ marker: m, idx: lower.indexOf(m.toLowerCase()) }))
+      .filter((x) => x.idx >= 0)
+      .sort((a, b) => a.idx - b.idx)[0];
+
+    if (!idx) return makeTextRun(text, style);
+    const before = text.slice(0, idx.idx);
+    const after = text.slice(idx.idx);
+    const answerStyle = mergeStyle(style, { charStyle: answerCharStyle });
+    return `${before ? makeTextRun(before, style) : ""}${after ? makeTextRun(after, answerStyle) : ""}`;
+  }
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
   if (tag === "br") return makeBreakRun();
   let nextStyle = style;
   const declaredChar = String(node.getAttribute?.("data-word-char-style") || "").trim();
   if (declaredChar) nextStyle = mergeStyle(nextStyle, { charStyle: declaredChar });
-  if (tag === "strong" || tag === "b") nextStyle = mergeStyle(style, { bold: true, charStyle: style.charStyle || "CBStrong" });
-  if (tag === "em" || tag === "i") nextStyle = mergeStyle(nextStyle, { italic: true, charStyle: nextStyle.charStyle || "CBEmphasis" });
-  if (tag === "u") nextStyle = mergeStyle(nextStyle, { underline: true, charStyle: nextStyle.charStyle || "CBUnderline" });
-  if (tag === "mark") nextStyle = mergeStyle(nextStyle, { highlight: true, charStyle: nextStyle.charStyle || "CBHighlight" });
+  const useTemplateStyles = Boolean(ctx?.useTemplateStyles);
+  if (tag === "strong" || tag === "b") {
+    nextStyle = useTemplateStyles
+      ? mergeStyle(style, { bold: true })
+      : mergeStyle(style, { bold: true, charStyle: style.charStyle || "CBStrong" });
+  }
+  if (tag === "em" || tag === "i") {
+    nextStyle = useTemplateStyles
+      ? mergeStyle(nextStyle, { italic: true })
+      : mergeStyle(nextStyle, { italic: true, charStyle: nextStyle.charStyle || "CBEmphasis" });
+  }
+  if (tag === "u") {
+    nextStyle = useTemplateStyles
+      ? mergeStyle(nextStyle, { underline: true })
+      : mergeStyle(nextStyle, { underline: true, charStyle: nextStyle.charStyle || "CBUnderline" });
+  }
+  if (tag === "mark") {
+    nextStyle = useTemplateStyles
+      ? mergeStyle(nextStyle, { highlight: true })
+      : mergeStyle(nextStyle, { highlight: true, charStyle: nextStyle.charStyle || "CBHighlight" });
+  }
   if (tag === "span" && /color\s*:\s*([^;]+)/i.test(node.getAttribute("style") || "")) {
     const m = (node.getAttribute("style") || "").match(/color\s*:\s*#?([0-9a-f]{3,6})/i);
     if (m?.[1]) nextStyle = mergeStyle(nextStyle, { color: m[1].length === 3 ? m[1].replace(/(.)/g, "$1$1") : m[1] });
   }
-  return Array.from(node.childNodes).map((child) => inlineRuns(child, nextStyle)).join("");
+  return Array.from(node.childNodes).map((child) => inlineRuns(child, nextStyle, ctx)).join("");
 }
 
-function tableXml(tableEl) {
+function tableXml(tableEl, ctx = {}) {
+  const styleMap = ctx?.styleMap || null;
+  const inTableStyle = styleMap?.tableText || "CBTableText";
+  const headerStyle = styleMap?.tableTitleCentered || styleMap?.tableTitleLeft || inTableStyle;
   const rows = Array.from(tableEl.querySelectorAll("tr")).map((tr) => {
     const cells = Array.from(tr.children).filter((cell) => /^(td|th)$/i.test(cell.tagName)).map((cell) => {
-      const cellParagraphs = blockNodesToXml(Array.from(cell.childNodes), { inTable: true }) || paragraphXml(makeTextRun(cell.textContent || ""), "CBTableText");
+      const isHeader = /^th$/i.test(cell.tagName);
+      const cellCtx = { ...ctx, inTable: true, forceStyle: isHeader ? headerStyle : inTableStyle };
+      const cellParagraphs = blockNodesToXml(Array.from(cell.childNodes), cellCtx)
+        || paragraphXml(makeTextRun(cell.textContent || ""), cellCtx.forceStyle || inTableStyle);
       return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr>${cellParagraphs}</w:tc>`;
     }).join("");
     return `<w:tr>${cells}</w:tr>`;
   }).join("");
+  if (ctx?.useTemplateStyles) {
+    return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>${rows}</w:tbl>`;
+  }
   return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="8" w:space="0" w:color="C7D2FE"/><w:left w:val="single" w:sz="8" w:space="0" w:color="C7D2FE"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="C7D2FE"/><w:right w:val="single" w:sz="8" w:space="0" w:color="C7D2FE"/><w:insideH w:val="single" w:sz="6" w:space="0" w:color="E2E8F0"/><w:insideV w:val="single" w:sz="6" w:space="0" w:color="E2E8F0"/></w:tblBorders></w:tblPr>${rows}</w:tbl>`;
+}
+
+function listXml(listEl, ctx = {}, level = 0) {
+  const tag = String(listEl?.tagName || "").toLowerCase();
+  if (tag !== "ul" && tag !== "ol") return "";
+  const styleMap = ctx?.styleMap || null;
+  const normalizedLevel = Math.max(0, Math.min(8, Number(level || 0)));
+
+  const pickListStyleId = () => {
+    if (!styleMap) return ctx.inTable ? "CBTableText" : "CBBody";
+    if (tag === "ol") {
+      return normalizedLevel >= 1
+        ? (styleMap.listNumberLevel2 || TEN_ED_STYLE_MAP.listNumberLevel2)
+        : (styleMap.listNumber || TEN_ED_STYLE_MAP.listNumber);
+    }
+    return normalizedLevel >= 1
+      ? (styleMap.listBulletLevel2 || TEN_ED_STYLE_MAP.listBulletLevel2)
+      : (styleMap.listBullet || TEN_ED_STYLE_MAP.listBullet);
+  };
+
+  const listStyleId = pickListStyleId();
+  const baseStyle = ctx?.forceStyle || (ctx.inTable ? (styleMap?.tableText || "CBTableText") : listStyleId);
+  const extra = ctx?.useTemplateStyles ? "" : listPpr(tag, normalizedLevel);
+
+  return Array.from(listEl.children)
+    .filter((li) => li?.tagName?.toLowerCase?.() === "li")
+    .map((li) => {
+      const nestedLists = Array.from(li.children || []).filter((child) => /^(ul|ol)$/i.test(child.tagName));
+      const runs = Array.from(li.childNodes).map((child) => {
+        if (child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)) return "";
+        return inlineRuns(child, {}, ctx);
+      }).join("");
+      const liParagraph = paragraphXml(runs || makeTextRun(li.textContent || ""), baseStyle, extra);
+      const nestedXml = nestedLists.map((nested) => listXml(nested, ctx, normalizedLevel + 1)).join("");
+      return liParagraph + nestedXml;
+    })
+    .join("");
 }
 
 function blockNodeToXml(node, ctx = {}) {
   if (!node) return "";
   if (node.nodeType === Node.TEXT_NODE) {
     const text = String(node.textContent || "").trim();
-    return text ? paragraphXml(makeTextRun(text), ctx.inTable ? "CBTableText" : "CBBody") : "";
+    const forced = String(ctx?.forceStyle || "").trim();
+    const base = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : (ctx?.styleMap?.body || "CBBody"));
+    return text ? paragraphXml(makeTextRun(text), base) : "";
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
-  if (tag === "table") return tableXml(node);
-  if (tag === "ul" || tag === "ol") {
-    return Array.from(node.children).filter((li) => li.tagName?.toLowerCase() === "li").map((li) => {
-      const runs = Array.from(li.childNodes).map((child) => {
-        if (child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)) return "";
-        return inlineRuns(child);
-      }).join("");
-      return paragraphXml(runs || makeTextRun(li.textContent || ""), ctx.inTable ? "CBTableText" : "CBBody", listPpr(tag));
-    }).join("");
+  if (tag === "table") return tableXml(node, ctx);
+
+  if (tag === "div" || tag === "blockquote") {
+    const blockTags = new Set(["p","div","h1","h2","h3","h4","h5","ul","ol","table","hr","blockquote"]);
+    const hasBlockChildren = Array.from(node.children || []).some((child) => blockTags.has(String(child?.tagName || "").toLowerCase()));
+    if (hasBlockChildren) {
+      return Array.from(node.childNodes).map((child) => blockNodeToXml(child, ctx)).join("");
+    }
+    const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
+    const forced = String(ctx?.forceStyle || "").trim();
+    const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
+    return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId);
   }
-  if (tag === "hr") return paragraphXml("", "CBBody", '<w:pBdr><w:bottom w:val="single" w:sz="8" w:space="12" w:color="CBD5E1"/></w:pBdr>');
-  if (["h1","h2","h3","h4","h5","p","div","blockquote"].includes(tag)) {
-    const runs = Array.from(node.childNodes).map((child) => inlineRuns(child)).join("");
-    const styleId = ctx.inTable ? "CBTableText" : mapParagraphStyle(node);
+
+  if (tag === "ul" || tag === "ol") {
+    return listXml(node, ctx, 0);
+  }
+  if (tag === "hr") {
+    const baseStyle = ctx?.styleMap?.body || "CBBody";
+    return paragraphXml("", baseStyle, '<w:pBdr><w:bottom w:val="single" w:sz="8" w:space="12" w:color="CBD5E1"/></w:pBdr>');
+  }
+  if (["h1","h2","h3","h4","h5","p"].includes(tag)) {
+    const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
+    const forced = String(ctx?.forceStyle || "").trim();
+    const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
     return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId);
   }
   return Array.from(node.childNodes).map((child) => blockNodeToXml(child, ctx)).join("");
@@ -337,14 +518,21 @@ function htmlToDocumentXml(html = "", options = {}) {
   let bodyXml = "";
   const title = String(options.title || "").trim();
   const subtitle = String(options.subtitle || "").trim();
-  if (title) bodyXml += paragraphXml(makeTextRun(title), "CBTitle");
-  if (subtitle) bodyXml += paragraphXml(makeTextRun(subtitle), "CBSubtitle");
-  bodyXml += blockNodesToXml(Array.from(doc.body.firstElementChild?.childNodes || doc.body.childNodes));
+  const styleMap = options?.styleMap || null;
+  const ctx = {
+    styleMap,
+    mode: options?.mode || "",
+    useTemplateStyles: Boolean(options?.useTemplateStyles)
+  };
+  if (title) bodyXml += paragraphXml(makeTextRun(title), styleMap?.title || "CBTitle");
+  if (subtitle) bodyXml += paragraphXml(makeTextRun(subtitle), styleMap?.subtitle || "CBSubtitle");
+  bodyXml += blockNodesToXml(Array.from(doc.body.firstElementChild?.childNodes || doc.body.childNodes), ctx);
+  const fallbackBodyStyle = styleMap?.body || "CBBody";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="${WORD_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <w:body>
-    ${bodyXml || paragraphXml("", "CBBody")}
-    ${buildSectPr()}
+    ${bodyXml || paragraphXml("", fallbackBodyStyle)}
+    ${buildSectPr(options?.sectPr || "")}
   </w:body>
 </w:document>`;
 }
@@ -425,7 +613,7 @@ export async function buildStyledDocxBlob({ html = "", title = "", subtitle = ""
   if (thumb) {
     zip.folder("docProps").file("thumbnail.jpeg", await thumb.arrayBuffer(), { binary: true });
   }
-  return zip.generate({ type: "blob" });
+  return await zipToBlob(zip);
 }
 
 export async function downloadStyledDocx({ html = "", title = "", subtitle = "", filename = "documento.docx", styleDefinitions = null } = {}) {
@@ -437,5 +625,54 @@ export async function downloadStyledDocx({ html = "", title = "", subtitle = "",
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+export async function buildDocxBlobFromTemplate({
+  html = "",
+  title = "",
+  subtitle = "",
+  mode = "",
+  templateUrl = "word-templates/ESTILOS_10ED.docx",
+  styleMap = TEN_ED_STYLE_MAP,
+  sectPr = TEN_ED_SECTPR
+} = {}) {
+  const JSZipCtor = pickZipCtor();
+  if (!JSZipCtor) throw new Error("JSZip no está disponible.");
+
+  const response = await fetch(templateUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`No se pudo cargar la plantilla (${response.status}).`);
+  const buffer = await response.arrayBuffer();
+
+  const zip = await loadZipFromArrayBuffer(JSZipCtor, buffer);
+  const docXml = htmlToDocumentXml(html, {
+    title,
+    subtitle,
+    styleMap,
+    sectPr,
+    mode,
+    useTemplateStyles: true
+  });
+
+  zip.file("word/document.xml", docXml);
+  zip.file("docProps/core.xml", buildCoreXml(title));
+
+  return await zipToBlob(zip);
+}
+
+export async function downloadDocxFromTemplate({
+  html = "",
+  title = "",
+  subtitle = "",
+  mode = "",
+  templateUrl = "word-templates/ESTILOS_10ED.docx",
+  filename = "documento.docx"
+} = {}) {
+  const blob = await buildDocxBlobFromTemplate({ html, title, subtitle, mode, templateUrl });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 export { sanitizeFilename };
 export { DEFAULT_STYLE_DEFINITIONS, normalizeStyleDefinitions };
+export { TEN_ED_STYLE_MAP, TEN_ED_SECTPR };

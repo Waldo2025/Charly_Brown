@@ -25,6 +25,7 @@ import {
   getDominantUnidadActivityStyle,
   setSelectedUnidadActivityStyles
 } from "./unidadActivityStyleSelector.js";
+import { downloadDocxFromTemplate } from "./word-export.js";
 
 // Configuración Firebase
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
@@ -30433,6 +30434,32 @@ function limpiarHTML(html = "") {
   return tmp.innerHTML;
 }
 
+function annotateWordExportHtml(html = "", mode = "alumno") {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const normalizedMode = String(mode || "").toLowerCase();
+
+  // Preservar señales antes de que `limpiarHTML()` elimine las clases
+  tmp.querySelectorAll(".answer, .respuesta, .respuesta-alumno").forEach((el) => {
+    el.setAttribute("data-word-style", "080400RESPUESTAALUMNO");
+  });
+
+  tmp.querySelectorAll(".instrucciones, .instructions").forEach((el) => {
+    el.setAttribute("data-word-style", "020100INSTRUCCION");
+  });
+
+  if (normalizedMode === "maestro") {
+    tmp.querySelectorAll(".col-maestro, .col-maestro *").forEach((el) => {
+      if (!el?.tagName) return;
+      if (!/^(h1|h2|h3|h4|h5|p|div|blockquote|li)$/i.test(el.tagName)) return;
+      if (el.hasAttribute("data-word-style")) return;
+      el.setAttribute("data-word-style", "1002SPEC");
+    });
+  }
+
+  return tmp.innerHTML;
+}
+
 function _unidadBuildAlumnoHtmlDesdeResultado() {
   const contenedor = document.getElementById("resultadoUnidadGenerada");
   if (!contenedor) return "";
@@ -30499,90 +30526,19 @@ document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
     return;
   }
 
-  // Limpieza más conservadora que no elimine contenido importante
-  const htmlAlumnoLimpio = limpiarHTML(htmlAlumno);
+  const htmlAlumnoMarcado = annotateWordExportHtml(htmlAlumno, "alumno");
+  const htmlAlumnoLimpio = limpiarHTML(htmlAlumnoMarcado);
 
-  // Crear el documento Word directamente con estilos básicos
-  const htmlCompleto = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            line-height: 1.6;
-          }
-          .activity { 
-            margin-bottom: 20px; 
-            padding: 10px;
-            border-left: 4px solid #007bff;
-            background: #f8f9fa;
-          }
-          .activity-fichas { 
-            background: #e9ecef; 
-            padding: 15px; 
-            margin-bottom: 15px; 
-            border-radius: 5px;
-          }
-          h1, h2, h3, h4, h5 { 
-            color: #2c3e50; 
-            margin-top: 20px;
-            margin-bottom: 10px;
-          }
-          table { 
-            border-collapse: collapse; 
-            width: 100%; 
-            margin: 15px 0; 
-          }
-          table, th, td { 
-            border: 1px solid #ddd; 
-          }
-          th, td { 
-            padding: 10px; 
-            text-align: left; 
-          }
-          th {
-            background-color: #f2f2f2;
-          }
-          .subtema-completo {
-            margin-bottom: 30px;
-            page-break-before: always;
-            page-break-inside: avoid;
-          }
-          .subtema-completo:first-child {
-            page-break-before: auto;
-          }
-          hr {
-            margin: 30px 0;
-            border: none;
-            border-top: 2px dashed #ccc;
-          }
-          .answer {
-            margin-top: 10px;
-            padding: 8px;
-            background: #fff3cd;
-            border-radius: 4px;
-          }
-        </style>
-      </head>
-      <body>${htmlAlumnoLimpio}</body>
-    </html>
-  `;
-
-  // Generar y descargar el archivo Word
-  try {
-    const blob = window.htmlDocx.asBlob(htmlCompleto);
-    const enlace = document.createElement("a");
-    enlace.href = URL.createObjectURL(blob);
-    enlace.download = "Unidad_Alumno_Completa.docx";
-    document.body.appendChild(enlace);
-    enlace.click();
-    document.body.removeChild(enlace);
-  } catch (error) {
-    alert("❌ Error al generar el archivo Word. Intenta nuevamente.");
-  }
+  downloadDocxFromTemplate({
+    html: htmlAlumnoLimpio,
+    mode: "alumno",
+    templateUrl: "word-templates/ESTILOS_10ED.docx",
+    filename: "Unidad_Alumno_Completa.docx",
+    title: "Unidad alumno"
+  }).catch((error) => {
+    console.error("[unidad] Error exportando Word (alumno):", error);
+    alert("❌ Error al generar el archivo Word con plantilla 10ED. Intenta nuevamente.");
+  });
 });
 
 
@@ -30594,32 +30550,19 @@ document.getElementById("btnDescargarMaestro")?.addEventListener("click", () => 
     return;
   }
 
-  const htmlMaestroLimpio = limpiarHTML(htmlMaestro);
+  const htmlMaestroMarcado = annotateWordExportHtml(htmlMaestro, "maestro");
+  const htmlMaestroLimpio = limpiarHTML(htmlMaestroMarcado);
 
-  const htmlCompleto = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          .col-maestro {
-            page-break-before: always;
-            page-break-inside: avoid;
-          }
-          .col-maestro:first-of-type {
-            page-break-before: auto;
-          }
-        </style>
-      </head>
-      <body>${htmlMaestroLimpio}</body>
-    </html>
-  `;
-
-  const blob = window.htmlDocx.asBlob(htmlCompleto);
-  const enlace = document.createElement("a");
-  enlace.href = URL.createObjectURL(blob);
-  enlace.download = "notas_maestro.docx";
-  enlace.click();
+  downloadDocxFromTemplate({
+    html: htmlMaestroLimpio,
+    mode: "maestro",
+    templateUrl: "word-templates/ESTILOS_10ED.docx",
+    filename: "notas_maestro.docx",
+    title: "Notas maestro"
+  }).catch((error) => {
+    console.error("[unidad] Error exportando Word (maestro):", error);
+    alert("❌ Error al generar el archivo Word del maestro con plantilla 10ED. Intenta nuevamente.");
+  });
 });
 
 document.getElementById("btnCopiarHTMLAlumno")?.addEventListener("click", async () => {
@@ -30656,39 +30599,19 @@ document.getElementById("btnDescargarWordEditor")?.addEventListener("click", () 
     return;
   }
 
-  // Limpiamos el HTML
-  const htmlAlumnoLimpio = limpiarHTML(htmlAlumno);
+  const htmlAlumnoMarcado = annotateWordExportHtml(htmlAlumno, "alumno");
+  const htmlAlumnoLimpio = limpiarHTML(htmlAlumnoMarcado);
 
-  // Creamos el documento Word directamente sin pasar por el modal de estilos
-  const htmlCompleto = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .activity { margin-bottom: 20px; }
-          .activity-fichas { background: #f5f5f5; padding: 10px; margin-bottom: 15px; }
-          .subtema-completo { page-break-before: always; page-break-inside: avoid; }
-          .subtema-completo:first-child { page-break-before: auto; }
-          h1, h2, h3, h4 { color: #2c3e50; }
-          table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-          table, th, td { border: 1px solid #ddd; }
-          th, td { padding: 8px; text-align: left; }
-        </style>
-      </head>
-      <body>${htmlAlumnoLimpio}</body>
-    </html>
-  `;
-
-  // Usamos la librería html-docx-js para generar el Word
-  const blob = window.htmlDocx.asBlob(htmlCompleto);
-  const enlace = document.createElement("a");
-  enlace.href = URL.createObjectURL(blob);
-  enlace.download = "Unidad_Alumno.docx";
-  document.body.appendChild(enlace);
-  enlace.click();
-  document.body.removeChild(enlace);
+  downloadDocxFromTemplate({
+    html: htmlAlumnoLimpio,
+    mode: "alumno",
+    templateUrl: "word-templates/ESTILOS_10ED.docx",
+    filename: "Unidad_Alumno.docx",
+    title: "Unidad alumno"
+  }).catch((error) => {
+    console.error("[unidad] Error exportando Word editor (alumno):", error);
+    alert("❌ Error al generar el archivo Word con plantilla 10ED.");
+  });
 });
 
 
@@ -30712,33 +30635,19 @@ document.getElementById("btnDescargarMaestroEditor")?.addEventListener("click", 
     htmlMaestro += col.outerHTML + "<hr>";
   });
 
-  const htmlMaestroLimpio = limpiarHTML(htmlMaestro);
+  const htmlMaestroMarcado = annotateWordExportHtml(htmlMaestro, "maestro");
+  const htmlMaestroLimpio2 = limpiarHTML(htmlMaestroMarcado);
 
-  const htmlCompleto = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          .col-maestro {
-            page-break-before: always;
-            page-break-inside: avoid;
-          }
-          .col-maestro:first-of-type {
-            page-break-before: auto;
-          }
-        </style>
-      </head>
-      <body>${htmlMaestroLimpio}</body>
-    </html>
-  `;
-
-  // ✅ Generamos el archivo Word
-  const blob = window.htmlDocx.asBlob(htmlCompleto);
-  const enlace = document.createElement("a");
-  enlace.href = URL.createObjectURL(blob);
-  enlace.download = "Unidad_Maestro.docx";
-  enlace.click();
+  downloadDocxFromTemplate({
+    html: htmlMaestroLimpio2,
+    mode: "maestro",
+    templateUrl: "word-templates/ESTILOS_10ED.docx",
+    filename: "Unidad_Maestro.docx",
+    title: "Unidad maestro"
+  }).catch((error) => {
+    console.error("[unidad] Error exportando Word editor (maestro):", error);
+    alert("❌ Error al generar el archivo Word del maestro con plantilla 10ED.");
+  });
 });
 
 
