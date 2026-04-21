@@ -1,11 +1,16 @@
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
+const { Readable } = require("node:stream");
 
 let admin = null;
 let GoogleGenAI = null;
+let ffmpegStaticPath = "";
 try {
   admin = require("firebase-admin");
 } catch (_) {
@@ -15,6 +20,11 @@ try {
   ({ GoogleGenAI } = require(path.resolve(__dirname, "..", "functions", "node_modules", "@google", "genai")));
 } catch (_) {
   ({ GoogleGenAI } = require("@google/genai"));
+}
+try {
+  ffmpegStaticPath = String(require("ffmpeg-static") || "").trim();
+} catch (_) {
+  ffmpegStaticPath = "";
 }
 
 function loadLocalEnvFile() {
@@ -54,6 +64,9 @@ const MAX_SPEAKER_PORTRAIT_BYTES = 10 * 1024 * 1024;
 const MAX_PODCASTER_MUSIC_BYTES = 12 * 1024 * 1024;
 const MAX_DIALOGUE_VIDEO_BYTES = 80 * 1024 * 1024;
 const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
+const MAX_REFERENCE_FRAME_BYTES = 6 * 1024 * 1024;
+const MAX_MONTAGE_EXPORT_SCENES = 40;
+const MAX_MONTAGE_EXPORT_TOTAL_SEC = 10 * 60;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
 const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
@@ -200,7 +213,10 @@ if (!admin.apps.length) {
   const storageBucket = String(
     process.env.FIREBASE_STORAGE_BUCKET
     || process.env.STORAGE_BUCKET
-    || `${projectId}.firebasestorage.app`
+    // Firebase/Cloud Storage default bucket is typically <projectId>.appspot.com.
+    // Using <projectId>.firebasestorage.app here can break Admin SDK downloads
+    // ("The specified bucket does not exist") on many projects.
+    || `${projectId}.appspot.com`
   ).trim();
 
   admin.initializeApp({
@@ -211,6 +227,203 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 const storageBucket = admin.storage().bucket();
+const PRIMARY_STORAGE_BUCKET_NAME = String(admin.app()?.options?.storageBucket || "").trim();
+const PRIMARY_PROJECT_ID = String(
+  admin.app()?.options?.projectId
+  || process.env.FIREBASE_PROJECT_ID
+  || process.env.PROJECT_ID
+  || ""
+).trim();
+const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
+  storageBucket?.name || "",
+  PRIMARY_STORAGE_BUCKET_NAME,
+  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.appspot.com` : "",
+  // Some projects may use the newer *.firebasestorage.app bucket naming.
+  // Keep it as a fallback candidate; if it doesn't exist, we'll treat it as a 404-like miss.
+  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.firebasestorage.app` : ""
+].map((item) => String(item || "").trim()).filter(Boolean)));
+const FALLBACK_STORAGE_BUCKETS = STORAGE_BUCKET_CANDIDATES
+  .filter((name) => name !== String(storageBucket?.name || "").trim())
+  .map((name) => admin.storage().bucket(name));
+
+function getStorageBucketCandidates() {
+  return [storageBucket, ...FALLBACK_STORAGE_BUCKETS].filter(Boolean);
+}
+
+let resolvedWritableStorageBucket = null;
+let resolvedWritableStorageBucketPromise = null;
+
+function isMissingBucketError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const status = Number(error?.code || error?.statusCode || error?.status || 0) || 0;
+  return status === 404 || message.includes("bucket does not exist") || message.includes("specified bucket does not exist");
+}
+
+async function resolveWritableStorageBucket() {
+  if (resolvedWritableStorageBucket) return resolvedWritableStorageBucket;
+  if (resolvedWritableStorageBucketPromise) return resolvedWritableStorageBucketPromise;
+  resolvedWritableStorageBucketPromise = (async () => {
+    const buckets = getStorageBucketCandidates();
+    for (const bucket of buckets) {
+      if (!bucket) continue;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await bucket.getMetadata();
+        resolvedWritableStorageBucket = bucket;
+        console.info("[backend][storage] resolved writable bucket", {
+          bucket: String(bucket.name || "").trim()
+        });
+        return bucket;
+      } catch (error) {
+        if (!isMissingBucketError(error)) {
+          console.warn("[backend][storage] bucket probe failed", {
+            bucket: String(bucket?.name || "").trim(),
+            message: String(error?.message || error)
+          });
+        }
+      }
+    }
+    resolvedWritableStorageBucket = storageBucket;
+    return storageBucket;
+  })();
+  try {
+    return await resolvedWritableStorageBucketPromise;
+  } finally {
+    resolvedWritableStorageBucketPromise = null;
+  }
+}
+
+async function downloadStorageObjectToBuffer(storagePath = "") {
+  const cleanStoragePath = normalizeStorageFilePath(storagePath);
+  if (!cleanStoragePath) {
+    const err = new Error("missing_storage_path");
+    err.code = "missing_storage_path";
+    throw err;
+  }
+  const buckets = getStorageBucketCandidates();
+  let lastError = null;
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const [downloaded] = await bucket.file(cleanStoragePath).download();
+      return {
+        buffer: Buffer.from(downloaded),
+        bucket
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isMissingBucketError(error)) {
+        throw error;
+      }
+    }
+  }
+  const err = new Error("storage_not_found");
+  err.code = "storage_not_found";
+  err.status = 404;
+  err.detail = {
+    storagePath: cleanStoragePath,
+    bucketsTried: buckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean),
+    lastError: lastError ? String(lastError?.message || lastError) : ""
+  };
+  throw err;
+}
+
+const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
+const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
+const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
+
+async function ensureMontageExportCacheDir() {
+  await fs.promises.mkdir(MONTAGE_EXPORT_CACHE_DIR, { recursive: true });
+  return MONTAGE_EXPORT_CACHE_DIR;
+}
+
+function clampExportId(value = "") {
+  return clampText(String(value || "").trim(), 120).replace(/[^a-z0-9_-]/gi, "");
+}
+
+async function cleanupMontageExportCache() {
+  try {
+    await ensureMontageExportCacheDir();
+    const names = await fs.promises.readdir(MONTAGE_EXPORT_CACHE_DIR).catch(() => []);
+    const metaFiles = names.filter((name) => name.endsWith(".json"));
+    const now = Date.now();
+    const items = [];
+    for (const name of metaFiles) {
+      const full = path.join(MONTAGE_EXPORT_CACHE_DIR, name);
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const stat = await fs.promises.stat(full);
+        items.push({ full, mtimeMs: stat.mtimeMs });
+      } catch (_) {}
+    }
+    items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const removeMeta = async (metaPath) => {
+      try {
+        const raw = await fs.promises.readFile(metaPath, "utf8");
+        const meta = JSON.parse(raw);
+        const filePath = String(meta?.filePath || "").trim();
+        if (filePath) await fs.promises.rm(filePath, { force: true }).catch(() => {});
+      } catch (_) {}
+      await fs.promises.rm(metaPath, { force: true }).catch(() => {});
+    };
+
+    for (const item of items) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const raw = await fs.promises.readFile(item.full, "utf8");
+        const meta = JSON.parse(raw);
+        const expiresAt = Number(new Date(meta?.expiresAt || 0).getTime() || 0) || 0;
+        if (expiresAt && expiresAt < now) {
+          // eslint-disable-next-line no-await-in-loop
+          await removeMeta(item.full);
+        }
+      } catch (_) {}
+    }
+
+    const refreshed = await fs.promises.readdir(MONTAGE_EXPORT_CACHE_DIR).catch(() => []);
+    const refreshedMeta = refreshed.filter((name) => name.endsWith(".json"));
+    if (refreshedMeta.length <= MONTAGE_EXPORT_CACHE_MAX_ITEMS) return;
+    const stats = [];
+    for (const name of refreshedMeta) {
+      const full = path.join(MONTAGE_EXPORT_CACHE_DIR, name);
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const stat = await fs.promises.stat(full);
+        stats.push({ full, mtimeMs: stat.mtimeMs });
+      } catch (_) {}
+    }
+    stats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const toRemove = stats.slice(MONTAGE_EXPORT_CACHE_MAX_ITEMS);
+    for (const item of toRemove) {
+      // eslint-disable-next-line no-await-in-loop
+      await removeMeta(item.full);
+    }
+  } catch (_) {
+    // best-effort
+  }
+}
+
+function resolvePublicBaseUrl(req) {
+  const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const xfHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const proto = xfProto || (req.protocol || "http");
+  const host = xfHost || String(req.get("host") || "").trim();
+  return host ? `${proto}://${host}` : "";
+}
+
+function redactUrlForLogs(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean) return "";
+  try {
+    const parsed = new URL(clean);
+    if (parsed.searchParams.has("token")) parsed.searchParams.set("token", "REDACTED");
+    return parsed.toString();
+  } catch (_) {
+    return clean.slice(0, 400);
+  }
+}
 
 function hasGeminiKey() {
   return !!GEMINI_API_KEY;
@@ -296,12 +509,19 @@ function buildBackendPodcasterStudioScenePrompt({
 }) {
   const educational = String(contentMode || "").trim().toLowerCase() === "educational";
   const speakerIndex = normalizePodcasterSpeakerSlotIndex(speakerLabel);
-  const stageZones = [
-    "zona izquierda del escenario, cerca del micrófono principal izquierdo",
-    "zona derecha del escenario, cerca del micrófono principal derecho",
-    "zona central ligeramente al fondo, junto a la consola o mesa principal",
-    "zona lateral secundaria con un ángulo alterno del mismo set",
-  ];
+  const stageZones = educational
+    ? [
+      "zona izquierda del encuadre, junto a un recurso visual de apoyo",
+      "zona derecha del encuadre, con composición didáctica limpia",
+      "zona central con profundidad de campo suave y apoyo gráfico",
+      "zona lateral secundaria con ángulo alterno del mismo entorno educativo",
+    ]
+    : [
+      "zona izquierda del escenario, cerca del micrófono principal izquierdo",
+      "zona derecha del escenario, cerca del micrófono principal derecho",
+      "zona central ligeramente al fondo, junto a la consola o mesa principal",
+      "zona lateral secundaria con un ángulo alterno del mismo set",
+    ];
   const eyelineDirections = [
     {
       bodyAngle: "cuerpo en tres cuartos orientado hacia la derecha del set",
@@ -556,6 +776,28 @@ function sanitizePodcasterSession(raw = {}) {
       promptVersion: clampText(portrait?.promptVersion || "podcaster_v1", 80) || "podcaster_v1"
     };
   });
+
+  const sanitizeReferenceImageMap = (rawMap = {}, maxEntries = 120) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      if (!key || !value || typeof value !== "object") return;
+      const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
+      if (!dataUrl.startsWith("data:image/")) return;
+      next[key] = {
+        name: clampText(value?.name || "Referencia", 180) || "Referencia",
+        dataUrl,
+        mimeType: clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
+        updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
+      };
+    });
+    return next;
+  };
+
+  const speakerReferenceImageMap = sanitizeReferenceImageMap(raw?.speakerReferenceImageMap || {}, 40);
+  const scenarioReferenceImageMap = sanitizeReferenceImageMap(raw?.scenarioReferenceImageMap || {}, 120);
+  const rowReferenceImageMap = sanitizeReferenceImageMap(raw?.rowReferenceImageMap || {}, 500);
   const dialogueVideoMapRaw = raw?.dialogueVideoMap && typeof raw.dialogueVideoMap === "object"
     ? raw.dialogueVideoMap
     : {};
@@ -641,14 +883,95 @@ function sanitizePodcasterSession(raw = {}) {
       durationMs: Math.max(0, Math.min(1200, Number(item.durationMs) || 0))
     };
   });
+  const sanitizeTimelineTracks = (tracksRaw = []) => {
+    if (!Array.isArray(tracksRaw)) return [];
+    const next = [];
+    const seen = new Set();
+    tracksRaw.slice(0, 40).forEach((track, index) => {
+      if (!track || typeof track !== "object") return;
+      const id = clampText(track?.id || "", 160);
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const fallbackLabel = `Track ${index + 1}`;
+      const label = clampText(track?.label || fallbackLabel, 120) || fallbackLabel;
+      next.push({
+        id,
+        label,
+        order: Math.max(0, Math.min(40, Math.round(Number(track?.order ?? index) || index)))
+      });
+    });
+    next.sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || String(a.id || "").localeCompare(String(b.id || "")));
+    return next.map((item, index) => ({ ...item, order: index }));
+  };
+  const sanitizeTimelineTrackHeightsById = (rawHeights = {}) => {
+    const source = rawHeights && typeof rawHeights === "object" ? rawHeights : {};
+    const next = {};
+    Object.entries(source).slice(0, 60).forEach(([trackId, value]) => {
+      const id = clampText(trackId || "", 160);
+      if (!id) return;
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return;
+      next[id] = Math.round(Math.max(56, Math.min(520, numeric)));
+    });
+    return next;
+  };
+  const normalizeSceneVolumeOverridePct = (value) => {
+    if (value == null || value === "") return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.min(100, Math.round(numeric)));
+  };
+  const sanitizeTimelineClipsByRowId = (rawClips = {}) => {
+    const source = rawClips && typeof rawClips === "object" ? rawClips : {};
+    const next = {};
+    Object.entries(source).slice(0, 900).forEach(([rowIdRaw, clip]) => {
+      const rowId = clampText(rowIdRaw || clip?.rowId || "", 120);
+      if (!rowId || !clip || typeof clip !== "object") return;
+      const sourceDurationMs = Math.max(500, Math.min(1800 * 1000, Math.round(Number(clip?.sourceDurationMs) || 8000)));
+      const trimInMs = Math.max(0, Math.min(sourceDurationMs - 500, Math.round(Number(clip?.trimInMs) || 0)));
+      const fallbackTrimOut = sourceDurationMs;
+      const trimOutMs = Math.max(
+        trimInMs + 500,
+        Math.min(sourceDurationMs, Math.round(Number(clip?.trimOutMs) || fallbackTrimOut))
+      );
+      const startMs = Math.max(0, Math.min(3600 * 1000, Math.round(Number(clip?.startMs) || 0)));
+      const zIndex = Math.max(1, Math.min(999, Math.round(Number(clip?.zIndex) || 1)));
+      next[rowId] = {
+        rowId,
+        speakerKey: clampText(clip?.speakerKey || "", 120),
+        trackId: clampText(clip?.trackId || "", 160),
+        startMs,
+        sourceDurationMs,
+        trimInMs,
+        trimOutMs,
+        veoVolumeOverridePct: normalizeSceneVolumeOverridePct(
+          clip?.veoVolumeOverridePct != null ? clip.veoVolumeOverridePct : clip?.veoVolumePct
+        ),
+        geminiVolumeOverridePct: normalizeSceneVolumeOverridePct(
+          clip?.geminiVolumeOverridePct != null ? clip.geminiVolumeOverridePct : clip?.geminiVolumePct
+        ),
+        zIndex
+      };
+    });
+    return next;
+  };
   const audioModeRaw = String(raw?.podcastVideoConfig?.audioMode || "").trim().toLowerCase();
+  const timelineViewModeRaw = String(raw?.podcastVideoConfig?.timelineViewMode || "").trim().toLowerCase();
   const podcastVideoConfig = {
     enabled: raw?.podcastVideoConfig?.enabled === true,
     editorEnabled: raw?.podcastVideoConfig?.editorEnabled === true,
     transitionsByEdge,
     audioMode: audioModeRaw === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene",
     masterVolume: clampNumber(raw?.podcastVideoConfig?.masterVolume, 0, 100, 100),
-    clipVolume: clampNumber(raw?.podcastVideoConfig?.clipVolume, 0, 100, 0)
+    clipVolume: clampNumber(raw?.podcastVideoConfig?.clipVolume, 0, 100, 0),
+    timelineVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineVersion) || 1))),
+    timelineTrackVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineTrackVersion) || 1))),
+    timelineTracks: sanitizeTimelineTracks(raw?.podcastVideoConfig?.timelineTracks || []),
+    timelineClipsByRowId: sanitizeTimelineClipsByRowId(raw?.podcastVideoConfig?.timelineClipsByRowId || {}),
+    timelineTrackHeightsById: sanitizeTimelineTrackHeightsById(raw?.podcastVideoConfig?.timelineTrackHeightsById || {}),
+    timelineViewMode: timelineViewModeRaw === "normal" ? "normal" : "tracks",
+    montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
+    montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100)
   };
   const panelMusicConfigRaw = raw?.panelMusicConfig && typeof raw.panelMusicConfig === "object" ? raw.panelMusicConfig : {};
   const panelMusicTrackRaw = panelMusicConfigRaw?.track && typeof panelMusicConfigRaw.track === "object" ? panelMusicConfigRaw.track : null;
@@ -762,6 +1085,9 @@ function sanitizePodcasterSession(raw = {}) {
     disfluencyDefaults: normalizedDisfluencyDefaults,
     panelMusicConfig,
     speakerPortraitMap,
+    speakerReferenceImageMap,
+    scenarioReferenceImageMap,
+    rowReferenceImageMap,
     globalScenarioDeck,
     dialogueVideoMap,
     dialogueAudioMap,
@@ -1211,6 +1537,255 @@ function getVideoExtension(mimeType = "video/mp4") {
   return "mp4";
 }
 
+function isFfmpegAvailable() {
+  try {
+    return Boolean(ffmpegStaticPath && fs.existsSync(ffmpegStaticPath));
+  } catch (_) {
+    return false;
+  }
+}
+
+function extractMediaStreamInfoFromFfmpegStderr(stderrText = "") {
+  const output = String(stderrText || "");
+  const videoMatch = output.match(/Video:\s*([^,\s]+)/i);
+  const audioMatch = output.match(/Audio:\s*([^,\s]+)/i);
+  const durationMatch = output.match(/Duration:\s*([0-9:.]+)/i);
+  const normalizeCodec = (value = "") => String(value || "").trim().toLowerCase().replace(/\(.*$/, "").trim();
+  return {
+    videoCodec: normalizeCodec(videoMatch?.[1] || ""),
+    audioCodec: normalizeCodec(audioMatch?.[1] || ""),
+    duration: String(durationMatch?.[1] || "").trim()
+  };
+}
+
+function runFfmpegCommand(args = [], context = {}) {
+  return new Promise((resolve, reject) => {
+    if (!isFfmpegAvailable()) {
+      const err = new Error("ffmpeg_static_missing");
+      err.code = "ffmpeg_static_missing";
+      err.stage = String(context?.stage || "spawn").trim() || "spawn";
+      reject(err);
+      return;
+    }
+    const child = spawn(ffmpegStaticPath, args, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk || "");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk || "");
+    });
+    child.on("error", (error) => {
+      const err = new Error(`ffmpeg_spawn_error: ${String(error?.message || error || "unknown")}`);
+      err.code = "ffmpeg_spawn_error";
+      err.stage = String(context?.stage || "spawn").trim() || "spawn";
+      err.stderr = stderr;
+      reject(err);
+    });
+    child.on("close", (code) => {
+      if (Number(code || 0) === 0) {
+        resolve({ stdout, stderr, code: 0 });
+        return;
+      }
+      const err = new Error(`ffmpeg_exit_code_${code}`);
+      err.code = "ffmpeg_exit_code";
+      err.exitCode = Number(code || 1);
+      err.stage = String(context?.stage || "run").trim() || "run";
+      err.stdout = stdout;
+      err.stderr = stderr;
+      reject(err);
+    });
+  });
+}
+
+async function extractLastVideoFramePng(videoBuffer = Buffer.alloc(0), sourceMimeType = "video/mp4") {
+  const source = Buffer.isBuffer(videoBuffer) ? videoBuffer : Buffer.from(videoBuffer || []);
+  if (!source.length) {
+    const err = new Error("empty_video_buffer");
+    err.code = "empty_video_buffer";
+    err.stage = "input";
+    throw err;
+  }
+  const ext = getVideoExtension(sourceMimeType);
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const inputPath = path.join(os.tmpdir(), `cb-prev-${token}.${ext}`);
+  const outputPath = path.join(os.tmpdir(), `cb-prev-${token}.png`);
+  try {
+    await fs.promises.writeFile(inputPath, source);
+    await runFfmpegCommand([
+      "-hide_banner",
+      "-y",
+      "-sseof",
+      "-0.15",
+      "-i",
+      inputPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      "scale=1280:-1:flags=lanczos",
+      outputPath
+    ], { stage: "extract_last_frame" });
+    const frame = await fs.promises.readFile(outputPath);
+    if (!frame.length || frame.length > MAX_REFERENCE_FRAME_BYTES) {
+      const err = new Error("reference_frame_too_large");
+      err.code = "reference_frame_too_large";
+      err.stage = "extract_last_frame";
+      throw err;
+    }
+    return frame;
+  } finally {
+    await safeUnlink(inputPath);
+    await safeUnlink(outputPath);
+  }
+}
+
+async function safeUnlink(filePath = "") {
+  const target = String(filePath || "").trim();
+  if (!target) return;
+  try {
+    await fs.promises.unlink(target);
+  } catch (_) {
+    // noop
+  }
+}
+
+async function probeMediaWithFfmpeg(inputPath = "", label = "probe") {
+  const source = String(inputPath || "").trim();
+  if (!source) return { label, videoCodec: "", audioCodec: "", duration: "" };
+  const probeResult = await runFfmpegCommand([
+    "-hide_banner",
+    "-i",
+    source,
+    "-f",
+    "null",
+    "-"
+  ], { stage: `${label}_probe` });
+  return {
+    label,
+    ...extractMediaStreamInfoFromFfmpegStderr(probeResult.stderr || "")
+  };
+}
+
+async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), sourceMimeType = "video/mp4") {
+  const source = Buffer.isBuffer(inputBuffer) ? inputBuffer : Buffer.from(inputBuffer || []);
+  if (!source.length) {
+    const err = new Error("empty_video_buffer");
+    err.code = "empty_video_buffer";
+    err.stage = "input";
+    throw err;
+  }
+  if (!isFfmpegAvailable()) {
+    const err = new Error("ffmpeg_static_missing");
+    err.code = "ffmpeg_static_missing";
+    err.stage = "input";
+    throw err;
+  }
+
+  const inputExt = getVideoExtension(sourceMimeType);
+  const inputPath = path.join("/tmp", `cb-dialogue-video-in-${randomUUID()}.${inputExt || "mp4"}`);
+  const outputPath = path.join("/tmp", `cb-dialogue-video-out-${randomUUID()}.mp4`);
+  let inputProbe = { videoCodec: "", audioCodec: "", duration: "" };
+  let outputProbe = { videoCodec: "", audioCodec: "", duration: "" };
+
+  try {
+    await fs.promises.writeFile(inputPath, source);
+    inputProbe = await probeMediaWithFfmpeg(inputPath, "input").catch(() => ({ videoCodec: "", audioCodec: "", duration: "" }));
+    const hasInputAudio = Boolean(String(inputProbe?.audioCodec || "").trim());
+    const transcodeArgs = hasInputAudio
+      ? [
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        inputPath,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-b:a",
+        "160k",
+        "-movflags",
+        "+faststart",
+        outputPath
+      ]
+      : [
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        inputPath,
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-shortest",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-b:a",
+        "160k",
+        "-movflags",
+        "+faststart",
+        outputPath
+      ];
+    await runFfmpegCommand(transcodeArgs, { stage: "transcode" });
+    const outputBuffer = await fs.promises.readFile(outputPath);
+    if (!outputBuffer.length) {
+      const err = new Error("empty_transcoded_video");
+      err.code = "empty_transcoded_video";
+      err.stage = "output";
+      throw err;
+    }
+    outputProbe = await probeMediaWithFfmpeg(outputPath, "output").catch(() => ({ videoCodec: "h264", audioCodec: "aac", duration: "" }));
+    return {
+      buffer: outputBuffer,
+      mimeType: "video/mp4",
+      container: "mp4",
+      transcoded: true,
+      sourceMimeType: String(sourceMimeType || "video/mp4").trim() || "video/mp4",
+      videoCodec: String(outputProbe?.videoCodec || "h264").trim() || "h264",
+      audioCodec: String(outputProbe?.audioCodec || "aac").trim() || "aac",
+      inputProbe,
+      outputProbe
+    };
+  } finally {
+    await Promise.all([
+      safeUnlink(inputPath),
+      safeUnlink(outputPath)
+    ]);
+  }
+}
+
 function getImageExtension(mimeType = "image/png") {
   const clean = String(mimeType || "").trim().toLowerCase();
   if (clean === "image/webp") return "webp";
@@ -1483,7 +2058,8 @@ async function generateMoodleModuleGraphicElementAsset({
 }
 
 async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metadata = {} }) {
-  const file = storageBucket.file(assetPath);
+  const targetBucket = await resolveWritableStorageBucket();
+  const file = targetBucket.file(assetPath);
   const token = randomUUID();
   await file.save(buffer, {
     resumable: false,
@@ -1498,7 +2074,35 @@ async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metada
   });
   return {
     path: assetPath,
-    downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${storageBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
+    downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
+  };
+}
+
+async function uploadBinaryFileAsset({ path: assetPath, filePath, mimeType, metadata = {} }) {
+  const sourcePath = String(filePath || "").trim();
+  if (!sourcePath) {
+    const err = new Error("missing_filePath");
+    err.code = "missing_filePath";
+    throw err;
+  }
+  const targetBucket = await resolveWritableStorageBucket();
+  const file = targetBucket.file(assetPath);
+  const token = randomUUID();
+  const writeStream = file.createWriteStream({
+    resumable: false,
+    contentType: mimeType,
+    metadata: {
+      cacheControl: "public,max-age=86400",
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+        ...metadata,
+      },
+    },
+  });
+  await pipeline(fs.createReadStream(sourcePath), writeStream);
+  return {
+    path: assetPath,
+    downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
   };
 }
 
@@ -1558,7 +2162,8 @@ app.post("/api/unidades/support-graphics/upload", async (req, res) => {
 
 async function deleteStoragePath(storagePath = "") {
   if (!storagePath) return;
-  await storageBucket.file(storagePath).delete({ ignoreNotFound: true }).catch(() => {});
+  const buckets = getStorageBucketCandidates();
+  await Promise.all(buckets.map((bucket) => bucket.file(storagePath).delete({ ignoreNotFound: true }).catch(() => {})));
 }
 
 async function validateActiveMinebloxPlayer({ roomId, playerId, clientSessionId }) {
@@ -2364,6 +2969,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const requestedDurationSecInput = clampNumber(req.body?.requestedDurationSec, 4, 8, 0);
     const portraitUrl = clampText(req.body?.portraitUrl || "", 3200);
     const portraitStoragePath = clampText(req.body?.portraitStoragePath || "", 700);
+    const referenceImageDataUrl = String(req.body?.referenceImageDataUrl || "").trim();
+    const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
+    const relateWithPreviousScene = req.body?.relateWithPreviousScene === true;
     const previousSceneRaw = req.body?.previousScene && typeof req.body.previousScene === "object" ? req.body.previousScene : null;
     const previousScene = previousSceneRaw ? {
       rowId: clampText(previousSceneRaw?.rowId || "", 120),
@@ -2374,9 +2982,12 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       text: clampText(previousSceneRaw?.text || "", 1600),
       targetSpeechLine: clampText(previousSceneRaw?.targetSpeechLine || "", 1600),
       previousVideoTargetSpeechLine: clampText(previousSceneRaw?.previousVideoTargetSpeechLine || "", 1600),
-      hasVideo: previousSceneRaw?.hasVideo === true
+      hasVideo: previousSceneRaw?.hasVideo === true,
+      videoDownloadUrl: clampText(previousSceneRaw?.videoDownloadUrl || "", 3200),
+      videoStoragePath: clampText(previousSceneRaw?.videoStoragePath || "", 700),
+      videoMimeType: clampText(previousSceneRaw?.videoMimeType || "video/mp4", 80) || "video/mp4"
     } : null;
-    const strictIdentity = req.body?.strictIdentity !== false;
+    let strictIdentity = req.body?.strictIdentity !== false;
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
@@ -2386,59 +2997,160 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       ...requestedCandidates.map((item) => normalizeModel(item || "")),
       ...PODCASTER_VIDEO_MODEL_CANDIDATES
     ].filter(Boolean)));
-    const filteredModels = strictIdentity
+    const filteredModels = (strictIdentity || relateWithPreviousScene)
       ? mergedModels.filter((modelName) => !/fast/i.test(String(modelName || "")))
       : mergedModels;
     const videoModels = filteredModels.length ? filteredModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
+    const requestDebugTag = `dialogue-video:${sessionId || "no-session"}:${rowId || "no-row"}`;
 
-    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
-    if (!rowId) return res.status(400).json({ error: "Falta rowId." });
-    if (!speakerLabel) return res.status(400).json({ error: "Falta speakerLabel." });
-    if (!text) return res.status(400).json({ error: "Falta texto de diálogo." });
-    if (!portraitUrl && !portraitStoragePath) return res.status(400).json({ error: "Falta retrato base (portraitUrl o portraitStoragePath)." });
+    if (!sessionId) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 missing sessionId`);
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+    if (!rowId) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 missing rowId`, { sessionId });
+      return res.status(400).json({ error: "Falta rowId." });
+    }
+    if (!speakerLabel) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 missing speakerLabel`, { sessionId, rowId });
+      return res.status(400).json({ error: "Falta speakerLabel." });
+    }
+    if (!text) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 missing text`, { sessionId, rowId, speakerLabel });
+      return res.status(400).json({ error: "Falta texto de diálogo." });
+    }
+    if (strictIdentity && !portraitUrl && !portraitStoragePath) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 strictIdentity without portrait`, {
+        strictIdentity,
+        educationalVideo,
+        hasPortraitUrl: Boolean(portraitUrl),
+        hasPortraitStoragePath: Boolean(portraitStoragePath)
+      });
+      return res.status(400).json({ error: "strictIdentity requiere portraitUrl o portraitStoragePath." });
+    }
 
     let portraitBuffer = null;
     let portraitMimeType = "image/png";
-    if (portraitStoragePath) {
-      try {
-        const file = storageBucket.file(portraitStoragePath);
-        const [meta] = await file.getMetadata().catch(() => [{}]);
-        const [downloaded] = await file.download();
-        portraitBuffer = Buffer.from(downloaded);
-        portraitMimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
-      } catch (_) {
-        portraitBuffer = null;
+    let portraitLoadedFromStorage = false;
+    let portraitSourceBucketName = "";
+    if (portraitUrl || portraitStoragePath) {
+      if (portraitStoragePath) {
+        try {
+          const bucketForMeta = await resolveWritableStorageBucket();
+          const file = bucketForMeta.file(portraitStoragePath);
+          const [meta] = await file.getMetadata().catch(() => [{}]);
+          const downloaded = await downloadStorageObjectToBuffer(portraitStoragePath);
+          portraitBuffer = Buffer.from(downloaded.buffer);
+          portraitSourceBucketName = String(downloaded?.bucket?.name || bucketForMeta?.name || "").trim();
+          portraitMimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
+          portraitLoadedFromStorage = true;
+        } catch (_) {
+          portraitBuffer = null;
+        }
+      }
+      if (!portraitBuffer && portraitUrl) {
+        const portraitResponse = await fetchCompat(portraitUrl, { method: "GET" });
+        if (!portraitResponse.ok) {
+          if (strictIdentity) {
+            const detail = await safeJson(portraitResponse);
+            return res.status(portraitResponse.status).json({
+              error: String(detail?.error?.message || detail?.error || `No se pudo descargar retrato (${portraitResponse.status}).`)
+            });
+          }
+          portraitBuffer = null;
+        } else {
+          portraitMimeType = String(portraitResponse.headers.get("content-type") || "image/png").trim().toLowerCase();
+          portraitBuffer = Buffer.from(await portraitResponse.arrayBuffer());
+        }
       }
     }
-    if (!portraitBuffer && portraitUrl) {
-      const portraitResponse = await fetchCompat(portraitUrl, { method: "GET" });
-      if (!portraitResponse.ok) {
-        const detail = await safeJson(portraitResponse);
-        return res.status(portraitResponse.status).json({
-          error: String(detail?.error?.message || detail?.error || `No se pudo descargar retrato (${portraitResponse.status}).`)
+    if ((portraitUrl || portraitStoragePath) && !portraitBuffer) {
+      if (strictIdentity) {
+        console.warn(`[backend][${requestDebugTag}] portrait unavailable, disabling strictIdentity fallback`, {
+          hasPortraitUrl: Boolean(portraitUrl),
+          hasPortraitStoragePath: Boolean(portraitStoragePath)
         });
       }
-      portraitMimeType = String(portraitResponse.headers.get("content-type") || "image/png").trim().toLowerCase();
-      portraitBuffer = Buffer.from(await portraitResponse.arrayBuffer());
+      strictIdentity = false;
     }
-    if (!portraitBuffer) {
-      return res.status(400).json({ error: "No se pudo cargar retrato base del locutor." });
+    if (portraitBuffer && !portraitMimeType.startsWith("image/")) {
+      if (strictIdentity) {
+        return res.status(400).json({ error: "El retrato no es una imagen válida para Veo." });
+      }
+      portraitBuffer = null;
+      portraitMimeType = "image/png";
     }
-    if (!portraitMimeType.startsWith("image/")) {
-      return res.status(400).json({ error: "El retrato no es una imagen válida para Veo." });
+    if (portraitBuffer && (!portraitBuffer.length || portraitBuffer.length > MAX_SPEAKER_PORTRAIT_BYTES)) {
+      if (strictIdentity) {
+        return res.status(413).json({ error: "El retrato excede el tamaño permitido." });
+      }
+      portraitBuffer = null;
+      portraitMimeType = "image/png";
     }
-    if (!portraitBuffer.length || portraitBuffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
-      return res.status(413).json({ error: "El retrato excede el tamaño permitido." });
-    }
-    const portraitBase64 = portraitBuffer.toString("base64");
-    const portraitGcsUri = portraitStoragePath
-      ? `gs://${storageBucket.name}/${portraitStoragePath}`
+    const portraitBase64 = portraitBuffer ? portraitBuffer.toString("base64") : "";
+    const portraitGcsUri = portraitLoadedFromStorage && portraitStoragePath
+      ? `gs://${portraitSourceBucketName || String((await resolveWritableStorageBucket())?.name || "").trim()}/${portraitStoragePath}`
       : "";
+    const hasPortraitAsset = Boolean(portraitBase64 || portraitGcsUri);
+
+    const sceneReference = await loadOptionalImageReference({
+      dataUrl: referenceImageDataUrl
+    });
+    const sceneReferenceBase64 = sceneReference ? sceneReference.buffer.toString("base64") : "";
+    const sceneReferenceMimeType = sceneReference ? String(sceneReference.mimeType || "image/png").trim().toLowerCase() : "image/png";
+    const hasSceneReference = Boolean(sceneReferenceBase64);
+    const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
+
+    let continuityFrameBase64 = "";
+    let continuityFrameMimeType = "image/png";
+    if (relateWithPreviousScene && previousScene?.hasVideo) {
+      const previousVideoStoragePath = String(previousScene?.videoStoragePath || "").trim();
+      const previousVideoUrl = String(previousScene?.videoDownloadUrl || "").trim();
+      const previousVideoHintMimeType = String(previousScene?.videoMimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
+      let previousVideoBuffer = null;
+      try {
+        if (previousVideoStoragePath) {
+          const downloaded = await downloadStorageObjectToBuffer(previousVideoStoragePath);
+          previousVideoBuffer = Buffer.from(downloaded.buffer);
+        } else if (previousVideoUrl) {
+          const previousVideoResponse = await fetchCompat(previousVideoUrl, { method: "GET" });
+          if (previousVideoResponse.ok) {
+            previousVideoBuffer = Buffer.from(await previousVideoResponse.arrayBuffer());
+          }
+        }
+      } catch (_) {
+        previousVideoBuffer = null;
+      }
+      if (previousVideoBuffer && previousVideoBuffer.length && previousVideoBuffer.length <= MAX_DIALOGUE_VIDEO_BYTES) {
+        try {
+          const frame = await extractLastVideoFramePng(previousVideoBuffer, previousVideoHintMimeType);
+          continuityFrameBase64 = frame.toString("base64");
+          continuityFrameMimeType = "image/png";
+        } catch (_) {
+          continuityFrameBase64 = "";
+          continuityFrameMimeType = "image/png";
+        }
+      }
+    }
+
+    console.info(`[backend][${requestDebugTag}] request`, {
+      strictIdentity,
+      educationalVideo,
+      hasPortraitAsset,
+      hasSceneReference,
+      useSceneReferenceAsInitImage,
+      relateWithPreviousScene,
+      hasContinuityFrame: Boolean(continuityFrameBase64),
+      hasPortraitUrl: Boolean(portraitUrl),
+      hasPortraitStoragePath: Boolean(portraitStoragePath),
+      textLength: String(text || "").length,
+      modelCandidates: videoModels
+    });
     let inferredAudioDurationSec = audioDurationSecInput;
     if (!inferredAudioDurationSec && dialogueAudioStoragePath) {
       try {
-        const [audioBytes] = await storageBucket.file(dialogueAudioStoragePath).download();
-        inferredAudioDurationSec = clampNumber(parseWavDurationSeconds(Buffer.from(audioBytes)), 0, 180, 0);
+        const audioDownload = await downloadStorageObjectToBuffer(dialogueAudioStoragePath);
+        inferredAudioDurationSec = clampNumber(parseWavDurationSeconds(Buffer.from(audioDownload.buffer)), 0, 180, 0);
       } catch (_) {
         inferredAudioDurationSec = 0;
       }
@@ -2450,25 +3162,29 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       : (inferredAudioDurationSec > 0
         ? Math.round(clampNumber(inferredAudioDurationSec, 5, 8, 8))
         : 8));
-    const characterPrompt = buildBackendPodcasterCharacterPrompt({
-      speakerLabel,
-      speakerName,
-      voiceName,
-      genderGroup,
-      expression,
-      counterpartSpeakerName,
-      contentMode: educationalVideo ? "educational" : "podcast"
-    });
-    const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
-      speakerLabel,
-      speakerName,
-      counterpartSpeakerName,
-      scenarioPrompt,
-      expression,
-      contentMode: educationalVideo ? "educational" : "podcast"
-    });
+    const characterPrompt = educationalVideo
+      ? ""
+      : buildBackendPodcasterCharacterPrompt({
+        speakerLabel,
+        speakerName,
+        voiceName,
+        genderGroup,
+        expression,
+        counterpartSpeakerName,
+        contentMode: "podcast"
+      });
+    const studioScenePrompt = educationalVideo
+      ? ""
+      : buildBackendPodcasterStudioScenePrompt({
+        speakerLabel,
+        speakerName,
+        counterpartSpeakerName,
+        scenarioPrompt,
+        expression,
+        contentMode: "podcast"
+      });
     const sceneVisualPrompt = scenePrompt || [
-      `Escena de ${speakerName}.`,
+      educationalVideo ? "Escena educativa basada en guion técnico." : `Escena de ${speakerName}.`,
       scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
       videoDirective ? `Prioridad manual: ${videoDirective}` : ""
     ].filter(Boolean).join(" ").trim();
@@ -2481,14 +3197,17 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       educationalVideo
         ? "Genera un video educativo corto, claro y realista."
         : "Genera un video cinematográfico corto y realista para podcast.",
-      videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario sin romper identidad, sincronía labial ni continuidad del set: ${videoDirective}` : "",
+      useSceneReferenceAsInitImage
+        ? `La imagen adjunta${referenceImageName ? ` (${referenceImageName})` : ""} es referencia visual principal de la escena. Debe guiar composición, estilo, ambientación y continuidad.`
+        : "",
+      videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario${educationalVideo ? " para narrativa visual educativa" : " sin romper identidad, sincronía labial ni continuidad del set"}: ${videoDirective}` : "",
       sceneVisualPrompt ? `${educationalVideo ? "Dirección pedagógica de la escena" : "Dirección visual de la escena"}: ${sceneVisualPrompt}` : "",
       sceneImagePromptList.length ? `Prompts de imagen para la escena: ${sceneImagePromptList.map((item, idx) => `${idx + 1}. ${item}`).join(" | ")}` : "",
       performanceDirective ? `Prioridad máxima de actuación visual: ejecuta estas acciones físicas o expresivas de forma visible en pantalla, sin convertirlas en texto en pantalla ni alterar el diálogo hablado: ${performanceDirective}` : "",
-      `Locutor: ${speakerName} (${speakerLabel}).`,
-      voiceName ? `Voz de referencia: ${voiceName}.` : "",
-      genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : "",
-      `Expresión: ${expression}.`,
+      educationalVideo ? "" : `Locutor: ${speakerName} (${speakerLabel}).`,
+      educationalVideo ? "" : (voiceName ? `Voz de referencia: ${voiceName}.` : ""),
+      educationalVideo ? "" : (genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : ""),
+      educationalVideo ? "" : `Expresión: ${expression}.`,
       characterPrompt ? `Identidad del personaje obligatoria: ${characterPrompt}` : "",
       studioScenePrompt ? `Escenario de locución obligatorio: ${studioScenePrompt}` : "",
       previousScene?.speakerLabel
@@ -2503,44 +3222,53 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       previousScene?.expression
         ? `Transición emocional: evoluciona de "${previousScene.expression}" hacia "${expression}" de forma natural y coherente.`
         : "",
+      relateWithPreviousScene && continuityFrameBase64
+        ? "Continuidad exacta: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación y continuidad de movimiento). No debe notarse corte."
+        : relateWithPreviousScene
+          ? "Continuidad: intenta continuar exactamente desde el final del clip anterior (sin salto visual)."
+          : "",
       previousScene?.hasVideo
-        ? "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía)."
+        ? (educationalVideo
+          ? "Mantén continuidad visual y de estilo con el clip previo (paleta, ritmo, tipo de recurso visual y composición)."
+          : "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía).")
         : "Si no hay clip previo disponible, conserva continuidad narrativa usando el texto de la escena anterior.",
-      "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base.",
-      "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje.",
+      educationalVideo ? "" : (hasPortraitAsset ? "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base." : ""),
+      educationalVideo ? "" : (hasPortraitAsset ? "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje." : ""),
       educationalVideo
         ? "Escena en entorno educativo profesional con apoyo visual limpio y composición editorial."
         : "Escena en cabina profesional de podcast con micrófono de estudio.",
       educationalVideo
-        ? "Usa el mismo entorno visual general del video, pero cada personaje debe ocupar una zona física distinta dentro del set."
+        ? "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del guion técnico."
         : "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
       educationalVideo
-        ? "Importante: posicionar a cada personaje en una parte diferente del escenario, y ser consistente con ese ángulo."
+        ? "Puedes mostrar escenas sin personas si el recurso visual lo pide (mapas, gráficos, objetos, documentos, animaciones)."
         : "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
       educationalVideo
-        ? "Importante: en la escena solo debe aparecer el personaje correspondiente al plano."
+        ? "Prohibido estilo podcast: no cabina de radio, no micrófonos, no set de entrevista, no host hablando a cámara."
         : "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
       educationalVideo
-        ? "El personaje debe verse explicando en pantalla: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un recurso visual fuera de cámara o una referencia didáctica dentro del set."
+        ? "Si aparece una persona, debe ser secundaria al recurso didáctico y nunca parecer conductor de podcast."
         : "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
       educationalVideo
-        ? "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara."
+        ? "Prioriza planos de recurso visual, detalle y contexto que refuercen la voz en off."
         : "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
       educationalVideo
-        ? "Debe verse un solo personaje identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje."
+        ? "Mantén narrativa didáctica clara y coherencia con transición solicitada."
         : "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
-      "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
+      educationalVideo ? "" : "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
       educationalVideo
-        ? "Si hace falta sugerir explicación, hacerlo solo con dirección de mirada, postura y composición del set; nunca agregando otra figura humana."
+        ? "Si la escena exige figura humana, evitar frontalidad y mantener foco en el contenido didáctico."
         : "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
       educationalVideo
-        ? "Solo se permiten microglances incidentales; la atención principal nunca debe caer directamente sobre la cámara."
+        ? "No incluir texto incrustado; la explicación textual ocurre en voz en off y edición."
         : "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
       educationalVideo
-        ? "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación limpia."
+        ? "Plano, luz y composición deben parecer pieza educativa premium de 16:9."
         : "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
       dialogueAudioStoragePath || dialogueAudioUrl
-        ? `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`
+        ? (educationalVideo
+          ? `El clip debe durar ~${inferredTargetDurationSec} segundos y reforzar visualmente la locución pregrabada (sin requerir lectura labial).`
+          : `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`)
         : "",
       "Las acotaciones escénicas o instrucciones de actuación son visuales; no deben aparecer como texto en pantalla ni modificar literalmente el diálogo hablado.",
       originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
@@ -2578,12 +3306,96 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       throw err;
     };
 
-    if (strictIdentity && !portraitUrl && !portraitGcsUri) {
+    if (strictIdentity && !hasPortraitAsset) {
+      console.warn(`[backend][${requestDebugTag}] reject 400 strictIdentity without portrait asset`, {
+        hasPortraitUrl: Boolean(portraitUrl),
+        hasPortraitStoragePath: Boolean(portraitStoragePath),
+        hasPortraitAsset
+      });
       return res.status(400).json({
         error: "strictIdentity requiere portraitUrl o portraitStoragePath para referenceImages."
       });
     }
     const requestVariants = [];
+    const sceneReferenceImage = sceneReferenceBase64
+      ? {
+        image: {
+          bytesBase64Encoded: sceneReferenceBase64,
+          mimeType: sceneReferenceMimeType
+        },
+        referenceType: "asset"
+      }
+      : null;
+    const continuityReferenceImage = continuityFrameBase64
+      ? {
+        image: {
+          bytesBase64Encoded: continuityFrameBase64,
+          mimeType: continuityFrameMimeType
+        },
+        referenceType: "asset"
+      }
+      : null;
+    const referenceDurationSec = continuityReferenceImage ? 8 : inferredTargetDurationSec;
+
+    if (sceneReferenceImage && useSceneReferenceAsInitImage) {
+      requestVariants.push(
+        {
+          label: "reference-scene+aspect+duration",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [sceneReferenceImage, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+            }],
+            parameters: {
+              aspectRatio: "16:9",
+              durationSeconds: referenceDurationSec
+            }
+          }
+        },
+        {
+          label: "reference-scene+aspect",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [sceneReferenceImage, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+            }],
+            parameters: {
+              aspectRatio: "16:9"
+            }
+          }
+        }
+      );
+    }
+
+    if (continuityReferenceImage && !strictIdentity) {
+      requestVariants.push(
+        {
+          label: "reference-continuity+aspect+duration",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [continuityReferenceImage]
+            }],
+            parameters: {
+              aspectRatio: "16:9",
+              durationSeconds: 8
+            }
+          }
+        },
+        {
+          label: "reference-continuity+aspect",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [continuityReferenceImage]
+            }],
+            parameters: {
+              aspectRatio: "16:9"
+            }
+          }
+        }
+      );
+    }
     if (portraitGcsUri) {
       requestVariants.push(
         {
@@ -2597,12 +3409,11 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }]
+              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9",
-              durationSeconds: inferredTargetDurationSec,
-              personGeneration: "allow_adult"
+              durationSeconds: referenceDurationSec
             }
           }
         },
@@ -2617,58 +3428,57 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }]
+              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
-              aspectRatio: "16:9",
-              personGeneration: "allow_adult"
+              aspectRatio: "16:9"
             }
           }
         }
       );
     }
-    requestVariants.push(
-      {
-        label: "reference-bytes+aspect+duration",
-        body: {
-          instances: [{
-            prompt,
-            referenceImages: [{
-              image: {
-                bytesBase64Encoded: portraitBase64,
-                mimeType: portraitMimeType
-              },
-              referenceType: "asset"
-            }]
-          }],
-          parameters: {
-            aspectRatio: "16:9",
-            durationSeconds: inferredTargetDurationSec,
-            personGeneration: "allow_adult"
+    if (portraitBase64) {
+      requestVariants.push(
+        {
+          label: "reference-bytes+aspect+duration",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [{
+                image: {
+                  bytesBase64Encoded: portraitBase64,
+                  mimeType: portraitMimeType
+                },
+                referenceType: "asset"
+              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+            }],
+            parameters: {
+              aspectRatio: "16:9",
+              durationSeconds: referenceDurationSec
+            }
+          }
+        },
+        {
+          label: "reference-bytes+aspect",
+          body: {
+            instances: [{
+              prompt,
+              referenceImages: [{
+                image: {
+                  bytesBase64Encoded: portraitBase64,
+                  mimeType: portraitMimeType
+                },
+                referenceType: "asset"
+              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+            }],
+            parameters: {
+              aspectRatio: "16:9"
+            }
           }
         }
-      },
-      {
-        label: "reference-bytes+aspect",
-        body: {
-          instances: [{
-            prompt,
-            referenceImages: [{
-              image: {
-                bytesBase64Encoded: portraitBase64,
-                mimeType: portraitMimeType
-              },
-              referenceType: "asset"
-            }]
-          }],
-          parameters: {
-            aspectRatio: "16:9",
-            personGeneration: "allow_adult"
-          }
-        }
-      }
-    );
-    if (!strictIdentity) {
+      );
+    }
+    if (!strictIdentity && portraitBase64) {
       requestVariants.push(
         {
           label: "image+aspect+duration",
@@ -2684,8 +3494,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
             }],
             parameters: {
               aspectRatio: "16:9",
-              durationSeconds: inferredTargetDurationSec,
-              personGeneration: "allow_adult"
+              durationSeconds: inferredTargetDurationSec
             }
           }
         },
@@ -2702,8 +3511,53 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
               }
             }],
             parameters: {
+              aspectRatio: "16:9"
+            }
+          }
+        }
+      );
+    }
+    if (!hasPortraitAsset) {
+      requestVariants.push(
+        {
+          label: "text-only+aspect+duration",
+          body: {
+            instances: [{ prompt }],
+            parameters: {
               aspectRatio: "16:9",
-              personGeneration: "allow_adult"
+              durationSeconds: inferredTargetDurationSec
+            }
+          }
+        },
+        {
+          label: "text-only+aspect",
+          body: {
+            instances: [{ prompt }],
+            parameters: {
+              aspectRatio: "16:9"
+            }
+          }
+        }
+      );
+    }
+    if (strictIdentity) {
+      requestVariants.push(
+        {
+          label: "strict-fallback-text-only+aspect+duration",
+          body: {
+            instances: [{ prompt }],
+            parameters: {
+              aspectRatio: "16:9",
+              durationSeconds: inferredTargetDurationSec
+            }
+          }
+        },
+        {
+          label: "strict-fallback-text-only+aspect",
+          body: {
+            instances: [{ prompt }],
+            parameters: {
+              aspectRatio: "16:9"
             }
           }
         }
@@ -2805,6 +3659,14 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     }
 
     if (!finalVideoBuffer) {
+      console.warn(`[backend][${requestDebugTag}] generation failed`, {
+        strictIdentity,
+        educationalVideo,
+        hasPortraitAsset,
+        lastStatus,
+        lastErrorDetail,
+        attemptErrors: attemptErrors.slice(-6)
+      });
       if (strictIdentity) {
         return res.status(lastStatus >= 400 ? lastStatus : 502).json({
           error: `No se pudo mantener identidad del locutor con referenceImages. ${lastErrorDetail}`
@@ -2815,6 +3677,48 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         error: errorPreview ? `${lastErrorDetail}. Intentos: ${errorPreview}` : lastErrorDetail
       });
     }
+
+    const sourceVideoMimeType = String(finalVideoMimeType || "video/mp4").trim() || "video/mp4";
+    const sourceVideoBytes = Number(finalVideoBuffer?.length || 0);
+    let transcodeMeta = null;
+    try {
+      transcodeMeta = await transcodeDialogueVideoToMp4(finalVideoBuffer, sourceVideoMimeType);
+      finalVideoBuffer = Buffer.from(transcodeMeta.buffer);
+      finalVideoMimeType = String(transcodeMeta.mimeType || "video/mp4").trim() || "video/mp4";
+    } catch (error) {
+      const stage = String(error?.stage || "transcode").trim() || "transcode";
+      const reason = String(error?.code || error?.message || "video_transcode_failed").trim() || "video_transcode_failed";
+      console.error(`[backend][${requestDebugTag}] video_transcode_failed`, {
+        model: resolvedModel,
+        variant: resolvedVariant,
+        sourceMimeType: sourceVideoMimeType,
+        stage,
+        reason
+      });
+      return res.status(502).json({
+        error: `video_transcode_failed: ${reason}`,
+        code: "video_transcode_failed",
+        detail: {
+          model: resolvedModel,
+          sourceMimeType: sourceVideoMimeType,
+          stage
+        }
+      });
+    }
+    console.info(`[backend][${requestDebugTag}] video-transcode`, {
+      model: resolvedModel,
+      variant: resolvedVariant,
+      sourceMimeType: sourceVideoMimeType,
+      outputMimeType: finalVideoMimeType,
+      inputVideoCodec: String(transcodeMeta?.inputProbe?.videoCodec || "").trim() || "unknown",
+      inputAudioCodec: String(transcodeMeta?.inputProbe?.audioCodec || "").trim() || "unknown",
+      outputVideoCodec: String(transcodeMeta?.videoCodec || "").trim() || "h264",
+      outputAudioCodec: String(transcodeMeta?.audioCodec || "").trim() || "aac",
+      inputDuration: String(transcodeMeta?.inputProbe?.duration || "").trim() || null,
+      outputDuration: String(transcodeMeta?.outputProbe?.duration || "").trim() || null,
+      sourceBytes: sourceVideoBytes,
+      outputBytes: Number(finalVideoBuffer?.length || 0)
+    });
 
     const ext = getVideoExtension(finalVideoMimeType);
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
@@ -2832,7 +3736,13 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         rowId,
         speakerLabel,
         speakerName,
+        referenceImageName,
+        hasSceneReference: hasSceneReference ? "1" : "0",
+        usedSceneReference: useSceneReferenceAsInitImage ? "1" : "0",
         model: resolvedModel,
+        sourceMimeType: sourceVideoMimeType,
+        videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
+        audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
         kind: "dialogue_video"
       }
     });
@@ -2846,6 +3756,11 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         rowId,
         speaker: speakerLabel,
         mimeType: finalVideoMimeType,
+        sourceMimeType: sourceVideoMimeType,
+        container: "mp4",
+        videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
+        audioCodec: String(transcodeMeta?.audioCodec || "aac").trim() || "aac",
+        transcoded: true,
         model: resolvedModel,
         variant: resolvedVariant || null,
         promptVersion: "podcaster_veo_v1",
@@ -2861,6 +3776,11 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("[backend][dialogue-video] unhandled error", {
+      status: Number(error?.status || 500),
+      message: String(error?.message || "No se pudo generar video del diálogo."),
+      stack: String(error?.stack || "").split("\n").slice(0, 3).join(" | ")
+    });
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar video del diálogo.") });
   }
 });
@@ -3004,6 +3924,867 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar audio del diálogo.") });
+  }
+});
+
+function getMontageExportExtension(format = "mp4_h264") {
+  const clean = String(format || "").trim().toLowerCase();
+  if (clean === "webm_vp9") return "webm";
+  return "mp4";
+}
+
+function getMontageExportMimeType(format = "mp4_h264") {
+  const ext = getMontageExportExtension(format);
+  return ext === "webm" ? "video/webm" : "video/mp4";
+}
+
+function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "balanced") {
+  const cleanFormat = String(format || "").trim().toLowerCase();
+  const preset = ["high", "balanced", "small"].includes(String(qualityPreset || "").trim().toLowerCase())
+    ? String(qualityPreset).trim().toLowerCase()
+    : "balanced";
+  if (cleanFormat === "webm_vp9") {
+    const crf = preset === "high" ? 28 : preset === "small" ? 36 : 32;
+    return {
+      container: "webm",
+      vCodec: "libvpx-vp9",
+      vArgs: ["-b:v", "0", "-crf", String(crf), "-deadline", "good"],
+      aCodec: "libopus",
+      aArgs: ["-b:a", "128k"]
+    };
+  }
+  if (cleanFormat === "mp4_h265") {
+    const crf = preset === "high" ? 22 : preset === "small" ? 28 : 24;
+    const x265Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
+    return {
+      container: "mp4",
+      vCodec: "libx265",
+      vArgs: ["-preset", x265Preset, "-crf", String(crf), "-tag:v", "hvc1", "-movflags", "+faststart"],
+      aCodec: "aac",
+      aArgs: ["-b:a", "160k"]
+    };
+  }
+  const crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
+  const x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
+  return {
+    container: "mp4",
+    vCodec: "libx264",
+    vArgs: ["-preset", x264Preset, "-crf", String(crf), "-movflags", "+faststart"],
+    aCodec: "aac",
+    aArgs: ["-b:a", "160k"]
+  };
+}
+
+function resolveMontageExportScaleFilter(resolution = "source") {
+  const key = String(resolution || "").trim().toLowerCase();
+  if (key === "source") return "";
+  const target = key === "1080p" ? { w: 1920, h: 1080 } : key === "720p" ? { w: 1280, h: 720 } : { w: 854, h: 480 };
+  // Downscale-only + enforce even dims for yuv420p.
+  return `scale='if(gt(iw,${target.w}),${target.w},iw)':'if(gt(ih,${target.h}),${target.h},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+}
+
+function normalizeStorageFilePath(value = "") {
+  let raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("gs://")) {
+    raw = raw.replace(/^gs:\/\//i, "");
+    const slash = raw.indexOf("/");
+    raw = slash >= 0 ? raw.slice(slash + 1) : "";
+  }
+  raw = raw.replace(/^\/+/, "");
+  // Algunas rutas pueden venir URL-encoded (p.ej. %2F). Decodifica best-effort.
+  if (/%2f/i.test(raw) || /%25/i.test(raw)) {
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (_) {
+      // noop
+    }
+  }
+  return String(raw || "").trim();
+}
+
+function isAllowedRemoteMediaUrl(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean) return false;
+  try {
+    const parsed = new URL(clean);
+    const host = String(parsed.hostname || "").toLowerCase();
+    return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
+  } catch (_) {
+    return false;
+  }
+}
+
+function coerceReadableStream(body = null) {
+  if (!body) return null;
+  if (typeof body.pipe === "function") return body;
+  // Node 18+ global fetch uses WHATWG ReadableStream.
+  if (typeof body.getReader === "function" && typeof Readable.fromWeb === "function") {
+    return Readable.fromWeb(body);
+  }
+  return null;
+}
+
+function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean) return null;
+  try {
+    const parsed = new URL(clean);
+    if (String(parsed.hostname || "").toLowerCase() !== "firebasestorage.googleapis.com") return null;
+    const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+    if (!match) return null;
+    const bucket = String(match[1] || "").trim();
+    let objectPath = String(match[2] || "").trim();
+    if (!bucket || !objectPath) return null;
+    try {
+      objectPath = decodeURIComponent(objectPath);
+    } catch (_) {
+      // noop
+    }
+    if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+      try {
+        objectPath = decodeURIComponent(objectPath);
+      } catch (_) {
+        // noop
+      }
+    }
+    objectPath = String(objectPath || "").replace(/^\/+/, "").trim();
+    if (!objectPath) return null;
+    return { bucket, objectPath };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function downloadStoragePathToFile(storagePath = "", outPath = "") {
+  const cleanPath = normalizeStorageFilePath(storagePath);
+  const targetPath = String(outPath || "").trim();
+  if (!cleanPath || !targetPath) {
+    const err = new Error("missing_download_path");
+    err.code = "missing_download_path";
+    err.detail = { storagePath: cleanPath, outPath: targetPath };
+    throw err;
+  }
+  const buckets = getStorageBucketCandidates();
+  let lastError = null;
+  let lastMetaError = null;
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    const file = bucket.file(cleanPath);
+    try {
+      await file.download({ destination: targetPath });
+      return targetPath;
+    } catch (error) {
+      lastError = error;
+      // Differentiate "not found" vs permission/network so callers don't
+      // incorrectly fallback to downloadUrl (which depends on tokens).
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await file.getMetadata();
+      } catch (metaError) {
+        lastMetaError = metaError;
+        const status = Number(metaError?.code || metaError?.statusCode || metaError?.status || 0) || 0;
+        const metaMessage = String(metaError?.message || "").toLowerCase();
+        if (status === 404) {
+          // Not found in this bucket, try next candidate.
+          continue;
+        }
+        if (metaMessage.includes("bucket does not exist")) {
+          // Treat missing bucket as a miss and try next candidate.
+          continue;
+        }
+        if (status === 401 || status === 403) {
+          const err = new Error("storage_forbidden");
+          err.code = "storage_forbidden";
+          err.status = 502;
+          err.detail = {
+            storagePath: cleanPath,
+            bucket: String(bucket?.name || "").trim(),
+            message: String(metaError?.message || metaError),
+          };
+          throw err;
+        }
+      }
+      const message = String(error?.message || "").toLowerCase();
+      const status = Number(error?.code || error?.statusCode || error?.status || 0) || 0;
+      if (status === 401 || status === 403 || message.includes("permission") || message.includes("forbidden")) {
+        const err = new Error("storage_forbidden");
+        err.code = "storage_forbidden";
+        err.status = 502;
+        err.detail = {
+          storagePath: cleanPath,
+          bucket: String(bucket?.name || "").trim(),
+          message: String(error?.message || error),
+        };
+        throw err;
+      }
+      if (String(error?.code || "") === "ENOTFOUND" || String(error?.code || "") === "ECONNRESET") {
+        const err = new Error("storage_not_available");
+        err.code = "storage_not_available";
+        err.status = 502;
+        err.detail = {
+          storagePath: cleanPath,
+          bucket: String(bucket?.name || "").trim(),
+          message: String(error?.message || error),
+        };
+        throw err;
+      }
+    }
+  }
+  const err = new Error("storage_not_found");
+  err.code = "storage_not_found";
+  err.status = 404;
+  err.detail = {
+    storagePath: cleanPath,
+    bucketsTried: buckets.map((bucket) => bucket?.name).filter(Boolean),
+    lastError: lastError ? String(lastError?.message || lastError) : undefined,
+    lastMetaError: lastMetaError ? String(lastMetaError?.message || lastMetaError) : undefined
+  };
+  throw err;
+}
+
+async function downloadUrlToFile(url = "", outPath = "") {
+  const cleanUrl = String(url || "").trim();
+  const targetPath = String(outPath || "").trim();
+  if (!cleanUrl || !targetPath) {
+    const err = new Error("missing_download_url");
+    err.code = "missing_download_url";
+    err.detail = { url: cleanUrl, outPath: targetPath };
+    throw err;
+  }
+  if (!isAllowedRemoteMediaUrl(cleanUrl)) {
+    const err = new Error("url_not_allowed");
+    err.code = "url_not_allowed";
+    err.detail = { url: cleanUrl };
+    throw err;
+  }
+
+  let firebaseAdminAttempted = false;
+  let firebaseAdminFallback = "";
+
+  // Prefer Firebase Admin SDK for Firebase Storage object URLs to avoid
+  // depending on public download tokens that may expire/return 403.
+  const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(cleanUrl);
+  if (firebaseObject) {
+    try {
+      firebaseAdminAttempted = true;
+      console.info("[backend][download] firebase url -> admin download", {
+        bucket: String(firebaseObject.bucket || "").trim(),
+        objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
+      });
+      await downloadStoragePathToFile(firebaseObject.objectPath, targetPath);
+      console.info("[backend][download] admin download ok", {
+        objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
+      });
+      return targetPath;
+    } catch (error) {
+      const code = String(error?.code || error?.message || "").trim();
+      const status = Number(error?.status || error?.statusCode || (typeof error?.code === "number" ? error.code : 0) || 0) || 0;
+      console.warn("[backend][download] admin download failed", {
+        code,
+        status: status || undefined,
+        objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
+      });
+      // Only allow fallback to HTTP when the object truly doesn't exist in our buckets.
+      const allowHttpFallback = code === "storage_not_found" || status === 404;
+      if (!allowHttpFallback) throw error;
+      firebaseAdminFallback = code || (status ? `status_${status}` : "storage_not_found");
+      // Else: fallback to HTTP fetch (may succeed if token is valid, or may be an external bucket).
+    }
+  }
+
+  if (firebaseAdminAttempted) {
+    console.info("[backend][download] falling back to http fetch", {
+      reason: firebaseAdminFallback || "storage_not_found",
+      url: redactUrlForLogs(cleanUrl)
+    });
+  }
+
+  const upstream = await fetchCompat(cleanUrl, { method: "GET" });
+  if (!upstream.ok) {
+    let bodySnippet = "";
+    try {
+      bodySnippet = String(await upstream.text()).trim().slice(0, 240);
+    } catch (_) {
+      bodySnippet = "";
+    }
+    const err = new Error(`download_failed_${upstream.status}`);
+    err.code = "download_failed";
+    // No devolver 403/401 al cliente (se confunde con auth del API).
+    err.status = 502;
+    err.detail = {
+      url: redactUrlForLogs(cleanUrl),
+      upstreamStatus: upstream.status,
+      upstreamBody: bodySnippet || undefined
+    };
+    throw err;
+  }
+  const stream = coerceReadableStream(upstream.body);
+  if (!stream) {
+    const err = new Error("download_stream_unavailable");
+    err.code = "download_stream_unavailable";
+    throw err;
+  }
+  await pipeline(stream, fs.createWriteStream(targetPath));
+  return targetPath;
+}
+
+app.post("/api/podcaster/montage/export", async (req, res) => {
+  let tmpDir = "";
+  try {
+    if (!isFfmpegAvailable()) {
+      return res.status(500).json({ error: "ffmpeg_static_missing" });
+    }
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.body?.sessionId || "", 140);
+    const format = String(req.body?.format || "mp4_h264").trim();
+    const qualityPreset = String(req.body?.qualityPreset || "balanced").trim();
+    const resolution = String(req.body?.resolution || "source").trim();
+    const includeBackgroundMusic = req.body?.includeBackgroundMusic === true;
+    const filename = clampText(req.body?.filename || "montage", 160) || "montage";
+    const entriesRaw = Array.isArray(req.body?.entries) ? req.body.entries : [];
+    const entries = entriesRaw.slice(0, MAX_MONTAGE_EXPORT_SCENES).map((item) => (item && typeof item === "object" ? item : null)).filter(Boolean);
+    const audioTimelineRaw = req.body?.audioTimeline && typeof req.body.audioTimeline === "object" ? req.body.audioTimeline : null;
+    const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
+    const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
+    const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
+      if (!segment || typeof segment !== "object") return null;
+      const url = String(segment?.url || "").trim();
+      const storagePath = clampText(segment?.storagePath || "", 900);
+      const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+      const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+      const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
+      const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
+      const rawVolumePct = Number(segment?.volumePct ?? 100);
+      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1
+        ? rawVolumePct * 100
+        : rawVolumePct;
+      const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
+      if (!storagePath && !url) return null;
+      if (volumePct <= 0.0001) return null;
+      return {
+        kind: clampText(segment?.kind || "audio", 40) || "audio",
+        id: clampText(segment?.id || `${idx + 1}`, 140) || `${idx + 1}`,
+        rowId: clampText(segment?.rowId || "", 140),
+        trackIndex: Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0)),
+        loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
+        url,
+        storagePath,
+        mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
+        startMs,
+        durationMs,
+        trimInMs,
+        trimOutMs,
+        volumePct
+      };
+    };
+    const timelineAudioSegments = [...geminiSegmentsRaw, ...backgroundSegmentsRaw]
+      .slice(0, 600)
+      .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
+      .filter(Boolean);
+    const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
+
+    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
+    if (!entries.length) return res.status(400).json({ error: "No hay entradas para exportar." });
+    if (entriesRaw.length > MAX_MONTAGE_EXPORT_SCENES) {
+      return res.status(413).json({ error: `Demasiadas escenas para exportar (máx ${MAX_MONTAGE_EXPORT_SCENES}).` });
+    }
+
+    const allowedFormats = new Set(["mp4_h264", "mp4_h265", "webm_vp9"]);
+    if (!allowedFormats.has(String(format).trim())) {
+      return res.status(400).json({ error: "Formato inválido." });
+    }
+    const allowedRes = new Set(["source", "1080p", "720p", "480p"]);
+    if (!allowedRes.has(String(resolution).trim())) {
+      return res.status(400).json({ error: "Resolución inválida." });
+    }
+    const totalDurationSec = entries.reduce((acc, entry) => acc + Math.max(0, Number(entry?.durationMs || 0) / 1000), 0);
+    if (totalDurationSec > MAX_MONTAGE_EXPORT_TOTAL_SEC) {
+      return res.status(413).json({ error: `Montaje demasiado largo para exportar (máx ${MAX_MONTAGE_EXPORT_TOTAL_SEC} s).` });
+    }
+
+    const exportId = randomUUID();
+    tmpDir = path.join(os.tmpdir(), `cb-montage-export-${exportId}`);
+    await fs.promises.mkdir(tmpDir, { recursive: true });
+
+    const params = resolveMontageExportVideoParams(format, qualityPreset);
+    const outExt = getMontageExportExtension(format);
+    const scaleFilter = resolveMontageExportScaleFilter(resolution);
+    const intermediatePaths = [];
+    const skippedEntries = [];
+    const exportedEntries = [];
+
+    const buildMontageSkippedEntry = (entry = {}, index = 0, reason = "scene_asset_unavailable", detail = {}) => ({
+      sceneIndex: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
+      rowId: clampText(entry?.rowId || "", 140),
+      speaker: clampText(entry?.speaker || "", 120),
+      sceneLabel: clampText(entry?.sceneLabel || "", 180),
+      kind: clampText(detail?.kind || "video", 40) || "video",
+      reason: clampText(reason || "scene_asset_unavailable", 120) || "scene_asset_unavailable",
+      storagePath: clampText(detail?.storagePath || "", 900),
+      url: detail?.url ? redactUrlForLogs(detail.url) : "",
+      code: clampText(detail?.code || "", 80),
+      index: Math.max(0, Number(detail?.index || index) || index),
+      lastError: clampText(detail?.lastError || detail?.message || "", 280)
+    });
+
+    const shouldSkipMontageEntryError = (error) => {
+      const code = String(error?.code || error?.message || "").trim();
+      return code === "storage_not_found" || code === "missing_download_source";
+    };
+
+    const downloadInput = async (asset = {}, kind = "video", index = 0) => {
+      const storagePath = clampText(asset?.storagePath || "", 900);
+      const url = String(asset?.url || "").trim();
+      if (!storagePath && !url) {
+        const err = new Error("missing_download_source");
+        err.code = "missing_download_source";
+        err.status = 404;
+        err.detail = {
+          kind,
+          index,
+          storagePath: "",
+          url: ""
+        };
+        throw err;
+      }
+      const isAudioKind = kind !== "video";
+      const ext = isAudioKind
+        ? (getAudioExtension(String(asset?.mimeType || "audio/mpeg")) || "audio")
+        : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
+      const outPath = path.join(tmpDir, `in-${kind}-${String(index + 1).padStart(3, "0")}.${ext}`);
+      const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
+        const clean = normalizeStorageFilePath(pathInput);
+        const uidClean = String(uidRaw || "").trim();
+        if (!clean || !uidClean) return [];
+        const marker = "/owners/";
+        const i = clean.indexOf(marker);
+        if (i < 0) return [];
+        const prefix = clean.slice(0, i + marker.length);
+        const rest = clean.slice(i + marker.length);
+        const slash = rest.indexOf("/");
+        if (slash < 0) return [];
+        const currentOwner = rest.slice(0, slash);
+        const suffix = rest.slice(slash);
+        const candidates = [
+          uidClean,
+          uidClean.toLowerCase(),
+          normalizeStorageSegment(uidClean, "anon"),
+        ]
+          .map((owner) => String(owner || "").trim())
+          .filter(Boolean);
+        const nextOwners = Array.from(new Set(candidates)).filter((owner) => owner && owner !== currentOwner);
+        return nextOwners.map((owner) => `${prefix}${owner}${suffix}`);
+      };
+      if (storagePath) {
+        try {
+          await downloadStoragePathToFile(storagePath, outPath);
+          return outPath;
+        } catch (error) {
+          const code = String(error?.code || error?.message || "").trim();
+          if (code === "storage_not_found") {
+            const altPaths = resolveAlternateOwnerStoragePaths(storagePath, uid);
+            for (const altPath of altPaths) {
+              try {
+                // eslint-disable-next-line no-await-in-loop
+                await downloadStoragePathToFile(altPath, outPath);
+                console.info("[backend][montage-export] recovered storagePath via alt owner", {
+                  kind,
+                  index,
+                  storagePath,
+                  altPath
+                });
+                return outPath;
+              } catch (_) {
+                // keep trying
+              }
+            }
+
+            if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
+              console.info("[backend][montage-export] storage_not_found -> url fallback", {
+                kind,
+                index,
+                storagePath,
+                url: redactUrlForLogs(url)
+              });
+              await downloadUrlToFile(url, outPath);
+              return outPath;
+            }
+          }
+          error.detail = {
+            ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
+            kind,
+            index,
+            storagePath,
+            url: url ? redactUrlForLogs(url) : ""
+          };
+          throw error;
+        }
+      }
+      await downloadUrlToFile(url, outPath);
+      return outPath;
+    };
+
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i] || {};
+      const rowId = clampText(entry?.rowId || "", 140);
+      const sceneIndex = Math.max(1, Number(entry?.sceneIndex || i + 1) || i + 1);
+      const trimInMs = Math.max(0, Number(entry?.trimInMs || 0) || 0);
+      const durationMs = Math.max(500, Number(entry?.durationMs || 0) || 0);
+      const trimSec = Math.max(0, trimInMs / 1000);
+      const durSec = Math.max(0.2, durationMs / 1000);
+      const useNativeVideoAudio = entry?.useNativeVideoAudio === true;
+      const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
+      const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
+
+      if (!rowId) return res.status(400).json({ error: `Entrada inválida (rowId) en índice ${i}.` });
+      if (!videoAsset?.storagePath && !videoAsset?.url) {
+        const skipped = buildMontageSkippedEntry(entry, i, "missing_video_source", {
+          kind: "video",
+          code: "missing_download_source",
+          index: i,
+          lastError: `Escena ${sceneIndex} sin video fuente para exportar.`
+        });
+        skippedEntries.push(skipped);
+        console.warn("[backend][montage-export] skip scene without video source", skipped);
+        continue;
+      }
+
+      try {
+        const inputVideoPath = await downloadInput(videoAsset, "video", i);
+        const forceSilentAudio = useTimelineAudio === true;
+        const inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
+
+        const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
+        const args = [
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "warning",
+          "-i",
+          inputVideoPath,
+        ];
+        let nullAudioInputIndex = -1;
+        if (forceSilentAudio) {
+          nullAudioInputIndex = 1;
+          args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
+        } else if (!useNativeVideoAudio && inputAudioPath) {
+          args.push("-i", inputAudioPath);
+        } else if (useNativeVideoAudio) {
+          // native audio from video (if present)
+        } else {
+          nullAudioInputIndex = 1;
+          args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
+        }
+
+        args.push(
+          "-ss",
+          String(trimSec),
+          "-t",
+          String(durSec),
+          "-map",
+          "0:v:0"
+        );
+        if (forceSilentAudio) {
+          args.push("-map", `${nullAudioInputIndex}:a:0`);
+        } else if (!useNativeVideoAudio && inputAudioPath) {
+          args.push("-map", "1:a:0");
+        } else if (useNativeVideoAudio) {
+          args.push("-map", "0:a:0?");
+        } else {
+          args.push("-map", `${nullAudioInputIndex}:a:0`);
+        }
+
+        args.push(
+          "-r",
+          "24",
+          "-c:v",
+          params.vCodec
+        );
+        if (scaleFilter) {
+          args.push("-vf", scaleFilter);
+        }
+        args.push(...params.vArgs);
+        args.push(
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          params.aCodec,
+          "-ar",
+          "48000",
+        );
+        args.push(...params.aArgs);
+        args.push(intermediatePath);
+
+        await runFfmpegCommand(args, { stage: `montage_scene_${sceneIndex}` });
+        intermediatePaths.push(intermediatePath);
+        exportedEntries.push({
+          sceneIndex,
+          rowId,
+          durationSec: durSec
+        });
+      } catch (error) {
+        if (!shouldSkipMontageEntryError(error)) throw error;
+        const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
+        const skipped = buildMontageSkippedEntry(entry, i, String(error?.code || error?.message || "scene_asset_unavailable"), {
+          ...detail,
+          code: String(error?.code || "").trim(),
+          index: Number(detail?.index || i) || i,
+          lastError: String(detail?.lastError || detail?.message || error?.message || "").trim()
+        });
+        skippedEntries.push(skipped);
+        console.warn("[backend][montage-export] skip scene missing asset", skipped);
+      }
+    }
+
+    if (!intermediatePaths.length) {
+      return res.status(404).json({
+        error: "No hay escenas válidas para exportar.",
+        code: "montage_no_valid_entries",
+        detail: {
+          skippedEntries
+        }
+      });
+    }
+
+    const concatListPath = path.join(tmpDir, "concat-list.txt");
+    await fs.promises.writeFile(
+      concatListPath,
+      intermediatePaths.map((p) => `file '${String(p).replace(/'/g, "'\\''")}'`).join("\n") + "\n",
+      "utf8"
+    );
+
+    const concatOutPath = path.join(tmpDir, `montage-concat.${outExt}`);
+    await runFfmpegCommand([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "warning",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      concatListPath,
+      "-c",
+      "copy",
+      concatOutPath
+    ], { stage: "montage_concat" });
+
+    const exportedDurationSec = exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
+    let finalOutPath = concatOutPath;
+    if (useTimelineAudio) {
+      const segmentInputs = [];
+      for (let i = 0; i < timelineAudioSegments.length; i += 1) {
+        const segment = timelineAudioSegments[i] || {};
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const p = await downloadInput({
+            storagePath: clampText(segment?.storagePath || "", 900),
+            url: String(segment?.url || "").trim(),
+            mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
+          }, "timeline-audio", i);
+          if (p) segmentInputs.push({ path: p, segment });
+        } catch (error) {
+          // Skip missing audio pieces; export should still succeed with partial audio.
+          if (String(error?.code || "") === "storage_not_found") continue;
+          throw error;
+        }
+      }
+
+      if (segmentInputs.length) {
+        const timelineMixedOutPath = path.join(tmpDir, `montage-timeline-audio.${outExt}`);
+        const audioCodec = outExt === "webm" ? "libopus" : "aac";
+        const audioBitrate = outExt === "webm" ? "128k" : "160k";
+        const filters = [];
+        const labels = [];
+        segmentInputs.forEach((item, idx) => {
+          const segment = item.segment || {};
+          const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+          const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
+          const durationMs = Math.max(100, Math.round(Number(segment?.durationMs || 0) || 0));
+          // En export, el largo efectivo del segmento lo define `durationMs` (timeline),
+          // no el `trimOutMs` del asset original. Si no, el audio puede "derramarse"
+          // a escenas siguientes y sonar junto.
+          const trimOutMs = Math.max(trimInMs + 100, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
+          const trimInSec = Math.max(0, trimInMs / 1000);
+          const durationSec = Math.max(0.1, durationMs / 1000);
+          const volumePct = Math.max(0, Math.min(100, Number(segment?.volumePct ?? 100)));
+          const volume = Math.max(0, Math.min(2, volumePct / 100));
+          const inputIndex = idx + 1;
+          const label = `a${idx}`;
+          labels.push(label);
+          filters.push(
+            `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${startMs}|${startMs},volume=${volume.toFixed(3)}[${label}]`
+          );
+        });
+        // Normaliza loudness para evitar exports demasiado bajitos.
+        const mix = `${labels.map((l) => `[${l}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=2,aresample=48000,loudnorm=I=-16:TP=-1.5:LRA=11[mix]`;
+        const filterComplex = `${filters.join(";")};${mix}`;
+
+        await runFfmpegCommand([
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "warning",
+          "-i",
+          finalOutPath,
+          ...segmentInputs.flatMap((item) => ["-i", item.path]),
+          "-filter_complex",
+          filterComplex,
+          "-map",
+          "0:v:0",
+          "-map",
+          "[mix]",
+          "-c:v",
+          "copy",
+          "-c:a",
+          audioCodec,
+          "-ar",
+          "48000",
+          "-b:a",
+          audioBitrate,
+          ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+          timelineMixedOutPath
+        ], { stage: "montage_mix_timeline_audio" });
+        finalOutPath = timelineMixedOutPath;
+      }
+    }
+    if (includeBackgroundMusic) {
+      const bg = req.body?.backgroundMusic && typeof req.body.backgroundMusic === "object" ? req.body.backgroundMusic : null;
+      if (!bg) return res.status(400).json({ error: "includeBackgroundMusic requiere backgroundMusic." });
+      const musicPath = await downloadInput(bg, "music", 0);
+      if (!musicPath) return res.status(400).json({ error: "No se pudo descargar música de fondo." });
+      const rawVolumePct = Number(bg?.volumePct ?? 25);
+      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1
+        ? rawVolumePct * 100
+        : rawVolumePct;
+      const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
+      const volume = Math.max(0, Math.min(1, volumePct / 100));
+
+      const mixedOutPath = path.join(tmpDir, `montage-mixed.${outExt}`);
+      const audioCodec = outExt === "webm" ? "libopus" : "aac";
+      const audioBitrate = outExt === "webm" ? "128k" : "160k";
+      await runFfmpegCommand([
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        finalOutPath,
+        "-stream_loop",
+        "-1",
+        "-i",
+        musicPath,
+        "-t",
+        String(exportedDurationSec),
+        "-filter_complex",
+        `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[a];[a]loudnorm=I=-16:TP=-1.5:LRA=11[outa]`,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[outa]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        audioCodec,
+        "-ar",
+        "48000",
+        "-b:a",
+        audioBitrate,
+        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+        mixedOutPath
+      ], { stage: "montage_mix_music" });
+      finalOutPath = mixedOutPath;
+    } else if (outExt === "mp4") {
+      const remuxOutPath = path.join(tmpDir, "montage-faststart.mp4");
+      await runFfmpegCommand([
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        finalOutPath,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        remuxOutPath
+      ], { stage: "montage_faststart" });
+      finalOutPath = remuxOutPath;
+    }
+
+    await cleanupMontageExportCache();
+    await ensureMontageExportCacheDir();
+    const token = randomUUID();
+    const createdAtIso = new Date().toISOString();
+    const expiresAtIso = new Date(Date.now() + MONTAGE_EXPORT_CACHE_TTL_MS).toISOString();
+    const cacheFilePath = path.join(MONTAGE_EXPORT_CACHE_DIR, `montage-${exportId}.${outExt}`);
+    await fs.promises.copyFile(finalOutPath, cacheFilePath);
+    await fs.promises.writeFile(path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`), JSON.stringify({
+      exportId,
+      token,
+      uid,
+      sessionId,
+      filename: `${filename}.${outExt}`,
+      mimeType: getMontageExportMimeType(format),
+      filePath: cacheFilePath,
+      createdAt: createdAtIso,
+      expiresAt: expiresAtIso,
+      format: String(format || "").trim(),
+      qualityPreset: String(qualityPreset || "").trim(),
+      resolution: String(resolution || "").trim()
+    }, null, 2), "utf8");
+    const base = resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`;
+    const downloadUrl = `${base}/api/assets/montage-download?exportId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+
+    return res.status(200).json({
+      ok: true,
+      export: {
+        filename: `${filename}.${outExt}`,
+        mimeType: getMontageExportMimeType(format),
+        storagePath: "",
+        downloadUrl,
+        createdAt: createdAtIso,
+        expiresAt: expiresAtIso,
+        exportId
+      },
+      warnings: skippedEntries.length ? {
+        skippedEntries,
+        requestedSceneCount: entries.length,
+        exportedSceneCount: exportedEntries.length
+      } : undefined
+    });
+  } catch (error) {
+    console.error("[backend][montage-export] error", {
+      status: Number(error?.status || 500),
+      message: String(error?.message || "montage_export_failed"),
+      code: String(error?.code || ""),
+      stack: String(error?.stack || "").split("\n").slice(0, 3).join(" | "),
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+    const rawCode = error?.code;
+    const rawStatus = error?.status ?? error?.statusCode;
+    const code = typeof rawCode === "string" ? rawCode.trim() : "";
+    const message = String(error?.message || "").trim();
+    const isNumericCode = typeof rawCode === "number" || (/^\d+$/.test(code) && code.length <= 4);
+    const statusNum = Number(rawStatus || 0) || 0;
+    const errorLabel = (!isNumericCode && code) ? code : (message || "No se pudo exportar el montaje.");
+    const payload = {
+      error: errorLabel
+    };
+    if (code) payload.code = code;
+    if (statusNum) payload.status = statusNum;
+    if (error?.detail && typeof error.detail === "object") {
+      payload.detail = error.detail;
+    }
+    return res.status(Number(error?.status || 500)).json(payload);
+  } finally {
+    if (tmpDir) {
+      try {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
   }
 });
 
@@ -3552,7 +5333,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       return res.status(400).json({ error: "Solo se permiten URLs http/https." });
     }
     const host = String(parsed.hostname || "").toLowerCase();
-    const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+    const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
     if (!allowedHost) {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
@@ -3572,38 +5353,115 @@ app.get("/api/assets/proxy-image", async (req, res) => {
   }
 });
 
+app.get("/api/assets/montage-download", async (req, res) => {
+  try {
+    await cleanupMontageExportCache();
+    const exportId = clampExportId(req.query?.exportId || "");
+    const token = clampText(String(req.query?.token || "").trim(), 180);
+    if (!exportId || !token) {
+      return res.status(400).json({ error: "Falta exportId o token." });
+    }
+    await ensureMontageExportCacheDir();
+    const metaPath = path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`);
+    const raw = await fs.promises.readFile(metaPath, "utf8").catch(() => "");
+    if (!raw) return res.status(404).json({ error: "Export no encontrado o expirado." });
+    let meta = null;
+    try {
+      meta = JSON.parse(raw);
+    } catch (_) {
+      meta = null;
+    }
+    if (!meta || String(meta.exportId || "") !== exportId) {
+      return res.status(404).json({ error: "Export no encontrado o expirado." });
+    }
+    if (String(meta.token || "") !== token) {
+      return res.status(403).json({ error: "Token inválido para descarga." });
+    }
+    const expiresAtMs = Number(new Date(meta.expiresAt || 0).getTime() || 0) || 0;
+    if (expiresAtMs && expiresAtMs < Date.now()) {
+      return res.status(404).json({ error: "Export expirado." });
+    }
+    const filePath = String(meta.filePath || "").trim();
+    if (!filePath) return res.status(404).json({ error: "Export no encontrado o expirado." });
+    const stat = await fs.promises.stat(filePath).catch(() => null);
+    if (!stat || !stat.isFile()) return res.status(404).json({ error: "Export no encontrado o expirado." });
+
+    const rangeHeader = String(req.headers.range || "").trim();
+    const mimeType = String(meta.mimeType || "application/octet-stream").trim() || "application/octet-stream";
+    const filename = String(meta.filename || `montage-${exportId}`).trim() || `montage-${exportId}`;
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
+
+    const total = Number(stat.size || 0) || 0;
+    if (rangeHeader) {
+      const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
+      if (match) {
+        const start = Math.max(0, Number(match[1] || 0));
+        const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
+        if (start <= end && end < total) {
+          res.status(206);
+          res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+          res.setHeader("Content-Length", String(end - start + 1));
+          return fs.createReadStream(filePath, { start, end }).pipe(res);
+        }
+      }
+    }
+    res.setHeader("Content-Length", String(total));
+    return fs.createReadStream(filePath).pipe(res);
+  } catch (error) {
+    return res.status(500).json({ error: String(error?.message || "No se pudo descargar el montaje.") });
+  }
+});
+
 app.get("/api/assets/proxy-media", async (req, res) => {
   try {
-    const storagePath = clampText(req.query?.storagePath || "", 700);
+    const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
     const rawUrl = String(req.query?.url || "").trim();
     const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
     const rangeHeader = String(req.headers.range || "").trim();
 
     if (storagePath) {
-      const file = storageBucket.file(storagePath);
-      const [exists] = await file.exists().catch(() => [false]);
-      if (!exists) {
-        return res.status(404).json({ error: "Archivo no encontrado en Storage." });
-      }
-      const [meta] = await file.getMetadata().catch(() => [{}]);
-      const [buffer] = await file.download();
-      const mime = String(meta?.contentType || "application/octet-stream");
-      res.setHeader("Content-Type", mime);
-      res.setHeader("Content-Length", String(buffer.length));
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Cache-Control", "private, max-age=120");
-      if (rangeHeader) {
-        const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
-        if (match) {
-          const start = Math.max(0, Number(match[1] || 0));
-          const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
-          const chunk = buffer.subarray(start, end + 1);
-          res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
-          res.setHeader("Content-Length", String(chunk.length));
-          return res.status(206).send(chunk);
+      const buckets = getStorageBucketCandidates();
+      let lastError = null;
+      for (const bucket of buckets) {
+        if (!bucket) continue;
+        const file = bucket.file(storagePath);
+        const [exists] = await file.exists().catch(() => [null]);
+        if (exists === false) continue;
+        try {
+          const [meta] = await file.getMetadata().catch(() => [{}]);
+          const [buffer] = await file.download();
+          const mime = String(meta?.contentType || "application/octet-stream");
+          res.setHeader("Content-Type", mime);
+          res.setHeader("Content-Length", String(buffer.length));
+          res.setHeader("Accept-Ranges", "bytes");
+          res.setHeader("Cache-Control", "private, max-age=120");
+          if (rangeHeader) {
+            const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
+            if (match) {
+              const start = Math.max(0, Number(match[1] || 0));
+              const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
+              const chunk = buffer.subarray(start, end + 1);
+              res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
+              res.setHeader("Content-Length", String(chunk.length));
+              return res.status(206).send(chunk);
+            }
+          }
+          return res.status(200).send(buffer);
+        } catch (error) {
+          lastError = error;
         }
       }
-      return res.status(200).send(buffer);
+      return res.status(404).json({
+        error: "Archivo no encontrado en Storage.",
+        detail: {
+          storagePath,
+          bucketsTried: buckets.map((bucket) => bucket?.name).filter(Boolean),
+          lastError: lastError ? String(lastError?.message || lastError) : undefined
+        }
+      });
     }
 
     if (!normalizedUrl) {

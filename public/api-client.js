@@ -116,6 +116,12 @@ export async function authFetchJson(url, options = {}) {
     error.detail = data;
     return error;
   };
+  const buildAuthForbiddenError = (response, data) => {
+    const error = new Error("AUTH_FORBIDDEN");
+    error.status = Number(response?.status || 0);
+    error.detail = data;
+    return error;
+  };
 
   let response = null;
   try {
@@ -139,11 +145,28 @@ export async function authFetchJson(url, options = {}) {
       }
     }
   }
-  if (response.status === 401 || response.status === 403) {
-    throw new Error("AUTH_FORBIDDEN");
-  }
   const data = await parseJsonSafe(response);
+  if (response.status === 401) {
+    throw buildAuthForbiddenError(response, data);
+  }
+  if (response.status === 403) {
+    const backendError = String(data?.error || data?.error?.message || "").trim();
+    if (/^AUTH_/i.test(backendError)) {
+      throw buildAuthForbiddenError(response, data);
+    }
+  }
   if (!response.ok) {
+    try {
+      console.error("[api-client] request failed", {
+        url: finalUrl,
+        method: String(requestInit?.method || "GET").toUpperCase(),
+        status: Number(response.status || 0),
+        error: data?.error || null,
+        detail: data || null
+      });
+    } catch (_) {
+      // no-op
+    }
     throw buildHttpError(response, data);
   }
   return data;

@@ -510,6 +510,28 @@ function sanitizePodcasterSession(raw = {}) {
       promptVersion: clampText(portrait?.promptVersion || "podcaster_v1", 80) || "podcaster_v1",
     };
   });
+
+  const sanitizeReferenceImageMap = (rawMap = {}, maxEntries = 120) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      if (!key || !value || typeof value !== "object") return;
+      const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
+      if (!dataUrl.startsWith("data:image/")) return;
+      next[key] = {
+        name: clampText(value?.name || "Referencia", 180) || "Referencia",
+        dataUrl,
+        mimeType: clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
+        updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
+      };
+    });
+    return next;
+  };
+
+  const speakerReferenceImageMap = sanitizeReferenceImageMap(raw?.speakerReferenceImageMap || {}, 40);
+  const scenarioReferenceImageMap = sanitizeReferenceImageMap(raw?.scenarioReferenceImageMap || {}, 120);
+  const rowReferenceImageMap = sanitizeReferenceImageMap(raw?.rowReferenceImageMap || {}, 500);
   const dialogueVideoMapRaw = raw?.dialogueVideoMap && typeof raw.dialogueVideoMap === "object" ?
     raw.dialogueVideoMap :
     {};
@@ -666,6 +688,9 @@ function sanitizePodcasterSession(raw = {}) {
     disfluencyDefaults: normalizedDisfluencyDefaults,
     panelMusicConfig,
     speakerPortraitMap,
+    speakerReferenceImageMap,
+    scenarioReferenceImageMap,
+    rowReferenceImageMap,
     globalScenarioDeck,
     dialogueVideoMap,
     dialogueAudioMap,
@@ -1965,7 +1990,7 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     previousVideoTargetSpeechLine: clampText(previousSceneRaw?.previousVideoTargetSpeechLine || "", 1600),
     hasVideo: previousSceneRaw?.hasVideo === true,
   } : null;
-  const strictIdentity = req.body?.strictIdentity !== false;
+  let strictIdentity = req.body?.strictIdentity !== false;
   const regenerate = req.body?.regenerate === true;
   const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
   const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
@@ -1980,51 +2005,82 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     : mergedModels;
   const videoModels = filteredModels.length ? filteredModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
 
-  if (!sessionId) return res.status(400).json({error: "Falta sessionId."});
-  if (!rowId) return res.status(400).json({error: "Falta rowId."});
-  if (!speakerLabel) return res.status(400).json({error: "Falta speakerLabel."});
-  if (!text) return res.status(400).json({error: "Falta texto de diálogo."});
-  if (!portraitUrl && !portraitStoragePath) return res.status(400).json({error: "Falta retrato base (portraitUrl o portraitStoragePath)."});
+  if (!sessionId) {
+    console.warn("[functions][dialogue-video] reject 400 missing sessionId");
+    return res.status(400).json({error: "Falta sessionId."});
+  }
+  if (!rowId) {
+    console.warn("[functions][dialogue-video] reject 400 missing rowId", {sessionId});
+    return res.status(400).json({error: "Falta rowId."});
+  }
+  if (!speakerLabel) {
+    console.warn("[functions][dialogue-video] reject 400 missing speakerLabel", {sessionId, rowId});
+    return res.status(400).json({error: "Falta speakerLabel."});
+  }
+  if (!text) {
+    console.warn("[functions][dialogue-video] reject 400 missing text", {sessionId, rowId, speakerLabel});
+    return res.status(400).json({error: "Falta texto de diálogo."});
+  }
+  if (strictIdentity && !portraitUrl && !portraitStoragePath) {
+    return res.status(400).json({error: "strictIdentity requiere portraitUrl o portraitStoragePath."});
+  }
 
   let portraitBuffer = null;
   let portraitMimeType = "image/png";
-  if (portraitStoragePath) {
-    try {
-      const bucket = admin.storage().bucket();
-      const file = bucket.file(portraitStoragePath);
-      const [meta] = await file.getMetadata().catch(() => [{}]);
-      const [downloaded] = await file.download();
-      portraitBuffer = Buffer.from(downloaded);
-      portraitMimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
-    } catch (_) {
-      portraitBuffer = null;
+  let portraitLoadedFromStorage = false;
+  if (portraitUrl || portraitStoragePath) {
+    if (portraitStoragePath) {
+      try {
+        const bucket = admin.storage().bucket();
+        const file = bucket.file(portraitStoragePath);
+        const [meta] = await file.getMetadata().catch(() => [{}]);
+        const [downloaded] = await file.download();
+        portraitBuffer = Buffer.from(downloaded);
+        portraitMimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
+        portraitLoadedFromStorage = true;
+      } catch (_) {
+        portraitBuffer = null;
+      }
+    }
+    if (!portraitBuffer && portraitUrl) {
+      const portraitResponse = await fetch(portraitUrl, {method: "GET"});
+      if (!portraitResponse.ok) {
+        if (strictIdentity) {
+          const detail = await portraitResponse.json().catch(() => ({}));
+          return res.status(portraitResponse.status).json({
+            error: String(detail?.error?.message || detail?.error || `No se pudo descargar retrato (${portraitResponse.status}).`),
+          });
+        }
+        portraitBuffer = null;
+      } else {
+        portraitMimeType = String(portraitResponse.headers.get("content-type") || "image/png").trim().toLowerCase();
+        portraitBuffer = Buffer.from(await portraitResponse.arrayBuffer());
+      }
     }
   }
-  if (!portraitBuffer && portraitUrl) {
-    const portraitResponse = await fetch(portraitUrl, {method: "GET"});
-    if (!portraitResponse.ok) {
-      const detail = await portraitResponse.json().catch(() => ({}));
-      return res.status(portraitResponse.status).json({
-        error: String(detail?.error?.message || detail?.error || `No se pudo descargar retrato (${portraitResponse.status}).`),
-      });
+  if ((portraitUrl || portraitStoragePath) && !portraitBuffer) {
+    strictIdentity = false;
+  }
+  if (portraitBuffer && !portraitMimeType.startsWith("image/")) {
+    if (strictIdentity) {
+      return res.status(400).json({error: "El retrato no es una imagen válida para Veo."});
     }
-    portraitMimeType = String(portraitResponse.headers.get("content-type") || "image/png").trim().toLowerCase();
-    portraitBuffer = Buffer.from(await portraitResponse.arrayBuffer());
+    portraitBuffer = null;
+    portraitMimeType = "image/png";
   }
-  if (!portraitBuffer) {
-    return res.status(400).json({error: "No se pudo cargar retrato base del locutor."});
+  if (portraitBuffer && (!portraitBuffer.length || portraitBuffer.length > MAX_SPEAKER_PORTRAIT_BYTES)) {
+    if (strictIdentity) {
+      return res.status(413).json({error: "El retrato excede el tamaño permitido."});
+    }
+    portraitBuffer = null;
+    portraitMimeType = "image/png";
   }
-  if (!portraitMimeType.startsWith("image/")) {
-    return res.status(400).json({error: "El retrato no es una imagen válida para Veo."});
-  }
-  if (!portraitBuffer.length || portraitBuffer.length > MAX_SPEAKER_PORTRAIT_BYTES) {
-    return res.status(413).json({error: "El retrato excede el tamaño permitido."});
-  }
-  const portraitBase64 = portraitBuffer.toString("base64");
+  const portraitBase64 = portraitBuffer ? portraitBuffer.toString("base64") : "";
   const bucket = admin.storage().bucket();
-  const portraitGcsUri = portraitStoragePath
+  const portraitGcsUri = portraitLoadedFromStorage && portraitStoragePath
     ? `gs://${bucket.name}/${portraitStoragePath}`
     : "";
+  const hasPortraitAsset = Boolean(portraitBase64 || portraitGcsUri);
   let inferredAudioDurationSec = audioDurationSecInput;
   if (!inferredAudioDurationSec && dialogueAudioStoragePath) {
     try {
@@ -2041,23 +2097,27 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     : (inferredAudioDurationSec > 0
       ? Math.round(clampNumber(inferredAudioDurationSec, 5, 8, 8))
       : 8));
-  const characterPrompt = buildBackendPodcasterCharacterPrompt({
-    speakerLabel,
-    speakerName,
-    voiceName,
-    genderGroup,
-    expression,
-    counterpartSpeakerName,
-    contentMode: educationalVideo ? "educational" : "podcast",
-  });
-  const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
-    speakerLabel,
-    speakerName,
-    counterpartSpeakerName,
-    scenarioPrompt,
-    expression,
-    contentMode: educationalVideo ? "educational" : "podcast",
-  });
+  const characterPrompt = educationalVideo
+    ? ""
+    : buildBackendPodcasterCharacterPrompt({
+      speakerLabel,
+      speakerName,
+      voiceName,
+      genderGroup,
+      expression,
+      counterpartSpeakerName,
+      contentMode: "podcast",
+    });
+  const studioScenePrompt = educationalVideo
+    ? ""
+    : buildBackendPodcasterStudioScenePrompt({
+      speakerLabel,
+      speakerName,
+      counterpartSpeakerName,
+      scenarioPrompt,
+      expression,
+      contentMode: "podcast",
+    });
   const sceneVisualPrompt = scenePrompt || [
     `Escena de ${speakerName}.`,
     scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
@@ -2078,14 +2138,14 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     regenerate
       ? "Varía de forma visible el encuadre, distancia de cámara, pose, mirada, gestos, timing corporal, bloqueo en cabina y microexpresión. No entregues una réplica ni una toma casi idéntica."
       : "",
-    videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario sin romper identidad, sincronía labial ni continuidad del set: ${videoDirective}` : "",
+    videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario${educationalVideo ? " para narrativa visual educativa" : " sin romper identidad, sincronía labial ni continuidad del set"}: ${videoDirective}` : "",
     sceneVisualPrompt ? `${educationalVideo ? "Dirección pedagógica de la escena" : "Dirección visual de la escena"}: ${sceneVisualPrompt}` : "",
     sceneImagePromptList.length ? `Prompts de imagen para la escena: ${sceneImagePromptList.map((item, idx) => `${idx + 1}. ${item}`).join(" | ")}` : "",
     performanceDirective ? `Prioridad máxima de actuación visual: ejecuta estas acciones físicas o expresivas de forma visible en pantalla, sin convertirlas en texto en pantalla ni alterar el diálogo hablado: ${performanceDirective}` : "",
-    `Locutor: ${speakerName} (${speakerLabel}).`,
-    voiceName ? `Voz de referencia: ${voiceName}.` : "",
-    genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : "",
-    `Expresión: ${expression}.`,
+    educationalVideo ? "" : `Locutor: ${speakerName} (${speakerLabel}).`,
+    educationalVideo ? "" : (voiceName ? `Voz de referencia: ${voiceName}.` : ""),
+    educationalVideo ? "" : (genderGroup ? `Presentación de género del personaje: ${genderGroup}.` : ""),
+    educationalVideo ? "" : `Expresión: ${expression}.`,
     characterPrompt ? `Identidad del personaje obligatoria: ${characterPrompt}` : "",
     studioScenePrompt ? `Escenario de locución obligatorio: ${studioScenePrompt}` : "",
     previousScene?.speakerLabel
@@ -2101,43 +2161,47 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
       ? `Transición emocional: evoluciona de "${previousScene.expression}" hacia "${expression}" de forma natural y coherente.`
       : "",
     previousScene?.hasVideo
-      ? "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía)."
+      ? (educationalVideo
+        ? "Mantén continuidad visual y de estilo con el clip previo (paleta, ritmo, tipo de recurso visual y composición)."
+        : "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía).")
       : "Si no hay clip previo disponible, conserva continuidad narrativa usando el texto de la escena anterior.",
-    "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base.",
-    "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje.",
+    educationalVideo ? "" : (hasPortraitAsset ? "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base." : ""),
+    educationalVideo ? "" : (hasPortraitAsset ? "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje." : ""),
     educationalVideo
       ? "Escena en entorno educativo profesional con apoyo visual limpio y composición editorial."
       : "Escena en cabina profesional de podcast con micrófono de estudio.",
     educationalVideo
-      ? "Usa el mismo entorno visual general del video, pero cada personaje debe ocupar una zona física distinta dentro del set."
+      ? "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del guion técnico."
       : "Usa el mismo escenario global del podcast, pero cada locutor debe ocupar una zona física distinta dentro del set.",
     educationalVideo
-      ? "Importante: posicionar a cada personaje en una parte diferente del escenario, y ser consistente con ese ángulo."
+      ? "Puedes mostrar escenas sin personas si el recurso visual lo pide (mapas, gráficos, objetos, documentos, animaciones)."
       : "Importante: posicionar a cada Host en una parte diferente del escenario, y ser consistente con ese ángulo.",
     educationalVideo
-      ? "Importante: en la escena solo debe aparecer el personaje correspondiente al plano."
+      ? "Prohibido estilo podcast: no cabina de radio, no micrófonos, no set de entrevista, no host hablando a cámara."
       : "Importante: en la escena solo debe aparecer el locutor o host correspondiente al track.",
     educationalVideo
-      ? "El personaje debe verse explicando en pantalla: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un recurso visual fuera de cámara o una referencia didáctica dentro del set."
+      ? "Si aparece una persona, debe ser secundaria al recurso didáctico y nunca parecer conductor de podcast."
       : "El locutor debe verse en conversación real: cuerpo en tres cuartos o semi perfil, con la mirada dirigida hacia un punto fuera de cámara dentro del set.",
     educationalVideo
-      ? "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara."
+      ? "Prioriza planos de recurso visual, detalle y contexto que refuercen la voz en off."
       : "Prohibido mirar fijamente al frente, prohibido hablarle al lente, prohibido pose de conductor mirando a cámara.",
     educationalVideo
-      ? "Debe verse un solo personaje identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje."
+      ? "Mantén narrativa didáctica clara y coherencia con transición solicitada."
       : "Debe verse un solo locutor identificable en cuadro; no introducir un segundo personaje visible ni fragmentos corporales de otro personaje.",
-    "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
+    educationalVideo ? "" : "Composición obligatoria de sujeto único: foreground y background libres de cualquier figura humana adicional.",
     educationalVideo
-      ? "Si hace falta sugerir explicación, hacerlo solo con dirección de mirada, postura y composición del set; nunca agregando otra figura humana."
+      ? "Si la escena exige figura humana, evitar frontalidad y mantener foco en el contenido didáctico."
       : "Si hace falta sugerir conversacion, hacerlo solo con direccion de mirada, postura y composicion del set; nunca agregando otra figura humana.",
     educationalVideo
-      ? "Solo se permiten microglances incidentales; la atención principal nunca debe caer directamente sobre la cámara."
+      ? "No incluir texto incrustado; la explicación textual ocurre en voz en off y edición."
       : "Solo se permiten microglances incidentales; la eyeline dominante nunca debe caer directamente sobre la cámara.",
     educationalVideo
-      ? "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación limpia."
+      ? "Plano, luz y composición deben parecer pieza educativa premium de 16:9."
       : "Plano medio corto, movimiento sutil de cabeza y labios, parpadeo natural, iluminación neutra.",
     dialogueAudioStoragePath || dialogueAudioUrl
-      ? `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`
+      ? (educationalVideo
+        ? `El clip debe durar ~${inferredTargetDurationSec} segundos y reforzar visualmente la locución pregrabada (sin requerir lectura labial).`
+        : `El clip debe sincronizar labios y ritmo con una locución pregrabada de ~${inferredTargetDurationSec} segundos.`)
       : "",
     "Las acotaciones escénicas o instrucciones de actuación son visuales; no deben aparecer como texto en pantalla ni modificar literalmente el diálogo hablado.",
     originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
@@ -2169,7 +2233,12 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     return {ok: false, status: 504, error: "Tiempo de espera agotado al generar video de diálogo.", latest};
   };
 
-  if (strictIdentity && !portraitUrl && !portraitGcsUri) {
+  if (strictIdentity && !hasPortraitAsset) {
+    console.warn("[functions][dialogue-video] reject 400 strictIdentity without portrait asset", {
+      hasPortraitUrl: Boolean(portraitUrl),
+      hasPortraitStoragePath: Boolean(portraitStoragePath),
+      hasPortraitAsset,
+    });
     return res.status(400).json({
       error: "strictIdentity requiere portraitUrl o portraitStoragePath para referenceImages.",
     });
@@ -2193,7 +2262,6 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
           parameters: {
             aspectRatio: "16:9",
             durationSeconds: inferredTargetDurationSec,
-            personGeneration: "allow_adult",
           },
         },
       },
@@ -2212,54 +2280,53 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
           }],
           parameters: {
             aspectRatio: "16:9",
-            personGeneration: "allow_adult",
           },
         },
       },
     );
   }
-  requestVariants.push(
-    {
-      label: "reference-bytes+aspect+duration",
-      body: {
-        instances: [{
-          prompt,
-          referenceImages: [{
-            image: {
-              bytesBase64Encoded: portraitBase64,
-              mimeType: portraitMimeType,
-            },
-            referenceType: "asset",
+  if (portraitBase64) {
+    requestVariants.push(
+      {
+        label: "reference-bytes+aspect+duration",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [{
+              image: {
+                bytesBase64Encoded: portraitBase64,
+                mimeType: portraitMimeType,
+              },
+              referenceType: "asset",
+            }],
           }],
-        }],
-        parameters: {
-          aspectRatio: "16:9",
-          durationSeconds: inferredTargetDurationSec,
-          personGeneration: "allow_adult",
+          parameters: {
+            aspectRatio: "16:9",
+            durationSeconds: inferredTargetDurationSec,
+          },
         },
       },
-    },
-    {
-      label: "reference-bytes+aspect",
-      body: {
-        instances: [{
-          prompt,
-          referenceImages: [{
-            image: {
-              bytesBase64Encoded: portraitBase64,
-              mimeType: portraitMimeType,
-            },
-            referenceType: "asset",
+      {
+        label: "reference-bytes+aspect",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [{
+              image: {
+                bytesBase64Encoded: portraitBase64,
+                mimeType: portraitMimeType,
+              },
+              referenceType: "asset",
+            }],
           }],
-        }],
-        parameters: {
-          aspectRatio: "16:9",
-          personGeneration: "allow_adult",
+          parameters: {
+            aspectRatio: "16:9",
+          },
         },
       },
-    },
-  );
-  if (!strictIdentity) {
+    );
+  }
+  if (!strictIdentity && portraitBase64) {
     requestVariants.push(
       {
         label: "image+aspect+duration",
@@ -2276,7 +2343,6 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
           parameters: {
             aspectRatio: "16:9",
             durationSeconds: inferredTargetDurationSec,
-            personGeneration: "allow_adult",
           },
         },
       },
@@ -2294,7 +2360,52 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
           }],
           parameters: {
             aspectRatio: "16:9",
-            personGeneration: "allow_adult",
+          },
+        },
+      },
+    );
+  }
+  if (!hasPortraitAsset) {
+    requestVariants.push(
+      {
+        label: "text-only+aspect+duration",
+        body: {
+          instances: [{prompt}],
+          parameters: {
+            aspectRatio: "16:9",
+            durationSeconds: inferredTargetDurationSec,
+          },
+        },
+      },
+      {
+        label: "text-only+aspect",
+        body: {
+          instances: [{prompt}],
+          parameters: {
+            aspectRatio: "16:9",
+          },
+        },
+      },
+    );
+  }
+  if (strictIdentity) {
+    requestVariants.push(
+      {
+        label: "strict-fallback-text-only+aspect+duration",
+        body: {
+          instances: [{prompt}],
+          parameters: {
+            aspectRatio: "16:9",
+            durationSeconds: inferredTargetDurationSec,
+          },
+        },
+      },
+      {
+        label: "strict-fallback-text-only+aspect",
+        body: {
+          instances: [{prompt}],
+          parameters: {
+            aspectRatio: "16:9",
           },
         },
       },

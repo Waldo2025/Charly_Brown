@@ -2684,10 +2684,40 @@ function inicializarToggleArchivadosUI() {
     actualizarBotonToggleArchivados();
 }
 
+function inicializarBotonExportCursoWord() {
+    const btn = document.getElementById("btnExportCursoWord");
+    if (!btn || btn.dataset.cbBound === "1") return;
+
+    btn.addEventListener("click", async () => {
+        if (!curso) {
+            alert("Selecciona un curso para exportar.");
+            return;
+        }
+
+        btn.disabled = true;
+        btn.classList.add("opacity-50", "cursor-wait");
+
+        try {
+            await exportarCursoCompletoWord(curso, { incluirArchivados: mostrarModulosArchivados });
+        } catch (_) {
+            alert("Error exportando el curso a Word");
+        } finally {
+            btn.classList.remove("cursor-wait");
+            btn.classList.toggle("opacity-50", !curso);
+            btn.classList.toggle("cursor-not-allowed", !curso);
+            btn.disabled = !curso;
+        }
+    });
+
+    btn.dataset.cbBound = "1";
+}
+
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", inicializarToggleArchivadosUI);
+    document.addEventListener("DOMContentLoaded", inicializarBotonExportCursoWord);
 } else {
     inicializarToggleArchivadosUI();
+    inicializarBotonExportCursoWord();
 }
 
 /* ESPERAR A QUE EL USUARIO INICIE SESIÓN */
@@ -3369,6 +3399,12 @@ function renderCursoItem(cursoItem) {
                     const btnAddTema = document.getElementById("btnAddTema");
                     if (btnAddTema) {
                         btnAddTema.disabled = true;
+                    }
+
+                    const btnExportCursoWord = document.getElementById("btnExportCursoWord");
+                    if (btnExportCursoWord) {
+                        btnExportCursoWord.disabled = true;
+                        btnExportCursoWord.classList.add("opacity-50", "cursor-not-allowed");
                     }
                 }
                 
@@ -4487,7 +4523,14 @@ async function seleccionarCurso(id) {
             }
         }
 
-        // btnDescargarCursoWord removido del UI
+        // Botón exportar curso (disponible también en solo lectura)
+        const btnExportCursoWord = document.getElementById("btnExportCursoWord");
+        if (btnExportCursoWord) {
+            btnExportCursoWord.disabled = false;
+            btnExportCursoWord.title = "Descargar contenido de todos los temas (Word)";
+            btnExportCursoWord.setAttribute("aria-label", btnExportCursoWord.title);
+            btnExportCursoWord.classList.remove("opacity-50", "cursor-not-allowed");
+        }
         
         // Renderizar temas
         renderTemas();
@@ -13076,7 +13119,7 @@ async function exportarTemaWord(tema) {
     }
 }
 
-async function exportarCursoCompletoWord(cursoActual) {
+async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = false } = {}) {
     if (!cursoActual?.temas?.length) {
         alert("No hay un curso cargado para exportar.");
         return;
@@ -13113,12 +13156,23 @@ async function exportarCursoCompletoWord(cursoActual) {
                     <h3 class="word-section-title">${escapeHtml(sub?.nombre || "Subtema")}</h3>
                 `;
 
+                const contenidoGenerado = String(sub?.contenidoGenerado || "").trim();
+                if (contenidoGenerado) {
+                    html += `
+                        <section>
+                            <h4 class="word-section-title">Introducción</h4>
+                            ${construirContenidoHtmlWord(contenidoGenerado)}
+                        </section>
+                    `;
+                }
+
                 if (!sub?.modulosIds?.length) {
                     html += `<p>(Sin módulos)</p>`;
                 } else {
                     for (const modId of sub.modulosIds) {
                         const modulo = await obtenerModulo(modId);
-                        if (!modulo || modulo.archivado) continue;
+                        if (!modulo) continue;
+                        if (modulo.archivado && !incluirArchivados) continue;
                         html += construirContenidoModuloWord(modulo);
                     }
                 }

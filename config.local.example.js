@@ -12,7 +12,7 @@ window.__CHARLY_CONFIG__ = {
     apiKey: "__FIREBASE_WEB_API_KEY_LOCAL__",
     authDomain: "charly-brown.firebaseapp.com",
     projectId: "charly-brown",
-    storageBucket: "charly-brown.firebasestorage.app",
+    storageBucket: "charly-brown.appspot.com",
     messagingSenderId: "128488238449",
     appId: "1:128488238449:web:2b99ef5c2f0272e9871ad0",
     measurementId: "G-RL0BMDZKE6"

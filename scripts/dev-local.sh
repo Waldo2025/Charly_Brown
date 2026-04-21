@@ -119,9 +119,28 @@ resolve_web_port "${WEB_PORT}"
 
 start_backend() {
   echo "[dev-local] starting backend on http://127.0.0.1:${API_PORT}"
-  rm -f "${BACKEND_LOG}"
-  node backend/server.js >"${BACKEND_LOG}" 2>&1 &
+  if [[ -f "${BACKEND_LOG}" ]]; then
+    local ts=""
+    ts="$(date +"%Y%m%d-%H%M%S" 2>/dev/null || true)"
+    if [[ -n "${ts}" ]]; then
+      cp -f "${BACKEND_LOG}" "${BACKEND_LOG%.log}-${ts}.prev.log" >/dev/null 2>&1 || true
+    else
+      cp -f "${BACKEND_LOG}" "${BACKEND_LOG}.prev" >/dev/null 2>&1 || true
+    fi
+  fi
+  : > "${BACKEND_LOG}"
+  node backend/server.js >>"${BACKEND_LOG}" 2>&1 &
   API_PID=$!
+}
+
+stop_backend_pid_if_running() {
+  if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" >/dev/null 2>&1; then
+    kill "$API_PID" >/dev/null 2>&1 || true
+    sleep 0.3
+    if kill -0 "$API_PID" >/dev/null 2>&1; then
+      kill -9 "$API_PID" >/dev/null 2>&1 || true
+    fi
+  fi
 }
 
 cleanup() {
@@ -214,9 +233,30 @@ verify_podcaster_routes() {
   return 0
 }
 
-start_backend
-wait_for_backend
-verify_podcaster_routes
+ensure_backend_ready() {
+  local max_attempts="${1:-4}"
+  local attempt=1
+  local delay=1
+  while [[ "${attempt}" -le "${max_attempts}" ]]; do
+    start_backend
+    if wait_for_backend 25 0.4 && verify_podcaster_routes; then
+      return 0
+    fi
+    echo "[dev-local] backend bootstrap attempt ${attempt}/${max_attempts} failed; retrying in ${delay}s"
+    stop_backend_pid_if_running
+    sleep "${delay}"
+    delay=$((delay < 8 ? delay * 2 : 8))
+    attempt=$((attempt + 1))
+  done
+  echo "[dev-local] backend failed to bootstrap after ${max_attempts} attempts"
+  if [[ -f "${BACKEND_LOG}" ]]; then
+    echo "[dev-local] backend log (final attempt):"
+    cat "${BACKEND_LOG}"
+  fi
+  return 1
+}
+
+ensure_backend_ready
 
 monitor_backend() {
   local retry_delay=2
@@ -230,14 +270,12 @@ monitor_backend() {
       continue
     fi
     echo "[dev-local] backend process stopped; restarting..."
-    start_backend
-    if ! wait_for_backend 20 0.4; then
-      echo "[dev-local] backend restart failed; retrying in ${retry_delay}s"
-      retry_delay=$((retry_delay < 20 ? retry_delay * 2 : 20))
-      continue
+    if [[ -f "${BACKEND_LOG}" ]]; then
+      echo "[dev-local] backend log tail (before restart):"
+      tail -n 80 "${BACKEND_LOG}" || true
     fi
-    if ! verify_podcaster_routes; then
-      echo "[dev-local] backend restart inválido para rutas críticas de podcaster; retrying in ${retry_delay}s"
+    if ! ensure_backend_ready 3; then
+      echo "[dev-local] backend restart failed; retrying in ${retry_delay}s"
       retry_delay=$((retry_delay < 20 ? retry_delay * 2 : 20))
       continue
     fi

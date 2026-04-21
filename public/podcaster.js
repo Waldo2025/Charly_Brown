@@ -23,9 +23,15 @@ const PANEL_MUSIC_STORAGE_KEY_BASE = "cb_podcaster_panel_music_v1";
 const PODCASTER_VIDEO_IMPORT_STORAGE_KEY = "cb_podcaster_video_import_v1";
 const PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY = "cb_podcast_studio_inspector_collapsed_v1";
 const PODCAST_STUDIO_INSPECTOR_WIDTH_KEY = "cb_podcast_studio_inspector_width_v1";
+const PODCAST_STUDIO_MONTAGE_AUDIO_SUBTRACKS_KEY = "cb_podcast_montage_audio_subtracks_v1";
 const PODCAST_STUDIO_INSPECTOR_WIDTH_MIN = 320;
 const PODCAST_STUDIO_INSPECTOR_WIDTH_MAX = 620;
 const PODCAST_STUDIO_INSPECTOR_WIDTH_DEFAULT = 420;
+const PODCAST_STAGE_MAX_HEIGHT_PX_KEY = "cb_podcast_stage_max_height_px_v2";
+const PODCAST_STAGE_MAX_HEIGHT_PX_MAX = 3600;
+const PODCAST_STAGE_WIDTH_RATIO_KEY = "cb_podcast_stage_width_ratio_v1";
+const PODCAST_STAGE_MIN_WIDTH_PX = 420;
+const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
 
 const VOICES = ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host"];
 const DEFAULT_HOSTS = Object.freeze(["Host A", "Host B"]);
@@ -44,6 +50,7 @@ const DISFLUENCY_LEVEL_MAX = Object.freeze({
   stutterLevel: 100
 });
 const VIDEO_SCENE_MAX_SEC = 8;
+const VIDEO_SCENE_MIN_SEC = 0.5;
 const VIDEO_SCENE_IMAGE_PROMPT_COUNT = 3;
 const VIDEO_DIALOGUE_MAX_SEC = 6;
 const VIDEO_SCENE_GAP_SEC = 2;
@@ -172,6 +179,7 @@ const els = {
   newSessionBtn: document.getElementById("newSessionBtn"),
   saveSessionBtn: document.getElementById("saveSessionBtn"),
   saveSessionFloatingBtn: document.getElementById("saveSessionFloatingBtn"),
+  importGeminiDialogueTrackBtn: document.getElementById("importGeminiDialogueTrackBtn"),
   openSidepanelBtn: document.getElementById("openSidepanelBtn"),
   sidepanelHeaderToggleBtn: document.getElementById("sidepanelHeaderToggleBtn"),
   sidepanel: document.getElementById("podcasterSidepanel"),
@@ -244,15 +252,20 @@ const els = {
   creativeVideoTimelineList: document.getElementById("creativeVideoTimelineList"),
   creativeVideoInspectorScene: document.getElementById("creativeVideoInspectorScene"),
   creativeVideoInspectorEditor: document.getElementById("creativeVideoInspectorEditor"),
+  geminiCreativityModal: document.getElementById("geminiCreativityModal"),
+  closeGeminiCreativityBtn: document.getElementById("closeGeminiCreativityBtn"),
+  geminiCreativityRange: document.getElementById("geminiCreativityRange"),
+  geminiCreativityValueLabel: document.getElementById("geminiCreativityValueLabel"),
+  geminiCreativitySceneLabel: document.getElementById("geminiCreativitySceneLabel"),
   podcastVideoLoader: document.getElementById("podcastVideoLoader"),
   closePodcastVideoBtn: document.getElementById("closePodcastVideoBtn"),
   podcastVideoShell: document.getElementById("podcastVideoShell"),
   togglePodcastStudioInspectorBtn: document.getElementById("togglePodcastStudioInspectorBtn"),
   podcastStudioInspector: document.getElementById("podcastStudioInspector"),
   podcastStudioInspectorResizeHandle: document.getElementById("podcastStudioInspectorResizeHandle"),
-  podcastStudioInspectorCornerHandle: document.getElementById("podcastStudioInspectorCornerHandle"),
   podcastStudioInspectorCollapsedHandle: document.getElementById("podcastStudioInspectorCollapsedHandle"),
   podcastVideoStage: document.getElementById("podcastVideoStage"),
+  podcastStageResizeHandle: document.getElementById("podcastStageResizeHandle"),
   podcastVideoWave: document.getElementById("podcastVideoWave"),
   podcastTimelineRuler: document.getElementById("podcastTimelineRuler"),
   podcastVideoTimeline: document.getElementById("podcastVideoTimeline"),
@@ -265,6 +278,7 @@ const els = {
   podcastTransitionPickerEdgeLabel: document.getElementById("podcastTransitionPickerEdgeLabel"),
   podcastVideoSpeakerCard: document.getElementById("podcastVideoSpeakerCard"),
   podcastActiveSpeakerVideo: document.getElementById("podcastActiveSpeakerVideo"),
+  podcastActiveSpeakerVideoAlt: document.getElementById("podcastActiveSpeakerVideoAlt"),
   podcastStudioDipOverlay: document.getElementById("podcastStudioDipOverlay"),
   podcastActiveSpeakerImage: document.getElementById("podcastActiveSpeakerImage"),
   podcastSpeakerMouth: document.getElementById("podcastSpeakerMouth"),
@@ -272,6 +286,7 @@ const els = {
   podcastVideoStatus: document.getElementById("podcastVideoStatus"),
   speakerReferenceImageInput: document.getElementById("speakerReferenceImageInput"),
   scenarioReferenceImageInput: document.getElementById("scenarioReferenceImageInput"),
+  rowReferenceImageInput: document.getElementById("rowReferenceImageInput"),
   podcastVideoPrevBtn: document.getElementById("podcastVideoPrevBtn"),
   podcastVideoPlayBtn: document.getElementById("podcastVideoPlayBtn"),
   podcastVideoPauseBtn: document.getElementById("podcastVideoPauseBtn"),
@@ -279,6 +294,18 @@ const els = {
   podcastVideoNextBtn: document.getElementById("podcastVideoNextBtn"),
   podcastVideoSpeedSelect: document.getElementById("podcastVideoSpeedSelect"),
   podcastVideoZoomBtn: document.getElementById("podcastVideoZoomBtn"),
+  exportMontageBtn: document.getElementById("exportMontageBtn"),
+  montageExportModal: document.getElementById("montageExportModal"),
+  closeMontageExportBtn: document.getElementById("closeMontageExportBtn"),
+  cancelMontageExportBtn: document.getElementById("cancelMontageExportBtn"),
+  confirmMontageExportBtn: document.getElementById("confirmMontageExportBtn"),
+  montageExportFormat: document.getElementById("montageExportFormat"),
+  montageExportResolution: document.getElementById("montageExportResolution"),
+  montageExportFilename: document.getElementById("montageExportFilename"),
+  montageExportStatusBox: document.getElementById("montageExportStatusBox"),
+  montageExportStatus: document.getElementById("montageExportStatus"),
+  montageExportHint: document.getElementById("montageExportHint"),
+  montageExportProgressBar: document.getElementById("montageExportProgressBar"),
   podcastStudioScrubber: document.getElementById("podcastStudioScrubber"),
   podcastStudioTime: document.getElementById("podcastStudioTime"),
   podcastStudioInspectorScene: document.getElementById("podcastStudioInspectorScene"),
@@ -296,6 +323,7 @@ const els = {
   regenerateAllDialogueVideosBtn: document.getElementById("regenerateAllDialogueVideosBtn"),
   generateDialogueAudioBtn: document.getElementById("generateDialogueAudioBtn"),
   regenerateDialogueAudioBtn: document.getElementById("regenerateDialogueAudioBtn"),
+  playDialogueAudioBtn: document.getElementById("playDialogueAudioBtn"),
   deleteDialogueAudioBtn: document.getElementById("deleteDialogueAudioBtn"),
   podcastPortraitStrip: document.getElementById("podcastPortraitStrip"),
   podcastPortraitViewer: document.getElementById("podcastPortraitViewer"),
@@ -314,6 +342,31 @@ const els = {
   rowDisfluencyModal: document.getElementById("rowDisfluencyModal"),
   rowDisfluencyModalTitle: document.getElementById("rowDisfluencyModalTitle"),
   closeRowDisfluencyModalBtn: document.getElementById("closeRowDisfluencyModalBtn"),
+  timelineClipDurationModal: document.getElementById("timelineClipDurationModal"),
+  closeTimelineClipDurationBtn: document.getElementById("closeTimelineClipDurationBtn"),
+  timelineClipDurationLabel: document.getElementById("timelineClipDurationLabel"),
+  timelineClipDurationRange: document.getElementById("timelineClipDurationRange"),
+  timelineClipDurationNumber: document.getElementById("timelineClipDurationNumber"),
+  timelineClipDurationHint: document.getElementById("timelineClipDurationHint"),
+  timelineClipVeoVolumeRange: document.getElementById("timelineClipVeoVolumeRange"),
+  timelineClipVeoVolumeNumber: document.getElementById("timelineClipVeoVolumeNumber"),
+  timelineClipGeminiVolumeRange: document.getElementById("timelineClipGeminiVolumeRange"),
+  timelineClipGeminiVolumeNumber: document.getElementById("timelineClipGeminiVolumeNumber"),
+  timelineClipRelatePrevCheckbox: document.getElementById("timelineClipRelatePrevCheckbox"),
+  timelineClipRelatePrevHint: document.getElementById("timelineClipRelatePrevHint"),
+  timelineClipApplyRelateAheadCheckbox: document.getElementById("timelineClipApplyRelateAheadCheckbox"),
+  timelineClipApplyRelateAheadHint: document.getElementById("timelineClipApplyRelateAheadHint"),
+  resetTimelineClipDurationBtn: document.getElementById("resetTimelineClipDurationBtn"),
+  cancelTimelineClipDurationBtn: document.getElementById("cancelTimelineClipDurationBtn"),
+  applyTimelineClipDurationBtn: document.getElementById("applyTimelineClipDurationBtn"),
+  montageSceneMixModal: document.getElementById("montageSceneMixModal"),
+  closeMontageSceneMixBtn: document.getElementById("closeMontageSceneMixBtn"),
+  montageSceneVeoVolumeRange: document.getElementById("montageSceneVeoVolumeRange"),
+  montageSceneVeoVolumeNumber: document.getElementById("montageSceneVeoVolumeNumber"),
+  montageSceneGeminiVolumeRange: document.getElementById("montageSceneGeminiVolumeRange"),
+  montageSceneGeminiVolumeNumber: document.getElementById("montageSceneGeminiVolumeNumber"),
+  cancelMontageSceneMixBtn: document.getElementById("cancelMontageSceneMixBtn"),
+  applyMontageSceneMixBtn: document.getElementById("applyMontageSceneMixBtn"),
   modalDisfluencyEnabled: document.getElementById("modalDisfluencyEnabled"),
   modalStutterEnabled: document.getElementById("modalStutterEnabled"),
   modalFillerLevel: document.getElementById("modalFillerLevel"),
@@ -337,6 +390,8 @@ let rowPlaybackTimerState = {
   rafId: 0
 };
 let rowPlaybackAudioEl = null;
+let studioDialoguePreviewAudioEl = null;
+let studioDialoguePreviewRowId = "";
 let googleGenAiLiveModule = null;
 let podcastStudioInspectorCollapsed = (() => {
   try {
@@ -356,8 +411,32 @@ let podcastStudioInspectorWidth = (() => {
   }
   return PODCAST_STUDIO_INSPECTOR_WIDTH_DEFAULT;
 })();
+let podcastStageWidthRatio = (() => {
+  try {
+    const rawValue = Number(window.localStorage.getItem(PODCAST_STAGE_WIDTH_RATIO_KEY));
+    if (Number.isFinite(rawValue) && rawValue > 0) {
+      return Math.max(0.1, Math.min(1, rawValue));
+    }
+  } catch (_) {
+    // noop
+  }
+  return null;
+})();
+let podcastStageMaxHeightPx = (() => {
+  try {
+    const rawValue = Number(window.localStorage.getItem(PODCAST_STAGE_MAX_HEIGHT_PX_KEY));
+    if (Number.isFinite(rawValue) && rawValue > 0) {
+      return Math.max(240, Math.min(PODCAST_STAGE_MAX_HEIGHT_PX_MAX, Math.round(rawValue)));
+    }
+  } catch (_) {
+    // noop
+  }
+  return null;
+})();
 let podcastStudioInspectorResizeObserver = null;
 let podcastStudioInspectorResizeCleanup = null;
+let podcastStageResizeCleanup = null;
+let podcastStageResizeObserver = null;
 let podcastVideoOpenRunToken = 0;
 const globalScenarioImagePending = new Set();
 let geminiLiveAudioCtx = null;
@@ -379,7 +458,29 @@ let globalConfigOpen = false;
 let musicConfigOpen = false;
 let audioTrackMixOpen = false;
 let scriptSetupOpen = false;
+let montageSceneMixOpen = false;
 let pendingScriptPrompt = "";
+let timelineClipDurationModalState = {
+  rowId: "",
+  minSec: 0.5,
+  maxSec: 0.5,
+  valueSec: 0.5,
+  relateWithPreviousScene: false,
+  baseVeoVolumePct: 100,
+  baseGeminiVolumePct: 100,
+  veoVolumePct: 100,
+  geminiVolumePct: 100
+};
+let timelineClipVolumePersistRaf = 0;
+let timelineClipVolumePersistTimeout = 0;
+let cloudAutosaveTimeout = 0;
+let cloudAutosaveInFlight = false;
+let cloudAutosaveQueued = false;
+let cloudAutosaveLastAt = 0;
+let suppressPodcastStudioUiStateSync = false;
+let geminiCreativityModalState = {
+  rowId: ""
+};
 let composerGenerationMode = (() => {
   try {
     return window.localStorage.getItem(COMPOSER_GENERATION_MODE_KEY) === "video" ? "video" : "script";
@@ -389,6 +490,13 @@ let composerGenerationMode = (() => {
 })();
 let rowDisfluencyConfigOpenId = null;
 let dialogueVideoDirectiveRequest = null;
+let montageAudioSubtracksOpen = (() => {
+  try {
+    return window.localStorage.getItem(PODCAST_STUDIO_MONTAGE_AUDIO_SUBTRACKS_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+})();
 let podcastVideoState = {
   enabled: false,
   activeSpeaker: "",
@@ -396,6 +504,9 @@ let podcastVideoState = {
   speaking: false,
   stagePortraitFallback: false,
   busy: false,
+  stageVideoSlot: 0,
+  showMontageAudioSubtracks: montageAudioSubtracksOpen,
+  playheadDragging: false,
   bulkVideoGenerationActive: false,
   bulkVideoGenerationMode: "",
   transitionPickerOpen: false,
@@ -415,8 +526,96 @@ let podcastVideoState = {
   timelineGapSelection: null,
   timelineLastInteractedRowId: "",
   timelineJustDraggedUntil: 0,
+  timelineAudioSelection: {
+    geminiRowIds: new Set(),
+    uploadedKeys: new Set()
+  },
   zoomed: false
 };
+
+function scheduleCloudAutosave(reason = "") {
+  const session = getActiveSession();
+  if (!session?.id) return;
+  const uid = resolveCurrentUid();
+  if (!uid) return;
+  const now = Date.now();
+  const MIN_INTERVAL_MS = 1600;
+  if (cloudAutosaveInFlight) {
+    cloudAutosaveQueued = true;
+    return;
+  }
+  if (now - cloudAutosaveLastAt < MIN_INTERVAL_MS) {
+    cloudAutosaveQueued = true;
+  }
+  if (cloudAutosaveTimeout) clearTimeout(cloudAutosaveTimeout);
+  cloudAutosaveTimeout = setTimeout(async () => {
+    cloudAutosaveTimeout = 0;
+    if (cloudAutosaveInFlight) return;
+    if (!resolveCurrentUid()) return;
+    cloudAutosaveInFlight = true;
+    cloudAutosaveQueued = false;
+    cloudAutosaveLastAt = Date.now();
+    try {
+      await saveSessionToCloud(null, { silent: true, reason: String(reason || "").slice(0, 64) });
+    } catch (_) {
+      // noop: autosave best-effort
+    } finally {
+      cloudAutosaveInFlight = false;
+      if (cloudAutosaveQueued) {
+        scheduleCloudAutosave("queued");
+      }
+    }
+  }, 900);
+}
+
+function clampPodcastStudioInspectorWidthPx(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return PODCAST_STUDIO_INSPECTOR_WIDTH_DEFAULT;
+  return Math.max(PODCAST_STUDIO_INSPECTOR_WIDTH_MIN, Math.min(PODCAST_STUDIO_INSPECTOR_WIDTH_MAX, numeric));
+}
+
+function clampPodcastStageWidthRatio(value, session = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const stage = els.podcastVideoStage;
+  const parentRect = stage?.parentElement?.getBoundingClientRect?.();
+  const parentWidth = parentRect?.width || stage?.getBoundingClientRect?.().width || window.innerWidth;
+  const minRatio = parentWidth ? Math.min(1, PODCAST_STAGE_MIN_WIDTH_PX / parentWidth) : 0.1;
+  return Math.max(minRatio, Math.min(1, numeric));
+}
+
+function normalizePodcastStudioUiState(raw = null, session = null) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const cfg = getPodcastVideoConfig(session || getActiveSession());
+  const rows = (session || getActiveSession())?.script?.rows || [];
+  const validRowIds = new Set(rows.map((row) => String(row?.id || "").trim()).filter(Boolean));
+  const lastActiveRowId = String(source.lastActiveRowId || "").trim();
+  return {
+    inspectorCollapsed: source.inspectorCollapsed === true,
+    inspectorWidthPx: clampPodcastStudioInspectorWidthPx(source.inspectorWidthPx),
+    stageWidthRatio: source.stageWidthRatio === null ? null : clampPodcastStageWidthRatio(source.stageWidthRatio, session),
+    timelineViewMode: String(source.timelineViewMode || cfg.timelineViewMode || "tracks").trim().toLowerCase() === "normal" ? "normal" : "tracks",
+    showMontageAudioSubtracks: source.showMontageAudioSubtracks === true,
+    lastActiveRowId: validRowIds.has(lastActiveRowId) ? lastActiveRowId : ""
+  };
+}
+
+function upsertPodcastStudioUiState(patch = {}, { autosaveReason = "ui-state" } = {}) {
+  if (suppressPodcastStudioUiStateSync) return;
+  const session = getActiveSession();
+  if (!session) return;
+  upsertActiveSession((current) => {
+    const next = normalizePodcastStudioUiState({
+      ...(current.podcastStudioUiState || {}),
+      ...(patch || {})
+    }, current);
+    return {
+      ...current,
+      podcastStudioUiState: next
+    };
+  }, { render: false });
+  scheduleCloudAutosave(autosaveReason);
+}
 let creativeVideoState = {
   enabled: false,
   activeRowId: ""
@@ -434,6 +633,16 @@ let podcastTimelineScrollSyncCleanup = null;
 let podcastTimelineScrollRafId = 0;
 let podcastTimelineManualScrollUntil = 0;
 let podcastTimelinePreviewObserver = null;
+let podcastTimelinePreviewsSuspended = false;
+let podcastTimelinePreviewSyncRafId = 0;
+let podcastTimelinePreviewSyncPayload = null;
+const PODCAST_STAGE_VIDEO_CACHE_LIMIT = 12;
+const podcastStageVideoCache = new Map();
+const PODCAST_STAGE_AUDIO_CACHE_LIMIT = 24;
+const podcastStageAudioCache = new Map();
+let localProxyMediaUnavailable = false;
+let localProxyMediaUnavailableAt = 0;
+const LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS = 45000;
 const PODCAST_RENDER_DEBUG = (() => {
   try {
     return window.localStorage.getItem("cb_podcast_render_debug") === "1";
@@ -441,6 +650,28 @@ const PODCAST_RENDER_DEBUG = (() => {
     return false;
   }
 })();
+
+function isLocalProxyMediaUrl(url = "") {
+  const src = String(url || "").trim();
+  if (!src) return false;
+  if (!/\/api\/assets\/proxy-media\?/i.test(src)) return false;
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost):8787\//i.test(src);
+}
+
+function markLocalProxyMediaUnavailable(reason = "") {
+  localProxyMediaUnavailableAt = Date.now();
+  if (localProxyMediaUnavailable) return;
+  localProxyMediaUnavailable = true;
+  try {
+    setGenerationStatus(`Backend local (127.0.0.1:8787) no disponible${reason ? `: ${reason}` : ""}.`, "");
+  } catch (_) { }
+}
+
+function shouldShortCircuitLocalProxyMediaFetch(url = "") {
+  if (!isLocalProxyMediaUrl(url)) return false;
+  if (!localProxyMediaUnavailable || !localProxyMediaUnavailableAt) return false;
+  return (Date.now() - localProxyMediaUnavailableAt) <= LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS;
+}
 let podcastRenderState = {
   timelineStructureKey: "",
   timelineMode: "",
@@ -474,7 +705,7 @@ let podcastAudioTrackUiState = {
 let panelMusicState = {
   preset: "ambient",
   volume: 22,
-  montageVolume: 22,
+  montageVolume: 0,
   stabilize: false,
   playing: false,
   sourceType: "preset",
@@ -486,6 +717,52 @@ let panelMusicState = {
   },
   track: null
 };
+function normalizeMontageExportSettings(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const format = ["mp4_h264", "mp4_h265", "webm_vp9"].includes(String(source.format || "").trim())
+    ? String(source.format).trim()
+    : "mp4_h264";
+  const qualityPreset = ["high", "balanced", "small"].includes(String(source.qualityPreset || "").trim())
+    ? String(source.qualityPreset).trim()
+    : "balanced";
+  const resolution = ["source", "1080p", "720p", "480p"].includes(String(source.resolution || "").trim())
+    ? String(source.resolution).trim()
+    : "source";
+  const filename = String(source.filename || "").trim().slice(0, 120);
+  return {
+    format,
+    qualityPreset,
+    resolution,
+    filename
+  };
+}
+
+function defaultMontageExportFilename() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `montage-${stamp}`;
+}
+
+function loadMontageExportSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
+    const normalized = normalizeMontageExportSettings(parsed || {});
+    if (!normalized.filename) normalized.filename = defaultMontageExportFilename();
+    return normalized;
+  } catch (_) {
+    return normalizeMontageExportSettings({ filename: defaultMontageExportFilename() });
+  }
+}
+
+function persistMontageExportSettings() {
+  try {
+    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(montageExportState)));
+  } catch (_) {
+    // noop
+  }
+}
+
+let montageExportState = loadMontageExportSettings();
+let montageExportBusy = false;
 let panelMusicAudioCtx = null;
 let panelMusicNodes = [];
 let panelMusicAudioEl = null;
@@ -507,6 +784,7 @@ let globalTooltipState = {
 };
 const dialogueVideoGenerationPending = new Set();
 const dialogueVideoGenerationTasks = new Map();
+const timelineSceneVideoGenerationPending = new Set();
 const dialogueAudioGenerationPending = new Set();
 let backgroundDialogueAudioWarmupToken = 0;
 const brokenDialogueVideoRows = new Set();
@@ -521,10 +799,23 @@ const connectScriptPanelGenerationState = {
   abortController: null,
   token: 0
 };
-const STUDIO_TRANSITION_TYPES = ["cut", "crossfade", "dip-black", "flash-white", "slide-left", "zoom-in"];
+const STUDIO_TRANSITION_TYPES = [
+  "cut",
+  "crossfade",
+  "dip-black",
+  "flash-white",
+  "slide-left",
+  "slide-right",
+  "slide-up",
+  "slide-down",
+  "zoom-in",
+  "zoom-out",
+  "blur"
+];
 const STUDIO_TIMELINE_VERSION = 3;
 const STUDIO_TIMELINE_TRACK_VERSION = 1;
 const STUDIO_TIMELINE_PIXELS_PER_SEC = 52;
+const PODCAST_TIMELINE_RULER_OFFSET_PX = 148;
 const STUDIO_TIMELINE_SNAP_MS = 10;
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const STUDIO_TIMELINE_MIN_CLIP_PX = 96;
@@ -536,7 +827,12 @@ const STUDIO_TRANSITION_PRESETS = {
   "dip-black": { type: "dip-black", durationMs: 420 },
   "flash-white": { type: "flash-white", durationMs: 220 },
   "slide-left": { type: "slide-left", durationMs: 360 },
-  "zoom-in": { type: "zoom-in", durationMs: 300 }
+  "slide-right": { type: "slide-right", durationMs: 360 },
+  "slide-up": { type: "slide-up", durationMs: 340 },
+  "slide-down": { type: "slide-down", durationMs: 340 },
+  "zoom-in": { type: "zoom-in", durationMs: 300 },
+  "zoom-out": { type: "zoom-out", durationMs: 300 },
+  blur: { type: "blur", durationMs: 320 }
 };
 const PODCASTER_VOICE_TRACE = true;
 
@@ -683,18 +979,36 @@ function setupGlobalTooltipPortal() {
 
 function loadSessions(uid = resolveCurrentUid()) {
   const storageKey = resolveSessionStorageKey(uid);
-  try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_) {
-    const isAnonScope = storageKey.endsWith(":anon");
-    if (!isAnonScope) return [];
+  const parseArrayFromStorage = (key = "") => {
     try {
-      const legacyParsed = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]");
-      return Array.isArray(legacyParsed) ? legacyParsed : [];
+      const parsed = JSON.parse(localStorage.getItem(String(key || "").trim()) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
     } catch (_) {
       return [];
     }
+  };
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    const scopedSessions = Array.isArray(parsed) ? parsed : [];
+    if (scopedSessions.length) return scopedSessions;
+    const legacyCandidates = [
+      LEGACY_STORAGE_KEY,
+      `${STORAGE_KEY_BASE}:auth_required`,
+      `${STORAGE_KEY_BASE}:anon`,
+      STORAGE_KEY_BASE
+    ];
+    const mergedLegacy = legacyCandidates.reduce((acc, key) => {
+      const sessions = parseArrayFromStorage(key);
+      return sessions.length ? mergeSessionsById(acc, sessions) : acc;
+    }, []);
+    if (!mergedLegacy.length) return scopedSessions;
+    localStorage.setItem(storageKey, JSON.stringify(mergedLegacy));
+    return mergedLegacy;
+  } catch (_) {
+    const storageScope = String(storageKey.split(":").pop() || "").trim().toLowerCase();
+    const isLegacyMigrationScope = storageScope === "anon" || storageScope === "auth_required";
+    if (!isLegacyMigrationScope) return [];
+    return parseArrayFromStorage(LEGACY_STORAGE_KEY);
   }
 }
 
@@ -731,13 +1045,30 @@ function persistSessions(uid = resolveCurrentUid(), sessions = state.sessions) {
 }
 
 async function loadCloudSessions() {
-  if (!hasAvailableApiBase()) {
-    return loadCloudSessionsDirect();
+  let apiSessions = [];
+  let apiError = null;
+  if (hasAvailableApiBase()) {
+    try {
+      const response = await authFetchJson("/api/podcaster/sessions/list", {
+        method: "GET"
+      });
+      apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+    } catch (error) {
+      apiError = error;
+    }
   }
-  const response = await authFetchJson("/api/podcaster/sessions/list", {
-    method: "GET"
-  });
-  return Array.isArray(response?.sessions) ? response.sessions : [];
+  let directSessions = [];
+  try {
+    directSessions = await loadCloudSessionsDirect();
+  } catch (directError) {
+    if (apiError) throw apiError;
+    throw directError;
+  }
+  if (apiSessions.length || directSessions.length) {
+    return mergeSessionsById(apiSessions, directSessions);
+  }
+  if (apiError) throw apiError;
+  return [];
 }
 
 async function loadCloudSessionsDirect() {
@@ -929,7 +1260,15 @@ function normalizePanelMusicTrack(track = null) {
     prompt: String(track.prompt || "").trim(),
     durationMeasuredWith: String(track.durationMeasuredWith || "").trim().toLowerCase(),
     loopSettings: normalizePanelMusicLoopSettings(track.loopSettings || [], sourceDurationMs),
-    mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || [])
+    mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || []),
+    segmentStartOverrides: Array.isArray(track.segmentStartOverrides)
+      ? track.segmentStartOverrides
+        .map((item) => ({
+          loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
+          startMs: Math.max(0, Math.round(Number(item?.startMs || 0) || 0))
+        }))
+        .filter((item) => Number.isFinite(item.loopIndex) && item.loopIndex <= 999 && Number.isFinite(item.startMs))
+      : []
   };
 }
 
@@ -983,8 +1322,7 @@ function setAllSessionUploadedTracksEnabled(enabled = true) {
     enabledInSession: enabled === true
   }));
   setPanelMusicUploadedTracks(nextTracks, { selectIndex: 0 });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
+  persistAudioTrackMixSettings();
   syncMusicControls();
   renderPodcastVideoTimeline(getActiveSession());
 }
@@ -999,12 +1337,8 @@ function toggleSessionUploadedTrackEnabled(index = 0) {
     ...track,
     enabledInSession: track.enabledInSession === false
   };
-  if (nextTracks.every((item) => item?.enabledInSession === false)) {
-    nextTracks[trackIndex].enabledInSession = true;
-  }
   setPanelMusicUploadedTracks(nextTracks, { selectIndex: trackIndex });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
+  persistAudioTrackMixSettings();
   syncMusicControls();
   renderPodcastVideoTimeline(getActiveSession());
   return true;
@@ -1023,8 +1357,7 @@ function removeUploadedTrackAt(index = 0, options = {}) {
     panelMusicState.track = null;
     panelMusicState.sourceType = "preset";
   }
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
+  persistAudioTrackMixSettings();
   syncMusicControls();
   renderPodcastVideoTimeline(getActiveSession());
   return true;
@@ -1235,6 +1568,7 @@ function getPanelMusicLoopCount(session = null, track = null) {
 
 function buildUploadedPanelMusicSegments(session = null) {
   const activeSession = session || getActiveSession();
+  const allTracks = getPanelMusicUploadedTracks();
   const uploadedTracks = getEnabledPanelMusicUploadedTracks().filter((track) => getPanelMusicTrackDurationSec(track) > 0.05);
   const entries = buildTimelineRuntimeEntries(activeSession);
   const totalDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
@@ -1242,8 +1576,36 @@ function buildUploadedPanelMusicSegments(session = null) {
     ? entries
     : [{ startMs: 0, endMs: totalDurationMs }];
   if (!uploadedTracks.length) return [];
+  const resolveFullTrackIndex = (track = null, fallbackIndex = 0) => {
+    const normalized = normalizePanelMusicTrack(track);
+    if (!normalized) return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
+    const slotLabel = String(normalized.slotLabel || "").trim();
+    if (slotLabel) {
+      const byLabel = allTracks.findIndex((item) => String(item?.slotLabel || "").trim() === slotLabel);
+      if (byLabel >= 0) return byLabel;
+    }
+    const byIdentity = allTracks.findIndex((item) => item === track);
+    if (byIdentity >= 0) return byIdentity;
+    return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
+  };
+  const applyOverrides = (segmentList = []) => segmentList.map((segment) => {
+    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
+    const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
+    const track = allTracks[trackIndex] || null;
+    const overrides = Array.isArray(track?.segmentStartOverrides) ? track.segmentStartOverrides : [];
+    const override = overrides.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex);
+    if (!override) return segment;
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) - Number(segment?.startMs || 0) || 0));
+    const nextStart = Math.max(0, Math.min(totalDurationMs - durationMs, Math.round(Number(override.startMs || 0) || 0)));
+    return {
+      ...segment,
+      startMs: nextStart,
+      endMs: nextStart + durationMs
+    };
+  });
   if (uploadedTracks.length === 1) {
     const single = uploadedTracks[0];
+    const fullTrackIndex = resolveFullTrackIndex(single, 0);
     const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(getPanelMusicTrackDurationSec(single) * 1000));
     const segments = [];
     let sceneCursor = 0;
@@ -1273,7 +1635,7 @@ function buildUploadedPanelMusicSegments(session = null) {
       segments.push({
         ...single,
         slotLabel: String(single.slotLabel || "Audio 1").trim() || "Audio 1",
-        trackIndex: 0,
+        trackIndex: fullTrackIndex,
         startMs,
         endMs: startMs + trimOutMs,
         durationSec: getPanelMusicTrackDurationSec(single),
@@ -1285,12 +1647,13 @@ function buildUploadedPanelMusicSegments(session = null) {
       sceneCursor = endSceneCursor + 1;
       loopIndex += 1;
     }
-    return segments;
+    return applyOverrides(segments);
   }
   const segments = [];
   let sceneCursor = 0;
   uploadedTracks.forEach((track, index) => {
     if (sceneCursor >= sceneEntries.length) return;
+    const fullTrackIndex = resolveFullTrackIndex(track, index);
     const trackDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(getPanelMusicTrackDurationSec(track) * 1000));
     const remainingTracksAfterCurrent = Math.max(0, uploadedTracks.length - index - 1);
     const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
@@ -1312,7 +1675,7 @@ function buildUploadedPanelMusicSegments(session = null) {
     segments.push({
       ...track,
       slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
-      trackIndex: index,
+      trackIndex: fullTrackIndex,
       startMs,
       endMs: startMs + visibleDurationMs,
       durationSec: getPanelMusicTrackDurationSec(track),
@@ -1323,7 +1686,7 @@ function buildUploadedPanelMusicSegments(session = null) {
     });
     sceneCursor = endSceneCursor + 1;
   });
-  return segments;
+  return applyOverrides(segments);
 }
 
 function groupUploadedPanelMusicSegmentsByTrack(session = null) {
@@ -1390,7 +1753,9 @@ async function decodeAudioDurationInfoFromSrc(src = "") {
   }
   const response = await fetch(source);
   if (!response.ok) {
-    throw new Error(`No se pudo leer audio (${response.status}).`);
+    const error = new Error(`No se pudo leer audio (${response.status}).`);
+    error.status = Number(response.status) || 0;
+    throw error;
   }
   const arrayBuffer = await response.arrayBuffer();
   if (!(arrayBuffer instanceof ArrayBuffer) || !arrayBuffer.byteLength) {
@@ -1407,6 +1772,19 @@ async function decodeAudioDurationInfoFromSrc(src = "") {
     durationSec: Math.max(0, Number(decodedBuffer?.duration || 0) || 0),
     method: "decode"
   };
+}
+
+function isMissingAudioSourceError(error = null) {
+  const status = Number(error?.status || 0);
+  if (status === 404) return true;
+  const text = String(error?.message || error || "").toLowerCase();
+  return text.includes("(404)") || text.includes(" 404 ");
+}
+
+function isProxyStoragePathMediaUrl(src = "") {
+  const source = String(src || "").trim();
+  if (!source) return false;
+  return source.includes("/api/assets/proxy-media?storagePath=");
 }
 
 async function decodeAudioDurationInfoFromArrayBuffer(arrayBuffer = null) {
@@ -1546,7 +1924,10 @@ async function measureAudioDurationInfoFromSrc(src = "") {
       });
       return decoded;
     }
-  } catch (_) {
+  } catch (error) {
+    if (isMissingAudioSourceError(error)) {
+      return { durationSec: 0, method: "missing" };
+    }
     // fallback to metadata below
   }
   const metadata = await readAudioDurationSecFromSrc(source);
@@ -1589,6 +1970,7 @@ async function ensurePanelMusicTrackDuration(kind = "", options = {}) {
   const track = getPanelMusicTrackByKind(trackKind);
   if (!track) return null;
   const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
+  if (!options.force && measuredWith === "missing") return track;
   if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") return track;
   const src = String(
     track.localDataUrl
@@ -1597,9 +1979,22 @@ async function ensurePanelMusicTrackDuration(kind = "", options = {}) {
     || ""
   ).trim();
   if (!src) return track;
+  if (isProxyStoragePathMediaUrl(src)) return track;
   panelMusicDurationProbePendingKinds.add(trackKind);
   try {
     const durationInfo = await measureAudioDurationInfoFromSrc(src);
+    if (String(durationInfo?.method || "").trim().toLowerCase() === "missing") {
+      const nextTrack = {
+        ...track,
+        durationSec: 0,
+        durationMeasuredWith: "missing",
+        updatedAt: nowIso()
+      };
+      setPanelMusicTrack(trackKind, nextTrack, { select: panelMusicState.selectedTrackKind === trackKind });
+      persistPanelMusicSettings();
+      persistPanelMusicToActiveSession();
+      return nextTrack;
+    }
     const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
     if (durationSec <= 0.05) return track;
     const nextTrack = {
@@ -1628,6 +2023,7 @@ async function ensureAllEnabledUploadedTrackDurations(options = {}) {
     const track = normalizePanelMusicTrack(tracks[index]);
     if (!track) continue;
     const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
+    if (!options.force && measuredWith === "missing") continue;
     if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") continue;
     const src = String(
       track.localDataUrl
@@ -1636,8 +2032,18 @@ async function ensureAllEnabledUploadedTrackDurations(options = {}) {
       || ""
     ).trim();
     if (!src) continue;
+    if (isProxyStoragePathMediaUrl(src)) continue;
     try {
       const durationInfo = await measureAudioDurationInfoFromSrc(src);
+      if (String(durationInfo?.method || "").trim().toLowerCase() === "missing") {
+        updateUploadedTrackAt(index, {
+          ...track,
+          durationSec: 0,
+          durationMeasuredWith: "missing",
+          updatedAt: nowIso()
+        }, { selectIndex: index });
+        continue;
+      }
       const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
       if (durationSec <= 0.05) continue;
       updateUploadedTrackAt(index, {
@@ -1782,7 +2188,7 @@ function loadPanelMusicSettings() {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const preset = ["ambient", "focus", "pulse"].includes(parsed?.preset) ? parsed.preset : "ambient";
     const volume = Math.max(0, Math.min(100, Number(parsed?.volume ?? 22)));
-    const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? volume)));
+    const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
     const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
     const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
     const legacyTrack = normalizePanelMusicTrack(parsed?.track || null);
@@ -1825,7 +2231,7 @@ function loadPanelMusicSettings() {
     return {
       preset: "ambient",
       volume: 22,
-      montageVolume: 22,
+      montageVolume: 0,
       stabilize: false,
       sourceType: "preset",
       selectedTrackKind: "uploaded",
@@ -2495,12 +2901,20 @@ function normalizeCreativeRow(row = {}, index = 0) {
       .replace(/\s+/g, " ")
       .trim()
   );
-  const durationSec = Math.max(VIDEO_SCENE_MAX_SEC, Math.min(180, Number(row?.durationSec) || VIDEO_SCENE_MAX_SEC));
+  const durationSec = Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(row?.durationSec) || VIDEO_SCENE_MAX_SEC));
+  const geminiCreativityLevel = (() => {
+    const raw = Number(row?.geminiCreativityLevel ?? 3);
+    if (!Number.isFinite(raw)) return 3;
+    return Math.round(Math.max(1, Math.min(10, raw)));
+  })();
   const voiceOverText = sanitizeCreativeText(
     row?.voiceOverText
     || row?.text
     || ""
   );
+  const voiceOverOriginalText = sanitizeCreativeText(row?.voiceOverOriginalText || "");
+  const visualNotesOriginalText = sanitizeCreativeText(row?.visualNotesOriginalText || "");
+  const visualNotesOriginalStored = row?.visualNotesOriginalStored === true;
   const sceneDescription = sanitizeCreativeText(
     row?.sceneDescription
     || row?.scenePrompt
@@ -2538,10 +2952,19 @@ function normalizeCreativeRow(row = {}, index = 0) {
     expression: "Neutral",
     mediaCue: MEDIA_CUES.includes(String(row?.mediaCue || "")) ? String(row.mediaCue) : "Sin media",
     durationSec,
+    geminiCreativityLevel,
+    voiceOverOriginalText,
+    visualNotesOriginalText,
+    visualNotesOriginalStored,
     voiceOverText: fallbackVoiceOver,
     sceneDescription: sceneDescription || fallbackScenePrompt,
     onScreenText: onScreenText || summarizeOnScreenTextFromVoiceOver(fallbackVoiceOver),
-    transition: transition || "Sin transición específica.",
+    transition: normalizeTransitionForScene(transition, {
+      script: fallbackVoiceOver,
+      sceneDescription: sceneDescription || fallbackScenePrompt,
+      visual: visualNotes || row?.visual || "",
+      partIndex: index
+    }),
     visualNotes,
     text: fallbackVoiceOver,
     notes: visualNotes || transition,
@@ -2565,6 +2988,26 @@ function resolveScenarioForVideoMode(session = null, host = "", fallback = "") {
 
 function normalizeVideoScenePrompt(value = "", row = null, session = null) {
   const prompt = String(value || "").replace(/\s+/g, " ").trim();
+  if (isEducationalVideoMode(session)) {
+    const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+    const visualNotes = String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim();
+    const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
+    const onScreenText = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
+    const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
+    const educationalParts = [
+      prompt ? `Dirección base: ${prompt}.` : "",
+      sceneDescription ? `Descripción de escena obligatoria: ${sceneDescription}.` : "",
+      visualNotes ? `Elemento visual obligatorio: ${visualNotes}.` : "",
+      transition ? `Transición sugerida: ${transition}.` : "",
+      voiceOver ? `Contexto narrativo de voz en off: ${voiceOver}.` : "",
+      onScreenText ? `Texto en pantalla de referencia semántica: ${onScreenText}. No incrustarlo en el video.` : "",
+      "Modo visual-first educativo: prioriza recurso visual, objeto, mapa, gráfico o entorno descrito por el guion técnico.",
+      "No forzar presentador humano; si no aporta, genera escena sin personas.",
+      "Prohibido estilo podcast: sin micrófono, sin cabina de radio, sin set de entrevista, sin host hablando a cámara.",
+      "Composición cinematográfica horizontal 16:9, limpia, didáctica y sin texto incrustado."
+    ].filter(Boolean);
+    return educationalParts.join(" ").trim().slice(0, 1200);
+  }
   if (prompt) return prompt.slice(0, 1200);
   const speakerLabel = String(row?.speaker || "").trim() || "Host A";
   const speakerName = resolveSpeakerDisplayName(speakerLabel, session);
@@ -2586,6 +3029,17 @@ function normalizeVideoScenePrompt(value = "", row = null, session = null) {
 
 function buildVideoSceneImagePrompts(row = null, session = null) {
   const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
+  if (isEducationalVideoMode(session)) {
+    const visualNotes = String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim();
+    const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+    const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
+    const base = scenePrompt || [sceneDescription, visualNotes].filter(Boolean).join(". ").trim();
+    return normalizeVideoImagePrompts([
+      `${base} Plano principal del recurso visual descrito, 16:9, estilo documental educativo, sin personas si no son necesarias, sin texto en pantalla.`,
+      `${base} Variación de apoyo con detalle del elemento visual y continuidad didáctica. ${transition ? `Transición visual sugerida: ${transition}.` : ""}`.trim(),
+      `${base} Toma alternativa de contexto para reforzar explicación de voz en off, sin micrófonos ni set de podcast.`
+    ]);
+  }
   const speakerLabel = String(row?.speaker || "").trim() || "Host A";
   const speakerName = resolveSpeakerDisplayName(speakerLabel, session);
   const expression = String(row?.expression || "Neutral").trim() || "Neutral";
@@ -2641,6 +3095,10 @@ function getScenarioReferenceImageMap(session = null) {
   return normalizeReferenceImageMap(session?.scenarioReferenceImageMap || {});
 }
 
+function getRowReferenceImageMap(session = null) {
+  return normalizeReferenceImageMap(session?.rowReferenceImageMap || {});
+}
+
 function setSpeakerReferenceImage(speaker = "", reference = null) {
   const key = normalizeSpeakerLabel(speaker, "");
   if (!key) return false;
@@ -2655,6 +3113,7 @@ function setSpeakerReferenceImage(speaker = "", reference = null) {
     };
   }, { render: false });
   renderPodcastPortraitStrip(getActiveSession(), { force: true, reason: "structure" });
+  scheduleCloudAutosave("speaker-reference-image");
   return true;
 }
 
@@ -2672,6 +3131,26 @@ function setScenarioReferenceImage(scenarioId = "", reference = null) {
     };
   }, { render: false });
   renderPodcastPortraitStrip(getActiveSession(), { force: true, reason: "structure" });
+  scheduleCloudAutosave("scenario-reference-image");
+  return true;
+}
+
+function setRowReferenceImage(rowId = "", reference = null) {
+  const key = String(rowId || "").trim();
+  if (!key) return false;
+  const normalized = normalizeReferenceImageRecord(reference);
+  upsertActiveSession((current) => {
+    const nextMap = { ...getRowReferenceImageMap(current) };
+    if (normalized) nextMap[key] = normalized;
+    else delete nextMap[key];
+    return {
+      ...current,
+      rowReferenceImageMap: nextMap
+    };
+  }, { render: false });
+  renderScript(getActiveSession());
+  syncPodcastStudioInspector(getActiveSession());
+  scheduleCloudAutosave("row-reference-image");
   return true;
 }
 
@@ -2903,6 +3382,19 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
     Math.min(sourceDurationMs, Math.round(toFiniteNumber(raw?.trimOutMs, fallbackTrimOut)))
   );
+  const normalizeSceneVolumeOverridePct = (value) => {
+    if (value == null || value === "") return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    const clamped = Math.max(0, Math.min(100, Math.round(numeric)));
+    return clamped;
+  };
+  const veoVolumeOverridePct = normalizeSceneVolumeOverridePct(
+    raw?.veoVolumeOverridePct != null ? raw.veoVolumeOverridePct : raw?.veoVolumePct
+  );
+  const geminiVolumeOverridePct = normalizeSceneVolumeOverridePct(
+    raw?.geminiVolumeOverridePct != null ? raw.geminiVolumeOverridePct : raw?.geminiVolumePct
+  );
   return {
     rowId: key,
     speakerKey: String(raw?.speakerKey || "").trim(),
@@ -2911,6 +3403,8 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     sourceDurationMs,
     trimInMs,
     trimOutMs,
+    veoVolumeOverridePct,
+    geminiVolumeOverridePct,
     zIndex: Math.max(1, Math.round(toFiniteNumber(raw?.zIndex, 1)))
   };
 }
@@ -2983,11 +3477,93 @@ function buildDefaultTimelineTracks(session = null) {
   }));
 }
 
+function normalizeGeminiDialogueTrackSegment(raw = {}, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const rowId = String(raw.rowId || "").trim();
+  const audioSrc = String(raw.audioSrc || "").trim();
+  if (!rowId || !audioSrc) return null;
+  const startMs = Math.max(0, Math.round(toFiniteNumber(raw.startMs, 0)));
+  const anchorStartMs = Math.max(0, Math.round(toFiniteNumber(raw.anchorStartMs, startMs)));
+  const trimInMs = Math.max(0, Math.round(toFiniteNumber(raw.trimInMs, 0)));
+  const trimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw.trimOutMs, trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS)));
+  const durationMs = Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    Math.round(toFiniteNumber(raw.durationMs, trimOutMs - trimInMs))
+  );
+  return {
+    rowId,
+    sceneIndex: Math.max(1, Math.round(toFiniteNumber(raw.sceneIndex, index + 1))),
+    speakerName: String(raw.speakerName || "").replace(/\s+/g, " ").trim(),
+    audioSrc,
+    startMs,
+    anchorStartMs,
+    endMs: Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw.endMs, startMs + durationMs))),
+    trimInMs,
+    trimOutMs,
+    durationMs
+  };
+}
+
+function normalizeGeminiDialogueTrack(raw = {}) {
+  const segments = Array.isArray(raw?.segments)
+    ? raw.segments.map((item, index) => normalizeGeminiDialogueTrackSegment(item, index)).filter(Boolean)
+    : [];
+  const uniqueMissing = Array.from(new Set(
+    (Array.isArray(raw?.missingRowIds) ? raw.missingRowIds : [])
+      .map((rowId) => String(rowId || "").trim())
+      .filter(Boolean)
+  ));
+  return {
+    enabled: raw?.enabled === true && segments.length > 0,
+    updatedAt: String(raw?.updatedAt || "").trim(),
+    segments: segments
+      .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.sceneIndex || 0) - Number(b.sceneIndex || 0)),
+    missingRowIds: uniqueMissing
+  };
+}
+
 function normalizePodcastVideoConfig(raw = {}) {
   const audioMode = String(raw?.audioMode || "").trim().toLowerCase();
   const timelineViewMode = String(raw?.timelineViewMode || "").trim().toLowerCase();
   const masterVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.masterVolume, 100)));
-  const clipVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.clipVolume, 0)));
+  const clipVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.clipVolume, 100)));
+  const timelineZoom = Math.max(0.25, Math.min(1, toFiniteNumber(raw?.timelineZoom, 1)));
+  const normalizedAudioMode = audioMode === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene";
+  const montageDefaultVeoVolumePct = Math.max(
+    0,
+    Math.min(
+      100,
+      toFiniteNumber(
+        raw?.montageDefaultVeoVolumePct,
+        normalizedAudioMode === "veo-native-audio" ? clipVolume : 0
+      )
+    )
+  );
+  const montageDefaultGeminiVolumePct = Math.max(
+    0,
+    Math.min(
+      100,
+      toFiniteNumber(
+        raw?.montageDefaultGeminiVolumePct,
+        masterVolume
+      )
+    )
+  );
+  const timelineTrackHeightsById = (() => {
+    const source = raw?.timelineTrackHeightsById && typeof raw.timelineTrackHeightsById === "object"
+      ? raw.timelineTrackHeightsById
+      : {};
+    const next = {};
+    Object.entries(source || {}).forEach(([trackId, value]) => {
+      const key = String(trackId || "").trim();
+      if (!key) return;
+      const height = toFiniteNumber(value, Number.NaN);
+      if (!Number.isFinite(height)) return;
+      next[key] = Math.round(Math.max(56, Math.min(520, height)));
+    });
+    return next;
+  })();
+  const geminiDialogueTrackIndex = Math.max(0, Math.min(999, Math.floor(toFiniteNumber(raw?.geminiDialogueTrackIndex, 0))));
   return {
     enabled: raw?.enabled === true,
     editorEnabled: raw?.editorEnabled === true,
@@ -2999,11 +3575,17 @@ function normalizePodcastVideoConfig(raw = {}) {
     timelineTrackVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineTrackVersion, STUDIO_TIMELINE_TRACK_VERSION))),
     timelineTracks: normalizeTimelineTracks(raw?.timelineTracks || []),
     timelineClipsByRowId: normalizeTimelineClipsByRowId(raw?.timelineClipsByRowId || {}),
+    timelineTrackHeightsById,
     timelineViewMode: timelineViewMode === "normal" ? "normal" : "tracks",
+    timelineZoom,
     transitionsByEdge: normalizeTransitionsByEdge(raw?.transitionsByEdge || {}),
-    audioMode: audioMode === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene",
+    geminiDialogueTrack: normalizeGeminiDialogueTrack(raw?.geminiDialogueTrack || {}),
+    geminiDialogueTrackIndex,
+    audioMode: normalizedAudioMode,
     masterVolume,
-    clipVolume
+    clipVolume,
+    montageDefaultVeoVolumePct,
+    montageDefaultGeminiVolumePct
   };
 }
 
@@ -3174,6 +3756,106 @@ function ensureTimelineClipsByRowId(session = null, options = {}) {
   return next;
 }
 
+function reflowTimelineClipsByScriptOrder(session = null, options = {}) {
+  const activeSession = session || getActiveSession();
+  const persist = options.persist !== false;
+  const shouldRender = options.render !== false;
+  if (!activeSession) return false;
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  if (!rows.length) return false;
+  const cfg = getPodcastVideoConfig(activeSession);
+  const baseMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
+  let cursorMs = 0;
+  const nextMap = {};
+  rows.forEach((row, index) => {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId) return;
+    const base = baseMap[rowId] || null;
+    if (!base) return;
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineClipEffectiveDurationMs(base));
+    const nextClip = normalizeTimelineClipItem({
+      ...base,
+      startMs: cursorMs,
+      zIndex: index + 1
+    }, rowId);
+    if (!nextClip) return;
+    nextMap[rowId] = nextClip;
+    cursorMs += durationMs;
+  });
+  const changed = JSON.stringify(nextMap) !== JSON.stringify(normalizeTimelineClipsByRowId(cfg.timelineClipsByRowId || {}));
+  if (!changed) return false;
+  if (persist) {
+    upsertPodcastVideoConfig((baseCfg) => ({
+      ...baseCfg,
+      timelineVersion: STUDIO_TIMELINE_VERSION,
+      timelineTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
+      timelineTracks: ensureTimelineTracks(activeSession, { persist: false }),
+      timelineClipsByRowId: nextMap
+    }));
+    podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
+    syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+    if (shouldRender) {
+      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      renderPodcastTransitionTimeline(getActiveSession());
+      syncPodcastStudioInspector(getActiveSession());
+    }
+  }
+  return true;
+}
+
+function shouldAutoRepairTimelineLayout(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return false;
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  if (rows.length < 2) return false;
+
+  const cfg = getPodcastVideoConfig(activeSession);
+  const clips = ensureTimelineClipsByRowId(activeSession, { persist: false });
+  const orderedClips = rows
+    .map((row) => clips[String(row?.id || "").trim()])
+    .filter(Boolean);
+  if (orderedClips.length < 2) return false;
+
+  const educational = isEducationalVideoMode(activeSession);
+  const trackIds = new Set(
+    orderedClips.map((clip) => String(clip?.trackId || "").trim()).filter(Boolean)
+  );
+
+  // En modo educativo (o un solo track), si todos los clips arrancan en 0 es casi seguro que el layout se perdió
+  // (e.g. borraron localStorage / no se guardó en Firebase) → evita escenas encimadas.
+  const startMsValues = orderedClips.map((clip) => Math.max(0, Number(clip?.startMs || 0)));
+  const uniqueStarts = new Set(startMsValues.map((ms) => Math.round(ms))).size;
+  const positiveStarts = startMsValues.filter((ms) => ms > Math.max(1, STUDIO_TIMELINE_SNAP_MS / 2)).length;
+  const looksReset = uniqueStarts <= 1 && positiveStarts === 0;
+  if (looksReset && (educational || trackIds.size <= 1)) return true;
+
+  // En modo educativo el montaje asume flujo secuencial; si hay overlap en el track principal,
+  // el montaje puede "elegir" otra escena por zIndex y parecer distinto al timeline.
+  if (educational || trackIds.size <= 1) {
+    const runtime = buildTimelineRuntimeEntries(activeSession)
+      .filter((entry) => Boolean(String(entry?.rowId || "").trim()));
+    const visual = runtime
+      .filter((entry) => Boolean(String(entry?.videoSrc || "").trim()))
+      .sort((a, b) => (
+        Number(a.startMs || 0) - Number(b.startMs || 0)
+        || Number(a.zIndex || 0) - Number(b.zIndex || 0)
+        || Number(a.index || 0) - Number(b.index || 0)
+      ));
+    let prevEnd = null;
+    for (let i = 0; i < visual.length; i += 1) {
+      const start = Math.max(0, Number(visual[i]?.startMs || 0));
+      const end = Math.max(0, Number(visual[i]?.endMs || 0));
+      if (prevEnd != null && start < prevEnd - Math.max(1, STUDIO_TIMELINE_SNAP_MS / 2)) {
+        return true;
+      }
+      prevEnd = Math.max(prevEnd == null ? 0 : prevEnd, end);
+    }
+  }
+
+  // Si existe config guardada con posiciones no-cero, respétala.
+  return false;
+}
+
 function getTimelineClipEffectiveDurationMs(clip = null) {
   if (!clip || typeof clip !== "object") return STUDIO_TIMELINE_MIN_CLIP_MS;
   return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(clip.trimOutMs || 0) - Number(clip.trimInMs || 0)));
@@ -3272,6 +3954,9 @@ function reorderTimelineClipsByTracks() {
       timelineClipsByRowId: nextClips
     };
   });
+  // Reorder cambia startMs de escenas; ajustar los clips de audio Gemini con el delta
+  // de su escena para mantener offsets manuales (si el usuario movió el chip).
+  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
   renderPodcastVideoShell(getActiveSession());
   const refreshedSession = getActiveSession();
   const firstOrderedRowId = Object.values(ensureTimelineClipsByRowId(refreshedSession, { persist: false }))
@@ -3304,12 +3989,32 @@ function snapTimelineMs(value = 0) {
   return Math.round(ms / STUDIO_TIMELINE_SNAP_MS) * STUDIO_TIMELINE_SNAP_MS;
 }
 
-function timelineMsToPx(valueMs = 0) {
-  return (Math.max(0, Number(valueMs) || 0) / 1000) * STUDIO_TIMELINE_PIXELS_PER_SEC;
+function getStudioTimelineZoom(session = null) {
+  const cfg = getPodcastVideoConfig(session || getActiveSession());
+  const raw = toFiniteNumber(cfg?.timelineZoom, 1);
+  return Math.max(0.25, Math.min(1, raw));
 }
 
-function timelinePxToMs(valuePx = 0) {
-  return (Math.max(0, Number(valuePx) || 0) / STUDIO_TIMELINE_PIXELS_PER_SEC) * 1000;
+function getStudioTimelinePixelsPerSec(session = null) {
+  return STUDIO_TIMELINE_PIXELS_PER_SEC * getStudioTimelineZoom(session);
+}
+
+function getStudioTimelineMinClipPx(session = null) {
+  const zoom = getStudioTimelineZoom(session);
+  return Math.max(44, Math.round(STUDIO_TIMELINE_MIN_CLIP_PX * zoom));
+}
+
+function getStudioAudioTrackMinLoopPx(session = null) {
+  const zoom = getStudioTimelineZoom(session);
+  return Math.max(12, Math.round(STUDIO_AUDIO_TRACK_MIN_LOOP_PX * zoom));
+}
+
+function timelineMsToPx(valueMs = 0, session = null) {
+  return (Math.max(0, Number(valueMs) || 0) / 1000) * getStudioTimelinePixelsPerSec(session);
+}
+
+function timelinePxToMs(valuePx = 0, session = null) {
+  return (Number(valuePx) || 0) / getStudioTimelinePixelsPerSec(session) * 1000;
 }
 
 function resolveTimelineDragStepMs(event = null) {
@@ -3320,12 +4025,13 @@ function resolveTimelineDragStepMs(event = null) {
 
 function snapTimelineMsWithStep(value = 0, stepMs = STUDIO_TIMELINE_SNAP_MS) {
   const step = Math.max(1, Number(stepMs) || STUDIO_TIMELINE_SNAP_MS);
-  const ms = Math.max(0, Number(value) || 0);
+  const ms = Number(value) || 0;
   return Math.round(ms / step) * step;
 }
 
 function buildTimelineRuntimeEntries(session = null) {
   const activeSession = session || getActiveSession();
+  const educationalMode = isEducationalVideoMode(activeSession);
   const rows = activeSession?.script?.rows || [];
   const clipMap = ensureTimelineClipsByRowId(activeSession);
   const entries = rows.map((row, index) => {
@@ -3334,8 +4040,7 @@ function buildTimelineRuntimeEntries(session = null) {
     const clip = clipMap[rowId];
     if (!clip) return null;
     const sceneClip = resolveDialogueVideoForRow(activeSession, rowId);
-    const segments = resolveDialogueVideoSegments(sceneClip);
-    const primarySegment = segments[0] || null;
+    const primarySegment = resolvePrimaryDialogueVideoSegment(sceneClip);
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
       primarySegment?.storagePath || sceneClip?.storagePath || ""
@@ -3366,27 +4071,277 @@ function buildTimelineRuntimeEntries(session = null) {
     const trimInMs = Math.max(0, Number(clip?.trimInMs || 0));
     const sceneClip = resolveDialogueVideoForRow(activeSession, entry.rowId);
     const sceneVideoDurationMs = Math.max(0, Number(sceneClip?.durationSec || 0) * 1000);
-    const sceneAudioDurationMs = Math.max(0, Number(entry?.audioDurationMs || 0));
     const maxPlayableByVideoMs = sceneVideoDurationMs > 0
       ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, sceneVideoDurationMs - trimInMs)
       : clipDurationMs;
-    const maxPlayableByAudioMs = sceneAudioDurationMs > 0
-      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, sceneAudioDurationMs - trimInMs)
-      : 0;
-    const effectiveDurationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.min(
-        clipDurationMs,
-        maxPlayableByAudioMs > 0
-          ? maxPlayableByAudioMs
-          : maxPlayableByVideoMs
-      )
-    );
+    // Mantén el runtime alineado a la duración del clip visual (trim), no a la
+    // duración del audio. Si el audio termina antes, queda silencio; si termina
+    // después, se recorta. Esto evita desfasajes en timeline/playhead/chips.
+    const effectiveDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(clipDurationMs, maxPlayableByVideoMs));
     entry.effectiveDurationMs = effectiveDurationMs;
     entry.endMs = Math.max(0, Number(entry.startMs || 0)) + effectiveDurationMs;
   });
   entries.sort((a, b) => a.startMs - b.startMs || a.index - b.index);
   return entries;
+}
+
+function buildGeminiDialogueTimelineTrack(session = null) {
+  const activeSession = session || getActiveSession();
+  const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
+  const missingRowIds = [];
+  const segments = runtimeEntries.map((entry, timelineIndex) => {
+    const rowId = String(entry?.rowId || "").trim();
+    const audioSrc = String(entry?.audioSrc || "").trim();
+    if (!rowId || !audioSrc) {
+      if (rowId) missingRowIds.push(rowId);
+      return null;
+    }
+    const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+    const trimInMs = Math.max(0, Math.round(Number(entry?.clip?.trimInMs || 0) || 0));
+    const trimOutMs = Math.max(
+      trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round(Number(entry?.clip?.trimOutMs || trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS) || (trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS))
+    );
+    const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
+    const audioDurationMs = Math.max(0, Math.round(Number(entry?.audioDurationMs || 0) || 0));
+    const maxPlayableByAudioMs = audioDurationMs > 0
+      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - trimInMs)
+      : clipPlayableMs;
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(clipPlayableMs, maxPlayableByAudioMs));
+    return normalizeGeminiDialogueTrackSegment({
+      rowId,
+      // En el timeline, "Escena N" debe corresponder al orden visual (izq→der),
+      // no necesariamente al índice del guion.
+      sceneIndex: timelineIndex + 1,
+      speakerName: String(entry?.speakerName || "").trim(),
+      audioSrc,
+      startMs,
+      endMs: startMs + durationMs,
+      trimInMs,
+      trimOutMs,
+      durationMs
+    }, timelineIndex);
+  }).filter(Boolean);
+  return normalizeGeminiDialogueTrack({
+    enabled: segments.length > 0,
+    segments,
+    missingRowIds,
+    updatedAt: nowIso()
+  });
+}
+
+function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack = null, options = {}) {
+  const activeSession = session || getActiveSession();
+  const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
+  const existing = normalizeGeminiDialogueTrack(existingTrack || {});
+  const existingByRowId = new Map(existing.segments.map((segment) => [String(segment?.rowId || "").trim(), segment]));
+  const preserveStartMs = options?.preserveStartMs !== false;
+  const missingRowIds = [];
+  const nextSegments = runtimeEntries.map((entry, timelineIndex) => {
+    const rowId = String(entry?.rowId || "").trim();
+    const audioSrc = String(entry?.audioSrc || "").trim();
+    if (!rowId || !audioSrc) {
+      if (rowId) missingRowIds.push(rowId);
+      return null;
+    }
+    const startMsDefault = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+    const trimInMs = Math.max(0, Math.round(Number(entry?.clip?.trimInMs || 0) || 0));
+    const trimOutMs = Math.max(
+      trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.round(Number(entry?.clip?.trimOutMs || trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS) || (trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS))
+    );
+    const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
+    const audioDurationMs = Math.max(0, Math.round(Number(entry?.audioDurationMs || 0) || 0));
+    const maxPlayableByAudioMs = audioDurationMs > 0
+      ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - trimInMs)
+      : clipPlayableMs;
+    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(clipPlayableMs, maxPlayableByAudioMs));
+    const existingSegment = existingByRowId.get(rowId) || null;
+    const existingAnchorStartMs = existingSegment
+      ? Math.max(0, Math.round(Number(existingSegment.anchorStartMs ?? existingSegment.startMs ?? startMsDefault) || 0))
+      : startMsDefault;
+    const deltaSceneStartMs = startMsDefault - existingAnchorStartMs;
+    const startMs = (preserveStartMs && existingSegment)
+      ? Math.max(0, Math.round(Number(existingSegment.startMs || 0) + deltaSceneStartMs))
+      : startMsDefault;
+    return normalizeGeminiDialogueTrackSegment({
+      rowId,
+      sceneIndex: timelineIndex + 1,
+      speakerName: String(entry?.speakerName || "").trim(),
+      audioSrc,
+      startMs,
+      anchorStartMs: startMsDefault,
+      endMs: startMs + durationMs,
+      trimInMs,
+      trimOutMs,
+      durationMs
+    }, timelineIndex);
+  }).filter(Boolean);
+
+  const normalizedNext = normalizeGeminiDialogueTrack({
+    enabled: nextSegments.length > 0,
+    segments: nextSegments,
+    missingRowIds,
+    updatedAt: existing.updatedAt
+  });
+  const stable = (track) => ({
+    enabled: track.enabled === true,
+    missingRowIds: (track.missingRowIds || []).slice().sort(),
+    segments: (track.segments || []).map((segment) => ({
+      rowId: String(segment?.rowId || "").trim(),
+      sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 0) || 0)),
+      startMs: Number(segment?.startMs || 0),
+      endMs: Number(segment?.endMs || 0),
+      durationMs: Number(segment?.durationMs || 0),
+      trimInMs: Number(segment?.trimInMs || 0),
+      trimOutMs: Number(segment?.trimOutMs || 0),
+      audioSrc: String(segment?.audioSrc || "").trim()
+    })).sort((a, b) => a.rowId.localeCompare(b.rowId))
+  });
+  const changed = JSON.stringify(stable(existing)) !== JSON.stringify(stable(normalizedNext));
+  return {
+    track: changed ? { ...normalizedNext, updatedAt: nowIso() } : existing,
+    changed
+  };
+}
+
+function syncGeminiDialogueTrackWithRuntime(options = {}) {
+  const activeSession = getActiveSession();
+  if (!activeSession) return false;
+  let changed = false;
+  upsertPodcastVideoConfig((cfg) => {
+    const current = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+    const reconciled = reconcileGeminiDialogueTrackWithRuntime(activeSession, current, {
+      preserveStartMs: options.preserveStartMs !== false
+    });
+    changed = reconciled.changed === true;
+    if (!changed) return cfg;
+    return {
+      ...cfg,
+      geminiDialogueTrack: reconciled.track
+    };
+  });
+  if (changed && options.render !== false) {
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    syncPodcastStudioInspector(getActiveSession());
+  }
+  return changed;
+}
+
+function countAvailableGeminiDialogueRows(session = null) {
+  const activeSession = session || getActiveSession();
+  const rows = activeSession?.script?.rows || [];
+  return rows.reduce((acc, row) => (
+    hasStoredMediaSource(resolveDialogueAudioForRow(activeSession, String(row?.id || "").trim())) ? acc + 1 : acc
+  ), 0);
+}
+
+function importGeminiDialogueTrackToTimeline(options = {}) {
+  let activeSession = getActiveSession();
+  if (!activeSession) return false;
+  if (isEducationalVideoMode(activeSession)) {
+    compactEducationalTimelineLayout(activeSession, { pinGeminiTrackRow: true, render: false });
+    activeSession = getActiveSession();
+  }
+  const nextTrack = buildGeminiDialogueTimelineTrack(activeSession);
+  if (!nextTrack.segments.length) {
+    if (options.silent !== true) {
+      setGenerationStatus("No hay audios Gemini disponibles para importar al timeline.", "");
+    }
+    upsertPodcastVideoConfig((cfg) => ({
+      ...cfg,
+      geminiDialogueTrack: normalizeGeminiDialogueTrack({
+        enabled: false,
+        segments: [],
+        missingRowIds: []
+      })
+    }));
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    return false;
+  }
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    geminiDialogueTrackIndex: isEducationalVideoMode(getActiveSession()) ? 0 : Number(cfg?.geminiDialogueTrackIndex ?? 0),
+    geminiDialogueTrack: nextTrack
+  }));
+  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+  syncPodcastStudioInspector(getActiveSession());
+  if (options.silent !== true) {
+    const missingCount = nextTrack.missingRowIds.length;
+    setGenerationStatus(
+      missingCount
+        ? `Track Voces Gemini actualizado (${nextTrack.segments.length} escenas con audio, ${missingCount} faltantes).`
+        : `Track Voces Gemini actualizado (${nextTrack.segments.length} escenas con audio).`,
+      "is-live"
+    );
+  }
+  return true;
+}
+
+function compactEducationalTimelineLayout(session = null, options = {}) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession || !isEducationalVideoMode(activeSession)) return false;
+  const rows = activeSession?.script?.rows || [];
+  if (!rows.length) return false;
+  const clips = ensureTimelineClipsByRowId(activeSession, { persist: false });
+  const tracks = ensureTimelineTracks(activeSession, { persist: false });
+  const primaryTrackId = String(tracks[0]?.id || "speaker:unknown").trim() || "speaker:unknown";
+  const rowIndexById = new Map(rows.map((row, index) => [String(row?.id || "").trim(), index]));
+  const ordered = Object.values(clips)
+    .filter(Boolean)
+    .map((clip) => ({
+      rowId: String(clip?.rowId || "").trim(),
+      startMs: Math.max(0, Number(clip?.startMs || 0) || 0),
+      zIndex: Math.max(1, Number(clip?.zIndex || 1) || 1),
+      scriptIndex: Number(rowIndexById.get(String(clip?.rowId || "").trim()) || 0),
+      clip
+    }))
+    .filter((item) => item.rowId)
+    .sort((a, b) => a.startMs - b.startMs || a.zIndex - b.zIndex || a.scriptIndex - b.scriptIndex);
+  if (!ordered.length) return false;
+
+  let cursorMs = 0;
+  const nextClips = { ...clips };
+  let changed = false;
+  ordered.forEach((item, index) => {
+    const rowId = item.rowId;
+    const current = clips[rowId];
+    if (!current) return;
+    const nextStartMs = snapTimelineMs(cursorMs);
+    const normalized = normalizeTimelineClipItem({
+      ...current,
+      trackId: primaryTrackId,
+      startMs: nextStartMs,
+      zIndex: Math.max(1, index + 1)
+    }, rowId);
+    if (!normalized) return;
+    cursorMs = getTimelineClipEndMs(normalized);
+    if (
+      String(current.trackId || "").trim() !== primaryTrackId
+      || Math.abs(Number(current.startMs || 0) - nextStartMs) > 0.5
+      || Number(current.zIndex || 0) !== Number(normalized.zIndex || 0)
+    ) {
+      changed = true;
+    }
+    nextClips[rowId] = normalized;
+  });
+
+  if (!changed && options.pinGeminiTrackRow !== true) return false;
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    timelineVersion: STUDIO_TIMELINE_VERSION,
+    timelineTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
+    timelineTracks: normalizeTimelineTracks(tracks),
+    timelineClipsByRowId: nextClips,
+    ...(options.pinGeminiTrackRow === true ? { geminiDialogueTrackIndex: 0 } : {})
+  }));
+  podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
+  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: false });
+  if (options.render !== false) {
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    syncPodcastStudioInspector(getActiveSession());
+  }
+  return true;
 }
 
 function getOrderedTimelineStartMarkers(entries = []) {
@@ -3420,6 +4375,37 @@ function resolveDialogueVideoSegments(clip = null) {
   }];
 }
 
+function resolvePrimaryDialogueVideoSegment(clip = null) {
+  if (!clip || typeof clip !== "object") return clip;
+  const segments = resolveDialogueVideoSegments(clip).filter(Boolean);
+  if (!segments.length) return clip;
+  const candidates = segments.filter((segment) => hasStoredMediaSource(segment));
+  const list = candidates.length ? candidates : segments;
+  const ready = list.filter((segment) => String(segment?.status || "").trim().toLowerCase() === "ready");
+  const pool = ready.length ? ready : list;
+
+  const withIndex = pool
+    .map((segment) => ({ segment, idx: Number(segment?.index) }))
+    .filter((item) => Number.isFinite(item.idx));
+  if (withIndex.length) {
+    withIndex.sort((a, b) => b.idx - a.idx);
+    return withIndex[0].segment || clip;
+  }
+
+  const withTime = pool
+    .map((segment) => {
+      const ts = new Date(String(segment?.updatedAt || segment?.createdAt || "")).getTime();
+      return { segment, ts: Number.isFinite(ts) ? ts : 0 };
+    })
+    .filter((item) => item.ts > 0);
+  if (withTime.length) {
+    withTime.sort((a, b) => b.ts - a.ts);
+    return withTime[0].segment || clip;
+  }
+
+  return pool[pool.length - 1] || clip;
+}
+
 function hasGeneratedDialogueVideoForRow(session = null, rowId = "") {
   const activeSession = session || getActiveSession();
   const key = String(rowId || "").trim();
@@ -3428,7 +4414,7 @@ function hasGeneratedDialogueVideoForRow(session = null, rowId = "") {
   if (brokenDialogueVideoRows.has(brokenKey)) return false;
   const clip = resolveDialogueVideoForRow(activeSession, key);
   if (!clip) return false;
-  const primarySegment = resolveDialogueVideoSegments(clip)[0] || clip;
+  const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
   return hasStoredMediaSource(primarySegment);
 }
 
@@ -3616,7 +4602,7 @@ function createSession(overrides = {}) {
     panelMusicConfig: {
       preset: "ambient",
       volume: 22,
-      montageVolume: 22,
+      montageVolume: 0,
       stabilize: false,
       sourceType: "preset",
       track: null
@@ -3624,6 +4610,7 @@ function createSession(overrides = {}) {
     speakerPortraitMap: {},
     speakerReferenceImageMap: {},
     scenarioReferenceImageMap: {},
+    rowReferenceImageMap: {},
     dialogueVideoMap: {},
     dialogueAudioMap: {},
     podcastVideoConfig: normalizePodcastVideoConfig({
@@ -3831,7 +4818,52 @@ function setActiveSession(sessionId) {
   backgroundDialogueAudioWarmupToken = 0;
   stopPodcastStudioMontage({ keepStatus: true });
   state.activeSessionId = sessionId;
-  resetPodcastStudioSessionUiState(getActiveSession());
+  const nextSession = getActiveSession();
+  resetPodcastStudioSessionUiState(nextSession);
+  // Restaurar estado visual del Studio desde la sesión (Firebase/localStorage fallback).
+  try {
+    suppressPodcastStudioUiStateSync = true;
+    const ui = normalizePodcastStudioUiState(nextSession?.podcastStudioUiState || null, nextSession);
+    const localInspectorCollapsed = (() => {
+      try {
+        const raw = window.localStorage.getItem(PODCAST_STUDIO_INSPECTOR_COLLAPSED_KEY);
+        if (raw === "1") return true;
+        if (raw === "0") return false;
+      } catch (_) {}
+      return null;
+    })();
+    const localInspectorWidthPx = (() => {
+      try {
+        const rawValue = Number(window.localStorage.getItem(PODCAST_STUDIO_INSPECTOR_WIDTH_KEY));
+        if (Number.isFinite(rawValue)) {
+          return Math.max(PODCAST_STUDIO_INSPECTOR_WIDTH_MIN, Math.min(PODCAST_STUDIO_INSPECTOR_WIDTH_MAX, rawValue));
+        }
+      } catch (_) {}
+      return null;
+    })();
+    setPodcastStudioInspectorCollapsed(localInspectorCollapsed ?? ui.inspectorCollapsed);
+    setPodcastStudioInspectorWidth(localInspectorWidthPx ?? ui.inspectorWidthPx, { persist: false });
+    if (ui.stageWidthRatio === null) {
+      setPodcastVideoStageWidthRatio(null, { persist: false });
+    } else {
+      setPodcastVideoStageWidthRatio(ui.stageWidthRatio, { persist: false });
+    }
+    if (ui.timelineViewMode) {
+      upsertPodcastVideoConfig((cfg) => ({ ...cfg, timelineViewMode: ui.timelineViewMode }));
+    }
+    podcastVideoState.showMontageAudioSubtracks = ui.showMontageAudioSubtracks === true;
+    if (ui.lastActiveRowId) {
+      podcastVideoState.activeRowId = ui.lastActiveRowId;
+      podcastVideoState.timelineLastInteractedRowId = ui.lastActiveRowId;
+      if (!podcastVideoState.transitionPickerOpen) {
+        podcastVideoState.transitionFromRowId = ui.lastActiveRowId;
+      }
+    }
+  } catch (_) {
+    // noop
+  } finally {
+    suppressPodcastStudioUiStateSync = false;
+  }
   render();
 }
 
@@ -3867,6 +4899,7 @@ function ensureSession() {
     const normalizedPortraitMap = normalizeSpeakerPortraitMap(session.speakerPortraitMap || {});
     const normalizedSpeakerReferenceImageMap = normalizeReferenceImageMap(session.speakerReferenceImageMap || {});
     const normalizedScenarioReferenceImageMap = normalizeReferenceImageMap(session.scenarioReferenceImageMap || {});
+    const normalizedRowReferenceImageMap = normalizeReferenceImageMap(session.rowReferenceImageMap || {});
     const normalizedDialogueVideoMap = normalizeDialogueVideoMap(session.dialogueVideoMap || {});
     const normalizedDialogueAudioMap = normalizeDialogueAudioMap(session.dialogueAudioMap || {});
     const reconciledMedia = reconcileDialogueMediaMapsForRows({
@@ -3876,6 +4909,7 @@ function ensureSession() {
     }, { log: false });
     const normalizedVideoConfig = normalizePodcastVideoConfig(session.podcastVideoConfig || {});
     const normalizedCreativeVideoConfig = normalizeCreativeVideoConfig(session.creativeVideoConfig || {});
+    const normalizedStudioUiState = normalizePodcastStudioUiState(session.podcastStudioUiState || null, session);
     const resolvedVideoContentType = resolveVideoContentType(session);
     const persistedVideoContentType = resolvedVideoContentType === "none" ? null : resolvedVideoContentType;
     const resolvedLegacyVideoMode = resolvedVideoContentType === "educational";
@@ -3889,13 +4923,15 @@ function ensureSession() {
     const samePortraitMap = JSON.stringify(normalizedPortraitMap) === JSON.stringify(session.speakerPortraitMap || {});
     const sameSpeakerReferenceImageMap = JSON.stringify(normalizedSpeakerReferenceImageMap) === JSON.stringify(session.speakerReferenceImageMap || {});
     const sameScenarioReferenceImageMap = JSON.stringify(normalizedScenarioReferenceImageMap) === JSON.stringify(session.scenarioReferenceImageMap || {});
+    const sameRowReferenceImageMap = JSON.stringify(normalizedRowReferenceImageMap) === JSON.stringify(session.rowReferenceImageMap || {});
     const sameDialogueVideoMap = JSON.stringify(reconciledMedia.dialogueVideoMap) === JSON.stringify(session.dialogueVideoMap || {});
     const sameDialogueAudioMap = JSON.stringify(reconciledMedia.dialogueAudioMap) === JSON.stringify(session.dialogueAudioMap || {});
     const sameVideoConfig = JSON.stringify(normalizedVideoConfig) === JSON.stringify(session.podcastVideoConfig || {});
     const sameCreativeVideoConfig = JSON.stringify(normalizedCreativeVideoConfig) === JSON.stringify(session.creativeVideoConfig || {});
+    const sameStudioUiState = JSON.stringify(normalizedStudioUiState) === JSON.stringify(session.podcastStudioUiState || {});
     const sameVideoContentType = normalizeVideoContentType(session?.script?.videoContentType || session?.videoContentType) === resolvedVideoContentType;
     const sameLegacyVideoMode = Boolean(session?.script?.videoMode === true) === resolvedLegacyVideoMode;
-    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig && sameCreativeVideoConfig && sameVideoContentType && sameLegacyVideoMode) return session;
+    if (sameVoiceMap && sameExpressionMap && sameNameMap && sameScenarioMap && sameScenarioVariantsMap && sameGlobalScenarioDeck && sameDisfluencyDefaults && samePortraitMap && sameSpeakerReferenceImageMap && sameScenarioReferenceImageMap && sameRowReferenceImageMap && sameDialogueVideoMap && sameDialogueAudioMap && sameVideoConfig && sameCreativeVideoConfig && sameStudioUiState && sameVideoContentType && sameLegacyVideoMode) return session;
     changed = true;
     return {
       ...session,
@@ -3910,10 +4946,12 @@ function ensureSession() {
       speakerPortraitMap: normalizedPortraitMap,
       speakerReferenceImageMap: normalizedSpeakerReferenceImageMap,
       scenarioReferenceImageMap: normalizedScenarioReferenceImageMap,
+      rowReferenceImageMap: normalizedRowReferenceImageMap,
       dialogueVideoMap: reconciledMedia.dialogueVideoMap,
       dialogueAudioMap: reconciledMedia.dialogueAudioMap,
       podcastVideoConfig: normalizedVideoConfig,
       creativeVideoConfig: normalizedCreativeVideoConfig,
+      podcastStudioUiState: normalizedStudioUiState,
       script: {
         ...(session?.script || {}),
         videoContentType: persistedVideoContentType,
@@ -4023,7 +5061,12 @@ function buildEducationalVideoAssistantReply(script = {}, options = {}) {
       const seconds = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
       const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
       const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
-      const transition = String(row?.transition || "").replace(/\s+/g, " ").trim() || "Sin transición específica.";
+      const transition = normalizeTransitionForScene(String(row?.transition || "").replace(/\s+/g, " ").trim(), {
+        script: voiceOver,
+        sceneDescription,
+        visual: String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim(),
+        partIndex: index
+      });
       const visualElement = String(
         row?.visual
         || row?.elementoVisual
@@ -4806,11 +5849,25 @@ function consumeImportedVideoPromptBridge(options = {}) {
   }
   const prompt = String(payload?.prompt || "").trim();
   if (!prompt) return false;
-  ensureSession();
-  upsertActiveSession((session) => ({
-    ...session,
-    prompt
-  }), { render: false });
+  const forceNewSession = payload?.createNewSession === true;
+  if (forceNewSession) {
+    const title = normalizeSessionTitle(buildShortSessionTitle(prompt));
+    const importedSession = createSession({
+      title,
+      prompt,
+      updatedAt: nowIso()
+    });
+    state.sessions = [importedSession, ...state.sessions.filter((item) => item?.id !== importedSession.id)];
+    state.activeSessionId = importedSession.id;
+    resetPodcastStudioSessionUiState(importedSession);
+    persistSessions();
+  } else {
+    ensureSession();
+    upsertActiveSession((session) => ({
+      ...session,
+      prompt
+    }), { render: false });
+  }
   if (els.promptInput) {
     setPromptInputContent(prompt);
   }
@@ -5354,6 +6411,7 @@ function updateRowPlayButtons() {
     btn.setAttribute("title", isPlaying ? "Detener reproducción" : "Reproducir escena");
     btn.innerHTML = isPlaying ? '<i class="fas fa-stop"></i>' : '<i class="fas fa-play"></i>';
   });
+  syncStudioPlayDialogueAudioButton();
   const activeRowId = String(playingRowId || "").trim();
   let activeRowEl = null;
   els.scriptTableBody.querySelectorAll(".script-row").forEach((rowEl) => {
@@ -5377,6 +6435,67 @@ function updateRowPlayButtons() {
     }
   }
   renderRowPlaybackElapsed();
+}
+
+function syncStudioPlayDialogueAudioButton() {
+  if (!els.playDialogueAudioBtn) return;
+  const session = getActiveSession();
+  const rowId = resolveTargetVideoRowId(session);
+  const cleanRowId = String(rowId || "").trim();
+  const isPlaying = Boolean(cleanRowId) && String(studioDialoguePreviewRowId || "").trim() === cleanRowId;
+  const hasAudio = hasStoredMediaSource(resolveDialogueAudioForRow(session, cleanRowId));
+  // Allow stopping even if the UI is busy; otherwise require stored audio.
+  els.playDialogueAudioBtn.disabled = !cleanRowId || (!isPlaying && (podcastVideoState.busy || !hasAudio));
+  els.playDialogueAudioBtn.classList.toggle("is-playing", isPlaying);
+  els.playDialogueAudioBtn.setAttribute(
+    "title",
+    isPlaying ? "Detener voz de escena" : "Reproducir voz guardada de la escena"
+  );
+  els.playDialogueAudioBtn.setAttribute(
+    "aria-label",
+    isPlaying ? "Detener voz guardada de escena" : "Reproducir voz guardada de escena"
+  );
+  els.playDialogueAudioBtn.innerHTML = isPlaying ? '<i class="fas fa-stop"></i>' : '<i class="fas fa-play"></i>';
+}
+
+function stopStudioDialoguePreviewAudio() {
+  if (studioDialoguePreviewAudioEl) {
+    try { studioDialoguePreviewAudioEl.pause(); } catch (_) {}
+    try { studioDialoguePreviewAudioEl.currentTime = 0; } catch (_) {}
+  }
+  studioDialoguePreviewAudioEl = null;
+  studioDialoguePreviewRowId = "";
+  syncStudioPlayDialogueAudioButton();
+}
+
+async function playStudioDialoguePreviewAudio(rowId = "") {
+  const session = getActiveSession();
+  const key = String(rowId || "").trim();
+  if (!session || !key) return false;
+  if (String(studioDialoguePreviewRowId || "").trim() === key) {
+    stopStudioDialoguePreviewAudio();
+    return true;
+  }
+  const storedAudio = resolveDialogueAudioForRow(session, key);
+  const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+  if (!storedAudioSrc) return false;
+  stopStudioDialoguePreviewAudio();
+  studioDialoguePreviewRowId = key;
+  syncStudioPlayDialogueAudioButton();
+  const audio = new Audio(resolvePodcastStageAudioSrc(storedAudioSrc));
+  audio.preload = "auto";
+  studioDialoguePreviewAudioEl = audio;
+  audio.addEventListener("ended", () => {
+    if (studioDialoguePreviewAudioEl === audio) {
+      stopStudioDialoguePreviewAudio();
+    }
+  }, { once: true });
+  audio.addEventListener("error", () => {
+    setGenerationStatus("No se pudo reproducir la voz guardada.", "");
+    stopStudioDialoguePreviewAudio();
+  }, { once: true });
+  await audio.play();
+  return true;
 }
 
 function formatElapsedClock(ms = 0) {
@@ -5500,6 +6619,7 @@ async function sendScenePromptWithReconnect(prompt = "", voiceProfile = null) {
 }
 
 async function playRowAudio(rowId, options = {}) {
+  stopStudioDialoguePreviewAudio();
   const session = getActiveSession();
   const row = session?.script?.rows?.find((item) => item.id === rowId);
   if (!row) return;
@@ -5512,14 +6632,7 @@ async function playRowAudio(rowId, options = {}) {
   stopRowAudio();
   try {
     setPodcastPlaybackRowStatus("pending", { rowId });
-    const speedMultiplier = Math.max(
-      0.5,
-      Math.min(1.9, Number(options.speedMultiplier || 1) * computeDurationSpeedMultiplier(
-        String(buildTargetSpeechLine(row, session) || row.text || ""),
-        Number(row?.durationSec || 0),
-        { min: 0.7, max: 1.9 }
-      ))
-    );
+    const speedMultiplier = Math.max(0.5, Math.min(1.9, Number(options.speedMultiplier || 1)));
     const storedAudio = resolveDialogueAudioForRow(session, row.id);
     const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
     if (storedAudioSrc) {
@@ -5530,7 +6643,7 @@ async function playRowAudio(rowId, options = {}) {
         setPodcastVideoSpeaker(session, row.speaker, { speaking: true, rowId: row.id });
       }
       updateRowPlayButtons();
-      const audio = new Audio(storedAudioSrc);
+      const audio = new Audio(resolvePodcastStageAudioSrc(storedAudioSrc));
       audio.preload = "auto";
       audio.playbackRate = speedMultiplier;
       rowPlaybackAudioEl = audio;
@@ -5598,7 +6711,7 @@ async function playRowAudio(rowId, options = {}) {
       "Respeta el rol del locutor y la emoción indicada.",
       "Nunca leas en voz alta acotaciones escénicas, texto entre paréntesis o instrucciones de actuación; solo interprétalas si existen.",
       "Interpreta exactamente la 'Línea objetivo' incluyendo muletillas, errores y tartamudeo si aparecen.",
-      `Duración objetivo aproximada: ${Math.max(1, Number(row?.durationSec || 0))} segundos. Ajusta el ritmo para acercarte a ese tiempo.`,
+      "No fuerces duración exacta: prioriza fluidez y naturalidad de la voz.",
       `Identidad vocal base: ${voiceProfile.name}, estilo ${voiceProfile.mood}.`,
       `Locale: ${voiceProfile.locale}.`,
       `Locutor: ${resolveSpeakerDisplayName(row.speaker, session)} (${row.speaker}).`,
@@ -5810,6 +6923,84 @@ function setAudioTrackMixOpen(isOpen) {
   if (audioTrackMixOpen) {
     syncMusicControls();
   }
+}
+
+function syncMontageSceneMixModalInputs(source = "") {
+  const session = getActiveSession();
+  if (!session) return;
+  ensureMontageDefaultVolumesPersisted(session);
+  const cfg = getPodcastVideoConfig(session);
+  let veoPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultVeoVolumePct, 0))));
+  let geminiPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100))));
+  if (source === "veoRange" && els.montageSceneVeoVolumeRange) {
+    veoPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(els.montageSceneVeoVolumeRange.value, veoPct))));
+  } else if (source === "veoNumber" && els.montageSceneVeoVolumeNumber) {
+    veoPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(els.montageSceneVeoVolumeNumber.value, veoPct))));
+  }
+  if (source === "geminiRange" && els.montageSceneGeminiVolumeRange) {
+    geminiPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(els.montageSceneGeminiVolumeRange.value, geminiPct))));
+  } else if (source === "geminiNumber" && els.montageSceneGeminiVolumeNumber) {
+    geminiPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(els.montageSceneGeminiVolumeNumber.value, geminiPct))));
+  }
+  if (els.montageSceneVeoVolumeRange) els.montageSceneVeoVolumeRange.value = String(veoPct);
+  if (els.montageSceneVeoVolumeNumber) els.montageSceneVeoVolumeNumber.value = String(veoPct);
+  if (els.montageSceneGeminiVolumeRange) els.montageSceneGeminiVolumeRange.value = String(geminiPct);
+  if (els.montageSceneGeminiVolumeNumber) els.montageSceneGeminiVolumeNumber.value = String(geminiPct);
+}
+
+function setMontageSceneMixOpen(isOpen) {
+  montageSceneMixOpen = !!isOpen;
+  if (els.montageSceneMixModal) {
+    els.montageSceneMixModal.hidden = !montageSceneMixOpen;
+  }
+  if (montageSceneMixOpen) {
+    syncMontageSceneMixModalInputs();
+  }
+}
+
+function applyMontageSceneMixToAllScenes() {
+  const session = getActiveSession();
+  if (!session) return;
+  const cfg = getPodcastVideoConfig(session);
+  const veoPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(
+    els.montageSceneVeoVolumeRange?.value ?? els.montageSceneVeoVolumeNumber?.value,
+    toFiniteNumber(cfg.montageDefaultVeoVolumePct, 0)
+  ))));
+  const geminiPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(
+    els.montageSceneGeminiVolumeRange?.value ?? els.montageSceneGeminiVolumeNumber?.value,
+    toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)
+  ))));
+  if (els.montageSceneVeoVolumeRange) els.montageSceneVeoVolumeRange.value = String(veoPct);
+  if (els.montageSceneVeoVolumeNumber) els.montageSceneVeoVolumeNumber.value = String(veoPct);
+  if (els.montageSceneGeminiVolumeRange) els.montageSceneGeminiVolumeRange.value = String(geminiPct);
+  if (els.montageSceneGeminiVolumeNumber) els.montageSceneGeminiVolumeNumber.value = String(geminiPct);
+  const clipMap = ensureTimelineClipsByRowId(session, { persist: false });
+  const nextClips = { ...clipMap };
+  Object.keys(nextClips).forEach((rowId) => {
+    const current = nextClips[rowId];
+    if (!current) return;
+    const updated = normalizeTimelineClipItem({
+      ...current,
+      veoVolumeOverridePct: veoPct,
+      geminiVolumeOverridePct: geminiPct
+    }, rowId);
+    if (updated) nextClips[rowId] = updated;
+  });
+  upsertPodcastVideoConfig((cfg) => ({
+    ...cfg,
+    montageDefaultVeoVolumePct: veoPct,
+    montageDefaultGeminiVolumePct: geminiPct,
+    timelineVersion: STUDIO_TIMELINE_VERSION,
+    timelineClipsByRowId: nextClips
+  }));
+  renderPodcastVideoTimeline(getActiveSession());
+  syncPodcastStudioInspector(getActiveSession());
+  if (els.timelineClipDurationModal && !els.timelineClipDurationModal.hidden && String(timelineClipDurationModalState.rowId || "").trim()) {
+    openTimelineClipDurationConfig(timelineClipDurationModalState.rowId);
+  }
+  setGenerationStatus(`Volúmenes globales aplicados: Veo ${veoPct}% · Gemini ${geminiPct}%`, "is-live");
+  scheduleCloudAutosave("montage-scene-mix");
+  setMontageSceneMixOpen(false);
 }
 
 function persistAudioTrackMixSettings() {
@@ -6353,7 +7544,7 @@ function syncPanelMusicStateFromSession(session = null) {
   const next = {
     preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
     volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
-    montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? cfg?.volume ?? 22))),
+    montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 0))),
     stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
     sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
     selectedTrackKind: resolvePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
@@ -6398,7 +7589,7 @@ function syncPanelMusicStateFromSession(session = null) {
   if (getEnabledPanelMusicUploadedTracks().length) {
     ensureAllEnabledUploadedTrackDurations({
       render: false,
-      force: true
+      force: false
     }).then(() => {
       syncMusicControls();
       renderPodcastVideoTimeline(getActiveSession());
@@ -6442,20 +7633,20 @@ function resolvePanelMusicTrackSrc() {
 }
 
 function getPanelMontageMusicConfig() {
-  const sourceUrl = panelMusicState.sourceType === "track"
-    ? resolvePanelMusicTrackSrc()
-    : "";
+  const uploadedMode = panelMusicState.selectedTrackKind === "uploaded";
   const activeTrack = normalizePanelMusicTrack(panelMusicState.track);
-  const uploadedSegments = panelMusicState.selectedTrackKind === "uploaded"
+  const uploadedSegments = uploadedMode
     ? buildUploadedPanelMusicSegments(getActiveSession())
     : [];
-  return {
-    sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
-    preset: ["ambient", "focus", "pulse"].includes(String(panelMusicState.preset || "").trim())
-      ? String(panelMusicState.preset).trim()
-      : "ambient",
-    sourceUrl: String(sourceUrl || "").trim(),
-    sourceItems: uploadedSegments.map((segment) => ({
+  // `buildUploadedPanelMusicSegments` usa tracks habilitados (enabledInSession !== false),
+  // por lo que trackIndex/loopIndex deben resolverse contra esa misma lista.
+  const uploadedTracks = uploadedMode ? getPanelMusicUploadedTracks() : [];
+  const sourceItems = uploadedSegments.map((segment) => {
+    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
+    const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
+    const track = uploadedTracks[trackIndex] || null;
+    const mutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
+    return {
       slotLabel: String(segment?.slotLabel || "").trim(),
       sourceUrl: String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
       startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
@@ -6463,9 +7654,29 @@ function getPanelMontageMusicConfig() {
       loop: segment?.loop === true,
       durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
       trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
-      trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0)
-    })).filter((segment) => segment.sourceUrl),
-    volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? panelMusicState.volume ?? 22))),
+      trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),
+      trackIndex,
+      loopIndex,
+      muted: mutedLoopIndexes.has(loopIndex)
+    };
+  }).filter((segment) => segment.sourceUrl);
+
+  // Para "uploaded": el montaje debe seguir sourceItems (segmentos en timeline) y no caer
+  // al `sourceUrl` del track activo, para que enabled/mute por clip funcionen correctamente.
+  const sourceUrl = (!uploadedMode && panelMusicState.sourceType === "track")
+    ? resolvePanelMusicTrackSrc()
+    : "";
+  const sourceType = uploadedMode
+    ? (sourceItems.length ? "track" : "none")
+    : (panelMusicState.sourceType === "track" ? "track" : "none");
+  return {
+    sourceType,
+    preset: ["ambient", "focus", "pulse"].includes(String(panelMusicState.preset || "").trim())
+      ? String(panelMusicState.preset).trim()
+      : "ambient",
+    sourceUrl: String(sourceUrl || "").trim(),
+    sourceItems,
+    volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
     stabilize: panelMusicState.stabilize === true,
     durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
     startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
@@ -6553,6 +7764,7 @@ async function startPanelMusic() {
 function buildCloudSessionPayload(session = null) {
   const source = session || getActiveSession();
   if (!source) return null;
+  const creativeMode = isCreativeVideoMode(source);
   const chat = Array.isArray(source.chat) ? source.chat : [];
   const rows = Array.isArray(source?.script?.rows) ? source.script.rows : [];
   const sourcePanelMusicConfig = source?.panelMusicConfig && typeof source.panelMusicConfig === "object"
@@ -6578,6 +7790,7 @@ function buildCloudSessionPayload(session = null) {
     prompt: String(source.prompt || "").slice(0, 4000),
     archived: source.archived === true,
     updatedAt: nowIso(),
+    podcastStudioUiState: normalizePodcastStudioUiState(source.podcastStudioUiState || null, source),
     chat: chat.slice(-220).map((msg) => ({
       id: String(msg?.id || makeId("msg")).trim(),
       role: ["assistant", "user", "system"].includes(String(msg?.role || "")) ? String(msg.role) : "assistant",
@@ -6591,11 +7804,14 @@ function buildCloudSessionPayload(session = null) {
         id: String(row?.id || makeId("row")).trim(),
         speaker: normalizeSpeakerLabel(row?.speaker || "Host A", "Host A"),
         expression: EXPRESSIONS.includes(String(row?.expression || "")) ? String(row.expression) : "Neutral",
-        durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC)),
+        durationSec: creativeMode
+          ? Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(row?.durationSec) || VIDEO_SCENE_MAX_SEC))
+          : Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC)),
         mediaCue: MEDIA_CUES.includes(String(row?.mediaCue || "")) ? String(row.mediaCue) : "Sin media",
         text: String(row?.text || "").slice(0, 10000),
         notes: String(row?.notes || "").slice(0, 4000),
         voiceOverText: String(row?.voiceOverText || "").slice(0, 10000),
+        voiceOverOriginalText: String(row?.voiceOverOriginalText || "").slice(0, 10000),
         sceneDescription: String(row?.sceneDescription || "").slice(0, 4000),
         onScreenText: String(row?.onScreenText || "").slice(0, 1200),
         transition: String(row?.transition || "").slice(0, 800),
@@ -6616,7 +7832,7 @@ function buildCloudSessionPayload(session = null) {
     panelMusicConfig: {
       preset: String(panelMusicConfig.preset || "ambient"),
       volume: Math.max(0, Math.min(100, Number(panelMusicConfig.volume) || 0)),
-      montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? panelMusicConfig.volume ?? 22))),
+      montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? 0))),
       stabilize: panelMusicConfig.stabilize === true,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicConfig.selectedTrackKind),
@@ -6718,6 +7934,9 @@ function buildCloudSessionPayload(session = null) {
         : null
     },
     speakerPortraitMap: getSpeakerPortraitMap(source),
+    speakerReferenceImageMap: getSpeakerReferenceImageMap(source),
+    scenarioReferenceImageMap: getScenarioReferenceImageMap(source),
+    rowReferenceImageMap: getRowReferenceImageMap(source),
     dialogueVideoMap: getDialogueVideoMap(source),
     dialogueAudioMap: getDialogueAudioMap(source),
     podcastVideoConfig: normalizePodcastVideoConfig(source?.podcastVideoConfig || {}),
@@ -7487,6 +8706,10 @@ function setPodcastVideoPortraitFallback(enabled = false) {
 
 function syncPodcastVideoSpeakerCardVisibility() {
   if (!els.podcastVideoSpeakerCard) return;
+  if (isEducationalVideoMode(getActiveSession())) {
+    els.podcastVideoSpeakerCard.hidden = true;
+    return;
+  }
   const hasSpeaker = Boolean(String(podcastVideoState.activeSpeaker || "").trim());
   els.podcastVideoSpeakerCard.hidden = !(podcastVideoState.enabled && (podcastVideoState.busy || podcastVideoState.stagePortraitFallback) && hasSpeaker);
 }
@@ -7520,7 +8743,28 @@ function setTimelineViewMode(nextMode = "tracks") {
     ...cfg,
     timelineViewMode: mode
   }));
+  upsertPodcastStudioUiState({ timelineViewMode: mode }, { autosaveReason: "ui-state" });
+  scheduleCloudAutosave("inspector");
   renderPodcastVideoShell(getActiveSession());
+}
+
+function setMontageAudioSubtracksOpen(nextOpen = false, options = {}) {
+  const open = Boolean(nextOpen);
+  podcastVideoState.showMontageAudioSubtracks = open;
+  if (options.persist !== false) {
+    try {
+      window.localStorage.setItem(PODCAST_STUDIO_MONTAGE_AUDIO_SUBTRACKS_KEY, open ? "1" : "0");
+    } catch (_) {
+      // noop
+    }
+  }
+  upsertPodcastStudioUiState({ showMontageAudioSubtracks: open }, { autosaveReason: "ui-state" });
+  if (open && getTimelineViewMode(getActiveSession()) !== "tracks") {
+    setTimelineViewMode("tracks");
+    return;
+  }
+  renderPodcastVideoTimeline(getActiveSession(), { reason: "structure", force: true });
+  updatePodcastPlayerUi();
 }
 
 function getTransitionEdgeKey(fromRowId = "", toRowId = "") {
@@ -7528,6 +8772,26 @@ function getTransitionEdgeKey(fromRowId = "", toRowId = "") {
   const to = String(toRowId || "").trim();
   if (!from || !to) return "";
   return `${from}__${to}`;
+}
+
+function getTransitionTimelineRowOrder(session = null) {
+  const activeSession = session || getActiveSession();
+  const runtimeEntries = buildTimelineRuntimeEntries(activeSession)
+    .filter((entry) => Boolean(String(entry?.rowId || "").trim()));
+  runtimeEntries.sort((a, b) => (
+    Number(a.startMs || 0) - Number(b.startMs || 0)
+    || Number(a.zIndex || 0) - Number(b.zIndex || 0)
+    || Number(a.index || 0) - Number(b.index || 0)
+  ));
+  const ordered = [];
+  const seen = new Set();
+  runtimeEntries.forEach((entry) => {
+    const rowId = String(entry?.rowId || "").trim();
+    if (!rowId || seen.has(rowId)) return;
+    seen.add(rowId);
+    ordered.push(rowId);
+  });
+  return ordered;
 }
 
 function getTransitionForEdge(session = null, fromRowId = "", toRowId = "") {
@@ -7545,12 +8809,82 @@ function getTransitionForEdge(session = null, fromRowId = "", toRowId = "") {
   };
 }
 
+function shouldUseNativeVideoAudioForRow(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
+  return String(cfg.audioMode || "gemini-live-per-scene") === "veo-native-audio";
+}
+
+function resolveEffectiveNativeVeoVolumePct(session = null) {
+  const cfg = getPodcastVideoConfig(session || getActiveSession());
+  const clip = Math.max(0, Math.min(100, toFiniteNumber(cfg.clipVolume, 100)));
+  if (clip > 0) return clip;
+  const master = Math.max(0, Math.min(100, toFiniteNumber(cfg.masterVolume, 100)));
+  if (master > 0) return master;
+  return 100;
+}
+
+function resolveTimelineClipMix(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
+  ensureMontageDefaultVolumesPersisted(activeSession);
+  const key = String(rowId || "").trim();
+  const clip = key ? ensureTimelineClipsByRowId(activeSession, { persist: false })[key] : null;
+  const masterPct = Math.max(0, Math.min(100, toFiniteNumber(cfg.masterVolume, 100)));
+  const fallbackVeoPct = Math.max(
+    0,
+    Math.min(100, toFiniteNumber(cfg.montageDefaultVeoVolumePct, resolveEffectiveNativeVeoVolumePct(activeSession)))
+  );
+  const fallbackGeminiPct = Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)));
+  const veoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
+  const geminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+  const veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
+  const geminiPct = Number.isFinite(geminiOverride) ? Math.max(0, Math.min(100, Math.round(geminiOverride))) : fallbackGeminiPct;
+  return {
+    masterPct,
+    veoPct,
+    geminiPct,
+    // En preview, el volumen de Veo y Gemini lo deciden los sliders por clip.
+    // `masterVolume` no escala Veo (native video audio) para evitar silenciarlo al bajar Gemini.
+    videoVolume: Math.max(0, Math.min(1, veoPct / 100)),
+    voiceVolume: Math.max(0, Math.min(1, geminiPct / 100))
+  };
+}
+
+function resolveTimelineClipVoiceVolume(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
+  ensureMontageDefaultVolumesPersisted(activeSession);
+  const key = String(rowId || "").trim();
+  const clip = key ? ensureTimelineClipsByRowId(activeSession, { persist: false })[key] : null;
+  const override = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+  const pct = Number.isFinite(override)
+    ? Math.max(0, Math.min(100, Math.round(override)))
+    : Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, toFiniteNumber(cfg.masterVolume, 100))));
+  return Math.max(0, Math.min(1, pct / 100));
+}
+
+function applyActiveTimelineClipMixToPlayback(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const key = String(rowId || "").trim() || String(podcastVideoState.activeRowId || "").trim();
+  if (!activeSession || !key) return;
+  const mix = resolveTimelineClipMix(activeSession, key);
+  const activeVideo = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null;
+  if (activeVideo) {
+    activeVideo.volume = mix.videoVolume;
+    activeVideo.muted = mix.videoVolume <= 0.0001;
+  }
+  if (podcastVideoState.audioEl) {
+    podcastVideoState.audioEl.volume = resolveTimelineClipVoiceVolume(activeSession, key);
+  }
+}
+
 async function playPodcastStageVideo(options = {}) {
   const restart = options.restart === true;
   const silent = options.silent === true;
   const playbackRateOverride = Number(options.playbackRate);
   const volumeOverride = Number(options.volume);
-  const video = els.podcastActiveSpeakerVideo;
+  const video = getActiveStageVideoEl();
   const src = String(video?.dataset?.src || "").trim();
   if (!video || !src) {
     if (podcastVideoState.stagePortraitFallback) {
@@ -7568,10 +8902,20 @@ async function playPodcastStageVideo(options = {}) {
         // noop
       }
     }
-    const cfg = getPodcastVideoConfig();
-    video.muted = false;
-    const fallbackVolume = Math.max(0, Math.min(1, toFiniteNumber(cfg.clipVolume, 0) / 100));
-    video.volume = Number.isFinite(volumeOverride) ? Math.max(0, Math.min(1, volumeOverride)) : fallbackVolume;
+    const session = getActiveSession();
+    const cfg = getPodcastVideoConfig(session);
+    const useNativeVideoAudio = shouldUseNativeVideoAudioForRow(session, String(podcastVideoState.activeRowId || "").trim());
+    const audioClip = resolveDialogueAudioForRow(session, String(podcastVideoState.activeRowId || "").trim());
+    const hasSceneAudio = Boolean(resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || ""));
+    const educationalMode = isEducationalVideoMode(session);
+    const keepVideoAudioAudible = educationalMode || useNativeVideoAudio;
+    const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+    const fallbackVolume = resolveTimelineClipMix(session, activeRowId).videoVolume;
+    const desiredVolume = Number.isFinite(volumeOverride)
+      ? Math.max(0, Math.min(1, volumeOverride))
+      : fallbackVolume;
+    video.volume = desiredVolume;
+    video.muted = desiredVolume <= 0.0001;
     const fallbackRate = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
     video.playbackRate = Number.isFinite(playbackRateOverride) ? Math.max(0.5, Math.min(2.25, playbackRateOverride)) : fallbackRate;
     video.preload = "auto";
@@ -7614,12 +8958,11 @@ async function playPodcastStageVideo(options = {}) {
         if (fallbackResponse.ok) {
           const blob = await fallbackResponse.blob();
           const blobUrl = URL.createObjectURL(blob);
-          if (video.dataset.objectUrl) {
-            URL.revokeObjectURL(video.dataset.objectUrl);
-          }
-          video.src = blobUrl;
-          video.dataset.objectUrl = blobUrl;
-          video.volume = Math.max(0, Math.min(1, Number(getPodcastVideoConfig().clipVolume || 0) / 100));
+          assignStageVideoElementSource(video, blobUrl, {
+            logicalSrc: fallbackSrc,
+            mode: "transient"
+          });
+          video.volume = Math.max(0, Math.min(1, Number(getPodcastVideoConfig().clipVolume || 100) / 100));
           video.load();
           await safeMediaPlay(video);
           updatePodcastVideoTransportUi();
@@ -7638,31 +8981,32 @@ async function playPodcastStageVideo(options = {}) {
 }
 
 function updatePodcastVideoTransportUi() {
-  const hasClip = Boolean(String(els.podcastActiveSpeakerVideo?.dataset?.src || "").trim());
+  const hasClip = Boolean(String((getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null)?.dataset?.src || "").trim());
   const hasStageMedia = hasClip || podcastVideoState.stagePortraitFallback;
   const stagePlaying = Boolean(
-    (els.podcastActiveSpeakerVideo && !els.podcastActiveSpeakerVideo.paused)
+    getStageVideoElements().some((video) => video && !video.paused)
     || (rowPlaybackAudioEl && !rowPlaybackAudioEl.paused)
     || (podcastVideoState.audioEl && !podcastVideoState.audioEl.paused)
     || Object.values(podcastVideoState.montageAudioPlayers || {}).some((audio) => audio && !audio.paused)
   );
   const montagePlaying = Boolean(podcastVideoState.montageActive && !podcastVideoState.montagePaused);
+  const sequencePlaying = Boolean(podcastVideoState.timelineSequenceActive === true && podcastVideoState.timelineSequencePaused !== true);
   const pausedByStatus = /paus/i.test(String(els.podcastVideoStatus?.textContent || ""));
   const isPausedVisual = Boolean(podcastVideoState.montagePaused || (!stagePlaying && pausedByStatus));
   const rows = getActiveSession()?.script?.rows || [];
-  if (els.podcastVideoPlayBtn) els.podcastVideoPlayBtn.disabled = !rows.length || (podcastVideoState.montageActive && !podcastVideoState.montagePaused);
-  if (els.podcastVideoPauseBtn) els.podcastVideoPauseBtn.disabled = !podcastVideoState.montageActive && !stagePlaying;
+  if (els.podcastVideoPlayBtn) els.podcastVideoPlayBtn.disabled = !rows.length || (podcastVideoState.montageActive && !podcastVideoState.montagePaused) || sequencePlaying;
+  if (els.podcastVideoPauseBtn) els.podcastVideoPauseBtn.disabled = !podcastVideoState.montageActive && !stagePlaying && !sequencePlaying;
   if (els.podcastVideoPlayBtn) {
-    els.podcastVideoPlayBtn.classList.toggle("is-playing", stagePlaying || montagePlaying);
+    els.podcastVideoPlayBtn.classList.toggle("is-playing", stagePlaying || montagePlaying || sequencePlaying);
   }
   if (els.podcastVideoPauseBtn) {
     els.podcastVideoPauseBtn.classList.toggle("is-paused-blink", isPausedVisual);
   }
-  if (els.podcastVideoStopBtn) els.podcastVideoStopBtn.disabled = !podcastVideoState.montageActive && !hasStageMedia && !stagePlaying;
-  if (els.podcastVideoPrevBtn) els.podcastVideoPrevBtn.disabled = !rows.length;
-  if (els.podcastVideoNextBtn) els.podcastVideoNextBtn.disabled = !rows.length;
-  if (els.generateAllDialogueVideosBtn) els.generateAllDialogueVideosBtn.disabled = podcastVideoState.busy || !rows.length;
-  if (els.regenerateAllDialogueVideosBtn) els.regenerateAllDialogueVideosBtn.disabled = podcastVideoState.busy || !rows.length;
+  if (els.podcastVideoStopBtn) els.podcastVideoStopBtn.disabled = !podcastVideoState.montageActive && !hasStageMedia && !stagePlaying && !sequencePlaying;
+  if (els.podcastVideoPrevBtn) els.podcastVideoPrevBtn.disabled = !rows.length || sequencePlaying;
+  if (els.podcastVideoNextBtn) els.podcastVideoNextBtn.disabled = !rows.length || sequencePlaying;
+  if (els.generateAllDialogueVideosBtn) els.generateAllDialogueVideosBtn.disabled = podcastVideoState.busy || podcastVideoState.bulkVideoGenerationActive || !rows.length;
+  if (els.regenerateAllDialogueVideosBtn) els.regenerateAllDialogueVideosBtn.disabled = podcastVideoState.busy || podcastVideoState.bulkVideoGenerationActive || !rows.length;
   if (els.reorderTimelineTracksBtn) els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || !canReorderTimelineLayout(getActiveSession());
 }
 
@@ -7769,6 +9113,8 @@ function buildPodcastTimelineStructureKey(session = null, mode = "") {
   const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
   const dialogueMap = getDialogueVideoMap(activeSession);
   const trackRows = ensureTimelineTracks(activeSession, { persist: false });
+  const videoCfg = getPodcastVideoConfig(activeSession);
+  const geminiDialogueTrack = normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
   return JSON.stringify({
     sessionId: String(activeSession?.id || "").trim(),
     mode: String(mode || "").trim(),
@@ -7776,8 +9122,7 @@ function buildPodcastTimelineStructureKey(session = null, mode = "") {
       const rowId = String(row?.id || "").trim();
       const clip = clipMap[rowId] || null;
       const dialogue = dialogueMap[rowId] || null;
-      const segments = resolveDialogueVideoSegments(dialogue);
-      const primarySegment = segments[0] || dialogue || null;
+      const primarySegment = resolvePrimaryDialogueVideoSegment(dialogue) || null;
       return {
         id: rowId,
         speaker: String(row?.speaker || "").trim(),
@@ -7806,7 +9151,21 @@ function buildPodcastTimelineStructureKey(session = null, mode = "") {
       id: String(track?.id || "").trim(),
       label: String(track?.label || "").trim(),
       order: Number(track?.order || 0)
-    }))
+    })),
+    geminiDialogueTrack: {
+      enabled: geminiDialogueTrack.enabled === true,
+      updatedAt: String(geminiDialogueTrack.updatedAt || "").trim(),
+      missingRowIds: geminiDialogueTrack.missingRowIds,
+      segments: geminiDialogueTrack.segments.map((segment) => ({
+        rowId: String(segment?.rowId || "").trim(),
+        startMs: Number(segment?.startMs || 0),
+        endMs: Number(segment?.endMs || 0),
+        durationMs: Number(segment?.durationMs || 0),
+        trimInMs: Number(segment?.trimInMs || 0),
+        trimOutMs: Number(segment?.trimOutMs || 0),
+        audioSrc: String(segment?.audioSrc || "").trim()
+      }))
+    }
   });
 }
 
@@ -7914,15 +9273,62 @@ function disconnectPodcastTimelinePreviewObserver() {
   podcastTimelinePreviewObserver = null;
 }
 
-function loadTimelinePreviewVideo(videoEl) {
-  if (!videoEl) return;
-  const nextSrc = String(videoEl.dataset.previewSrc || "").trim();
-  if (!nextSrc) return;
-  if (String(videoEl.getAttribute("src") || "").trim() === nextSrc && String(videoEl.preload || "").trim().toLowerCase() === "metadata") {
+function setTimelinePreviewsSuspended(isSuspended = false) {
+  const next = Boolean(isSuspended);
+  if (podcastTimelinePreviewsSuspended === next) return;
+  podcastTimelinePreviewsSuspended = next;
+  if (!els.podcastVideoTimeline) return;
+  if (next) {
+    disconnectPodcastTimelinePreviewObserver();
+    const previewVideos = Array.from(
+      els.podcastVideoTimeline.querySelectorAll("video[data-preview-src]")
+    );
+    previewVideos.forEach((videoEl) => {
+      try { videoEl.pause(); } catch (_) {}
+      try { videoEl.preload = "none"; } catch (_) {}
+      try {
+        const currentSrc = String(videoEl.getAttribute("src") || "").trim();
+        if (currentSrc) {
+          videoEl.dataset.previewOriginalSrc = currentSrc;
+          videoEl.removeAttribute("src");
+        }
+      } catch (_) {}
+      try { videoEl.load(); } catch (_) {}
+    });
     return;
   }
-  videoEl.preload = "metadata";
-  videoEl.src = nextSrc;
+  // Resume preview system.
+  try {
+    const previewVideos = Array.from(
+      els.podcastVideoTimeline.querySelectorAll("video[data-preview-src]")
+    );
+    previewVideos.forEach((videoEl) => {
+      try { delete videoEl.dataset.previewOriginalSrc; } catch (_) {}
+      try { delete videoEl.dataset.previewSuspended; } catch (_) {}
+    });
+  } catch (_) {}
+  attachPodcastTimelinePreviewLoading();
+}
+
+function loadTimelinePreviewVideo(videoEl, options = {}) {
+  if (!videoEl) return;
+  if (podcastTimelinePreviewsSuspended) return;
+  const nextSrc = String(videoEl.dataset.previewSrc || "").trim();
+  if (!nextSrc) return;
+  const preferAuto = options.preferAuto === true;
+  const currentSrc = String(videoEl.getAttribute("src") || "").trim();
+  const currentPreload = String(videoEl.preload || "").trim().toLowerCase();
+  if (currentSrc === nextSrc) {
+    if (preferAuto && currentPreload === "auto") return;
+    if (!preferAuto && (currentPreload === "metadata" || currentPreload === "auto")) return;
+  }
+  if (!String(videoEl.getAttribute("poster") || "").trim()) {
+    videoEl.setAttribute("poster", "SnoopyPodcastCreator.png");
+  }
+  videoEl.preload = preferAuto ? "auto" : "metadata";
+  if (currentSrc !== nextSrc) {
+    videoEl.src = nextSrc;
+  }
   try {
     videoEl.load();
   } catch (_) {
@@ -7933,6 +9339,7 @@ function loadTimelinePreviewVideo(videoEl) {
 function attachPodcastTimelinePreviewLoading() {
   disconnectPodcastTimelinePreviewObserver();
   if (!els.podcastVideoTimeline) return;
+  if (podcastTimelinePreviewsSuspended) return;
   const previewVideos = Array.from(
     els.podcastVideoTimeline.querySelectorAll(".podcast-video-scene-preview video[data-preview-src], .podcast-video-clip-preview video[data-preview-src]")
   );
@@ -7941,15 +9348,22 @@ function attachPodcastTimelinePreviewLoading() {
     const videoEl = event?.currentTarget?.tagName === "VIDEO"
       ? event.currentTarget
       : event?.target?.closest?.("video[data-preview-src]");
-    loadTimelinePreviewVideo(videoEl);
+    loadTimelinePreviewVideo(videoEl, { preferAuto: true });
   };
   previewVideos.forEach((videoEl) => {
     videoEl.addEventListener("mouseenter", promotePreview, { passive: true });
     videoEl.addEventListener("focus", promotePreview, { passive: true });
   });
+  // Percepción de velocidad: precarga fuerte para las primeras escenas visibles.
+  const eagerCount = 8;
+  previewVideos.slice(0, eagerCount).forEach((videoEl) => {
+    loadTimelinePreviewVideo(videoEl, { preferAuto: true });
+  });
   if (typeof IntersectionObserver !== "function") {
     previewVideos.forEach((videoEl, index) => {
-      if (index < 6) loadTimelinePreviewVideo(videoEl);
+      if (index < Math.max(eagerCount, 12)) {
+        loadTimelinePreviewVideo(videoEl, { preferAuto: index < eagerCount });
+      }
     });
     return;
   }
@@ -7957,12 +9371,12 @@ function attachPodcastTimelinePreviewLoading() {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       const videoEl = entry.target;
-      loadTimelinePreviewVideo(videoEl);
+      loadTimelinePreviewVideo(videoEl, { preferAuto: false });
       observer.unobserve(videoEl);
     });
   }, {
     root: els.podcastVideoTimeline,
-    rootMargin: "240px",
+    rootMargin: "420px",
     threshold: 0.01
   });
   previewVideos.forEach((videoEl) => {
@@ -7970,8 +9384,61 @@ function attachPodcastTimelinePreviewLoading() {
   });
 }
 
+function syncPodcastTimelineLaneOffsetFromDom(session = null) {
+  if (!els.podcastVideoTimeline) return 0;
+  const activeSession = session || getActiveSession();
+  const mode = getTimelineViewMode(activeSession);
+  const canvas = els.podcastVideoTimeline.querySelector(".podcast-video-timeline-canvas");
+  if (!canvas) return 0;
+  if (mode !== "tracks") {
+    canvas.dataset.playheadOffset = "0";
+    try { canvas.style.setProperty("--pod-timeline-lane-offset", "0px"); } catch (_) {}
+    return 0;
+  }
+  const lane = els.podcastVideoTimeline.querySelector(".podcast-video-track-lane[data-track-id][data-track-index]");
+  if (!lane) return Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
+  const canvasRect = canvas.getBoundingClientRect();
+  const laneRect = lane.getBoundingClientRect();
+  const offsetPx = Math.max(0, Math.round(laneRect.left - canvasRect.left));
+  canvas.dataset.playheadOffset = String(offsetPx);
+  try { canvas.style.setProperty("--pod-timeline-lane-offset", `${offsetPx}px`); } catch (_) {}
+  return offsetPx;
+}
+
+function getPodcastTimelineClipMenuPortal() {
+  if (els.podcastVideoTimeline) {
+    const layer = els.podcastVideoTimeline.querySelector("#podcastTimelineMenuLayer");
+    if (layer) return layer;
+  }
+  // Fallback defensivo (si el timeline aún no se renderiza por alguna razón).
+  let portal = document.getElementById("podcastTimelineClipMenuPortal");
+  if (portal) return portal;
+  portal = document.createElement("div");
+  portal.id = "podcastTimelineClipMenuPortal";
+  portal.className = "podcast-video-clip-actions-portal";
+  portal.setAttribute("aria-hidden", "false");
+  document.body.appendChild(portal);
+  return portal;
+}
+
+function closePodcastTimelineClipMenu() {
+  const portal = document.getElementById("podcastTimelineClipMenuPortal");
+  const layer = els.podcastVideoTimeline?.querySelector?.("#podcastTimelineMenuLayer") || null;
+  [layer, portal].filter(Boolean).forEach((target) => {
+    target.innerHTML = "";
+    delete target.dataset.openRowId;
+    target.classList.remove("is-open");
+  });
+  if (els.podcastVideoTimeline) {
+    els.podcastVideoTimeline
+      .querySelectorAll("[data-action='timeline-toggle-clip-menu'][aria-expanded='true']")
+      .forEach((btn) => btn.setAttribute("aria-expanded", "false"));
+  }
+}
+
 function renderPodcastVideoTimeline(session = null, options = {}) {
   if (!els.podcastVideoTimeline) return;
+  closePodcastTimelineClipMenu();
   const activeSession = session || getActiveSession();
   const rows = activeSession?.script?.rows || [];
   const mode = getTimelineViewMode(activeSession);
@@ -7987,9 +9454,17 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   }
   const clipMap = ensureTimelineClipsByRowId(activeSession);
   const dialogueMap = getDialogueVideoMap(activeSession);
+  const videoCfg = getPodcastVideoConfig(activeSession);
+  const pxPerSec = getStudioTimelinePixelsPerSec(activeSession);
+  const minClipPx = getStudioTimelineMinClipPx(activeSession);
+  const minAudioLoopPx = getStudioAudioTrackMinLoopPx(activeSession);
+  const timelineLaneHeightsById = videoCfg?.timelineTrackHeightsById && typeof videoCfg.timelineTrackHeightsById === "object"
+    ? videoCfg.timelineTrackHeightsById
+    : {};
   const isBulkRegenAll = podcastVideoState.bulkVideoGenerationActive && podcastVideoState.bulkVideoGenerationMode === "all";
   const timelineDurationMs = getTimelineTotalDurationMs(activeSession);
-  const canvasWidthPx = Math.max(860, Math.round((timelineDurationMs / 1000) * STUDIO_TIMELINE_PIXELS_PER_SEC) + 120);
+  const minCanvasWidthPx = Math.max(360, Math.round(860 * Math.max(0.35, getStudioTimelineZoom(activeSession))));
+  const canvasWidthPx = Math.max(minCanvasWidthPx, Math.round((timelineDurationMs / 1000) * pxPerSec) + 172);
   const trackRows = ensureTimelineTracks(activeSession, { persist: false });
   const rowIndexById = new Map(rows.map((row, index) => [String(row?.id || "").trim(), index]));
   const structureKey = buildPodcastTimelineStructureKey(activeSession, mode);
@@ -8008,6 +9483,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
     syncTimelineModeButtons(activeSession);
     syncPodcastTimelineSelectionUi(activeSession);
     syncTimelineGapSelectionUi();
+    syncPodcastTimelineLaneOffsetFromDom(activeSession);
     syncPodcastTimelinePlayhead(activeSession);
     if (els.podcastTimelineRuler) {
       const totalSec = Math.ceil(timelineDurationMs / 1000);
@@ -8022,14 +9498,82 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
     logPodcastRenderDebug("timeline-guard-structural-from-ephemeral", { reason: renderReason });
   }
 
+  const timelineSceneIndexByRowId = (() => {
+    const ordered = rows
+      .map((row, index) => {
+        const rowId = String(row?.id || "").trim();
+        if (!rowId) return null;
+        const clip = clipMap[rowId];
+        if (!clip) return null;
+        return {
+          rowId,
+          startMs: Math.max(0, Number(clip?.startMs || 0) || 0),
+          zIndex: Math.max(1, Number(clip?.zIndex || 1) || 1),
+          scriptIndex: index
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startMs - b.startMs || a.zIndex - b.zIndex || a.scriptIndex - b.scriptIndex);
+    const map = new Map();
+    ordered.forEach((item, index) => {
+      map.set(String(item.rowId || "").trim(), index + 1);
+    });
+    return map;
+  })();
+
+  const syncMontageAudioSubtrackAlignment = () => {
+    if (!els.podcastVideoTimeline) return;
+    if (mode !== "tracks") return;
+    if (podcastVideoState.showMontageAudioSubtracks !== true) return;
+    const chips = Array.from(els.podcastVideoTimeline.querySelectorAll(".podcast-montage-audio-chip[data-row-id]"));
+    if (!chips.length) return;
+    let sampled = 0;
+    chips.forEach((chip) => {
+      const alignMode = String(chip?.dataset?.audioAlign || "clip").trim().toLowerCase();
+      if (alignMode && alignMode !== "clip") return;
+      const rowId = String(chip?.dataset?.rowId || "").trim();
+      if (!rowId) return;
+      const clipEl = els.podcastVideoTimeline.querySelector(`.podcast-video-timeline-clip[data-row-id="${CSS.escape(rowId)}"]`);
+      const lane = chip.closest(".podcast-video-track-lane");
+      if (!clipEl || !lane) return;
+      const clipLeft = Number(clipEl.offsetLeft || 0);
+      const clipWidth = Math.max(0, Number(clipEl.offsetWidth || 0));
+      chip.style.left = `${clipLeft}px`;
+      if (clipWidth > 0) {
+        const existingWidth = Math.max(0, Number.parseFloat(String(chip.style.width || "")) || Number(chip.offsetWidth || 0));
+        const nextWidth = existingWidth > 0 ? Math.min(existingWidth, clipWidth) : clipWidth;
+        chip.style.width = `${Math.max(minAudioLoopPx, Math.floor(nextWidth))}px`;
+      }
+      if (PODCAST_RENDER_DEBUG && sampled < 5) {
+        sampled += 1;
+        logPodcastRenderDebug("montage-audio-align", {
+          rowId,
+          clipLeft,
+          chipLeft: Number(chip.offsetLeft || 0),
+          clipWidth,
+          chipWidth: Number(chip.offsetWidth || 0)
+        });
+      }
+    });
+  };
+
   if (els.podcastTimelineRuler) {
     const marks = [];
     const totalSec = Math.ceil(timelineDurationMs / 1000);
+    const offsetPx = mode === "tracks" ? PODCAST_TIMELINE_RULER_OFFSET_PX : 0;
     for (let sec = 0; sec <= totalSec; sec += 1) {
-      const leftPx = timelineMsToPx(sec * 1000);
-      marks.push(`<div class="podcast-timeline-ruler-mark" style="left:${leftPx}px"><span>${escapeHtml(secondsToClock(sec))}</span></div>`);
+      const leftPx = timelineMsToPx(sec * 1000, activeSession);
+      marks.push(`<div class="podcast-timeline-ruler-mark" style="left:${leftPx + offsetPx}px"><span>${escapeHtml(secondsToClock(sec))}</span></div>`);
     }
-    els.podcastTimelineRuler.innerHTML = `<div class="podcast-timeline-ruler-inner" style="width:${canvasWidthPx}px">${marks.join("")}</div>`;
+    const zoomValue = Math.max(0.25, Math.min(1, toFiniteNumber(videoCfg?.timelineZoom, 1)));
+    els.podcastTimelineRuler.innerHTML = `
+      <div class="podcast-timeline-ruler-zoom" aria-hidden="false">
+        <div class="podcast-timeline-ruler-zoom-inner">
+          <input id="podcastTimelineZoomOutRange" class="podcast-timeline-zoom-range" type="range" min="0.25" max="1" step="0.05" value="${escapeHtml(String(zoomValue))}" aria-label="Zoom del timeline" title="Zoom del timeline">
+        </div>
+      </div>
+      <div class="podcast-timeline-ruler-inner" style="width:${canvasWidthPx}px">${marks.join("")}<div id="podcastTimelineRulerPlayhead" class="podcast-timeline-ruler-playhead" aria-hidden="true"></div></div>
+    `.trim();
   }
 
   if (mode === "normal") {
@@ -8037,30 +9581,34 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
       const rowId = String(row?.id || "").trim();
       if (!rowId) return "";
       const generatedClip = dialogueMap[rowId] || null;
-      const segments = resolveDialogueVideoSegments(generatedClip);
-      const primarySegment = segments[0] || null;
+      const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
       const videoSrc = resolveStorageVideoUrl(
         primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
         primarySegment?.storagePath || generatedClip?.storagePath || ""
       );
       const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
       const portraitSrc = resolvePodcastPortraitUrl(portrait?.downloadUrl || "");
+      const previewPosterSrc = portraitSrc || "SnoopyPodcastCreator.png";
       const timelineClip = clipMap[rowId] || null;
       const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
+      const isGenerating = isTimelineSceneVideoGenerating(activeSession, rowId);
       const audioReady = hasStoredMediaSource(resolveDialogueAudioForRow(activeSession, rowId));
       const speakerName = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
-      const nextRowId = String(rows[index + 1]?.id || "").trim();
-      const transition = nextRowId ? getTransitionForEdge(activeSession, rowId, nextRowId) : { type: "cut", durationMs: 0 };
-      const hasTransition = nextRowId && String(transition.type || "cut") !== "cut";
       return `
         <div class="podcast-video-timeline-item" data-row-id="${escapeHtml(rowId)}">
           <article class="podcast-video-scene-card${videoSrc ? " has-video" : ""}${isActive ? " is-active" : ""}" tabindex="-1">
-            <button class="podcast-video-scene-preview" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
+            <button class="podcast-video-scene-preview${isGenerating ? " is-generating" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
               ${videoSrc
-                ? `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous"${portraitSrc ? ` poster="${escapeHtml(portraitSrc)}"` : ""}></video>`
+                ? `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`
                 : portraitSrc
                   ? `<img src="${escapeHtml(portraitSrc)}" alt="${escapeHtml(`Retrato de ${speakerName}`)}" loading="lazy">`
                   : `<div class="podcast-video-scene-empty">Sin video</div>`}
+              ${isGenerating
+                ? `<div class="podcast-video-scene-loading" aria-hidden="true">
+                    <span class="podcast-video-scene-loading-ring"></span>
+                    <img src="SnoopyPodcastCreator.png" alt="" class="podcast-video-scene-loading-logo">
+                  </div>`
+                : ""}
             </button>
             <div class="podcast-video-scene-meta">
               <strong>Escena ${index + 1} · ${escapeHtml(speakerName)}</strong>
@@ -8072,14 +9620,11 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
               <button class="row-icon-btn" type="button" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video"${videoSrc ? "" : " disabled"}><i class="fas fa-trash"></i></button>
             </div>
           </article>
-          ${nextRowId
-            ? `<button class="podcast-transition-card${hasTransition ? " is-active" : ""}" type="button" data-action="timeline-open-transition" data-from-row-id="${escapeHtml(rowId)}" data-to-row-id="${escapeHtml(nextRowId)}" title="Configurar transición">${hasTransition ? `<i class="fas fa-magic"></i>` : "+"}</button>`
-            : ""}
         </div>
       `;
     }).join("");
     podcastRenderState.timelinePreviewCreateCount += (timelineItemsHtml.match(/data-preview-src=/g) || []).length;
-    els.podcastVideoTimeline.innerHTML = `<div class="podcast-video-timeline-canvas is-normal" data-playhead-offset="0" style="width:${canvasWidthPx}px"><div id="podcastTimelinePlayhead" class="podcast-timeline-playhead" aria-hidden="true"><button class="podcast-timeline-playhead-grip" type="button" data-action="timeline-drag-playhead" aria-label="Mover marcador de tiempo"></button></div><div class="podcast-video-timeline-list">${timelineItemsHtml}</div></div>`;
+    els.podcastVideoTimeline.innerHTML = `<div class="podcast-video-timeline-canvas is-normal" data-playhead-offset="0" style="width:${canvasWidthPx}px;--pod-timeline-px-per-sec:${Math.max(8, Math.round(pxPerSec))}px"><div id="podcastTimelinePlayhead" class="podcast-timeline-playhead" aria-hidden="true"><button class="podcast-timeline-playhead-grip" type="button" data-action="timeline-drag-playhead" aria-label="Mover marcador de tiempo"></button></div><div id="podcastTimelineMenuLayer" class="podcast-video-timeline-menu-layer" aria-hidden="false"></div><div class="podcast-video-timeline-list">${timelineItemsHtml}</div></div>`;
     podcastRenderState.timelineStructureKey = structureKey;
     podcastRenderState.timelineMode = mode;
     podcastRenderState.timelineStructureRenderCount += 1;
@@ -8097,18 +9642,99 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   }
 
   const timelineTrackBlocks = [];
+  const showMontageAudioSubtracks = podcastVideoState.showMontageAudioSubtracks === true;
+  const montageAudioMode = String(videoCfg?.audioMode || "gemini-live-per-scene").trim().toLowerCase();
+  const montageGeminiTrack = normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
+  const montageGeminiSegmentByRowId = new Map(
+    (montageGeminiTrack?.enabled === true ? montageGeminiTrack.segments : [])
+      .map((segment) => [String(segment?.rowId || "").trim(), segment])
+      .filter(([rowId]) => rowId)
+  );
+  const resolveMontageAudioChipDurationMs = (timelineClip = null, audioDurationSec = 0) => {
+    if (!timelineClip) return STUDIO_TIMELINE_MIN_CLIP_MS;
+    const trimInMs = Math.max(0, Number(timelineClip?.trimInMs || 0) || 0);
+    const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineClipEffectiveDurationMs(timelineClip));
+    const audioDurationMs = Math.max(0, Number(audioDurationSec || 0) || 0) * 1000;
+    if (montageAudioMode === "gemini-live-per-scene") {
+      if (audioDurationMs > 0) {
+        return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(clipPlayableMs, Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - trimInMs)));
+      }
+      return clipPlayableMs;
+    }
+    if (montageAudioMode === "veo-native-audio") return clipPlayableMs;
+    return audioDurationMs > 0 ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(clipPlayableMs, audioDurationMs)) : clipPlayableMs;
+  };
+  const buildMontageAudioSubtrackRowHtml = (track = null, trackIndex = 0, trackItems = []) => {
+    if (!showMontageAudioSubtracks) return "";
+    const trackId = String(track?.id || "").trim();
+    if (!trackId) return "";
+    const chipsHtml = trackItems.map(({ row, rowId, timelineClip, clipLeftPx, clipWidthPx }) => {
+      const segment = montageGeminiSegmentByRowId.get(String(rowId || "").trim()) || null;
+      const alignMode = montageAudioMode === "gemini-live-per-scene" && segment ? "segment" : "clip";
+      const startMs = alignMode === "segment"
+        ? Math.max(0, Number(segment?.startMs || 0) || 0)
+        : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
+      const leftPx = Math.max(0, alignMode === "segment" ? timelineMsToPx(startMs, activeSession) : Number(clipLeftPx || timelineMsToPx(startMs, activeSession) || 0));
+      const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
+      const audioClip = resolveDialogueAudioForRow(activeSession, rowId);
+      const storedAudioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
+      const hasStoredAudio = Boolean(storedAudioSrc);
+      const speakerLabel = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
+      const sceneIndex = Math.max(
+        1,
+        Math.round(Number(timelineSceneIndexByRowId.get(rowId) || 0) || 0) || (Number(rowIndexById.get(rowId) || 0) + 1)
+      );
+      const durationMs = alignMode === "segment"
+        ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS)
+        : resolveMontageAudioChipDurationMs(timelineClip, Number(audioClip?.durationSec || 0));
+      const baseWidthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
+      const widthLimitPx = alignMode === "segment"
+        ? Math.max(0, remainingWidthPx)
+        : Math.max(0, Math.min(remainingWidthPx, Number(clipWidthPx || remainingWidthPx)));
+      const widthPx = Math.max(minAudioLoopPx, Math.min(baseWidthPx, widthLimitPx));
+      if (widthPx <= 0) return "";
+      const isLiveMode = montageAudioMode === "gemini-live-per-scene" && !hasStoredAudio;
+      const chipTone = hasStoredAudio ? "is-stored" : (isLiveMode ? "is-live" : "is-missing");
+      const icon = hasStoredAudio ? "fa-volume-up" : (isLiveMode ? "fa-wave-square" : "fa-exclamation-circle");
+      const subtitle = hasStoredAudio ? "Voz guardada" : (isLiveMode ? "Voz Live" : "Sin voz");
+      const isSelected = podcastVideoState.timelineAudioSelection?.geminiRowIds?.has?.(String(rowId || "").trim()) === true;
+      return `
+        <button class="podcast-montage-audio-chip ${chipTone}${isSelected ? " is-selected" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" data-audio-align="${escapeHtml(alignMode)}" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`Escena ${sceneIndex} · ${speakerLabel} · ${subtitle}`)}">
+          <i class="fas ${icon}" aria-hidden="true"></i>
+          <span>${escapeHtml(`Escena ${sceneIndex} · ${speakerLabel}`)}</span>
+        </button>
+      `;
+    }).join("");
+    if (!chipsHtml) return "";
+    const laneId = `montage-audio:${trackId}`;
+    return `
+      <section class="podcast-video-track-row podcast-montage-audio-subtrack-row" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
+        <div class="podcast-video-track-label is-subtrack"><span>Audio</span></div>
+        <div class="podcast-video-track-lane podcast-montage-audio-lane" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
+          ${chipsHtml}
+        </div>
+      </section>
+    `;
+  };
   trackRows.forEach((track, trackIndex) => {
     timelineTrackBlocks.push(`<div class="podcast-video-track-drop-zone" data-drop-track-index="${trackIndex}" aria-hidden="true"></div>`);
     const trackId = String(track?.id || "").trim();
     const trackLabel = String(track?.label || `Track ${trackIndex + 1}`).trim() || `Track ${trackIndex + 1}`;
+    const laneHeightRaw = toFiniteNumber(timelineLaneHeightsById?.[trackId], Number.NaN);
+    const laneHeightPx = Number.isFinite(laneHeightRaw)
+      ? Math.round(Math.max(56, Math.min(520, laneHeightRaw)))
+      : Number.NaN;
+    const laneHeightAttr = Number.isFinite(laneHeightPx)
+      ? ` style="height:${laneHeightPx}px;min-height:${laneHeightPx}px"`
+      : "";
     const trackItems = rows
       .map((row) => {
         const rowId = String(row?.id || "").trim();
         if (!rowId) return null;
         const timelineClip = clipMap[rowId];
         if (!timelineClip || String(timelineClip.trackId || "").trim() !== trackId) return null;
-        const clipLeftPx = timelineMsToPx(Number(timelineClip?.startMs || 0));
-        const clipWidthPx = Math.max(STUDIO_TIMELINE_MIN_CLIP_PX, timelineMsToPx(getTimelineClipEffectiveDurationMs(timelineClip)));
+        const clipLeftPx = timelineMsToPx(Number(timelineClip?.startMs || 0), activeSession);
+        const clipWidthPx = Math.max(minClipPx, timelineMsToPx(getTimelineClipEffectiveDurationMs(timelineClip), activeSession));
         return {
           row,
           rowId,
@@ -8121,57 +9747,124 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
       })
       .filter(Boolean)
       .sort((a, b) => Number(a.timelineClip.startMs || 0) - Number(b.timelineClip.startMs || 0) || a.index - b.index);
+    // Cuando dos clips se enciman, marcamos el tramo de intersección para dibujar
+    // un "fade" visual en el timeline (A: fade out, B: fade in).
+    const overlapFadeByRowId = new Map();
+    for (let i = 1; i < trackItems.length; i += 1) {
+      const prev = trackItems[i - 1];
+      const next = trackItems[i];
+      const overlapPxRaw = Number(prev?.clipEndPx || 0) - Number(next?.clipLeftPx || 0);
+      const overlapPx = Math.max(0, Math.round(overlapPxRaw));
+      if (!overlapPx) continue;
+      const prevWidth = Math.max(0, Math.round(Number(prev?.clipWidthPx || 0)));
+      const nextWidth = Math.max(0, Math.round(Number(next?.clipWidthPx || 0)));
+      const fadeOutPx = Math.max(0, Math.min(overlapPx, Math.max(0, prevWidth - 1)));
+      const fadeInPx = Math.max(0, Math.min(overlapPx, Math.max(0, nextWidth - 1)));
+      if (fadeOutPx) {
+        const current = overlapFadeByRowId.get(prev.rowId) || { inPx: 0, outPx: 0 };
+        overlapFadeByRowId.set(prev.rowId, { inPx: current.inPx, outPx: Math.max(current.outPx, fadeOutPx) });
+      }
+      if (fadeInPx) {
+        const current = overlapFadeByRowId.get(next.rowId) || { inPx: 0, outPx: 0 };
+        overlapFadeByRowId.set(next.rowId, { inPx: Math.max(current.inPx, fadeInPx), outPx: current.outPx });
+      }
+    }
     timelineTrackBlocks.push(`
     <section class="podcast-video-track-row" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}">
-      <div class="podcast-video-track-label">${escapeHtml(trackLabel)}</div>
-      <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}">
+      <div class="podcast-video-track-label">
+        <div class="podcast-track-label-main">
+          <span class="podcast-track-label-text">${escapeHtml(trackLabel)}</span>
+        </div>
+        ${trackId === "speaker:narrador"
+          ? `<div class="podcast-track-label-actions">
+              <button class="row-icon-btn" type="button" data-action="open-montage-scene-mix" title="Volúmenes globales (Veo + Gemini)" aria-label="Volúmenes globales">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+              </button>
+            </div>`
+          : ""}
+      </div>
+      <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}"${laneHeightAttr}>
         ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
           const generatedClip = dialogueMap[rowId] || null;
-          const segments = resolveDialogueVideoSegments(generatedClip);
-          const primarySegment = segments[0] || null;
+          const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
           const videoSrc = resolveStorageVideoUrl(
             primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
             primarySegment?.storagePath || generatedClip?.storagePath || ""
           );
           const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
           const portraitSrc = resolvePodcastPortraitUrl(portrait?.downloadUrl || "");
+          const previewPosterSrc = portraitSrc || "SnoopyPodcastCreator.png";
           const leftPx = Number(clipLeftPx || 0);
-          const widthPx = Math.max(STUDIO_TIMELINE_MIN_CLIP_PX, Number(clipWidthPx || 0));
+          const widthPx = Math.max(minClipPx, Number(clipWidthPx || 0));
+          const fade = overlapFadeByRowId.get(rowId) || null;
+          const fadeInPx = fade ? Math.max(0, Number(fade.inPx || 0)) : 0;
+          const fadeOutPx = fade ? Math.max(0, Number(fade.outPx || 0)) : 0;
+          const hasOverlapFade = fadeInPx > 0 || fadeOutPx > 0;
           const sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(timelineClip?.sourceDurationMs || getTimelineClipEffectiveDurationMs(timelineClip)));
           const trimMaskLeftPct = Math.max(0, Math.min(100, (Math.max(0, Number(timelineClip?.trimInMs || 0)) / sourceDurationMs) * 100));
           const trimMaskRightPct = Math.max(0, Math.min(100, (Math.max(0, sourceDurationMs - Number(timelineClip?.trimOutMs || sourceDurationMs)) / sourceDurationMs) * 100));
           const hasTrimMask = trimMaskLeftPct > 0.05 || trimMaskRightPct > 0.05;
           const isActive = rowId === String(podcastVideoState.activeRowId || "").trim();
-          const audioReady = hasStoredMediaSource(resolveDialogueAudioForRow(activeSession, rowId));
+          const isGenerating = isTimelineSceneVideoGenerating(activeSession, rowId);
           const speakerName = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
+          const statusLabel = videoSrc ? "Listo" : "no hay video";
           return `
-            <article class="podcast-video-timeline-clip${videoSrc ? " has-video" : ""}${isActive ? " is-active" : ""}${hasTrimMask ? " is-trimmed" : ""}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${Math.max(1, Number(timelineClip?.zIndex || index + 1))};--trim-mask-left:${trimMaskLeftPct.toFixed(3)}%;--trim-mask-right:${trimMaskRightPct.toFixed(3)}%">
+            <article class="podcast-video-timeline-clip${videoSrc ? " has-video" : ""}${isActive ? " is-active" : ""}${hasTrimMask ? " is-trimmed" : ""}${hasOverlapFade ? " is-overlap-fade" : ""}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${Math.max(1, Number(timelineClip?.zIndex || index + 1))};--trim-mask-left:${trimMaskLeftPct.toFixed(3)}%;--trim-mask-right:${trimMaskRightPct.toFixed(3)}%;--clip-fade-in:${fadeInPx}px;--clip-fade-out:${fadeOutPx}px">
               <button class="podcast-video-clip-handle start" type="button" data-action="timeline-trim-start" data-row-id="${escapeHtml(rowId)}" aria-label="Recortar inicio"></button>
               <button class="podcast-video-clip-handle end" type="button" data-action="timeline-trim-end" data-row-id="${escapeHtml(rowId)}" aria-label="Recortar final"></button>
-              <div class="podcast-video-clip-body" data-action="timeline-drag-clip" data-row-id="${escapeHtml(rowId)}">
-                <button class="podcast-video-clip-preview" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
+              <div class="podcast-video-clip-body${isGenerating ? " is-generating" : ""}" data-action="timeline-drag-clip" data-row-id="${escapeHtml(rowId)}">
+                <button class="podcast-video-clip-preview${isGenerating ? " is-generating" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
                   ${videoSrc
-                    ? `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous"${portraitSrc ? ` poster="${escapeHtml(portraitSrc)}"` : ""}></video>`
+                    ? `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`
                     : portraitSrc
                       ? `<img src="${escapeHtml(portraitSrc)}" alt="${escapeHtml(`Retrato de ${speakerName}`)}" loading="lazy">`
                       : `<div class="podcast-video-scene-empty">Sin video</div>`}
+                  ${isGenerating
+                    ? `<div class="podcast-video-scene-loading" aria-hidden="true">
+                        <span class="podcast-video-scene-loading-ring"></span>
+                        <img src="SnoopyPodcastCreator.png" alt="" class="podcast-video-scene-loading-logo">
+                      </div>`
+                    : ""}
                 </button>
                 <div class="podcast-video-clip-meta">
                   <strong>Escena ${index + 1} · ${escapeHtml(speakerName)}</strong>
-                  <span>${videoSrc ? "Video generado" : "Sin video"} · ${audioReady ? "Voz lista" : "Sin voz"} · ${secondsToClock(getTimelineClipEffectiveDurationMs(timelineClip) / 1000)}</span>
+                  <span>${escapeHtml(statusLabel)}</span>
                 </div>
                 <div class="podcast-video-clip-actions">
-                  <button class="row-icon-btn" type="button" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena"><i class="fas fa-play"></i></button>
-                  <button class="row-icon-btn${isBulkRegenAll ? " is-loading" : ""}" type="button" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video"${isBulkRegenAll ? " disabled" : ""}><i class="fas ${isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}"></i></button>
-                  <button class="row-icon-btn" type="button" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video"${videoSrc ? "" : " disabled"}><i class="fas fa-trash"></i></button>
+                  <button class="row-icon-btn podcast-video-clip-menu-btn" type="button" data-action="timeline-toggle-clip-menu" data-row-id="${escapeHtml(rowId)}" aria-haspopup="menu" aria-expanded="false" title="Acciones">
+                    <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
+                  </button>
+                  <div class="podcast-video-clip-menu" role="menu" aria-label="Acciones de escena" data-row-id="${escapeHtml(rowId)}">
+                    <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-configure-scene-duration" data-row-id="${escapeHtml(rowId)}" title="Configurar duración (solo recortar)" aria-label="Configurar duración">
+                      <i class="fas fa-sliders-h" aria-hidden="true"></i>
+                    </button>
+                    <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena" aria-label="Reproducir escena">
+                      <i class="fas fa-play" aria-hidden="true"></i>
+                    </button>
+                    <button class="row-icon-btn${isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video" aria-label="${videoSrc ? "Regenerar video" : "Generar video"}"${isBulkRegenAll ? " disabled" : ""}>
+                      <i class="fas ${isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}" aria-hidden="true"></i>
+                    </button>
+                    <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video" aria-label="Eliminar video"${videoSrc ? "" : " disabled"}>
+                      <i class="fas fa-trash" aria-hidden="true"></i>
+                    </button>
+                  </div>
                 </div>
+                ${isGenerating
+                  ? `<div class="podcast-video-clip-loading" aria-hidden="true">
+                      <span class="podcast-video-scene-loading-ring"></span>
+                      <img src="SnoopyPodcastCreator.png" alt="" class="podcast-video-scene-loading-logo">
+                    </div>`
+                  : ""}
               </div>
             </article>
           `;
         }).join("")}
+        <button class="podcast-track-lane-resize-handle" type="button" data-action="timeline-resize-track-lane" data-track-id="${escapeHtml(trackId)}" aria-label="Redimensionar altura del track" title="Arrastra para cambiar altura (doble click para restablecer)"></button>
       </div>
     </section>
   `);
+    const audioRowHtml = buildMontageAudioSubtrackRowHtml(track, trackIndex, trackItems);
+    if (audioRowHtml) timelineTrackBlocks.push(audioRowHtml);
   });
   timelineTrackBlocks.push(`<div class="podcast-video-track-drop-zone" data-drop-track-index="${trackRows.length}" aria-hidden="true"></div>`);
   const panelTrack = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
@@ -8194,8 +9887,8 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   const panelTrackLoopCount = panelTrackReady ? getPanelMusicLoopCount(activeSession, panelTrack) : 1;
   const panelTrackLoopSegments = panelTrackReady ? getPanelMusicLoopSegments(activeSession, panelTrack) : [];
   const panelTrackLoopWidthPx = panelTrackReady && panelTrackDurationSec > 0.05
-    ? Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, timelineMsToPx(panelTrackEffectiveLoopMs))
-    : Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, Math.min(160, canvasWidthPx - 4));
+    ? Math.max(minAudioLoopPx, timelineMsToPx(panelTrackEffectiveLoopMs, activeSession))
+    : Math.max(minAudioLoopPx, Math.min(160, canvasWidthPx - 4));
   const panelMutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(panelTrack?.mutedLoopIndexes || []));
   const panelLoopGapPx = 6;
   const panelTrackLabel = panelTrackReady
@@ -8204,7 +9897,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   const panelTrackTitle = panelTrackReady
     ? `Música de fondo lista: ${panelTrackLabel}`
     : "Sin audio de fondo cargado";
-  const montageMusicVolume = Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? panelMusicState.volume ?? 22)));
+  const montageMusicVolume = Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0)));
   const montageStabilize = panelMusicState.stabilize === true;
   logPodcastRenderDebug("audio-track-lane-render", {
     sourceType: panelMusicState.sourceType,
@@ -8225,22 +9918,31 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   const uploadedGroupMap = new Map(uploadedTrackGroups.map((group) => [Math.max(0, Math.floor(Number(group?.trackIndex || 0) || 0)), group]));
   const renderUploadedGroupRow = (groupTrack = null, rowIndex = 0) => {
     const safeTrack = normalizePanelMusicTrack(groupTrack);
-    const trackIndex = Math.max(0, Math.floor(Number(rowIndex) || 0));
+    const allUploadedTracks = getPanelMusicUploadedTracks();
+    const trackIndex = (() => {
+      const slotLabel = String(safeTrack?.slotLabel || "").trim();
+      if (slotLabel) {
+        const idx = allUploadedTracks.findIndex((item) => String(item?.slotLabel || "").trim() === slotLabel);
+        if (idx >= 0) return idx;
+      }
+      return Math.max(0, Math.floor(Number(rowIndex) || 0));
+    })();
     const isTrackEnabled = safeTrack?.enabledInSession !== false;
     const group = uploadedGroupMap.get(trackIndex) || null;
     const groupSegments = Array.isArray(group?.segments) ? group.segments : [];
     const groupMutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(safeTrack?.mutedLoopIndexes || []));
-    const rowTitle = `${String(safeTrack?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`} · Bloqueado`;
-    const chipsHtml = groupSegments.map((segment) => {
-      const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
-      const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0));
+	    const rowTitle = String(safeTrack?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`;
+	    const chipsHtml = groupSegments.map((segment) => {
+	      const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
+	      const selectionKey = `u:${trackIndex}:${loopIndex}`;
+      const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession));
       const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
       const widthPx = Math.max(
-        STUDIO_AUDIO_TRACK_MIN_LOOP_PX,
+        minAudioLoopPx,
         Math.min(
           Math.max(
-            STUDIO_AUDIO_TRACK_MIN_LOOP_PX,
-            timelineMsToPx(Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(segment?.endMs || 0) - Number(segment?.startMs || 0))) - panelLoopGapPx
+            minAudioLoopPx,
+            timelineMsToPx(Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(segment?.endMs || 0) - Number(segment?.startMs || 0)), activeSession) - panelLoopGapPx
           ),
           remainingWidthPx
         )
@@ -8249,78 +9951,84 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
       const isActiveLoop = panelMusicState.selectedTrackKind === "uploaded"
         && String(panelMusicState.track?.slotLabel || "").trim() === String(safeTrack?.slotLabel || group?.slotLabel || "").trim()
         && Number(podcastAudioTrackUiState.activeLoopIndex) === loopIndex;
-      const title = String(group?.segments?.length || 0) > 1
-        ? `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · Loop ${loopIndex + 1}`
-        : `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · ${safeTrack?.name || "Audio"}`;
-      return `
-        <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(title)}">
-          <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar inicio de audio"></button>
-          <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar final de audio"></button>
-          <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
-            <i class="fas ${isMutedLoop ? "fa-volume-mute" : "fa-volume-up"}" aria-hidden="true"></i>
-          </button>
-          <span>${escapeHtml(`${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · ${groupSegments.length > 1 ? `Loop ${loopIndex + 1}` : (safeTrack?.name || "Audio")} · ${montageMusicVolume}% · ${montageStabilize ? "Estabilizado" : "Sin estabilizar"}`)}</span>
-        </div>
-      `;
-    }).join("");
-    return `
-      <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track-uploaded-${trackIndex}" data-track-index="-1">
-        <div class="podcast-video-track-label is-locked">
-          <span>${escapeHtml(rowTitle)}</span>
-          <button class="row-icon-btn" type="button" data-action="timeline-toggle-uploaded-track-enabled" data-track-index="${trackIndex}" title="${isTrackEnabled ? "Deshabilitar track en esta sesión" : "Habilitar track en esta sesión"}">
-            <i class="fas ${isTrackEnabled ? "fa-volume-up" : "fa-volume-mute"}"></i>
-          </button>
-          <button class="row-icon-btn" type="button" data-action="timeline-delete-uploaded-track" data-track-index="${trackIndex}" title="Eliminar track">
-            <i class="fas fa-trash"></i>
-          </button>
-          ${rowIndex === 0 ? `<button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio">
-            <i class="fas fa-sliders-h"></i>
-          </button>` : ""}
-        </div>
-        <div class="podcast-video-track-lane podcast-audio-track-lane is-locked" data-track-id="audio-track-uploaded-${trackIndex}" data-track-index="-1">
-          ${chipsHtml}
-        </div>
-      </section>
-    `;
-  };
+	      const title = String(group?.segments?.length || 0) > 1
+	        ? `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · Loop ${loopIndex + 1}`
+	        : `${safeTrack?.slotLabel || `Audio ${trackIndex + 1}`} · ${safeTrack?.name || "Audio"}`;
+	      const isSelected = podcastVideoState.timelineAudioSelection.uploadedKeys.has(selectionKey);
+	      const displayName = String(safeTrack?.name || safeTrack?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`;
+	      return `
+	        <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}${isSelected ? " is-selected" : ""}" data-action="timeline-select-audio-loop" data-track-kind="uploaded" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(title)}">
+	          <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar inicio de audio"></button>
+	          <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" data-track-index="${trackIndex}" aria-label="Recortar final de audio"></button>
+	          <span>${escapeHtml(displayName)}</span>
+	        </div>
+	      `;
+	    }).join("");
+	    return `
+	      <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track-uploaded-${trackIndex}" data-track-index="-1">
+	        <div class="podcast-video-track-label is-locked is-audio-track">
+	          <div class="podcast-track-label-main">
+	            <i class="fas fa-music" aria-hidden="true"></i>
+	            <span class="podcast-track-label-text">${escapeHtml(rowTitle)}</span>
+	          </div>
+	          <div class="podcast-track-label-actions">
+	            <button class="row-icon-btn" type="button" data-action="timeline-toggle-uploaded-track-enabled" data-track-index="${trackIndex}" title="${isTrackEnabled ? "Deshabilitar track en esta sesión" : "Habilitar track en esta sesión"}" aria-label="${isTrackEnabled ? "Deshabilitar track" : "Habilitar track"}">
+	              <i class="fas ${isTrackEnabled ? "fa-volume-up" : "fa-volume-mute"}" aria-hidden="true"></i>
+	            </button>
+	            ${rowIndex === 0 ? `<button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio" aria-label="Configurar mezcla de audio">
+	              <i class="fas fa-sliders-h" aria-hidden="true"></i>
+	            </button>` : ""}
+	            <button class="row-icon-btn" type="button" data-action="timeline-delete-uploaded-track" data-track-index="${trackIndex}" title="Eliminar track" aria-label="Eliminar track">
+	              <i class="fas fa-trash" aria-hidden="true"></i>
+	            </button>
+	          </div>
+	        </div>
+	        <div class="podcast-video-track-lane podcast-audio-track-lane is-locked" data-track-id="audio-track-uploaded-${trackIndex}" data-track-index="-1">
+	          ${chipsHtml}
+	        </div>
+	      </section>
+	    `;
+	  };
   if (panelMusicState.selectedTrackKind === "uploaded" && uploadedTracks.length) {
     timelineTrackBlocks.push(uploadedTracks.map((track, rowIndex) => renderUploadedGroupRow(track, rowIndex)).join(""));
-  } else {
-    timelineTrackBlocks.push(`
-      <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track" data-track-index="-1">
-        <div class="podcast-video-track-label is-locked">
-          <span>Audio de fondo · Bloqueado</span>
-          <button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio">
-            <i class="fas fa-sliders-h"></i>
-          </button>
-        </div>
-        <div class="podcast-video-track-lane podcast-audio-track-lane is-locked" data-track-id="audio-track" data-track-index="-1">
-          ${panelTrackReady
-            ? panelTrackLoopSegments.map((segment) => {
+	  } else {
+	    timelineTrackBlocks.push(`
+	      <section class="podcast-video-track-row podcast-audio-track-row is-locked" data-track-id="audio-track" data-track-index="-1">
+	        <div class="podcast-video-track-label is-locked is-audio-track">
+	          <div class="podcast-track-label-main">
+	            <i class="fas fa-music" aria-hidden="true"></i>
+	            <span class="podcast-track-label-text">Audio de fondo</span>
+	          </div>
+	          <div class="podcast-track-label-actions">
+	            <button class="row-icon-btn podcast-audio-track-config-btn" type="button" data-action="open-audio-track-mix" title="Configurar mezcla de audio" aria-label="Configurar mezcla de audio">
+	              <i class="fas fa-sliders-h" aria-hidden="true"></i>
+	            </button>
+	          </div>
+	        </div>
+	        <div class="podcast-video-track-lane podcast-audio-track-lane is-locked" data-track-id="audio-track" data-track-index="-1">
+	          ${panelTrackReady
+	            ? panelTrackLoopSegments.map((segment) => {
               const loopIndex = Math.max(0, Number(segment?.loopIndex || 0) || 0);
               const segmentLoopMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(segment?.effectiveLoopMs || panelTrackEffectiveLoopMs) || panelTrackEffectiveLoopMs);
               const leftPx = panelTrackDurationSec > 0.05
-                ? Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0) + (loopIndex * panelLoopGapPx))
+                ? Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + (loopIndex * panelLoopGapPx))
                 : 0;
               const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
               const widthPx = panelTrackDurationSec > 0.05
-                ? Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, Math.min(Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, timelineMsToPx(segmentLoopMs) - panelLoopGapPx), remainingWidthPx))
-                : Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, Math.min(160, canvasWidthPx - 4));
+                ? Math.max(minAudioLoopPx, Math.min(Math.max(minAudioLoopPx, timelineMsToPx(segmentLoopMs, activeSession) - panelLoopGapPx), remainingWidthPx))
+                : Math.max(minAudioLoopPx, Math.min(160, canvasWidthPx - 4));
               if (widthPx <= 0) return "";
               const isMutedLoop = panelMutedLoopIndexes.has(loopIndex);
               const isActiveLoop = Number(podcastAudioTrackUiState.activeLoopIndex) === loopIndex;
-              return `
-                <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
-                  <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" aria-label="Recortar inicio de audio"></button>
-                  <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" aria-label="Recortar final de audio"></button>
-                  <button class="podcast-audio-loop-mute-btn" type="button" data-action="timeline-toggle-audio-loop-mute" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" title="${isMutedLoop ? "Activar loop" : "Mutear loop"}">
-                    <i class="fas ${isMutedLoop ? "fa-volume-mute" : "fa-volume-up"}" aria-hidden="true"></i>
-                  </button>
-                  <span data-action="timeline-drag-audio-track" data-loop-index="${loopIndex}">${escapeHtml(`${panelTrackLabel} · Loop ${loopIndex + 1} · ${montageMusicVolume}% · ${montageStabilize ? "Estabilizado" : "Sin estabilizar"}`)}</span>
-                </div>
-              `;
-            }).join("")
-            : `<div class="podcast-audio-timeline-chip is-missing" style="left:0;width:${Math.max(STUDIO_AUDIO_TRACK_MIN_LOOP_PX, Math.min(160, canvasWidthPx - 4))}px" title="${escapeHtml(panelTrackTitle)}">
+	              return `
+	                <div class="podcast-audio-timeline-chip has-audio${isMutedLoop ? " is-muted-loop" : ""}${isActiveLoop ? " is-active" : ""}" data-action="timeline-select-audio-loop" data-track-kind="${escapeHtml(panelMusicState.selectedTrackKind)}" data-loop-index="${loopIndex}" tabindex="0" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`${panelTrackTitle} · Loop ${loopIndex + 1}`)}">
+	                  <button class="podcast-video-clip-handle start" type="button" data-action="timeline-audio-trim-start" data-loop-index="${loopIndex}" aria-label="Recortar inicio de audio"></button>
+	                  <button class="podcast-video-clip-handle end" type="button" data-action="timeline-audio-trim-end" data-loop-index="${loopIndex}" aria-label="Recortar final de audio"></button>
+	                  <span data-action="timeline-drag-audio-track" data-loop-index="${loopIndex}">${escapeHtml(panelTrackLabel)}</span>
+	                </div>
+	              `;
+	            }).join("")
+            : `<div class="podcast-audio-timeline-chip is-missing" style="left:0;width:${Math.max(minAudioLoopPx, Math.min(160, canvasWidthPx - 4))}px" title="${escapeHtml(panelTrackTitle)}">
                 <i class="fas fa-lock" aria-hidden="true"></i>
                 <span>${escapeHtml(panelTrackLabel)} · ${escapeHtml(`${montageMusicVolume}%`)} · ${montageStabilize ? "Estabilizado" : "Sin estabilizar"}</span>
               </div>`}
@@ -8331,7 +10039,9 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
   const timelineHtml = timelineTrackBlocks.join("");
 
   podcastRenderState.timelinePreviewCreateCount += (timelineHtml.match(/data-preview-src=/g) || []).length;
-  els.podcastVideoTimeline.innerHTML = `<div class="podcast-video-timeline-canvas" data-playhead-offset="112" style="width:${canvasWidthPx}px"><div id="podcastTimelinePlayhead" class="podcast-timeline-playhead" aria-hidden="true"><button class="podcast-timeline-playhead-grip" type="button" data-action="timeline-drag-playhead" aria-label="Mover marcador de tiempo"></button></div>${timelineHtml}</div>`;
+  els.podcastVideoTimeline.innerHTML = `<div class="podcast-video-timeline-canvas" data-playhead-offset="${PODCAST_TIMELINE_RULER_OFFSET_PX}" style="width:${canvasWidthPx}px;--pod-timeline-px-per-sec:${Math.max(8, Math.round(pxPerSec))}px"><div id="podcastTimelinePlayhead" class="podcast-timeline-playhead" aria-hidden="true"><button class="podcast-timeline-playhead-grip" type="button" data-action="timeline-drag-playhead" aria-label="Mover marcador de tiempo"></button></div><div id="podcastTimelineMenuLayer" class="podcast-video-timeline-menu-layer" aria-hidden="false"></div>${timelineHtml}</div>`;
+  syncPodcastTimelineLaneOffsetFromDom(activeSession);
+  syncMontageAudioSubtrackAlignment();
   podcastRenderState.timelineStructureKey = structureKey;
   podcastRenderState.timelineMode = mode;
   podcastRenderState.timelineStructureRenderCount += 1;
@@ -8352,7 +10062,6 @@ function syncPodcastTimelineSelectionUi(session = null) {
   if (!els.podcastVideoTimeline) return;
   const activeSession = session || getActiveSession();
   const activeRowId = String(podcastVideoState.activeRowId || "").trim();
-  const activeEdge = getActiveTransitionEdge(activeSession);
   els.podcastVideoTimeline.querySelectorAll(".podcast-video-scene-card.is-active, .podcast-video-timeline-clip.is-active").forEach((node) => {
     node.classList.remove("is-active");
   });
@@ -8362,15 +10071,6 @@ function syncPodcastTimelineSelectionUi(session = null) {
         node.classList.add("is-active");
       }
     });
-  }
-  els.podcastVideoTimeline.querySelectorAll(".podcast-transition-card.is-active").forEach((node) => {
-    node.classList.remove("is-active");
-  });
-  if (activeEdge.fromRowId && activeEdge.toRowId) {
-    const transitionBtn = els.podcastVideoTimeline.querySelector(
-      `.podcast-transition-card[data-from-row-id="${CSS.escape(activeEdge.fromRowId)}"][data-to-row-id="${CSS.escape(activeEdge.toRowId)}"]`
-    );
-    transitionBtn?.classList.add("is-active");
   }
 }
 
@@ -8384,14 +10084,15 @@ function getTrackTimelineItems(trackId = "", session = null) {
   const rows = activeSession?.script?.rows || [];
   const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
   const rowIndexById = new Map(rows.map((row, index) => [String(row?.id || "").trim(), index]));
+  const minClipPx = getStudioTimelineMinClipPx(activeSession);
   return rows
     .map((row) => {
       const rowId = String(row?.id || "").trim();
       if (!rowId) return null;
       const clip = clipMap[rowId];
       if (!clip || String(clip.trackId || "").trim() !== String(trackId || "").trim()) return null;
-      const startPx = timelineMsToPx(Number(clip?.startMs || 0));
-      const widthPx = Math.max(STUDIO_TIMELINE_MIN_CLIP_PX, timelineMsToPx(getTimelineClipEffectiveDurationMs(clip)));
+      const startPx = timelineMsToPx(Number(clip?.startMs || 0), activeSession);
+      const widthPx = Math.max(minClipPx, timelineMsToPx(getTimelineClipEffectiveDurationMs(clip), activeSession));
       return {
         rowId,
         startMs: Number(clip.startMs || 0),
@@ -8407,7 +10108,8 @@ function getTrackTimelineItems(trackId = "", session = null) {
 
 function getTimelineGapBoundsForPoint(trackId = "", pointPx = 0, session = null) {
   const items = getTrackTimelineItems(trackId, session);
-  const totalWidthPx = timelineMsToPx(getTimelineTotalDurationMs(session || getActiveSession()));
+  const activeSession = session || getActiveSession();
+  const totalWidthPx = timelineMsToPx(getTimelineTotalDurationMs(activeSession), activeSession);
   let prevEndPx = 0;
   let nextStartPx = totalWidthPx;
   for (let i = 0; i < items.length; i += 1) {
@@ -8509,7 +10211,7 @@ function updateTimelineGapSelection(currentPx = 0) {
 function beginTimelineGapSelection(lane, event) {
   const session = getActiveSession();
   const trackId = String(lane?.dataset?.trackId || "").trim();
-  if (!trackId || trackId === "audio-track") return false;
+  if (!trackId || trackId === "audio-track" || trackId.startsWith("montage-audio:")) return false;
   const pointPx = getTrackLaneContentPx(lane, event.clientX);
   const gapBounds = getTimelineGapBoundsForPoint(trackId, pointPx, session);
   if (!gapBounds) {
@@ -8555,12 +10257,14 @@ function deleteSelectedTimelineGap() {
     };
   });
   clearTimelineGapSelection();
+  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
   renderPodcastVideoShell(getActiveSession());
   return true;
 }
 
-function syncPodcastTimelinePlayhead(session = null) {
+function syncPodcastTimelinePlayhead(session = null, options = {}) {
   if (!els.podcastVideoTimeline) return;
+  const lightweight = options?.lightweight === true;
   const canvas = els.podcastVideoTimeline.querySelector(".podcast-video-timeline-canvas");
   const playhead = els.podcastVideoTimeline.querySelector("#podcastTimelinePlayhead");
   if (!playhead) return;
@@ -8570,44 +10274,32 @@ function syncPodcastTimelinePlayhead(session = null) {
   const cursorMs = Math.max(0, Math.min(totalMs, Number(podcastVideoState.montageCursorMs || 0)));
   let leftPx = 0;
   let playheadRowId = "";
-  if (mode === "normal") {
-    const clipMap = ensureTimelineClipsByRowId(activeSession, { persist: false });
-    const entries = buildTimelineRuntimeEntries(activeSession);
-    const directEntry = entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || null;
-    const nextEntry = entries.find((entry) => entry.startMs >= cursorMs) || null;
-    const lastEntry = entries.length ? entries[entries.length - 1] : null;
-    const timelineEntry = directEntry || nextEntry || lastEntry || null;
-    const targetRowId = String(timelineEntry?.rowId || podcastVideoState.activeRowId || "").trim();
-    playheadRowId = targetRowId;
-    const activeItem = targetRowId
-      ? els.podcastVideoTimeline.querySelector(`.podcast-video-timeline-item[data-row-id="${targetRowId}"] .podcast-video-scene-card`)
-      : null;
-    const activeClip = targetRowId ? clipMap[targetRowId] : null;
-    const clipStartMs = Math.max(0, Number(activeClip?.startMs || 0));
-    const clipDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineClipEffectiveDurationMs(activeClip));
-    const clipEndMs = clipStartMs + clipDurationMs;
-    const localCursorMs = directEntry
-      ? cursorMs
-      : (nextEntry ? clipStartMs : Math.min(clipEndMs, cursorMs));
-    const localProgress = Math.max(0, Math.min(1, (localCursorMs - clipStartMs) / Math.max(1, clipEndMs - clipStartMs)));
-    if (activeItem) {
-      leftPx = Math.round(Number(activeItem.offsetLeft || 0) + (Number(activeItem.offsetWidth || 0) * localProgress));
-    } else {
-      leftPx = Math.round(timelineMsToPx(cursorMs));
-    }
-  } else {
-    const entries = buildTimelineRuntimeEntries(activeSession);
-    const directEntry = entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || null;
-    const nextEntry = entries.find((entry) => entry.startMs >= cursorMs) || null;
-    const lastEntry = entries.length ? entries[entries.length - 1] : null;
-    playheadRowId = String((directEntry || nextEntry || lastEntry || {}).rowId || podcastVideoState.activeRowId || "").trim();
-    const offsetPx = Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
-    leftPx = offsetPx + Math.round(timelineMsToPx(cursorMs));
-  }
+  const entries = buildTimelineRuntimeEntries(activeSession);
+  const directEntry = entries.find((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs) || null;
+  const lastEntry = entries.length ? entries[entries.length - 1] : null;
+  const focusEntry = directEntry || (cursorMs >= (Number(lastEntry?.endMs || 0) - 1) ? lastEntry : null);
+  playheadRowId = String(focusEntry?.rowId || "").trim();
+  const offsetPx = Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
+  // En modo "normal" el listado de cards no es proporcional al tiempo, pero el
+  // playhead + scrubber sí deben representar la posición temporal real.
+  // Por eso, la posición del playhead siempre se calcula por ms->px (igual que la regla).
+  leftPx = offsetPx + Math.round(timelineMsToPx(cursorMs, activeSession));
   playhead.style.left = `${leftPx}px`;
+  const rulerPlayhead = els.podcastTimelineRuler?.querySelector?.("#podcastTimelineRulerPlayhead") || null;
+  if (rulerPlayhead) {
+    rulerPlayhead.style.left = `${leftPx}px`;
+  }
+  if (els.podcastStudioScrubber) {
+    const ratio = Math.max(0, Math.min(1, cursorMs / Math.max(1, totalMs)));
+    els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
+  }
+  if (els.podcastStudioTime) {
+    els.podcastStudioTime.textContent = `${secondsToClock(cursorMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
+  }
+  if (lightweight) return;
   let focusNode = null;
   els.podcastVideoTimeline
-    .querySelectorAll(".podcast-video-scene-card.is-playhead-focus, .podcast-video-timeline-clip.is-playhead-focus")
+    .querySelectorAll(".podcast-video-scene-card.is-playhead-focus, .podcast-video-timeline-clip.is-playhead-focus, .podcast-montage-audio-chip.is-playhead-focus")
     .forEach((node) => {
       node.classList.remove("is-playhead-focus");
       node.removeAttribute("aria-current");
@@ -8615,7 +10307,7 @@ function syncPodcastTimelinePlayhead(session = null) {
   if (playheadRowId) {
     const escapedRowId = CSS.escape(playheadRowId);
     els.podcastVideoTimeline
-      .querySelectorAll(`.podcast-video-timeline-item[data-row-id="${escapedRowId}"] .podcast-video-scene-card, .podcast-video-timeline-clip[data-row-id="${escapedRowId}"]`)
+      .querySelectorAll(`.podcast-video-timeline-item[data-row-id="${escapedRowId}"] .podcast-video-scene-card, .podcast-video-timeline-clip[data-row-id="${escapedRowId}"], .podcast-montage-audio-chip[data-row-id="${escapedRowId}"]`)
       .forEach((node) => {
         node.classList.add("is-playhead-focus");
         node.setAttribute("aria-current", "true");
@@ -8633,6 +10325,24 @@ function syncPodcastTimelinePlayhead(session = null) {
   ensureTimelinePlayheadVisible(leftPx, focusNode);
 }
 
+function scheduleStudioTimelinePreviewSync(nextMs = 0, entries = null) {
+  podcastTimelinePreviewSyncPayload = {
+    nextMs: Math.max(0, Number(nextMs) || 0),
+    entries: Array.isArray(entries) ? entries : null
+  };
+  if (podcastTimelinePreviewSyncRafId) return;
+  podcastTimelinePreviewSyncRafId = requestAnimationFrame(() => {
+    podcastTimelinePreviewSyncRafId = 0;
+    const payload = podcastTimelinePreviewSyncPayload;
+    podcastTimelinePreviewSyncPayload = null;
+    if (!payload) return;
+    const session = getActiveSession();
+    const runtimeEntries = payload.entries || buildTimelineRuntimeEntries(session);
+    // Drag de playhead: solo scrub/preview, nunca auto-play.
+    syncStudioTimelinePreview(payload.nextMs, runtimeEntries, null, { autoplay: false }).catch(() => {});
+  });
+}
+
 function seekStudioTimelineByClientX(clientX = 0, options = {}) {
   const session = getActiveSession();
   if (!session || !els.podcastVideoTimeline) return;
@@ -8644,7 +10354,9 @@ function seekStudioTimelineByClientX(clientX = 0, options = {}) {
   const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
   const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX)));
   podcastVideoState.montageCursorMs = nextMs;
-  syncPodcastTimelinePlayhead(session);
+  syncPodcastTimelinePlayhead(session, {
+    lightweight: options.lightweightPlayhead === true
+  });
   if (els.podcastStudioScrubber) {
     const ratio = Math.max(0, Math.min(1, nextMs / totalMs));
     els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
@@ -8652,8 +10364,13 @@ function seekStudioTimelineByClientX(clientX = 0, options = {}) {
   if (options.stopMontage === true && podcastVideoState.montageActive) {
     stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
   }
-  const entries = buildTimelineRuntimeEntries(session);
-  syncStudioTimelinePreview(nextMs, entries).catch(() => {});
+  if (options.deferPreview === true) {
+    scheduleStudioTimelinePreviewSync(nextMs, null);
+  } else {
+    const entries = buildTimelineRuntimeEntries(session);
+    const previewOptions = options.autoplay === false ? { autoplay: false } : undefined;
+    syncStudioTimelinePreview(nextMs, entries, null, previewOptions).catch(() => {});
+  }
   if (els.podcastStudioTime) {
     els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
   }
@@ -8666,11 +10383,11 @@ function seekStudioTimelineByRulerClientX(clientX = 0, options = {}) {
   const canvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas");
   const rect = els.podcastTimelineRuler.getBoundingClientRect();
   const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
-  const totalWidthPx = Math.max(1, Number(rulerInner?.offsetWidth || timelineMsToPx(totalMs)));
+  const totalWidthPx = Math.max(1, Number(rulerInner?.offsetWidth || timelineMsToPx(totalMs, session)));
   const offsetPx = Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
   const localX = Math.max(0, Math.min(rect.width, Number(clientX || 0) - rect.left));
   const contentX = Math.max(0, Math.min(totalWidthPx, localX + Number(els.podcastTimelineRuler.scrollLeft || 0) - offsetPx));
-  const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX)));
+  const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX, session)));
   podcastVideoState.montageCursorMs = nextMs;
   syncPodcastTimelinePlayhead(session);
   if (els.podcastStudioScrubber) {
@@ -8681,7 +10398,8 @@ function seekStudioTimelineByRulerClientX(clientX = 0, options = {}) {
     stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
   }
   const entries = buildTimelineRuntimeEntries(session);
-  syncStudioTimelinePreview(nextMs, entries).catch(() => {});
+  // Click en regla: solo posiciona el playhead, no debe reproducir/auto-play.
+  syncStudioTimelinePreview(nextMs, entries, null, { autoplay: false }).catch(() => {});
   if (els.podcastStudioTime) {
     els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
   }
@@ -8712,6 +10430,7 @@ function clearPodcastTimelineDragUi() {
   }
   podcastVideoState.timelineDrag = null;
   document.body.classList.remove("podcast-timeline-dragging");
+  document.body.classList.remove("podcast-timeline-resizing-lane");
 }
 
 function findTimelineActionButton(action = "", rowId = "") {
@@ -8720,6 +10439,18 @@ function findTimelineActionButton(action = "", rowId = "") {
   if (!els.podcastVideoTimeline || !actionName || !key) return null;
   return Array.from(els.podcastVideoTimeline.querySelectorAll(`[data-action="${actionName}"][data-row-id]`))
     .find((node) => String(node.dataset.rowId || "").trim() === key) || null;
+}
+
+function buildTimelineSceneGenerationKey(session = null, rowId = "") {
+  const sessionId = String(session?.id || "").trim();
+  const key = String(rowId || "").trim();
+  if (!sessionId || !key) return "";
+  return `${sessionId}:${key}`;
+}
+
+function isTimelineSceneVideoGenerating(session = null, rowId = "") {
+  const generationKey = buildTimelineSceneGenerationKey(session, rowId);
+  return Boolean(generationKey) && timelineSceneVideoGenerationPending.has(generationKey);
 }
 
 function updateTimelineClipForRow(rowId = "", mutator = null, options = {}) {
@@ -8748,8 +10479,442 @@ function updateTimelineClipForRow(rowId = "", mutator = null, options = {}) {
     podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
     renderPodcastVideoTimeline(getActiveSession());
     syncPodcastStudioInspector(getActiveSession());
+    scheduleCloudAutosave("timeline-clip");
   }
   return changed;
+}
+
+function formatTimelineClipDurationSeconds(value = 0) {
+  const numeric = Math.max(0, toFiniteNumber(value, 0));
+  const rounded = Math.round(numeric * 100) / 100;
+  return rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function getTimelineClipRestoreTarget(clip = null) {
+  const minMs = STUDIO_TIMELINE_MIN_CLIP_MS;
+  const hardMaxMs = Math.max(minMs, Math.round(VIDEO_SCENE_MAX_SEC * 1000));
+  const sourceDurationMs = Math.max(
+    minMs,
+    Math.min(
+      hardMaxMs,
+      Math.round(toFiniteNumber(clip?.sourceDurationMs, 0)) || Math.round(toFiniteNumber(getTimelineClipEffectiveDurationMs(clip), minMs))
+    )
+  );
+  const restoreTrimInMs = 0;
+  const restoreTrimOutMs = Math.max(minMs, Math.min(sourceDurationMs, hardMaxMs));
+  const currentTrimInMs = Math.max(0, Math.round(toFiniteNumber(clip?.trimInMs, 0)));
+  const currentTrimOutMs = Math.max(
+    currentTrimInMs + minMs,
+    Math.round(toFiniteNumber(clip?.trimOutMs, currentTrimInMs + minMs))
+  );
+  const hasCuts = currentTrimInMs !== restoreTrimInMs || currentTrimOutMs !== restoreTrimOutMs;
+  return {
+    restoreTrimInMs,
+    restoreTrimOutMs,
+    sourceDurationMs,
+    hasCuts
+  };
+}
+
+function setTimelineClipDurationModalOpen(isOpen = false) {
+  const open = Boolean(isOpen) && Boolean(String(timelineClipDurationModalState.rowId || "").trim());
+  if (els.timelineClipDurationModal) {
+    els.timelineClipDurationModal.hidden = !open;
+  }
+  if (!open) {
+    // Persist volume overrides even if the RAF already flushed the "preview" update.
+    // Otherwise slider changes can be lost when the user closes without pressing Apply.
+    try {
+      persistTimelineClipVolumeOverridesFromModal({ persist: true });
+    } catch (_) {}
+    // Flush pending per-scene volume updates so slider moves are not lost when
+    // the user closes/cancels quickly (RAF throttle).
+    if (timelineClipVolumePersistRaf) {
+      cancelAnimationFrame(timelineClipVolumePersistRaf);
+      timelineClipVolumePersistRaf = 0;
+      try {
+        persistTimelineClipVolumeOverridesFromModal({ persist: true });
+      } catch (_) {}
+    }
+    timelineClipDurationModalState = {
+      rowId: "",
+      minSec: STUDIO_TIMELINE_MIN_CLIP_MS / 1000,
+      maxSec: STUDIO_TIMELINE_MIN_CLIP_MS / 1000,
+      valueSec: STUDIO_TIMELINE_MIN_CLIP_MS / 1000,
+      relateWithPreviousScene: false,
+      baseVeoVolumePct: 100,
+      baseGeminiVolumePct: 100,
+      veoVolumePct: 100,
+      geminiVolumePct: 100
+    };
+    if (els.timelineClipVeoVolumeRange) {
+      els.timelineClipVeoVolumeRange.value = "100";
+    }
+    if (els.timelineClipVeoVolumeNumber) {
+      els.timelineClipVeoVolumeNumber.value = "100";
+    }
+    if (els.timelineClipGeminiVolumeRange) {
+      els.timelineClipGeminiVolumeRange.value = "100";
+    }
+    if (els.timelineClipGeminiVolumeNumber) {
+      els.timelineClipGeminiVolumeNumber.value = "100";
+    }
+    if (els.timelineClipRelatePrevCheckbox) {
+      els.timelineClipRelatePrevCheckbox.checked = false;
+      els.timelineClipRelatePrevCheckbox.disabled = true;
+      delete els.timelineClipRelatePrevCheckbox.dataset.rowId;
+      delete els.timelineClipRelatePrevCheckbox.dataset.field;
+    }
+    if (els.timelineClipRelatePrevHint) {
+      els.timelineClipRelatePrevHint.textContent = "";
+    }
+    if (els.timelineClipApplyRelateAheadCheckbox) {
+      els.timelineClipApplyRelateAheadCheckbox.checked = false;
+      els.timelineClipApplyRelateAheadCheckbox.disabled = true;
+    }
+    if (els.timelineClipApplyRelateAheadHint) {
+      els.timelineClipApplyRelateAheadHint.textContent = "";
+    }
+    return;
+  }
+  syncTimelineClipDurationModalInputs();
+}
+
+function syncTimelineClipDurationModalInputs(source = "") {
+  const rowId = String(timelineClipDurationModalState.rowId || "").trim();
+  if (!rowId) return;
+  const session = getActiveSession();
+  const rowIndex = (session?.script?.rows || []).findIndex((row) => String(row?.id || "").trim() === rowId);
+  const row = rowIndex >= 0 ? session.script.rows[rowIndex] : null;
+  const clip = ensureTimelineClipsByRowId(session, { persist: false })[rowId];
+  if (!row || !clip) {
+    setTimelineClipDurationModalOpen(false);
+    return;
+  }
+  const previousRow = rowIndex > 0 ? session.script.rows[rowIndex - 1] : null;
+  const previousRowId = String(previousRow?.id || "").trim();
+  const previousVideoClip = previousRowId ? resolveDialogueVideoForRow(session, previousRowId) : null;
+  const previousVideoPrimary = resolveDialogueVideoSegments(previousVideoClip)[0] || previousVideoClip || null;
+  const canRelateWithPrevious = Boolean(previousRowId && hasStoredMediaSource(previousVideoPrimary));
+  const hasForwardScenes = rowIndex >= 0 && rowIndex < Math.max(0, (session?.script?.rows || []).length - 1);
+  const hardMaxSec = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS / 1000, VIDEO_SCENE_MAX_SEC);
+  const currentDurationSec = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS / 1000, Math.min(hardMaxSec, getTimelineClipEffectiveDurationMs(clip) / 1000));
+  const minSec = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS / 1000, toFiniteNumber(timelineClipDurationModalState.minSec, STUDIO_TIMELINE_MIN_CLIP_MS / 1000));
+  const maxSec = Math.max(minSec, Math.min(hardMaxSec, currentDurationSec));
+  let nextSec = toFiniteNumber(timelineClipDurationModalState.valueSec, maxSec);
+  if (source === "range" && els.timelineClipDurationRange) {
+    nextSec = toFiniteNumber(els.timelineClipDurationRange.value, nextSec);
+  } else if (source === "number" && els.timelineClipDurationNumber) {
+    nextSec = toFiniteNumber(String(els.timelineClipDurationNumber.value || "").replace(",", ".").trim(), nextSec);
+  }
+  nextSec = Math.max(minSec, Math.min(maxSec, Math.round(nextSec * 100) / 100));
+  const baseVeoVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseVeoVolumePct, 100))));
+  const baseGeminiVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseGeminiVolumePct, 100))));
+  const clipVeoOverride = toFiniteNumber(clip.veoVolumeOverridePct, Number.NaN);
+  const clipGeminiOverride = toFiniteNumber(clip.geminiVolumeOverridePct, Number.NaN);
+  const lastBaseVeo = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseVeoVolumePct, baseVeoVolumePct))));
+  const lastBaseGemini = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.baseGeminiVolumePct, baseGeminiVolumePct))));
+  const currentVeoState = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.veoVolumePct, baseVeoVolumePct))));
+  const currentGeminiState = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.geminiVolumePct, baseGeminiVolumePct))));
+  let nextVeoVolume = Number.isFinite(clipVeoOverride)
+    ? Math.max(0, Math.min(100, Math.round(clipVeoOverride)))
+    : (currentVeoState === lastBaseVeo ? baseVeoVolumePct : currentVeoState);
+  if (source === "veoRange" && els.timelineClipVeoVolumeRange) {
+    nextVeoVolume = Math.round(Math.max(0, Math.min(100, toFiniteNumber(els.timelineClipVeoVolumeRange.value, nextVeoVolume))));
+  } else if (source === "veoNumber" && els.timelineClipVeoVolumeNumber) {
+    nextVeoVolume = Math.round(Math.max(0, Math.min(100, toFiniteNumber(String(els.timelineClipVeoVolumeNumber.value || "").trim(), nextVeoVolume))));
+  }
+  let nextGeminiVolume = Number.isFinite(clipGeminiOverride)
+    ? Math.max(0, Math.min(100, Math.round(clipGeminiOverride)))
+    : (currentGeminiState === lastBaseGemini ? baseGeminiVolumePct : currentGeminiState);
+  if (source === "geminiRange" && els.timelineClipGeminiVolumeRange) {
+    nextGeminiVolume = Math.round(Math.max(0, Math.min(100, toFiniteNumber(els.timelineClipGeminiVolumeRange.value, nextGeminiVolume))));
+  } else if (source === "geminiNumber" && els.timelineClipGeminiVolumeNumber) {
+    nextGeminiVolume = Math.round(Math.max(0, Math.min(100, toFiniteNumber(String(els.timelineClipGeminiVolumeNumber.value || "").trim(), nextGeminiVolume))));
+  }
+  timelineClipDurationModalState = {
+    rowId,
+    minSec,
+    maxSec,
+    valueSec: nextSec,
+    relateWithPreviousScene: row?.relateWithPreviousScene === true,
+    baseVeoVolumePct,
+    baseGeminiVolumePct,
+    veoVolumePct: nextVeoVolume,
+    geminiVolumePct: nextGeminiVolume
+  };
+  if (els.timelineClipDurationRange) {
+    els.timelineClipDurationRange.min = String(minSec);
+    els.timelineClipDurationRange.max = String(maxSec);
+    els.timelineClipDurationRange.value = String(nextSec);
+  }
+  if (els.timelineClipDurationNumber) {
+    els.timelineClipDurationNumber.min = String(minSec);
+    els.timelineClipDurationNumber.max = String(maxSec);
+    els.timelineClipDurationNumber.value = String(nextSec);
+  }
+  if (els.timelineClipVeoVolumeRange) {
+    els.timelineClipVeoVolumeRange.value = String(nextVeoVolume);
+  }
+  if (els.timelineClipVeoVolumeNumber) {
+    els.timelineClipVeoVolumeNumber.value = String(nextVeoVolume);
+  }
+  if (els.timelineClipGeminiVolumeRange) {
+    els.timelineClipGeminiVolumeRange.value = String(nextGeminiVolume);
+  }
+  if (els.timelineClipGeminiVolumeNumber) {
+    els.timelineClipGeminiVolumeNumber.value = String(nextGeminiVolume);
+  }
+  if (els.timelineClipDurationLabel) {
+    const speakerName = resolveSpeakerDisplayName(row?.speaker, session);
+    els.timelineClipDurationLabel.textContent = `Escena ${rowIndex + 1} · ${speakerName}`;
+  }
+  if (els.timelineClipDurationHint) {
+    els.timelineClipDurationHint.textContent = `Máximo actual: ${formatTimelineClipDurationSeconds(maxSec)}s · mínimo: ${formatTimelineClipDurationSeconds(minSec)}s. Solo recorte.`;
+  }
+  if (els.timelineClipRelatePrevCheckbox) {
+    els.timelineClipRelatePrevCheckbox.dataset.rowId = rowId;
+    els.timelineClipRelatePrevCheckbox.dataset.field = "relateWithPreviousScene";
+    els.timelineClipRelatePrevCheckbox.checked = row?.relateWithPreviousScene === true;
+    els.timelineClipRelatePrevCheckbox.disabled = !canRelateWithPrevious;
+  }
+  if (els.timelineClipRelatePrevHint) {
+    if (!previousRowId) {
+      els.timelineClipRelatePrevHint.textContent = "No hay escena anterior para relacionar.";
+    } else if (!hasStoredMediaSource(previousVideoPrimary)) {
+      els.timelineClipRelatePrevHint.textContent = "Genera el video de la escena anterior para activar continuidad.";
+    } else {
+      els.timelineClipRelatePrevHint.textContent = "Usa el último frame del video anterior como referencia para intentar continuidad sin cortes visibles.";
+    }
+  }
+  if (els.timelineClipApplyRelateAheadCheckbox) {
+    els.timelineClipApplyRelateAheadCheckbox.disabled = !hasForwardScenes;
+    if (!hasForwardScenes) els.timelineClipApplyRelateAheadCheckbox.checked = false;
+  }
+  if (els.timelineClipApplyRelateAheadHint) {
+    els.timelineClipApplyRelateAheadHint.textContent = hasForwardScenes
+      ? "Replica esta selección de continuidad hacia adelante (escenas posteriores)."
+      : "No hay escenas posteriores para aplicar.";
+  }
+  if (els.resetTimelineClipDurationBtn) {
+    const restoreTarget = getTimelineClipRestoreTarget(clip);
+    els.resetTimelineClipDurationBtn.disabled = !restoreTarget.hasCuts;
+  }
+}
+
+function applyTimelineClipDurationFromModal() {
+  const rowId = String(timelineClipDurationModalState.rowId || "").trim();
+  if (!rowId) return;
+  syncTimelineClipDurationModalInputs("number");
+  syncTimelineClipDurationModalInputs("veoNumber");
+  syncTimelineClipDurationModalInputs("geminiNumber");
+  const applyRelateAhead = els.timelineClipApplyRelateAheadCheckbox?.checked === true;
+  const relateValue = els.timelineClipRelatePrevCheckbox?.checked === true;
+  const desiredVeoVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.veoVolumePct, 100))));
+  const desiredGeminiVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.geminiVolumePct, 100))));
+  const desiredVeoOverridePct = desiredVeoVolumePct;
+  const desiredGeminiOverridePct = desiredGeminiVolumePct;
+
+  const applyRelateWithPreviousForward = (pivotRowId = "", nextValue = false) => {
+    const pivotKey = String(pivotRowId || "").trim();
+    if (!pivotKey) return false;
+    const session = getActiveSession();
+    const rows = Array.isArray(session?.script?.rows) ? session.script.rows : [];
+    const pivotIndex = rows.findIndex((row) => String(row?.id || "").trim() === pivotKey);
+    if (pivotIndex < 0 || pivotIndex >= rows.length - 1) return false;
+    let changed = false;
+    const nextRows = rows.map((row, index) => {
+      if (index <= pivotIndex) return row;
+      const prevRow = rows[index - 1] || null;
+      const prevRowId = String(prevRow?.id || "").trim();
+      if (!prevRowId) return row;
+      const desired = nextValue === true;
+      const current = row?.relateWithPreviousScene === true;
+      if (current === desired) return row;
+      changed = true;
+      return {
+        ...row,
+        relateWithPreviousScene: desired
+      };
+    });
+    if (!changed) return false;
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        rows: nextRows
+      }
+    }), { render: false });
+    scheduleCloudAutosave("timeline-clip-relate-ahead");
+    return true;
+  };
+
+  const desiredSec = Math.max(
+    timelineClipDurationModalState.minSec,
+    Math.min(timelineClipDurationModalState.maxSec, toFiniteNumber(timelineClipDurationModalState.valueSec, timelineClipDurationModalState.maxSec))
+  );
+  const desiredMs = Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    snapTimelineMs(Math.round(desiredSec * 1000))
+  );
+  let durationChanged = false;
+  let volumeChanged = false;
+  const changed = updateTimelineClipForRow(rowId, (current) => {
+    const trimInMs = Math.max(0, Number(current?.trimInMs || 0));
+    const maxTrimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Number(current?.trimOutMs || trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS));
+    const nextTrimOutMs = Math.max(
+      trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.min(maxTrimOutMs, trimInMs + desiredMs)
+    );
+    durationChanged = Number(current?.trimOutMs || 0) !== nextTrimOutMs;
+    const currentVeoOverride = toFiniteNumber(current?.veoVolumeOverridePct, Number.NaN);
+    const currentGeminiOverride = toFiniteNumber(current?.geminiVolumeOverridePct, Number.NaN);
+    const normalizedCurrentVeoOverride = Number.isFinite(currentVeoOverride) ? Math.max(0, Math.min(100, Math.round(currentVeoOverride))) : null;
+    const normalizedCurrentGeminiOverride = Number.isFinite(currentGeminiOverride) ? Math.max(0, Math.min(100, Math.round(currentGeminiOverride))) : null;
+    volumeChanged = normalizedCurrentVeoOverride !== desiredVeoOverridePct
+      || normalizedCurrentGeminiOverride !== desiredGeminiOverridePct;
+    return {
+      ...current,
+      trimOutMs: nextTrimOutMs,
+      veoVolumeOverridePct: desiredVeoOverridePct,
+      geminiVolumeOverridePct: desiredGeminiOverridePct
+    };
+  });
+  const relateAheadChanged = applyRelateAhead ? applyRelateWithPreviousForward(rowId, relateValue) : false;
+  if (!changed && !relateAheadChanged) {
+    setGenerationStatus("No hubo cambios en la duración de la escena.", "is-live");
+    setTimelineClipDurationModalOpen(false);
+    return;
+  }
+  const refreshedClip = ensureTimelineClipsByRowId(getActiveSession(), { persist: false })[rowId];
+  const nextDurationSec = Number((getTimelineClipEffectiveDurationMs(refreshedClip) / 1000).toFixed(2));
+  const baseLabel = durationChanged && volumeChanged
+    ? `Escena recortada a ${nextDurationSec}s · volumen actualizado`
+    : (durationChanged ? `Escena recortada a ${nextDurationSec}s` : "Volumen actualizado");
+  setGenerationStatus(
+    applyRelateAhead && relateAheadChanged
+      ? `${baseLabel} · continuidad ${relateValue ? "activada" : "desactivada"} en escenas siguientes`
+      : (changed ? baseLabel : `Continuidad ${relateValue ? "activada" : "desactivada"} en escenas siguientes`),
+    "is-live"
+  );
+  if (durationChanged) {
+    syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+  }
+  setTimelineClipDurationModalOpen(false);
+}
+
+function persistTimelineClipVolumeOverridesFromModal(options = {}) {
+  const rowId = String(timelineClipDurationModalState.rowId || "").trim();
+  if (!rowId) return false;
+  const session = getActiveSession();
+  if (!session) return false;
+  const desiredVeoOverridePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.veoVolumePct, 100))));
+  const desiredGeminiOverridePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(timelineClipDurationModalState.geminiVolumePct, 100))));
+  const changed = updateTimelineClipForRow(rowId, (current) => ({
+    ...current,
+    veoVolumeOverridePct: desiredVeoOverridePct,
+    geminiVolumeOverridePct: desiredGeminiOverridePct
+  }), { persist: options.persist === true });
+  if (changed && String(podcastVideoState.activeRowId || "").trim() === rowId) {
+    applyActiveTimelineClipMixToPlayback(session, rowId);
+  }
+  return changed;
+}
+
+function schedulePersistTimelineClipVolumeOverrides() {
+  if (timelineClipVolumePersistRaf) cancelAnimationFrame(timelineClipVolumePersistRaf);
+  timelineClipVolumePersistRaf = requestAnimationFrame(() => {
+    timelineClipVolumePersistRaf = 0;
+    try { persistTimelineClipVolumeOverridesFromModal({ persist: false }); } catch (_) {}
+  });
+  if (timelineClipVolumePersistTimeout) clearTimeout(timelineClipVolumePersistTimeout);
+  timelineClipVolumePersistTimeout = setTimeout(() => {
+    timelineClipVolumePersistTimeout = 0;
+    try { persistTimelineClipVolumeOverridesFromModal({ persist: true }); } catch (_) {}
+  }, 900);
+}
+
+function ensureMontageDefaultVolumesPersisted(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return false;
+  const rawCfg = activeSession?.podcastVideoConfig && typeof activeSession.podcastVideoConfig === "object"
+    ? activeSession.podcastVideoConfig
+    : {};
+  const hasVeo = Object.prototype.hasOwnProperty.call(rawCfg, "montageDefaultVeoVolumePct");
+  const hasGemini = Object.prototype.hasOwnProperty.call(rawCfg, "montageDefaultGeminiVolumePct");
+  if (hasVeo && hasGemini) return false;
+  const cfg = getPodcastVideoConfig(activeSession);
+  const audioMode = String(cfg.audioMode || "gemini-live-per-scene").trim().toLowerCase();
+  const fallbackVeo = audioMode === "veo-native-audio"
+    ? Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.clipVolume, 100))))
+    : 0;
+  const fallbackGemini = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.masterVolume, 100))));
+  upsertPodcastVideoConfig((base) => ({
+    ...base,
+    montageDefaultVeoVolumePct: hasVeo ? base.montageDefaultVeoVolumePct : fallbackVeo,
+    montageDefaultGeminiVolumePct: hasGemini ? base.montageDefaultGeminiVolumePct : fallbackGemini
+  }));
+  return true;
+}
+
+function resetTimelineClipDurationFromModal() {
+  const rowId = String(timelineClipDurationModalState.rowId || "").trim();
+  if (!rowId) return;
+  const clip = ensureTimelineClipsByRowId(getActiveSession(), { persist: false })[rowId];
+  if (!clip) return;
+  const restoreTarget = getTimelineClipRestoreTarget(clip);
+  if (!restoreTarget.hasCuts) {
+    setGenerationStatus("La escena ya está restablecida sin cortes.", "is-live");
+    return;
+  }
+  const changed = updateTimelineClipForRow(rowId, (current) => ({
+    ...current,
+    trimInMs: restoreTarget.restoreTrimInMs,
+    trimOutMs: restoreTarget.restoreTrimOutMs
+  }));
+  if (!changed) {
+    setGenerationStatus("No se pudo restablecer la escena.", "");
+    return;
+  }
+  const restoredSec = Number((restoreTarget.restoreTrimOutMs / 1000).toFixed(2));
+  timelineClipDurationModalState.valueSec = restoredSec;
+  syncTimelineClipDurationModalInputs();
+  setGenerationStatus(`Escena restablecida a ${restoredSec}s`, "is-live");
+  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+}
+
+function openTimelineClipDurationConfig(rowId = "") {
+  const key = String(rowId || "").trim();
+  if (!key) return;
+  const session = getActiveSession();
+  ensureMontageDefaultVolumesPersisted(session);
+  const clips = ensureTimelineClipsByRowId(session, { persist: false });
+  const clip = clips[key];
+  if (!clip) return;
+  const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
+  const hardMaxSec = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS / 1000, VIDEO_SCENE_MAX_SEC);
+  const currentDurationSec = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS / 1000, Math.min(hardMaxSec, getTimelineClipEffectiveDurationMs(clip) / 1000));
+  const roundedDurationSec = Math.round(currentDurationSec * 100) / 100;
+  const cfg = getPodcastVideoConfig(session);
+  const baseVeoVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultVeoVolumePct, 0))));
+  const baseGeminiVolumePct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100))));
+  const clipVeoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
+  const clipGeminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
+  timelineClipDurationModalState = {
+    rowId: key,
+    minSec: STUDIO_TIMELINE_MIN_CLIP_MS / 1000,
+    maxSec: Math.min(hardMaxSec, roundedDurationSec),
+    valueSec: roundedDurationSec,
+    relateWithPreviousScene: row?.relateWithPreviousScene === true,
+    baseVeoVolumePct,
+    baseGeminiVolumePct,
+    veoVolumePct: Math.max(0, Math.min(100, Math.round(Number.isFinite(clipVeoOverride) ? clipVeoOverride : baseVeoVolumePct))),
+    geminiVolumePct: Math.max(0, Math.min(100, Math.round(Number.isFinite(clipGeminiOverride) ? clipGeminiOverride : baseGeminiVolumePct)))
+  };
+  setTimelineClipDurationModalOpen(true);
+  if (els.timelineClipApplyRelateAheadCheckbox) {
+    els.timelineClipApplyRelateAheadCheckbox.checked = false;
+  }
 }
 
 function beginTimelineClipDrag(mode = "move", rowId = "", event = null) {
@@ -8846,6 +11011,122 @@ function beginTimelineAudioMoveDrag(event = null) {
   document.body.classList.add("podcast-timeline-dragging");
 }
 
+function beginTimelineGeminiSegmentMoveDrag(event = null) {
+  if (!event) return;
+  const rowId = String(event?.target?.closest?.("[data-row-id]")?.dataset?.rowId || "").trim();
+  if (!rowId) return;
+  const session = getActiveSession();
+  const cfg = getPodcastVideoConfig(session);
+  const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+  if (!track.enabled || !track.segments.length) return;
+  const runtimeEntries = buildTimelineRuntimeEntries(session);
+  const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
+  const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+  const multi = event.metaKey || event.ctrlKey;
+  if (!multi) {
+    podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
+    podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+  } else if (!podcastVideoState.timelineAudioSelection.geminiRowIds.has(rowId)) {
+    podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
+    podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+  }
+  const selected = Array.from(podcastVideoState.timelineAudioSelection.geminiRowIds);
+  const segmentsSnapshot = track.segments
+    .filter((segment) => selected.includes(String(segment?.rowId || "").trim()))
+    .map((segment) => {
+      const segRowId = String(segment?.rowId || "").trim();
+      const durationMs = Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
+      );
+      const runtime = segRowId ? runtimeByRowId.get(segRowId) : null;
+      const sceneStartMs = runtime ? Math.max(0, Number(runtime.startMs || 0) || 0) : 0;
+      const sceneEndMs = runtime ? Math.max(sceneStartMs + STUDIO_TIMELINE_MIN_CLIP_MS, Number(runtime.endMs || 0) || 0) : totalMs;
+      const maxStartMs = Math.max(sceneStartMs, Math.min(totalMs, sceneEndMs - durationMs));
+      return {
+        rowId: segRowId,
+        audioSrc: String(segment?.audioSrc || "").trim(),
+        startMs: Number(segment?.startMs || 0),
+        durationMs,
+        endMs: Number(segment?.endMs || 0),
+        trimInMs: Number(segment?.trimInMs || 0),
+        trimOutMs: Number(segment?.trimOutMs || 0),
+        sceneIndex: Number(segment?.sceneIndex || 1),
+        speakerName: String(segment?.speakerName || "").trim(),
+        minStartMs: sceneStartMs,
+        maxStartMs
+      };
+    });
+  if (!segmentsSnapshot.length) return;
+  podcastVideoState.timelineDrag = {
+    mode: "gemini-segment-move",
+    startClientX: Number(event.clientX || 0),
+    segmentsSnapshot
+  };
+  document.body.classList.add("podcast-timeline-dragging");
+}
+
+function beginTimelineUploadedAudioSegmentMoveDrag(event = null) {
+  if (!event) return;
+  const chip = event?.target?.closest?.(".podcast-audio-timeline-chip.has-audio[data-track-index][data-loop-index]");
+  if (!chip) return;
+  const trackIndex = Math.max(0, Math.floor(Number(chip.dataset.trackIndex || 0) || 0));
+  const loopIndex = Math.max(0, Math.floor(Number(chip.dataset.loopIndex || 0) || 0));
+  const selectionKey = `u:${trackIndex}:${loopIndex}`;
+  const multi = event.metaKey || event.ctrlKey;
+  if (!multi) {
+    podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
+    podcastVideoState.timelineAudioSelection.uploadedKeys.add(selectionKey);
+  } else if (!podcastVideoState.timelineAudioSelection.uploadedKeys.has(selectionKey)) {
+    podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
+    podcastVideoState.timelineAudioSelection.uploadedKeys.add(selectionKey);
+  }
+  const session = getActiveSession();
+  const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+  const segments = buildUploadedPanelMusicSegments(session);
+  const segmentByKey = new Map(segments.map((segment) => [
+    `u:${Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0))}:${Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0))}`,
+    segment
+  ]));
+  const selectedKeys = Array.from(podcastVideoState.timelineAudioSelection.uploadedKeys);
+  const segmentsSnapshot = selectedKeys
+    .map((key) => {
+      const segment = segmentByKey.get(key) || null;
+      if (!segment) return null;
+      const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) - Number(segment?.startMs || 0) || 0));
+      return {
+        selectionKey: key,
+        trackIndex: Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0)),
+        loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
+        startMs: Math.max(0, Math.round(Number(segment?.startMs || 0) || 0)),
+        durationMs,
+        maxStartMs: Math.max(0, totalMs - durationMs)
+      };
+    })
+    .filter(Boolean);
+  if (!segmentsSnapshot.length) return;
+  podcastVideoState.timelineDrag = {
+    mode: "uploaded-segment-move",
+    startClientX: Number(event.clientX || 0),
+    segmentsSnapshot
+  };
+  document.body.classList.add("podcast-timeline-dragging");
+}
+
+function beginTimelineGeminiTrackReorderDrag(event = null) {
+  if (!event) return;
+  const session = getActiveSession();
+  const cfg = getPodcastVideoConfig(session);
+  const trackRows = ensureTimelineTracks(session, { persist: false });
+  const initialIndex = Math.max(0, Math.min(trackRows.length, Math.floor(Number(cfg?.geminiDialogueTrackIndex ?? 0) || 0)));
+  podcastVideoState.timelineDrag = {
+    mode: "gemini-track-reorder",
+    startClientY: Number(event.clientY || 0),
+    initialIndex
+  };
+  document.body.classList.add("podcast-timeline-dragging");
+}
+
 function resolveTimelineDragDropTarget(clientX = 0, clientY = 0) {
   if (!els.podcastVideoTimeline) return { trackId: "", dropIndex: null };
   const hit = document.elementFromPoint(clientX, clientY);
@@ -8886,6 +11167,29 @@ function applyTimelineDragTargetUi(trackId = "", dropIndex = null) {
 function applyTimelineClipDrag(event = null) {
   const drag = podcastVideoState.timelineDrag;
   if (!drag || !event) return;
+  if (drag.mode === "gemini-track-reorder") {
+    const clientX = Number(event.clientX || 0);
+    const clientY = Number(event.clientY || 0);
+    const deltaY = clientY - Number(drag.startClientY || 0);
+    if (Math.abs(deltaY) > 2) {
+      drag.moved = true;
+    }
+    const hit = document.elementFromPoint(clientX, clientY);
+    const hitRow = hit?.closest?.(".podcast-video-track-row[data-track-index]");
+    const session = getActiveSession();
+    const tracks = ensureTimelineTracks(session, { persist: false });
+    let dropIndex = null;
+    if (hitRow && !hitRow.classList.contains("podcast-gemini-dialogue-track-row")) {
+      const idx = Number(hitRow.dataset.trackIndex);
+      const rect = hitRow.getBoundingClientRect();
+      if (Number.isFinite(idx) && idx >= 0 && rect && rect.height > 0) {
+        dropIndex = clientY < rect.top + rect.height / 2 ? idx : idx + 1;
+      }
+    }
+    drag.targetIndex = Number.isFinite(dropIndex) ? Math.max(0, Math.min(tracks.length, Math.round(dropIndex))) : null;
+    applyTimelineDragTargetUi("", Number.isFinite(drag.targetIndex) ? drag.targetIndex : null);
+    return;
+  }
   if (drag.mode === "move") {
     const target = resolveTimelineDragDropTarget(Number(event.clientX || 0), Number(event.clientY || 0));
     drag.targetTrackId = String(target.trackId || "").trim();
@@ -8947,6 +11251,93 @@ function applyTimelineClipDrag(event = null) {
     }));
     return;
   }
+  if (drag.mode === "gemini-segment-move") {
+    const session = getActiveSession();
+    const cfg = getPodcastVideoConfig(session);
+    const baseTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+    const snapshot = Array.isArray(drag.segmentsSnapshot) ? drag.segmentsSnapshot : [];
+    if (!baseTrack.enabled || !snapshot.length) return;
+    let targetDelta = deltaMs;
+    const minProjected = snapshot.reduce((acc, segment) => Math.min(acc, Number(segment.startMs || 0) + targetDelta), Number.POSITIVE_INFINITY);
+    if (minProjected < 0) {
+      targetDelta = targetDelta - minProjected;
+    }
+    const patchByRowId = new Map(snapshot.map((segment) => {
+      const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(segment.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
+      const minStartMs = Math.max(0, Math.round(Number(segment.minStartMs ?? 0) || 0));
+      const maxStartMsRaw = Number(segment.maxStartMs ?? Number.POSITIVE_INFINITY);
+      const maxStartMs = Number.isFinite(maxStartMsRaw) ? Math.max(minStartMs, Math.round(maxStartMsRaw)) : Number.POSITIVE_INFINITY;
+      const unclampedStartMs = snapTimelineMsWithStep(Number(segment.startMs || 0) + targetDelta, dragStepMs);
+      const startMs = Math.max(minStartMs, Math.min(maxStartMs, Math.max(0, unclampedStartMs)));
+      return [String(segment.rowId || "").trim(), { startMs, endMs: startMs + durationMs, durationMs }];
+    }));
+    const nextSegments = baseTrack.segments.map((segment) => {
+      const key = String(segment?.rowId || "").trim();
+      const patch = patchByRowId.get(key);
+      if (!patch) return segment;
+      return {
+        ...segment,
+        startMs: patch.startMs,
+        endMs: patch.endMs,
+        durationMs: patch.durationMs
+      };
+    });
+    upsertPodcastVideoConfig((nextCfg) => ({
+      ...nextCfg,
+      geminiDialogueTrack: normalizeGeminiDialogueTrack({
+        ...(nextCfg.geminiDialogueTrack || {}),
+        enabled: true,
+        segments: nextSegments
+      })
+    }));
+    renderPodcastVideoTimeline(getActiveSession());
+    syncPodcastStudioInspector(getActiveSession());
+    // Si el usuario está previsualizando (sin montaje activo) y mueve el chip de voz,
+    // fuerza un resync del preview para que respete el nuevo `segment.startMs`.
+    try {
+      const currentMs = Math.max(0, Number(podcastVideoState.montageCursorMs || 0));
+      const runtimeEntries = buildTimelineRuntimeEntries(session);
+      const isPreviewPlaying = Boolean([els.podcastActiveSpeakerVideo, els.podcastActiveSpeakerVideoAlt].filter(Boolean).some((video) => video && !video.paused));
+      syncStudioTimelinePreview(currentMs, runtimeEntries, null, { autoplay: isPreviewPlaying }).catch(() => {});
+    } catch (_) {}
+    return;
+  }
+  if (drag.mode === "uploaded-segment-move") {
+    const session = getActiveSession();
+    const snapshot = Array.isArray(drag.segmentsSnapshot) ? drag.segmentsSnapshot : [];
+    if (!snapshot.length) return;
+    const selectedByTrack = new Map();
+    snapshot.forEach((seg) => {
+      const trackIndex = Math.max(0, Math.floor(Number(seg.trackIndex || 0) || 0));
+      if (!selectedByTrack.has(trackIndex)) selectedByTrack.set(trackIndex, []);
+      selectedByTrack.get(trackIndex).push(seg);
+    });
+    const tracks = getPanelMusicUploadedTracks();
+    const selectedSlotLabel = String(panelMusicState.track?.slotLabel || "").trim();
+    const selectedIndex = tracks.findIndex((track) => String(track?.slotLabel || "").trim() === selectedSlotLabel);
+    const nextTracks = [...tracks];
+    snapshot.forEach((seg) => {
+      const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(seg.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
+      const startMs = Math.max(0, Math.min(Number(seg.maxStartMs || 0), snapTimelineMsWithStep(Number(seg.startMs || 0) + deltaMs, dragStepMs)));
+      const trackIndex = Math.max(0, Math.floor(Number(seg.trackIndex || 0) || 0));
+      const loopIndex = Math.max(0, Math.floor(Number(seg.loopIndex || 0) || 0));
+      const track = nextTracks[trackIndex] || null;
+      if (!track) return;
+      const overrides = Array.isArray(track.segmentStartOverrides) ? track.segmentStartOverrides : [];
+      const filtered = overrides.filter((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) !== loopIndex);
+      filtered.push({ loopIndex, startMs: Math.max(0, Math.round(startMs)) });
+      nextTracks[trackIndex] = {
+        ...track,
+        segmentStartOverrides: filtered.sort((a, b) => Number(a.loopIndex || 0) - Number(b.loopIndex || 0))
+      };
+    });
+    setPanelMusicUploadedTracks(nextTracks, selectedIndex >= 0 ? { selectIndex: selectedIndex } : {});
+    persistPanelMusicSettings();
+    persistPanelMusicToActiveSession();
+    renderPodcastVideoTimeline(session);
+    syncPodcastStudioInspector(session);
+    return;
+  }
   if (drag.mode === "move") {
     const session = getActiveSession();
     const clips = ensureTimelineClipsByRowId(session);
@@ -8980,31 +11371,6 @@ function applyTimelineClipDrag(event = null) {
       if (!normalized) return;
       nextClips[key] = normalized;
     });
-    if (targetDelta > 0 && !shouldMoveTrack && !Number.isFinite(drag.targetDropIndex)) {
-      const sourceTrackId = String(drag.sourceTrackId || "").trim();
-      const orderedTrackClips = Object.values(nextClips)
-        .filter((item) => String(item?.trackId || "").trim() === sourceTrackId)
-        .sort((a, b) => (
-          Number(a.startMs || 0) - Number(b.startMs || 0)
-          || Number(rowIndexById.get(String(a.rowId || "").trim()) || 0) - Number(rowIndexById.get(String(b.rowId || "").trim()) || 0)
-        ));
-      for (let i = 1; i < orderedTrackClips.length; i += 1) {
-        const prev = orderedTrackClips[i - 1];
-        const current = orderedTrackClips[i];
-        const prevEnd = getTimelineClipEndMs(prev);
-        const currentStart = Math.max(0, Number(current.startMs || 0));
-        if (currentStart >= prevEnd) continue;
-        const currentRowId = String(current.rowId || "").trim();
-        if (!currentRowId) continue;
-        const shifted = normalizeTimelineClipItem({
-          ...current,
-          startMs: snapTimelineMsWithStep(prevEnd, dragStepMs)
-        }, currentRowId);
-        if (!shifted) continue;
-        nextClips[currentRowId] = shifted;
-        orderedTrackClips[i] = shifted;
-      }
-    }
     upsertPodcastVideoConfig((cfg) => ({
       ...cfg,
       timelineVersion: STUDIO_TIMELINE_VERSION,
@@ -9060,6 +11426,7 @@ function applyTimelineClipDrag(event = null) {
     });
     podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
     renderPodcastVideoTimeline(getActiveSession());
+    syncTimelineClipDurationModalInputs();
     syncPodcastStudioInspector(getActiveSession());
     return;
   }
@@ -9114,13 +11481,28 @@ function applyTimelineClipDrag(event = null) {
     });
     podcastVideoState.timelineDurationSec = Math.max(0, getTimelineTotalDurationMs(getActiveSession()) / 1000);
     renderPodcastVideoTimeline(getActiveSession());
+    syncTimelineClipDurationModalInputs();
     syncPodcastStudioInspector(getActiveSession());
   }
 }
 
 function finalizeTimelineClipDrag() {
   const drag = podcastVideoState.timelineDrag;
-  if (!drag || drag.mode !== "move") return;
+  if (!drag) return;
+  if (drag.mode === "gemini-track-reorder") {
+    const session = getActiveSession();
+    const tracks = ensureTimelineTracks(session, { persist: false });
+    const targetIndex = Number.isFinite(drag.targetIndex) ? Math.max(0, Math.min(tracks.length, Math.round(drag.targetIndex))) : null;
+    if (targetIndex === null) return;
+    upsertPodcastVideoConfig((cfg) => ({
+      ...cfg,
+      geminiDialogueTrackIndex: targetIndex
+    }));
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    syncPodcastStudioInspector(getActiveSession());
+    return;
+  }
+  if (drag.mode !== "move") return;
   const groupIds = (Array.isArray(drag.dragGroup) ? drag.dragGroup : [])
     .map((item) => String(item?.rowId || "").trim())
     .filter(Boolean);
@@ -9169,6 +11551,8 @@ function finalizeTimelineClipDrag() {
       timelineClipsByRowId: nextClips
     };
   });
+  // Nota: en modo educativo antes se compactaba el timeline para evitar solapamientos.
+  // Ahora permitimos encimar escenas (para transiciones por overlap), así que no auto-compactamos aquí.
 }
 
 function reorderPodcastStudioSceneRows(dragRowId = "", targetRowId = "", placeAfter = false) {
@@ -9213,9 +11597,10 @@ function upsertPodcastVideoConfig(mutator) {
 
 function getActiveTransitionEdge(session = null) {
   const activeSession = session || getActiveSession();
-  const rows = activeSession?.script?.rows || [];
-  if (rows.length < 2) return { fromRowId: "", toRowId: "" };
-  const rowIds = rows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+  const timelineRowIds = getTransitionTimelineRowOrder(activeSession);
+  const scriptRowIds = (activeSession?.script?.rows || []).map((row) => String(row?.id || "").trim()).filter(Boolean);
+  const rowIds = timelineRowIds.length >= 2 ? timelineRowIds : scriptRowIds;
+  if (rowIds.length < 2) return { fromRowId: "", toRowId: "" };
   const indexOf = (value = "") => rowIds.findIndex((id) => id === String(value || "").trim());
   const explicitFrom = String(podcastVideoState.transitionFromRowId || "").trim();
   const explicitTo = String(podcastVideoState.transitionToRowId || "").trim();
@@ -9233,7 +11618,7 @@ function getActiveTransitionEdge(session = null) {
   const activeRowId = String(podcastVideoState.activeRowId || "").trim();
   let idx = indexOf(activeRowId);
   if (idx < 0) idx = 0;
-  if (idx >= rows.length - 1) idx = rows.length - 2;
+  if (idx >= rowIds.length - 1) idx = rowIds.length - 2;
   return {
     fromRowId: String(rowIds[idx] || "").trim(),
     toRowId: String(rowIds[idx + 1] || "").trim()
@@ -9364,9 +11749,14 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
   }
 
   const loadingButton = options.loadingButton || null;
-  const setBusyState = options.setBusyState !== false;
+  const setBusyState = options.setBusyState === true;
+  const generationKey = buildTimelineSceneGenerationKey(session, key);
   if (setBusyState) {
     podcastVideoState.busy = true;
+  }
+  if (generationKey) {
+    timelineSceneVideoGenerationPending.add(generationKey);
+    renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
   }
   if (loadingButton) {
     setButtonLoadingState(loadingButton, true, {
@@ -9406,6 +11796,10 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     });
     return generated;
   } finally {
+    if (generationKey) {
+      timelineSceneVideoGenerationPending.delete(generationKey);
+      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+    }
     if (loadingButton) {
       setButtonLoadingState(loadingButton, false);
     }
@@ -9475,6 +11869,7 @@ function syncPodcastStudioInspector(session = null) {
     const key = `${activeSession?.id || ""}:${String(activeRow?.id || "").trim()}`;
     els.generateDialogueAudioBtn.disabled = !activeRow || podcastVideoState.busy || dialogueAudioGenerationPending.has(key);
   }
+  syncStudioPlayDialogueAudioButton();
 }
 
 function setTransitionForEdge(fromRowId = "", toRowId = "", type = "cut", durationMs = 0) {
@@ -9495,6 +11890,7 @@ function setTransitionForEdge(fromRowId = "", toRowId = "", type = "cut", durati
       transitionsByEdge: nextTransitions
     };
   });
+  scheduleCloudAutosave("inspector");
   renderPodcastVideoTimeline(getActiveSession());
   renderPodcastTransitionTimeline(getActiveSession());
   syncPodcastStudioInspector(getActiveSession());
@@ -9513,12 +11909,13 @@ function setPodcastVideoRow(rowId = "", options = {}) {
   const updateScrubber = options.updateScrubber !== false;
   podcastVideoState.activeRowId = key;
   podcastVideoState.timelineLastInteractedRowId = key;
+  upsertPodcastStudioUiState({ lastActiveRowId: key }, { autosaveReason: "ui-state" });
   if (!podcastVideoState.transitionPickerOpen) {
-    const rows = session?.script?.rows || [];
-    const idx = rows.findIndex((row) => String(row?.id || "").trim() === key);
-    const nextRow = idx >= 0 ? rows[idx + 1] : null;
+    const rowIds = getTransitionTimelineRowOrder(session);
+    const idx = rowIds.findIndex((id) => id === key);
+    const nextRowId = idx >= 0 ? String(rowIds[idx + 1] || "").trim() : "";
     podcastVideoState.transitionFromRowId = key;
-    podcastVideoState.transitionToRowId = String(nextRow?.id || "").trim();
+    podcastVideoState.transitionToRowId = nextRowId;
   }
   if (podcastVideoState.montageActive || options.lightweightUi === true) {
     syncPodcastTimelineSelectionUi(session);
@@ -9582,54 +11979,103 @@ function syncPodcastStudioRuntimeUi(session = null, rowId = "", speaker = "", op
 
 function syncPodcastVideoStageMedia(session = null, rowId = "") {
   const activeSession = session || getActiveSession();
+  const educationalMode = isEducationalVideoMode(activeSession);
   const explicitKey = String(rowId || "").trim();
   const key = explicitKey || String(podcastVideoState.activeRowId || "").trim();
-  if (!key && els.podcastActiveSpeakerVideo) {
-    try {
-      els.podcastActiveSpeakerVideo.pause();
-    } catch (_) {
-      // noop
-    }
-    els.podcastActiveSpeakerVideo.removeAttribute("src");
-    delete els.podcastActiveSpeakerVideo.dataset.src;
-    els.podcastActiveSpeakerVideo.hidden = true;
+  if (!key) {
+    getStageVideoElements().forEach((video) => {
+      try { video.pause(); } catch (_) {}
+      releaseTransientStageVideoObjectUrl(video);
+      video.removeAttribute("src");
+      delete video.dataset.src;
+      video.hidden = true;
+      video.style.opacity = "";
+      video.style.transform = "";
+      video.style.filter = "";
+      video.style.transition = "";
+    });
+    const preview = els.podcastVideoStage?.querySelector(".podcast-video-preview");
+    preview?.style?.removeProperty?.("--pod-stage-aspect");
+    preview?.style?.removeProperty?.("--pod-stage-aspect-w");
+    preview?.style?.removeProperty?.("--pod-stage-aspect-h");
     setPodcastVideoPortraitFallback(false);
     updatePodcastVideoTransportUi();
     return;
   }
   const clip = resolveDialogueVideoForRow(activeSession, key);
-  const segments = resolveDialogueVideoSegments(clip);
-  const firstSegment = segments[0] || null;
+  const firstSegment = resolvePrimaryDialogueVideoSegment(clip);
   const src = resolveStorageVideoUrl(
     firstSegment?.downloadUrl || clip?.downloadUrl || "",
     firstSegment?.storagePath || clip?.storagePath || ""
   );
-  if (!els.podcastActiveSpeakerVideo) return;
+  const stageVideo = getActiveStageVideoEl();
+  const inactiveVideo = getInactiveStageVideoEl();
+  if (!stageVideo) return;
   if (src) {
+    if (!podcastVideoState.montageActive) {
+      setActiveStageVideoSlot(0);
+    }
     setPodcastVideoPortraitFallback(false);
-    const currentSrc = String(els.podcastActiveSpeakerVideo.dataset.src || "").trim();
+    const currentSrc = String(stageVideo.dataset.src || "").trim();
     if (currentSrc !== src) {
-      if (els.podcastActiveSpeakerVideo.dataset.objectUrl) {
-        URL.revokeObjectURL(els.podcastActiveSpeakerVideo.dataset.objectUrl);
-        delete els.podcastActiveSpeakerVideo.dataset.objectUrl;
+      const cachedObjectUrl = getCachedPodcastStageVideoObjectUrl(src);
+      const preferredSource = cachedObjectUrl || src;
+      assignStageVideoElementSource(stageVideo, preferredSource, {
+        logicalSrc: src,
+        mode: cachedObjectUrl ? "cache" : "direct",
+        cacheKey: src
+      });
+      if (!cachedObjectUrl) {
+        ensurePodcastStageVideoCachedObjectUrl(src).catch(() => {});
       }
-      els.podcastActiveSpeakerVideo.src = src;
-      els.podcastActiveSpeakerVideo.dataset.src = src;
       if (isSameOriginMediaUrl(src)) {
-        els.podcastActiveSpeakerVideo.removeAttribute("crossorigin");
+        stageVideo.removeAttribute("crossorigin");
       } else {
-        els.podcastActiveSpeakerVideo.crossOrigin = "anonymous";
+        stageVideo.crossOrigin = "anonymous";
       }
     }
-    els.podcastActiveSpeakerVideo.hidden = false;
-    els.podcastActiveSpeakerVideo.muted = false;
+    stageVideo.hidden = false;
+    if (inactiveVideo && inactiveVideo !== stageVideo) {
+      try { inactiveVideo.pause(); } catch (_) {}
+      releaseTransientStageVideoObjectUrl(inactiveVideo);
+      inactiveVideo.removeAttribute("src");
+      delete inactiveVideo.dataset.src;
+      inactiveVideo.hidden = true;
+      inactiveVideo.muted = true;
+      inactiveVideo.volume = 0;
+      inactiveVideo.style.opacity = "";
+      inactiveVideo.style.transform = "";
+      inactiveVideo.style.filter = "";
+      inactiveVideo.style.transition = "";
+    }
     const cfg = getPodcastVideoConfig(activeSession);
-    const useNativeVideoAudio = String(cfg.audioMode || "gemini-live-per-scene") === "veo-native-audio";
-    const volumePct = useNativeVideoAudio ? toFiniteNumber(cfg.masterVolume, 100) : toFiniteNumber(cfg.clipVolume, 0);
-    els.podcastActiveSpeakerVideo.volume = Math.max(0, Math.min(1, volumePct / 100));
-    els.podcastActiveSpeakerVideo.playbackRate = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+    const useNativeVideoAudio = shouldUseNativeVideoAudioForRow(activeSession, key);
+    const educationalMode = isEducationalVideoMode(activeSession);
+    const keepVideoAudioAudible = educationalMode || useNativeVideoAudio;
+    const mix = resolveTimelineClipMix(activeSession, key);
+    const volumePct = keepVideoAudioAudible ? mix.veoPct : 0;
+    const sceneAudioClip = resolveDialogueAudioForRow(activeSession, key);
+    const sceneAudioSrc = resolveStorageAudioUrl(sceneAudioClip?.downloadUrl || "", sceneAudioClip?.storagePath || "");
+    stageVideo.volume = mix.videoVolume;
+    stageVideo.muted = stageVideo.volume <= 0.0001;
+    logPodcastRenderDebug("stage-audio-policy", {
+      rowId: key,
+      audioMode: String(cfg.audioMode || "").trim() || "gemini-live-per-scene",
+      useNativeVideoAudio,
+      keepVideoAudioAudible,
+      hasSceneAudio: Boolean(String(sceneAudioSrc || "").trim()),
+      videoSrc: String(src || "").trim().slice(0, 120),
+      audioSrc: String(sceneAudioSrc || "").trim().slice(0, 120),
+      effectiveVideoVolume: Number(stageVideo.volume || 0),
+      effectiveVeoOverridePct: Number(mix.veoPct || 0),
+      effectiveGeminiOverridePct: Number(mix.geminiPct || 0),
+      clipVolumePct: Number(toFiniteNumber(cfg.clipVolume, 100) || 0),
+      masterVolumePct: Number(toFiniteNumber(cfg.masterVolume, 100) || 0),
+      montageMusicVolumePct: Number(panelMusicState.montageVolume || 0)
+    });
+    stageVideo.playbackRate = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
     if (podcastPlaybackState.active || podcastVideoState.speaking) {
-      const playPromise = els.podcastActiveSpeakerVideo.play();
+      const playPromise = stageVideo.play();
       if (playPromise && typeof playPromise.catch === "function") {
         playPromise.catch(() => {});
       }
@@ -9638,23 +12084,20 @@ function syncPodcastVideoStageMedia(session = null, rowId = "") {
     setPodcastVideoStatus(`Escena ${resolveSceneNumberByRowId(key, activeSession)} lista`);
     return;
   }
-  if (els.podcastActiveSpeakerVideo) {
-    try {
-      els.podcastActiveSpeakerVideo.pause();
-    } catch (_) {
-      // noop
-    }
-    if (els.podcastActiveSpeakerVideo.dataset.objectUrl) {
-      URL.revokeObjectURL(els.podcastActiveSpeakerVideo.dataset.objectUrl);
-      delete els.podcastActiveSpeakerVideo.dataset.objectUrl;
-    }
-    els.podcastActiveSpeakerVideo.removeAttribute("src");
-    delete els.podcastActiveSpeakerVideo.dataset.src;
-    els.podcastActiveSpeakerVideo.hidden = true;
-  }
-  setPodcastVideoPortraitFallback(true);
+  getStageVideoElements().forEach((video) => {
+    try { video.pause(); } catch (_) {}
+    releaseTransientStageVideoObjectUrl(video);
+    video.removeAttribute("src");
+    delete video.dataset.src;
+    video.hidden = true;
+  });
+  setPodcastVideoPortraitFallback(educationalMode ? false : true);
   updatePodcastVideoTransportUi();
-  setPodcastVideoStatus(`Escena ${resolveSceneNumberByRowId(key, activeSession)} sin video generado, usando retrato`);
+  setPodcastVideoStatus(
+    educationalMode
+      ? `Escena ${resolveSceneNumberByRowId(key, activeSession)} sin video generado`
+      : `Escena ${resolveSceneNumberByRowId(key, activeSession)} sin video generado, usando retrato`
+  );
 }
 
 async function generateDialogueVideoForRow(rowId = "", options = {}) {
@@ -9665,10 +12108,6 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const row = (session?.script?.rows || []).find((item) => item.id === key) || null;
   const rows = session?.script?.rows || [];
   const rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
-  const previousRow = rowIndex > 0 ? rows[rowIndex - 1] : null;
-  const previousRowId = String(previousRow?.id || "").trim();
-  const previousClip = previousRowId ? resolveDialogueVideoForRow(session, previousRowId) : null;
-  const previousClipPrimary = resolveDialogueVideoSegments(previousClip)[0] || previousClip || null;
   if (!row) return null;
   if (!String(session?.id || "").trim()) {
     throw new Error("La sesión no tiene un ID válido para generar video.");
@@ -9690,6 +12129,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     expression: row.expression,
     contentMode: isEducationalVideoMode(session) ? "educational" : "podcast"
   });
+  const rowReferenceImage = getRowReferenceImageMap(session)[key] || null;
   const pendingKey = `${sessionId}:${key}`;
   if (dialogueVideoGenerationTasks.has(pendingKey)) {
     logPodcastBatchDebug("generate-row-await-existing-task", {
@@ -9710,18 +12150,60 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const videoDirective = String(options.videoDirective || row?.videoDirective || "").replace(/\s+/g, " ").trim();
   const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
   const imagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || []);
+  const educationalMode = isEducationalVideoMode(session);
+  const relateWithPreviousScene = options.relateWithPreviousScene === true
+    ? true
+    : options.relateWithPreviousScene === false
+      ? false
+      : row?.relateWithPreviousScene === true;
+
+  // Continuidad: usa la escena anterior en el ORDEN DEL TIMELINE (montaje), no solo el orden del guion.
+  // Esto evita que al reordenar clips/tracks, la continuidad se calcule contra la escena incorrecta.
+  const scriptPreviousRow = rowIndex > 0 ? rows[rowIndex - 1] : null;
+  const scriptPreviousRowId = String(scriptPreviousRow?.id || "").trim();
+  const resolveTimelinePreviousRowId = () => {
+    try {
+      const runtimeEntries = buildTimelineRuntimeEntries(session)
+        .map((entry, scriptIndex) => ({
+          rowId: String(entry?.rowId || "").trim(),
+          startMs: Number(entry?.startMs || 0) || 0,
+          zIndex: Number(entry?.zIndex || 0) || 0,
+          scriptIndex
+        }))
+        .filter((item) => item.rowId);
+      runtimeEntries.sort((a, b) => a.startMs - b.startMs || a.zIndex - b.zIndex || a.scriptIndex - b.scriptIndex);
+      const idx = runtimeEntries.findIndex((item) => item.rowId === key);
+      if (idx <= 0) return "";
+      return runtimeEntries[idx - 1].rowId;
+    } catch (_) {
+      return "";
+    }
+  };
+  const previousRowId = relateWithPreviousScene
+    ? (resolveTimelinePreviousRowId() || scriptPreviousRowId)
+    : scriptPreviousRowId;
+  const previousRow = previousRowId ? (rows.find((item) => String(item?.id || "").trim() === previousRowId) || null) : null;
+  const previousRowIndex = previousRowId ? rows.findIndex((item) => String(item?.id || "").trim() === previousRowId) : -1;
+  const previousClip = previousRowId ? resolveDialogueVideoForRow(session, previousRowId) : null;
+  // Para continuidad necesitamos el ÚLTIMO segmento del video previo (fin real de la escena),
+  // no el primer segmento.
+  const previousSegments = resolveDialogueVideoSegments(previousClip);
+  const previousClipPrimary = previousSegments.length
+    ? (previousSegments[previousSegments.length - 1] || null)
+    : (previousClip || null);
   const performanceDirective = buildScenePerformanceDirective(row, videoDirective);
   const syncStageAfterGenerate = options.syncStageAfterGenerate !== false;
   let portrait = resolvePortraitForSpeaker(session, row.speaker);
   let portraitUrl = String(portrait?.downloadUrl || "").trim();
   let portraitStoragePath = String(portrait?.storagePath || "").trim();
-  if (!portraitUrl && !portraitStoragePath) {
-    logPodcastBatchDebug("generate-row-fail-no-portrait", {
+  const hasPortraitAsset = Boolean(portraitUrl || portraitStoragePath);
+  if (!hasPortraitAsset) {
+    logPodcastBatchDebug("generate-row-no-portrait-continue", {
       rowId: key,
       sceneNumber: resolveSceneNumberByRowId(key, session),
-      speaker: speakerLabel
+      speaker: speakerLabel,
+      educationalMode
     });
-    throw new Error(`La escena ${resolveSceneNumberByRowId(key, session)} no tiene retrato base. Genera el retrato del locutor manualmente antes de crear video.`);
   }
   let audioClip = resolveDialogueAudioForRow(session, key);
   if (!hasStoredMediaSource(audioClip)) {
@@ -9794,20 +12276,26 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           segmentCount: textSegments.length,
           portraitUrl,
           portraitStoragePath,
+          referenceImageDataUrl: String(rowReferenceImage?.dataUrl || "").trim(),
+          referenceImageName: String(rowReferenceImage?.name || "").trim(),
           previousScene: previousRow
             ? {
                 rowId: previousRowId,
-                sceneNumber: rowIndex,
+                sceneNumber: Math.max(1, (previousRowIndex >= 0 ? previousRowIndex + 1 : rowIndex)),
                 speakerLabel: String(previousRow?.speaker || "").trim(),
                 speakerName: resolveSpeakerDisplayName(String(previousRow?.speaker || "").trim(), session),
                 expression: String(previousRow?.expression || "Neutral").trim() || "Neutral",
                 text: String(previousRow?.text || "").trim().slice(0, 1600),
                 targetSpeechLine: String(buildTargetSpeechLine(previousRow, session) || previousRow?.text || "").trim().slice(0, 1600),
                 previousVideoTargetSpeechLine: String(previousClipPrimary?.targetSpeechLine || "").trim().slice(0, 1600),
-                hasVideo: Boolean(String(previousClipPrimary?.downloadUrl || "").trim())
+                hasVideo: Boolean(String(previousClipPrimary?.downloadUrl || "").trim()),
+                videoDownloadUrl: relateWithPreviousScene ? String(previousClipPrimary?.downloadUrl || "").trim() : "",
+                videoStoragePath: relateWithPreviousScene ? String(previousClipPrimary?.storagePath || "").trim() : "",
+                videoMimeType: relateWithPreviousScene ? String(previousClipPrimary?.mimeType || "video/mp4").trim() : ""
               }
             : null,
-          strictIdentity: true,
+          relateWithPreviousScene,
+          strictIdentity: (!educationalMode && hasPortraitAsset),
           model: cheapVideoMode ? "veo-3.1-fast-generate-preview" : "veo-3.1-generate-preview",
           modelCandidates: cheapVideoMode
             ? ["veo-3.1-fast-generate-preview"]
@@ -9923,6 +12411,23 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       }
       return first;
     } catch (error) {
+      try {
+        console.error("[podcaster] generateDialogueVideoForRow failed", {
+          sessionId,
+          rowId: key,
+          sceneNumber: resolveSceneNumberByRowId(key, session),
+          speakerLabel,
+          hasAudioClip: Boolean(audioClip),
+          audioDurationSec,
+          hasPortraitAsset,
+          educationalMode,
+          status: Number(error?.status || 0),
+          message: String(error?.message || "error desconocido"),
+          detail: error?.detail || null
+        });
+      } catch (_) {
+        // no-op
+      }
       logPodcastBatchDebug("generate-row-task-error", {
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
@@ -9958,6 +12463,7 @@ function removeDialogueAudioForRow(rowId = "", options = {}) {
   if (!silent) {
     setGenerationStatus(`Voz eliminada de escena ${resolveSceneNumberByRowId(key, getActiveSession())}`, "is-live");
   }
+  syncGeminiDialogueTrackWithRuntime({ render: false });
   syncPodcastStudioInspector(getActiveSession());
 }
 
@@ -9995,8 +12501,6 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   const regenerate = options.regenerate === true;
   const silent = options.silent === true;
   const disfluencyInstruction = buildDisfluencyInstruction(row);
-  const desiredDurationSec = Math.max(1, Number(row?.durationSec || 0));
-  const durationRateHint = computeDurationSpeedMultiplier(dialogueText, desiredDurationSec, { min: 0.7, max: 1.9 });
   dialogueAudioGenerationPending.add(pendingKey);
   if (!silent) {
     setGenerationStatus(`Generando voz Gemini Live para escena ${resolveSceneNumberByRowId(key, session)}...`, "is-busy");
@@ -10019,8 +12523,6 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
           text: dialogueText.slice(0, 2000),
           originalText: String(row?.text || "").trim().slice(0, 2000),
           targetSpeechLine: dialogueText.slice(0, 2000),
-          desiredDurationSec,
-          durationRateHint: Number(durationRateHint.toFixed(3)),
           disfluencyInstruction: String(disfluencyInstruction || "").trim().slice(0, 1800),
           notes: String(row?.notes || "").trim().slice(0, 1200),
           regenerate,
@@ -10073,6 +12575,7 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       setGenerationStatus(`Voz lista para escena ${resolveSceneNumberByRowId(key, refreshed)}`, "is-live");
     }
     if (String(state.activeSessionId || "").trim() === sessionId) {
+      syncGeminiDialogueTrackWithRuntime({ render: false });
       syncPodcastStudioInspector(refreshed);
       renderPodcastVideoShell(refreshed);
     }
@@ -10162,6 +12665,7 @@ const podcastStudioPlayback = createPodcasterStudioPlayback({
   getActiveSession,
   getPodcastVideoConfig,
   toFiniteNumber,
+  ensureTimelineClipsByRowId,
   syncPodcastTimelinePlayhead,
   secondsToClock,
   setPodcastVideoStatus,
@@ -10174,9 +12678,15 @@ const podcastStudioPlayback = createPodcasterStudioPlayback({
   applyStudioTransition,
   primePodcastStageVideoSource,
   setPodcastStageVideoSource,
+  setPodcastStageVideoSourceForElement,
+  setTimelinePreviewsSuspended,
   buildTimelineRuntimeEntries,
   getTimelineTotalDurationMs,
-  getPanelMontageMusicConfig
+  getPanelMontageMusicConfig,
+  getActiveStageVideoEl,
+  getInactiveStageVideoEl,
+  setActiveStageVideoSlot,
+  shouldUseNativeVideoAudioForRow
 });
 
 function stopPodcastStudioMontage(options = {}) {
@@ -10187,12 +12697,27 @@ function pausePodcastStudioMontage() {
   return podcastStudioPlayback.pausePodcastStudioMontage();
 }
 
-function syncMontageAudioPlayers(activeEntries = [], currentMs = 0, speed = 1) {
-  return podcastStudioPlayback.syncMontageAudioPlayers(activeEntries, currentMs, speed);
+function syncMontageAudioPlayers(activeEntries = [], currentMs = 0, speed = 1, runtimeEntries = []) {
+  return podcastStudioPlayback.syncMontageAudioPlayers(activeEntries, currentMs, speed, runtimeEntries);
 }
 
-async function syncStudioTimelinePreview(currentMs = 0, runtimeEntries = []) {
-  return podcastStudioPlayback.syncStudioTimelinePreview(currentMs, runtimeEntries);
+function syncMontageBackgroundAt(currentMs = 0, speed = 1) {
+  if (typeof podcastStudioPlayback.syncMontageBackgroundAt !== "function") return;
+  return podcastStudioPlayback.syncMontageBackgroundAt(currentMs, speed);
+}
+
+function pauseMontageBackgroundAudio() {
+  if (typeof podcastStudioPlayback.pauseMontageBackgroundAudio !== "function") return;
+  return podcastStudioPlayback.pauseMontageBackgroundAudio();
+}
+
+function stopMontageBackgroundAudio() {
+  if (typeof podcastStudioPlayback.stopMontageBackgroundAudio !== "function") return;
+  return podcastStudioPlayback.stopMontageBackgroundAudio();
+}
+
+async function syncStudioTimelinePreview(currentMs = 0, runtimeEntries = [], forcedActiveEntries = null, options = {}) {
+  return podcastStudioPlayback.syncStudioTimelinePreview(currentMs, runtimeEntries, forcedActiveEntries, options);
 }
 
 function waitVideoEnd(videoEl = null, timeoutMs = 120000) {
@@ -10229,6 +12754,193 @@ function waitAudioEnd(audioEl = null, timeoutMs = 120000) {
   });
 }
 
+function getCachedPodcastStageVideoObjectUrl(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cached = podcastStageVideoCache.get(cleanSrc);
+  if (!cached?.objectUrl) return "";
+  cached.lastUsedAt = Date.now();
+  podcastStageVideoCache.set(cleanSrc, cached);
+  return String(cached.objectUrl || "").trim();
+}
+
+function getCachedPodcastStageAudioObjectUrl(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cached = podcastStageAudioCache.get(cleanSrc);
+  if (!cached?.objectUrl) return "";
+  cached.lastUsedAt = Date.now();
+  podcastStageAudioCache.set(cleanSrc, cached);
+  return String(cached.objectUrl || "").trim();
+}
+
+function prunePodcastStageVideoCache() {
+  if (podcastStageVideoCache.size <= PODCAST_STAGE_VIDEO_CACHE_LIMIT) return;
+  const entries = Array.from(podcastStageVideoCache.entries())
+    .sort((a, b) => Number(a?.[1]?.lastUsedAt || 0) - Number(b?.[1]?.lastUsedAt || 0));
+  while (entries.length > PODCAST_STAGE_VIDEO_CACHE_LIMIT) {
+    const [cacheKey, cacheValue] = entries.shift() || [];
+    if (!cacheKey) continue;
+    if (cacheValue?.objectUrl) {
+      try { URL.revokeObjectURL(cacheValue.objectUrl); } catch (_) {}
+    }
+    podcastStageVideoCache.delete(cacheKey);
+  }
+}
+
+function prunePodcastStageAudioCache() {
+  if (podcastStageAudioCache.size <= PODCAST_STAGE_AUDIO_CACHE_LIMIT) return;
+  const entries = Array.from(podcastStageAudioCache.entries())
+    .sort((a, b) => Number(a?.[1]?.lastUsedAt || 0) - Number(b?.[1]?.lastUsedAt || 0));
+  while (entries.length > PODCAST_STAGE_AUDIO_CACHE_LIMIT) {
+    const [cacheKey, cacheValue] = entries.shift() || [];
+    if (!cacheKey) continue;
+    if (cacheValue?.objectUrl) {
+      try { URL.revokeObjectURL(cacheValue.objectUrl); } catch (_) {}
+    }
+    podcastStageAudioCache.delete(cacheKey);
+  }
+}
+
+async function ensurePodcastStageVideoCachedObjectUrl(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cached = getCachedPodcastStageVideoObjectUrl(cleanSrc);
+  if (cached) return cached;
+  if (shouldShortCircuitLocalProxyMediaFetch(cleanSrc)) return "";
+  try {
+    const response = await fetch(cleanSrc, {
+      method: "GET",
+      mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors",
+      cache: "force-cache"
+    });
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    if (!blob || Number(blob.size || 0) <= 0) return "";
+    const objectUrl = URL.createObjectURL(blob);
+    podcastStageVideoCache.set(cleanSrc, {
+      objectUrl,
+      lastUsedAt: Date.now()
+    });
+    prunePodcastStageVideoCache();
+    return objectUrl;
+  } catch (error) {
+    if (isLocalProxyMediaUrl(cleanSrc)) {
+      markLocalProxyMediaUnavailable("ejecuta `npm run api:dev`");
+    }
+    return "";
+  }
+}
+
+async function ensurePodcastStageAudioCachedObjectUrl(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cached = getCachedPodcastStageAudioObjectUrl(cleanSrc);
+  if (cached) return cached;
+  if (shouldShortCircuitLocalProxyMediaFetch(cleanSrc)) return "";
+  try {
+    const response = await fetch(cleanSrc, {
+      method: "GET",
+      mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors",
+      cache: "force-cache"
+    });
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    if (!blob || Number(blob.size || 0) <= 0) return "";
+    const objectUrl = URL.createObjectURL(blob);
+    podcastStageAudioCache.set(cleanSrc, {
+      objectUrl,
+      lastUsedAt: Date.now()
+    });
+    prunePodcastStageAudioCache();
+    return objectUrl;
+  } catch (error) {
+    if (isLocalProxyMediaUrl(cleanSrc)) {
+      markLocalProxyMediaUnavailable("ejecuta `npm run api:dev`");
+    }
+    return "";
+  }
+}
+
+function resolvePodcastStageAudioSrc(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cached = getCachedPodcastStageAudioObjectUrl(cleanSrc);
+  if (!cached) {
+    ensurePodcastStageAudioCachedObjectUrl(cleanSrc).catch(() => {});
+    return cleanSrc;
+  }
+  return cached;
+}
+
+function releaseTransientStageVideoObjectUrl(videoEl = null) {
+  if (!videoEl) return;
+  const previousObjectUrl = String(videoEl.dataset.objectUrl || "").trim();
+  const previousMode = String(videoEl.dataset.objectUrlMode || "").trim();
+  if (previousObjectUrl && previousMode === "transient") {
+    try { URL.revokeObjectURL(previousObjectUrl); } catch (_) {}
+  }
+  delete videoEl.dataset.objectUrl;
+  delete videoEl.dataset.objectUrlMode;
+  delete videoEl.dataset.objectUrlCacheKey;
+}
+
+function getStageVideoElements() {
+  return [els.podcastActiveSpeakerVideo, els.podcastActiveSpeakerVideoAlt].filter(Boolean);
+}
+
+function getActiveStageVideoEl() {
+  const primary = els.podcastActiveSpeakerVideo;
+  const alt = els.podcastActiveSpeakerVideoAlt;
+  if (!alt) return primary;
+  return Number(podcastVideoState.stageVideoSlot || 0) === 1 ? alt : primary;
+}
+
+function getInactiveStageVideoEl() {
+  const primary = els.podcastActiveSpeakerVideo;
+  const alt = els.podcastActiveSpeakerVideoAlt;
+  if (!alt) return null;
+  return Number(podcastVideoState.stageVideoSlot || 0) === 1 ? primary : alt;
+}
+
+function setActiveStageVideoSlot(slot = 0) {
+  podcastVideoState.stageVideoSlot = Number(slot || 0) === 1 ? 1 : 0;
+}
+
+function assignStageVideoElementSource(videoEl = null, source = "", options = {}) {
+  if (!videoEl) return;
+  const logicalSrc = String(options.logicalSrc || source || "").trim();
+  const cleanSource = String(source || "").trim();
+  if (!cleanSource || !logicalSrc) return;
+  const mode = String(options.mode || "").trim() || "direct";
+  const cacheKey = String(options.cacheKey || "").trim();
+  releaseTransientStageVideoObjectUrl(videoEl);
+  videoEl.src = cleanSource;
+  videoEl.dataset.src = logicalSrc;
+  if (mode === "cache" || mode === "transient") {
+    videoEl.dataset.objectUrl = cleanSource;
+    videoEl.dataset.objectUrlMode = mode;
+    if (mode === "cache" && cacheKey) {
+      videoEl.dataset.objectUrlCacheKey = cacheKey;
+    }
+  }
+
+  const preview = els.podcastVideoStage?.querySelector?.(".podcast-video-preview");
+  if (preview) {
+    const applyAspect = () => {
+      const w = Number(videoEl.videoWidth || 0);
+      const h = Number(videoEl.videoHeight || 0);
+      if (w > 0 && h > 0) {
+        preview.style.setProperty("--pod-stage-aspect", `${Math.round(w)} / ${Math.round(h)}`);
+        preview.style.setProperty("--pod-stage-aspect-w", `${Math.round(w)}`);
+        preview.style.setProperty("--pod-stage-aspect-h", `${Math.round(h)}`);
+      }
+    };
+    applyAspect();
+    videoEl.addEventListener("loadedmetadata", applyAspect, { once: true });
+  }
+}
+
 async function primePodcastStageVideoSource(src = "") {
   const cleanSrc = String(src || "").trim();
   if (!cleanSrc) return false;
@@ -10243,9 +12955,11 @@ async function primePodcastStageVideoSource(src = "") {
   } else {
     podcastStageVideoPreloader.crossOrigin = "anonymous";
   }
-  if (podcastStageVideoPreloadSrc !== cleanSrc || podcastStageVideoPreloader.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-    podcastStageVideoPreloadSrc = cleanSrc;
-    podcastStageVideoPreloader.src = cleanSrc;
+  const cachedObjectUrl = getCachedPodcastStageVideoObjectUrl(cleanSrc);
+  const preloadSrc = cachedObjectUrl || cleanSrc;
+  if (podcastStageVideoPreloadSrc !== preloadSrc || podcastStageVideoPreloader.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    podcastStageVideoPreloadSrc = preloadSrc;
+    podcastStageVideoPreloader.src = preloadSrc;
     podcastStageVideoPreloader.load();
     await new Promise((resolve) => {
       let settled = false;
@@ -10262,50 +12976,176 @@ async function primePodcastStageVideoSource(src = "") {
       setTimeout(done, 1200);
     });
   }
+  if (!cachedObjectUrl) {
+    ensurePodcastStageVideoCachedObjectUrl(cleanSrc).catch(() => {});
+  }
   return true;
 }
 
 async function setPodcastStageVideoSource(src = "") {
-  if (!els.podcastActiveSpeakerVideo) return false;
+  return setPodcastStageVideoSourceForElement(getActiveStageVideoEl(), src);
+}
+
+let podcastStageVideoLoadTokenSeq = 0;
+let podcastStageVideoLoadTokensByEl = new WeakMap();
+
+async function setPodcastStageVideoSourceForElement(videoEl = null, src = "", options = {}) {
+  const video = videoEl || null;
+  if (!video) return false;
   const cleanSrc = String(src || "").trim();
   if (!cleanSrc) return false;
   setPodcastVideoPortraitFallback(false);
-  const video = els.podcastActiveSpeakerVideo;
+  const loadToken = ++podcastStageVideoLoadTokenSeq;
+  podcastStageVideoLoadTokensByEl.set(video, loadToken);
   if (String(video.dataset.src || "").trim() === cleanSrc && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
     return true;
   }
   await primePodcastStageVideoSource(cleanSrc);
-  if (els.podcastActiveSpeakerVideo.dataset.objectUrl) {
-    URL.revokeObjectURL(els.podcastActiveSpeakerVideo.dataset.objectUrl);
-    delete els.podcastActiveSpeakerVideo.dataset.objectUrl;
-  }
-  video.src = cleanSrc;
-  video.dataset.src = cleanSrc;
+  if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+  const cachedObjectUrl = getCachedPodcastStageVideoObjectUrl(cleanSrc);
+  const preferredSource = cachedObjectUrl || cleanSrc;
   if (isSameOriginMediaUrl(cleanSrc)) {
     video.removeAttribute("crossorigin");
   } else {
     video.crossOrigin = "anonymous";
   }
-  video.hidden = false;
+  assignStageVideoElementSource(video, preferredSource, {
+    logicalSrc: cleanSrc,
+    mode: cachedObjectUrl ? "cache" : "direct",
+    cacheKey: cleanSrc
+  });
+  video.hidden = options.keepHidden === true ? true : false;
   video.preload = "auto";
-  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-    video.load();
-    await new Promise((resolve) => {
+  // Always force a load after assigning `src` to avoid reusing stale decoded frames.
+  try { video.load(); } catch (_) {}
+  const waitForVideoReadiness = async (timeoutMs = 1800) => {
+    return new Promise((resolve) => {
       let settled = false;
-      const done = () => {
+      const done = (ok = false) => {
         if (settled) return;
         settled = true;
         video.removeEventListener("loadeddata", onReady);
         video.removeEventListener("canplay", onReady);
-        resolve();
+        video.removeEventListener("error", onError);
+        const stillExpected = (
+          podcastStageVideoLoadTokensByEl.get(video) === loadToken
+          && String(video.dataset.src || "").trim() === cleanSrc
+        );
+        const hasData = video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+        resolve(Boolean(ok) && stillExpected && hasData);
       };
-      const onReady = () => done();
+      const onReady = () => done(true);
+      const onError = () => done(false);
       video.addEventListener("loadeddata", onReady, { once: true });
       video.addEventListener("canplay", onReady, { once: true });
-      setTimeout(done, 500);
+      video.addEventListener("error", onError, { once: true });
+      setTimeout(() => done(true), timeoutMs);
     });
+  };
+
+  let ready = await waitForVideoReadiness();
+  if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+  if (ready) return true;
+
+  const hydratedObjectUrl = await ensurePodcastStageVideoCachedObjectUrl(cleanSrc);
+  if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+  if (hydratedObjectUrl && hydratedObjectUrl !== preferredSource) {
+    assignStageVideoElementSource(video, hydratedObjectUrl, {
+      logicalSrc: cleanSrc,
+      mode: "cache",
+      cacheKey: cleanSrc
+    });
+    ready = await waitForVideoReadiness(2200);
+    if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+    if (ready) return true;
   }
-  return true;
+
+  try {
+    if (/^https?:\/\//i.test(cleanSrc)) {
+      const response = await fetch(cleanSrc, {
+        method: "GET",
+        mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors"
+      });
+      if (!response.ok) return false;
+      const blob = await response.blob();
+      if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+      const blobUrl = URL.createObjectURL(blob);
+      assignStageVideoElementSource(video, blobUrl, {
+        logicalSrc: cleanSrc,
+        mode: "transient"
+      });
+      ready = await waitForVideoReadiness(2200);
+      if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
+      return ready;
+    }
+  } catch (_) {
+    // noop
+  }
+  return false;
+}
+
+function clearStageVideoCache() {
+  try {
+    Array.from(podcastStageVideoCache.values()).forEach((entry) => {
+      if (entry?.objectUrl) {
+        try { URL.revokeObjectURL(entry.objectUrl); } catch (_) {}
+      }
+    });
+    podcastStageVideoCache.clear();
+  } catch (_) {
+    // noop
+  }
+}
+
+function clearStageAudioCache() {
+  try {
+    Array.from(podcastStageAudioCache.values()).forEach((entry) => {
+      if (entry?.objectUrl) {
+        try { URL.revokeObjectURL(entry.objectUrl); } catch (_) {}
+      }
+    });
+    podcastStageAudioCache.clear();
+  } catch (_) {
+    // noop
+  }
+}
+
+function dumpStageVideoState() {
+  const primary = els.podcastActiveSpeakerVideo || null;
+  const alt = els.podcastActiveSpeakerVideoAlt || null;
+  const active = getActiveStageVideoEl?.() || primary;
+  const inactive = getInactiveStageVideoEl?.() || (alt && active === primary ? alt : null);
+  const pack = (video) => {
+    if (!video) return null;
+    return {
+      hidden: Boolean(video.hidden),
+      datasetSrc: String(video.dataset?.src || ""),
+      attrSrc: String(video.getAttribute?.("src") || ""),
+      currentSrc: String(video.currentSrc || ""),
+      readyState: Number(video.readyState || 0),
+      networkState: Number(video.networkState || 0),
+      currentTime: Number(video.currentTime || 0),
+      duration: Number(video.duration || 0),
+      paused: Boolean(video.paused),
+      muted: Boolean(video.muted),
+      volume: Number(video.volume || 0),
+      playbackRate: Number(video.playbackRate || 1)
+    };
+  };
+  return {
+    stageVideoSlot: Number(podcastVideoState.stageVideoSlot || 0),
+    active: pack(active),
+    inactive: pack(inactive)
+  };
+}
+
+try {
+  window.__podcasterDebug = window.__podcasterDebug || {};
+  window.__podcasterDebug.clearStageVideoCache = clearStageVideoCache;
+  window.__podcasterDebug.dumpStageVideoState = dumpStageVideoState;
+  window.__podcasterDebug.setTimelinePreviewsSuspended = setTimelinePreviewsSuspended;
+} catch (_) {
+  // noop
 }
 
 async function waitForStudioLiveDrain(rowId = "", timeoutMs = 120000) {
@@ -10333,9 +13173,21 @@ async function waitForStandaloneRowPlayback(rowId = "", timeoutMs = 120000) {
 }
 
 async function applyStudioTransition(transition = { type: "cut", durationMs: 0 }) {
-  const type = String(transition?.type || "cut").toLowerCase();
+  // Transiciones deshabilitadas: el studio usa cortes directos.
+  return;
+  /* const type = String(transition?.type || "cut").toLowerCase();
+  const phase = String(transition?.phase || "both").trim().toLowerCase();
   const durationMs = Math.max(0, Math.min(1200, Number(transition?.durationMs) || 0));
-  if (!durationMs || type === "cut") return;
+  const runPhase = phase === "out" || phase === "in" ? phase : "both";
+  if (!durationMs || type === "cut") {
+    if (type === "cut" && runPhase === "in" && els.podcastStudioDipOverlay) {
+      els.podcastStudioDipOverlay.classList.remove("is-active");
+      els.podcastStudioDipOverlay.style.opacity = "";
+      els.podcastStudioDipOverlay.style.transition = "";
+      els.podcastStudioDipOverlay.style.background = "#020617";
+    }
+    return;
+  }
   if (!els.podcastActiveSpeakerVideo) {
     await sleep(durationMs);
     return;
@@ -10344,52 +13196,252 @@ async function applyStudioTransition(transition = { type: "cut", durationMs: 0 }
   const previousTransition = video.style.transition;
   const previousTransform = video.style.transform;
   const previousFilter = video.style.filter;
-  if (type === "crossfade") {
-    video.style.transition = `opacity ${durationMs}ms ease`;
-    video.style.opacity = "0";
-    await sleep(durationMs);
-    video.style.opacity = "1";
-  } else if (type === "dip-black") {
-    if (els.podcastStudioDipOverlay) {
-      els.podcastStudioDipOverlay.style.background = "#020617";
-      els.podcastStudioDipOverlay.classList.add("is-active");
-      await sleep(Math.round(durationMs * 0.5));
-      els.podcastStudioDipOverlay.classList.remove("is-active");
-      await sleep(Math.round(durationMs * 0.5));
-    } else {
-      await sleep(durationMs);
+  const previousOpacity = video.style.opacity;
+  const previousClipPath = video.style.clipPath;
+  const overlay = els.podcastStudioDipOverlay || null;
+  const overlayPreviousTransition = overlay ? overlay.style.transition : "";
+  const overlayPreviousOpacity = overlay ? overlay.style.opacity : "";
+  const overlayPreviousBackground = overlay ? overlay.style.background : "";
+
+  const restoreVideoStyles = () => {
+    video.style.transition = previousTransition || "";
+    video.style.transform = previousTransform || "";
+    video.style.filter = previousFilter || "";
+    video.style.opacity = previousOpacity || "";
+    video.style.clipPath = previousClipPath || "";
+  };
+
+  const clearVideoStyles = () => {
+    video.style.transition = "";
+    video.style.transform = "";
+    video.style.filter = "";
+    video.style.opacity = "";
+    video.style.clipPath = "";
+  };
+
+  const setOverlay = (next = {}) => {
+    if (!overlay) return;
+    overlay.classList.remove("is-active");
+    const bg = String(next.background || "#020617");
+    const opacity = Math.max(0, Math.min(1, Number(next.opacity ?? 1)));
+    const ms = Math.max(0, Math.min(1200, Number(next.durationMs ?? durationMs) || durationMs));
+    overlay.style.background = bg;
+    overlay.style.transition = `opacity ${ms}ms ease`;
+    overlay.style.opacity = String(opacity);
+  };
+
+  const restoreOverlay = () => {
+    if (!overlay) return;
+    overlay.classList.remove("is-active");
+    overlay.style.transition = overlayPreviousTransition || "";
+    overlay.style.opacity = overlayPreviousOpacity || "";
+    overlay.style.background = overlayPreviousBackground || "";
+  };
+
+  const overlayOutOpacityForType = () => {
+    if (type === "dip-black" || type === "flash-white") return 1;
+    if (type === "crossfade") return 0.55;
+    if (type === "blur") return 0.45;
+    return 0.35;
+  };
+
+  const runOut = async () => {
+    // Para evitar "flash" del fondo al cambiar de src, usamos el overlay como máscara de swap
+    // (en vez de poner el video en opacity 0).
+    if (overlay) {
+      setOverlay({
+        background: type === "flash-white" ? "#f8fafc" : "#020617",
+        opacity: overlayOutOpacityForType(),
+        durationMs
+      });
     }
-  } else if (type === "flash-white") {
-    if (els.podcastStudioDipOverlay) {
-      els.podcastStudioDipOverlay.style.background = "#f8fafc";
-      els.podcastStudioDipOverlay.classList.add("is-active");
-      await sleep(Math.max(80, Math.round(durationMs * 0.28)));
-      els.podcastStudioDipOverlay.classList.remove("is-active");
-      await sleep(Math.max(80, Math.round(durationMs * 0.72)));
-      els.podcastStudioDipOverlay.style.background = "#020617";
-    } else {
+    if (type === "dip-black" || type === "flash-white") {
       await sleep(durationMs);
+      return;
     }
-  } else if (type === "slide-left") {
-    video.style.transition = `transform ${durationMs}ms ease, opacity ${durationMs}ms ease`;
-    video.style.transform = "translateX(-14px)";
-    video.style.opacity = "0.68";
+    if (type === "crossfade") {
+      video.style.transition = `filter ${durationMs}ms ease`;
+      video.style.filter = "saturate(0.95) contrast(1.02)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-left") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateX(-18px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-right") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateX(18px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-up") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateY(-14px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-down") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateY(14px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "zoom-in") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "scale(1.04)";
+      video.style.filter = "saturate(1.08) contrast(1.02)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "zoom-out") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "scale(0.98)";
+      video.style.filter = "saturate(0.92) contrast(1.02)";
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "blur") {
+      video.style.transition = `filter ${durationMs}ms ease`;
+      video.style.filter = "blur(6px) saturate(1.1)";
+      await sleep(durationMs);
+      return;
+    }
     await sleep(durationMs);
-    video.style.transform = "translateX(0)";
-    video.style.opacity = "1";
-  } else if (type === "zoom-in") {
-    video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
-    video.style.transform = "scale(1.04)";
-    video.style.filter = "saturate(1.08)";
+  };
+
+  const runIn = async () => {
+    // Nueva escena: arrancar sin estilos del "out"
+    clearVideoStyles();
+    if (overlay) {
+      // Mantener el fondo cubierto y revelar al final.
+      setOverlay({
+        background: type === "flash-white" ? "#f8fafc" : "#020617",
+        opacity: overlayPreviousOpacity || String(overlayOutOpacityForType()),
+        durationMs: 0
+      });
+    }
+    if (type === "dip-black" || type === "flash-white") {
+      if (overlay) setOverlay({ background: type === "flash-white" ? "#f8fafc" : "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "crossfade") {
+      video.style.transition = `filter ${durationMs}ms ease`;
+      video.style.filter = "saturate(0.95) contrast(1.02)";
+      await sleep(16);
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-left") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateX(18px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(16);
+      video.style.transform = "translateX(0)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-right") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateX(-18px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(16);
+      video.style.transform = "translateX(0)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-up") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateY(14px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(16);
+      video.style.transform = "translateY(0)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "slide-down") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "translateY(-14px)";
+      video.style.filter = "saturate(0.95)";
+      await sleep(16);
+      video.style.transform = "translateY(0)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "zoom-in") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "scale(0.98)";
+      video.style.filter = "saturate(0.92) contrast(1.02)";
+      await sleep(16);
+      video.style.transform = "scale(1)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "zoom-out") {
+      video.style.transition = `transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
+      video.style.transform = "scale(1.04)";
+      video.style.filter = "saturate(1.08) contrast(1.02)";
+      await sleep(16);
+      video.style.transform = "scale(1)";
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
+    if (type === "blur") {
+      video.style.transition = `filter ${durationMs}ms ease`;
+      video.style.filter = "blur(6px) saturate(1.1)";
+      await sleep(16);
+      video.style.filter = "none";
+      if (overlay) setOverlay({ background: "#020617", opacity: 0, durationMs });
+      await sleep(durationMs);
+      return;
+    }
     await sleep(durationMs);
-    video.style.transform = "scale(1)";
-    video.style.filter = "none";
-  } else {
-    await sleep(durationMs);
+  };
+
+  try {
+    if (runPhase === "out") {
+      await runOut();
+      return;
+    }
+    if (runPhase === "in") {
+      await runIn();
+      return;
+    }
+    await runOut();
+    await runIn();
+  } finally {
+    if (runPhase === "both") {
+      restoreVideoStyles();
+      restoreOverlay();
+      return;
+    }
+    if (runPhase === "in") {
+      clearVideoStyles();
+      restoreOverlay();
+    }
   }
-  video.style.transition = previousTransition || "";
-  video.style.transform = previousTransform || "";
-  video.style.filter = previousFilter || "";
+  */
 }
 
 async function playSceneInStudio(row = null, options = {}) {
@@ -10408,14 +13460,19 @@ async function playSceneInStudio(row = null, options = {}) {
   const audioReady = audioClip?.downloadUrl ? audioClip : null;
   const audioSrc = resolveStorageAudioUrl(audioReady?.downloadUrl || "", audioReady?.storagePath || "");
   const cfg = getPodcastVideoConfig(session);
-  const preferredAudioMode = String(cfg.audioMode || "gemini-live-per-scene");
+  const educationalMode = isEducationalVideoMode(session);
   const hasSceneVoiceTrack = Boolean(audioSrc);
-  // Prioritize the configured per-scene voice track to keep voice identity consistent.
-  const useNativeVideoAudio = preferredAudioMode === "veo-native-audio" && !hasSceneVoiceTrack;
+  const mix = resolveTimelineClipMix(session, rowId);
+  const voiceVolume = resolveTimelineClipVoiceVolume(session, rowId);
+  const playVoiceTrack = hasSceneVoiceTrack && voiceVolume > 0.0001;
   const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
   if (!segments.length) {
-    setPodcastVideoPortraitFallback(true);
-    setPodcastVideoStatus(`Escena ${resolveSceneNumberByRowId(rowId, session)} sin video, reproduciendo retrato`);
+    setPodcastVideoPortraitFallback(educationalMode ? false : true);
+    setPodcastVideoStatus(
+      educationalMode
+        ? `Escena ${resolveSceneNumberByRowId(rowId, session)} sin video, reproduciendo solo voz`
+        : `Escena ${resolveSceneNumberByRowId(rowId, session)} sin video, reproduciendo retrato`
+    );
     const started = await playRowAudio(rowId, { speedMultiplier: speed });
     if (!started) return false;
     return waitForStandaloneRowPlayback(
@@ -10429,19 +13486,20 @@ async function playSceneInStudio(row = null, options = {}) {
   );
   let syncedVideoRate = speed;
   let audioDurationSec = Math.max(0, Number(audioReady?.durationSec) || 0);
-  const videoVolume = Math.max(0, Math.min(1, Number((useNativeVideoAudio ? cfg.masterVolume : cfg.clipVolume) || 0) / 100));
+  const videoVolume = mix.videoVolume;
   if (els.podcastActiveSpeakerVideo) {
     els.podcastActiveSpeakerVideo.volume = videoVolume;
+    els.podcastActiveSpeakerVideo.muted = videoVolume <= 0.0001;
     els.podcastActiveSpeakerVideo.playbackRate = syncedVideoRate;
   }
   if (podcastVideoState.audioEl) {
     try { podcastVideoState.audioEl.pause(); } catch (_) {}
     podcastVideoState.audioEl = null;
   }
-  if (!useNativeVideoAudio && audioSrc) {
+  if (playVoiceTrack && audioSrc) {
     const audio = new Audio(audioSrc);
     audio.preload = "auto";
-    audio.volume = Math.max(0, Math.min(1, toFiniteNumber(cfg.masterVolume, 100) / 100));
+    audio.volume = voiceVolume;
     audio.playbackRate = speed;
     podcastVideoState.audioEl = audio;
     await new Promise((resolve) => {
@@ -10464,12 +13522,19 @@ async function playSceneInStudio(row = null, options = {}) {
         els.podcastActiveSpeakerVideo.playbackRate = syncedVideoRate;
       }
     }
-    await safeMediaPlay(audio);
+    try {
+      await safeMediaPlay(audio);
+    } catch (_) {
+      // Si el navegador bloquea autoplay al encadenar escenas (sin gesto nuevo del usuario),
+      // no detengas el flujo: continúa con video (y/o audio nativo) para que la siguiente escena arranque.
+      try { audio.pause(); } catch (_) {}
+      podcastVideoState.audioEl = null;
+    }
   } else if (runtimeFeatureState.dialogueAudioUnavailable) {
     await playRowAudio(rowId, { speedMultiplier: speed });
     await waitForStudioLiveDrain(rowId, Math.max(5000, Math.round((Number(row.durationSec) || 10) * 1200)));
   }
-  const hasAudioTrack = !useNativeVideoAudio && hasSceneVoiceTrack;
+  const hasAudioTrack = playVoiceTrack && hasSceneVoiceTrack && Boolean(podcastVideoState.audioEl);
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i];
     const segmentSrc = resolveStorageVideoUrl(segment?.downloadUrl || "", segment?.storagePath || "");
@@ -10479,7 +13544,9 @@ async function playSceneInStudio(row = null, options = {}) {
       const shouldApplyTrimWindow = segments.length === 1 && Number.isFinite(trimInSec) && Number.isFinite(trimOutSec);
       els.podcastActiveSpeakerVideo.currentTime = shouldApplyTrimWindow ? Math.max(0, trimInSec) : 0;
       els.podcastActiveSpeakerVideo.playbackRate = syncedVideoRate;
-      await playPodcastStageVideo({ restart: true, silent: false, playbackRate: syncedVideoRate, volume: videoVolume });
+      // `restart:true` pisa `currentTime` y puede recortar el inicio cuando hay trims.
+      const mix = resolveTimelineClipMix(session, rowId);
+      await playPodcastStageVideo({ restart: false, silent: false, playbackRate: syncedVideoRate, volume: mix.videoVolume });
     }
     const trimmedSec = segments.length === 1
       ? Math.max(0.5, Math.min(Math.max(0.5, Number(segment?.durationSec) || 8), trimOutSec) - Math.max(0, trimInSec))
@@ -10519,7 +13586,367 @@ async function playSceneInStudio(row = null, options = {}) {
 }
 
 async function playPodcastStudioMontage(startAtMs = null) {
+  ensureMontageDefaultVolumesPersisted(getActiveSession());
   return podcastStudioPlayback.playPodcastStudioMontage(startAtMs);
+}
+
+function cancelTimelineSequence({ paused = false } = {}) {
+  podcastVideoState.timelineSequenceToken = Number(podcastVideoState.timelineSequenceToken || 0) + 1;
+  podcastVideoState.timelineSequenceActive = false;
+  podcastVideoState.timelineSequencePaused = Boolean(paused);
+  const previousStageMode = String(podcastVideoState.timelineSequencePreviousStageMode || "").trim();
+  if (previousStageMode) {
+    podcastVideoState.montageStageMode = previousStageMode;
+  }
+  podcastVideoState.timelineSequencePreviousStageMode = "";
+  podcastVideoState.timelineSequenceRuntimeEntries = [];
+  Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
+    try { audio.pause(); } catch (_) {}
+  });
+  podcastVideoState.montageAudioPlayers = {};
+  if (paused) {
+    pauseMontageBackgroundAudio();
+  } else {
+    stopMontageBackgroundAudio();
+  }
+  if (podcastVideoState.audioEl) {
+    try { podcastVideoState.audioEl.pause(); } catch (_) {}
+    podcastVideoState.audioEl = null;
+  }
+}
+
+function resolveTimelineSequenceStartIndex(entries = [], startMs = 0) {
+  const list = Array.isArray(entries) ? entries : [];
+  const cursorMs = Math.max(0, Number(startMs || 0));
+  const activeIndex = list.findIndex((entry) => cursorMs >= entry.startMs && cursorMs < entry.endMs);
+  if (activeIndex >= 0) return activeIndex;
+  const nextIndex = list.findIndex((entry) => Number(entry.startMs || 0) >= cursorMs);
+  return nextIndex >= 0 ? nextIndex : Math.max(0, list.length - 1);
+}
+
+async function playTimelineSequenceFromPlayhead(startAtMs = null) {
+  const session = getActiveSession();
+  const rows = Array.isArray(session?.script?.rows) ? session.script.rows : [];
+  if (!rows.length) return;
+  const runtimeEntries = buildTimelineRuntimeEntries(session);
+  if (!runtimeEntries.length) return;
+  // Cancela cualquier reproducción de montaje/MSE activa.
+  stopPodcastStudioMontage({ keepStatus: true, keepCursor: true, forceResetToStart: false });
+
+  // En secuencia: el audio se maneja con `syncMontageAudioPlayers()` (pista `podcast-montage-audio-lane`).
+  // Evita duplicados: apaga cualquier audio previo antes de iniciar.
+  if (podcastVideoState.audioEl) {
+    try { podcastVideoState.audioEl.pause(); } catch (_) {}
+    podcastVideoState.audioEl = null;
+  }
+  Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
+    try { audio.pause(); } catch (_) {}
+  });
+  podcastVideoState.montageAudioPlayers = {};
+
+  const previousStageMode = String(podcastVideoState.montageStageMode || "").trim();
+  podcastVideoState.montageStageMode = "multi";
+  podcastVideoState.timelineSequencePreviousStageMode = previousStageMode;
+  podcastVideoState.timelineSequenceRuntimeEntries = runtimeEntries;
+
+  const token = Number(podcastVideoState.timelineSequenceToken || 0) + 1;
+  podcastVideoState.timelineSequenceToken = token;
+  podcastVideoState.timelineSequenceActive = true;
+  podcastVideoState.timelineSequencePaused = false;
+  setPodcastVideoStatus("Reproduciendo escenas (secuencial)...");
+  updatePodcastVideoTransportUi();
+
+  const startMs = Number.isFinite(Number(startAtMs))
+    ? Math.max(0, Number(startAtMs))
+    : Math.max(0, Number(podcastVideoState.montageCursorMs || 0));
+  let index = resolveTimelineSequenceStartIndex(runtimeEntries, startMs);
+  let cursorMs = startMs;
+  let resumedFromHandoff = false;
+  const handoffLeadSec = 0.18;
+  const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+
+  const setStageSlotVisible = (slot) => {
+    setActiveStageVideoSlot(slot);
+    const active = getActiveStageVideoEl?.() || null;
+    const inactive = getInactiveStageVideoEl?.() || null;
+    if (active) active.hidden = false;
+    if (inactive) inactive.hidden = true;
+  };
+
+  const pauseAndSilenceVideo = (video) => {
+    if (!video) return;
+    try { video.pause(); } catch (_) {}
+    video.volume = 0;
+    video.muted = true;
+  };
+
+  const stopSequenceAudio = () => {
+    Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
+      try { audio.pause(); } catch (_) {}
+    });
+    podcastVideoState.montageAudioPlayers = {};
+    if (podcastVideoState.audioEl) {
+      try { podcastVideoState.audioEl.pause(); } catch (_) {}
+      podcastVideoState.audioEl = null;
+    }
+  };
+
+  const syncSequenceAudioAt = (currentMs = 0) => {
+    const ms = Math.max(0, Number(currentMs || 0));
+    const activeEntries = runtimeEntries.filter((entry) => ms >= entry.startMs && ms < entry.endMs);
+    syncMontageAudioPlayers(activeEntries, ms, speed, runtimeEntries);
+    syncMontageBackgroundAt(ms, speed);
+  };
+
+  // Primer intento de audio bajo el gesto del usuario (best-effort).
+  try { syncSequenceAudioAt(startMs); } catch (_) {}
+
+  const cleanupSequence = () => {
+    podcastVideoState.montageStageMode = previousStageMode;
+    podcastVideoState.timelineSequencePreviousStageMode = "";
+    podcastVideoState.timelineSequenceRuntimeEntries = [];
+    stopSequenceAudio();
+    podcastVideoState.timelineSequenceActive = false;
+  };
+
+  const loadEntryIntoVideo = async (videoEl, entry, startSec, { keepHidden = false, silent = false } = {}) => {
+    const video = videoEl || null;
+    const src = String(entry?.videoSrc || "").trim();
+    if (!video || !src) return false;
+    const rowId = String(entry?.rowId || "").trim();
+    const mix = resolveTimelineClipMix(session, rowId);
+    pauseAndSilenceVideo(video);
+    const ready = await setPodcastStageVideoSourceForElement(video, src, { keepHidden });
+    if (!ready) return false;
+    video.playbackRate = speed;
+    if (silent) {
+      video.volume = 0;
+      video.muted = true;
+    } else {
+      video.volume = mix.videoVolume;
+      video.muted = mix.videoVolume <= 0.0001;
+    }
+    try { video.currentTime = Math.max(0, startSec); } catch (_) {}
+    return true;
+  };
+
+  const startPreloadNext = (nextEntry) => {
+    const next = nextEntry || null;
+    if (!next || !String(next.videoSrc || "").trim()) return null;
+    const inactive = getInactiveStageVideoEl?.() || null;
+    if (!inactive) return null;
+    // Mantén el preload totalmente silencioso e invisible.
+    pauseAndSilenceVideo(inactive);
+    const videoPromise = loadEntryIntoVideo(
+      inactive,
+      next,
+      Math.max(0, Number(next.clip?.trimInMs || 0) / 1000),
+      { keepHidden: true, silent: true }
+    );
+    // Preload audio (best-effort) para minimizar espera.
+    if (next.audioSrc) {
+      try {
+        const preloadAudio = new Audio(String(next.audioSrc || "").trim());
+        preloadAudio.preload = "auto";
+        preloadAudio.load();
+      } catch (_) {}
+    }
+    return { nextIndex: index + 1, videoPromise };
+  };
+
+  const waitForBoundaryOrHandoff = async (currentEntry, endSec, nextEntry, nextPreload) => {
+    const activeVideo = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null;
+    if (!activeVideo) return { type: "ended" };
+    let settled = false;
+    let handoffTriggered = false;
+    let pastEndStartedAt = 0;
+    return new Promise((resolve) => {
+      const done = (payload) => {
+        if (settled) return;
+        settled = true;
+        activeVideo.removeEventListener("timeupdate", onTimeUpdate);
+        activeVideo.removeEventListener("ended", onEnded);
+        resolve(payload);
+      };
+      const tryHandoff = async () => {
+        if (handoffTriggered) return;
+        if (!nextEntry) return;
+        if (!nextPreload?.videoPromise) return;
+        handoffTriggered = true;
+        // Espera un poco a que el preload termine (si no, caerá al comportamiento con pausa).
+        try {
+          await Promise.race([nextPreload.videoPromise, sleep(220)]);
+        } catch (_) {}
+        if (Number(podcastVideoState.timelineSequenceToken || 0) !== token) return done({ type: "canceled" });
+        const inactive = getInactiveStageVideoEl?.() || null;
+        const expectedSrc = String(nextEntry?.videoSrc || "").trim();
+        const inactiveReady = Boolean(inactive && String(inactive.dataset?.src || "").trim() === expectedSrc && inactive.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+        if (!inactiveReady) {
+          // No alcanzó a preload: deja terminar y el loop cargará la siguiente escena con pausa (fallback).
+          handoffTriggered = false;
+          return;
+        }
+
+        // Silencia el video actual ANTES de swap para evitar doble audio, pero sin pausar visible.
+        activeVideo.volume = 0;
+        activeVideo.muted = true;
+
+        // Swap a la escena ya pre-cargada.
+        const nextSlot = Number(podcastVideoState.stageVideoSlot || 0) === 1 ? 0 : 1;
+        setStageSlotVisible(nextSlot);
+        const nextVideo = getActiveStageVideoEl?.() || null;
+        if (nextVideo) {
+          nextVideo.hidden = false;
+          const rowId = String(nextEntry?.rowId || "").trim();
+          const mix = resolveTimelineClipMix(session, rowId);
+          nextVideo.playbackRate = speed;
+          nextVideo.volume = mix.videoVolume;
+          nextVideo.muted = mix.videoVolume <= 0.0001;
+        }
+
+        // Sincroniza UI/playhead al inicio de la siguiente escena.
+        try {
+          const nextRowId = String(nextEntry?.rowId || "").trim();
+          const nextRow = rows.find((item) => String(item?.id || "").trim() === nextRowId) || null;
+          const speakerKey = String(nextRow?.speaker || nextEntry?.speakerKey || "").trim();
+          syncPodcastStudioRuntimeUi(session, nextRowId, speakerKey, { speaking: false });
+          podcastVideoState.montageCursorMs = Math.max(0, Number(nextEntry.startMs || 0));
+          syncPodcastTimelinePlayhead(session);
+        } catch (_) {}
+
+        // Audio Gemini: depende del playhead en el timeline (pista de audio del montaje).
+        syncSequenceAudioAt(Math.max(0, Number(nextEntry.startMs || 0)));
+        try { await safeMediaPlay(nextVideo); } catch (_) {}
+
+        // Ya fuera de pantalla: ahora sí pausa y silencia el video anterior.
+        pauseAndSilenceVideo(getInactiveStageVideoEl?.() || null);
+
+        return done({ type: "handoff", nextIndex: index + 1 });
+      };
+      const onTimeUpdate = () => {
+        if (Number(podcastVideoState.timelineSequenceToken || 0) !== token) return done({ type: "canceled" });
+        const t = Number(activeVideo.currentTime || 0);
+        if (t >= Math.max(0, endSec - 0.02)) {
+          if (!nextEntry) {
+            pauseAndSilenceVideo(activeVideo);
+            stopSequenceAudio();
+            return done({ type: "ended" });
+          }
+          if (!pastEndStartedAt) pastEndStartedAt = Date.now();
+          tryHandoff();
+          if (Date.now() - pastEndStartedAt > 260) {
+            // No se logró handoff; corta aquí para permitir que el loop cargue el siguiente (con pausa mínima).
+            pauseAndSilenceVideo(activeVideo);
+            stopSequenceAudio();
+            return done({ type: "ended" });
+          }
+          return;
+        }
+        if (t >= Math.max(0, endSec - handoffLeadSec)) {
+          if (nextEntry) tryHandoff();
+        }
+      };
+      const onEnded = () => {
+        if (Number(podcastVideoState.timelineSequenceToken || 0) !== token) return done({ type: "canceled" });
+        done({ type: "ended" });
+      };
+      activeVideo.addEventListener("timeupdate", onTimeUpdate);
+      activeVideo.addEventListener("ended", onEnded, { once: true });
+      // Fallback: si el tiempo ya está al final (trims), dispara handoff/end.
+      setTimeout(() => {
+        if (settled) return;
+        const t = Number(activeVideo.currentTime || 0);
+        if (nextEntry && t >= Math.max(0, endSec - handoffLeadSec)) {
+          tryHandoff();
+          return;
+        }
+        if (!nextEntry && t >= Math.max(0, endSec - 0.02)) {
+          done({ type: "ended" });
+        }
+      }, 120);
+    });
+  };
+
+  // Asegura que solo 1 video sea visible al arrancar.
+  setStageSlotVisible(Number(podcastVideoState.stageVideoSlot || 0));
+
+  while (index < runtimeEntries.length) {
+    if (Number(podcastVideoState.timelineSequenceToken || 0) !== token) {
+      cleanupSequence();
+      return;
+    }
+    const entry = runtimeEntries[index];
+    const rowId = String(entry?.rowId || "").trim();
+    const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+    if (!rowId || !row) {
+      index += 1;
+      cursorMs = Math.max(0, Number(runtimeEntries[index]?.startMs || cursorMs));
+      resumedFromHandoff = false;
+      continue;
+    }
+
+    const trimInSec = Math.max(0, Number(entry?.clip?.trimInMs || 0) / 1000);
+    const playableSec = Math.max(0.2, Number(entry?.effectiveDurationMs || 0) / 1000);
+    const offsetSec = Math.max(0, Math.min(Math.max(0, playableSec - 0.05), (Math.max(0, cursorMs - Number(entry.startMs || 0))) / 1000));
+    const startSec = trimInSec + offsetSec;
+    const endSec = trimInSec + playableSec;
+
+    setPodcastVideoStatus(`Reproduciendo escena ${index + 1} / ${runtimeEntries.length}...`);
+    updatePodcastVideoTransportUi();
+
+    if (!resumedFromHandoff) {
+      // UI: actualiza row/speaker sin tocar el stage (el stage lo controlamos aquí).
+      syncPodcastStudioRuntimeUi(session, rowId, String(row?.speaker || "").trim(), { speaking: false });
+      podcastVideoState.montageCursorMs = Math.max(0, Number(entry.startMs || 0) + Math.round(offsetSec * 1000));
+      syncPodcastTimelinePlayhead(session);
+
+      const activeVideo = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null;
+      const loaded = await loadEntryIntoVideo(activeVideo, entry, startSec, { keepHidden: false });
+      if (!loaded) {
+        index += 1;
+        cursorMs = Math.max(0, Number(runtimeEntries[index]?.startMs || cursorMs));
+        resumedFromHandoff = false;
+        continue;
+      }
+      setStageSlotVisible(Number(podcastVideoState.stageVideoSlot || 0));
+      syncSequenceAudioAt(Math.max(0, Number(entry.startMs || 0) + Math.round(offsetSec * 1000)));
+      try { await safeMediaPlay(activeVideo); } catch (_) {}
+    } else {
+      resumedFromHandoff = false;
+      applyActiveTimelineClipMixToPlayback(session, rowId);
+      syncSequenceAudioAt(Math.max(0, Number(entry.startMs || 0) + Math.round(offsetSec * 1000)));
+    }
+
+    const nextEntry = runtimeEntries[index + 1] || null;
+    const nextPreload = nextEntry ? startPreloadNext(nextEntry) : null;
+    const result = await waitForBoundaryOrHandoff(entry, endSec, nextEntry, nextPreload);
+
+    if (result?.type === "canceled") {
+      cleanupSequence();
+      return;
+    }
+    if (result?.type === "handoff") {
+      index = Math.max(index + 1, Number(result.nextIndex || index + 1));
+      cursorMs = Math.max(0, Number(runtimeEntries[index]?.startMs || cursorMs));
+      resumedFromHandoff = true;
+      continue;
+    }
+
+    // No hubo handoff: finalizó la escena actual (o no se pudo preload).
+    index += 1;
+    cursorMs = Math.max(0, Number(runtimeEntries[index]?.startMs || cursorMs));
+    resumedFromHandoff = false;
+  }
+
+  if (Number(podcastVideoState.timelineSequenceToken || 0) !== token) {
+    cleanupSequence();
+    return;
+  }
+  podcastVideoState.timelineSequenceActive = false;
+  podcastVideoState.timelineSequencePaused = false;
+  podcastVideoState.montageStageMode = previousStageMode;
+  setPodcastVideoStatus("Secuencia completada.");
+  updatePodcastVideoTransportUi();
 }
 
 function syncCreativeVideoToggleButton() {
@@ -10551,6 +13978,7 @@ function setCreativeVideoOpen(isOpen) {
 }
 
 function closeCreativeVideoModal() {
+  setGeminiCreativityModalOpen("");
   setCreativeVideoOpen(false);
 }
 
@@ -10559,13 +13987,428 @@ function openCreativeVideoModal() {
   renderCreativeVideoShell(getActiveSession());
 }
 
+function setMontageExportOpen(isOpen = false) {
+  if (els.montageExportModal) {
+    els.montageExportModal.hidden = !Boolean(isOpen);
+  }
+}
+
+function closeMontageExportModal() {
+  setMontageExportOpen(false);
+}
+
+function setMontageExportStatus(text = "", hint = "", options = {}) {
+  const safeText = String(text || "").trim() || "Listo. Presiona Exportar para generar tu video.";
+  const safeHint = String(hint || "").trim();
+  const tone = String(options?.tone || "").trim();
+  const box = els.montageExportStatusBox
+    || (els.montageExportStatus ? els.montageExportStatus.closest(".montage-export-status") : null);
+  if (els.montageExportStatus) {
+    els.montageExportStatus.textContent = safeText;
+  }
+  if (els.montageExportHint) {
+    els.montageExportHint.textContent = safeHint;
+  }
+  if (box) {
+    const normalized = ["neutral", "success", "warning", "error"].includes(tone) ? tone : "neutral";
+    box.dataset.tone = normalized;
+  }
+}
+
+function setMontageExportBusy(isBusy = false) {
+  if (els.confirmMontageExportBtn) els.confirmMontageExportBtn.disabled = Boolean(isBusy);
+  if (els.montageExportModal) {
+    els.montageExportModal.classList.toggle("is-busy", Boolean(isBusy));
+    if (!isBusy) els.montageExportModal.classList.remove("is-progress");
+  }
+}
+
+function setMontageExportProgress(progress = null) {
+  const bar = els.montageExportProgressBar || null;
+  if (!bar || !els.montageExportModal) return;
+  if (!Number.isFinite(Number(progress))) {
+    bar.style.removeProperty("--montage-export-progress");
+    els.montageExportModal.classList.remove("is-progress");
+    return;
+  }
+  const clamped = Math.max(0, Math.min(1, Number(progress)));
+  bar.style.setProperty("--montage-export-progress", `${Math.round(clamped * 1000) / 10}%`);
+  els.montageExportModal.classList.add("is-progress");
+}
+
+function syncMontageExportUi() {
+  montageExportState = normalizeMontageExportSettings(montageExportState);
+  if (els.montageExportFormat) els.montageExportFormat.value = montageExportState.format;
+  if (els.montageExportResolution) els.montageExportResolution.value = montageExportState.resolution;
+  if (els.montageExportFilename) els.montageExportFilename.value = montageExportState.filename || defaultMontageExportFilename();
+  if (els.montageExportModal) {
+    const btns = Array.from(els.montageExportModal.querySelectorAll("[data-quality]"));
+    btns.forEach((btn) => {
+      const key = String(btn?.dataset?.quality || "").trim();
+      btn.classList.toggle("is-active", key === montageExportState.qualityPreset);
+    });
+  }
+  persistMontageExportSettings();
+}
+
+function openMontageExportModal() {
+  montageExportState = normalizeMontageExportSettings(montageExportState);
+  if (!montageExportState.filename) montageExportState.filename = defaultMontageExportFilename();
+  setMontageExportOpen(true);
+  syncMontageExportUi();
+  setMontageExportBusy(false);
+  setMontageExportProgress(null);
+  setMontageExportStatus("Listo. Presiona Exportar para generar tu video.", "Usa el timeline tal como está (escenas + audio).", { tone: "neutral" });
+}
+
+function validateMontageExportLinearTimeline(runtimeEntries = []) {
+  const entries = Array.isArray(runtimeEntries) ? runtimeEntries.slice() : [];
+  entries.sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0));
+  let prev = null;
+  for (const entry of entries) {
+    const startMs = Math.max(0, Number(entry?.startMs || 0) || 0);
+    const endMs = Math.max(startMs, Number(entry?.endMs || 0) || startMs);
+    if (prev && startMs < (Number(prev.endMs || 0) - 10)) {
+      return { ok: false, error: "Export no soporta clips simultáneos aún (solo timeline lineal)." };
+    }
+    prev = { startMs, endMs };
+  }
+  return { ok: true, error: "" };
+}
+
+function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
+  const list = Array.isArray(skippedEntries) ? skippedEntries.filter(Boolean) : [];
+  if (!list.length) return "";
+  const reasonLabels = {
+    missing_video_source: "sin video",
+    missing_audio_source: "sin audio",
+    storage_not_found: "archivo no disponible"
+  };
+  const preview = list.slice(0, Math.max(1, maxItems)).map((item, index) => {
+    const sceneIndex = Math.max(1, Number(item?.sceneIndex || index + 1) || index + 1);
+    const speaker = String(item?.speaker || "").trim();
+    const reasonKey = String(item?.reason || "").trim();
+    const reason = reasonKey ? (reasonLabels[reasonKey] || reasonKey) : "";
+    const bits = [`Escena ${sceneIndex}`];
+    if (speaker) bits.push(speaker);
+    if (reason) bits.push(reason);
+    return bits.join(" · ");
+  });
+  const suffix = list.length > preview.length ? ` y ${list.length - preview.length} más` : "";
+  return preview.join("; ") + suffix;
+}
+
+function buildMontageExportPayload(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return { ok: false, error: "No hay sesión activa.", payload: null };
+  const sessionId = String(activeSession?.id || "").trim();
+  if (!sessionId) return { ok: false, error: "La sesión no tiene un ID válido.", payload: null };
+  const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
+  if (!runtimeEntries.length) return { ok: false, error: "No hay clips en el timeline para exportar.", payload: null };
+  const linear = validateMontageExportLinearTimeline(runtimeEntries);
+  if (!linear.ok) return { ok: false, error: linear.error, payload: null };
+  const videoCfg = getPodcastVideoConfig(activeSession);
+  const timelineDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
+  const montageAudioMode = String(videoCfg?.audioMode || "gemini-live-per-scene").trim().toLowerCase();
+  const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
+
+  const normalizeLegacyPct = (value, fallback = 100) => {
+    const num = toFiniteNumber(value, fallback);
+    if (!Number.isFinite(num)) return Math.max(0, Math.min(100, Number(fallback) || 0));
+    const scaled = num > 0 && num <= 1 ? num * 100 : num;
+    return Math.max(0, Math.min(100, scaled));
+  };
+
+  const buildGeminiTimelineSegments = () => {
+    const track = normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
+    if (!(track.enabled === true) || !Array.isArray(track.segments) || !track.segments.length) return [];
+    const baseGeminiVolumePct = normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100);
+    return track.segments
+      .map((segment, idx) => {
+        const rowId = String(segment?.rowId || "").trim();
+        if (!rowId) return null;
+        const runtime = runtimeByRowId.get(rowId) || null;
+        const storedAudio = resolveDialogueAudioForRow(activeSession, rowId);
+        const storedSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+        const src = String(storedSrc || segment?.audioSrc || runtime?.audioSrc || "").trim();
+        if (!src) return null;
+        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const durationMs = Math.max(
+          STUDIO_TIMELINE_MIN_CLIP_MS,
+          Math.round(Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS)
+        );
+        const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || runtime?.clip?.trimInMs || 0) || 0));
+        const trimOutMsRaw = Math.round(Number(segment?.trimOutMs || runtime?.clip?.trimOutMs || 0) || 0);
+        // En export, el segmento debe durar `durationMs` dentro del timeline.
+        // Si `trimOutMs` es mayor, FFmpeg recortaría demasiado tarde y el audio se encimaría.
+        const trimOutMs = Math.min(
+          Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMsRaw || (trimInMs + durationMs)),
+          trimInMs + durationMs
+        );
+        const overridePctRaw = toFiniteNumber(runtime?.clip?.geminiVolumeOverridePct, Number.NaN);
+        const volumePct = Number.isFinite(overridePctRaw)
+          ? normalizeLegacyPct(overridePctRaw, baseGeminiVolumePct)
+          : baseGeminiVolumePct;
+        if (volumePct <= 0.0001) return null;
+        return {
+          kind: "gemini",
+          id: String(segment?.id || `${rowId}-seg-${idx + 1}`).trim() || `${rowId}-seg-${idx + 1}`,
+          rowId,
+          sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 0) || 0)),
+          url: src,
+          storagePath: String(storedAudio?.storagePath || "").trim(),
+          downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
+          mimeType: String(storedAudio?.mimeType || "").trim(),
+          startMs,
+          durationMs,
+          trimInMs,
+          trimOutMs,
+          volumePct
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const buildUploadedBackgroundSegments = () => {
+    const segments = buildUploadedPanelMusicSegments(activeSession);
+    const volumePct = normalizeLegacyPct(panelMusicState?.montageVolume ?? 0, 0);
+    if (!Array.isArray(segments) || !segments.length || volumePct <= 0.0001) return [];
+    return segments
+      .map((segment, idx) => {
+        const src = String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim();
+        if (!src) return null;
+        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) || 0));
+        const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, endMs - startMs);
+        const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
+        const trimOutMs = Math.min(
+          Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs))),
+          trimInMs + durationMs
+        );
+        return {
+          kind: "uploaded",
+          id: String(segment?.id || `uploaded-${idx + 1}`).trim() || `uploaded-${idx + 1}`,
+          trackIndex: Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0)),
+          loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
+          slotLabel: String(segment?.slotLabel || "").trim(),
+          url: src,
+          storagePath: String(segment?.storagePath || "").trim(),
+          downloadUrl: String(segment?.downloadUrl || "").trim(),
+          mimeType: String(segment?.mimeType || "").trim(),
+          startMs,
+          durationMs,
+          trimInMs,
+          trimOutMs,
+          volumePct
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const geminiTimelineSegments = montageAudioMode === "gemini-live-per-scene" ? buildGeminiTimelineSegments() : [];
+  const uploadedBackgroundSegments = buildUploadedBackgroundSegments();
+  const useTimelineAudio = geminiTimelineSegments.length > 0 || uploadedBackgroundSegments.length > 0;
+
+  const entries = runtimeEntries
+    .slice()
+    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0))
+    .map((entry, index) => {
+      const rowId = String(entry?.rowId || "").trim();
+      const row = (activeSession?.script?.rows || []).find((item) => String(item?.id || "").trim() === rowId) || null;
+      const clip = resolveDialogueVideoForRow(activeSession, rowId);
+      const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
+      const audio = resolveDialogueAudioForRow(activeSession, rowId);
+      const videoStoragePath = String(primarySegment?.storagePath || clip?.storagePath || "").trim();
+      const videoDownloadUrl = String(primarySegment?.downloadUrl || clip?.downloadUrl || "").trim();
+      const videoMimeType = String(primarySegment?.mimeType || clip?.mimeType || "video/mp4").trim() || "video/mp4";
+      const audioStoragePath = String(audio?.storagePath || "").trim();
+      const audioDownloadUrl = String(audio?.downloadUrl || "").trim();
+      const audioMimeType = String(audio?.mimeType || "audio/ogg").trim() || "audio/ogg";
+      const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
+      const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs || 0) || 0);
+      const useNativeVideoAudio = shouldUseNativeVideoAudioForRow(activeSession, rowId);
+      if (!rowId || !(videoStoragePath || videoDownloadUrl)) {
+        return {
+          ok: false,
+          error: `La escena ${index + 1} no tiene video generado.`,
+          entry: null,
+          skippedEntry: {
+            sceneIndex: index + 1,
+            rowId,
+            speaker: String(row?.speaker || "").trim(),
+            sceneLabel: `Escena ${index + 1}`,
+            reason: "missing_video_source"
+          }
+        };
+      }
+      return {
+        ok: true,
+        error: "",
+        entry: {
+          rowId,
+          sceneIndex: index + 1,
+          speaker: String(row?.speaker || "").trim(),
+          sceneLabel: `Escena ${index + 1}`,
+          trimInMs,
+          durationMs,
+          video: {
+            storagePath: videoStoragePath || "",
+            url: videoDownloadUrl || "",
+            mimeType: videoMimeType
+          },
+          audio: useTimelineAudio
+            ? null
+            : (audioStoragePath || audioDownloadUrl) ? {
+              storagePath: audioStoragePath || "",
+              url: audioDownloadUrl || "",
+              mimeType: audioMimeType
+            } : null,
+          useNativeVideoAudio: useTimelineAudio ? false : (useNativeVideoAudio === true)
+        }
+      };
+    });
+  const validEntries = entries.filter((item) => item.ok === true && item.entry).map((item) => item.entry);
+  const skippedEntries = entries.filter((item) => item.ok !== true).map((item) => item.skippedEntry).filter(Boolean);
+  if (!validEntries.length) {
+    return {
+      ok: false,
+      error: skippedEntries.length
+        ? `No hay escenas válidas para exportar. ${formatMontageSkippedEntries(skippedEntries, 2)}`
+        : "No se pudo preparar exportación.",
+      payload: null,
+      warnings: {
+        skippedEntries
+      }
+    };
+  }
+
+  const panelMusic = getPanelMontageMusicConfig();
+  const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
+  const trackUrl = String(panelMusic?.sourceUrl || "").trim();
+  const trackVolumePct = Math.max(0, Math.min(100, Math.round(Number(panelMusic?.volume ?? 0))));
+  const includeBackgroundMusic = Boolean(canUseTrackMusic && trackUrl && trackVolumePct > 0);
+  const backgroundMusic = includeBackgroundMusic ? {
+    storagePath: "",
+    url: trackUrl,
+    volumePct: trackVolumePct
+  } : null;
+
+  const payload = {
+    sessionId,
+    format: montageExportState.format,
+    qualityPreset: montageExportState.qualityPreset,
+    resolution: montageExportState.resolution,
+    includeBackgroundMusic,
+    backgroundMusic,
+    filename: String(montageExportState.filename || defaultMontageExportFilename()).trim(),
+    audioTimeline: useTimelineAudio ? {
+      enabled: true,
+      durationMs: timelineDurationMs,
+      mode: "timeline",
+      geminiSegments: geminiTimelineSegments,
+      backgroundSegments: uploadedBackgroundSegments
+    } : null
+  };
+
+  return {
+    ok: true,
+    error: "",
+    warnings: {
+      skippedEntries
+    },
+    payload: {
+      ...payload,
+      entries: validEntries
+    }
+  };
+}
+
+async function runMontageExport() {
+  if (montageExportBusy) return;
+  const session = getActiveSession();
+  setMontageExportStatus("Preparando exportación…", "Revisando escenas y audio.", { tone: "neutral" });
+  setMontageExportProgress(0.12);
+  const prepared = buildMontageExportPayload(session);
+  if (!prepared.ok) {
+    setMontageExportProgress(null);
+    setMontageExportStatus(prepared.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
+    return;
+  }
+  montageExportBusy = true;
+  setMontageExportBusy(true);
+  setMontageExportProgress(0.22);
+  setMontageExportStatus("Creando tu video…", "Esto puede tardar un poco según la duración.", { tone: "neutral" });
+  try {
+    setMontageExportProgress(0.55);
+    const data = await authFetchJson("/api/podcaster/montage/export", {
+      method: "POST",
+      body: prepared.payload
+    });
+    setMontageExportProgress(0.9);
+    const localSkippedEntries = Array.isArray(prepared?.warnings?.skippedEntries) ? prepared.warnings.skippedEntries : [];
+    const serverSkippedEntries = Array.isArray(data?.warnings?.skippedEntries) ? data.warnings.skippedEntries : [];
+    const skippedEntries = [...localSkippedEntries, ...serverSkippedEntries];
+    const url = String(data?.export?.downloadUrl || "").trim();
+    const name = String(data?.export?.filename || montageExportState.filename || "montage").trim() || "montage";
+    if (!url) {
+      setMontageExportProgress(null);
+      setMontageExportStatus("Terminamos, pero no pudimos iniciar la descarga.", "Intenta exportar de nuevo. Si se repite, revisa la consola.", { tone: "warning" });
+      return;
+    }
+    if (skippedEntries.length) {
+      setMontageExportStatus(
+        `Tu video está listo. Omitimos ${skippedEntries.length} escena(s) con archivos faltantes.`,
+        formatMontageSkippedEntries(skippedEntries, 3),
+        { tone: "warning" }
+      );
+    } else {
+      setMontageExportStatus("Tu video está listo.", "Iniciando descarga…", { tone: "success" });
+    }
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (_) {
+      // noop
+    }
+    setMontageExportProgress(1);
+  } catch (error) {
+    const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
+    const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
+    const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
+    const status = Number(apiPayload?.status || error?.status || 0) || 0;
+    const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
+    console.warn("[podcaster] montage export failed", { status, code, apiPayload, error });
+    const hintParts = [];
+    if (skippedEntries.length) {
+      hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
+      hintParts.push("Regenera esas escenas y vuelve a exportar.");
+    } else if (String(code).includes("storage_not_found")) {
+      hintParts.push("Hay escenas que ya no tienen su archivo de video/audio.");
+      hintParts.push("Regenera esas escenas y vuelve a exportar.");
+    } else if (status >= 500) {
+      hintParts.push("Intenta de nuevo en unos segundos.");
+    } else {
+      hintParts.push("Revisa tu timeline y vuelve a intentar.");
+    }
+    setMontageExportProgress(null);
+    setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
+  } finally {
+    montageExportBusy = false;
+    setMontageExportBusy(false);
+  }
+}
+
 function renderCreativeTimeline(session = null) {
   if (!els.creativeVideoTimelineList) return;
   const activeSession = session || getActiveSession();
   const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
   els.creativeVideoTimelineList.innerHTML = rows.map((row, index) => {
     const active = String(row?.id || "").trim() === String(creativeVideoState.activeRowId || "").trim();
-    const duration = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
+    const duration = Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(row?.durationSec) || VIDEO_SCENE_MAX_SEC));
     const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
     return `
       <button class="creative-timeline-row${active ? " is-active" : ""}" type="button" data-action="select-creative-row" data-row-id="${escapeHtml(String(row?.id || "").trim())}">
@@ -10597,13 +14440,28 @@ function renderCreativeInspector(session = null) {
     els.creativeVideoInspectorScene.textContent = `Secuencia activa: ${activeIndex + 1}`;
   }
   if (!els.creativeVideoInspectorEditor) return;
+  const activeVoiceOriginal = String(activeRow?.voiceOverOriginalText || "").trim();
+  const hasVisualOriginal = activeRow?.visualNotesOriginalStored === true;
   els.creativeVideoInspectorEditor.innerHTML = `
     <label class="row-field">
       <span>Tiempo</span>
-      <input type="number" min="${SHORT_SCENE_MIN_SEC}" max="180" step="1" data-field="durationSec" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(Math.max(SHORT_SCENE_MIN_SEC, Number(activeRow?.durationSec) || SHORT_SCENE_MAX_SEC)))}">
+      <input type="number" min="${VIDEO_SCENE_MIN_SEC}" max="${VIDEO_SCENE_MAX_SEC}" step="0.01" data-field="durationSec" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" value="${escapeHtml(String(Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(activeRow?.durationSec) || VIDEO_SCENE_MAX_SEC))))}">
     </label>
     <label class="row-field">
-      <span>Guion</span>
+      <span class="row-field-head">
+        <span>Guion</span>
+        <span class="row-field-inline-actions">
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
+            <i class="fas fa-sliders-h" aria-hidden="true"></i>
+          </button>
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="rewrite-voiceover-text" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Reformular guion con Gemini (más corto, sin perder esencia)" aria-label="Reformular guion con Gemini">
+            <i class="fas fa-magic" aria-hidden="true"></i>
+          </button>
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="restore-voiceover-text" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Restaurar guion original" aria-label="Restaurar guion original"${activeVoiceOriginal ? "" : " disabled"}>
+            <i class="fas fa-undo-alt" aria-hidden="true"></i>
+          </button>
+        </span>
+      </span>
       <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Narración de la escena">${escapeHtml(String(activeRow?.voiceOverText || activeRow?.text || "").trim())}</textarea>
     </label>
     <label class="row-field">
@@ -10619,7 +14477,20 @@ function renderCreativeInspector(session = null) {
       <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Ej: corte rápido, disolvencia, barrido">${escapeHtml(String(activeRow?.transition || activeRow?.visualNotes || activeRow?.notes || "").trim())}</textarea>
     </label>
     <label class="row-field">
-      <span>Elemento visual</span>
+      <span class="row-field-head">
+        <span>Elemento visual</span>
+        <span class="row-field-inline-actions">
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
+            <i class="fas fa-sliders-h" aria-hidden="true"></i>
+          </button>
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="rewrite-visual-notes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Regenerar elemento visual con Gemini (más detallado)" aria-label="Regenerar elemento visual con Gemini">
+            <i class="fas fa-magic" aria-hidden="true"></i>
+          </button>
+          <button class="row-icon-btn row-field-mini-btn" type="button" data-action="restore-visual-notes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" title="Restaurar elemento visual anterior" aria-label="Restaurar elemento visual anterior"${hasVisualOriginal ? "" : " disabled"}>
+            <i class="fas fa-undo-alt" aria-hidden="true"></i>
+          </button>
+        </span>
+      </span>
       <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué elemento visual refuerza la explicación">${escapeHtml(String(activeRow?.visualNotes || activeRow?.visual || "").trim())}</textarea>
     </label>
   `;
@@ -10717,6 +14588,12 @@ async function openPodcastVideoModalWithLoader() {
   await sleep(950);
   if (runToken !== podcastVideoOpenRunToken) return;
   setPodcastVideoOpen(true);
+  const openedSession = getActiveSession();
+  if (openedSession && shouldAutoRepairTimelineLayout(openedSession)) {
+    // Reparación conservadora: solo reposiciona startMs/zIndex según el orden del guion para evitar encimes
+    // y garantizar que el montaje siga exactamente el timeline.
+    reflowTimelineClipsByScriptOrder(openedSession, { persist: true, render: false });
+  }
   renderPodcastVideoShell(getActiveSession());
   setPodcastVideoRow(resolveTargetVideoRowId(getActiveSession()), { syncStage: true });
   setPodcastVideoStatus(getPanelModeCopy(getActiveSession()).videoMode ? "Video educativo activado" : "Video activado");
@@ -10728,6 +14605,7 @@ function closePodcastVideoModal() {
   setPodcastVideoLoaderOpen(false);
   stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
   setAudioTrackMixOpen(false);
+  setGeminiCreativityModalOpen("");
   const panelCopy = getPanelModeCopy(getActiveSession());
   podcastVideoState.enabled = false;
   if (els.podcastVideoModal) {
@@ -10966,6 +14844,13 @@ async function regenerateAllSpeakerPortraits() {
 function renderPodcastPortraitStrip(session = null, options = {}) {
   if (!els.podcastPortraitStrip) return;
   const activeSession = session || getActiveSession();
+  if (isEducationalVideoMode(activeSession)) {
+    els.podcastPortraitStrip.hidden = true;
+    els.podcastPortraitStrip.innerHTML = "";
+    podcastRenderState.portraitStructureKey = "";
+    return;
+  }
+  els.podcastPortraitStrip.hidden = false;
   const renderReason = String(options.reason || "structure").trim() || "structure";
   const structureKey = buildPodcastPortraitStripStructureKey(activeSession);
   const canReuseStructure = (
@@ -11208,12 +15093,20 @@ function updatePodcastPlayerUi() {
   if (els.reorderTimelineTracksBtn) {
     els.reorderTimelineTracksBtn.disabled = podcastVideoState.busy || !canReorderTimelineLayout(getActiveSession());
   }
+  if (els.importGeminiDialogueTrackBtn) {
+    const enabled = podcastVideoState.showMontageAudioSubtracks === true;
+    els.importGeminiDialogueTrackBtn.disabled = podcastVideoState.busy;
+    els.importGeminiDialogueTrackBtn.classList.toggle("is-active", enabled);
+    els.importGeminiDialogueTrackBtn.setAttribute("title", enabled ? "Ocultar audio del montaje" : "Mostrar audio del montaje");
+    els.importGeminiDialogueTrackBtn.setAttribute("aria-label", enabled ? "Ocultar audio del montaje" : "Mostrar audio del montaje");
+  }
   if (els.generateDialogueAudioBtn) {
     const session = getActiveSession();
     const rowId = resolveTargetVideoRowId(session);
     const key = `${session?.id || ""}:${rowId || ""}`;
     els.generateDialogueAudioBtn.disabled = podcastVideoState.busy || !rowId || dialogueAudioGenerationPending.has(key);
   }
+  syncStudioPlayDialogueAudioButton();
   if (!isActive && !isPaused && !podcastPlaybackState.queue.length) {
     setPodcastPlaybackStatus("Detenido");
   } else if (isPaused) {
@@ -11733,6 +15626,7 @@ function renderScript(session) {
   const script = session.script || {};
   const rows = script.rows || [];
   const panelCopy = getPanelModeCopy(session);
+  const rowReferenceMap = getRowReferenceImageMap(session);
   if (els.sidepanel) {
     els.sidepanel.classList.toggle("is-video-mode", panelCopy.videoMode);
   }
@@ -11761,7 +15655,7 @@ function renderScript(session) {
     els.durationSummary.textContent = secondsToClock(countTotalDuration(rows));
   }
 
-  els.scriptTableBody.innerHTML = rows.map((row, index) => `
+  const buildScriptRowCard = (row, index) => `
     <article class="script-row" data-row-id="${escapeHtml(row.id)}" tabindex="-1">
       <div class="script-row-head">
         <div class="row-head-left">
@@ -11773,12 +15667,26 @@ function renderScript(session) {
           ${panelCopy.videoMode ? "" : `<span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>`}
           ${hasVideoSceneMetadata(row) ? `<span class="row-chip row-chip-scenario">${panelCopy.videoMode ? "Video educativo" : "Video"}</span>` : ""}
           ${normalizeVideoImagePrompts(row.imagePrompts || []).length ? `<span class="row-chip row-chip-selected">${escapeHtml(`${normalizeVideoImagePrompts(row.imagePrompts || []).length} imgs`)}</span>` : ""}
+          ${(panelCopy.videoMode && rowReferenceMap[String(row.id || "").trim()])
+            ? `<span class="row-chip">${escapeHtml(`Ref: ${rowReferenceMap[String(row.id || "").trim()].name}`)}</span>`
+            : ""}
           <span class="row-chip row-chip-elapsed" data-row-play-elapsed="${escapeHtml(row.id)}">0:00</span>
         </div>
         <div class="row-actions">
           <button class="row-icon-btn ${hasActiveDisfluencyConfig(getRowDisfluencyConfig(row)) ? "is-active" : ""}" type="button" data-action="toggle-disfluency-config" data-row-id="${escapeHtml(row.id)}" title="Configurar muletillas, errores y tartamudeo">
             <i class="fas fa-comment-dots"></i>
           </button>
+          ${panelCopy.videoMode
+            ? (() => {
+              const ref = rowReferenceMap[String(row.id || "").trim()] || null;
+              return `
+                <button class="row-icon-btn" type="button" data-action="attach-row-reference-image" data-row-id="${escapeHtml(row.id)}" title="Adjuntar imagen de referencia de la escena">
+                  <i class="fas fa-paperclip"></i>
+                </button>
+                ${ref ? `<button class="row-icon-btn" type="button" data-action="clear-row-reference-image" data-row-id="${escapeHtml(row.id)}" title="Quitar imagen de referencia de la escena"><i class="fas fa-times"></i></button>` : ""}
+              `;
+            })()
+            : ""}
           <button class="row-icon-btn" type="button" data-action="save-row-audio-storage" data-row-id="${escapeHtml(row.id)}" title="Guardar audio de escena en Storage">
             <i class="fas fa-save"></i>
           </button>
@@ -11795,7 +15703,18 @@ function renderScript(session) {
       </div>
       ${buildScriptRowEditorMarkup(session, row)}
     </article>
-  `).join("");
+  `;
+
+  els.scriptTableBody.innerHTML = rows.flatMap((row, index) => ([
+    buildScriptRowCard(row, index),
+    index < rows.length - 1
+      ? `
+        <button class="script-row-insert" type="button" data-action="insert-row-at" data-insert-index="${index + 1}" aria-label="Añadir escena aquí" title="Añadir escena aquí">
+          <span class="script-row-insert-plus" aria-hidden="true"><i class="fas fa-plus"></i></span>
+        </button>
+      `
+      : ""
+  ])).join("");
 
   if (scriptSortable) {
     scriptSortable.destroy();
@@ -11806,21 +15725,36 @@ function renderScript(session) {
     scriptSortable = window.Sortable.create(els.scriptTableBody, {
       animation: 150,
       handle: ".drag-handle",
+      draggable: ".script-row",
+      filter: ".script-row-insert",
       ghostClass: "sortable-ghost",
       chosenClass: "sortable-chosen",
       onEnd(evt) {
-        if (evt.oldIndex === evt.newIndex) return;
-        upsertActiveSession((sessionData) => {
-          const nextRows = [...(sessionData.script?.rows || [])];
-          const [moved] = nextRows.splice(evt.oldIndex, 1);
-          nextRows.splice(evt.newIndex, 0, moved);
-          return {
-            ...sessionData,
-            script: {
-              ...sessionData.script,
-              rows: nextRows
-            }
-          };
+        const session = getActiveSession();
+        const rows = Array.isArray(session?.script?.rows) ? session.script.rows : [];
+        if (rows.length < 2) return;
+        const rowById = new Map(rows.map((row) => [String(row?.id || "").trim(), row]));
+        const domIds = [...els.scriptTableBody.querySelectorAll(".script-row[data-row-id]")]
+          .map((node) => String(node?.dataset?.rowId || "").trim())
+          .filter(Boolean);
+        if (!domIds.length) return;
+        const nextRows = domIds.map((id) => rowById.get(id)).filter(Boolean);
+        const missing = rows.filter((row) => !domIds.includes(String(row?.id || "").trim()));
+        if (missing.length) nextRows.push(...missing);
+        const oldSignature = rows.map((row) => String(row?.id || "").trim()).join("|");
+        const nextSignature = nextRows.map((row) => String(row?.id || "").trim()).join("|");
+        if (oldSignature === nextSignature) return;
+        upsertActiveSession((sessionData) => ({
+          ...sessionData,
+          script: {
+            ...sessionData.script,
+            rows: nextRows
+          }
+        }), { render: false });
+        scheduleCloudAutosave("structure");
+        queueMicrotask(() => {
+          reflowTimelineClipsByScriptOrder(getActiveSession(), { persist: true });
+          render();
         });
       }
     });
@@ -11840,10 +15774,23 @@ function buildScriptRowEditorMarkup(session, row) {
       <div class="script-row-grid">
         <label class="row-field">
           <span>Tiempo</span>
-          <input type="number" min="${SHORT_SCENE_MIN_SEC}" max="180" data-field="durationSec" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.durationSec)}">
+          <input type="number" min="${VIDEO_SCENE_MIN_SEC}" max="${VIDEO_SCENE_MAX_SEC}" step="0.01" data-field="durationSec" data-row-id="${escapeHtml(creativeRow.id)}" value="${escapeHtml(creativeRow.durationSec)}">
         </label>
         <label class="row-field wide">
-          <span>Guion</span>
+          <span class="row-field-head">
+            <span>Guion</span>
+            <span class="row-field-inline-actions">
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(creativeRow.id)}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+              </button>
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="rewrite-voiceover-text" data-row-id="${escapeHtml(creativeRow.id)}" title="Reformular guion con Gemini (más corto, sin perder esencia)" aria-label="Reformular guion con Gemini">
+                <i class="fas fa-magic" aria-hidden="true"></i>
+              </button>
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="restore-voiceover-text" data-row-id="${escapeHtml(creativeRow.id)}" title="Restaurar guion original" aria-label="Restaurar guion original"${String(creativeRow.voiceOverOriginalText || "").trim() ? "" : " disabled"}>
+                <i class="fas fa-undo-alt" aria-hidden="true"></i>
+              </button>
+            </span>
+          </span>
           <textarea rows="4" data-field="voiceOverText" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.voiceOverText || "")}</textarea>
         </label>
         <label class="row-field wide">
@@ -11859,7 +15806,20 @@ function buildScriptRowEditorMarkup(session, row) {
           <textarea rows="2" data-field="transition" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.transition || creativeRow.visualNotes || "")}</textarea>
         </label>
         <label class="row-field wide">
-          <span>Elemento visual</span>
+          <span class="row-field-head">
+            <span>Elemento visual</span>
+            <span class="row-field-inline-actions">
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="open-gemini-creativity" data-row-id="${escapeHtml(creativeRow.id)}" title="Ajustar creatividad de Gemini" aria-label="Ajustar creatividad de Gemini">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+              </button>
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="rewrite-visual-notes" data-row-id="${escapeHtml(creativeRow.id)}" title="Regenerar elemento visual con Gemini (más detallado)" aria-label="Regenerar elemento visual con Gemini">
+                <i class="fas fa-magic" aria-hidden="true"></i>
+              </button>
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="restore-visual-notes" data-row-id="${escapeHtml(creativeRow.id)}" title="Restaurar elemento visual anterior" aria-label="Restaurar elemento visual anterior"${creativeRow.visualNotesOriginalStored === true ? "" : " disabled"}>
+                <i class="fas fa-undo-alt" aria-hidden="true"></i>
+              </button>
+            </span>
+          </span>
           <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(creativeRow.id)}">${escapeHtml(creativeRow.visualNotes || creativeRow.visual || "")}</textarea>
         </label>
       </div>
@@ -11926,9 +15886,46 @@ function buildScriptRowEditorMarkup(session, row) {
   `;
 }
 
+function buildBlankScriptRow(session = null, options = {}) {
+  const activeSession = session || getActiveSession();
+  const panelCopy = getPanelModeCopy(activeSession);
+  const speakerOptions = getSpeakerOptions(activeSession);
+  const fallbackSpeaker = speakerOptions[0] || "Host A";
+  const speaker = panelCopy.videoMode ? "Narrador" : String(options.speaker || fallbackSpeaker).trim() || fallbackSpeaker;
+  const expression = panelCopy.videoMode ? "Neutral" : String(options.expression || "Neutral").trim() || "Neutral";
+  const durationSec = panelCopy.videoMode ? VIDEO_SCENE_MAX_SEC : 6;
+  const base = {
+    id: makeId("row"),
+    speaker,
+    expression,
+    durationSec,
+    mediaCue: "Sin media",
+    text: "",
+    notes: "",
+    scenePrompt: "",
+    imagePrompts: [],
+    disfluencyConfig: { ...DEFAULT_DISFLUENCY_CONFIG }
+  };
+  if (!panelCopy.videoMode) return base;
+  return {
+    ...base,
+    voiceOverText: "",
+    voiceOverOriginalText: "",
+    sceneDescription: "",
+    onScreenText: "",
+    transition: "",
+    visualNotes: "",
+    geminiCreativityLevel: 3
+  };
+}
+
 function buildInspectorScriptRowMarkup(session, row, index = -1) {
   const safeIndex = Number.isFinite(index) && index >= 0 ? index : 0;
   const panelCopy = getPanelModeCopy(session);
+  const rowId = String(row?.id || "").trim();
+  const rowReference = (panelCopy.videoMode && rowId)
+    ? (getRowReferenceImageMap(session)[rowId] || null)
+    : null;
   return `
     <article class="script-row script-row-inspector" data-row-id="${escapeHtml(row.id)}">
       <div class="script-row-head script-row-head-inspector">
@@ -11937,7 +15934,32 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
           ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
           ${panelCopy.videoMode ? "" : `<span class="row-chip row-chip-voice">${escapeHtml(resolveSpeakerVoiceName(row.speaker, session))}</span>`}
         </div>
+        ${panelCopy.videoMode
+          ? `
+            <div class="row-actions row-actions-inspector">
+              <button class="row-icon-btn" type="button" data-action="attach-row-reference-image" data-row-id="${escapeHtml(row.id)}" title="Adjuntar imagen de referencia de la escena" aria-label="Adjuntar imagen de referencia de la escena">
+                <i class="fas fa-paperclip"></i>
+              </button>
+              ${rowReference
+                ? `<button class="row-icon-btn" type="button" data-action="clear-row-reference-image" data-row-id="${escapeHtml(row.id)}" title="Quitar imagen de referencia de la escena" aria-label="Quitar imagen de referencia de la escena"><i class="fas fa-times"></i></button>`
+                : ""}
+            </div>
+          `
+          : ""}
       </div>
+      ${panelCopy.videoMode
+        ? `
+          <div class="inspector-row-reference">
+            <div class="inspector-row-reference-head">
+              <span>Imagen de referencia</span>
+              <span class="inspector-row-reference-name">${rowReference ? escapeHtml(rowReference.name) : "Sin referencia"}</span>
+            </div>
+            ${rowReference
+              ? `<div class="inspector-row-reference-preview"><img src="${escapeHtml(rowReference.dataUrl)}" alt="${escapeHtml(rowReference.name)}"></div>`
+              : `<div class="inspector-row-reference-empty">Adjunta una imagen para guiar el video de esta escena.</div>`}
+          </div>
+        `
+        : ""}
       ${buildScriptRowEditorMarkup(session, row)}
     </article>
   `;
@@ -11991,6 +16013,7 @@ function setPodcastStudioInspectorCollapsed(isCollapsed) {
   } catch (_) {
     // noop
   }
+  upsertPodcastStudioUiState({ inspectorCollapsed: podcastStudioInspectorCollapsed }, { autosaveReason: "ui-state" });
 }
 
 function setPodcastStudioInspectorWidth(nextWidth, { persist = true } = {}) {
@@ -12009,13 +16032,16 @@ function setPodcastStudioInspectorWidth(nextWidth, { persist = true } = {}) {
       // noop
     }
   }
+  if (persist) {
+    upsertPodcastStudioUiState({ inspectorWidthPx: Math.round(normalizedWidth) }, { autosaveReason: "ui-state" });
+  }
 }
 
 function setupPodcastStudioInspectorResize() {
   setPodcastStudioInspectorWidth(podcastStudioInspectorWidth, { persist: false });
   podcastStudioInspectorResizeCleanup?.();
-  if (!els.podcastStudioInspector || !els.podcastStudioInspectorCornerHandle) return;
-  const handles = [els.podcastStudioInspectorCornerHandle];
+  if (!els.podcastStudioInspector || !els.podcastStudioInspectorResizeHandle) return;
+  const handles = [els.podcastStudioInspectorResizeHandle].filter(Boolean);
   const onPointerDown = (event) => {
     if (event.button !== 0) return;
     if (window.innerWidth <= 920 || podcastStudioInspectorCollapsed) return;
@@ -12055,6 +16081,156 @@ function setupPodcastStudioInspectorResize() {
     setPodcastStudioInspectorWidth(nextWidth);
   });
   podcastStudioInspectorResizeObserver.observe(els.podcastStudioInspector);
+}
+
+function setPodcastVideoStageWidthRatio(nextRatio, { persist = true } = {}) {
+  const stage = els.podcastVideoStage;
+  const shell = els.podcastVideoShell;
+  if (!stage || !shell) return;
+  // Ensure older builds don't leave inline vars on the stage itself.
+  stage.style.removeProperty("--pod-stage-width");
+  stage.style.removeProperty("--pod-stage-user-max-height");
+  // Limpieza defensiva: versiones anteriores guardaron altura custom en key antiguo.
+  try { window.localStorage.removeItem("cb_podcast_stage_height_ratio_v1"); } catch (_) {}
+  const parentRect = stage.parentElement?.getBoundingClientRect();
+  const parentWidth = parentRect?.width || stage.getBoundingClientRect().width || window.innerWidth;
+  const minRatio = parentWidth ? Math.min(1, PODCAST_STAGE_MIN_WIDTH_PX / parentWidth) : 0.1;
+
+  if (!Number.isFinite(nextRatio) || nextRatio === null) {
+    podcastStageWidthRatio = null;
+    shell.style.removeProperty("--pod-stage-width");
+    shell.style.removeProperty("--pod-stage-user-max-height");
+    podcastStageMaxHeightPx = null;
+    stage.classList.remove("is-user-resized");
+    if (persist) {
+      try {
+        window.localStorage.removeItem(PODCAST_STAGE_WIDTH_RATIO_KEY);
+        window.localStorage.removeItem(PODCAST_STAGE_MAX_HEIGHT_PX_KEY);
+      } catch (_) {
+        // noop
+      }
+    }
+    if (persist) {
+      upsertPodcastStudioUiState({ stageWidthRatio: null }, { autosaveReason: "ui-state" });
+    }
+    return;
+  }
+
+  const normalizedRatio = Math.max(minRatio, Math.min(1, Number(nextRatio)));
+  podcastStageWidthRatio = normalizedRatio;
+  const widthPx = Math.round(normalizedRatio * parentWidth);
+  shell.style.setProperty("--pod-stage-width", `${widthPx}px`);
+  if (podcastStageMaxHeightPx) {
+    shell.style.setProperty("--pod-stage-user-max-height", `${podcastStageMaxHeightPx}px`);
+  }
+  stage.classList.add("is-user-resized");
+  if (persist) {
+    try {
+      window.localStorage.setItem(PODCAST_STAGE_WIDTH_RATIO_KEY, String(normalizedRatio));
+      if (podcastStageMaxHeightPx) {
+        window.localStorage.setItem(PODCAST_STAGE_MAX_HEIGHT_PX_KEY, String(Math.round(podcastStageMaxHeightPx)));
+      } else {
+        window.localStorage.removeItem(PODCAST_STAGE_MAX_HEIGHT_PX_KEY);
+      }
+    } catch (_) {
+      // noop
+    }
+    upsertPodcastStudioUiState({ stageWidthRatio: normalizedRatio }, { autosaveReason: "ui-state" });
+  }
+}
+
+function applyPodcastVideoStageWidthFromSavedRatio() {
+  if (!els.podcastVideoStage || !els.podcastVideoShell) return;
+  if (podcastStageWidthRatio === null) setPodcastVideoStageWidthRatio(null, { persist: false });
+  else setPodcastVideoStageWidthRatio(podcastStageWidthRatio, { persist: false });
+  if (podcastStageMaxHeightPx) {
+    els.podcastVideoShell.style.setProperty("--pod-stage-user-max-height", `${podcastStageMaxHeightPx}px`);
+  } else {
+    els.podcastVideoShell.style.removeProperty("--pod-stage-user-max-height");
+  }
+}
+
+function setupPodcastVideoStageResize() {
+  podcastStageResizeCleanup?.();
+  podcastStageResizeCleanup = null;
+  podcastStageResizeObserver?.disconnect();
+  podcastStageResizeObserver = null;
+  if (!els.podcastVideoStage || !els.podcastStageResizeHandle) return;
+
+  applyPodcastVideoStageWidthFromSavedRatio();
+
+  const handle = els.podcastStageResizeHandle;
+  const stage = els.podcastVideoStage;
+  const stageParent = stage.parentElement;
+
+  const onDoubleClick = () => setPodcastVideoStageWidthRatio(null);
+  const onPointerDown = (event) => {
+    if (event.button !== 0) return;
+    if (!stageParent) return;
+    event.preventDefault();
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add("is-resizing-podcast-stage");
+
+    const parentRect = stageParent.getBoundingClientRect();
+    const startRect = stage.getBoundingClientRect();
+    const previewEl = stage.querySelector(".podcast-video-preview");
+    const previewRect = previewEl?.getBoundingClientRect?.();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = startRect.width || parentRect.width;
+    const parentWidth = parentRect.width || window.innerWidth;
+    const startHeight = previewRect?.height || (startWidth ? (startWidth * 9) / 16 : 1);
+    const safeStartWidth = Math.max(1, startWidth);
+    const safeStartHeight = Math.max(1, startHeight);
+
+    const onPointerMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      const nextWidthFromX = safeStartWidth + deltaX;
+      const nextHeightFromY = safeStartHeight + deltaY;
+      const scaleFromX = nextWidthFromX / safeStartWidth;
+      const scaleFromY = nextHeightFromY / safeStartHeight;
+      const scale = Math.abs(deltaY) > Math.abs(deltaX) ? scaleFromY : scaleFromX;
+      const nextWidth = safeStartWidth * scale;
+      const nextRatio = parentWidth ? nextWidth / parentWidth : null;
+      const nextHeight = safeStartHeight * scale;
+      podcastStageMaxHeightPx = Math.max(240, Math.min(PODCAST_STAGE_MAX_HEIGHT_PX_MAX, Math.round(nextHeight)));
+      setPodcastVideoStageWidthRatio(nextRatio, { persist: false });
+    };
+    const stopResize = () => {
+      document.body.classList.remove("is-resizing-podcast-stage");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      if (podcastStageWidthRatio !== null) setPodcastVideoStageWidthRatio(podcastStageWidthRatio, { persist: true });
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize, { once: true });
+    window.addEventListener("pointercancel", stopResize, { once: true });
+  };
+
+  const onWindowResize = () => applyPodcastVideoStageWidthFromSavedRatio();
+
+  handle.addEventListener("dblclick", onDoubleClick);
+  handle.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("resize", onWindowResize);
+
+  if (typeof ResizeObserver === "function" && stageParent) {
+    podcastStageResizeObserver = new ResizeObserver(() => {
+      if (document.body.classList.contains("is-resizing-podcast-stage")) return;
+      applyPodcastVideoStageWidthFromSavedRatio();
+    });
+    podcastStageResizeObserver.observe(stageParent);
+  }
+
+  podcastStageResizeCleanup = () => {
+    handle.removeEventListener("dblclick", onDoubleClick);
+    handle.removeEventListener("pointerdown", onPointerDown);
+    window.removeEventListener("resize", onWindowResize);
+    podcastStageResizeObserver?.disconnect();
+    podcastStageResizeObserver = null;
+  };
 }
 
 function autoResizePrompt() {
@@ -12206,6 +16382,13 @@ function parsePlainTextTableToRows(text = "") {
   return [];
 }
 
+function hasStructuredVideoTableInput(promptText = "", promptHtml = "") {
+  const htmlRows = parseHtmlTableToRows(promptHtml);
+  if (htmlRows.length) return true;
+  const textRows = parsePlainTextTableToRows(promptText);
+  return textRows.length > 0;
+}
+
 function insertPromptInputText(text = "") {
   if (!els.promptInput) return;
   const normalized = String(text || "");
@@ -12317,8 +16500,22 @@ function normalizeEducationalVideoTableRows(rows = []) {
     ))
     .filter((row) => row.some(Boolean));
   if (!sourceRows.length) return [];
-  const headerKeys = sourceRows[0].map((cell) => normalizeVideoTableHeaderKey(cell));
-  const hasKnownHeader = headerKeys.filter(Boolean).length >= 2;
+  const firstRow = sourceRows[0] || [];
+  const headerKeys = firstRow.map((cell) => normalizeVideoTableHeaderKey(cell));
+  const recognizedHeaderCount = headerKeys.filter(Boolean).length;
+  const shortCellCount = firstRow.filter((cell) => String(cell || "").trim().length <= 40).length;
+  const hasLongNarrativeCell = firstRow.some((cell) => {
+    const text = String(cell || "").trim();
+    return text.length > 55 || /[.!?]/.test(text);
+  });
+  const hasCanonicalHeaderPair = headerKeys.includes("time") && headerKeys.includes("script");
+  // Solo considerar encabezado cuando realmente se parece a encabezado de tabla.
+  const hasKnownHeader = (
+    recognizedHeaderCount >= 3
+    && shortCellCount >= Math.max(3, Math.ceil(firstRow.length * 0.66))
+    && !hasLongNarrativeCell
+    && hasCanonicalHeaderPair
+  );
   const dataRows = hasKnownHeader ? sourceRows.slice(1) : sourceRows;
   return dataRows
     .map((row) => {
@@ -12457,71 +16654,739 @@ async function structureEducationalVideoTableWithGemini(prompt = "", sessionSnap
   );
 }
 
-async function prepareVideoPromptPreviewForUser(promptText = "", promptHtml = "", sessionSnapshot = null) {
-  const htmlRows = parseHtmlTableToRows(promptHtml);
-  const textRows = parsePlainTextTableToRows(promptText);
-  const localRows = normalizeEducationalVideoTableRows(htmlRows.length ? htmlRows : textRows);
-  let rows = localRows;
-  try {
-    const inputForGemini = localRows.length
-      ? buildEducationalVideoTableMarkdown(localRows)
-      : String(promptText || "");
-    const geminiRows = await structureEducationalVideoTableWithGemini(inputForGemini, sessionSnapshot);
-    if (geminiRows.length) {
-      if (localRows.length) {
-        rows = geminiRows.map((row, index) => {
-          const localRow = localRows[index] || null;
-          if (!localRow) return row;
-          return {
-            time: String(localRow.time || row.time || "").trim() || "00:00-00:08",
-            script: String(localRow.script || row.script || "").trim() || "Definir voz en off.",
-            sceneDescription: String(localRow.sceneDescription || row.sceneDescription || row.visual || "").trim() || "Definir descripción de escena.",
-            onScreenText: String(localRow.onScreenText || row.onScreenText || "").trim(),
-            transition: String(localRow.transition || row.transition || "").trim() || "Corte limpio",
-            visual: String(localRow.visual || row.visual || row.sceneDescription || "").trim() || "Definir elemento visual."
-          };
-        });
-      } else {
-        rows = geminiRows;
-      }
-    }
-  } catch (_) {
-    // fallback local
+function buildEducationalVideoSceneTimeRange(index = 0) {
+  const safeIndex = Math.max(0, Math.floor(Number(index) || 0));
+  const startSec = safeIndex * VIDEO_SCENE_MAX_SEC;
+  const endSec = startSec + VIDEO_SCENE_MAX_SEC;
+  return `${secondsToClock(startSec)}-${secondsToClock(endSec)}`;
+}
+
+function buildCompactEducationalSentence(source = "", maxWords = 16) {
+  const topic = trimWords(normalizeSimpleText(source) || "la idea principal", Math.max(3, Math.min(8, maxWords - 6)));
+  let sentence = ensureCompleteSentence(`Explicamos ${topic} con un ejemplo claro`);
+  if (countWords(sentence) > maxWords) {
+    sentence = ensureCompleteSentence(`Explicamos ${trimWords(topic, Math.max(2, maxWords - 2))}`);
   }
-  rows = normalizeEducationalVideoTableRows(
-    rows.map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual])
-  ).map((row) => ({
+  return sentence;
+}
+
+function stripLeadingStageDirection(text = "") {
+  return String(text || "").replace(/^\s*[\(\[][^\)\]]+[\)\]]\s*/u, "").trim();
+}
+
+function splitScriptIntoSceneChunks(text = "", options = {}) {
+  const maxWords = Math.max(10, Number(options?.maxWords) || 24);
+  const clean = normalizeSimpleText(stripLeadingStageDirection(text));
+  if (!clean) return [];
+  const sentences = splitTextIntoSentences(clean).map((part) => ensureCompleteSentence(part)).filter(Boolean);
+  if (!sentences.length) return [ensureCompleteSentence(clean)];
+  const chunks = [];
+  let bucket = "";
+  sentences.forEach((sentence) => {
+    const candidate = bucket ? `${bucket} ${sentence}`.replace(/\s+/g, " ").trim() : sentence;
+    if (!bucket) {
+      bucket = candidate;
+      return;
+    }
+    if (countWords(candidate) <= maxWords) {
+      bucket = candidate;
+      return;
+    }
+    chunks.push(ensureCompleteSentence(bucket));
+    bucket = sentence;
+  });
+  if (bucket) chunks.push(ensureCompleteSentence(bucket));
+  return chunks.filter(Boolean);
+}
+
+function normalizeSingleSentenceForVideoScene(text = "", options = {}) {
+  const clean = normalizeSimpleText(stripLeadingStageDirection(text));
+  const fallbackSeed = normalizeSimpleText(options?.fallbackSeed || options?.context || "");
+  const maxWords = Math.max(10, Number(options?.maxWords) || 24);
+  if (!clean) {
+    return buildCompactEducationalSentence(fallbackSeed || "la idea principal", 16);
+  }
+  if (countWords(clean) <= maxWords) {
+    return ensureCompleteSentence(clean);
+  }
+  const chunks = splitScriptIntoSceneChunks(clean, { maxWords });
+  if (chunks.length) return chunks[0];
+  return ensureCompleteSentence(trimWords(clean, maxWords));
+}
+
+function normalizeOnScreenTextStrict(value = "", options = {}) {
+  const voiceOver = normalizeSimpleText(options?.voiceOver || "");
+  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
+  const visual = normalizeSimpleText(options?.visual || "");
+  const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual, { maxWords: 8 });
+  let text = buildOnScreenText(value, { voiceOver, sceneDescription, visual }) || fallback || "";
+  text = normalizeSimpleText(text);
+  if (countWords(text) > 12) text = normalizeSimpleText(trimWords(text, 12));
+  const danglingWords = new Set(["de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"]);
+  const tokens = text.split(/\s+/).filter(Boolean);
+  while (tokens.length > 2 && danglingWords.has(String(tokens[tokens.length - 1] || "").toLowerCase())) {
+    tokens.pop();
+  }
+  text = normalizeSimpleText(tokens.join(" "));
+  if (isWeakOnScreenText(text)) {
+    text = normalizeSimpleText(fallback || text);
+  }
+  return text || normalizeSimpleText(fallback || "Idea clave en pantalla");
+}
+
+function inferTransitionFromSceneContext(options = {}) {
+  const script = normalizeSimpleText(options?.script || "").toLowerCase();
+  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "").toLowerCase();
+  const visual = normalizeSimpleText(options?.visual || "").toLowerCase();
+  const hay = `${script} ${sceneDescription} ${visual}`;
+  if (/\bzoom|acercamiento|primer plano|close[- ]?up\b/.test(hay)) return "Zoom in suave";
+  if (/\bfundido|desvanece|fade|disolvencia\b/.test(hay)) return "Fundido suave";
+  if (/\bpaneo|barrido|travelling|recorrido\b/.test(hay)) return "Paneo lateral";
+  if (/\bmontaje|rapido|rápido|dinamica|dinámica\b/.test(hay)) return "Montaje rápido";
+  if (/\brevela|revelar|descubre|aparece\b/.test(hay)) return "Disolvencia";
+  const partIndex = Math.max(0, Number(options?.partIndex) || 0);
+  return partIndex === 0 ? "Corte inicial" : "Corte limpio";
+}
+
+function normalizeTransitionForScene(value = "", options = {}) {
+  const raw = normalizeSimpleText(value);
+  const isGeneric = !raw
+    || /^sin transici[oó]n(?:\s+espec[ií]fica)?\.?$/i.test(raw)
+    || /^sin transicion(?:\s+especifica)?\.?$/i.test(raw)
+    || /^no transition\.?$/i.test(raw);
+  if (!isGeneric) return raw;
+  return inferTransitionFromSceneContext(options);
+}
+
+function validateEducationalVideoCanonicalRow(row = {}) {
+  const issues = [];
+  const durationSec = Math.round(Number(row?.durationSec) || 0);
+  const script = normalizeSimpleText(row?.script || "");
+  const sentenceCount = splitTextIntoSentences(script).length;
+  if (durationSec !== VIDEO_SCENE_MAX_SEC) issues.push("duration_not_8s");
+  if (!/[.!?]$/.test(script)) issues.push("script_sentence_incomplete");
+  if (!sentenceCount) issues.push("script_empty");
+  return {
+    isValid: issues.length === 0,
+    issues,
+    speechSec: Number(estimateSpeechDurationSec(script).toFixed(2)),
+    bufferSec: Number((VIDEO_SCENE_MAX_SEC - estimateSpeechDurationSec(script)).toFixed(2)),
+    onScreenWords: countWords(normalizeSimpleText(row?.onScreenText || ""))
+  };
+}
+
+function toEducationalVideoCanonicalRow(raw = {}, index = 0) {
+  const timeSeed = String(raw?.timeRange || raw?.time || "").trim();
+  const parsedDuration = parseDurationSecFromRangeLabel(timeSeed, VIDEO_SCENE_MAX_SEC);
+  const sceneDescription = normalizeSimpleText(raw?.sceneDescription || raw?.descripcionEscena || raw?.scenePrompt || raw?.visual || "");
+  const visual = normalizeSimpleText(raw?.visual || raw?.elementoVisual || raw?.visualNotes || sceneDescription || "");
+  const scriptSeed = normalizeSimpleText(raw?.script || raw?.guion || raw?.voiceOverText || raw?.text || "");
+  const transition = normalizeTransitionForScene(raw?.transition || raw?.transicion || "", {
+    script: scriptSeed,
+    sceneDescription,
+    visual,
+    partIndex: index
+  });
+  const script = normalizeSingleSentenceForVideoScene(scriptSeed, {
+    fallbackSeed: sceneDescription || visual || scriptSeed,
+    supportText: sceneDescription || visual
+  });
+  const onScreenText = normalizeOnScreenTextStrict(raw?.onScreenText || raw?.textoPantalla || "", {
+    voiceOver: script,
+    sceneDescription,
+    visual
+  });
+  const timeRange = buildEducationalVideoSceneTimeRange(index);
+  const row = {
+    timeRange,
+    durationSec: VIDEO_SCENE_MAX_SEC,
+    script,
+    sceneDescription: sceneDescription || buildFallbackSceneDescriptionFromVoiceOver(script, transition, index),
+    onScreenText,
+    transition,
+    visual: visual || sceneDescription || "Definir elemento visual.",
+    validation: {
+      isValid: false,
+      issues: ["not_validated"]
+    }
+  };
+  if (Math.round(parsedDuration) !== VIDEO_SCENE_MAX_SEC) {
+    row.validation = {
+      isValid: false,
+      issues: ["duration_not_8s"]
+    };
+  }
+  row.validation = validateEducationalVideoCanonicalRow(row);
+  return row;
+}
+
+function repairEducationalVideoCanonicalRowLocal(row = {}, index = 0) {
+  const script = normalizeSingleSentenceForVideoScene(row?.script || "", {
+    fallbackSeed: row?.sceneDescription || row?.visual || row?.script || "",
+    supportText: row?.sceneDescription || row?.visual || ""
+  });
+  const repaired = {
     ...row,
-    onScreenText: buildOnScreenText(row.onScreenText || "", {
-      voiceOver: row.script || "",
-      sceneDescription: row.sceneDescription || "",
-      visual: row.visual || ""
-    })
-  }));
-  try {
-    const refinedRows = await enhanceEducationalVideoOnScreenTextWithGemini(rows, sessionSnapshot);
-    if (Array.isArray(refinedRows) && refinedRows.length) {
-      rows = refinedRows;
-    }
-  } catch (_) {
-    // fallback local
+    timeRange: buildEducationalVideoSceneTimeRange(index),
+    durationSec: VIDEO_SCENE_MAX_SEC,
+    script,
+    sceneDescription: normalizeSimpleText(row?.sceneDescription || "") || buildFallbackSceneDescriptionFromVoiceOver(script, row?.transition || "", index),
+    transition: normalizeTransitionForScene(row?.transition || "", {
+      script,
+      sceneDescription: row?.sceneDescription || "",
+      visual: row?.visual || "",
+      partIndex: index
+    }),
+    visual: normalizeSimpleText(row?.visual || row?.sceneDescription || "") || "Definir elemento visual."
+  };
+  repaired.onScreenText = normalizeOnScreenTextStrict(row?.onScreenText || "", {
+    voiceOver: repaired.script,
+    sceneDescription: repaired.sceneDescription,
+    visual: repaired.visual
+  });
+  repaired.validation = validateEducationalVideoCanonicalRow(repaired);
+  if (!repaired.validation.isValid) {
+    const forcedScript = buildCompactEducationalSentence(repaired.script || repaired.sceneDescription || repaired.visual || "la idea principal", 16);
+    repaired.script = normalizeSingleSentenceForVideoScene(forcedScript, {
+      fallbackSeed: repaired.sceneDescription || repaired.visual || forcedScript
+    });
+    repaired.onScreenText = normalizeOnScreenTextStrict(repaired.onScreenText || "", {
+      voiceOver: repaired.script,
+      sceneDescription: repaired.sceneDescription,
+      visual: repaired.visual
+    });
+    repaired.validation = validateEducationalVideoCanonicalRow(repaired);
   }
-  if (!rows.length) {
+  return repaired;
+}
+
+function canonicalRowsToEducationalVideoTableRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row, index) => ({
+    time: String(row?.timeRange || buildEducationalVideoSceneTimeRange(index)).trim(),
+    script: normalizeSimpleText(row?.script || ""),
+    sceneDescription: normalizeSimpleText(row?.sceneDescription || ""),
+    onScreenText: normalizeSimpleText(row?.onScreenText || ""),
+    transition: normalizeSimpleText(row?.transition || "") || "Corte limpio",
+    visual: normalizeSimpleText(row?.visual || row?.sceneDescription || "") || "Definir elemento visual."
+  }));
+}
+
+function mergeEducationalVideoRowsWithLocalPriority(localRows = [], geminiRows = []) {
+  if (!Array.isArray(geminiRows) || !geminiRows.length) return localRows;
+  if (!Array.isArray(localRows) || !localRows.length) return geminiRows;
+  return geminiRows.map((row, index) => {
+    const localRow = localRows[index] || null;
+    if (!localRow) return row;
+    return {
+      time: String(localRow.time || row.time || "").trim() || "00:00-00:08",
+      script: String(localRow.script || row.script || "").trim() || "Definir voz en off.",
+      sceneDescription: String(localRow.sceneDescription || row.sceneDescription || row.visual || "").trim() || "Definir descripción de escena.",
+      onScreenText: String(localRow.onScreenText || row.onScreenText || "").trim(),
+      transition: String(localRow.transition || row.transition || "").trim() || "Corte limpio",
+      visual: String(localRow.visual || row.visual || row.sceneDescription || "").trim() || "Definir elemento visual."
+    };
+  });
+}
+
+function expandEducationalVideoRowsByScript(rows = []) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const expanded = [];
+  sourceRows.forEach((row) => {
+    const scriptSource = String(row?.script || row?.guion || row?.voiceOverText || row?.text || "").trim();
+    const chunks = splitScriptIntoSceneChunks(scriptSource, { maxWords: 24 });
+    if (!chunks.length) {
+      expanded.push(row);
+      return;
+    }
+    chunks.forEach((chunk, index) => {
+      const chunkSceneDescription = index === 0
+        ? String(row?.sceneDescription || "").trim()
+        : buildFallbackSceneDescriptionFromVoiceOver(chunk, String(row?.transition || "").trim(), index);
+      const chunkVisual = index === 0
+        ? String(row?.visual || row?.elementoVisual || "").trim()
+        : buildFallbackSceneDescriptionFromVoiceOver(chunk, "", index);
+      expanded.push({
+        ...row,
+        script: chunk,
+        guion: chunk,
+        voiceOverText: chunk,
+        text: chunk,
+        onScreenText: index === 0 ? String(row?.onScreenText || row?.textoPantalla || "").trim() : "",
+        sceneDescription: chunkSceneDescription || String(row?.sceneDescription || "").trim(),
+        visual: chunkVisual || String(row?.visual || row?.elementoVisual || "").trim(),
+        transition: normalizeTransitionForScene(
+          index === 0
+            ? String(row?.transition || row?.transicion || "").trim()
+            : "Corte limpio",
+          {
+            script: chunk,
+            sceneDescription: chunkSceneDescription,
+            visual: chunkVisual,
+            partIndex: index
+          }
+        )
+      });
+    });
+  });
+  return expanded;
+}
+
+function normalizeSplitCoverageText(value = "") {
+  return stripLeadingStageDirection(String(value || ""))
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeCoverageText(value = "") {
+  return normalizeSplitCoverageText(value)
+    .split(/\s+/)
+    .map((token) => String(token || "").trim())
+    .filter((token) => token.length >= 3);
+}
+
+function computeTokenCoverageRatio(original = "", candidate = "") {
+  const originalTokens = tokenizeCoverageText(original);
+  if (!originalTokens.length) return 0;
+  const candidateSet = new Set(tokenizeCoverageText(candidate));
+  if (!candidateSet.size) return 0;
+  const matched = originalTokens.filter((token) => candidateSet.has(token)).length;
+  return matched / originalTokens.length;
+}
+
+function hasAcceptableSplitCoverage(original = "", candidate = "") {
+  const base = normalizeSplitCoverageText(original);
+  const test = normalizeSplitCoverageText(candidate);
+  if (!base || !test) return false;
+  if (test === base) return true;
+  if (test.includes(base)) return true;
+  const tokenCoverage = computeTokenCoverageRatio(base, test);
+  const lengthRatio = test.length / Math.max(1, base.length);
+  // Aceptar variaciones leves de redacción, pero bloquear recortes sustanciales.
+  return tokenCoverage >= 0.82 && lengthRatio >= 0.74;
+}
+
+async function splitEducationalVideoRowsWithGemini(rows = [], sessionSnapshot = null, options = {}) {
+  const strictMode = options?.strict === true;
+  const attempt = Math.max(0, Number(options?.attempt) || 0);
+  const sourceRows = (Array.isArray(rows) ? rows : []).map((row, index) => ({
+    sourceIndex: index,
+    script: String(row?.script || row?.guion || row?.voiceOverText || row?.text || "").trim(),
+    sceneDescription: String(row?.sceneDescription || "").trim(),
+    transition: String(row?.transition || "").trim(),
+    visual: String(row?.visual || "").trim()
+  })).filter((row) => row.script);
+  if (!sourceRows.length) return rows;
+
+  const responseSchema = {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            sourceIndex: { type: "number" },
+            partIndex: { type: "number" },
+            script: { type: "string" },
+            sceneDescription: { type: "string" },
+            visual: { type: "string" },
+            transition: { type: "string" },
+            onScreenText: { type: "string" }
+          },
+          required: ["sourceIndex", "partIndex", "script", "sceneDescription", "visual", "transition"]
+        }
+      }
+    },
+    required: ["rows"]
+  };
+  const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: attempt > 0
+          ? "Eres editor de guion y director visual. Divide cada escena original en sub-escenas coherentes por frases completas. REGLA CRÍTICA: al concatenar todas las sub-escenas de un sourceIndex debe conservarse TODO el contenido textual original en el mismo orden (sin recorte ni omisión), salvo limpieza de acotaciones iniciales entre paréntesis. Además, por cada sub-escena devuelve sceneDescription y visual específicos y distintos para secuencia progresiva (no repetir fondo), y transition cinematográfica coherente. Devuelve sourceIndex y partIndex consecutivo desde 0. Responde solo JSON valido."
+          : "Eres editor de guion y director visual. Divide cada escena original en sub-escenas coherentes por frases completas. Reglas: 1) conservar TODO el contenido textual de cada escena original en el mismo orden, 2) no recortar ni omitir ideas, 3) no cortar frases a la mitad, 4) por cada sub-escena devolver sceneDescription y visual específicos y distintos para que la secuencia avance (no repetir el mismo fondo), 5) devolver sourceIndex y partIndex consecutivo desde 0 para cada sourceIndex, 6) transition debe indicar continuidad cinematográfica coherente (ej. corte limpio, paneo lateral, acercamiento). Responde solo JSON valido."
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          conversationContext ? `Conversación reciente:\n${conversationContext}` : "",
+          `Escenas originales a dividir:\n${JSON.stringify(sourceRows)}`
+        ].filter(Boolean).join("\n\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema
+    }
+  };
+  try {
+    const data = await authFetchJson("/api/gemini/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        model: els.scriptModelSelect.value,
+        payload
+      })
+    });
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const parsed = JSON.parse(rawText);
+    const splitRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+    if (!splitRows.length) {
+      if (strictMode && attempt < 1) {
+        return splitEducationalVideoRowsWithGemini(rows, sessionSnapshot, {
+          ...options,
+          strict: true,
+          attempt: attempt + 1
+        });
+      }
+      return rows;
+    }
+
+    const grouped = new Map();
+    splitRows.forEach((item) => {
+      const sourceIndex = Number(item?.sourceIndex);
+      const partIndex = Number(item?.partIndex);
+      const script = String(item?.script || "").trim();
+      const sceneDescription = String(item?.sceneDescription || "").trim();
+      const visual = String(item?.visual || "").trim();
+      const transition = String(item?.transition || "").trim();
+      const onScreenText = String(item?.onScreenText || "").trim();
+      if (!Number.isFinite(sourceIndex) || sourceIndex < 0) return;
+      if (!Number.isFinite(partIndex) || partIndex < 0) return;
+      if (!script || !sceneDescription || !visual || !transition) return;
+      if (!grouped.has(sourceIndex)) grouped.set(sourceIndex, []);
+      grouped.get(sourceIndex).push({ partIndex, script, sceneDescription, visual, transition, onScreenText });
+    });
+
+    const result = [];
+    const failedCoverageIndexes = [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const originalRow = rows[index] || {};
+      const originalScript = String(originalRow?.script || originalRow?.guion || originalRow?.voiceOverText || originalRow?.text || "").trim();
+      if (!originalScript) continue;
+      const parts = (grouped.get(index) || []).sort((a, b) => a.partIndex - b.partIndex);
+      if (!parts.length) {
+        result.push(originalRow);
+        continue;
+      }
+      const mergedText = parts.map((part) => String(part.script || "").trim()).filter(Boolean).join(" ");
+      if (!hasAcceptableSplitCoverage(originalScript, mergedText)) {
+        if (strictMode) {
+          failedCoverageIndexes.push(index);
+          continue;
+        }
+        result.push(originalRow);
+        continue;
+      }
+      parts.forEach((part, partIndex) => {
+        const script = normalizeSimpleText(part.script || "");
+        const sceneDescription = normalizeSimpleText(part.sceneDescription || "");
+        const visual = normalizeSimpleText(part.visual || "");
+        const transition = normalizeTransitionForScene(part.transition || "", {
+          script,
+          sceneDescription,
+          visual,
+          partIndex
+        });
+        if (!script) return;
+        result.push({
+          ...originalRow,
+          script,
+          guion: script,
+          voiceOverText: script,
+          text: script,
+          sceneDescription: sceneDescription || String(originalRow?.sceneDescription || "").trim(),
+          visual: visual || String(originalRow?.visual || "").trim(),
+          onScreenText: String(part.onScreenText || "").trim() || (partIndex === 0 ? String(originalRow?.onScreenText || "").trim() : ""),
+          transition
+        });
+      });
+    }
+    if (strictMode && failedCoverageIndexes.length) {
+      if (attempt < 1) {
+        return splitEducationalVideoRowsWithGemini(rows, sessionSnapshot, {
+          ...options,
+          strict: true,
+          attempt: attempt + 1
+        });
+      }
+      const first = failedCoverageIndexes[0];
+      throw new Error(`Gemini devolvió una división inválida en la escena ${first + 1} (cobertura insuficiente del texto original).`);
+    }
+    if (!result.length) {
+      if (strictMode) {
+        throw new Error("Gemini no devolvió filas útiles para dividir escenas.");
+      }
+      return rows;
+    }
+    return result;
+  } catch (error) {
+    if (strictMode) {
+      throw new Error(`Fallo al dividir escenas con Gemini: ${String(error?.message || "error desconocido")}`);
+    }
+    return rows;
+  }
+}
+
+function buildEducationalVideoRowsFromNarrativeText(text = "") {
+  const source = String(text || "").replace(/\r\n?/g, "\n");
+  const blocks = source
+    .split(/\n+/)
+    .map((line) => normalizeSimpleText(line))
+    .filter(Boolean);
+  if (!blocks.length) return [];
+  const chunks = [];
+  blocks.forEach((block) => {
+    const parsedChunks = splitScriptIntoSceneChunks(block, { maxWords: 24 });
+    if (parsedChunks.length) {
+      parsedChunks.forEach((chunk) => {
+        const clean = ensureCompleteSentence(chunk);
+        if (clean) chunks.push(clean);
+      });
+      return;
+    }
+    const clean = ensureCompleteSentence(block);
+    if (clean) chunks.push(clean);
+  });
+  const uniqueChunks = chunks.filter(Boolean);
+  if (!uniqueChunks.length) return [];
+  return uniqueChunks.map((sentence, index) => {
+    const sceneDescription = buildFallbackSceneDescriptionFromVoiceOver(sentence, "", index);
+    return {
+      time: buildEducationalVideoSceneTimeRange(index),
+      script: sentence,
+      sceneDescription,
+      onScreenText: summarizeOnScreenTextFromVoiceOver(sentence, { maxWords: 8 }) || "",
+      transition: normalizeTransitionForScene("", {
+        script: sentence,
+        sceneDescription,
+        visual: sceneDescription,
+        partIndex: index
+      }),
+      visual: sceneDescription
+    };
+  });
+}
+
+async function repairEducationalVideoCanonicalRowsWithGemini(canonicalRows = [], sessionSnapshot = null) {
+  const rows = Array.isArray(canonicalRows) ? canonicalRows : [];
+  const invalidRows = rows
+    .map((row, index) => ({ row, index }))
+    .filter((item) => item?.row?.validation?.isValid !== true);
+  if (!invalidRows.length) return rows;
+  const responseSchema = {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            index: { type: "number" },
+            script: { type: "string" },
+            onScreenText: { type: "string" }
+          },
+          required: ["index", "script", "onScreenText"]
+        }
+      }
+    },
+    required: ["rows"]
+  };
+  const compactRows = invalidRows.map((item) => ({
+    index: item.index,
+    script: item.row.script,
+    sceneDescription: item.row.sceneDescription,
+    transition: item.row.transition,
+    visual: item.row.visual,
+    onScreenText: item.row.onScreenText,
+    issues: item.row.validation?.issues || []
+  }));
+  const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: `Corrige solo filas inválidas de guion técnico de video educativo.
+Reglas obligatorias por fila: conservar el contenido textual sin recortar ideas, usar frases completas en "script" y duración total fija de ${VIDEO_SCENE_MAX_SEC}s por escena.
+No repitas literalmente la descripcion de escena ni el elemento visual en onScreenText.
+Responde solo JSON válido.`
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          conversationContext ? `Conversación reciente:\n${conversationContext}` : "",
+          `Filas inválidas:\n${JSON.stringify(compactRows)}`
+        ].filter(Boolean).join("\n\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema
+    }
+  };
+  try {
+    const data = await authFetchJson("/api/gemini/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        model: els.scriptModelSelect.value,
+        payload
+      })
+    });
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const parsed = JSON.parse(rawText);
+    const byIndex = new Map();
+    (Array.isArray(parsed?.rows) ? parsed.rows : []).forEach((item) => {
+      const index = Number(item?.index);
+      if (!Number.isFinite(index) || index < 0) return;
+      byIndex.set(index, {
+        script: normalizeSimpleText(item?.script || ""),
+        onScreenText: normalizeSimpleText(item?.onScreenText || "")
+      });
+    });
+    return rows.map((row, index) => {
+      const patch = byIndex.get(index);
+      if (!patch) return row;
+      return repairEducationalVideoCanonicalRowLocal({
+        ...row,
+        script: patch.script || row.script,
+        onScreenText: patch.onScreenText || row.onScreenText
+      }, index);
+    });
+  } catch (_) {
+    return rows;
+  }
+}
+
+async function composeEducationalVideoTable(input = {}, sessionSnapshot = null, options = {}) {
+  const sourceText = String(input?.text || "").trim();
+  const sourceHtml = String(input?.html || "").trim();
+  const htmlRows = parseHtmlTableToRows(sourceHtml);
+  const textRows = parsePlainTextTableToRows(sourceText);
+  const localRows = normalizeEducationalVideoTableRows(htmlRows.length ? htmlRows : textRows);
+  let normalizedRows = localRows;
+  if (options?.useGeminiSceneSplit !== false && localRows.length) {
+    normalizedRows = await splitEducationalVideoRowsWithGemini(localRows, sessionSnapshot, {
+      strict: options?.failOnSplitError === true
+    });
+  }
+  normalizedRows = expandEducationalVideoRowsByScript(normalizedRows);
+  if (options?.useGeminiStructure !== false && (localRows.length || options?.forceStructureFromPrompt === true)) {
+    try {
+      const inputForGemini = localRows.length
+        ? buildEducationalVideoTableMarkdown(localRows)
+        : sourceText;
+      const geminiRows = await structureEducationalVideoTableWithGemini(inputForGemini, sessionSnapshot);
+      if (geminiRows.length) {
+        const mergedRows = mergeEducationalVideoRowsWithLocalPriority(localRows, geminiRows);
+        const splitRows = options?.useGeminiSceneSplit !== false
+          ? await splitEducationalVideoRowsWithGemini(mergedRows, sessionSnapshot, {
+            strict: options?.failOnSplitError === true
+          })
+          : mergedRows;
+        normalizedRows = expandEducationalVideoRowsByScript(splitRows);
+      }
+    } catch (_) {
+      // fallback local
+    }
+  }
+  if (!normalizedRows.length) {
+    const seedRows = buildEducationalVideoRowsFromNarrativeText(sourceText);
+    const splitRows = options?.useGeminiSceneSplit !== false
+      ? await splitEducationalVideoRowsWithGemini(seedRows, sessionSnapshot, {
+        strict: options?.failOnSplitError === true
+      })
+      : seedRows;
+    normalizedRows = expandEducationalVideoRowsByScript(splitRows);
+  }
+  if (!normalizedRows.length) {
+    return {
+      rows: [],
+      tableRows: [],
+      markdown: "",
+      html: "",
+      userMessageText: sourceText,
+      userMessageHtml: sourceHtml,
+      generationPrompt: sourceText
+    };
+  }
+  let canonicalRows = normalizedRows.map((row, index) => repairEducationalVideoCanonicalRowLocal(toEducationalVideoCanonicalRow(row, index), index));
+  canonicalRows = canonicalRows.map((row, index) => repairEducationalVideoCanonicalRowLocal(row, index));
+  if (canonicalRows.some((row) => row?.validation?.isValid !== true)) {
+    canonicalRows = await repairEducationalVideoCanonicalRowsWithGemini(canonicalRows, sessionSnapshot);
+  }
+  canonicalRows = canonicalRows.map((row, index) => repairEducationalVideoCanonicalRowLocal(row, index));
+  canonicalRows = canonicalRows.map((row, index) => {
+    if (row?.validation?.isValid === true) return row;
+    return repairEducationalVideoCanonicalRowLocal({
+      ...row,
+      script: buildCompactEducationalSentence(row?.script || row?.sceneDescription || row?.visual || "la idea principal", 16),
+      onScreenText: summarizeOnScreenTextFromVoiceOver(row?.script || row?.sceneDescription || "", { maxWords: 8 })
+    }, index);
+  });
+  const tableRows = canonicalRowsToEducationalVideoTableRows(canonicalRows);
+  let rowsForOnScreen = tableRows;
+  if (options?.useGeminiOnScreen !== false) {
+    try {
+      const enhancedRows = await enhanceEducationalVideoOnScreenTextWithGemini(tableRows, sessionSnapshot);
+      if (Array.isArray(enhancedRows) && enhancedRows.length === tableRows.length) {
+        rowsForOnScreen = enhancedRows.map((row, index) => ({
+          ...row,
+          time: String(tableRows[index]?.time || row?.time || "").trim() || buildEducationalVideoSceneTimeRange(index)
+        }));
+      }
+    } catch (_) {
+      // fallback local
+    }
+  }
+  canonicalRows = rowsForOnScreen.map((row, index) => repairEducationalVideoCanonicalRowLocal(toEducationalVideoCanonicalRow(row, index), index));
+  const finalizedTableRows = canonicalRowsToEducationalVideoTableRows(canonicalRows);
+  const markdown = buildEducationalVideoTableMarkdown(finalizedTableRows);
+  const html = buildEducationalVideoTableHtml(finalizedTableRows);
+  const generationPrompt = [
+    sourceText,
+    "Usa esta tabla base estructurada para construir el guión final:",
+    markdown
+  ].filter(Boolean).join("\n\n");
+  return {
+    rows: canonicalRows,
+    tableRows: finalizedTableRows,
+    markdown,
+    html,
+    userMessageText: `Tabla base de guión de video educativo:\n${markdown}`,
+    userMessageHtml: html,
+    generationPrompt
+  };
+}
+
+async function prepareVideoPromptPreviewForUser(promptText = "", promptHtml = "", sessionSnapshot = null) {
+  const composed = await composeEducationalVideoTable({
+    text: promptText,
+    html: promptHtml
+  }, sessionSnapshot, {
+    useGeminiStructure: true,
+    useGeminiSceneSplit: true,
+    failOnSplitError: true,
+    useGeminiOnScreen: false,
+    forceStructureFromPrompt: false
+  });
+  if (!Array.isArray(composed?.rows) || !composed.rows.length) {
     return {
       userMessageText: promptText,
       userMessageHtml: promptHtml,
       generationPrompt: promptText
     };
   }
-  const tableMarkdown = buildEducationalVideoTableMarkdown(rows);
   return {
-    userMessageText: `Tabla base de guión de video educativo:\n${tableMarkdown}`,
-    userMessageHtml: buildEducationalVideoTableHtml(rows),
-    generationPrompt: [
-      String(promptText || "").trim(),
-      "Usa esta tabla base estructurada para construir el guión final:",
-      tableMarkdown
-    ].filter(Boolean).join("\n\n")
+    userMessageText: composed.userMessageText,
+    userMessageHtml: composed.userMessageHtml,
+    generationPrompt: composed.generationPrompt
   };
 }
 
@@ -13144,6 +18009,7 @@ function normalizeScriptPayload(raw = {}, options = {}) {
         text: sanitizeSpeakerMentionsInDialogue(normalizedText || fallbackRows[index % fallbackRows.length].text, sourceSession, normalizedHosts),
         notes: sanitizeSpeakerMentionsInDialogue(String(row?.notes || "").trim(), sourceSession, normalizedHosts),
         voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
+        voiceOverOriginalText: String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim(),
         sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
         onScreenText: String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
         transition: String(row?.transition || row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim(),
@@ -13420,8 +18286,32 @@ function summarizeOnScreenTextFromVoiceOver(text = "", options = {}) {
   const words = firstSentence.split(/\s+/).filter(Boolean);
   if (!words.length) return "";
   const picked = words.slice(0, maxWords);
+  const danglingWords = new Set([
+    "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
+  ]);
+  const leadingConnectors = new Set(["pero", "y", "o", "aunque", "sin", "entonces", "ademas", "además"]);
+  while (picked.length > 4 && leadingConnectors.has(String(picked[0] || "").toLowerCase())) {
+    picked.shift();
+  }
+  while (picked.length > 4 && danglingWords.has(String(picked[picked.length - 1] || "").toLowerCase())) {
+    picked.pop();
+  }
   const summary = picked.join(" ").replace(/[.,;:!?]+$/g, "").trim();
   return summary;
+}
+
+function isWeakOnScreenText(value = "") {
+  const text = normalizeSimpleText(value);
+  if (!text) return true;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return true;
+  const trailing = String(words[words.length - 1] || "").toLowerCase();
+  const danglingWords = new Set([
+    "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
+  ]);
+  if (danglingWords.has(trailing)) return true;
+  if (/[,;:]\s*$/.test(text)) return true;
+  return false;
 }
 
 async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionSnapshot = null) {
@@ -13458,7 +18348,7 @@ async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionS
   const payload = {
     systemInstruction: {
       parts: [{
-        text: "Eres editor de guión técnico de video educativo. Reescribe SOLO texto en pantalla por fila con estilo claro y coherente. Debe ser una frase breve de 4 a 9 palabras, comprensible para estudiantes, y NO debe duplicar literalmente la descripción de escena, transición ni elemento visual. Responde solo JSON válido."
+        text: "Eres editor de guión técnico de video educativo. Reescribe SOLO texto en pantalla por fila con estilo claro y coherente. Debe ser una frase breve de 4 a 9 palabras, comprensible para estudiantes, completa (sin cortes ni conectores sueltos), y NO debe duplicar literalmente la descripción de escena, transición ni elemento visual. Responde solo JSON válido."
       }]
     },
     contents: [{
@@ -13508,6 +18398,7 @@ function buildOnScreenText(value = "", options = {}) {
   const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual);
   if (!explicit) return fallback;
   if (looksLikeTransitionOnly(explicit)) return fallback;
+  if (isWeakOnScreenText(explicit)) return fallback || explicit;
   const explicitNorm = normalizeComparableCreativeText(explicit);
   const visualNorm = normalizeComparableCreativeText(visual);
   const sceneNorm = normalizeComparableCreativeText(sceneDescription);
@@ -13570,9 +18461,7 @@ function splitLongSentenceIntoChunks(sentence = "", maxWords = 14) {
     if (bucket) output.push(ensureCompleteSentence(bucket));
     if (output.length) return output;
   }
-  return splitByMaxWords(source, safeMaxWords)
-    .map((chunk) => ensureCompleteSentence(chunk))
-    .filter(Boolean);
+  return [buildCompactEducationalSentence(source, safeMaxWords)].filter(Boolean);
 }
 
 function splitNarrationIntoCompleteScenes(text = "", options = {}) {
@@ -13715,38 +18604,39 @@ async function enrichCreativeRowsSceneDescriptionsWithGemini(rows = [], options 
   });
 }
 
-function buildCreativeVideoScriptFromPromptTable(prompt = "", session = null) {
-  const parsedRows = parsePlainTextTableToRows(prompt);
-  const tableRows = normalizeEducationalVideoTableRows(parsedRows);
-  if (!tableRows.length) return null;
+async function buildCreativeVideoScriptFromPromptTable(prompt = "", session = null) {
+  const composed = await composeEducationalVideoTable({
+    text: prompt,
+    html: ""
+  }, session, {
+    useGeminiStructure: false,
+    useGeminiSceneSplit: true,
+    failOnSplitError: true,
+    useGeminiOnScreen: false
+  });
+  const canonicalRows = Array.isArray(composed?.rows) ? composed.rows : [];
+  if (!canonicalRows.length) return null;
 
-  const creativeRows = tableRows.map((row, index) => {
-    const timeValue = String(row?.time || "").trim();
+  const creativeRows = canonicalRows.map((row, index) => {
     const scriptText = String(row?.script || "").replace(/\s+/g, " ").trim();
     const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
     const visual = String(row?.visual || "").replace(/\s+/g, " ").trim();
-    const sceneDescriptionInput = String(row?.sceneDescription || "").replace(/\s+/g, " ").trim();
-    const onScreen = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
-    const fallbackDuration = Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(estimateSpeechDurationSec(scriptText))));
-    const durationSec = parseDurationSecFromRangeLabel(timeValue, fallbackDuration);
-    const seedSceneDescription = sceneDescriptionInput || "";
-    const sceneDescription = (!seedSceneDescription || looksLikeTransitionOnly(seedSceneDescription) || seedSceneDescription.toLowerCase() === transition.toLowerCase())
-      ? buildFallbackSceneDescriptionFromVoiceOver(scriptText, transition, index)
-      : seedSceneDescription;
+    const sceneDescription = String(row?.sceneDescription || "").replace(/\s+/g, " ").trim()
+      || buildFallbackSceneDescriptionFromVoiceOver(scriptText, transition, index);
     const directiveBase = transition
       ? `Transición sugerida: ${transition}.`
       : "Transición sugerida: corte limpio.";
     return normalizeCreativeRow({
       id: makeId("row"),
-      durationSec,
+      durationSec: VIDEO_SCENE_MAX_SEC,
       voiceOverText: scriptText || `Narración de la secuencia ${index + 1}.`,
       sceneDescription,
-      onScreenText: buildOnScreenText(onScreen || "", {
+      onScreenText: buildOnScreenText(String(row?.onScreenText || "").trim(), {
         voiceOver: scriptText || "",
         sceneDescription,
         visual
       }),
-      transition: transition || "Sin transición específica.",
+      transition: transition || "Corte limpio",
       visualNotes: visual,
       mediaCue: deriveMediaCueFromTransition(transition),
       videoDirective: `${directiveBase} Mantener claridad didáctica y ritmo narrativo.`,
@@ -13788,7 +18678,7 @@ function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null
   const generatedRows = Array.isArray(baseScript?.rows) ? baseScript.rows : [];
   const mergedRows = authoritativeRows.map((tableRow, index) => {
     const generatedRow = generatedRows[index] || {};
-    return normalizeCreativeRow({
+    const merged = normalizeCreativeRow({
       ...generatedRow,
       ...tableRow,
       durationSec: Number(tableRow?.durationSec || generatedRow?.durationSec || SHORT_SCENE_MAX_SEC),
@@ -13803,6 +18693,19 @@ function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null
         ? tableRow.imagePrompts
         : [String(tableRow?.visual || "").trim(), ...(generatedRow?.imagePrompts || [])].filter(Boolean)
     }, index);
+    const authoritativeVoice = normalizeSimpleText(
+      String(tableRow?.voiceOverText || tableRow?.text || "").trim()
+    );
+    if (authoritativeVoice) {
+      merged.voiceOverText = authoritativeVoice;
+      merged.text = authoritativeVoice;
+    }
+    const authoritativeOnScreen = normalizeSimpleText(String(tableRow?.onScreenText || "").trim());
+    if (authoritativeOnScreen) {
+      merged.onScreenText = authoritativeOnScreen;
+    }
+    merged.durationSec = VIDEO_SCENE_MAX_SEC;
+    return merged;
   });
   return normalizeScriptPayload({
     ...baseScript,
@@ -14266,7 +19169,49 @@ async function generateEducationalVideoScript(prompt, sessionSnapshot = null, co
     videoMode: true
   };
   const generated = await generateScriptWithGeminiCore(prompt, sessionSnapshot, safeConstraints, "video");
-  return enforceEducationalVideoSemantics(generated, sessionSnapshot);
+  const semanticallyNormalized = enforceEducationalVideoSemantics(generated, sessionSnapshot);
+  const rows = Array.isArray(semanticallyNormalized?.rows) ? semanticallyNormalized.rows : [];
+  if (!rows.length) return semanticallyNormalized;
+  const shouldEnhanceOnScreenWithGemini = constraints?.enhanceOnScreenWithGemini === true;
+  if (!shouldEnhanceOnScreenWithGemini) return semanticallyNormalized;
+  try {
+    const tableRows = rows.map((row, index) => {
+      const seconds = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
+      const startSec = rows
+        .slice(0, index)
+        .reduce((acc, item) => acc + Math.max(SHORT_SCENE_MIN_SEC, Number(item?.durationSec) || SHORT_SCENE_MAX_SEC), 0);
+      const endSec = startSec + seconds;
+      return {
+        time: `${secondsToClock(startSec)}-${secondsToClock(endSec)}`,
+        script: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
+        sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+        onScreenText: String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
+        transition: String(row?.transition || "").replace(/\s+/g, " ").trim(),
+        visual: String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim()
+      };
+    });
+    const enhancedRows = await enhanceEducationalVideoOnScreenTextWithGemini(tableRows, sessionSnapshot);
+    if (Array.isArray(enhancedRows) && enhancedRows.length === rows.length) {
+      return normalizeScriptPayload({
+        ...semanticallyNormalized,
+        rows: rows.map((row, index) => normalizeCreativeRow({
+          ...row,
+          onScreenText: buildOnScreenText(enhancedRows[index]?.onScreenText || row?.onScreenText || "", {
+            voiceOver: row?.voiceOverText || row?.text || "",
+            sceneDescription: row?.sceneDescription || row?.scenePrompt || "",
+            visual: row?.visualNotes || row?.visual || ""
+          })
+        }, index))
+      }, {
+        session: sessionSnapshot,
+        videoMode: true,
+        skipOptimize: true
+      });
+    }
+  } catch (_) {
+    // Si Gemini falla en esta etapa, conservamos el texto ya generado/fallback.
+  }
+  return semanticallyNormalized;
 }
 
 function generateFallbackScript(prompt, options = {}) {
@@ -14456,7 +19401,7 @@ async function handleGenerate(prompt, options = {}) {
   const sessionBeforeUpdate = getActiveSession();
   const explicitConstraints = normalizeGenerationConstraints(options?.constraints || {});
   const authoritativeTableScript = explicitConstraints.videoMode === true
-    ? buildCreativeVideoScriptFromPromptTable(generationPrompt, sessionBeforeUpdate)
+    ? await buildCreativeVideoScriptFromPromptTable(generationPrompt, sessionBeforeUpdate)
     : null;
   const effectiveGenerationPrompt = explicitConstraints.videoMode === true
     ? rewritePromptForEducationalVideo(generationPrompt)
@@ -14733,15 +19678,364 @@ function closeSessionMenus() {
   });
 }
 
+function resolveCreativeRowMeta(session = null, rowId = "") {
+  const activeSession = session || getActiveSession();
+  const key = String(rowId || "").trim();
+  if (!activeSession || !key) return { row: null, rowIndex: -1 };
+  const rows = activeSession?.script?.rows || [];
+  const rowIndex = rows.findIndex((row) => String(row?.id || "").trim() === key);
+  return {
+    row: rowIndex >= 0 ? rows[rowIndex] : null,
+    rowIndex
+  };
+}
+
+function describeGeminiCreativityLevel(level = 3) {
+  const normalized = Math.round(Math.max(1, Math.min(10, Number(level) || 3)));
+  if (normalized <= 1) return "Mínimo";
+  if (normalized <= 3) return "Casi igual";
+  if (normalized <= 5) return "Balanceado";
+  if (normalized <= 7) return "Creativo";
+  return "Muy creativo";
+}
+
+function resolveGeminiCreativityLevel(row = null) {
+  const raw = Number(row?.geminiCreativityLevel ?? 3);
+  if (!Number.isFinite(raw)) return 3;
+  return Math.round(Math.max(1, Math.min(10, raw)));
+}
+
+function setGeminiCreativityModalOpen(rowId = "") {
+  const session = getActiveSession();
+  const key = String(rowId || "").trim();
+  const open = Boolean(key);
+  geminiCreativityModalState = { rowId: open ? key : "" };
+  if (els.geminiCreativityModal) {
+    els.geminiCreativityModal.hidden = !open;
+  }
+  if (!open) return;
+  const panelCopy = getPanelModeCopy(session);
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  const level = resolveGeminiCreativityLevel(row);
+  if (els.geminiCreativityRange) {
+    els.geminiCreativityRange.value = String(level);
+  }
+  if (els.geminiCreativityValueLabel) {
+    els.geminiCreativityValueLabel.textContent = `${level} · ${describeGeminiCreativityLevel(level)}`;
+  }
+  if (els.geminiCreativitySceneLabel) {
+    const label = rowIndex >= 0
+      ? `${panelCopy.videoMode ? "Secuencia" : "Escena"} ${rowIndex + 1} · ${resolveSpeakerDisplayName(String(row?.speaker || "Narrador"), session)}`
+      : `${panelCopy.videoMode ? "Secuencia" : "Escena"}: --`;
+    els.geminiCreativitySceneLabel.textContent = label;
+  }
+}
+
+async function rewriteVoiceOverTextWithGemini(rowId = "", options = {}) {
+  const session = getActiveSession();
+  if (!isCreativeVideoMode(session)) return false;
+  const key = String(rowId || "").trim();
+  const triggerBtn = options.button || null;
+  if (!key) return false;
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  if (!row || rowIndex < 0) return false;
+  const currentText = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
+  if (!currentText) {
+    setGenerationStatus("No hay texto en Guion para reformular.", "");
+    return false;
+  }
+  const creativityLevel = resolveGeminiCreativityLevel(row);
+  const temperature = Math.max(0.05, Math.min(1, 0.12 + ((creativityLevel - 1) / 9) * 0.78));
+  const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+  const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
+  const responseSchema = {
+    type: "object",
+    properties: {
+      voiceOverText: { type: "string" }
+    },
+    required: ["voiceOverText"]
+  };
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: [
+          "Eres editor de guion de video educativo.",
+          `Nivel de creatividad (1–10): ${creativityLevel}.`,
+          "Con 1, cambia lo mínimo posible (casi igual). Con niveles altos, puedes ser más creativo en estilo/ritmo, pero sin cambiar nunca el sentido original ni inventar.",
+          "Reescribe la narración manteniendo la esencia, intención y datos clave. Debe quedar más breve y clara, en español natural.",
+          "Entrega solo JSON válido."
+        ].join(" ")
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          `Escena: ${rowIndex + 1}`,
+          `Guion actual: ${currentText}`,
+          sceneDescription ? `Contexto visual: ${sceneDescription}` : "",
+          transition ? `Transición: ${transition}` : "",
+          "Objetivo: reeditar sin perder esencia y procurar que la frase sea más corta."
+        ].filter(Boolean).join("\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema,
+      temperature
+    }
+  };
+  try {
+    if (triggerBtn) {
+      setButtonLoadingState(triggerBtn, true, { loadingTitle: "Reformulando guion con Gemini..." });
+    }
+    setGenerationStatus(`Reformulando guion de escena ${rowIndex + 1}...`, "is-busy");
+    const data = await authFetchJson("/api/gemini/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        model: els.scriptModelSelect?.value || "gemini-2.5-flash",
+        payload
+      })
+    });
+    const rawText = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}").trim();
+    let rewritten = "";
+    try {
+      rewritten = String(JSON.parse(rawText)?.voiceOverText || "").replace(/\s+/g, " ").trim();
+    } catch (_) {
+      rewritten = "";
+    }
+    if (!rewritten) {
+      throw new Error("Gemini no devolvió una reformulación válida.");
+    }
+    const normalizedRewrite = rewriteScenarioPromptForEducationalVideo(rewritten);
+    const originalBackup = String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim() || currentText;
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        hosts: ["Narrador"],
+        rows: current.script.rows.map((entry, index) => (
+          String(entry?.id || "").trim() === key
+            ? normalizeCreativeRow({
+              ...entry,
+              voiceOverOriginalText: originalBackup,
+              voiceOverText: normalizedRewrite
+            }, index)
+            : normalizeCreativeRow(entry, index)
+        ))
+      }
+    }), { render: true });
+    setGenerationStatus(`Guion de escena ${rowIndex + 1} reformulado con Gemini.`, "is-live");
+    return true;
+  } catch (error) {
+    setGenerationStatus("Error", "");
+    addChatMessage("system", `No se pudo reformular el guion de la escena ${rowIndex + 1} (${String(error?.message || "error desconocido")}).`);
+    return false;
+  } finally {
+    if (triggerBtn) {
+      setButtonLoadingState(triggerBtn, false);
+    }
+  }
+}
+
+function restoreVoiceOverOriginalText(rowId = "") {
+  const session = getActiveSession();
+  if (!isCreativeVideoMode(session)) return false;
+  const key = String(rowId || "").trim();
+  if (!key) return false;
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  if (!row || rowIndex < 0) return false;
+  const originalText = String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim();
+  if (!originalText) {
+    setGenerationStatus("No hay texto original guardado para restaurar.", "");
+    return false;
+  }
+  upsertActiveSession((current) => ({
+    ...current,
+    script: {
+      ...current.script,
+      hosts: ["Narrador"],
+      rows: current.script.rows.map((entry, index) => (
+        String(entry?.id || "").trim() === key
+          ? normalizeCreativeRow({
+            ...entry,
+            voiceOverText: originalText
+          }, index)
+          : normalizeCreativeRow(entry, index)
+      ))
+    }
+  }), { render: true });
+  setGenerationStatus(`Guion original restaurado en escena ${rowIndex + 1}.`, "is-live");
+  return true;
+}
+
+async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
+  const session = getActiveSession();
+  if (!isCreativeVideoMode(session)) return false;
+  const key = String(rowId || "").trim();
+  const triggerBtn = options.button || null;
+  if (!key) return false;
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  if (!row || rowIndex < 0) return false;
+
+  const creativityLevel = resolveGeminiCreativityLevel(row);
+  const temperature = Math.max(0.05, Math.min(1, 0.12 + ((creativityLevel - 1) / 9) * 0.78));
+  const voiceOverText = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
+  const voiceOverOriginal = String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim();
+  const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
+  const transition = String(row?.transition || "").replace(/\s+/g, " ").trim();
+  const onScreenText = String(row?.onScreenText || "").replace(/\s+/g, " ").trim();
+  const currentVisual = String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim();
+
+  if (!voiceOverText && !voiceOverOriginal) {
+    setGenerationStatus("No hay guion para regenerar el elemento visual.", "");
+    return false;
+  }
+
+  const responseSchema = {
+    type: "object",
+    properties: {
+      visualNotes: { type: "string" }
+    },
+    required: ["visualNotes"]
+  };
+
+  const payload = {
+    systemInstruction: {
+      parts: [{
+        text: [
+          "Eres director/a de arte de videos educativos (modo visual-first).",
+          `Nivel de creatividad (1–10): ${creativityLevel}.`,
+          "Con 1, cambia lo mínimo posible (casi igual). Con niveles altos, puedes proponer variaciones más creativas, pero sin cambiar nunca el sentido original.",
+          "Lee primero el guion actual (si existe) y usa el original solo como respaldo.",
+          "Regenera un 'Elemento visual' nuevo, más detallado, que refuerce exactamente lo que dice el guion.",
+          "Describe el recurso visual (objeto, gráfico, diagrama, animación, entorno) con claridad y concreción.",
+          "Debe servir para generar video 16:9 sin texto incrustado (no pongas subtítulos).",
+          "Evita estilo podcast: sin cabina, sin micrófono, sin set de entrevista, sin presentador humano si no aporta.",
+          "Entrega solo JSON válido."
+        ].join(" ")
+      }]
+    },
+    contents: [{
+      role: "user",
+      parts: [{
+        text: [
+          `Escena: ${rowIndex + 1}`,
+          voiceOverText ? `Guion actual: ${voiceOverText}` : "",
+          voiceOverOriginal ? `Guion original: ${voiceOverOriginal}` : "",
+          sceneDescription ? `Descripción de escena: ${sceneDescription}` : "",
+          transition ? `Transición: ${transition}` : "",
+          onScreenText ? `Texto en pantalla (semántica, no incrustar): ${onScreenText}` : "",
+          currentVisual ? `Elemento visual actual: ${currentVisual}` : "",
+          "Objetivo: proponer un elemento visual NUEVO y más detallado, alineado al guion, listo para producción."
+        ].filter(Boolean).join("\n")
+      }]
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: responseSchema,
+      temperature
+    }
+  };
+
+  try {
+    if (triggerBtn) {
+      setButtonLoadingState(triggerBtn, true, { loadingTitle: "Regenerando elemento visual con Gemini..." });
+    }
+    setGenerationStatus(`Regenerando elemento visual de escena ${rowIndex + 1}...`, "is-busy");
+    const data = await authFetchJson("/api/gemini/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        model: els.scriptModelSelect?.value || "gemini-2.5-flash",
+        payload
+      })
+    });
+    const rawText = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}").trim();
+    let rewritten = "";
+    try {
+      rewritten = String(JSON.parse(rawText)?.visualNotes || "").replace(/\s+/g, " ").trim();
+    } catch (_) {
+      rewritten = "";
+    }
+    if (!rewritten) {
+      throw new Error("Gemini no devolvió un elemento visual válido.");
+    }
+    const normalizedRewrite = rewriteScenarioPromptForEducationalVideo(rewritten);
+    const alreadyStored = row?.visualNotesOriginalStored === true;
+    const originalBackup = alreadyStored
+      ? String(row?.visualNotesOriginalText ?? "")
+      : currentVisual;
+    upsertActiveSession((current) => ({
+      ...current,
+      script: {
+        ...current.script,
+        hosts: ["Narrador"],
+        rows: current.script.rows.map((entry, index) => (
+          String(entry?.id || "").trim() === key
+            ? normalizeCreativeRow({
+              ...entry,
+              visualNotesOriginalText: originalBackup,
+              visualNotesOriginalStored: true,
+              visualNotes: normalizedRewrite
+            }, index)
+            : normalizeCreativeRow(entry, index)
+        ))
+      }
+    }), { render: true });
+    setGenerationStatus(`Elemento visual de escena ${rowIndex + 1} regenerado con Gemini.`, "is-live");
+    return true;
+  } catch (error) {
+    setGenerationStatus("Error", "");
+    addChatMessage("system", `No se pudo regenerar el elemento visual de la escena ${rowIndex + 1} (${String(error?.message || "error desconocido")}).`);
+    return false;
+  } finally {
+    if (triggerBtn) {
+      setButtonLoadingState(triggerBtn, false);
+    }
+  }
+}
+
+function restoreVisualNotesOriginalText(rowId = "") {
+  const session = getActiveSession();
+  if (!isCreativeVideoMode(session)) return false;
+  const key = String(rowId || "").trim();
+  if (!key) return false;
+  const { row, rowIndex } = resolveCreativeRowMeta(session, key);
+  if (!row || rowIndex < 0) return false;
+  if (row?.visualNotesOriginalStored !== true) {
+    setGenerationStatus("No hay elemento visual anterior guardado para restaurar.", "");
+    return false;
+  }
+  const originalText = String(row?.visualNotesOriginalText ?? "");
+  upsertActiveSession((current) => ({
+    ...current,
+    script: {
+      ...current.script,
+      hosts: ["Narrador"],
+      rows: current.script.rows.map((entry, index) => (
+        String(entry?.id || "").trim() === key
+          ? normalizeCreativeRow({
+            ...entry,
+            visualNotes: originalText
+          }, index)
+          : normalizeCreativeRow(entry, index)
+      ))
+    }
+  }), { render: true });
+  setGenerationStatus(`Elemento visual anterior restaurado en escena ${rowIndex + 1}.`, "is-live");
+  return true;
+}
+
 function handleScriptFieldUpdate(event) {
   const target = event.target.closest("[data-row-id][data-field]");
   if (!target) return;
   const rowId = target.dataset.rowId;
   const field = target.dataset.field;
   const session = getActiveSession();
+  const isLiveInput = String(event?.type || "").trim().toLowerCase() === "input";
   const rawValue = field === "durationSec"
     ? Number(target.value || 0)
-    : field === "disfluencyEnabled" || field === "stutterEnabled"
+    : field === "disfluencyEnabled" || field === "stutterEnabled" || field === "relateWithPreviousScene"
       ? Boolean(target.checked)
       : target.value;
   if (field === "disfluencyEnabled" || field === "fillerLevel" || field === "errorLevel" || field === "stutterEnabled" || field === "stutterLevel") {
@@ -14781,6 +20075,7 @@ function handleScriptFieldUpdate(event) {
     }), { render: false });
     updateRowDisfluencyButtonState(rowId);
     syncRowDisfluencyModal(getActiveSession());
+    scheduleCloudAutosave("script-edit");
     return;
   }
   const value = field === "speaker" ? normalizeSpeakerLabel(rawValue, "Host A") : rawValue;
@@ -14800,10 +20095,11 @@ function handleScriptFieldUpdate(event) {
         [speaker]: normalizeLiveVoiceName(value, resolveSpeakerVoiceName(speaker, current))
       }
     }));
+    scheduleCloudAutosave("script-edit");
     return;
   }
 
-  const nextRender = field === "speaker" || field === "scenePrompt" || field === "imagePrompts";
+  const nextRender = !isLiveInput && (field === "speaker" || field === "scenePrompt" || field === "imagePrompts");
   if (field === "speaker") {
     logPodcasterLiveDebug("speaker-change", {
       rowId,
@@ -14830,6 +20126,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { render: nextRender });
+    scheduleCloudAutosave("script-edit");
     return;
   }
   if (field === "videoDirective") {
@@ -14849,6 +20146,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { render: nextRender });
+    scheduleCloudAutosave("script-edit");
     return;
   }
   if (field === "imagePrompts") {
@@ -14871,6 +20169,7 @@ function handleScriptFieldUpdate(event) {
         ))
       }
     }), { render: nextRender });
+    scheduleCloudAutosave("script-edit");
     return;
   }
   if (isCreativeVideoMode(session) && (field === "voiceOverText" || field === "sceneDescription" || field === "onScreenText" || field === "visualNotes" || field === "transition" || field === "durationSec")) {
@@ -14885,7 +20184,8 @@ function handleScriptFieldUpdate(event) {
             : normalizeCreativeRow(row, index)
         ))
       }
-    }), { render: true });
+    }), { render: !isLiveInput });
+    scheduleCloudAutosave("script-edit");
     return;
   }
   upsertActiveSession((current) => ({
@@ -14919,11 +20219,36 @@ function handleScriptFieldUpdate(event) {
       ))
     }
   }), { render: nextRender });
+  scheduleCloudAutosave(field === "durationSec" ? "structure" : "script-edit");
 
+  if (field === "relateWithPreviousScene") {
+    scheduleCloudAutosave("timeline-clip-modal");
+  }
   if (field === "durationSec") {
     refreshSessionMeta();
     renderSessions();
   }
+}
+
+function shouldHandleScriptFieldOnInput(event) {
+  const target = event?.target?.closest?.("[data-row-id][data-field]");
+  if (!target) return false;
+  const field = String(target.dataset.field || "").trim();
+  return field === "disfluencyEnabled"
+    || field === "fillerLevel"
+    || field === "errorLevel"
+    || field === "stutterEnabled"
+    || field === "stutterLevel"
+    || field === "text"
+    || field === "notes"
+    || field === "scenePrompt"
+    || field === "videoDirective"
+    || field === "voiceOverText"
+    || field === "sceneDescription"
+    || field === "onScreenText"
+    || field === "visualNotes"
+    || field === "transition"
+    || field === "durationSec";
 }
 
 function attachEvents() {
@@ -14937,18 +20262,36 @@ function attachEvents() {
     setPromptInputContent("");
     autoResizePrompt();
     if (composerGenerationMode === "video") {
-      setGenerationStatus("Paso 1/3: Estructurando tabla de video...", "is-busy");
-      const sessionSnapshot = getActiveSession();
-      const prepared = await prepareVideoPromptPreviewForUser(prompt, promptHtml, sessionSnapshot);
-      await handleGenerate(prompt, {
-        displayPrompt: prompt,
-        userMessageText: prepared.userMessageText,
-        userMessageHtml: prepared.userMessageHtml,
-        generationPrompt: prepared.generationPrompt,
-        constraints: {
-          videoMode: true
+      try {
+        const sessionSnapshot = getActiveSession();
+        const hasStructuredTable = hasStructuredVideoTableInput(prompt, promptHtml);
+        if (hasStructuredTable) {
+          setGenerationStatus("Paso 1/3: Estructurando tabla de video...", "is-busy");
+          const prepared = await prepareVideoPromptPreviewForUser(prompt, promptHtml, sessionSnapshot);
+          await handleGenerate(prompt, {
+            displayPrompt: prompt,
+            userMessageText: prepared.userMessageText,
+            userMessageHtml: prepared.userMessageHtml,
+            generationPrompt: prepared.generationPrompt,
+            constraints: {
+              videoMode: true
+            }
+          });
+        } else {
+          setGenerationStatus("Paso 1/3: Preparando solicitud...", "is-busy");
+          await handleGenerate(prompt, {
+            displayPrompt: prompt,
+            generationPrompt: prompt,
+            constraints: {
+              videoMode: true
+            }
+          });
         }
-      });
+      } catch (error) {
+        const message = String(error?.message || "No se pudo dividir el guion con Gemini.").trim();
+        addChatMessage("system", `Error en división de escenas: ${message}`);
+        setGenerationStatus("Error", "");
+      }
       return;
     }
     pendingScriptPrompt = prompt;
@@ -15011,6 +20354,7 @@ function attachEvents() {
           speakerScenarioMap: maps.scenarioMap
         };
       }, { render: false });
+      scheduleCloudAutosave("structure");
       const generationPrompt = composeScriptPromptWithSetup(basePrompt, setup);
       setGenerationStatus("Paso 2/3: Analizando configuración + chat...", "is-busy");
       setScriptSetupOpen(false);
@@ -15058,6 +20402,7 @@ function attachEvents() {
         ]
       }
     }));
+    scheduleCloudAutosave("structure");
   });
 
   els.duplicateRowBtn.addEventListener("click", () => {
@@ -15074,6 +20419,7 @@ function attachEvents() {
         ]
       }
     }));
+    scheduleCloudAutosave("structure");
   });
 
   const handleSaveSessionClick = async () => {
@@ -15091,6 +20437,16 @@ function attachEvents() {
   }
   if (els.saveSessionFloatingBtn) {
     els.saveSessionFloatingBtn.addEventListener("click", handleSaveSessionClick);
+  }
+  if (els.importGeminiDialogueTrackBtn) {
+    els.importGeminiDialogueTrackBtn.addEventListener("click", () => {
+      if (podcastVideoState.busy) return;
+      setMontageAudioSubtracksOpen(!podcastVideoState.showMontageAudioSubtracks);
+      setGenerationStatus(
+        podcastVideoState.showMontageAudioSubtracks ? "Mostrando audio del montaje bajo cada track." : "Audio del montaje oculto.",
+        "is-live"
+      );
+    });
   }
   if (els.openSidepanelBtn) {
     els.openSidepanelBtn.addEventListener("click", () => {
@@ -15574,8 +20930,70 @@ function attachEvents() {
       }), { render: false });
       renderCreativeVideoShell(getActiveSession());
     };
+    const handleCreativeInlineActions = async (event) => {
+      const openCreativityBtn = event.target.closest("[data-action='open-gemini-creativity'][data-row-id]");
+      if (openCreativityBtn) {
+        const rowId = String(openCreativityBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        setGeminiCreativityModalOpen(rowId);
+        return;
+      }
+      const rewriteBtn = event.target.closest("[data-action='rewrite-voiceover-text'][data-row-id]");
+      if (rewriteBtn) {
+        const rowId = String(rewriteBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        await rewriteVoiceOverTextWithGemini(rowId, { button: rewriteBtn });
+        return;
+      }
+      const restoreBtn = event.target.closest("[data-action='restore-voiceover-text'][data-row-id]");
+      if (restoreBtn) {
+        const rowId = String(restoreBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        restoreVoiceOverOriginalText(rowId);
+        return;
+      }
+      const rewriteVisualBtn = event.target.closest("[data-action='rewrite-visual-notes'][data-row-id]");
+      if (rewriteVisualBtn) {
+        const rowId = String(rewriteVisualBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        await rewriteVisualNotesWithGemini(rowId, { button: rewriteVisualBtn });
+        return;
+      }
+      const restoreVisualBtn = event.target.closest("[data-action='restore-visual-notes'][data-row-id]");
+      if (restoreVisualBtn) {
+        const rowId = String(restoreVisualBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        restoreVisualNotesOriginalText(rowId);
+      }
+    };
     els.creativeVideoInspectorEditor.addEventListener("input", handleCreativeField);
     els.creativeVideoInspectorEditor.addEventListener("change", handleCreativeField);
+    els.creativeVideoInspectorEditor.addEventListener("click", (event) => {
+      handleCreativeInlineActions(event).catch(() => {});
+    });
+  }
+  if (els.geminiCreativityRange) {
+    els.geminiCreativityRange.addEventListener("input", () => {
+      const session = getActiveSession();
+      const rowId = String(geminiCreativityModalState.rowId || "").trim();
+      if (!session || !rowId) return;
+      const level = Math.round(Math.max(1, Math.min(10, Number(els.geminiCreativityRange.value || 3) || 3)));
+      if (els.geminiCreativityValueLabel) {
+        els.geminiCreativityValueLabel.textContent = `${level} · ${describeGeminiCreativityLevel(level)}`;
+      }
+      upsertActiveSession((current) => ({
+        ...current,
+        script: {
+          ...current.script,
+          hosts: ["Narrador"],
+          rows: (current.script?.rows || []).map((row, index) => (
+            String(row?.id || "").trim() === rowId
+              ? normalizeCreativeRow({ ...row, geminiCreativityLevel: level }, index)
+              : normalizeCreativeRow(row, index)
+          ))
+        }
+      }), { render: false });
+    });
   }
   if (els.creativeGlobalVoiceName) {
     els.creativeGlobalVoiceName.addEventListener("change", () => {
@@ -15626,26 +21044,51 @@ function attachEvents() {
       setGenerationStatus(`Transición aplicada: ${type}`, "is-live");
     });
   }
-  if (els.podcastActiveSpeakerVideo) {
-    els.podcastActiveSpeakerVideo.addEventListener("play", updatePodcastVideoTransportUi);
-    els.podcastActiveSpeakerVideo.addEventListener("pause", updatePodcastVideoTransportUi);
-    els.podcastActiveSpeakerVideo.addEventListener("ended", updatePodcastVideoTransportUi);
-    els.podcastActiveSpeakerVideo.addEventListener("timeupdate", () => {
+  if (els.podcastActiveSpeakerVideo || els.podcastActiveSpeakerVideoAlt) {
+    const onStageState = (event) => {
+      const target = event?.currentTarget || null;
+      const active = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null;
+      if (target && active && target !== active) return;
+      if (event?.type === "pause") {
+        // Si el usuario pausa el video, pausa también el track de audio 1 (background).
+        pauseMontageBackgroundAudio();
+      }
+      updatePodcastVideoTransportUi();
+    };
+    const onStageTimeUpdate = (event) => {
+      const target = event?.currentTarget || null;
+      const activeVideo = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideo || null;
+      if (target && activeVideo && target !== activeVideo) return;
       const durationSec = Math.max(0.1, Number(podcastVideoState.timelineDurationSec || 0.1));
       const current = podcastVideoState.montageActive
         ? Math.max(0, Number(podcastVideoState.montageCursorMs || 0) / 1000)
-        : Number(els.podcastActiveSpeakerVideo.currentTime || 0);
+        : Number(activeVideo?.currentTime || 0);
       if (!podcastVideoState.montageActive) {
         const session = getActiveSession();
         const clipMap = ensureTimelineClipsByRowId(session, { persist: false });
         const activeClip = clipMap[String(podcastVideoState.activeRowId || "").trim()];
         if (activeClip) {
           const clipStartMs = Math.max(0, Number(activeClip.startMs || 0));
+          const trimInSec = Math.max(0, Number(activeClip.trimInMs || 0) / 1000);
           const clipDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineClipEffectiveDurationMs(activeClip));
           const clipEndMs = clipStartMs + clipDurationMs;
-          const sceneMs = clipStartMs + Math.max(0, current * 1000);
+          const normalizedSec = Math.max(0, current - trimInSec);
+          const sceneMs = clipStartMs + Math.max(0, normalizedSec * 1000);
           podcastVideoState.montageCursorMs = Math.max(clipStartMs, Math.min(clipEndMs, sceneMs));
           syncPodcastTimelinePlayhead(session);
+          if (podcastVideoState.timelineSequenceActive === true && podcastVideoState.timelineSequencePaused !== true) {
+            const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+            const runtimeEntries = Array.isArray(podcastVideoState.timelineSequenceRuntimeEntries)
+              ? podcastVideoState.timelineSequenceRuntimeEntries
+              : [];
+            if (runtimeEntries.length) {
+              const ms = Math.max(0, Number(podcastVideoState.montageCursorMs || 0));
+              const activeEntries = runtimeEntries.filter((entry) => ms >= entry.startMs && ms < entry.endMs);
+              syncMontageAudioPlayers(activeEntries, ms, speed, runtimeEntries);
+              // Audio de fondo (tracks uploaded / locked lane).
+              syncMontageBackgroundAt(ms, speed);
+            }
+          }
         }
       }
       if (els.podcastStudioScrubber && durationSec > 0 && !podcastVideoState.montageActive) {
@@ -15656,16 +21099,21 @@ function attachEvents() {
         const total = Math.max(durationSec, Number(podcastVideoState.timelineDurationSec || 0));
         els.podcastStudioTime.textContent = `${secondsToClock(current)} / ${secondsToClock(total)}`;
       }
+    };
+    getStageVideoElements().forEach((video) => {
+      video.addEventListener("play", onStageState);
+      video.addEventListener("pause", onStageState);
+      video.addEventListener("ended", onStageState);
+      video.addEventListener("timeupdate", onStageTimeUpdate);
     });
   }
   if (els.podcastVideoPlayBtn) {
     els.podcastVideoPlayBtn.addEventListener("click", async () => {
+      if (Date.now() < Number(podcastVideoState.timelineJustDraggedUntil || 0)) return;
       const session = getActiveSession();
       if (!(session?.script?.rows || []).length) return;
-      const startMs = podcastVideoState.montagePaused
-        ? Number(podcastVideoState.montageCursorMs || 0)
-        : Number(podcastVideoState.montageCursorMs || 0);
-      await playPodcastStudioMontage(startMs);
+      const startMs = Number(podcastVideoState.montageCursorMs || 0);
+      await playTimelineSequenceFromPlayhead(startMs);
     });
   }
   if (els.podcastVideoPauseBtn) {
@@ -15674,21 +21122,45 @@ function attachEvents() {
         pausePodcastStudioMontage();
         return;
       }
-      if (els.podcastActiveSpeakerVideo && !els.podcastActiveSpeakerVideo.paused) {
-        try { els.podcastActiveSpeakerVideo.pause(); } catch (_) {}
+      if (podcastVideoState.timelineSequenceActive === true) {
+        cancelTimelineSequence({ paused: true });
       }
+      getStageVideoElements().forEach((video) => {
+        if (video && !video.paused) {
+          try { video.pause(); } catch (_) {}
+        }
+      });
       if (podcastVideoState.audioEl && !podcastVideoState.audioEl.paused) {
         try { podcastVideoState.audioEl.pause(); } catch (_) {}
       }
       Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
         try { audio.pause(); } catch (_) {}
       });
+      pauseMontageBackgroundAudio();
       setPodcastVideoStatus("Pausado");
       updatePodcastVideoTransportUi();
     });
   }
   if (els.podcastVideoStopBtn) {
     els.podcastVideoStopBtn.addEventListener("click", () => {
+      if (podcastVideoState.timelineSequenceActive === true) {
+        cancelTimelineSequence({ paused: false });
+      }
+      getStageVideoElements().forEach((video) => {
+        if (!video) return;
+        try { video.pause(); } catch (_) {}
+        video.volume = 0;
+        video.muted = true;
+      });
+      if (podcastVideoState.audioEl) {
+        try { podcastVideoState.audioEl.pause(); } catch (_) {}
+        podcastVideoState.audioEl = null;
+      }
+      Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
+        try { audio.pause(); } catch (_) {}
+      });
+      podcastVideoState.montageAudioPlayers = {};
+      stopMontageBackgroundAudio();
       stopPodcastStudioMontage();
     });
   }
@@ -15703,7 +21175,7 @@ function attachEvents() {
       stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
       podcastVideoState.montageCursorMs = prev;
       syncPodcastTimelinePlayhead(session);
-      await syncStudioTimelinePreview(prev, entries);
+      await syncStudioTimelinePreview(prev, entries, null, { autoplay: false });
       if (els.podcastStudioScrubber && podcastVideoState.timelineDurationSec > 0) {
         const ratio = Math.max(0, Math.min(1, prev / (podcastVideoState.timelineDurationSec * 1000)));
         els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
@@ -15721,7 +21193,7 @@ function attachEvents() {
       stopPodcastStudioMontage({ keepStatus: true, keepCursor: true });
       podcastVideoState.montageCursorMs = next;
       syncPodcastTimelinePlayhead(session);
-      await syncStudioTimelinePreview(next, entries);
+      await syncStudioTimelinePreview(next, entries, null, { autoplay: false });
       if (els.podcastStudioScrubber && podcastVideoState.timelineDurationSec > 0) {
         const ratio = Math.max(0, Math.min(1, next / (podcastVideoState.timelineDurationSec * 1000)));
         els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
@@ -15730,9 +21202,10 @@ function attachEvents() {
   }
   if (els.podcastVideoSpeedSelect) {
     els.podcastVideoSpeedSelect.addEventListener("change", () => {
-      if (!els.podcastActiveSpeakerVideo) return;
       const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect.value || 1)));
-      els.podcastActiveSpeakerVideo.playbackRate = speed;
+      getStageVideoElements().forEach((video) => {
+        try { video.playbackRate = speed; } catch (_) {}
+      });
       if (podcastVideoState.audioEl) {
         podcastVideoState.audioEl.playbackRate = speed;
       }
@@ -15748,6 +21221,66 @@ function attachEvents() {
   if (els.podcastVideoZoomBtn) {
     els.podcastVideoZoomBtn.addEventListener("click", () => {
       setPodcastVideoZoomEnabled(!podcastVideoState.zoomed);
+    });
+  }
+  if (els.exportMontageBtn) {
+    els.exportMontageBtn.addEventListener("click", () => {
+      openMontageExportModal();
+    });
+  }
+  if (els.montageExportModal) {
+    els.montageExportModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-montage-export-modal']");
+      if (closeBtn) {
+        closeMontageExportModal();
+      }
+    });
+  }
+  if (els.closeMontageExportBtn) {
+    els.closeMontageExportBtn.addEventListener("click", () => {
+      closeMontageExportModal();
+    });
+  }
+  if (els.cancelMontageExportBtn) {
+    els.cancelMontageExportBtn.addEventListener("click", () => {
+      closeMontageExportModal();
+    });
+  }
+  if (els.confirmMontageExportBtn) {
+    els.confirmMontageExportBtn.addEventListener("click", () => {
+      runMontageExport().catch(() => {});
+    });
+  }
+  if (els.montageExportFormat) {
+    els.montageExportFormat.addEventListener("change", () => {
+      montageExportState.format = String(els.montageExportFormat.value || "mp4_h264").trim();
+      syncMontageExportUi();
+    });
+  }
+  if (els.montageExportResolution) {
+    els.montageExportResolution.addEventListener("change", () => {
+      montageExportState.resolution = String(els.montageExportResolution.value || "source").trim();
+      syncMontageExportUi();
+    });
+  }
+  if (els.montageExportFilename) {
+    els.montageExportFilename.addEventListener("input", () => {
+      montageExportState.filename = String(els.montageExportFilename.value || "").trim().slice(0, 120);
+      persistMontageExportSettings();
+    });
+    els.montageExportFilename.addEventListener("change", () => {
+      montageExportState.filename = String(els.montageExportFilename.value || "").trim().slice(0, 120);
+      persistMontageExportSettings();
+    });
+  }
+  if (els.montageExportModal) {
+    const qualityBtns = Array.from(els.montageExportModal.querySelectorAll("[data-quality]"));
+    qualityBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = String(btn?.dataset?.quality || "").trim();
+        montageExportState.qualityPreset = key;
+        syncMontageExportUi();
+      });
     });
   }
   if (els.podcastStudioScrubber) {
@@ -15772,28 +21305,61 @@ function attachEvents() {
   if (els.podcastTimelineRuler) {
     els.podcastTimelineRuler.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
+      if (event.target && event.target.closest && event.target.closest(".podcast-timeline-ruler-zoom")) return;
       seekStudioTimelineByRulerClientX(event.clientX, { stopMontage: true });
       event.preventDefault();
+    });
+    els.podcastTimelineRuler.addEventListener("input", (event) => {
+      const target = event?.target || null;
+      if (!target || String(target.id || "") !== "podcastTimelineZoomOutRange") return;
+      const session = getActiveSession();
+      if (!session) return;
+      const nextZoom = Math.max(0.25, Math.min(1, toFiniteNumber(target.value, 1)));
+      const prevPxPerSec = getStudioTimelinePixelsPerSec(session);
+      const prevCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
+      const prevOffsetPx = Math.max(0, Number(prevCanvas?.dataset?.playheadOffset || 0));
+      const prevScrollLeft = Math.max(0, Number(els.podcastVideoTimeline?.scrollLeft || 0));
+      const updated = upsertActiveSession((current) => ({
+        ...current,
+        podcastVideoConfig: normalizePodcastVideoConfig({
+          ...(current.podcastVideoConfig || {}),
+          timelineZoom: nextZoom
+        })
+      }), { render: false });
+      if (!updated) return;
+      renderPodcastVideoTimeline(updated, { force: true, reason: "structure" });
+      const nextPxPerSec = getStudioTimelinePixelsPerSec(updated);
+      const nextCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
+      const nextOffsetPx = Math.max(0, Number(nextCanvas?.dataset?.playheadOffset || 0));
+      const scaledScroll = nextOffsetPx + Math.max(0, prevScrollLeft - prevOffsetPx) * (nextPxPerSec / Math.max(1e-6, prevPxPerSec));
+      try {
+        if (els.podcastVideoTimeline) els.podcastVideoTimeline.scrollLeft = scaledScroll;
+        if (els.podcastTimelineRuler) els.podcastTimelineRuler.scrollLeft = scaledScroll;
+      } catch (_) {}
+      syncPodcastTimelinePlayhead(updated);
     });
   }
   const runGenerateMissingDialogueVideos = async (options = {}) => {
     const session = getActiveSession();
     const rows = session?.script?.rows || [];
-    if (!rows.length || podcastVideoState.busy) return;
+    if (!rows.length || podcastVideoState.bulkVideoGenerationActive) return;
     const triggerButton = options.triggerButton || null;
+    const regenerateAll = options.regenerateAll === true;
     const preservedActiveRowId = String(podcastVideoState.activeRowId || "").trim();
-    const eligibleRows = rows.filter((row) => {
-      const rowId = String(row?.id || "").trim();
-      if (!rowId) return false;
-      return !hasGeneratedDialogueVideoForRow(session, rowId);
-    });
+    const eligibleRows = regenerateAll
+      ? rows.filter((row) => String(row?.id || "").trim())
+      : rows.filter((row) => {
+        const rowId = String(row?.id || "").trim();
+        if (!rowId) return false;
+        return !hasGeneratedDialogueVideoForRow(session, rowId);
+      });
     logPodcastBatchDebug("batch-eligible-rows", {
       totalRows: rows.length,
       eligibleRowIds: eligibleRows.map((row) => String(row?.id || "").trim()),
       eligibleScenes: eligibleRows.map((row) => resolveSceneNumberByRowId(String(row?.id || "").trim(), session))
     });
     if (!eligibleRows.length) {
-      setGenerationStatus("Todas las escenas ya tienen video", "is-live");
+      setGenerationStatus(regenerateAll ? "No hay escenas para generar" : "Todas las escenas ya tienen video", "is-live");
       return;
     }
     const readyRows = eligibleRows.slice();
@@ -15804,17 +21370,28 @@ function attachEvents() {
       skippedRowIds: skippedRowsMissingAudio.map((row) => String(row?.id || "").trim()),
       skippedScenes: skippedRowsMissingAudio.map((row) => resolveSceneNumberByRowId(String(row?.id || "").trim(), session))
     });
-    podcastVideoState.busy = true;
     podcastVideoState.bulkVideoGenerationActive = true;
-    podcastVideoState.bulkVideoGenerationMode = "missing";
+    podcastVideoState.bulkVideoGenerationMode = regenerateAll ? "all" : "missing";
     setButtonLoadingState(triggerButton, true, {
-      loadingTitle: "Generando escenas faltantes..."
+      loadingTitle: regenerateAll ? "Generando todas las escenas..." : "Generando escenas faltantes..."
     });
-    addChatMessage("system", `Cola iniciada: ${readyRows.length} escena(s) sin video.`);
+    addChatMessage("system", `Cola iniciada: ${readyRows.length} escena(s) ${regenerateAll ? "para generar/regenerar" : "sin video"}.`);
     updatePodcastPlayerUi();
     const failures = [];
     let successCount = 0;
+    const generationKeys = [];
     try {
+      readyRows.forEach((row) => {
+        const rowId = String(row?.id || "").trim();
+        if (!rowId) return;
+        const generationKey = buildTimelineSceneGenerationKey(session, rowId);
+        if (!generationKey) return;
+        generationKeys.push(generationKey);
+        timelineSceneVideoGenerationPending.add(generationKey);
+      });
+      if (generationKeys.length) {
+        renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      }
       for (let i = 0; i < readyRows.length; i += 1) {
         const currentSession = getActiveSession();
         const row = ((currentSession?.script?.rows || []).find((item) => String(item?.id || "").trim() === String(readyRows[i]?.id || "").trim())) || readyRows[i];
@@ -15830,7 +21407,7 @@ function attachEvents() {
         try {
           const generatedClip = await generateDialogueVideoForRow(rowId, {
             videoDirective: normalizeVideoDirectiveText(row?.videoDirective || ""),
-            regenerate: false,
+            regenerate: regenerateAll,
             silent: true,
             deferTimelineRender: false,
             syncStageAfterGenerate: false
@@ -15859,6 +21436,11 @@ function attachEvents() {
           });
           failures.push(`Escena ${resolveSceneNumberByRowId(rowId, session)}: ${String(error?.message || "error desconocido")}`);
         }
+        const generationKey = buildTimelineSceneGenerationKey(session, rowId);
+        if (generationKey) {
+          timelineSceneVideoGenerationPending.delete(generationKey);
+          renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+        }
       }
       if (preservedActiveRowId && successCount > 0) {
         setPodcastVideoRow(preservedActiveRowId, {
@@ -15871,7 +21453,7 @@ function attachEvents() {
         addChatMessage("system", `Se generaron videos con incidencias: ${failures.slice(0, 5).join(" | ")}`);
         setGenerationStatus("Completado con incidencias", "");
       } else {
-        setGenerationStatus("Escenas faltantes generadas", "is-live");
+        setGenerationStatus(regenerateAll ? "Escenas generadas" : "Escenas faltantes generadas", "is-live");
       }
     } catch (error) {
       logPodcastBatchDebug("batch-fatal-error", {
@@ -15885,10 +21467,15 @@ function attachEvents() {
         successCount,
         failureCount: failures.length
       });
+      generationKeys.forEach((generationKey) => {
+        timelineSceneVideoGenerationPending.delete(generationKey);
+      });
+      if (generationKeys.length) {
+        renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      }
       setButtonLoadingState(triggerButton, false);
       podcastVideoState.bulkVideoGenerationActive = false;
       podcastVideoState.bulkVideoGenerationMode = "";
-      podcastVideoState.busy = false;
       if (successCount > 0) {
         renderPodcastTransitionTimeline(getActiveSession());
         syncPodcastStudioInspector(getActiveSession());
@@ -15918,39 +21505,58 @@ function attachEvents() {
       const ok = reorderTimelineClipsByTracks();
       if (!ok) {
         setGenerationStatus("Se necesitan al menos 2 escenas para reordenar el timeline", "");
+        return;
       }
+      syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      syncPodcastStudioInspector(getActiveSession());
     });
   }
   const applyStudioMasterVolume = (rawValue) => {
     const value = Math.max(0, Math.min(100, toFiniteNumber(rawValue, 100)));
     upsertPodcastVideoConfig((cfg) => ({ ...cfg, masterVolume: value }));
+    scheduleCloudAutosave("inspector");
     if (els.podcastStudioMasterVolume) {
       els.podcastStudioMasterVolume.value = String(value);
     }
     if (els.podcastStudioMasterVolumeNumber) {
       els.podcastStudioMasterVolumeNumber.value = String(value);
     }
-    if (podcastVideoState.audioEl) {
-      podcastVideoState.audioEl.volume = Math.max(0, Math.min(1, value / 100));
-    }
-    if (els.podcastActiveSpeakerVideo && String(getPodcastVideoConfig(getActiveSession()).audioMode || "gemini-live-per-scene") === "veo-native-audio") {
-      els.podcastActiveSpeakerVideo.volume = Math.max(0, Math.min(1, value / 100));
+    const activeSession = getActiveSession();
+    const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+    applyActiveTimelineClipMixToPlayback(activeSession, activeRowId);
+    const inactive = getInactiveStageVideoEl?.() || null;
+    if (inactive) {
+      inactive.volume = 0;
+      inactive.muted = true;
     }
     syncPodcastStudioInspector(getActiveSession());
+    if (els.timelineClipDurationModal && !els.timelineClipDurationModal.hidden) {
+      syncTimelineClipDurationModalInputs();
+    }
   };
   const applyStudioClipVolume = (rawValue) => {
     const value = Math.max(0, Math.min(100, toFiniteNumber(rawValue, 0)));
     upsertPodcastVideoConfig((cfg) => ({ ...cfg, clipVolume: value }));
+    scheduleCloudAutosave("inspector");
     if (els.podcastStudioClipVolume) {
       els.podcastStudioClipVolume.value = String(value);
     }
     if (els.podcastStudioClipVolumeNumber) {
       els.podcastStudioClipVolumeNumber.value = String(value);
     }
-    if (els.podcastActiveSpeakerVideo) {
-      els.podcastActiveSpeakerVideo.volume = Math.max(0, Math.min(1, value / 100));
+    const activeSession = getActiveSession();
+    const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+    applyActiveTimelineClipMixToPlayback(activeSession, activeRowId);
+    const inactive = getInactiveStageVideoEl?.() || null;
+    if (inactive) {
+      inactive.volume = 0;
+      inactive.muted = true;
     }
     syncPodcastStudioInspector(getActiveSession());
+    if (els.timelineClipDurationModal && !els.timelineClipDurationModal.hidden) {
+      syncTimelineClipDurationModalInputs();
+    }
   };
   if (els.podcastStudioMasterVolume) {
     els.podcastStudioMasterVolume.addEventListener("input", () => {
@@ -15978,23 +21584,6 @@ function attachEvents() {
       applyStudioClipVolume(els.podcastStudioClipVolumeNumber.value);
     });
   }
-  if (els.podcastTransitionTypeSelect) {
-    els.podcastTransitionTypeSelect.addEventListener("change", () => {
-      const type = String(els.podcastTransitionTypeSelect.value || "cut").trim().toLowerCase();
-      const duration = toFiniteNumber(els.podcastTransitionDurationRange?.value, 0);
-      setTransitionForActiveEdge(type, duration);
-    });
-  }
-  if (els.podcastTransitionDurationRange) {
-    els.podcastTransitionDurationRange.addEventListener("input", () => {
-      const duration = Math.max(0, Math.min(1200, toFiniteNumber(els.podcastTransitionDurationRange.value, 0)));
-      if (els.podcastTransitionDurationLabel) {
-        els.podcastTransitionDurationLabel.textContent = `${duration} ms`;
-      }
-      const type = String(els.podcastTransitionTypeSelect?.value || "cut").trim().toLowerCase();
-      setTransitionForActiveEdge(type, duration);
-    });
-  }
   if (els.regenerateAllPortraitsBtn) {
     els.regenerateAllPortraitsBtn.addEventListener("click", async () => {
       if (podcastVideoState.busy) return;
@@ -16013,7 +21602,9 @@ function attachEvents() {
     els.generateDialogueVideoBtn.addEventListener("click", async () => {
       const session = getActiveSession();
       const rowId = resolveTargetVideoRowId(session);
-      if (!session || !rowId || podcastVideoState.busy) return;
+      if (!session || !rowId) return;
+      const pendingKey = `${String(session?.id || "").trim()}:${String(rowId || "").trim()}`;
+      if (dialogueVideoGenerationPending.has(pendingKey)) return;
       try {
         await runSceneVideoGenerationFlow(rowId, {
           promptDirective: true,
@@ -16053,6 +21644,25 @@ function attachEvents() {
       }
     });
   }
+  if (els.playDialogueAudioBtn) {
+    els.playDialogueAudioBtn.addEventListener("click", async () => {
+      const session = getActiveSession();
+      const rowId = resolveTargetVideoRowId(session);
+      const key = String(rowId || "").trim();
+      if (!key) return;
+      if (podcastVideoState.busy && String(studioDialoguePreviewRowId || "").trim() !== key) return;
+      const storedAudio = resolveDialogueAudioForRow(session, key);
+      const storedAudioSrc = resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
+      if (!storedAudioSrc) {
+        setGenerationStatus("Esta escena no tiene voz guardada. Genera la voz primero.", "");
+        addChatMessage("system", `La escena ${resolveSceneNumberByRowId(key, session)} no tiene audio guardado todavía.`);
+        syncStudioPlayDialogueAudioButton();
+        return;
+      }
+      await playStudioDialoguePreviewAudio(key);
+      syncStudioPlayDialogueAudioButton();
+    });
+  }
   if (els.regenerateDialogueAudioBtn) {
     els.regenerateDialogueAudioBtn.addEventListener("click", async () => {
       const session = getActiveSession();
@@ -16090,7 +21700,27 @@ function attachEvents() {
     const onTimelinePointerMove = (event) => {
       if (!podcastVideoState.timelineDrag) return;
       if (podcastVideoState.timelineDrag.mode === "playhead") {
-        seekStudioTimelineByClientX(event.clientX, { stopMontage: false });
+        podcastVideoState.timelineDrag.lastClientX = Number(event.clientX || 0);
+        seekStudioTimelineByClientX(event.clientX, {
+          stopMontage: false,
+          autoplay: false,
+          lightweightPlayhead: true,
+          deferPreview: true
+        });
+        return;
+      }
+      if (podcastVideoState.timelineDrag.mode === "resize-track-lane") {
+        const drag = podcastVideoState.timelineDrag;
+        const trackId = String(drag.trackId || "").trim();
+        if (!trackId) return;
+        const lane = els.podcastVideoTimeline.querySelector(`.podcast-video-track-lane[data-track-id="${CSS.escape(trackId)}"]`);
+        if (!lane) return;
+        const delta = Number(event.clientY || 0) - Number(drag.startClientY || 0);
+        const nextHeight = Math.round(Math.max(56, Math.min(520, Number(drag.startHeightPx || 0) + delta)));
+        drag.currentHeightPx = nextHeight;
+        lane.style.height = `${nextHeight}px`;
+        lane.style.minHeight = `${nextHeight}px`;
+        drag.moved = true;
         return;
       }
       if (podcastVideoState.timelineDrag.mode === "gap-selection") {
@@ -16104,8 +21734,36 @@ function attachEvents() {
     };
     const onTimelinePointerUp = () => {
       if (!podcastVideoState.timelineDrag) return;
+      const dragMode = String(podcastVideoState.timelineDrag.mode || "").trim();
+      if (dragMode === "resize-track-lane") {
+        const drag = podcastVideoState.timelineDrag;
+        const trackId = String(drag.trackId || "").trim();
+        const nextHeight = Math.round(Math.max(56, Math.min(520, Number(drag.currentHeightPx || drag.startHeightPx || 0))));
+        if (trackId && nextHeight > 0) {
+          upsertPodcastVideoConfig((cfg) => ({
+            ...cfg,
+            timelineTrackHeightsById: {
+              ...(cfg.timelineTrackHeightsById || {}),
+              [trackId]: nextHeight
+            }
+          }));
+          scheduleCloudAutosave("timeline-track-height");
+        }
+        document.body.classList.remove("podcast-timeline-resizing-lane");
+        clearPodcastTimelineDragUi();
+        return;
+      }
       if (podcastVideoState.timelineDrag.mode === "playhead") {
         podcastVideoState.timelineJustDraggedUntil = Date.now() + 240;
+        podcastVideoState.playheadDragging = false;
+        const finalClientX = Number(podcastVideoState.timelineDrag.lastClientX ?? podcastVideoState.timelineDrag.startClientX ?? 0);
+        seekStudioTimelineByClientX(finalClientX, {
+          stopMontage: true,
+          autoplay: false,
+          lightweightPlayhead: false,
+          deferPreview: false
+        });
+        try { podcastStudioPlayback.stopScrubPreview?.(); } catch (_) {}
         clearPodcastTimelineDragUi();
         syncPodcastTimelineSelectionUi(getActiveSession());
         syncPodcastTimelinePlayhead(getActiveSession());
@@ -16122,20 +21780,70 @@ function attachEvents() {
         clearPodcastTimelineDragUi();
         return;
       }
+      if (dragMode === "trim-start" || dragMode === "trim-end") {
+        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+      }
       podcastVideoState.timelineJustDraggedUntil = Date.now() + 240;
       finalizeTimelineClipDrag();
+      if (dragMode === "move") {
+        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+      }
       clearPodcastTimelineDragUi();
       renderPodcastVideoShell(getActiveSession());
     };
     els.podcastVideoTimeline.addEventListener("mousedown", (event) => {
       if (getTimelineViewMode(getActiveSession()) !== "tracks") return;
       if (event.button !== 0) return;
+      const resizeHandle = event.target.closest("[data-action='timeline-resize-track-lane'][data-track-id]");
+      if (resizeHandle) {
+        const trackId = String(resizeHandle.dataset.trackId || "").trim();
+        if (!trackId) return;
+        if (event.detail >= 2) {
+          const lane = els.podcastVideoTimeline.querySelector(`.podcast-video-track-lane[data-track-id="${CSS.escape(trackId)}"]`);
+          if (lane) {
+            lane.style.height = "";
+            lane.style.minHeight = "";
+          }
+          upsertPodcastVideoConfig((cfg) => {
+            const heights = { ...(cfg.timelineTrackHeightsById || {}) };
+            delete heights[trackId];
+            return { ...cfg, timelineTrackHeightsById: heights };
+          });
+          scheduleCloudAutosave("timeline-track-height");
+          event.preventDefault();
+          return;
+        }
+        const lane = els.podcastVideoTimeline.querySelector(`.podcast-video-track-lane[data-track-id="${CSS.escape(trackId)}"]`);
+        if (!lane) return;
+        const rect = lane.getBoundingClientRect();
+        const startHeightPx = Math.round(Math.max(56, Math.min(520, Number(rect.height || 0) || 0)));
+        podcastVideoState.timelineDrag = {
+          mode: "resize-track-lane",
+          trackId,
+          startClientY: Number(event.clientY || 0),
+          startHeightPx,
+          currentHeightPx: startHeightPx,
+          moved: false
+        };
+        document.body.classList.add("podcast-timeline-resizing-lane");
+        event.preventDefault();
+        return;
+      }
       const playhead = event.target.closest("[data-action='timeline-drag-playhead']");
       if (playhead) {
         podcastVideoState.timelineDrag = {
-          mode: "playhead"
+          mode: "playhead",
+          startClientX: Number(event.clientX || 0),
+          lastClientX: Number(event.clientX || 0)
         };
-        seekStudioTimelineByClientX(event.clientX, { stopMontage: true });
+        podcastVideoState.playheadDragging = true;
+        seekStudioTimelineByClientX(event.clientX, { stopMontage: true, autoplay: false, lightweightPlayhead: true });
+        event.preventDefault();
+        return;
+      }
+      const dragGeminiTrackRow = event.target.closest("[data-action='timeline-drag-gemini-track-row']");
+      if (dragGeminiTrackRow) {
+        beginTimelineGeminiTrackReorderDrag(event);
         event.preventDefault();
         return;
       }
@@ -16173,6 +21881,29 @@ function attachEvents() {
         event.preventDefault();
         return;
       }
+      const montageAudioChip = event.target.closest(".podcast-montage-audio-chip.is-stored[data-row-id]");
+      if (montageAudioChip) {
+        beginTimelineGeminiSegmentMoveDrag(event);
+        event.preventDefault();
+        return;
+      }
+      const geminiChip = event.target.closest(".podcast-gemini-audio-chip.has-audio[data-row-id]");
+      if (geminiChip) {
+        beginTimelineGeminiSegmentMoveDrag(event);
+        event.preventDefault();
+        return;
+      }
+      const audioChip = event.target.closest(".podcast-audio-timeline-chip.has-audio:not(.podcast-gemini-audio-chip)");
+      if (audioChip && !event.target.closest(".podcast-audio-loop-mute-btn")) {
+        const trackKind = String(audioChip.dataset.trackKind || "").trim();
+        if (trackKind === "uploaded" && audioChip.dataset.trackIndex != null) {
+          beginTimelineUploadedAudioSegmentMoveDrag(event);
+        } else {
+          beginTimelineAudioMoveDrag(event);
+        }
+        event.preventDefault();
+        return;
+      }
       const dragAudioTrack = event.target.closest("[data-action='timeline-drag-audio-track']");
       if (dragAudioTrack && !event.target.closest(".podcast-audio-loop-mute-btn")) {
         beginTimelineAudioMoveDrag(event);
@@ -16206,15 +21937,105 @@ function attachEvents() {
       if (Date.now() < Number(podcastVideoState.timelineJustDraggedUntil || 0)) {
         return;
       }
-      const transitionBtn = event.target.closest("[data-action='timeline-open-transition']");
-      if (transitionBtn) {
-        const fromRowId = String(transitionBtn.dataset.fromRowId || "").trim();
-        const toRowId = String(transitionBtn.dataset.toRowId || "").trim();
-        if (fromRowId && toRowId) {
-          podcastVideoState.activeRowId = fromRowId;
-          setPodcastTransitionPickerOpen(true, fromRowId, toRowId);
-          syncPodcastStudioInspector(getActiveSession());
+      const clipMenuToggle = event.target.closest("[data-action='timeline-toggle-clip-menu'][data-row-id]");
+      if (clipMenuToggle && els.podcastVideoTimeline) {
+        const rowId = String(clipMenuToggle.dataset.rowId || "").trim();
+        if (!rowId) return;
+        const clipEl = clipMenuToggle.closest(".podcast-video-timeline-clip[data-row-id]") || null;
+        if (!clipEl) return;
+        const menuLayer = getPodcastTimelineClipMenuPortal();
+        const currentOpenRowId = String(menuLayer.dataset.openRowId || "").trim();
+        const wantsOpen = currentOpenRowId !== rowId || !menuLayer.querySelector(".podcast-video-clip-menu.is-visible");
+
+        // Close any existing portal menu.
+        closePodcastTimelineClipMenu();
+
+        if (wantsOpen) {
+          const menuSource = clipEl.querySelector(".podcast-video-clip-menu[data-row-id]") || null;
+          if (!menuSource) return;
+          const menu = menuSource.cloneNode(true);
+          menu.classList.add("is-visible");
+          // Posiciona el menú en un "layer" dentro del canvas para evitar clipping por overflow/contain.
+          menu.style.visibility = "hidden";
+          menu.style.left = "0px";
+          menu.style.top = "0px";
+          menuLayer.appendChild(menu);
+
+          // Force layout so we can measure.
+          const menuRect = menu.getBoundingClientRect();
+          const anchorRect = clipMenuToggle.getBoundingClientRect();
+          const layerRect = menuLayer.getBoundingClientRect();
+          const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+          const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+          const containerRect = els.podcastVideoTimeline.getBoundingClientRect();
+          const gap = 10;
+          const leftMinViewport = Math.max(8, Math.round(containerRect.left + 8));
+          const leftMaxViewport = Math.min(
+            Math.max(leftMinViewport, viewportW - menuRect.width - 8),
+            Math.round(containerRect.right - menuRect.width - 8)
+          );
+          // Acciones están del lado izquierdo: alinear al borde izquierdo del botón.
+          const leftViewport = Math.max(leftMinViewport, Math.min(leftMaxViewport, anchorRect.left));
+          // Prefer above (más arriba). If it would go offscreen, flip below.
+          const topMinViewport = Math.max(8, Math.round(containerRect.top + 8));
+          const topMaxViewport = Math.min(
+            Math.max(topMinViewport, viewportH - menuRect.height - 8),
+            Math.round(containerRect.bottom - menuRect.height - 8)
+          );
+          let topViewport = anchorRect.top - menuRect.height - gap;
+          if (topViewport < topMinViewport) {
+            topViewport = anchorRect.bottom + gap;
+          }
+          topViewport = Math.max(topMinViewport, Math.min(topMaxViewport, topViewport));
+          // Convierte coords viewport -> coords del layer (posicionamiento absolute).
+          menu.style.left = `${Math.round(leftViewport - layerRect.left)}px`;
+          menu.style.top = `${Math.round(topViewport - layerRect.top)}px`;
+          menu.style.visibility = "";
+          menuLayer.dataset.openRowId = rowId;
+          menuLayer.classList.add("is-open");
+          clipMenuToggle.setAttribute("aria-expanded", "true");
         }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const selectAllGeminiBtn = event.target.closest("[data-action='timeline-select-all-gemini-audio']");
+      if (selectAllGeminiBtn && (event.metaKey || event.ctrlKey)) {
+        const session = getActiveSession();
+        const cfg = getPodcastVideoConfig(session);
+        const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+        const next = new Set(track.segments.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean));
+        const current = podcastVideoState.timelineAudioSelection.geminiRowIds;
+        const allSelected = next.size > 0 && Array.from(next).every((rowId) => current.has(rowId));
+        current.clear();
+        if (!allSelected) {
+          next.forEach((rowId) => current.add(rowId));
+        }
+        renderPodcastVideoTimeline(session);
+        return;
+      }
+      const geminiChip = event.target.closest("[data-action='timeline-select-gemini-audio'][data-row-id]");
+      if (geminiChip) {
+        const rowId = String(geminiChip.dataset.rowId || "").trim();
+        if (!rowId) return;
+        const multi = event.metaKey || event.ctrlKey;
+        if (multi) {
+          if (podcastVideoState.timelineAudioSelection.geminiRowIds.has(rowId)) {
+            podcastVideoState.timelineAudioSelection.geminiRowIds.delete(rowId);
+          } else {
+            podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+          }
+        } else {
+          podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
+          podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+        }
+        renderPodcastVideoTimeline(getActiveSession());
+        return;
+      }
+      const openMontageSceneMixBtn = event.target.closest("[data-action='open-montage-scene-mix']");
+      if (openMontageSceneMixBtn) {
+        event.preventDefault();
+        setMontageSceneMixOpen(true);
         return;
       }
       const openAudioTrackMixBtn = event.target.closest("[data-action='open-audio-track-mix']");
@@ -16226,12 +22047,27 @@ function attachEvents() {
       if (selectAudioLoopChip) {
         const trackIndex = Number(selectAudioLoopChip.dataset.trackIndex);
         const trackKind = resolvePanelMusicTrackKind(selectAudioLoopChip.dataset.trackKind || panelMusicState.selectedTrackKind);
+        const loopIndex = Math.max(0, Math.floor(Number(selectAudioLoopChip.dataset.loopIndex || 0) || 0));
+        if (trackKind === "uploaded" && Number.isFinite(trackIndex)) {
+          const key = `u:${Math.max(0, Math.floor(trackIndex || 0))}:${loopIndex}`;
+          const multi = event.metaKey || event.ctrlKey;
+          if (multi) {
+            if (podcastVideoState.timelineAudioSelection.uploadedKeys.has(key)) {
+              podcastVideoState.timelineAudioSelection.uploadedKeys.delete(key);
+            } else {
+              podcastVideoState.timelineAudioSelection.uploadedKeys.add(key);
+            }
+          } else {
+            podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
+            podcastVideoState.timelineAudioSelection.uploadedKeys.add(key);
+          }
+        }
         if (Number.isFinite(trackIndex)) {
           selectUploadedPanelMusicTrackByIndex(trackIndex);
         } else if (trackKind !== panelMusicState.selectedTrackKind) {
           selectPanelMusicTrackKind(trackKind, { notify: false });
         }
-        podcastAudioTrackUiState.activeLoopIndex = Math.max(0, Math.floor(Number(selectAudioLoopChip.dataset.loopIndex || 0) || 0));
+        podcastAudioTrackUiState.activeLoopIndex = loopIndex;
         renderPodcastVideoTimeline(getActiveSession());
         return;
       }
@@ -16254,6 +22090,11 @@ function attachEvents() {
         event.preventDefault();
         const trackIndex = Math.max(0, Math.floor(Number(toggleUploadedTrackEnabledBtn.dataset.trackIndex || 0) || 0));
         toggleSessionUploadedTrackEnabled(trackIndex);
+        // Aplica inmediatamente al playback (por si el playhead está encima del loop actual).
+        try {
+          const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+          syncMontageBackgroundAt(Math.max(0, Number(podcastVideoState.montageCursorMs || 0)), speed);
+        } catch (_) {}
         return;
       }
       const deleteUploadedTrackBtn = event.target.closest("[data-action='timeline-delete-uploaded-track']");
@@ -16271,6 +22112,26 @@ function attachEvents() {
       if (deleteSelectedGapBtn) {
         event.preventDefault();
         deleteSelectedTimelineGap();
+        return;
+      }
+      const montageAudioChip = event.target.closest(".podcast-montage-audio-chip.is-stored[data-row-id]");
+      if (montageAudioChip) {
+        event.preventDefault();
+        const rowId = String(montageAudioChip.dataset.rowId || "").trim();
+        if (!rowId) return;
+        const multi = event.metaKey || event.ctrlKey;
+        if (multi) {
+          if (podcastVideoState.timelineAudioSelection.geminiRowIds.has(rowId)) {
+            podcastVideoState.timelineAudioSelection.geminiRowIds.delete(rowId);
+          } else {
+            podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+          }
+        } else {
+          podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
+          podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
+        }
+        selectTimelineSceneRow(rowId, { syncStage: false });
+        renderPodcastVideoTimeline(getActiveSession());
         return;
       }
       const selectBtn = event.target.closest("[data-action='timeline-select-scene']");
@@ -16292,6 +22153,9 @@ function attachEvents() {
       if (playBtn) {
         const rowId = String(playBtn.dataset.rowId || "").trim();
         if (!rowId) return;
+        if (podcastVideoState.timelineSequenceActive === true) {
+          cancelTimelineSequence({ paused: false });
+        }
         const session = getActiveSession();
         const row = (session?.script?.rows || []).find((item) => item.id === rowId) || null;
         setPodcastVideoRow(rowId, { syncStage: true });
@@ -16303,14 +22167,28 @@ function attachEvents() {
         return;
       }
 
+      const configureDurationBtn = event.target.closest("[data-action='timeline-configure-scene-duration']");
+      if (configureDurationBtn) {
+        const rowId = String(configureDurationBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        openTimelineClipDurationConfig(rowId);
+        return;
+      }
+
       const generateBtn = event.target.closest("[data-action='timeline-generate-scene-video']");
       if (generateBtn) {
         const rowId = String(generateBtn.dataset.rowId || "").trim();
-        if (!rowId || podcastVideoState.busy) return;
+        if (!rowId) return;
+        const session = getActiveSession();
+        const pendingKey = `${String(session?.id || "").trim()}:${rowId}`;
+        if (dialogueVideoGenerationPending.has(pendingKey)) {
+          setPodcastVideoStatus("Esta escena ya se está generando. Puedes seguir reproduciendo el montaje.");
+          return;
+        }
         const loadingBtn = findTimelineActionButton("timeline-generate-scene-video", rowId) || generateBtn;
         try {
           await runSceneVideoGenerationFlow(rowId, {
-            promptDirective: true,
+            promptDirective: false,
             loadingButton: loadingBtn,
             loadingTitle: "Generando video de escena...",
             selectRow: true,
@@ -16333,6 +22211,19 @@ function attachEvents() {
         if (!confirmed) return;
         removeDialogueVideoForRow(rowId, { silent: false });
       }
+    });
+    // Cierra menús de acciones al hacer click fuera.
+    document.addEventListener("click", (event) => {
+      const menuLayer = els.podcastVideoTimeline?.querySelector?.("#podcastTimelineMenuLayer") || null;
+      const portal = document.getElementById("podcastTimelineClipMenuPortal");
+      const host = menuLayer || portal;
+      if (!host) return;
+      const hasMenu = Boolean(host.querySelector(".podcast-video-clip-menu.is-visible"));
+      if (!hasMenu) return;
+      const target = event.target || null;
+      if (target?.closest?.(".podcast-video-clip-actions") || target?.closest?.(".podcast-video-clip-menu")) return;
+      if (target?.closest?.("[data-action='timeline-toggle-clip-menu']")) return;
+      closePodcastTimelineClipMenu();
     });
   }
   if (els.podcastTimelineNormalModeBtn) {
@@ -16492,6 +22383,22 @@ function attachEvents() {
       }
     });
   }
+  if (els.rowReferenceImageInput) {
+    els.rowReferenceImageInput.addEventListener("change", async () => {
+      const rowId = String(els.rowReferenceImageInput.dataset.rowId || "").trim();
+      const file = els.rowReferenceImageInput.files?.[0] || null;
+      els.rowReferenceImageInput.value = "";
+      els.rowReferenceImageInput.dataset.rowId = "";
+      if (!rowId || !file) return;
+      try {
+        const reference = await readImageReferenceFromFile(file);
+        setRowReferenceImage(rowId, reference);
+        setGenerationStatus(`Referencia actualizada para escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
+      } catch (error) {
+        addChatMessage("system", `No se pudo adjuntar referencia para la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
+      }
+    });
+  }
   if (els.podcastPortraitViewerBackdrop) {
     els.podcastPortraitViewerBackdrop.addEventListener("click", closePodcastPortraitViewer);
   }
@@ -16501,6 +22408,134 @@ function attachEvents() {
       if (closeBtn) {
         closeDialogueVideoDirectiveModal({ confirmed: false, videoDirective: "" });
       }
+    });
+  }
+  if (els.timelineClipDurationModal) {
+    els.timelineClipDurationModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-timeline-clip-duration-modal']");
+      if (closeBtn) {
+        setTimelineClipDurationModalOpen(false);
+      }
+    });
+    els.timelineClipDurationModal.addEventListener("change", (event) => {
+      const target = event.target?.closest?.("[data-row-id][data-field]");
+      if (!target) return;
+      handleScriptFieldUpdate(event);
+      syncTimelineClipDurationModalInputs();
+    });
+  }
+  if (els.montageSceneMixModal) {
+    els.montageSceneMixModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-montage-scene-mix-modal']");
+      if (closeBtn) {
+        setMontageSceneMixOpen(false);
+      }
+    });
+  }
+  if (els.closeMontageSceneMixBtn) {
+    els.closeMontageSceneMixBtn.addEventListener("click", () => {
+      setMontageSceneMixOpen(false);
+    });
+  }
+  if (els.cancelMontageSceneMixBtn) {
+    els.cancelMontageSceneMixBtn.addEventListener("click", () => {
+      setMontageSceneMixOpen(false);
+    });
+  }
+  if (els.applyMontageSceneMixBtn) {
+    els.applyMontageSceneMixBtn.addEventListener("click", () => {
+      applyMontageSceneMixToAllScenes();
+    });
+  }
+  if (els.montageSceneVeoVolumeRange) {
+    els.montageSceneVeoVolumeRange.addEventListener("input", () => {
+      syncMontageSceneMixModalInputs("veoRange");
+    });
+  }
+  if (els.montageSceneVeoVolumeNumber) {
+    els.montageSceneVeoVolumeNumber.addEventListener("input", () => {
+      syncMontageSceneMixModalInputs("veoNumber");
+    });
+    els.montageSceneVeoVolumeNumber.addEventListener("change", () => {
+      syncMontageSceneMixModalInputs("veoNumber");
+    });
+  }
+  if (els.montageSceneGeminiVolumeRange) {
+    els.montageSceneGeminiVolumeRange.addEventListener("input", () => {
+      syncMontageSceneMixModalInputs("geminiRange");
+    });
+  }
+  if (els.montageSceneGeminiVolumeNumber) {
+    els.montageSceneGeminiVolumeNumber.addEventListener("input", () => {
+      syncMontageSceneMixModalInputs("geminiNumber");
+    });
+    els.montageSceneGeminiVolumeNumber.addEventListener("change", () => {
+      syncMontageSceneMixModalInputs("geminiNumber");
+    });
+  }
+  if (els.closeTimelineClipDurationBtn) {
+    els.closeTimelineClipDurationBtn.addEventListener("click", () => {
+      setTimelineClipDurationModalOpen(false);
+    });
+  }
+  if (els.cancelTimelineClipDurationBtn) {
+    els.cancelTimelineClipDurationBtn.addEventListener("click", () => {
+      setTimelineClipDurationModalOpen(false);
+    });
+  }
+  if (els.resetTimelineClipDurationBtn) {
+    els.resetTimelineClipDurationBtn.addEventListener("click", () => {
+      resetTimelineClipDurationFromModal();
+    });
+  }
+  if (els.timelineClipDurationRange) {
+    els.timelineClipDurationRange.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("range");
+    });
+  }
+  if (els.timelineClipDurationNumber) {
+    els.timelineClipDurationNumber.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("number");
+    });
+    els.timelineClipDurationNumber.addEventListener("change", () => {
+      syncTimelineClipDurationModalInputs("number");
+    });
+  }
+  if (els.timelineClipVeoVolumeRange) {
+    els.timelineClipVeoVolumeRange.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("veoRange");
+      schedulePersistTimelineClipVolumeOverrides();
+    });
+  }
+  if (els.timelineClipVeoVolumeNumber) {
+    els.timelineClipVeoVolumeNumber.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("veoNumber");
+      schedulePersistTimelineClipVolumeOverrides();
+    });
+    els.timelineClipVeoVolumeNumber.addEventListener("change", () => {
+      syncTimelineClipDurationModalInputs("veoNumber");
+      persistTimelineClipVolumeOverridesFromModal({ persist: true });
+    });
+  }
+  if (els.timelineClipGeminiVolumeRange) {
+    els.timelineClipGeminiVolumeRange.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("geminiRange");
+      schedulePersistTimelineClipVolumeOverrides();
+    });
+  }
+  if (els.timelineClipGeminiVolumeNumber) {
+    els.timelineClipGeminiVolumeNumber.addEventListener("input", () => {
+      syncTimelineClipDurationModalInputs("geminiNumber");
+      schedulePersistTimelineClipVolumeOverrides();
+    });
+    els.timelineClipGeminiVolumeNumber.addEventListener("change", () => {
+      syncTimelineClipDurationModalInputs("geminiNumber");
+      persistTimelineClipVolumeOverridesFromModal({ persist: true });
+    });
+  }
+  if (els.applyTimelineClipDurationBtn) {
+    els.applyTimelineClipDurationBtn.addEventListener("click", () => {
+      applyTimelineClipDurationFromModal();
     });
   }
   if (els.closeDialogueVideoDirectiveBtn) {
@@ -16529,8 +22564,46 @@ function attachEvents() {
       closePodcastPortraitViewer();
       return;
     }
+    if (event.key === "Escape" && els.timelineClipDurationModal && !els.timelineClipDurationModal.hidden) {
+      setTimelineClipDurationModalOpen(false);
+      return;
+    }
     if (event.key === "Escape" && els.dialogueVideoDirectiveModal && !els.dialogueVideoDirectiveModal.hidden) {
       closeDialogueVideoDirectiveModal({ confirmed: false, videoDirective: "" });
+    }
+  });
+
+  const isEditingTextField = (target) => {
+    const el = target instanceof Element ? target : null;
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const tag = String(el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.closest && el.closest("input, textarea, select, [contenteditable='true']")) return true;
+    return false;
+  };
+
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
+    if (!podcastVideoState.enabled) return;
+    if (isEditingTextField(event.target)) return;
+    if (event.key === " " || event.code === "Space") {
+      event.preventDefault();
+      if (podcastVideoState.montageActive && !podcastVideoState.montagePaused) {
+        pausePodcastStudioMontage();
+      } else {
+        playPodcastStudioMontage(Number(podcastVideoState.montageCursorMs || 0)).catch(() => {});
+      }
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      els.podcastVideoPrevBtn?.click?.();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      els.podcastVideoNextBtn?.click?.();
     }
   });
 
@@ -16730,8 +22803,16 @@ function attachEvents() {
       closeCreativeVideoModal();
       return;
     }
+    if (floatingClose?.dataset?.action === "close-gemini-creativity-modal") {
+      setGeminiCreativityModalOpen("");
+      return;
+    }
     if (floatingClose?.dataset?.action === "close-transition-picker-modal") {
       setPodcastTransitionPickerOpen(false);
+      return;
+    }
+    if (floatingClose?.dataset?.action === "close-timeline-clip-duration-modal") {
+      setTimelineClipDurationModalOpen(false);
       return;
     }
     if (!event.target.closest(".session-card-menu")) {
@@ -16740,6 +22821,14 @@ function attachEvents() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      if (els.timelineClipDurationModal && !els.timelineClipDurationModal.hidden) {
+        setTimelineClipDurationModalOpen(false);
+        return;
+      }
+      if (els.geminiCreativityModal && !els.geminiCreativityModal.hidden) {
+        setGeminiCreativityModalOpen("");
+        return;
+      }
       if (rowDisfluencyConfigOpenId) setRowDisfluencyModalOpen("");
       if (musicConfigOpen) setMusicConfigOpen(false);
       if (audioTrackMixOpen) setAudioTrackMixOpen(false);
@@ -16763,14 +22852,75 @@ function attachEvents() {
     }
   });
 
-  els.scriptTableBody.addEventListener("input", handleScriptFieldUpdate);
+  els.scriptTableBody.addEventListener("input", (event) => {
+    if (!shouldHandleScriptFieldOnInput(event)) return;
+    handleScriptFieldUpdate(event);
+  });
   els.scriptTableBody.addEventListener("change", handleScriptFieldUpdate);
   if (els.podcastStudioInspectorRowEditor) {
-    els.podcastStudioInspectorRowEditor.addEventListener("input", handleScriptFieldUpdate);
+    els.podcastStudioInspectorRowEditor.addEventListener("input", (event) => {
+      if (!shouldHandleScriptFieldOnInput(event)) return;
+      handleScriptFieldUpdate(event);
+    });
     els.podcastStudioInspectorRowEditor.addEventListener("change", handleScriptFieldUpdate);
+    els.podcastStudioInspectorRowEditor.addEventListener("click", (event) => {
+      const attachRefBtn = event.target.closest("[data-action='attach-row-reference-image'][data-row-id]");
+      if (attachRefBtn) {
+        const rowId = String(attachRefBtn.dataset.rowId || "").trim();
+        if (!rowId || !els.rowReferenceImageInput) return;
+        els.rowReferenceImageInput.dataset.rowId = rowId;
+        els.rowReferenceImageInput.click();
+        return;
+      }
+      const clearRefBtn = event.target.closest("[data-action='clear-row-reference-image'][data-row-id]");
+      if (clearRefBtn) {
+        const rowId = String(clearRefBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        setRowReferenceImage(rowId, null);
+        setGenerationStatus(`Referencia quitada de escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
+        return;
+      }
+      const openCreativityBtn = event.target.closest("[data-action='open-gemini-creativity'][data-row-id]");
+      if (openCreativityBtn) {
+        const rowId = String(openCreativityBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        setGeminiCreativityModalOpen(rowId);
+        return;
+      }
+      const rewriteBtn = event.target.closest("[data-action='rewrite-voiceover-text'][data-row-id]");
+      if (rewriteBtn) {
+        const rowId = String(rewriteBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        rewriteVoiceOverTextWithGemini(rowId, { button: rewriteBtn }).catch(() => {});
+        return;
+      }
+      const restoreBtn = event.target.closest("[data-action='restore-voiceover-text'][data-row-id]");
+      if (restoreBtn) {
+        const rowId = String(restoreBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        restoreVoiceOverOriginalText(rowId);
+        return;
+      }
+      const rewriteVisualBtn = event.target.closest("[data-action='rewrite-visual-notes'][data-row-id]");
+      if (rewriteVisualBtn) {
+        const rowId = String(rewriteVisualBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        rewriteVisualNotesWithGemini(rowId, { button: rewriteVisualBtn }).catch(() => {});
+        return;
+      }
+      const restoreVisualBtn = event.target.closest("[data-action='restore-visual-notes'][data-row-id]");
+      if (restoreVisualBtn) {
+        const rowId = String(restoreVisualBtn.dataset.rowId || "").trim();
+        if (!rowId) return;
+        restoreVisualNotesOriginalText(rowId);
+      }
+    });
   }
   if (els.rowDisfluencyModal) {
-    els.rowDisfluencyModal.addEventListener("input", handleScriptFieldUpdate);
+    els.rowDisfluencyModal.addEventListener("input", (event) => {
+      if (!shouldHandleScriptFieldOnInput(event)) return;
+      handleScriptFieldUpdate(event);
+    });
     els.rowDisfluencyModal.addEventListener("change", handleScriptFieldUpdate);
     els.rowDisfluencyModal.addEventListener("click", (event) => {
       const closeBtn = event.target.closest("[data-action='close-row-disfluency-modal']");
@@ -16788,7 +22938,78 @@ function attachEvents() {
   els.scriptTableBody.addEventListener("click", (event) => {
     const actionBtn = event.target.closest("[data-action]");
     if (!actionBtn) return;
+    const action = String(actionBtn.dataset.action || "").trim();
     const rowId = actionBtn.dataset.rowId;
+    if (action === "insert-row-at") {
+      const insertIndex = Math.max(0, Math.round(toFiniteNumber(actionBtn.dataset.insertIndex, 0)));
+      const session = getActiveSession();
+      const rows = Array.isArray(session?.script?.rows) ? session.script.rows : [];
+      const safeIndex = Math.max(0, Math.min(rows.length, insertIndex));
+      const before = rows[safeIndex - 1] || null;
+      const newRow = buildBlankScriptRow(session, {
+        speaker: before?.speaker,
+        expression: before?.expression
+      });
+      upsertActiveSession((current) => {
+        const nextRows = [...(current.script?.rows || [])];
+        nextRows.splice(safeIndex, 0, newRow);
+        return {
+          ...current,
+          script: {
+            ...current.script,
+            rows: nextRows
+          }
+        };
+      }, { render: false });
+      reflowTimelineClipsByScriptOrder(getActiveSession(), { persist: true });
+      render();
+      scheduleCloudAutosave("structure");
+      queueMicrotask(() => {
+        try {
+          const target = els.scriptTableBody?.querySelector?.(`[data-row-id="${CSS.escape(String(newRow.id || "").trim())}"]`);
+          target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+          target?.focus?.();
+        } catch (_) {}
+      });
+      return;
+    }
+    if (actionBtn.dataset.action === "attach-row-reference-image") {
+      if (!rowId || !els.rowReferenceImageInput) return;
+      els.rowReferenceImageInput.dataset.rowId = String(rowId || "").trim();
+      els.rowReferenceImageInput.click();
+      return;
+    }
+    if (actionBtn.dataset.action === "clear-row-reference-image") {
+      if (!rowId) return;
+      setRowReferenceImage(rowId, null);
+      setGenerationStatus(`Referencia quitada de escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
+      return;
+    }
+    if (actionBtn.dataset.action === "open-gemini-creativity") {
+      if (!rowId) return;
+      setGeminiCreativityModalOpen(rowId);
+      return;
+    }
+    if (actionBtn.dataset.action === "rewrite-voiceover-text") {
+      if (!rowId) return;
+      rewriteVoiceOverTextWithGemini(rowId, { button: actionBtn }).catch(() => {});
+      return;
+    }
+    if (actionBtn.dataset.action === "restore-voiceover-text") {
+      if (!rowId) return;
+      restoreVoiceOverOriginalText(rowId);
+      return;
+    }
+    if (actionBtn.dataset.action === "rewrite-visual-notes") {
+      if (!rowId) return;
+      rewriteVisualNotesWithGemini(rowId, { button: actionBtn }).catch(() => {});
+      return;
+    }
+    if (actionBtn.dataset.action === "restore-visual-notes") {
+      if (!rowId) return;
+      restoreVisualNotesOriginalText(rowId);
+      return;
+    }
     if (actionBtn.dataset.action === "toggle-disfluency-config") {
       setRowDisfluencyModalOpen(rowDisfluencyConfigOpenId === rowId ? "" : rowId);
       return;
@@ -16812,6 +23033,7 @@ function attachEvents() {
     }
     if (actionBtn.dataset.action === "delete-row") {
       if (rowDisfluencyConfigOpenId === rowId) setRowDisfluencyModalOpen("");
+      if (timelineClipDurationModalState.rowId === rowId) setTimelineClipDurationModalOpen(false);
       upsertActiveSession((session) => ({
         ...session,
         dialogueVideoMap: Object.fromEntries(
@@ -16824,10 +23046,13 @@ function attachEvents() {
           ...session.script,
           rows: session.script.rows.filter((row) => row.id !== rowId)
         }
-      }));
+      }), { render: false });
       if (String(podcastVideoState.activeRowId || "").trim() === String(rowId || "").trim()) {
         podcastVideoState.activeRowId = "";
       }
+      reflowTimelineClipsByScriptOrder(getActiveSession(), { persist: true });
+      render();
+      scheduleCloudAutosave("structure");
     }
     if (actionBtn.dataset.action === "duplicate-row") {
       const currentRow = getActiveSession()?.script?.rows?.find((row) => row.id === rowId);
@@ -16840,7 +23065,10 @@ function attachEvents() {
             row.id === rowId ? [row, { ...currentRow, id: makeId("row") }] : [row]
           ))
         }
-      }));
+      }), { render: false });
+      reflowTimelineClipsByScriptOrder(getActiveSession(), { persist: true });
+      render();
+      scheduleCloudAutosave("structure");
     }
   });
 }
@@ -16848,6 +23076,7 @@ function attachEvents() {
 function init() {
   attachEvents();
   setupPodcastStudioInspectorResize();
+  setupPodcastVideoStageResize();
   setSidepanelOpen(true);
   setMusicConfigOpen(false);
   setAudioTrackMixOpen(false);
@@ -16864,7 +23093,6 @@ function init() {
       redirectToIndex();
       return;
     }
-    if (nextUid === currentStorageScopeUid && state.sessions.length) return;
     const prevUid = currentStorageScopeUid;
     const prevSessions = prevUid ? loadSessions(prevUid) : [];
     const nextSessions = loadSessions(nextUid);
@@ -16889,6 +23117,9 @@ function init() {
     persistSessions(nextUid, finalSessions);
     state.activeSessionId = null;
     ensureSession();
+    if (podcastVideoState.showMontageAudioSubtracks && getTimelineViewMode(getActiveSession()) !== "tracks") {
+      upsertPodcastVideoConfig((cfg) => ({ ...cfg, timelineViewMode: "tracks" }));
+    }
     render();
     consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
   });
