@@ -100,6 +100,15 @@ function pickZipCtor() {
   return window.htmlDocx?.JSZip || window.JSZip || null;
 }
 
+async function readZipText(zip, path) {
+  const entry = zip?.file?.(path);
+  if (!entry) return "";
+  if (typeof entry.async === "function") return await entry.async("string");
+  if (typeof entry.asText === "function") return entry.asText();
+  if (typeof entry.asBinary === "function") return entry.asBinary();
+  return "";
+}
+
 async function loadZipFromArrayBuffer(JSZipCtor, buffer) {
   if (!JSZipCtor) throw new Error("JSZip no está disponible.");
   if (typeof JSZipCtor.loadAsync === "function") return await JSZipCtor.loadAsync(buffer);
@@ -114,6 +123,77 @@ async function zipToBlob(zip) {
   if (typeof zip.generateAsync === "function") return await zip.generateAsync({ type: "blob" });
   if (typeof zip.generate === "function") return zip.generate({ type: "blob" });
   throw new Error("No se pudo generar el blob del ZIP.");
+}
+
+function extractStyleNumId(stylesXml = "", styleId = "") {
+  if (!stylesXml || !styleId) return "";
+  const re = new RegExp(`<w:style[^>]*w:styleId="${styleId.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}"[\\s\\S]*?<\\/w:style>`);
+  const m = stylesXml.match(re);
+  if (!m?.[0]) return "";
+  const numId = m[0].match(/<w:numId[^>]*w:val="(\\d+)"/);
+  return numId?.[1] || "";
+}
+
+class TemplateNumberingAllocator {
+  constructor({ numberingXml = "" } = {}) {
+    this.numberingXml = String(numberingXml || "");
+    this.cache = new Map();
+    this.baseNumXmlByNumId = new Map();
+    this.nextNumId = this._computeNextNumId();
+  }
+
+  _computeNextNumId() {
+    const ids = Array.from(this.numberingXml.matchAll(/<w:num\\b[^>]*w:numId="(\\d+)"/g))
+      .map((m) => Number(m[1] || 0))
+      .filter((n) => Number.isFinite(n));
+    return (ids.length ? Math.max(...ids) : 0) + 1;
+  }
+
+  _getBaseNumXml(baseNumId = "") {
+    const key = String(baseNumId || "").trim();
+    if (!key) return "";
+    if (this.baseNumXmlByNumId.has(key)) return this.baseNumXmlByNumId.get(key) || "";
+    const re = new RegExp(`<w:num\\b[^>]*w:numId="${key}"[\\s\\S]*?<\\/w:num>`);
+    const m = this.numberingXml.match(re);
+    const xml = m?.[0] || "";
+    this.baseNumXmlByNumId.set(key, xml);
+    return xml;
+  }
+
+  ensureRestartedNumId({ groupKey = "", baseNumId = "" } = {}) {
+    const key = `${String(groupKey || "").trim()}::${String(baseNumId || "").trim()}`;
+    if (!groupKey || !baseNumId) return String(baseNumId || "");
+    if (this.cache.has(key)) return this.cache.get(key);
+
+    const baseXml = this._getBaseNumXml(baseNumId);
+    if (!baseXml) return String(baseNumId || "");
+
+    const newNumId = String(this.nextNumId++);
+    let cloned = baseXml.replace(
+      new RegExp(`w:numId="${String(baseNumId).replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}"`),
+      `w:numId="${newNumId}"`
+    );
+
+    if (!/<w:lvlOverride\\b/i.test(cloned)) {
+      cloned = cloned.replace(
+        new RegExp("</w:num>\\s*$", "i"),
+        '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>'
+      );
+    } else if (!/<w:startOverride\\b/i.test(cloned)) {
+      cloned = cloned.replace(
+        /<w:lvlOverride\\b([^>]*)>/i,
+        '<w:lvlOverride$1><w:startOverride w:val="1"/>'
+      );
+    }
+
+    this.numberingXml = this.numberingXml.replace(new RegExp("</w:numbering>\\s*$", "i"), `${cloned}</w:numbering>`);
+    this.cache.set(key, newNumId);
+    return newNumId;
+  }
+
+  getXml() {
+    return this.numberingXml;
+  }
 }
 
 function buildContentTypes() {
@@ -451,18 +531,36 @@ function listXml(listEl, ctx = {}, level = 0) {
 
   const listStyleId = pickListStyleId();
   const baseStyle = ctx?.forceStyle || (ctx.inTable ? (styleMap?.tableText || "CBTableText") : listStyleId);
-  const extra = ctx?.useTemplateStyles ? "" : listPpr(tag, normalizedLevel);
+
+  let extra = ctx?.useTemplateStyles ? "" : listPpr(tag, normalizedLevel);
+  if (ctx?.useTemplateStyles && ctx?.template?.stylesXml) {
+    const baseNumId = extractStyleNumId(ctx.template.stylesXml, listStyleId);
+    let numIdToUse = baseNumId;
+    const shouldRestart = tag === "ol" && normalizedLevel >= 1 && ctx?.activityGroupKey && ctx?.template?.numberingAllocator;
+    if (shouldRestart && baseNumId) {
+      numIdToUse = ctx.template.numberingAllocator.ensureRestartedNumId({
+        groupKey: `${ctx.activityGroupKey}:L${normalizedLevel}`,
+        baseNumId
+      });
+    }
+    if (numIdToUse) {
+      extra = `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numIdToUse}"/></w:numPr>`;
+    }
+  }
 
   return Array.from(listEl.children)
     .filter((li) => li?.tagName?.toLowerCase?.() === "li")
-    .map((li) => {
+    .map((li, idx) => {
+      const nextCtx = (ctx?.useTemplateStyles && tag === "ol" && normalizedLevel === 0)
+        ? { ...ctx, activityGroupKey: ctx.activityGroupKey || `ACT_${idx + 1}` }
+        : ctx;
       const nestedLists = Array.from(li.children || []).filter((child) => /^(ul|ol)$/i.test(child.tagName));
       const runs = Array.from(li.childNodes).map((child) => {
         if (child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)) return "";
-        return inlineRuns(child, {}, ctx);
+        return inlineRuns(child, {}, nextCtx);
       }).join("");
       const liParagraph = paragraphXml(runs || makeTextRun(li.textContent || ""), baseStyle, extra);
-      const nestedXml = nestedLists.map((nested) => listXml(nested, ctx, normalizedLevel + 1)).join("");
+      const nestedXml = nestedLists.map((nested) => listXml(nested, nextCtx, normalizedLevel + 1)).join("");
       return liParagraph + nestedXml;
     })
     .join("");
@@ -522,7 +620,8 @@ function htmlToDocumentXml(html = "", options = {}) {
   const ctx = {
     styleMap,
     mode: options?.mode || "",
-    useTemplateStyles: Boolean(options?.useTemplateStyles)
+    useTemplateStyles: Boolean(options?.useTemplateStyles),
+    template: options?.template || null
   };
   if (title) bodyXml += paragraphXml(makeTextRun(title), styleMap?.title || "CBTitle");
   if (subtitle) bodyXml += paragraphXml(makeTextRun(subtitle), styleMap?.subtitle || "CBSubtitle");
@@ -642,17 +741,28 @@ export async function buildDocxBlobFromTemplate({
   const buffer = await response.arrayBuffer();
 
   const zip = await loadZipFromArrayBuffer(JSZipCtor, buffer);
+  const templateStylesXml = await readZipText(zip, "word/styles.xml");
+  const templateNumberingXml = await readZipText(zip, "word/numbering.xml");
+  const numberingAllocator = new TemplateNumberingAllocator({ numberingXml: templateNumberingXml });
+
   const docXml = htmlToDocumentXml(html, {
     title,
     subtitle,
     styleMap,
     sectPr,
     mode,
-    useTemplateStyles: true
+    useTemplateStyles: true,
+    template: {
+      stylesXml: templateStylesXml,
+      numberingAllocator
+    }
   });
 
   zip.file("word/document.xml", docXml);
   zip.file("docProps/core.xml", buildCoreXml(title));
+  if (templateNumberingXml) {
+    zip.file("word/numbering.xml", numberingAllocator.getXml());
+  }
 
   return await zipToBlob(zip);
 }
