@@ -366,6 +366,19 @@ function listPpr(type = "ul", level = 0) {
   return `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
 }
 
+function spacingPprFromAttrs(el) {
+  if (!el?.getAttribute) return "";
+  const beforeRaw = String(el.getAttribute("data-word-spacing-before") || "").trim();
+  const afterRaw = String(el.getAttribute("data-word-spacing-after") || "").trim();
+  const before = beforeRaw && /^\d+$/.test(beforeRaw) ? beforeRaw : "";
+  const after = afterRaw && /^\d+$/.test(afterRaw) ? afterRaw : "";
+  if (!before && !after) return "";
+  const attrs = [];
+  if (before) attrs.push(`w:before="${before}"`);
+  if (after) attrs.push(`w:after="${after}"`);
+  return `<w:spacing ${attrs.join(" ")}/>`;
+}
+
 function mapParagraphStyle(el, ctx = {}) {
   const declared = String(el?.getAttribute?.("data-word-style") || "").trim();
   if (declared) return declared;
@@ -587,7 +600,8 @@ function blockNodeToXml(node, ctx = {}) {
     const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
     const forced = String(ctx?.forceStyle || "").trim();
     const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
-    return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId);
+    const spacing = spacingPprFromAttrs(node);
+    return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId, spacing);
   }
 
   if (tag === "ul" || tag === "ol") {
@@ -601,7 +615,8 @@ function blockNodeToXml(node, ctx = {}) {
     const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
     const forced = String(ctx?.forceStyle || "").trim();
     const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
-    return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId);
+    const spacing = spacingPprFromAttrs(node);
+    return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId, spacing);
   }
   return Array.from(node.childNodes).map((child) => blockNodeToXml(child, ctx)).join("");
 }

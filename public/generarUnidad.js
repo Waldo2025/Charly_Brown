@@ -30439,6 +30439,61 @@ function annotateWordExportHtml(html = "", mode = "alumno") {
   tmp.innerHTML = html;
   const normalizedMode = String(mode || "").toLowerCase();
 
+  function normalizeTitleText(value = "") {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/[“”]/g, '"')
+      .trim()
+      .toLowerCase();
+  }
+
+  function looksLikeMetaLine(text = "") {
+    const t = String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!t) return true;
+    return (
+      t.startsWith("categoría:") ||
+      t.startsWith("categoria:") ||
+      t.startsWith("subcat:") ||
+      t.startsWith("eje articulador:") ||
+      t.startsWith("campo formativo:") ||
+      t.startsWith("habilidad cognitiva asociada") ||
+      t.includes("competencia:")
+    );
+  }
+
+  function dedupeCreativeTitleIn(container) {
+    const headings = Array.from(container.querySelectorAll("h1,h2,h3,h4,h5"));
+    for (let i = 0; i < headings.length - 1; i += 1) {
+      const a = headings[i];
+      const b = headings[i + 1];
+      const aText = normalizeTitleText(a.textContent || "");
+      const bText = normalizeTitleText(b.textContent || "");
+      if (!aText || aText !== bText) continue;
+
+      // Verificar que entre A y B sólo hay líneas de etiquetas/meta
+      let ok = true;
+      let node = a.nextSibling;
+      while (node && node !== b) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const tag = String(node.tagName || "").toLowerCase();
+          if (tag === "hr") { node = node.nextSibling; continue; }
+          const text = node.textContent || "";
+          if (!looksLikeMetaLine(text)) { ok = false; break; }
+        } else if (node.nodeType === Node.TEXT_NODE) {
+          if (!looksLikeMetaLine(node.textContent || "")) { ok = false; break; }
+        }
+        node = node.nextSibling;
+      }
+      if (!ok) continue;
+
+      // Eliminar el título duplicado (el de arriba) y espaciado en el de abajo.
+      a.remove();
+      b.setAttribute("data-word-spacing-before", "220");
+      b.setAttribute("data-word-spacing-after", "260");
+      i += 1;
+    }
+  }
+
   // Preservar señales antes de que `limpiarHTML()` elimine las clases
   tmp.querySelectorAll(".answer, .respuesta, .respuesta-alumno").forEach((el) => {
     el.setAttribute("data-word-style", "080400RESPUESTAALUMNO");
@@ -30456,6 +30511,10 @@ function annotateWordExportHtml(html = "", mode = "alumno") {
       el.setAttribute("data-word-style", "1002SPEC");
     });
   }
+
+  const subtemas = tmp.querySelectorAll(".subtema-completo");
+  if (subtemas.length) subtemas.forEach((el) => dedupeCreativeTitleIn(el));
+  else dedupeCreativeTitleIn(tmp);
 
   return tmp.innerHTML;
 }
