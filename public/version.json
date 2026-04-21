@@ -1,10 +1,11 @@
 {
-  "version": "2026-1.0.1.22",
+  "version": "2026-1.0.1.23",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
+    "Mejora: Export Word de Unidad ahora usa plantilla 10ED (estilos + listas + respuestas).",
     "Nuevo: Slider de zoom-out del timeline en el editor de video (regla, escenas y audios).",
     "Fix: Preview y export respetan el timeline de Gemini + tracks de audio.",
     "Mejora: Controles del reproductor centrados y barra de transporte estilo carbón.",
