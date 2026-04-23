@@ -739,6 +739,12 @@ function sanitizePodcasterSession(raw = {}) {
         .map((prompt) => clampText(prompt || "", 1200))
         .filter(Boolean)
         .slice(0, 3),
+    publicSceneLibraryId: clampText(row?.publicSceneLibraryId || "", 140),
+    publicScenePublishedAt: clampText(row?.publicScenePublishedAt || "", 64),
+    publicSceneTitle: clampText(row?.publicSceneTitle || "", 220),
+    publicSceneThumbUrl: clampText(row?.publicSceneThumbUrl || "", 3000),
+    publicSceneVideoUrl: clampText(row?.publicSceneVideoUrl || "", 3000),
+    sourcePublicSceneLibraryId: clampText(row?.sourcePublicSceneLibraryId || "", 140),
     disfluencyConfig: normalizeDisfluency(row?.disfluencyConfig || {})
   }));
   const hosts = Array.isArray(raw?.script?.hosts)
@@ -844,7 +850,12 @@ function sanitizePodcasterSession(raw = {}) {
       segments,
       updatedAt: clampText(clip?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
       downloadUrl,
-      storagePath
+      storagePath,
+      publicSceneLibraryId: clampText(clip?.publicSceneLibraryId || "", 140),
+      publicScenePublishedAt: clampText(clip?.publicScenePublishedAt || "", 64),
+      publicSceneTitle: clampText(clip?.publicSceneTitle || "", 220),
+      publicSceneThumbUrl: clampText(clip?.publicSceneThumbUrl || "", 3000),
+      publicSceneVideoUrl: clampText(clip?.publicSceneVideoUrl || "", 3000)
     };
   });
   const dialogueAudioMapRaw = raw?.dialogueAudioMap && typeof raw.dialogueAudioMap === "object"
@@ -861,7 +872,7 @@ function sanitizePodcasterSession(raw = {}) {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
       mimeType: clampText(clip?.mimeType || "audio/wav", 120) || "audio/wav",
-      model: clampText(clip?.model || "gemini-2.5-flash-preview-tts", 140) || "gemini-2.5-flash-preview-tts",
+      model: clampText(clip?.model || "gemini-3.1-flash-tts-preview", 140) || "gemini-3.1-flash-tts-preview",
       promptVersion: clampText(clip?.promptVersion || "podcaster_live_audio_v1", 80) || "podcaster_live_audio_v1",
       durationSec: clampNumber(clip?.durationSec, 0, 180, 0),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
@@ -2307,6 +2318,131 @@ app.use("/api/podcaster", async (req, res, next) => {
   }
 });
 
+app.post("/api/podcaster/scene-library/clone-video", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    const sessionId = clampText(String(req.body?.sessionId || "").trim(), 180);
+    const rowId = clampText(String(req.body?.rowId || "").trim(), 180);
+    const speakerLabel = clampText(String(req.body?.speakerLabel || "Narrador").trim(), 120) || "Narrador";
+    const sourceStoragePathRaw = clampText(String(req.body?.sourceStoragePath || "").trim(), 900);
+    const sourceUrlRaw = clampText(String(req.body?.sourceUrl || "").trim(), 2000);
+    const mimeType = clampText(String(req.body?.mimeType || "video/mp4").trim(), 120) || "video/mp4";
+    if (!sessionId || !rowId) {
+      return res.status(400).json({ error: "Falta sessionId o rowId." });
+    }
+
+    const extractFirebaseStoragePathFromUrl = (url = "") => {
+      const clean = String(url || "").trim();
+      if (!clean) return { bucketName: "", storagePath: "" };
+      try {
+        const parsed = new URL(clean);
+        const host = String(parsed.hostname || "").toLowerCase();
+        const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+        if (!allowedHost) return { bucketName: "", storagePath: "" };
+        const pathParts = String(parsed.pathname || "").split("/").filter(Boolean);
+        // Expected: /v0/b/<bucket>/o/<encodedObjectPath>
+        const bIndex = pathParts.indexOf("b");
+        const oIndex = pathParts.indexOf("o");
+        const bucketName = bIndex >= 0 ? String(pathParts[bIndex + 1] || "").trim() : "";
+        const encodedObj = oIndex >= 0 ? String(pathParts[oIndex + 1] || "").trim() : "";
+        const storagePath = encodedObj ? decodeURIComponent(encodedObj) : "";
+        return { bucketName, storagePath };
+      } catch (_) {
+        return { bucketName: "", storagePath: "" };
+      }
+    };
+
+    const requestedStoragePath = normalizeStorageFilePath(sourceStoragePathRaw);
+    const extracted = requestedStoragePath ? { bucketName: "", storagePath: requestedStoragePath } : extractFirebaseStoragePathFromUrl(sourceUrlRaw);
+    const sourceStoragePath = String(extracted.storagePath || "").trim();
+    if (!sourceStoragePath) {
+      return res.status(400).json({ error: "Falta sourceStoragePath o sourceUrl válido." });
+    }
+    // Limita a assets de librería para evitar uso del endpoint como proxy/copy genérico.
+    if (!/^podcaster\/library\//i.test(sourceStoragePath)) {
+      return res.status(403).json({ error: "Solo se permite clonar assets de podcaster/library." });
+    }
+
+    const ext = getVideoExtension(mimeType);
+    const sessionSlug = normalizeStorageSegment(sessionId, "session");
+    const rowSlug = normalizeStorageSegment(rowId, "row");
+    const speakerSlug = normalizeStorageSegment(speakerLabel, "speaker");
+    const destPath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/videos/${rowSlug}-${speakerSlug}/${randomUUID()}.${ext}`;
+    const targetBucket = await resolveWritableStorageBucket();
+    const destFile = targetBucket.file(destPath);
+    const token = randomUUID();
+
+    const candidateBuckets = (() => {
+      const buckets = getStorageBucketCandidates();
+      const extra = extracted.bucketName ? [admin.storage().bucket(extracted.bucketName)] : [];
+      const byName = new Map();
+      [...extra, ...buckets].filter(Boolean).forEach((bucket) => {
+        const name = String(bucket?.name || "").trim();
+        if (!name || byName.has(name)) return;
+        byName.set(name, bucket);
+      });
+      return Array.from(byName.values());
+    })();
+
+    let copied = false;
+    let lastError = null;
+    for (const bucket of candidateBuckets) {
+      if (!bucket) continue;
+      const srcFile = bucket.file(sourceStoragePath);
+      const [exists] = await srcFile.exists().catch(() => [null]);
+      if (exists === false) continue;
+      try {
+        await pipeline(
+          srcFile.createReadStream(),
+          destFile.createWriteStream({
+            resumable: false,
+            contentType: mimeType,
+            metadata: {
+              cacheControl: "public,max-age=86400",
+              metadata: {
+                firebaseStorageDownloadTokens: token,
+                uid,
+                sessionId,
+                rowId,
+                speakerLabel,
+                kind: "public_scene_clone",
+                sourceStoragePath
+              }
+            }
+          })
+        );
+        copied = true;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!copied) {
+      return res.status(502).json({
+        error: "No se pudo clonar el video desde la librería.",
+        detail: {
+          sourceStoragePath,
+          bucketsTried: candidateBuckets.map((b) => b?.name).filter(Boolean),
+          lastError: lastError ? String(lastError?.message || lastError) : undefined
+        }
+      });
+    }
+
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
+    return res.status(200).json({
+      ok: true,
+      video: {
+        storagePath: destPath,
+        downloadUrl,
+        mimeType
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo clonar video de la librería.") });
+  }
+});
+
 app.use("/api/moodle", async (req, res, next) => {
   if (req.method === "OPTIONS") return next();
   try {
@@ -2412,6 +2548,79 @@ app.post("/api/moodle/delete-course", async (req, res) => {
     return res.status(200).json({ ok: true, deletedCourseId: courseId, deletedModules: moduleDocIds.size });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar el curso.") });
+  }
+});
+
+app.post("/api/moodle/instruction-images/import", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+
+    const courseId = clampText(String(req.body?.courseId || "").trim(), 180);
+    const moduleId = clampText(String(req.body?.moduleId || "").trim(), 220);
+    const imageId = clampText(String(req.body?.imageId || "").trim(), 220) || `gemimg_${Date.now()}`;
+    const sourceUrl = clampText(String(req.body?.sourceUrl || "").trim(), 2400);
+    const requestedName = clampText(String(req.body?.name || "").trim(), 180) || `imagen_${imageId}`;
+    const origin = clampText(String(req.body?.origin || "remote").trim(), 80) || "remote";
+
+    if (!courseId || !moduleId || !sourceUrl) {
+      return res.status(400).json({ error: "Faltan courseId, moduleId o sourceUrl." });
+    }
+    if (!isAllowedMoodleInstructionImageImportUrl(sourceUrl)) {
+      return res.status(400).json({ error: "La URL de origen no está permitida para importación." });
+    }
+
+    const upstream = await fetchCompat(sourceUrl, { method: "GET", redirect: "follow" });
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `No se pudo descargar la imagen remota (${upstream.status}).` });
+    }
+
+    const mimeType = String(upstream.headers.get("content-type") || "image/png").trim().toLowerCase();
+    if (!mimeType.startsWith("image/")) {
+      return res.status(415).json({ error: "La URL no devolvió una imagen válida." });
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    if (!buffer.length) {
+      return res.status(400).json({ error: "La imagen remota llegó vacía." });
+    }
+    if (buffer.length > 8 * 1024 * 1024) {
+      return res.status(413).json({ error: "La imagen remota supera 8 MB." });
+    }
+
+    const ext = getImageExtension(mimeType);
+    const storagePath = `images/${normalizeStorageSegment(uid, "user")}/moodle-instructions/${normalizeStorageSegment(courseId, "curso")}/${normalizeStorageSegment(moduleId, "modulo")}/${normalizeStorageSegment(imageId, "imagen")}.${ext}`;
+    const asset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer,
+      mimeType,
+      metadata: {
+        origin: "moodleCourseInstructionsImport",
+        sourceUrl: sourceUrl.slice(0, 700),
+        courseId,
+        moduleId,
+        imageId,
+        fileName: requestedName,
+        requestedOrigin: origin
+      }
+    });
+
+    return res.status(200).json({
+      ok: true,
+      image: {
+        imageId,
+        name: requestedName,
+        mimeType,
+        storagePath: asset.path,
+        downloadUrl: asset.downloadUrl,
+        origin,
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo importar la imagen remota del módulo.") });
   }
 });
 
@@ -2947,11 +3156,34 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
-    const scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+    let scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
     const videoDirective = clampText(req.body?.videoDirective || "", 1400);
     const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
     const educationalVideo = req.body?.educationalVideo === true || req.body?.videoMode === true || contentMode === "educational";
+    const rewriteScenarioPromptForEducationalVideo = (prompt = "") => {
+      const text = String(prompt || "").replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      const rewritten = text
+        .replace(/\bcabina premium de podcast\b/gi, "entorno visual educativo premium")
+        .replace(/\bcabina de podcast\b/gi, "entorno visual educativo premium")
+        .replace(/\bcabina premium de radio\b/gi, "entorno visual educativo premium")
+        .replace(/\bcabina de radio\b/gi, "entorno visual educativo premium")
+        .replace(/\bestudio editorial premium para podcast\/video podcast\b/gi, "entorno editorial educativo premium")
+        .replace(/\bestudio (?:premium )?de podcast\b/gi, "entorno visual educativo premium")
+        .replace(/\bestudio (?:premium )?de radio\b/gi, "entorno visual educativo premium")
+        .replace(/\bestudio (?:premium )?de grabaci[oó]n\b/gi, "entorno visual educativo premium")
+        .replace(/\bpodcast\/video podcast\b/gi, "video educativo")
+        .replace(/\bpodcast\b/gi, "video educativo")
+        .replace(/\bradio\b/gi, "educación");
+      // Si aún huele a cabina/estudio, fuerza un set educativo para evitar “cabina de radio”.
+      const lower = rewritten.toLowerCase();
+      const hasBooth = /\bcabina\b/.test(lower) || /\bestudio\b/.test(lower) || /\bmicr[oó]fono\b/.test(lower);
+      return hasBooth ? "Entorno visual educativo premium (aula moderna, laboratorio o set didáctico)." : rewritten;
+    };
+    if (educationalVideo) {
+      scenarioPrompt = rewriteScenarioPromptForEducationalVideo(scenarioPrompt);
+    }
     const imagePrompts = Array.isArray(req.body?.imagePrompts)
       ? req.body.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
       : String(req.body?.imagePrompts || "")
@@ -2970,6 +3202,8 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const portraitUrl = clampText(req.body?.portraitUrl || "", 3200);
     const portraitStoragePath = clampText(req.body?.portraitStoragePath || "", 700);
     const referenceImageDataUrl = String(req.body?.referenceImageDataUrl || "").trim();
+    const continuityReferenceImageDataUrl = String(req.body?.continuityReferenceImageDataUrl || "").trim();
+    const explicitForceImmediateSceneChange = req.body?.forceImmediateSceneChange === true;
     const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
     const relateWithPreviousScene = req.body?.relateWithPreviousScene === true;
     const previousSceneRaw = req.body?.previousScene && typeof req.body.previousScene === "object" ? req.body.previousScene : null;
@@ -3101,9 +3335,40 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const hasSceneReference = Boolean(sceneReferenceBase64);
     const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
 
+    const shouldForceImmediateSceneChange = (source = "") => {
+      const text = String(source || "").toLowerCase();
+      if (!text) return false;
+      if (/\b(hard cut|jump cut|match cut)\b/.test(text)) return true;
+      if (/\bmontaje\b/.test(text) && (/\br[aá]pid/.test(text) || /\bdin[aá]mic/.test(text))) return true;
+      if (/\btransici[oó]n\b/.test(text) && (/\br[aá]pid/.test(text) || /\binmedi/.test(text))) return true;
+      if (/\bcorte\b/.test(text) && (/\br[aá]pid/.test(text) || /\binmedi/.test(text) || /\bal inicio\b/.test(text))) return true;
+      if (/\bcorte a\b/.test(text) || /\bluego[, ]+un corte\b/.test(text) || /\btransici[oó]n r[aá]pida\b/.test(text)) return true;
+      if (/\b(cambio|cambiar|cambie|cambia|transici[oó]n|corte|cortar|salto)\b/.test(text) && /\b(inmedi|de inmediato|ya|al instante|al inicio|desde el inicio)\b/.test(text)) {
+        return true;
+      }
+      if (/\b(cambia|cambie|cambiar)\b/.test(text) && /\b(escena|set|entorno|plano|composici[oó]n|visual)\b/.test(text)) {
+        return true;
+      }
+      return false;
+    };
+    const forceImmediateChange = relateWithPreviousScene && (explicitForceImmediateSceneChange || shouldForceImmediateSceneChange([
+      scenePrompt,
+      videoDirective,
+      performanceDirective,
+      imagePrompts.join(" "),
+      referenceImageName
+    ].filter(Boolean).join(" ")));
+
     let continuityFrameBase64 = "";
     let continuityFrameMimeType = "image/png";
-    if (relateWithPreviousScene && previousScene?.hasVideo) {
+    if (relateWithPreviousScene && continuityReferenceImageDataUrl && continuityReferenceImageDataUrl.startsWith("data:image/")) {
+      const continuityReference = await loadOptionalImageReference({ dataUrl: continuityReferenceImageDataUrl });
+      if (continuityReference?.buffer?.length) {
+        continuityFrameBase64 = continuityReference.buffer.toString("base64");
+        continuityFrameMimeType = String(continuityReference.mimeType || "image/png").trim().toLowerCase() || "image/png";
+      }
+    }
+    if (!continuityFrameBase64 && relateWithPreviousScene && previousScene?.hasVideo) {
       const previousVideoStoragePath = String(previousScene?.videoStoragePath || "").trim();
       const previousVideoUrl = String(previousScene?.videoDownloadUrl || "").trim();
       const previousVideoHintMimeType = String(previousScene?.videoMimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
@@ -3223,14 +3488,18 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         ? `Transición emocional: evoluciona de "${previousScene.expression}" hacia "${expression}" de forma natural y coherente.`
         : "",
       relateWithPreviousScene && continuityFrameBase64
-        ? "Continuidad exacta: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación y continuidad de movimiento). No debe notarse corte."
+        ? (forceImmediateChange
+          ? "Continuidad solo en el primer fotograma: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación). Luego, dentro de los siguientes 0.2–0.8 segundos, realiza un corte o transición visible para cumplir el nuevo Elemento visual/Descripción de escena (cambio inmediato de plano/entorno/composición). No te quedes con la imagen del frame anterior durante todo el clip."
+          : "Continuidad exacta: el primer fotograma del nuevo clip debe coincidir con el último fotograma del clip anterior (mismo encuadre, posición, iluminación y continuidad de movimiento). No debe notarse corte.")
         : relateWithPreviousScene
           ? "Continuidad: intenta continuar exactamente desde el final del clip anterior (sin salto visual)."
           : "",
       previousScene?.hasVideo
-        ? (educationalVideo
-          ? "Mantén continuidad visual y de estilo con el clip previo (paleta, ritmo, tipo de recurso visual y composición)."
-          : "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía).")
+        ? (forceImmediateChange
+          ? "Tras el primer fotograma, prioriza el nuevo Elemento visual aunque implique un cambio claro de plano, contenido o composición respecto al clip previo."
+          : (educationalVideo
+            ? "Mantén continuidad visual y de estilo con el clip previo (paleta, ritmo, tipo de recurso visual y composición)."
+            : "Mantén continuidad visual y de puesta en escena con el clip previo (posición en cabina, encuadre y energía)."))
         : "Si no hay clip previo disponible, conserva continuidad narrativa usando el texto de la escena anterior.",
       educationalVideo ? "" : (hasPortraitAsset ? "El sujeto debe mantener identidad visual consistente y reconocible con la imagen base." : ""),
       educationalVideo ? "" : (hasPortraitAsset ? "Conserva rasgos faciales, peinado, tono de piel y proporciones del rostro sin sustituir personaje." : ""),
@@ -3335,7 +3604,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         referenceType: "asset"
       }
       : null;
-    const referenceDurationSec = continuityReferenceImage ? 8 : inferredTargetDurationSec;
+    const referenceDurationSec = inferredTargetDurationSec;
 
     if (sceneReferenceImage && useSceneReferenceAsInitImage) {
       requestVariants.push(
@@ -3378,7 +3647,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
             }],
             parameters: {
               aspectRatio: "16:9",
-              durationSeconds: 8
+              durationSeconds: referenceDurationSec
             }
           }
         },
@@ -3571,6 +3840,55 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     let finalVideoMimeType = "video/mp4";
     let resolvedModel = videoModels[0] || DEFAULT_PODCASTER_VIDEO_MODEL;
     let resolvedVariant = "";
+    const resolveVeoVideoResult = (operationDone = {}) => {
+      const op = operationDone && typeof operationDone === "object" ? operationDone : {};
+      const response = op.response && typeof op.response === "object"
+        ? op.response
+        : (op.result && typeof op.result === "object"
+          ? op.result
+          : (op.output && typeof op.output === "object" ? op.output : op));
+      const uriCandidates = [
+        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
+        response?.generateVideoResponse?.generatedSamples?.[0]?.videoUri,
+        response?.generateVideoResponse?.generatedSamples?.[0]?.uri,
+        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.fileUri,
+        response?.generatedVideos?.[0]?.video?.uri,
+        response?.generatedVideos?.[0]?.videoUri,
+        response?.generatedVideos?.[0]?.uri,
+        response?.videos?.[0]?.video?.uri,
+        response?.videos?.[0]?.uri,
+        response?.video?.uri,
+        response?.videoUri
+      ];
+      for (const candidate of uriCandidates) {
+        const uri = String(candidate || "").trim();
+        if (uri) return { uri };
+      }
+      const inlineCandidates = [
+        response?.generateVideoResponse?.generatedSamples?.[0]?.video?.inlineData,
+        response?.generateVideoResponse?.generatedSamples?.[0]?.inlineData,
+        response?.generatedVideos?.[0]?.video?.inlineData,
+        response?.generatedVideos?.[0]?.inlineData
+      ].filter(Boolean);
+      for (const inlineData of inlineCandidates) {
+        const data = String(inlineData?.data || inlineData?.bytesBase64Encoded || "").trim();
+        const mimeType = String(inlineData?.mimeType || "video/mp4").trim() || "video/mp4";
+        if (data) return { inlineData: { data, mimeType } };
+      }
+      const parts = Array.isArray(response?.candidates?.[0]?.content?.parts)
+        ? response.candidates[0].content.parts
+        : [];
+      for (const part of parts) {
+        const fileUri = String(part?.fileData?.fileUri || part?.fileData?.uri || "").trim();
+        if (fileUri) return { uri: fileUri };
+        const partUri = String(part?.video?.uri || part?.videoUri || part?.uri || "").trim();
+        if (partUri) return { uri: partUri };
+        const data = String(part?.inlineData?.data || part?.inlineData?.bytesBase64Encoded || "").trim();
+        const mimeType = String(part?.inlineData?.mimeType || "").trim();
+        if (data && mimeType.toLowerCase().startsWith("video/")) return { inlineData: { data, mimeType } };
+      }
+      return null;
+    };
     for (const videoModel of videoModels) {
       for (const variant of requestVariants) {
         const createOpResponse = await fetchCompat(
@@ -3609,11 +3927,23 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           continue;
         }
 
-        const videoUri = String(
-          operationDone?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
-          || operationDone?.response?.generatedVideos?.[0]?.video?.uri
-          || ""
-        ).trim();
+        const resolved = resolveVeoVideoResult(operationDone);
+        const videoUri = String(resolved?.uri || "").trim();
+        if (!videoUri && resolved?.inlineData?.data) {
+          const mimeType = String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4";
+          const downloadedBuffer = Buffer.from(String(resolved.inlineData.data || ""), "base64");
+          if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
+            lastStatus = 413;
+            lastErrorDetail = `${videoModel} [${variant.label}]: video inline demasiado grande o vacío.`;
+            attemptErrors.push(lastErrorDetail);
+            continue;
+          }
+          finalVideoBuffer = downloadedBuffer;
+          finalVideoMimeType = mimeType.toLowerCase().startsWith("video/") ? mimeType : "video/mp4";
+          resolvedModel = videoModel;
+          resolvedVariant = String(variant?.label || "").trim();
+          break;
+        }
         if (!videoUri) {
           lastStatus = 502;
           lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
@@ -3785,6 +4115,88 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
   }
 });
 
+function normalizeGeminiInlineAudioTags(value = "") {
+  const source = String(value || "").trim();
+  if (!source) return "";
+  const explicitTags = source.match(/\[[^[\]]+\]/g);
+  if (explicitTags?.length) {
+    return explicitTags.map((tag) => clampText(tag.replace(/\s+/g, " ").trim(), 40)).filter(Boolean).slice(0, 6).join(" ");
+  }
+  return source
+    .split(/[,\n;|]+/)
+    .map((part) => clampText(String(part || "").replace(/[\[\]]/g, "").replace(/\s+/g, " ").trim(), 32))
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((part) => `[${part}]`)
+    .join(" ");
+}
+
+function normalizeGeminiTtsDirectionConfig(input = {}) {
+  return {
+    stylePrompt: clampText(input?.stylePrompt || "", 260),
+    pacingPrompt: clampText(input?.pacingPrompt || "", 180),
+    accentPrompt: clampText(input?.accentPrompt || "", 180),
+    scenePrompt: clampText(input?.scenePrompt || "", 220),
+    audioTags: normalizeGeminiInlineAudioTags(input?.audioTags || "")
+  };
+}
+
+function buildGeminiTtsBaseStyle(expression = "") {
+  const clean = String(expression || "").trim();
+  if (clean === "Enérgico") return "Enérgica y animada, pero natural y sin gritar.";
+  if (clean === "Cálido") return "Cálida, cercana y tranquilizadora.";
+  if (clean === "Curioso") return "Curiosa, ligeramente intrigada y conversacional.";
+  if (clean === "Serio") return "Seria, enfocada y controlada.";
+  if (clean === "Inspirador") return "Inspiradora, esperanzadora y convincente.";
+  return "Natural, humana y creíble.";
+}
+
+function buildGeminiTtsPrompt({
+  speakerName = "Locutor",
+  speakerLabel = "Host A",
+  voiceName = "",
+  expression = "Neutral",
+  targetSpeechLine = "",
+  originalText = "",
+  disfluencyInstruction = "",
+  notes = "",
+  contentMode = "podcast",
+  ttsDirection = {}
+} = {}) {
+  const direction = normalizeGeminiTtsDirectionConfig(ttsDirection || {});
+  const transcriptBase = clampText(targetSpeechLine || "", 2200);
+  const transcript = [direction.audioTags, transcriptBase].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || transcriptBase;
+  const styleLine = [buildGeminiTtsBaseStyle(expression), direction.stylePrompt].filter(Boolean).join(" ");
+  const pacingLine = direction.pacingPrompt || "Conversacional, fluido y con pausas naturales.";
+  const accentLine = direction.accentPrompt || "Español latino neutro, dicción clara.";
+  const sceneLine = direction.scenePrompt || (String(contentMode || "").trim().toLowerCase() === "educational"
+    ? "Explicación cercana de estudio, clara y humana."
+    : "Conversación de podcast en estudio, cercana y natural.");
+  return [
+    "Synthesize speech for the TRANSCRIPT only. Do not read section titles, notes, labels, or instructions aloud.",
+    "Keep the wording of the TRANSCRIPT exact, preserving any intentional fillers, repairs, or stutters already present there.",
+    "Never speak the director notes aloud.",
+    "",
+    "### AUDIO PROFILE",
+    `Speaker: ${clampText(speakerName || "Locutor", 120)} (${clampText(speakerLabel || "Host A", 80)}).`,
+    voiceName ? `Voice: ${clampText(voiceName, 80)}.` : "",
+    "",
+    "### SCENE",
+    sceneLine,
+    "",
+    "### DIRECTOR'S NOTES",
+    `Style: ${styleLine}`,
+    `Pacing: ${pacingLine}`,
+    `Accent: ${accentLine}`,
+    `Delivery guardrails: ${clampText(disfluencyInstruction || "Natural, clean articulation.", 1800)}`,
+    notes ? `Additional notes: ${clampText(notes, 1200)}` : "",
+    originalText ? `Reference only, do not read: "${String(clampText(originalText, 2000)).replace(/"/g, '\\"')}"` : "",
+    "",
+    "### TRANSCRIPT",
+    `"${String(transcript).replace(/"/g, '\\"')}"`
+  ].filter(Boolean).join("\n");
+}
+
 app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
@@ -3800,12 +4212,13 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || text, 2200) || text;
     const originalText = clampText(req.body?.originalText || "", 2000);
     const disfluencyInstruction = clampText(req.body?.disfluencyInstruction || "", 1800);
+    const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || {});
     const notes = clampText(req.body?.notes || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
     const educationalAudio = req.body?.videoMode === true || contentMode === "educational";
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
-    const model = normalizeModel(req.body?.model || "gemini-2.5-flash-preview-tts");
+    const model = normalizeModel(req.body?.model || "gemini-3.1-flash-tts-preview");
 
     if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
     if (!rowId) return res.status(400).json({ error: "Falta rowId." });
@@ -3818,20 +4231,18 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
       return res.status(400).json({ error: `Voz no soportada para Gemini Live: ${voiceNameInput}` });
     }
 
-    const prompt = [
-      educationalAudio
-        ? "Interpreta una línea para un video educativo en español latino, con tono claro, explicativo y natural."
-        : "Interpreta una línea para podcast conversacional en español latino.",
-      `Locutor: ${speakerName} (${speakerLabel}).`,
-      `Expresión: ${expression}.`,
-      voiceName ? `Usa exactamente la voz ${voiceName}.` : "",
-      disfluencyInstruction || "No agregues metacomentarios.",
-      "Nunca leas acotaciones escénicas, texto entre paréntesis o instrucciones de actuación; interpreta solo la línea objetivo limpia.",
-      "Habla natural, humana y clara.",
-      notes ? `Notas de interpretación: ${notes}.` : "",
-      originalText ? `Línea original (referencia): "${String(originalText).replace(/"/g, '\\"')}"` : "",
-      `Línea objetivo (obligatoria): "${String(targetSpeechLine).replace(/"/g, '\\"')}"`
-    ].filter(Boolean).join("\n");
+    const prompt = buildGeminiTtsPrompt({
+      speakerName,
+      speakerLabel,
+      voiceName,
+      expression,
+      targetSpeechLine,
+      originalText,
+      disfluencyInstruction,
+      notes,
+      contentMode: educationalAudio ? "educational" : "podcast",
+      ttsDirection
+    });
 
     const payload = {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -4010,6 +4421,22 @@ function isAllowedRemoteMediaUrl(url = "") {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
     return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
+  } catch (_) {
+    return false;
+  }
+}
+
+function isAllowedMoodleInstructionImageImportUrl(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean) return false;
+  try {
+    const parsed = new URL(clean);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (!["https:", "http:"].includes(protocol)) return false;
+    if (!host || host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return false;
+    if (/^(10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(host)) return false;
+    return true;
   } catch (_) {
     return false;
   }
@@ -4452,7 +4879,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 
       try {
         const inputVideoPath = await downloadInput(videoAsset, "video", i);
-        const forceSilentAudio = useTimelineAudio === true;
+        const forceSilentAudio = useTimelineAudio === true && !useNativeVideoAudio;
         const inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
 
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
@@ -4679,7 +5106,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         "-t",
         String(exportedDurationSec),
         "-filter_complex",
-        `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[a];[a]loudnorm=I=-16:TP=-1.5:LRA=11[outa]`,
+        `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]sidechaincompress=threshold=0.02:ratio=8:attack=10:release=250:makeup=2:link=average[ducked];[ducked]loudnorm=I=-16:TP=-1.5:LRA=11[outa]`,
         "-map",
         "0:v:0",
         "-map",
@@ -4835,6 +5262,341 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir la canción.") });
+  }
+});
+
+function normalizePodcastSceneLibraryItem(docSnap = null) {
+  const data = docSnap && typeof docSnap.data === "function" ? (docSnap.data() || {}) : (docSnap || {});
+  const libraryId = String(docSnap?.id || data.libraryId || data.id || "").trim();
+  if (!libraryId) return null;
+  return {
+    libraryId,
+    title: clampText(data.title || data.name || data.publicSceneTitle || "Escena pública", 180) || "Escena pública",
+    sourceSessionId: clampText(data.sourceSessionId || "", 140),
+    sourceRowId: clampText(data.sourceRowId || "", 120),
+    sourceRowNumber: Math.max(0, Number(data.sourceRowNumber) || 0),
+    ownerId: clampText(data.ownerId || "", 140),
+    ownerEmail: clampText(data.ownerEmail || "", 180),
+    durationSec: clampNumber(data.durationSec, 0, 240, 0),
+    downloadUrl: clampText(data.downloadUrl || "", 3000),
+    storagePath: clampText(data.storagePath || "", 700),
+    mimeType: clampText(data.mimeType || "video/mp4", 120) || "video/mp4",
+    thumbUrl: clampText(data.thumbUrl || data.thumbnailUrl || "", 3000),
+    thumbStoragePath: clampText(data.thumbStoragePath || data.thumbnailStoragePath || "", 700),
+    thumbMimeType: clampText(data.thumbMimeType || "image/jpeg", 120) || "image/jpeg",
+    sceneDescription: clampText(data.sceneDescription || "", 1200),
+    onScreenText: clampText(data.onScreenText || "", 500),
+    transition: clampText(data.transition || "", 500),
+    visualNotes: clampText(data.visualNotes || "", 1200),
+    videoDirective: clampText(data.videoDirective || "", 1400),
+    scenePrompt: clampText(data.scenePrompt || "", 1200),
+    voiceOverText: clampText(data.voiceOverText || "", 4000),
+    tagLabel: clampText(data.tagLabel || "", 120),
+    tagColor: clampText(data.tagColor || "slate", 40) || "slate",
+    imagePrompts: Array.isArray(data.imagePrompts)
+      ? data.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+      : String(data.imagePrompts || "")
+        .split(/\n+/)
+        .map((prompt) => clampText(prompt || "", 1200))
+        .filter(Boolean)
+        .slice(0, 3),
+    videoPreset: clampText(data.videoPreset || "creative", 40) || "creative",
+    createdAt: clampText(data.createdAt || "", 64),
+    updatedAt: clampText(data.updatedAt || "", 64),
+    publicSceneLibraryId: libraryId,
+    publicScenePublishedAt: clampText(data.publicScenePublishedAt || data.updatedAt || data.createdAt || "", 64),
+  };
+}
+
+async function uploadSceneLibraryThumb(thumbSource = "", libraryId = "") {
+  const source = String(thumbSource || "").trim();
+  if (!source) {
+    return {thumbUrl: "", thumbStoragePath: "", thumbMimeType: "image/jpeg"};
+  }
+  if (!source.startsWith("data:")) {
+    return {thumbUrl: source, thumbStoragePath: "", thumbMimeType: "image/jpeg"};
+  }
+  const decoded = decodeBase64DataUrl(source, MAX_SPEAKER_PORTRAIT_BYTES);
+  const mimeType = String(decoded.mimeType || "image/jpeg").trim() || "image/jpeg";
+  const ext = getImageExtension(mimeType);
+  const storagePath = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/thumb.${ext}`;
+  const asset = await uploadScreenshotAsset({
+    path: storagePath,
+    buffer: decoded.buffer,
+    mimeType,
+    metadata: {
+      kind: "podcaster_scene_library_thumb",
+      libraryId
+    }
+  });
+  return {thumbUrl: asset.downloadUrl, thumbStoragePath: asset.path, thumbMimeType: mimeType};
+}
+
+async function uploadSceneLibraryVideo({
+  downloadUrl = "",
+  storagePath = "",
+  mimeType = "video/mp4",
+  libraryId = ""
+}) {
+  const sourceStoragePath = String(storagePath || "").trim();
+  const sourceDownloadUrl = String(downloadUrl || "").trim();
+  if (!sourceStoragePath && !sourceDownloadUrl) {
+    throw new Error("Falta video de origen para publicar la escena.");
+  }
+  let buffer = null;
+  let resolvedMimeType = String(mimeType || "video/mp4").trim() || "video/mp4";
+  if (sourceStoragePath) {
+    try {
+      const downloaded = await downloadStorageObjectToBuffer(sourceStoragePath);
+      buffer = downloaded.buffer;
+    } catch (error) {
+      if (!sourceDownloadUrl) throw error;
+    }
+  }
+  if (!buffer && sourceDownloadUrl) {
+    const response = await fetchCompat(sourceDownloadUrl, { method: "GET" });
+    if (!response.ok) {
+      throw new Error(`No se pudo descargar el video fuente (${response.status}).`);
+    }
+    buffer = Buffer.from(await response.arrayBuffer());
+    resolvedMimeType = String(response.headers.get("content-type") || resolvedMimeType).trim() || resolvedMimeType;
+  }
+  if (!buffer?.length) {
+    throw new Error("El video fuente está vacío.");
+  }
+  const ext = getVideoExtension(resolvedMimeType);
+  const libraryPath = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/video.${ext}`;
+  const asset = await uploadScreenshotAsset({
+    path: libraryPath,
+    buffer,
+    mimeType: resolvedMimeType,
+    metadata: {
+      kind: "podcaster_scene_library_video",
+      libraryId
+    }
+  });
+  return {
+    downloadUrl: asset.downloadUrl,
+    storagePath: asset.path,
+    mimeType: resolvedMimeType
+  };
+}
+
+app.get("/api/podcaster/scene-library/list", async (req, res) => {
+  try {
+    const snap = await db.collection("podcaster_scene_library").orderBy("updatedAt", "desc").limit(250).get();
+    const items = snap.docs.map((docSnap) => normalizePodcastSceneLibraryItem(docSnap)).filter(Boolean);
+    return res.status(200).json({ ok: true, items });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar la biblioteca pública de escenas.") });
+  }
+});
+
+app.post("/api/podcaster/scene-library/publish", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const ownerEmail = String(req.authContext?.email || "").trim();
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    const sessionId = clampText(req.body?.sessionId || "", 140);
+    const rowId = clampText(req.body?.rowId || "", 120);
+    const incomingLibraryId = clampText(req.body?.libraryId || "", 140);
+    const title = clampText(req.body?.title || "Escena pública", 180) || "Escena pública";
+    const durationSec = clampNumber(req.body?.durationSec, 6, 180, 6);
+    const videoDownloadUrl = clampText(req.body?.downloadUrl || "", 3000);
+    const videoStoragePath = clampText(req.body?.storagePath || "", 700);
+    const videoMimeType = clampText(req.body?.mimeType || "video/mp4", 120) || "video/mp4";
+    const thumbDataUrl = String(req.body?.thumbDataUrl || "").trim();
+    const sceneDescription = clampText(req.body?.sceneDescription || "", 1200);
+    const onScreenText = clampText(req.body?.onScreenText || "", 500);
+    const transition = clampText(req.body?.transition || "", 500);
+    const visualNotes = clampText(req.body?.visualNotes || "", 1200);
+    const videoDirective = clampText(req.body?.videoDirective || "", 1400);
+    const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
+    const voiceOverText = clampText(req.body?.voiceOverText || "", 4000);
+    const imagePrompts = Array.isArray(req.body?.imagePrompts)
+      ? req.body.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
+      : String(req.body?.imagePrompts || "")
+        .split(/\n+/)
+        .map((prompt) => clampText(prompt || "", 1200))
+        .filter(Boolean)
+        .slice(0, 3);
+    const videoPreset = clampText(req.body?.videoPreset || "creative", 40) || "creative";
+    const tagLabel = clampText(req.body?.tagLabel || "", 120);
+    const tagColor = clampText(req.body?.tagColor || "slate", 40) || "slate";
+    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
+    if (!rowId) return res.status(400).json({ error: "Falta rowId." });
+    if (!videoDownloadUrl && !videoStoragePath) return res.status(400).json({ error: "Falta video de la escena." });
+
+    const sourceRowSnap = await db.collection("podcaster_sessions").doc(sessionId).get();
+    const sourceSession = sourceRowSnap.exists ? (sourceRowSnap.data()?.session || null) : null;
+    const sourceRowIndex = Array.isArray(sourceSession?.script?.rows)
+      ? sourceSession.script.rows.findIndex((item) => String(item?.id || "").trim() === rowId)
+      : -1;
+    const libraryId = incomingLibraryId || randomUUID();
+    const libraryRef = db.collection("podcaster_scene_library").doc(libraryId);
+    const existingSnap = await libraryRef.get();
+    const existing = existingSnap.exists ? (existingSnap.data() || {}) : {};
+
+    const videoAsset = await uploadSceneLibraryVideo({
+      downloadUrl: videoDownloadUrl,
+      storagePath: videoStoragePath,
+      mimeType: videoMimeType,
+      libraryId
+    });
+    const thumbAsset = await uploadSceneLibraryThumb(thumbDataUrl, libraryId);
+
+    const nowIso = new Date().toISOString();
+    await libraryRef.set({
+      libraryId,
+      sourceSessionId: sessionId,
+      sourceRowId: rowId,
+      sourceRowNumber: sourceRowIndex >= 0 ? sourceRowIndex + 1 : 0,
+      ownerId: uid,
+      ownerEmail: ownerEmail || null,
+      title,
+      durationSec,
+      downloadUrl: videoAsset.downloadUrl,
+      storagePath: videoAsset.storagePath,
+      mimeType: videoAsset.mimeType,
+      thumbUrl: thumbAsset.thumbUrl || thumbDataUrl,
+      thumbStoragePath: thumbAsset.thumbStoragePath || "",
+      thumbMimeType: thumbAsset.thumbMimeType || "image/jpeg",
+      sceneDescription,
+      onScreenText,
+      transition,
+      visualNotes,
+      videoDirective,
+      scenePrompt,
+      voiceOverText,
+      tagLabel: existing.tagLabel || tagLabel,
+      tagColor: existing.tagColor || tagColor,
+      imagePrompts,
+      videoPreset,
+      createdAt: existing.createdAt || nowIso,
+      updatedAt: nowIso,
+    }, { merge: true });
+
+    const previousVideoStoragePath = clampText(existing.storagePath || "", 700);
+    const previousThumbStoragePath = clampText(existing.thumbStoragePath || "", 700);
+    if (previousVideoStoragePath && previousVideoStoragePath !== videoAsset.storagePath) {
+      await deleteStoragePath(previousVideoStoragePath).catch(() => {});
+    }
+    if (previousThumbStoragePath && previousThumbStoragePath !== thumbAsset.thumbStoragePath) {
+      await deleteStoragePath(previousThumbStoragePath).catch(() => {});
+    }
+
+    return res.status(200).json({
+      ok: true,
+      item: {
+        libraryId,
+        sourceSessionId: sessionId,
+        sourceRowId: rowId,
+        sourceRowNumber: sourceRowIndex >= 0 ? sourceRowIndex + 1 : 0,
+        ownerId: uid,
+        ownerEmail: ownerEmail || null,
+        title,
+        durationSec,
+        downloadUrl: videoAsset.downloadUrl,
+        storagePath: videoAsset.storagePath,
+        mimeType: videoAsset.mimeType,
+        thumbUrl: thumbAsset.thumbUrl || thumbDataUrl,
+        thumbStoragePath: thumbAsset.thumbStoragePath || "",
+        thumbMimeType: thumbAsset.thumbMimeType || "image/jpeg",
+        sceneDescription,
+        onScreenText,
+        transition,
+        visualNotes,
+        videoDirective,
+        scenePrompt,
+        voiceOverText,
+        tagLabel: existing.tagLabel || tagLabel,
+        tagColor: existing.tagColor || tagColor,
+        imagePrompts,
+        videoPreset,
+        createdAt: existing.createdAt || nowIso,
+        updatedAt: nowIso,
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo publicar la escena pública.") });
+  }
+});
+
+app.post("/api/podcaster/scene-library/update", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const libraryId = clampText(req.body?.libraryId || "", 140);
+    const title = clampText(req.body?.title || "", 180);
+    const tagLabel = clampText(req.body?.tagLabel || "", 120);
+    const tagColor = clampText(req.body?.tagColor || "slate", 40) || "slate";
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    if (!libraryId) return res.status(400).json({ error: "Falta libraryId." });
+    if (!title) return res.status(400).json({ error: "Falta title." });
+    const ref = db.collection("podcaster_scene_library").doc(libraryId);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: "La escena pública no existe." });
+    const data = snap.data() || {};
+    if (String(data.ownerId || "").trim() && String(data.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "No puedes editar esta escena." });
+    }
+    const nowIso = new Date().toISOString();
+    await ref.set({ title, tagLabel, tagColor, updatedAt: nowIso }, { merge: true });
+    return res.status(200).json({
+      ok: true,
+      item: {
+        libraryId,
+        sourceSessionId: clampText(data.sourceSessionId || "", 140),
+        sourceRowId: clampText(data.sourceRowId || "", 120),
+        sourceRowNumber: Math.max(0, Number(data.sourceRowNumber) || 0),
+        ownerId: clampText(data.ownerId || "", 140),
+        ownerEmail: clampText(data.ownerEmail || "", 180),
+        title,
+        durationSec: clampNumber(data.durationSec, 0, 240, 0),
+        downloadUrl: clampText(data.downloadUrl || "", 3000),
+        storagePath: clampText(data.storagePath || "", 700),
+        mimeType: clampText(data.mimeType || "video/mp4", 120) || "video/mp4",
+        thumbUrl: clampText(data.thumbUrl || data.thumbnailUrl || "", 3000),
+        thumbStoragePath: clampText(data.thumbStoragePath || data.thumbnailStoragePath || "", 700),
+        thumbMimeType: clampText(data.thumbMimeType || "image/jpeg", 120) || "image/jpeg",
+        sceneDescription: clampText(data.sceneDescription || "", 1200),
+        onScreenText: clampText(data.onScreenText || "", 500),
+        transition: clampText(data.transition || "", 500),
+        visualNotes: clampText(data.visualNotes || "", 1200),
+        videoDirective: clampText(data.videoDirective || "", 1400),
+        scenePrompt: clampText(data.scenePrompt || "", 1200),
+        voiceOverText: clampText(data.voiceOverText || "", 4000),
+        tagLabel,
+        tagColor,
+        imagePrompts: Array.isArray(data.imagePrompts) ? data.imagePrompts : [],
+        videoPreset: clampText(data.videoPreset || "creative", 40) || "creative",
+        createdAt: clampText(data.createdAt || nowIso, 64),
+        updatedAt: nowIso
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo actualizar la escena pública.") });
+  }
+});
+
+app.post("/api/podcaster/scene-library/delete", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const libraryId = clampText(req.body?.libraryId || "", 140);
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    if (!libraryId) return res.status(400).json({ error: "Falta libraryId." });
+    const ref = db.collection("podcaster_scene_library").doc(libraryId);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: "La escena pública no existe." });
+    const data = snap.data() || {};
+    if (String(data.ownerId || "").trim() && String(data.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "No puedes eliminar esta escena." });
+    }
+    await ref.delete();
+    await deleteStoragePath(clampText(data.storagePath || "", 700)).catch(() => {});
+    await deleteStoragePath(clampText(data.thumbStoragePath || "", 700)).catch(() => {});
+    return res.status(200).json({ ok: true, libraryId });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar la escena pública.") });
   }
 });
 
@@ -5204,26 +5966,140 @@ app.post("/api/gemini/generate", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
     const model = normalizeModel(req.body?.model);
-    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const originalPayload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+
+    const isCreativeVideoPayload = (payload = {}) => {
+      try {
+        const systemText = String(payload?.systemInstruction?.parts?.map((p) => p?.text).filter(Boolean).join(" ") || "").toLowerCase();
+        const userText = String(payload?.contents?.map((c) => c?.parts?.map((p) => p?.text).filter(Boolean).join("\n")).filter(Boolean).join("\n") || "").toLowerCase();
+        return (
+          systemText.includes("videos cortos creativos")
+          || systemText.includes("video corto creativo")
+          || systemText.includes("video creativo")
+          || userText.includes("video creativo")
+          || userText.includes("video corto creativo")
+        );
+      } catch (_) {
+        return false;
+      }
+    };
+
+    const looksLikeEducationalTemplateText = (text = "") => {
+      const lower = String(text || "").toLowerCase();
+      if (!lower) return false;
+      return (
+        lower.includes("bienvenidos a este video educativo")
+        || lower.includes("escena didáctica")
+        || lower.includes("escena didactica")
+        || lower.includes("conversación útil y accionable")
+        || lower.includes("conversacion util y accionable")
+        || lower.includes("vamos a tomar una idea y convertirla")
+        || lower.includes("módulo claro, dinámico")
+        || lower.includes("modulo claro, dinamico")
+      );
+    };
+
+    const augmentCreativeVideoPayload = (payload = {}) => {
+      const next = JSON.parse(JSON.stringify(payload || {}));
+      const baseSystem = String(next?.systemInstruction?.parts?.[0]?.text || "").trim();
+      if (baseSystem) {
+        next.systemInstruction = next.systemInstruction || {};
+        next.systemInstruction.parts = next.systemInstruction.parts || [{ text: baseSystem }];
+        next.systemInstruction.parts[0].text = [
+          baseSystem,
+          "Reglas extra (creativo): Prohibido usar plantillas educativas.",
+          "No escribas frases tipo 'Bienvenidos a este video educativo', 'Hoy abrimos una conversación útil y accionable' o 'Vamos a tomar una idea y convertirla...'.",
+          "Empieza directo con acción/amenaza y usa detalles concretos del prompt desde la primera escena.",
+          "Responde solo JSON válido."
+        ].join(" ");
+      }
+      next.generationConfig = next.generationConfig && typeof next.generationConfig === "object" ? next.generationConfig : {};
+      const currentTemp = Number(next.generationConfig.temperature);
+      if (!Number.isFinite(currentTemp) || currentTemp < 0.55) {
+        next.generationConfig.temperature = 0.85;
+      }
+      return next;
+    };
+
+    const shouldAugmentCreative = isCreativeVideoPayload(originalPayload);
+    const payload = shouldAugmentCreative ? augmentCreativeVideoPayload(originalPayload) : originalPayload;
+
     const serialized = JSON.stringify(payload || {});
     if (Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
       return res.status(413).json({ error: "Payload demasiado grande para Gemini." });
     }
 
-    console.log(`[GEMINI] model=${model}, payloadSize=${serialized.length}`);
+    if (shouldAugmentCreative) {
+      console.log("[GEMINI][creative] request", {
+        model,
+        payloadSize: serialized.length,
+        hasRowsSchema: Boolean(payload?.generationConfig?.responseJsonSchema?.properties?.rows),
+        responseMimeType: String(payload?.generationConfig?.responseMimeType || ""),
+        promptPreview: String(
+          payload?.contents?.map((c) => c?.parts?.map((p) => p?.text).filter(Boolean).join("\n")).filter(Boolean).join("\n") || ""
+        ).slice(0, 240)
+      });
+    } else {
+      console.log(`[GEMINI] model=${model}, payloadSize=${serialized.length}`);
+    }
 
-    const upstream = await fetchCompat(
-      `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
+    const endpoint = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+    const doRequest = async (bodyJson) => {
+      const upstream = await fetchCompat(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: serialized
-      }
-    );
-    const data = await safeJson(upstream);
+        body: bodyJson
+      });
+      const data = await safeJson(upstream);
+      return { upstream, data };
+    };
+
+    let { upstream, data } = await doRequest(serialized);
     if (!upstream.ok) {
       console.error(`[GEMINI] HTTP ${upstream.status}:`, JSON.stringify(data, null, 2));
     }
+    if (shouldAugmentCreative) {
+      const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      console.log("[GEMINI][creative] response", {
+        status: upstream.status,
+        hasCandidates: Array.isArray(data?.candidates),
+        candidateCount: Array.isArray(data?.candidates) ? data.candidates.length : 0,
+        promptFeedback: data?.promptFeedback ? {
+          blockReason: String(data?.promptFeedback?.blockReason || ""),
+          blockReasonMessage: String(data?.promptFeedback?.blockReasonMessage || ""),
+          safetyRatings: Array.isArray(data?.promptFeedback?.safetyRatings) ? data.promptFeedback.safetyRatings.length : 0
+        } : null,
+        textPreview: text.slice(0, 260),
+        looksEducational: looksLikeEducationalTemplateText(text)
+      });
+    }
+
+    if (shouldAugmentCreative && upstream.ok) {
+      const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      if (looksLikeEducationalTemplateText(text)) {
+        try {
+          const retryPayload = augmentCreativeVideoPayload(payload);
+          if (retryPayload?.systemInstruction?.parts?.[0]?.text) {
+            retryPayload.systemInstruction.parts[0].text = [
+              String(retryPayload.systemInstruction.parts[0].text || "").trim(),
+              "REINTENTO: tu salida anterior sonó a plantilla educativa y fue rechazada.",
+              "Reescribe TODO el guion como video creativo para redes, sin plantilla educativa y con detalles concretos del prompt desde la escena 1."
+            ].join(" ");
+          }
+          const retrySerialized = JSON.stringify(retryPayload || {});
+          if (Buffer.byteLength(retrySerialized, "utf8") <= MAX_PAYLOAD_BYTES) {
+            const retry = await doRequest(retrySerialized);
+            if (retry.upstream.ok) {
+              upstream = retry.upstream;
+              data = retry.data;
+            }
+          }
+        } catch (error) {
+          console.error("[GEMINI] creative retry failed:", String(error?.message || error));
+        }
+      }
+    }
+
     return res.status(upstream.status).json(data);
   } catch (error) {
     console.error(`[GEMINI] Error:`, error.message);
@@ -5487,6 +6363,74 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       headers: rangeHeader ? { Range: rangeHeader } : undefined
     });
     if (!upstream.ok && upstream.status !== 206) {
+      // Si un link de Firebase Storage (token) expiró o devuelve 403,
+      // intenta recuperar el asset por admin SDK usando el object path (solo librería podcaster).
+      try {
+        const shouldTryAdminFallback = upstream.status === 403 || upstream.status === 404;
+        if (shouldTryAdminFallback) {
+          const pathname = String(parsed.pathname || "");
+          const parts = pathname.split("/").filter(Boolean);
+          const bIndex = parts.indexOf("b");
+          const oIndex = parts.indexOf("o");
+          const bucketFromUrl = bIndex >= 0 ? String(parts[bIndex + 1] || "").trim() : "";
+          const encodedObj = oIndex >= 0 ? String(parts[oIndex + 1] || "").trim() : "";
+          const objectPath = encodedObj ? decodeURIComponent(encodedObj) : "";
+          const isPodcasterLibrary = /^podcaster\/library\//i.test(String(objectPath || "").trim());
+          if (isPodcasterLibrary && objectPath) {
+            const candidates = (() => {
+              const buckets = getStorageBucketCandidates();
+              const extra = bucketFromUrl ? [admin.storage().bucket(bucketFromUrl)] : [];
+              const byName = new Map();
+              [...extra, ...buckets].filter(Boolean).forEach((bucket) => {
+                const name = String(bucket?.name || "").trim();
+                if (!name || byName.has(name)) return;
+                byName.set(name, bucket);
+              });
+              return Array.from(byName.values());
+            })();
+            let lastError = null;
+            for (const bucket of candidates) {
+              if (!bucket) continue;
+              const file = bucket.file(objectPath);
+              const [exists] = await file.exists().catch(() => [null]);
+              if (exists === false) continue;
+              try {
+                const [meta] = await file.getMetadata().catch(() => [{}]);
+                const [buffer] = await file.download();
+                const mime = String(meta?.contentType || "application/octet-stream");
+                res.setHeader("Content-Type", mime);
+                res.setHeader("Content-Length", String(buffer.length));
+                res.setHeader("Accept-Ranges", "bytes");
+                res.setHeader("Cache-Control", "private, max-age=120");
+                if (rangeHeader) {
+                  const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
+                  if (match) {
+                    const start = Math.max(0, Number(match[1] || 0));
+                    const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
+                    const chunk = buffer.subarray(start, end + 1);
+                    res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
+                    res.setHeader("Content-Length", String(chunk.length));
+                    return res.status(206).send(chunk);
+                  }
+                }
+                return res.status(200).send(buffer);
+              } catch (error) {
+                lastError = error;
+              }
+            }
+            // Fallthrough: no se pudo leer por admin, devuelve upstream.
+            if (lastError) {
+              console.warn("[backend][proxy-media] admin fallback failed", {
+                objectPath,
+                bucketFromUrl,
+                message: String(lastError?.message || lastError)
+              });
+            }
+          }
+        }
+      } catch (_) {
+        // noop
+      }
       const body = await safeJson(upstream);
       return res.status(upstream.status).json(body);
     }

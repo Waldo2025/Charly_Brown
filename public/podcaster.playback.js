@@ -30,7 +30,9 @@ export function createPodcasterStudioPlayback(deps = {}) {
     getActiveStageVideoEl,
     getInactiveStageVideoEl,
     setActiveStageVideoSlot,
-    shouldUseNativeVideoAudioForRow
+    shouldUseNativeVideoAudioForRow,
+    syncGeminiDialogueTrackWithRuntime,
+    syncPodcastOnScreenTextOverlay
   } = deps;
 
   let montageBackgroundAudio = null;
@@ -45,6 +47,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
   let montageBackgroundLfoGain = null;
   let montageBackgroundOscillators = [];
   let montageAudioCache = {};
+  let montageBackgroundDuckFactor = 1;
   const failedSceneAudioRows = new Set();
   let previewSyncRequestToken = 0;
   let previewSceneAudio = null;
@@ -841,6 +844,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     montageBackgroundSrc = "";
     montageBackgroundLoopTrimInSec = 0;
     montageBackgroundLoopTrimOutSec = 0;
+    setMontageBackgroundDuckFactor(1);
     disconnectMontageBackgroundChain();
     disconnectMontageBackgroundSynth();
   }
@@ -866,6 +870,10 @@ export function createPodcasterStudioPlayback(deps = {}) {
     return Math.max(0, Math.min(1, Number(value) || 0));
   }
 
+  function setMontageBackgroundDuckFactor(value = 1) {
+    montageBackgroundDuckFactor = Math.max(0.18, Math.min(1, Number(value) || 1));
+  }
+
   function getMontageBackgroundLoopEnvelope(positionSec = 0, audioDurationSec = 0) {
     const durationSec = Math.max(0, Number(audioDurationSec || 0));
     if (!durationSec) return 1;
@@ -878,7 +886,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
   }
 
   function applyMontageBackgroundVolume(targetVolume = 0, envelope = 1) {
-    const finalVolume = clamp01(targetVolume) * clamp01(envelope);
+    const finalVolume = clamp01(targetVolume) * clamp01(envelope) * clamp01(montageBackgroundDuckFactor);
     if (montageBackgroundGain) {
       const now = montageBackgroundCtx?.currentTime || 0;
       try {
@@ -982,6 +990,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
 	    const session = getActiveSession();
 	    const studioCfg = getPodcastVideoConfig(session);
 	    const panelVolume = Math.max(0, Math.min(1, toFiniteNumber(panelCfg?.volume, 0) / 100));
+	    const duckFactor = clamp01(montageBackgroundDuckFactor);
 	    // El volumen del track de audio (MP3/locked lane) se controla desde `audioTrackMixModal`
 	    // (`audioTrackMontageVolume`). No lo escalamos por `masterVolume` (Gemini/voz) para que
 	    // al bajar Gemini a 0 no silencie el track de audio del montaje.
@@ -1057,7 +1066,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
 	      }
 	      const envelope = getMontageBackgroundLoopEnvelope(itemLoopPositionSec, itemEffectiveLoopSec);
 	      const isMutedItem = activeItem?.muted === true;
-	      const finalVolume = isMutedItem ? 0 : (clamp01(targetVolume) * envelope);
+	      const finalVolume = isMutedItem ? 0 : (clamp01(targetVolume) * envelope * duckFactor);
 	      if (!montageBackgroundCtx) {
 	        montageBackgroundAudio.volume = finalVolume;
 	        if (isMutedItem) {
@@ -1126,7 +1135,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
         const envelope = getMontageBackgroundLoopEnvelope(loopState.positionSec, loopState.effectiveLoopSec);
         const loopIndex = loopState.loopIndex;
         applyMontageBackgroundLoopWindow(loopState.trimInSec, loopState.trimOutSec);
-        const effectiveVolume = mutedLoopIndexes.has(loopIndex) ? 0 : clamp01(targetVolume) * envelope;
+        const effectiveVolume = mutedLoopIndexes.has(loopIndex) ? 0 : clamp01(targetVolume) * envelope * duckFactor;
         const audioDuration = Math.max(0, Number(montageBackgroundAudio.duration || configuredDurationSec || 0));
         if (audioDuration > 0 && Math.abs(Number(montageBackgroundAudio.currentTime || 0) - loopOffset) > 0.5) {
           try { montageBackgroundAudio.currentTime = loopOffset; } catch (_) {}
@@ -1226,7 +1235,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
         montageBackgroundCompressor.connect(montageBackgroundGain);
         montageBackgroundGain.connect(montageBackgroundCtx.destination);
       } catch (_) {
-        montageBackgroundAudio.volume = targetVolume;
+        montageBackgroundAudio.volume = clamp01(targetVolume) * duckFactor;
         if (montageBackgroundAudio.paused) {
           montageBackgroundAudio.play().catch(() => {});
         }
@@ -1395,6 +1404,23 @@ export function createPodcasterStudioPlayback(deps = {}) {
       if (montageAudioCache[rowId]) return;
       const audio = new Audio(typeof resolvePodcastStageAudioSrc === "function" ? resolvePodcastStageAudioSrc(src) : src);
       audio.preload = "auto";
+      if (!audio.__podcasterDurationBound) {
+        audio.addEventListener("loadedmetadata", () => {
+          const durSec = Number(audio.duration || 0);
+          if (!Number.isFinite(durSec) || durSec <= 0) return;
+          const durMs = Math.round(Math.max(0, durSec * 1000));
+          if (!podcastVideoState.montageAudioActualDurationsMs || typeof podcastVideoState.montageAudioActualDurationsMs !== "object") {
+            podcastVideoState.montageAudioActualDurationsMs = {};
+          }
+          const prev = Math.max(0, Number(podcastVideoState.montageAudioActualDurationsMs[rowId] || 0) || 0);
+          if (durMs <= prev + 20) return;
+          podcastVideoState.montageAudioActualDurationsMs[rowId] = durMs;
+          if (typeof syncGeminiDialogueTrackWithRuntime === "function") {
+            try { syncGeminiDialogueTrackWithRuntime({ render: true, preserveStartMs: true }); } catch (_) {}
+          }
+        }, { once: true });
+        audio.__podcasterDurationBound = true;
+      }
       try { audio.load(); } catch (_) {}
       montageAudioCache[rowId] = audio;
     });
@@ -1428,9 +1454,15 @@ export function createPodcasterStudioPlayback(deps = {}) {
         STUDIO_TIMELINE_MIN_CLIP_MS,
         Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS
       );
-      const trimInMs = Math.max(0, Number(segment?.trimInMs || runtime?.clip?.trimInMs || 0) || 0);
-      const trimOutMsRaw = Number(segment?.trimOutMs || runtime?.clip?.trimOutMs || 0) || 0;
-      const trimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMsRaw || (trimInMs + durationMs));
+      const audioAlign = "segment";
+      // Importante: cuando el usuario mueve el chip (segment.startMs),
+      // NO debemos "sumar" trimInMs del clip visual, o cortaríamos el inicio del audio.
+      const baseTrimInMs = Math.max(0, Number(segment?.trimInMs || runtime?.clip?.trimInMs || 0) || 0);
+      const trimInMs = audioAlign === "segment" ? 0 : baseTrimInMs;
+      const baseTrimOutMsRaw = Number(segment?.trimOutMs || runtime?.clip?.trimOutMs || 0) || 0;
+      const trimOutMs = audioAlign === "segment"
+        ? Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, trimInMs + durationMs)
+        : Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, baseTrimOutMsRaw || (trimInMs + durationMs));
       return {
         ...(runtime || {}),
         rowId,
@@ -1438,6 +1470,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
         startMs,
         endMs: startMs + durationMs,
         effectiveDurationMs: durationMs,
+        audioAlign,
         clip: {
           ...(runtime?.clip || {}),
           trimInMs,
@@ -1466,17 +1499,22 @@ export function createPodcasterStudioPlayback(deps = {}) {
 
     const voiceTimelineEntries = buildMontageVoiceTimelineEntries(cfg, runtimeEntries);
     const visualRowId = resolvePrimaryVisualRowId(activeEntries);
-    const voiceEntry = visualRowId
-      ? (voiceTimelineEntries.find((entry) => String(entry?.rowId || "").trim() === visualRowId) || null)
-      : null;
-    const fallbackVoiceEntry = voiceEntry
-      ? null
-      : (voiceTimelineEntries.find((entry) => (
+    // En modo "single", el audio debe respetar la posición del chip (segment.startMs).
+    // Si el usuario movió el chip dentro de la escena, NO se debe calcular offset contra el inicio visual,
+    // porque cortaría el audio (skipping) al entrar en la nueva posición.
+    const activeVoiceEntries = Array.isArray(voiceTimelineEntries)
+      ? voiceTimelineEntries.filter((entry) => (
         Number(currentMs || 0) >= Number(entry?.startMs || 0)
         && Number(currentMs || 0) < Number(entry?.endMs || 0)
         && String(entry?.audioSrc || "").trim()
-      )) || null);
-    const selected = voiceEntry || fallbackVoiceEntry;
+      ))
+      : [];
+    const visualVoiceEntry = visualRowId
+      ? (activeVoiceEntries.find((entry) => String(entry?.rowId || "").trim() === visualRowId) || null)
+      : null;
+    const selected = visualVoiceEntry || activeVoiceEntries
+      .slice()
+      .sort((a, b) => Number(b.startMs || 0) - Number(a.startMs || 0) || Number(b.zIndex || 0) - Number(a.zIndex || 0))[0] || null;
     const rowId = String(selected?.rowId || "").trim();
     const src = String(selected?.audioSrc || "").trim();
     const clip = selected?.clip && typeof selected.clip === "object" ? selected.clip : null;
@@ -1510,6 +1548,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       }
       audio = new Audio(typeof resolvePodcastStageAudioSrc === "function" ? resolvePodcastStageAudioSrc(src) : src);
       audio.preload = "auto";
+      audio.__podcasterObjectUrlCacheKey = src;
       podcastVideoState.audioEl = audio;
       try { audio.load(); } catch (_) {}
       try { audio.currentTime = offsetSec; } catch (_) {}
@@ -1526,6 +1565,13 @@ export function createPodcasterStudioPlayback(deps = {}) {
       });
       return;
     }
+
+    // Mantén vivo el objectURL en caché para evitar que se revoque mientras el audio aún se usa.
+    try {
+      if (typeof resolvePodcastStageAudioSrc === "function" && audio && audio.__podcasterObjectUrlCacheKey) {
+        resolvePodcastStageAudioSrc(audio.__podcasterObjectUrlCacheKey);
+      }
+    } catch (_) {}
 
     try { audio.volume = effectiveVolume; } catch (_) {}
     try { audio.playbackRate = speed; } catch (_) {}
@@ -1555,6 +1601,8 @@ export function createPodcasterStudioPlayback(deps = {}) {
       });
       podcastVideoState.montageAudioPlayers = {};
       syncMontageVoiceAudioEl(activeEntries, currentMs, speed, runtimeEntries);
+      const voiceVolume = Number(podcastVideoState.audioEl?.volume || 0);
+      setMontageBackgroundDuckFactor(voiceVolume > 0.0001 ? Math.max(0.28, 1 - Math.min(0.72, voiceVolume * 0.72)) : 1);
       return;
     }
     const session = getActiveSession();
@@ -1569,6 +1617,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       ? voiceTimelineEntries.filter((entry) => Number(currentMs || 0) >= Number(entry?.startMs || 0) && Number(currentMs || 0) < Number(entry?.endMs || 0))
       : [];
     const activeIds = new Set(activeVoiceEntries.map((entry) => entry.rowId));
+    let activeVoicePeak = 0;
     primeMontageAudioEntries(voiceTimelineEntries, currentMs);
 
 	    activeVoiceEntries.forEach((entry) => {
@@ -1589,6 +1638,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
 	        ? Math.max(0, Math.min(100, overridePctRaw))
 	        : baseGeminiVolumePct;
 	      const effectiveVolume = Math.max(0, Math.min(1, effectivePct / 100));
+	      activeVoicePeak = Math.max(activeVoicePeak, effectiveVolume);
 	      // Si el usuario puso Gemini=0, garantizamos silencio pausando el elemento (no solo volume=0).
 	      // Esto evita casos raros donde el audio queda sonando por estado previo.
 	      if (effectiveVolume <= 0.0001) {
@@ -1606,30 +1656,39 @@ export function createPodcasterStudioPlayback(deps = {}) {
 	      const isNearSceneStart = entryElapsedMs <= Math.max(180, STUDIO_TIMELINE_SNAP_MS * 2);
 	      const offsetMs = isNearSceneStart ? trimInMs : clampedOffsetMs;
       const offsetSec = Math.max(0, offsetMs / 1000);
-      const audioDurationMs = Math.max(0, Number(entry?.audioDurationMs || 0));
-      const audioEndReached = audioDurationMs > 0 && offsetMs >= Math.max(0, audioDurationMs - 60);
-      if (audioEndReached) {
-        const staleAudio = nextMap[rowId];
-        if (staleAudio) {
-          try { staleAudio.pause(); } catch (_) {}
-          delete nextMap[rowId];
-        }
-        activeIds.delete(rowId);
-        return;
-      }
 	      let audio = nextMap[rowId];
-	      if (!audio) {
+      if (!audio) {
 	        audio = montageAudioCache[rowId] || new Audio(typeof resolvePodcastStageAudioSrc === "function" ? resolvePodcastStageAudioSrc(src) : src);
 	        audio.preload = "auto";
+          audio.__podcasterObjectUrlCacheKey = src;
+          if (!audio.__podcasterDurationBound) {
+            audio.addEventListener("loadedmetadata", () => {
+              const durSec = Number(audio.duration || 0);
+              if (!Number.isFinite(durSec) || durSec <= 0) return;
+              const durMs = Math.round(Math.max(0, durSec * 1000));
+              if (!podcastVideoState.montageAudioActualDurationsMs || typeof podcastVideoState.montageAudioActualDurationsMs !== "object") {
+                podcastVideoState.montageAudioActualDurationsMs = {};
+              }
+              const prev = Math.max(0, Number(podcastVideoState.montageAudioActualDurationsMs[rowId] || 0) || 0);
+              if (durMs <= prev + 20) return;
+              podcastVideoState.montageAudioActualDurationsMs[rowId] = durMs;
+              if (typeof syncGeminiDialogueTrackWithRuntime === "function") {
+                try { syncGeminiDialogueTrackWithRuntime({ render: true, preserveStartMs: true }); } catch (_) {}
+              }
+            }, { once: true });
+            audio.__podcasterDurationBound = true;
+          }
 	        if (!audio.__podcasterSceneAudioErrorBound) {
           audio.addEventListener("error", () => {
             failedSceneAudioRows.add(rowId);
+            audio.__podcasterErrored = true;
             logMontageDebug("scene-audio-error", { rowId, src: String(src || "").trim().slice(0, 240) });
           });
           audio.__podcasterSceneAudioErrorBound = true;
         }
 	        audio.addEventListener("playing", () => {
 	          failedSceneAudioRows.delete(rowId);
+            audio.__podcasterErrored = false;
 	        }, { once: true });
 	        audio.volume = effectiveVolume;
 	        audio.playbackRate = speed;
@@ -1643,6 +1702,22 @@ export function createPodcasterStudioPlayback(deps = {}) {
         montageAudioCache[rowId] = audio;
         return;
       }
+      // Si el elemento entró en estado de error, recrea (a veces el browser queda "pegado" y no recupera).
+      if (audio.__podcasterErrored === true || audio.error) {
+        try { audio.pause(); } catch (_) {}
+        delete nextMap[rowId];
+        delete montageAudioCache[rowId];
+        failedSceneAudioRows.add(rowId);
+        return;
+      }
+
+      // Mantén vivo el objectURL en caché para evitar que se revoque mientras está en reproducción.
+      try {
+        if (typeof resolvePodcastStageAudioSrc === "function" && audio.__podcasterObjectUrlCacheKey) {
+          resolvePodcastStageAudioSrc(audio.__podcasterObjectUrlCacheKey);
+        }
+      } catch (_) {}
+
       audio.volume = effectiveVolume;
       audio.playbackRate = speed;
       const drift = Math.abs((Number(audio.currentTime || 0) - offsetSec));
@@ -1670,6 +1745,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     });
 
     podcastVideoState.montageAudioPlayers = nextMap;
+    setMontageBackgroundDuckFactor(activeVoicePeak > 0.0001 ? Math.max(0.28, 1 - Math.min(0.72, activeVoicePeak * 0.72)) : 1);
   }
 
   async function syncStudioTimelinePreview(currentMs = 0, runtimeEntries = [], forcedActiveEntries = null, options = {}) {
@@ -1689,6 +1765,15 @@ export function createPodcasterStudioPlayback(deps = {}) {
           syncPodcastStudioRuntimeUi(session, rowId, String(visualEntry?.speakerKey || "").trim(), { speaking: shouldAutoplay });
         } catch (_) {}
         podcastVideoState.montageLastVisualRowId = rowId;
+        if (typeof syncPodcastOnScreenTextOverlay === "function") {
+          try {
+            syncPodcastOnScreenTextOverlay(session, {
+              rowId,
+              currentMs,
+              forceRow: false
+            });
+          } catch (_) {}
+        }
       }
       stopPreviewSceneAudio();
       return;
@@ -1726,6 +1811,15 @@ export function createPodcasterStudioPlayback(deps = {}) {
     if (!activeEntries.length) {
       if (isStaleRequest()) return;
       stopPreviewSceneAudio();
+      if (typeof syncPodcastOnScreenTextOverlay === "function") {
+        try {
+          syncPodcastOnScreenTextOverlay(session, {
+            rowId: "",
+            currentMs,
+            forceRow: false
+          });
+        } catch (_) {}
+      }
       if (podcastVideoState.speaking) {
         setPodcastVideoSpeaker(session, podcastVideoState.activeSpeaker || "", { speaking: false, rowId: podcastVideoState.activeRowId });
       }
@@ -2361,8 +2455,11 @@ export function createPodcasterStudioPlayback(deps = {}) {
           : baseGeminiVolumePct;
         const voiceGain = Math.max(0, Math.min(1, effectivePct / 100));
         const effectiveVolume = Math.max(0, Math.min(1, masterVolume * voiceGain));
-        const trimInMsVoice = Math.max(0, Number(clip?.trimInMs || 0));
-        const trimOutMsVoice = Math.max(trimInMsVoice + STUDIO_TIMELINE_MIN_CLIP_MS, Number(clip?.trimOutMs || trimInMsVoice + STUDIO_TIMELINE_MIN_CLIP_MS));
+        const isSegmentAligned = String(selected?.audioAlign || "").trim() === "segment";
+        const trimInMsVoice = isSegmentAligned ? 0 : Math.max(0, Number(clip?.trimInMs || 0));
+        const trimOutMsVoice = isSegmentAligned
+          ? Math.max(trimInMsVoice + STUDIO_TIMELINE_MIN_CLIP_MS, trimInMsVoice + Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(selected?.effectiveDurationMs || 0) || (Number(selected?.endMs || 0) - Number(selected?.startMs || 0)) || 0))
+          : Math.max(trimInMsVoice + STUDIO_TIMELINE_MIN_CLIP_MS, Number(clip?.trimOutMs || trimInMsVoice + STUDIO_TIMELINE_MIN_CLIP_MS));
         const entryElapsedMs = selected ? Math.max(0, Number(currentMs || 0) - Number(selected.startMs || 0)) : 0;
         const rawOffsetMs = trimInMsVoice + entryElapsedMs;
         const clampedOffsetMs = Math.max(trimInMsVoice, Math.min(Math.max(trimInMsVoice, trimOutMsVoice - 1), rawOffsetMs));

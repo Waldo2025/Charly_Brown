@@ -1,6 +1,5 @@
 import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.1.14";
 import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.1.14";
-const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function getGeminiEndpoint() {
   return buildApiUrl("/api/gemini/generate");
@@ -46,23 +45,82 @@ async function geminiGenerateRequest(payload = {}, options = {}) {
 function obtenerImagenesGeminiPorModulo(moduloId = "") {
   const key = String(moduloId || "").trim();
   if (!key) return {};
-  try {
-    const parsed = JSON.parse(localStorage.getItem(GEMINI_INSTRUCTION_IMAGE_CACHE_KEY) || "{}");
-    const scoped = parsed?.[key];
-    return scoped && typeof scoped === "object" ? scoped : {};
-  } catch (_) {
-    return {};
-  }
+  const cache = window.__cbGeminiInstructionImageRuntimeCache;
+  if (!cache || typeof cache !== "object") return {};
+  const scoped = cache?.[key];
+  return scoped && typeof scoped === "object" ? scoped : {};
 }
 
-function extraerPartesMultimodalesDesdeInstrucciones(instruccionesHtml = "", moduloId = "") {
+function normalizarInstruccionesImagenes(records = []) {
+  if (!Array.isArray(records)) return [];
+  return records
+    .map((item, index) => {
+      const imageId = String(item?.imageId || "").trim() || `gemimg_${index + 1}`;
+      const downloadUrl = String(item?.downloadUrl || "").trim();
+      const storagePath = String(item?.storagePath || "").trim();
+      const mimeType = String(item?.mimeType || "").trim().toLowerCase();
+      if (!downloadUrl && !storagePath) return null;
+      return {
+        imageId,
+        downloadUrl,
+        storagePath,
+        mimeType: mimeType.startsWith("image/") ? mimeType : "image/png",
+        name: String(item?.name || "").trim(),
+        origin: String(item?.origin || "storage").trim() || "storage",
+        updatedAt: String(item?.updatedAt || "").trim()
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 24);
+}
+
+function crearMapaImagenesGemini(records = [], runtimeMap = {}) {
+  const map = {};
+  normalizarInstruccionesImagenes(records).forEach((item) => {
+    map[item.imageId] = { ...item };
+  });
+  Object.entries(runtimeMap && typeof runtimeMap === "object" ? runtimeMap : {}).forEach(([imageId, value]) => {
+    if (!imageId || !value || typeof value !== "object") return;
+    map[imageId] = {
+      ...(map[imageId] || {}),
+      ...value,
+      imageId
+    };
+  });
+  return map;
+}
+
+async function convertirUrlImagenABase64(url = "", fallbackMimeType = "image/png") {
+  const target = String(url || "").trim();
+  if (!target) return null;
+  const response = await fetch(target, { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`No se pudo descargar la imagen de referencia (${response.status}).`);
+  }
+  const blob = await response.blob();
+  const mimeType = String(blob.type || fallbackMimeType || "image/png").trim().toLowerCase() || "image/png";
+  const arrayBuffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return {
+    mimeType,
+    data: btoa(binary)
+  };
+}
+
+async function extraerPartesMultimodalesDesdeInstrucciones(instruccionesHtml = "", moduloId = "", imageRecords = []) {
   const raw = String(instruccionesHtml || "");
   const images = [];
-  const cache = obtenerImagenesGeminiPorModulo(moduloId);
+  const cache = crearMapaImagenesGemini(imageRecords, obtenerImagenesGeminiPorModulo(moduloId));
   const container = document.createElement("div");
   container.innerHTML = raw;
 
-  container.querySelectorAll("img").forEach((img) => {
+  const imageNodes = Array.from(container.querySelectorAll("img"));
+  for (const img of imageNodes) {
     const src = String(img.getAttribute("src") || "").trim();
     const imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
     let mimeType = "";
@@ -81,13 +139,35 @@ function extraerPartesMultimodalesDesdeInstrucciones(instruccionesHtml = "", mod
         mimeType = m[1];
         data = m[2];
       }
+    } else {
+      const storedUrl = String(
+        img.getAttribute("data-gemini-storage-url")
+        || cache?.[imageId]?.downloadUrl
+        || (src.startsWith("http") ? src : "")
+      ).trim();
+      if (storedUrl) {
+        try {
+          const encoded = await convertirUrlImagenABase64(storedUrl, cache?.[imageId]?.mimeType || "image/png");
+          if (encoded?.data) {
+            mimeType = encoded.mimeType;
+            data = encoded.data;
+          }
+        } catch (error) {
+          console.warn("No se pudo rehidratar una imagen de instrucciones para Gemini:", {
+            moduloId,
+            imageId,
+            storedUrl,
+            error: String(error?.message || error || "")
+          });
+        }
+      }
     }
 
     if (mimeType && data) {
       images.push({ mimeType, data });
     }
     img.remove();
-  });
+  }
 
   const richText = convertirHtmlInstruccionesARichTextPrompt(container.innerHTML);
 
@@ -967,6 +1047,27 @@ function inferirDominioActividad(texto = "", imageCount = 0) {
     ];
 
     const languageSignals = [
+        /\bespanol\b/i,
+        /\blengua\b/i,
+        /\blenguaje\b/i,
+        /\bcomprension lectora\b/i,
+        /\blectura\b/i,
+        /\bgramatic/i,
+        /\bortograf/i,
+        /\bredaccion\b/i,
+        /\bliteratura\b/i,
+        /\btexto\b/i,
+        /\bparrafo\b/i,
+        /\boracion(?:es)?\b/i,
+        /\bverbo(?:s)?\b/i,
+        /\bsustantivo(?:s)?\b/i,
+        /\badjetivo(?:s)?\b/i,
+        /\badverbio(?:s)?\b/i,
+        /\bpronombre(?:s)?\b/i,
+        /\barticulo(?:s)?\b/i,
+        /\bsilaba(?:s)?\b/i,
+        /\bsinonimo(?:s)?\b/i,
+        /\bantonimo(?:s)?\b/i,
         /\bmorfolog/i,
         /\bpalabra(?:s)?\b/i,
         /\bsufijo(?:s)?\b/i,
@@ -979,19 +1080,19 @@ function inferirDominioActividad(texto = "", imageCount = 0) {
     const mathScore = mathSignals.reduce((acc, rx) => acc + (rx.test(normalized) ? 1 : 0), 0);
     const languageScore = languageSignals.reduce((acc, rx) => acc + (rx.test(normalized) ? 1 : 0), 0);
 
-    if (mathScore >= 2 || (mathScore >= 1 && imageCount > 0)) {
+    if (languageScore >= 2 && languageScore >= mathScore) {
+        return {
+            code: "language",
+            label: "lengua, español o comprensión lectora",
+            instruction: "Todas las propuestas deben mantenerse en lengua/español, comprensión lectora, gramática, ortografía, redacción o análisis lingüístico. No cambies a matemáticas ni a otra materia."
+        };
+    }
+
+    if (mathScore >= 3 || (mathScore >= 2 && imageCount > 0 && languageScore === 0)) {
         return {
             code: "math",
             label: "matemáticas",
             instruction: "Todas las propuestas deben mantenerse en matemáticas y en resolución/análisis de expresiones, ecuaciones o procedimientos algebraicos."
-        };
-    }
-
-    if (languageScore >= 2) {
-        return {
-            code: "language",
-            label: "lengua y morfología",
-            instruction: "Todas las propuestas deben mantenerse en análisis lingüístico y morfológico."
         };
     }
 
@@ -1032,6 +1133,53 @@ function inferirMicrotipoActividad(texto = "", dominio = "generic", imageCount =
             code: "math_generic",
             label: "matemáticas del mismo subtipo de ejercicio",
             instruction: "Las propuestas deben mantenerse en el mismo subtipo matemático de la actividad original, sin saltar a otro bloque temático."
+        };
+    }
+
+    if (dominio === "language") {
+        const readingSignals = [
+            /\bcomprension lectora\b/i,
+            /\blee\b/i,
+            /\blectura\b/i,
+            /\btexto\b/i,
+            /\bparrafo\b/i,
+            /\bresponde segun el texto\b/i
+        ];
+        const grammarSignals = [
+            /\bgramatic/i,
+            /\bmorfolog/i,
+            /\bsintaxis\b/i,
+            /\bverbo(?:s)?\b/i,
+            /\bsustantivo(?:s)?\b/i,
+            /\badjetivo(?:s)?\b/i,
+            /\badverbio(?:s)?\b/i,
+            /\bpronombre(?:s)?\b/i,
+            /\bsinonimo(?:s)?\b/i,
+            /\bantonimo(?:s)?\b/i,
+            /\bsilaba(?:s)?\b/i,
+            /\bortograf/i,
+            /\bredaccion\b/i
+        ];
+        const readingScore = readingSignals.reduce((acc, rx) => acc + (rx.test(normalized) ? 1 : 0), 0);
+        const grammarScore = grammarSignals.reduce((acc, rx) => acc + (rx.test(normalized) ? 1 : 0), 0);
+        if (readingScore >= 2 || (readingScore >= 1 && imageCount > 0)) {
+            return {
+                code: "reading_comprehension",
+                label: "comprensión lectora y análisis de texto",
+                instruction: "Las propuestas deben centrarse en leer, comprender, analizar o responder sobre textos, oraciones o párrafos del mismo estilo. No conviertas la actividad en matemáticas, ciencias ni trivia general."
+            };
+        }
+        if (grammarScore >= 2) {
+            return {
+                code: "grammar_language",
+                label: "gramática, ortografía o análisis lingüístico",
+                instruction: "Las propuestas deben mantenerse en gramática, ortografía, redacción o análisis lingüístico del mismo tipo de ejercicio."
+            };
+        }
+        return {
+            code: "language_generic",
+            label: "lengua/español del mismo subtipo de actividad",
+            instruction: "Las propuestas deben mantenerse dentro de lengua/español y conservar el mismo formato cognitivo de la actividad original."
         };
     }
 
@@ -1448,7 +1596,11 @@ export async function generarModuloGemini(moduloId) {
         const generarGrafico = modulo.generarGrafico === true;
         const ignorarContextoOtrosModulos = modulo.ignorarContextoOtrosModulos === true;
         const { textOnly: instruccionesSoloTexto, richText: instruccionesRichText, images: imagenesInstrucciones } =
-            extraerPartesMultimodalesDesdeInstrucciones(instruccionesRaw, modulo.id || moduloId);
+            await extraerPartesMultimodalesDesdeInstrucciones(
+                instruccionesRaw,
+                modulo.id || moduloId,
+                modulo.instruccionesImagenes || []
+            );
         const imagenesParaAnalisis = incluirImagenOriginalEnPropuesta ? imagenesInstrucciones : [];
         const instruccionesParaPrompt = modulo.tipo === "Lectura" && String(instruccionesRichText || "").trim()
             ? instruccionesRichText
@@ -1594,8 +1746,11 @@ export async function generarModuloGemini(moduloId) {
         ===== PRIORIDAD DE DOMINIO =====
         - El dominio prioritario de ESTA actividad es: ${dominioActividad.label}.
         - ${dominioActividad.instruction}
+        - La materia de la actividad actual tiene prioridad absoluta sobre el contexto del curso, del subtema y de otros módulos.
         - Si el contexto global del curso o del subtema entra en conflicto con esta actividad puntual, PRIORIZA la actividad puntual.
         - No mezcles contenidos de otras materias aunque aparezcan en el contexto del curso.
+        - Si la instrucción actual es de español/lengua/lectura, NO la conviertas en matemáticas.
+        - Si la instrucción actual es de matemáticas, NO la conviertas en español/lengua ni en otra materia.
         ${dominioActividad.code === "math" ? `
         ===== FORMATO STEM OBLIGATORIO =====
         - Escribe ecuaciones, fracciones, potencias y expresiones matemáticas usando notación TeX válida.
@@ -1605,6 +1760,12 @@ export async function generarModuloGemini(moduloId) {
         - Usa fracciones como \\frac{a}{b}; NO escribas 1/x2 si realmente significa 1/(x^2).
         - Si necesitas desigualdades o restricciones, usa comandos TeX válidos como \\neq, \\leq, \\geq.
         - Si el contenido incluye química, usa \\ce{...}. Si incluye unidades físicas, puedes usar \\pu{...}.
+        ` : dominioActividad.code === "language" ? `
+        ===== FORMATO LENGUA / ESPAÑOL =====
+        - Mantén todas las actividades dentro de español, lengua o comprensión lectora.
+        - Si el autor pide análisis de texto, lectura, gramática, ortografía, redacción, sílabas, verbos, sustantivos, sinónimos o antónimos, conserva exactamente ese campo.
+        - No transformes la actividad en ejercicios numéricos, ecuaciones, operaciones, fórmulas ni problemas matemáticos.
+        - Si hay imagen de referencia, úsala solo para mantener el formato pedagógico y el contenido lingüístico de la actividad.
         ` : ""}
 
         ===== PRIORIDAD DE SUBTIPO =====
@@ -2172,33 +2333,27 @@ REGLAS:
         case "notas_maestro": return isEnglish ? `
         Generate a Moodle TEACHER'S NOTES module in structured markdown following this FIXED structure.
 
-        REQUIRED HEADINGS:
-        ## Previous Knowledge
-        ## Objectives
+        REQUIRED HEADINGS (exactly and only these):
         ## Opening
         ## While Using the book section
         ## Closing
 
-        MANDATORY CONTENT RULES:
-        - Always keep those headings exactly as written.
-        - Under "Objectives", include:
-          - one objective sentence starting with "To ..."
-          - one line exactly labeled "Intellectual abilities:"
-        - Under "Opening", provide practical teacher guidance, not student worksheet text.
-        - Under "While Using the book section", include:
-          - core classroom guidance connected to the activity or page
-          - one subsection labeled "Support activity:"
-          - one subsection labeled "Extension activity:"
-        - Under "Closing", include a concrete wrap-up, checking, or reflection action.
-        - If the author provides a specific exercise, page, image, or prompt, adapt the notes to that exact material.
-        - The output must read like real classroom teaching notes, not generic theory.
-        - Do not convert this into a quiz, a reading, or a syllabus table.
-        - Do not omit any section even if information is limited; complete it coherently.
-        - Use bullets or numbered steps when they improve clarity.
+        TEMPLATE (keep the wording; only customize the word list and minor details to match the module text):
 
-        STYLE:
-        - Professional, practical, teacher-facing language.
-        - Keep the structure clean and easy to apply in class.
+        ## Opening
+        Choose some words from the text, such as: <word1>, <word2>, <word3>, <word4>, <word5>, etc. Use Fit for Teaching Vocabulary in your app to follow the processes and vary the techniques. Keep the words in sight for students to use in the following activity.
+
+        ## While Using the book section
+        Ask students to observe the picture and allow them to describe what they see with a partner. Give them a few minutes to write what they think the text will be about. Encourage them to use the words they learned. Monitor the activity and help if necessary. Use support and extension activities according to their needs.
+        Support activity: Provide a few examples for students to write their predictions, for example “I think the text is going to be about… I think the text will explain…”, etc.
+        Extension activity: Encourage students to use their previous knowledge to write their predictions.
+
+        ## Closing
+        Ask students to compare what they wrote with a partner while you monitor and correct or validate their work. You can ask them to read to each other or swap books to read what their partners wrote.
+
+        HARD RULES:
+        - Do not add extra headings or sections.
+        - Keep "Support activity:" and "Extension activity:" exactly as written (including the colon).
         - Return only the final teacher's notes content in markdown.
         ` : `
         Genera un módulo de NOTAS DEL MAESTRO Moodle en markdown estructurado siguiendo esta estructura FIJA.

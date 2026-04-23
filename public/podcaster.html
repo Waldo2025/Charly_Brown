@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="podcaster.css?v=2026-04-21-5">
+  <link rel="stylesheet" href="podcaster.css?v=2026-04-22-17">
 </head>
 <body>
   <header class="main-header">
@@ -76,6 +76,16 @@
                     </span>
                   </label>
                   <span class="composer-mode-label">Activa video</span>
+                </div>
+                <div id="composerVideoTableModeWrap" class="composer-mode-switch" role="group" aria-label="Modo de tabla (componer o crear)">
+                  <span class="composer-mode-label">Componer</span>
+                  <label class="composer-switch" for="composerVideoTableModeToggle">
+                    <input id="composerVideoTableModeToggle" type="checkbox" aria-label="Crear tabla nueva o componer tabla">
+                    <span class="composer-switch-track" aria-hidden="true">
+                      <span class="composer-switch-thumb"></span>
+                    </span>
+                  </label>
+                  <span class="composer-mode-label">Crear</span>
                 </div>
                 <div class="composer-controls">
                   <label class="model-select-wrap" for="scriptModelSelect">
@@ -275,6 +285,18 @@
       </div>
     </section>
   </div>
+  <div id="onScreenTextTrackModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-onscreen-text-track-modal" aria-label="Cerrar opciones de texto en pantalla"></button>
+    <section id="onScreenTextTrackPanel" class="music-config-panel floating-panel-card" aria-label="Opciones del texto en pantalla">
+      <div class="music-config-head">
+        <h3>Texto en pantalla</h3>
+        <button id="closeOnScreenTextTrackModalBtn" class="row-icon-btn" type="button" title="Cerrar opciones de texto" data-action="close-onscreen-text-track-modal">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div id="onScreenTextTrackModalBody" class="music-config-grid"></div>
+    </section>
+  </div>
   <div id="montageSceneMixModal" class="floating-panel-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-montage-scene-mix-modal" aria-label="Cerrar volúmenes globales"></button>
     <section class="timeline-clip-duration-panel floating-panel-card" role="dialog" aria-modal="true" aria-label="Volúmenes globales del montaje">
@@ -333,9 +355,46 @@
       <div class="podcast-studio-layout">
           <div class="podcast-studio-main">
             <div id="podcastVideoStage" class="podcast-video-stage">
+              <aside class="podcast-video-library" aria-label="Librería pública de escenas">
+                <div class="podcast-video-library-head">
+                  <div>
+                    <strong>Librería</strong>
+                    <span>Escenas públicas reutilizables</span>
+                  </div>
+                  <button id="refreshPodcastSceneLibraryBtn" class="row-icon-btn" type="button" title="Actualizar librería pública" aria-label="Actualizar librería pública">
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                </div>
+                <div class="podcast-video-library-filters">
+                  <input id="podcastSceneLibrarySearchInput" type="search" class="podcast-scene-library-search" placeholder="Buscar por nombre o texto" aria-label="Buscar por nombre o texto">
+                  <select id="podcastSceneLibraryColorFilterSelect" class="podcast-scene-library-color-filter" aria-label="Filtrar por etiqueta de color">
+                    <option value="all">Todas</option>
+                    <option value="slate">Slate</option>
+                    <option value="red">Rojo</option>
+                    <option value="amber">Ámbar</option>
+                    <option value="emerald">Verde</option>
+                    <option value="sky">Azul</option>
+                    <option value="violet">Violeta</option>
+                    <option value="pink">Rosa</option>
+                  </select>
+                  <button id="podcastSceneLibraryClearFiltersBtn" class="row-icon-btn" type="button" title="Limpiar filtros" aria-label="Limpiar filtros">
+                    <i class="fas fa-eraser"></i>
+                  </button>
+                </div>
+                <div class="podcast-video-library-toolbar">
+                  <button id="publishPodcastSceneBtn" class="row-icon-btn" type="button" title="Publicar escena activa" aria-label="Publicar escena activa">
+                    <i class="fas fa-globe"></i>
+                  </button>
+                </div>
+                <div id="podcastSceneLibraryList" class="podcast-scene-library-list" aria-live="polite"></div>
+              </aside>
               <div class="podcast-video-preview">
+                <button id="addOnScreenTextClipBtn" class="row-icon-btn podcast-preview-add-onscreen-text-btn" type="button" title="Añadir texto en pantalla a la escena seleccionada" aria-label="Añadir texto en pantalla a la escena seleccionada">
+                  <i class="fas fa-plus" aria-hidden="true"></i>
+                </button>
                 <video id="podcastActiveSpeakerVideo" class="podcast-active-speaker-video" playsinline preload="auto" hidden></video>
                 <video id="podcastActiveSpeakerVideoAlt" class="podcast-active-speaker-video podcast-active-speaker-video-alt" playsinline preload="auto" hidden></video>
+                <div id="podcastOnScreenTextOverlay" class="podcast-onscreen-text-overlay" aria-hidden="true" hidden></div>
                 <div id="podcastVideoWave" class="podcast-video-wave" aria-hidden="true"></div>
                 <div id="podcastVideoSpeakerCard" class="podcast-video-speaker-card">
                   <div class="podcast-video-speaker-avatar">
@@ -384,6 +443,12 @@
   	                    <option value="1.5">1.50x</option>
   	                  </select>
   	                </label>
+                    <button id="copyVoiceoverToOnscreenTextAllBtn" class="row-icon-btn" type="button" title="Copiar guión → texto en pantalla (todas las escenas)" aria-label="Copiar guión a texto en pantalla en todas las escenas">
+                      <i class="fas fa-copy"></i>
+                    </button>
+                    <button id="toggleOnScreenTextTrackBtn" class="row-icon-btn" type="button" title="Mostrar u ocultar track de texto" aria-label="Mostrar u ocultar track de texto" aria-pressed="true">
+                      <i class="fas fa-closed-captioning"></i>
+                    </button>
                     <button id="podcastVideoZoomBtn" class="row-icon-btn" type="button" title="Activar zoom de video" aria-label="Activar zoom de video">
                       <i class="fas fa-search-plus"></i>
                     </button>
@@ -406,7 +471,7 @@
                 <button id="podcastTimelineTracksModeBtn" class="timeline-mode-btn" type="button" title="Modo tracks">Tracks</button>
               </div>
             </div>
-            <div id="podcastTimelineRuler" class="podcast-timeline-ruler" aria-hidden="true"></div>
+            <div id="podcastTimelineRuler" class="podcast-timeline-ruler"></div>
             <div id="podcastVideoTimeline" class="podcast-video-timeline podcast-video-timeline-tracks" aria-live="polite"></div>
           </div>
         </div>
@@ -448,6 +513,69 @@
       <input id="speakerReferenceImageInput" type="file" accept="image/*" hidden>
       <input id="scenarioReferenceImageInput" type="file" accept="image/*" hidden>
       <input id="rowReferenceImageInput" type="file" accept="image/*" hidden>
+    </section>
+  </div>
+  <div id="podcastSceneInsertModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-podcast-scene-insert-modal" aria-label="Cerrar inserción de escena"></button>
+    <section class="podcast-scene-insert-panel floating-panel-card" role="dialog" aria-modal="true" aria-label="Elegir posición para insertar escena pública">
+      <div class="floating-panel-head">
+        <div>
+          <h3 id="podcastSceneInsertTitle">Insertar escena pública</h3>
+          <p id="podcastSceneInsertHint" class="podcast-scene-insert-hint">Elige dónde colocar la escena en el timeline.</p>
+        </div>
+        <div class="floating-panel-head-actions">
+          <button id="closePodcastSceneInsertBtn" class="row-icon-btn" type="button" title="Cerrar" aria-label="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+      <div id="podcastSceneInsertList" class="podcast-scene-insert-list" aria-label="Posiciones disponibles para insertar"></div>
+      <div class="podcast-scene-insert-actions">
+        <button id="cancelPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn" type="button">Cancelar</button>
+        <button id="confirmPodcastSceneInsertBtn" class="podcast-scene-insert-action-btn is-primary" type="button">Insertar escena</button>
+      </div>
+    </section>
+  </div>
+  <div id="podcastSceneLibraryEditModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-podcast-scene-library-edit-modal" aria-label="Cerrar edición de escena pública"></button>
+    <section class="podcast-scene-library-edit-panel floating-panel-card" role="dialog" aria-modal="true" aria-label="Editar escena pública">
+      <div class="floating-panel-head">
+        <div>
+          <h3 id="podcastSceneLibraryEditTitle">Editar escena pública</h3>
+          <p class="podcast-scene-insert-hint">Cambia el nombre y la etiqueta de color del video.</p>
+        </div>
+        <div class="floating-panel-head-actions">
+          <button id="closePodcastSceneLibraryEditBtn" class="row-icon-btn" type="button" title="Cerrar" aria-label="Cerrar">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+      <div class="podcast-scene-library-edit-fields">
+        <label>
+          <span>Nombre</span>
+          <input id="podcastSceneLibraryEditName" type="text" maxlength="180" placeholder="Nombre del video">
+        </label>
+        <label>
+          <span>Etiqueta</span>
+          <input id="podcastSceneLibraryEditTagLabel" type="text" maxlength="120" placeholder="Ej. Cine, Historia, Acción">
+        </label>
+        <label>
+          <span>Color</span>
+          <select id="podcastSceneLibraryEditTagColor">
+            <option value="slate">Slate</option>
+            <option value="red">Rojo</option>
+            <option value="amber">Ámbar</option>
+            <option value="emerald">Verde</option>
+            <option value="sky">Azul</option>
+            <option value="violet">Violeta</option>
+            <option value="pink">Rosa</option>
+          </select>
+        </label>
+      </div>
+      <div class="podcast-scene-insert-actions">
+        <button id="cancelPodcastSceneLibraryEditBtn" class="podcast-scene-insert-action-btn" type="button">Cancelar</button>
+        <button id="savePodcastSceneLibraryEditBtn" class="podcast-scene-insert-action-btn is-primary" type="button">Guardar cambios</button>
+      </div>
     </section>
   </div>
   <div id="creativeVideoModal" class="floating-panel-modal" hidden>
@@ -636,7 +764,7 @@
         </div>
         <label class="row-field wide">
           <span>Generar con IA</span>
-          <textarea id="panelMusicAiPrompt" rows="3" placeholder="Ej. Ambient instrumental cálido, pads suaves, piano sutil, sin voces, para video educativo creativo."></textarea>
+          <textarea id="panelMusicAiPrompt" rows="3" placeholder="Ej. Ambient instrumental cálido, pads suaves, piano sutil, sin voces, para video creativo."></textarea>
         </label>
         <div id="panelMusicTrackInfo" class="music-track-info">Sin canción seleccionada.</div>
       </div>
@@ -701,7 +829,7 @@
         <div id="scriptSetupSpeakerFields" class="script-setup-speaker-fields" aria-live="polite"></div>
         <label class="global-check-row">
           <input id="scriptSetupVideoMode" type="checkbox">
-          <span>Crear video educativo (separar por frases completas por escena)</span>
+          <span>Crear video creativo (separar por frases completas por escena)</span>
         </label>
         <label class="row-field">
           <span>Escenas</span>
@@ -780,6 +908,30 @@
             <input id="globalStutterLevel" type="range" min="0" max="100" step="1" value="18">
           </label>
         </div>
+      </div>
+      <div class="global-disfluency-block">
+        <label class="row-field wide">
+          <span>Estilo emocional Gemini TTS</span>
+          <textarea id="globalTtsStylePrompt" rows="2" placeholder="Ej: cercano, confidencial, con calidez humana y energía contenida"></textarea>
+        </label>
+        <div class="global-disfluency-sliders">
+          <label class="row-field">
+            <span>Ritmo</span>
+            <input id="globalTtsPacingPrompt" type="text" placeholder="Ej: pausado pero fluido">
+          </label>
+          <label class="row-field">
+            <span>Acento / dicción</span>
+            <input id="globalTtsAccentPrompt" type="text" placeholder="Ej: español latino neutro, dicción clara">
+          </label>
+          <label class="row-field">
+            <span>Audio tags</span>
+            <input id="globalTtsAudioTags" type="text" placeholder="[whispers] [laughs] [excited]">
+          </label>
+        </div>
+        <label class="row-field wide">
+          <span>Escena / vibe de voz</span>
+          <input id="globalTtsScenePrompt" type="text" placeholder="Ej: conversación íntima de estudio, micrófono cercano y tono natural">
+        </label>
       </div>
       <div id="globalSpeakerSettings" class="global-speaker-settings"></div>
       <button id="applyGlobalConfigBtn" class="global-apply-btn" type="button">Aplicar configuración</button>
@@ -868,7 +1020,7 @@
   <script src="vendor/sortablejs/Sortable.min.js"></script>
   <script src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
-  <script type="module" src="podcaster.js"></script>
+  <script type="module" src="podcaster.js?v=2026-04-22-26"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="update-banner-loader.js" defer></script>
 </body>

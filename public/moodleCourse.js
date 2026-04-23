@@ -8181,38 +8181,36 @@ function obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado = { code: "es", 
   if (isEnglish) {
     return {
       sectionNames: {
-        previousKnowledge: "Previous Knowledge",
-        objectives: "Objectives",
         opening: "Opening",
         whileUsingBook: "While Using the book section",
         closing: "Closing"
       },
-      abilitiesLabel: "Intellectual abilities",
       supportLabel: "Support activity",
       extensionLabel: "Extension activity",
-      objectiveLead: "To",
       contract: `
 MANDATORY OUTPUT STRUCTURE:
-- Use these exact section titles and in this exact order:
-  1. Previous Knowledge
-  2. Objectives
-  3. Opening
-  4. While Using the book section
-  5. Closing
-- Inside "Objectives", include:
-  - one objective sentence starting with "To"
-  - one line starting exactly with "Intellectual abilities:"
-- Inside "While Using the book section", include:
-  - the core classroom guidance for using the book or module
-  - one paragraph starting exactly with "Support activity:"
-  - one paragraph starting exactly with "Extension activity:"
-- Do not omit any section, even if you must adapt it briefly.
-- Return the response in markdown with headings using this format:
-  ## Previous Knowledge
-  ## Objectives
-  ## Opening
-  ## While Using the book section
-  ## Closing
+- Use ONLY these exact section titles and in this exact order:
+  1. Opening
+  2. While Using the book section
+  3. Closing
+
+TEMPLATE (keep the wording; only customize the word list and minor details to match the module text):
+
+## Opening
+Choose some words from the text, such as: <word1>, <word2>, <word3>, <word4>, <word5>, etc. Use Fit for Teaching Vocabulary in your app to follow the processes and vary the techniques. Keep the words in sight for students to use in the following activity.
+
+## While Using the book section
+Ask students to observe the picture and allow them to describe what they see with a partner. Give them a few minutes to write what they think the text will be about. Encourage them to use the words they learned. Monitor the activity and help if necessary. Use support and extension activities according to their needs.
+Support activity: Provide a few examples for students to write their predictions, for example “I think the text is going to be about… I think the text will explain…”, etc.
+Extension activity: Encourage students to use their previous knowledge to write their predictions.
+
+## Closing
+Ask students to compare what they wrote with a partner while you monitor and correct or validate their work. You can ask them to read to each other or swap books to read what their partners wrote.
+
+HARD RULES:
+- Do not add extra headings or sections.
+- Keep "Support activity:" and "Extension activity:" exactly as written (including the colon).
+- Return only the final teacher's notes content in markdown.
 `
     };
   }
@@ -8566,6 +8564,7 @@ function construirPromptQuizz({
   idiomaDetectado
 }) {
   const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
+  const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
   return `
 Eres un experto en pedagogía y diseño instruccional.
 
@@ -8579,6 +8578,11 @@ REGLAS OBLIGATORIAS:
 - No agregues preguntas inexistentes.
 - No inventes estaciones ni recursos que no aparezcan.
 - Convierte el análisis del quiz a la plantilla editorial obligatoria.
+${isEnglish ? `
+- Keep the exact English template structure and wording required by the contract.
+- Make the "Choose some words from the text, such as:" list reflect the quiz vocabulary (5+ key words from the quiz content).
+- In "While Using the book section", adapt "picture" to whatever the quiz provides (text, images, prompts) without adding new headings.
+` : `
 - En "${plantilla.sectionNames.previousKnowledge}" indica qué saberes y vocabulario conviene activar.
 - En "${plantilla.sectionNames.objectives}" redacta una meta clara que inicie con "${plantilla.objectiveLead}" y añade la línea "${plantilla.abilitiesLabel}:".
 - En "${plantilla.sectionNames.opening}" explica cómo introducir el quiz antes de resolverlo.
@@ -8586,6 +8590,7 @@ REGLAS OBLIGATORIAS:
 - En "${plantilla.supportLabel}:" incluye apoyo concreto para estudiantes que necesiten andamiaje.
 - En "${plantilla.extensionLabel}:" incluye una variante de profundización fiel al contenido.
 - En "${plantilla.sectionNames.closing}" explica cómo cerrar y verificar comprensión.
+`}
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -10220,6 +10225,13 @@ function sanitizarTraducciones(traducciones) {
     }));
 }
 
+function sanitizarInstruccionesModuloPersistibles(html = "") {
+    return recortarTextoSeguro(
+        sanitizarHtmlEditorial(limpiarDataUrlsInstruccionesGemini(html)),
+        160000
+    );
+}
+
 function quitarUndefinedPlano(obj = {}) {
     const out = {};
     Object.entries(obj).forEach(([k, v]) => {
@@ -10284,7 +10296,10 @@ async function reintentarGuardadoModuloReduciendoTamano({
     const cambiosBase = { ...(cambios || {}) };
 
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "instrucciones")) {
-        cambiosBase.instrucciones = recortarTextoSeguro(sanitizarHtmlEditorial(cambiosBase.instrucciones), 160000);
+        cambiosBase.instrucciones = sanitizarInstruccionesModuloPersistibles(cambiosBase.instrucciones);
+    }
+    if (Object.prototype.hasOwnProperty.call(cambiosBase, "instruccionesImagenes")) {
+        cambiosBase.instruccionesImagenes = sanitizarInstruccionesImagenes(cambiosBase.instruccionesImagenes);
     }
     if (Object.prototype.hasOwnProperty.call(cambiosBase, "contenido")) {
         cambiosBase.contenido = recortarTextoSeguro(normalizarContenidoModuloPersistible(cambiosBase.contenido), 280000);
@@ -10302,8 +10317,11 @@ async function reintentarGuardadoModuloReduciendoTamano({
     const payloadRescate = quitarUndefinedPlano({
         ...cambiosBase,
         instrucciones: recortarTextoSeguro(
-            sanitizarHtmlEditorial(cambiosBase.instrucciones ?? actual.instrucciones ?? ""),
+            sanitizarInstruccionesModuloPersistibles(cambiosBase.instrucciones ?? actual.instrucciones ?? ""),
             160000
+        ),
+        instruccionesImagenes: sanitizarInstruccionesImagenes(
+            cambiosBase.instruccionesImagenes ?? actual.instruccionesImagenes ?? []
         ),
         contenido: recortarTextoSeguro(
             normalizarContenidoModuloPersistible(cambiosBase.contenido ?? actual.contenido ?? ""),
@@ -10359,7 +10377,10 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
         
         const cambiosSanitizados = { ...(cambios || {}) };
         if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "instrucciones")) {
-            cambiosSanitizados.instrucciones = sanitizarHtmlEditorial(cambiosSanitizados.instrucciones);
+            cambiosSanitizados.instrucciones = sanitizarInstruccionesModuloPersistibles(cambiosSanitizados.instrucciones);
+        }
+        if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "instruccionesImagenes")) {
+            cambiosSanitizados.instruccionesImagenes = sanitizarInstruccionesImagenes(cambiosSanitizados.instruccionesImagenes);
         }
         if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "contenido")) {
             cambiosSanitizados.contenido = normalizarContenidoModuloPersistible(cambiosSanitizados.contenido);
@@ -13210,33 +13231,22 @@ async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = fals
 // Variable global para almacenar selección actual
 let currentGeminiSelection = null;
 let geminiToolbarInicializado = false;
-const GEMINI_INSTRUCTION_IMAGE_CACHE_KEY = "cb_gemini_instruction_image_cache_v1";
 
 function obtenerEditorGemini() {
     return document.getElementById('txtModalInstruccionesGemini');
 }
 
-function leerCacheImagenesGemini() {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(GEMINI_INSTRUCTION_IMAGE_CACHE_KEY) || "{}");
-        return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
-        return {};
+function obtenerCacheRuntimeImagenesGemini() {
+    if (!window.__cbGeminiInstructionImageRuntimeCache || typeof window.__cbGeminiInstructionImageRuntimeCache !== "object") {
+        window.__cbGeminiInstructionImageRuntimeCache = {};
     }
-}
-
-function guardarCacheImagenesGemini(cache = {}) {
-    try {
-        localStorage.setItem(GEMINI_INSTRUCTION_IMAGE_CACHE_KEY, JSON.stringify(cache));
-    } catch (_) {
-        // noop
-    }
+    return window.__cbGeminiInstructionImageRuntimeCache;
 }
 
 function obtenerImagenesGeminiPorModulo(moduloId = "") {
     const key = String(moduloId || "").trim();
     if (!key) return {};
-    const cache = leerCacheImagenesGemini();
+    const cache = obtenerCacheRuntimeImagenesGemini();
     const scoped = cache[key];
     return scoped && typeof scoped === "object" ? scoped : {};
 }
@@ -13244,9 +13254,144 @@ function obtenerImagenesGeminiPorModulo(moduloId = "") {
 function guardarImagenesGeminiPorModulo(moduloId = "", imageMap = {}) {
     const key = String(moduloId || "").trim();
     if (!key) return;
-    const cache = leerCacheImagenesGemini();
+    const cache = obtenerCacheRuntimeImagenesGemini();
     cache[key] = imageMap && typeof imageMap === "object" ? imageMap : {};
-    guardarCacheImagenesGemini(cache);
+}
+
+function limpiarImagenesGeminiPorModulo(moduloId = "") {
+    const key = String(moduloId || "").trim();
+    if (!key) return;
+    const cache = obtenerCacheRuntimeImagenesGemini();
+    delete cache[key];
+}
+
+function sanitizarNombreImagenGemini(value = "", fallback = "imagen") {
+    const clean = String(value || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 180);
+    return clean || fallback;
+}
+
+function sanitizarInstruccionesImagenes(imagenes = []) {
+    if (!Array.isArray(imagenes)) return [];
+    return imagenes
+        .map((item, index) => {
+            const imageId = String(item?.imageId || "").trim() || `gemimg_meta_${index + 1}`;
+            const downloadUrl = String(item?.downloadUrl || "").trim();
+            const storagePath = String(item?.storagePath || "").trim();
+            const mimeType = String(item?.mimeType || "").trim().toLowerCase();
+            if (!downloadUrl && !storagePath) return null;
+            return {
+                imageId,
+                storagePath,
+                downloadUrl,
+                mimeType: mimeType.startsWith("image/") ? mimeType : "image/png",
+                name: sanitizarNombreImagenGemini(item?.name || `imagen_${index + 1}`),
+                origin: String(item?.origin || "storage").trim() || "storage",
+                updatedAt: String(item?.updatedAt || new Date().toISOString()).trim() || new Date().toISOString()
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 24);
+}
+
+function crearMapaImagenesGemini(records = [], runtimeMap = {}) {
+    const map = {};
+    sanitizarInstruccionesImagenes(records).forEach((item) => {
+        map[item.imageId] = { ...item };
+    });
+    Object.entries(runtimeMap && typeof runtimeMap === "object" ? runtimeMap : {}).forEach(([imageId, value]) => {
+        if (!imageId || !value || typeof value !== "object") return;
+        map[imageId] = {
+            ...(map[imageId] || {}),
+            ...value,
+            imageId
+        };
+    });
+    return map;
+}
+
+function esUrlFirebaseStorageGemini(url = "") {
+    const clean = String(url || "").trim();
+    if (!clean) return false;
+    try {
+        const parsed = new URL(clean);
+        const host = String(parsed.hostname || "").toLowerCase();
+        return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
+    } catch (_) {
+        return false;
+    }
+}
+
+function construirMetadataImagenGemini({
+    imageId = "",
+    name = "imagen",
+    mimeType = "image/png",
+    downloadUrl = "",
+    storagePath = "",
+    origin = "storage",
+    updatedAt = ""
+} = {}) {
+    return {
+        imageId: String(imageId || crearGeminiImageId()).trim() || crearGeminiImageId(),
+        name: sanitizarNombreImagenGemini(name),
+        mimeType: String(mimeType || "image/png").trim().toLowerCase() || "image/png",
+        downloadUrl: String(downloadUrl || "").trim(),
+        storagePath: String(storagePath || "").trim(),
+        origin: String(origin || "storage").trim() || "storage",
+        updatedAt: String(updatedAt || new Date().toISOString()).trim() || new Date().toISOString()
+    };
+}
+
+function obtenerImagenesGeminiPersistidasDesdeModulo(modulo = {}) {
+    return sanitizarInstruccionesImagenes(modulo?.instruccionesImagenes);
+}
+
+function obtenerMapaImagenesGeminiDesdeModulo(modulo = {}, moduloId = "") {
+    return crearMapaImagenesGemini(
+        obtenerImagenesGeminiPersistidasDesdeModulo(modulo),
+        obtenerImagenesGeminiPorModulo(moduloId || modulo?.id || "")
+    );
+}
+
+function limpiarDataUrlsInstruccionesGemini(html = "") {
+    return String(html || "")
+        .replace(/<img[^>]+src=["']data:image\/[a-zA-Z0-9.+-]+;base64,[^"']+["'][^>]*>/gi, "")
+        .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, "")
+        .trim();
+}
+
+function normalizarHtmlInstruccionesGeminiParaEstadoLocal(html = "", moduloId = "", imageRecords = []) {
+    const raw = normalizarHtmlLegacyImagenGemini(String(html || ""));
+    if (!raw.trim()) return "";
+    const imageMap = crearMapaImagenesGemini(imageRecords, obtenerImagenesGeminiPorModulo(moduloId));
+    const container = document.createElement("div");
+    container.innerHTML = sanitizeRichText(raw);
+    container.querySelectorAll("img").forEach((img, index) => {
+        let imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
+        if (!imageId) imageId = crearGeminiImageId();
+        img.setAttribute("data-gemini-image-id", imageId);
+        const src = String(img.getAttribute("src") || "").trim();
+        const meta = imageMap[imageId] || {};
+        const downloadUrl = String(img.getAttribute("data-gemini-storage-url") || meta.downloadUrl || "").trim();
+        const storagePath = String(img.getAttribute("data-gemini-storage-path") || meta.storagePath || "").trim();
+        if (downloadUrl) {
+            img.setAttribute("src", downloadUrl);
+            img.setAttribute("data-gemini-storage-url", downloadUrl);
+        } else if (src.startsWith("data:image/")) {
+            img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
+            img.removeAttribute("data-gemini-storage-url");
+        } else if (!src || /^https?:\/\//i.test(src)) {
+            img.setAttribute("src", construirPlaceholderImagenGemini(imageId));
+        }
+        if (storagePath) {
+            img.setAttribute("data-gemini-storage-path", storagePath);
+        } else {
+            img.removeAttribute("data-gemini-storage-path");
+        }
+    });
+    return sanitizarHtmlEditorial(limpiarDataUrlsInstruccionesGemini(container.innerHTML));
 }
 
 function obtenerExtensionImagenGemini(mimeType = "image/png") {
@@ -13303,7 +13448,35 @@ async function subirImagenInstruccionGeminiAFirebaseStorage({
         downloadUrl,
         storagePath: path,
         mimeType,
+        origin: "clipboard",
         updatedAt: new Date().toISOString()
+    };
+}
+
+async function importarImagenRemotaInstruccionGemini({
+    moduloId = "",
+    cursoId = "",
+    imageId = "",
+    sourceUrl = "",
+    nombre = "imagen"
+} = {}) {
+    const data = await authFetchJson("/api/moodle/instruction-images/import", {
+        method: "POST",
+        body: {
+            courseId: String(cursoId || curso?.id || "").trim(),
+            moduleId: String(moduloId || "").trim(),
+            imageId: String(imageId || crearGeminiImageId()).trim(),
+            sourceUrl: String(sourceUrl || "").trim(),
+            name: sanitizarNombreImagenGemini(nombre),
+            origin: "remote"
+        }
+    });
+    return {
+        downloadUrl: String(data?.image?.downloadUrl || "").trim(),
+        storagePath: String(data?.image?.storagePath || "").trim(),
+        mimeType: String(data?.image?.mimeType || "image/png").trim().toLowerCase() || "image/png",
+        origin: String(data?.image?.origin || "remote").trim() || "remote",
+        updatedAt: String(data?.image?.updatedAt || new Date().toISOString()).trim() || new Date().toISOString()
     };
 }
 
@@ -13342,10 +13515,10 @@ function normalizarHtmlLegacyImagenGemini(html = "") {
     );
 }
 
-function hidratarHtmlInstruccionesGemini(html = "", moduloId = "") {
+function hidratarHtmlInstruccionesGemini(html = "", moduloId = "", imageRecords = []) {
     const raw = normalizarHtmlLegacyImagenGemini(html);
     if (!raw.trim()) return "";
-    const cache = obtenerImagenesGeminiPorModulo(moduloId);
+    const cache = crearMapaImagenesGemini(imageRecords, obtenerImagenesGeminiPorModulo(moduloId));
     const container = document.createElement("div");
     container.innerHTML = raw;
     container.querySelectorAll("img[data-gemini-image-id]").forEach((img) => {
@@ -13407,11 +13580,18 @@ function hidratarHtmlInstruccionesGemini(html = "", moduloId = "") {
 
 async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = "", cursoId = "") {
     const key = String(moduloId || "").trim();
-    if (!key) return sanitizarHtmlEditorial(sanitizeRichText(normalizarHtmlLegacyImagenGemini(html)));
+    if (!key) {
+        return {
+            html: sanitizarHtmlEditorial(limpiarDataUrlsInstruccionesGemini(sanitizeRichText(normalizarHtmlLegacyImagenGemini(html)))),
+            imagenes: [],
+            warnings: []
+        };
+    }
     const container = document.createElement("div");
     container.innerHTML = sanitizeRichText(normalizarHtmlLegacyImagenGemini(String(html || "").trim()));
     const nextCache = { ...obtenerImagenesGeminiPorModulo(key) };
     const usedIds = new Set();
+    const warnings = [];
 
     const imageNodes = Array.from(container.querySelectorAll("img"));
     for (const [index, img] of imageNodes.entries()) {
@@ -13424,6 +13604,8 @@ async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = 
         const alt = String(img.getAttribute("alt") || `imagen_${index + 1}`).trim() || `imagen_${index + 1}`;
         let downloadUrl = String(img.getAttribute("data-gemini-storage-url") || nextCache?.[imageId]?.downloadUrl || "").trim();
         let storagePath = String(img.getAttribute("data-gemini-storage-path") || nextCache?.[imageId]?.storagePath || "").trim();
+        let mimeType = String(nextCache?.[imageId]?.mimeType || "").trim().toLowerCase();
+        let origin = String(nextCache?.[imageId]?.origin || (src.startsWith("data:image/") ? "clipboard" : "storage")).trim() || "storage";
 
         if (src.startsWith("data:image/")) {
             const uploaded = await subirImagenInstruccionGeminiAFirebaseStorage({
@@ -13434,17 +13616,61 @@ async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = 
                 nombre: alt
             });
             nextCache[imageId] = {
-                name: alt,
-                mimeType: String(uploaded?.mimeType || src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/png").trim(),
-                dataUrl: src,
-                downloadUrl: uploaded.downloadUrl,
-                storagePath: uploaded.storagePath,
-                updatedAt: new Date().toISOString()
+                ...construirMetadataImagenGemini({
+                    imageId,
+                    name: alt,
+                    mimeType: String(uploaded?.mimeType || src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)?.[1] || "image/png").trim(),
+                    downloadUrl: uploaded.downloadUrl,
+                    storagePath: uploaded.storagePath,
+                    origin: uploaded.origin || "clipboard",
+                    updatedAt: uploaded.updatedAt
+                })
             };
             downloadUrl = String(uploaded.downloadUrl || "").trim();
             storagePath = String(uploaded.storagePath || "").trim();
+            mimeType = String(uploaded?.mimeType || mimeType || "image/png").trim().toLowerCase();
+            origin = String(uploaded?.origin || "clipboard").trim() || "clipboard";
         } else if (/^https?:\/\//i.test(src)) {
-            downloadUrl = src;
+            if (esUrlFirebaseStorageGemini(src)) {
+                downloadUrl = src;
+                origin = "storage";
+            } else {
+                try {
+                    const imported = await importarImagenRemotaInstruccionGemini({
+                        moduloId: key,
+                        cursoId,
+                        imageId,
+                        sourceUrl: src,
+                        nombre: alt
+                    });
+                    nextCache[imageId] = {
+                        ...construirMetadataImagenGemini({
+                            imageId,
+                            name: alt,
+                            mimeType: imported.mimeType || mimeType || "image/png",
+                            downloadUrl: imported.downloadUrl,
+                            storagePath: imported.storagePath,
+                            origin: imported.origin || "remote",
+                            updatedAt: imported.updatedAt
+                        })
+                    };
+                    downloadUrl = String(imported.downloadUrl || "").trim();
+                    storagePath = String(imported.storagePath || "").trim();
+                    mimeType = String(imported?.mimeType || mimeType || "image/png").trim().toLowerCase();
+                    origin = String(imported?.origin || "remote").trim() || "remote";
+                } catch (error) {
+                    warnings.push(`No se pudo importar una imagen remota (${alt}). Se removió del módulo.`);
+                    console.warn("No se pudo importar imagen remota de instrucciones Gemini:", {
+                        moduloId: key,
+                        imageId,
+                        src,
+                        error: String(error?.message || error || "")
+                    });
+                    img.remove();
+                    delete nextCache[imageId];
+                    continue;
+                }
+            }
         } else if (nextCache?.[imageId]?.dataUrl) {
             const uploaded = await subirImagenInstruccionGeminiAFirebaseStorage({
                 moduloId: key,
@@ -13454,19 +13680,40 @@ async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = 
                 nombre: alt
             });
             nextCache[imageId] = {
-                ...nextCache[imageId],
-                name: alt,
-                mimeType: String(uploaded?.mimeType || nextCache[imageId]?.mimeType || "image/png").trim(),
-                downloadUrl: uploaded.downloadUrl,
-                storagePath: uploaded.storagePath,
-                updatedAt: new Date().toISOString()
+                ...construirMetadataImagenGemini({
+                    ...nextCache[imageId],
+                    imageId,
+                    name: alt,
+                    mimeType: String(uploaded?.mimeType || nextCache[imageId]?.mimeType || "image/png").trim(),
+                    downloadUrl: uploaded.downloadUrl,
+                    storagePath: uploaded.storagePath,
+                    origin: uploaded.origin || nextCache[imageId]?.origin || "clipboard",
+                    updatedAt: uploaded.updatedAt
+                })
             };
             downloadUrl = String(uploaded.downloadUrl || "").trim();
             storagePath = String(uploaded.storagePath || "").trim();
+            mimeType = String(uploaded?.mimeType || mimeType || "image/png").trim().toLowerCase();
+            origin = String(uploaded?.origin || origin || "clipboard").trim() || "clipboard";
+        } else if (downloadUrl || storagePath) {
+            nextCache[imageId] = {
+                ...construirMetadataImagenGemini({
+                    ...nextCache[imageId],
+                    imageId,
+                    name: alt,
+                    mimeType: mimeType || "image/png",
+                    downloadUrl,
+                    storagePath,
+                    origin,
+                    updatedAt: nextCache?.[imageId]?.updatedAt || new Date().toISOString()
+                })
+            };
         }
 
         if (!downloadUrl) {
+            warnings.push(`Se eliminó una imagen sin referencia persistible (${alt}).`);
             img.remove();
+            delete nextCache[imageId];
             continue;
         }
 
@@ -13481,10 +13728,47 @@ async function prepararHtmlInstruccionesGeminiParaGuardar(html = "", moduloId = 
 
     const trimmedCache = {};
     usedIds.forEach((imageId) => {
-        if (nextCache[imageId]) trimmedCache[imageId] = nextCache[imageId];
+        if (!nextCache[imageId]) return;
+        const safe = { ...nextCache[imageId] };
+        delete safe.dataUrl;
+        trimmedCache[imageId] = safe;
+    });
+    container.querySelectorAll("figure").forEach((figure) => {
+        const hasImage = figure.querySelector("img");
+        if (!hasImage && !String(figure.textContent || "").trim()) {
+            figure.remove();
+        }
     });
     guardarImagenesGeminiPorModulo(key, trimmedCache);
-    return sanitizarHtmlEditorial(container.innerHTML.trim());
+    return {
+        html: sanitizarHtmlEditorial(limpiarDataUrlsInstruccionesGemini(container.innerHTML.trim())),
+        imagenes: sanitizarInstruccionesImagenes(Object.values(trimmedCache)),
+        warnings
+    };
+}
+
+async function repararInstruccionesGeminiDeModulo(modulo = {}, cursoId = "") {
+    const moduloId = String(modulo?.id || "").trim();
+    if (!moduloId) return { modulo, changed: false, warnings: [] };
+    const prepared = await prepararHtmlInstruccionesGeminiParaGuardar(
+        String(modulo?.instrucciones || ""),
+        moduloId,
+        cursoId || modulo?.cursoId || curso?.id || ""
+    );
+    const imagenesActuales = JSON.stringify(sanitizarInstruccionesImagenes(modulo?.instruccionesImagenes));
+    const imagenesPreparadas = JSON.stringify(prepared.imagenes);
+    const instruccionesActuales = String(modulo?.instrucciones || "").trim();
+    const instruccionesPreparadas = String(prepared?.html || "").trim();
+    const changed = instruccionesActuales !== instruccionesPreparadas || imagenesActuales !== imagenesPreparadas;
+    return {
+        modulo: {
+            ...modulo,
+            instrucciones: instruccionesPreparadas,
+            instruccionesImagenes: prepared.imagenes
+        },
+        changed,
+        warnings: Array.isArray(prepared?.warnings) ? prepared.warnings : []
+    };
 }
 
 function escapeHtmlGemini(texto = "") {
@@ -13541,6 +13825,44 @@ function insertarHtmlEnEditorGemini(html = "") {
     if (!html) return;
     document.execCommand('insertHTML', false, html);
     guardarSeleccionGemini();
+}
+
+function prepararHtmlPegadoEnEditorGemini(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return "";
+    const container = document.createElement("div");
+    container.innerHTML = raw;
+    container.querySelectorAll("script, style").forEach((node) => node.remove());
+    container.querySelectorAll("*").forEach((node) => {
+        Array.from(node.attributes || []).forEach((attr) => {
+            if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
+        });
+    });
+    container.querySelectorAll("img").forEach((img, index) => {
+        const src = String(img.getAttribute("src") || "").trim();
+        let imageId = String(img.getAttribute("data-gemini-image-id") || "").trim();
+        if (!imageId) imageId = crearGeminiImageId();
+        img.setAttribute("data-gemini-image-id", imageId);
+        img.removeAttribute("srcset");
+        if (src.startsWith("data:image/")) {
+            img.setAttribute("data-gemini-image-origin", "clipboard");
+            img.removeAttribute("data-gemini-storage-url");
+            img.removeAttribute("data-gemini-storage-path");
+            return;
+        }
+        if (/^https?:\/\//i.test(src)) {
+            img.setAttribute("data-gemini-image-origin", esUrlFirebaseStorageGemini(src) ? "storage" : "remote-pending");
+            if (esUrlFirebaseStorageGemini(src)) {
+                img.setAttribute("data-gemini-storage-url", src);
+            } else {
+                img.removeAttribute("data-gemini-storage-url");
+                img.removeAttribute("data-gemini-storage-path");
+            }
+            return;
+        }
+        img.setAttribute("alt", String(img.getAttribute("alt") || `imagen_${index + 1}`).trim() || `imagen_${index + 1}`);
+    });
+    return container.innerHTML;
 }
 
 function fileToDataUrlGemini(file) {
@@ -13618,9 +13940,10 @@ function sanitizeAttrGemini(value = "") {
 
 function insertarImagenEnEditorGemini(dataUrl, nombre = "imagen") {
     const safeName = sanitizeAttrGemini(nombre);
+    const imageId = crearGeminiImageId();
     const html = `
         <figure class="cb-editor-image-wrap my-3">
-            <img src="${dataUrl}" alt="${safeName}" class="max-w-full h-auto rounded border border-slate-200" />
+            <img src="${dataUrl}" alt="${safeName}" data-gemini-image-id="${sanitizeAttrGemini(imageId)}" data-gemini-image-origin="clipboard" class="max-w-full h-auto rounded border border-slate-200" />
             <figcaption class="text-xs text-muted-foreground mt-1">${safeName}</figcaption>
         </figure>
     `;
@@ -13862,10 +14185,7 @@ async function pasteWithFormat() {
             if (bodyMatch) {
                 htmlContent = bodyMatch[1];
             }
-            
-            // Limpiar scripts y estilos potencialmente peligrosos
-            htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-            htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+            htmlContent = prepararHtmlPegadoEnEditorGemini(htmlContent);
 
             if (contieneTablaEnHtml(htmlContent)) {
                 insertarHtmlEnEditorGemini(htmlContent);
@@ -13954,16 +14274,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             let htmlContent = clipboardHtml;
                             const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
                             if (bodyMatch) htmlContent = bodyMatch[1];
-                            htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-                            htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+                            htmlContent = prepararHtmlPegadoEnEditorGemini(htmlContent);
                             insertarHtmlEnEditorGemini(htmlContent);
                             contenidoPegado = true;
                         } else if (htmlTieneImagenes) {
                             let htmlContent = clipboardHtml;
                             const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
                             if (bodyMatch) htmlContent = bodyMatch[1];
-                            htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-                            htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+                            htmlContent = prepararHtmlPegadoEnEditorGemini(htmlContent);
                             insertarHtmlEnEditorGemini(htmlContent);
                             contenidoPegado = true;
                         } else {
@@ -14008,8 +14326,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 let htmlContent = html;
                 const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
                 if (bodyMatch) htmlContent = bodyMatch[1];
-                htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-                htmlContent = htmlContent.replace(/on\w+="[^"]*"/gi, '');
+                htmlContent = prepararHtmlPegadoEnEditorGemini(htmlContent);
                 insertarHtmlEnEditorGemini(htmlContent);
                 updateFormatInfo("Tabla pegada desde portapapeles");
                 return;
@@ -14051,8 +14368,27 @@ document.addEventListener('DOMContentLoaded', function() {
 window.abrirInstruccionesGemini = async function(moduloId) {
     inicializarToolbarInstruccionesGemini();
     const cursoIdModulo = String(curso?.id || "").trim() || null;
-    const modulo = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
+    let modulo = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
     if (!modulo) return;
+    try {
+        const repaired = await repararInstruccionesGeminiDeModulo(modulo, cursoIdModulo);
+        modulo = repaired.modulo;
+        if (repaired.changed) {
+            await guardarModulo(moduloId, {
+                instrucciones: modulo.instrucciones,
+                instruccionesImagenes: modulo.instruccionesImagenes
+            }, cursoIdModulo);
+            sincronizarModuloLocal(moduloId, cursoIdModulo, {
+                instrucciones: modulo.instrucciones,
+                instruccionesImagenes: modulo.instruccionesImagenes
+            });
+        }
+        if (Array.isArray(repaired.warnings) && repaired.warnings.length) {
+            console.warn("Advertencias al reparar instrucciones Gemini:", repaired.warnings);
+        }
+    } catch (error) {
+        console.warn("No se pudo reparar automáticamente el módulo al abrir instrucciones Gemini:", error);
+    }
 
     // Guardamos referencia al ID, no el objeto
     window.__moduloEditandoInstruccionesId = moduloId;
@@ -14086,7 +14422,8 @@ No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.`
 
     // Cargar instrucciones (pueden contener HTML)
     if (instruccionesModulo && !debeIgnorarDefaultTemario) {
-        const htmlHidratado = hidratarHtmlInstruccionesGemini(modulo.instrucciones, moduloId);
+        guardarImagenesGeminiPorModulo(moduloId, obtenerMapaImagenesGeminiDesdeModulo(modulo, moduloId));
+        const htmlHidratado = hidratarHtmlInstruccionesGemini(modulo.instrucciones, moduloId, modulo.instruccionesImagenes);
         // Si contiene HTML, usarlo directamente
         if (modulo.instrucciones.includes('<') && modulo.instrucciones.includes('>')) {
             editor.innerHTML = sanitizarHtmlEditorial(htmlHidratado);
@@ -14154,9 +14491,13 @@ function inicializarEventosModalInstruccionesGemini() {
         const moduloId = window.__moduloEditandoInstruccionesId;
         const cursoIdModulo = String(window.__moduloEditandoInstruccionesCursoId || curso?.id || "").trim() || null;
         if (!moduloId) return;
+        const docId = construirDocIdModulo(moduloId, cursoIdModulo);
+        const moduloActual = (docId && modulosCache.get(docId)) || {};
+        const instruccionesImagenes = sanitizarInstruccionesImagenes(moduloActual?.instruccionesImagenes || []);
 
         sincronizarModuloLocal(moduloId, cursoIdModulo, {
-            instrucciones: editor.innerHTML,
+            instrucciones: normalizarHtmlInstruccionesGeminiParaEstadoLocal(editor.innerHTML, moduloId, instruccionesImagenes),
+            instruccionesImagenes,
             incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
             incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
             generarGrafico: checkGenerarGrafico?.checked === true,
@@ -14187,13 +14528,15 @@ function inicializarEventosModalInstruccionesGemini() {
             if (htmlNormalizado !== editor.innerHTML.trim()) {
                 editor.innerHTML = sanitizarHtmlEditorial(htmlNormalizado);
             }
-            const contenidoHTML = await prepararHtmlInstruccionesGeminiParaGuardar(
+            const prepared = await prepararHtmlInstruccionesGeminiParaGuardar(
                 htmlNormalizado,
                 moduloId,
                 cursoIdModulo
             );
+            const contenidoHTML = String(prepared?.html || "").trim();
             const payloadLocal = {
                 instrucciones: contenidoHTML,
+                instruccionesImagenes: sanitizarInstruccionesImagenes(prepared?.imagenes || []),
                 incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
                 incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
                 generarGrafico: checkGenerarGrafico?.checked === true,
@@ -14210,16 +14553,23 @@ function inicializarEventosModalInstruccionesGemini() {
             const incluirImagenOriginalPersistido = docSnap?.data()?.incluirImagenOriginalEnPropuesta === true;
             const generarGraficoPersistido = docSnap?.data()?.generarGrafico === true;
             const ignorarContextoPersistido = docSnap?.data()?.ignorarContextoOtrosModulos === true;
+            const instruccionesImagenesPersistidas = JSON.stringify(sanitizarInstruccionesImagenes(docSnap?.data()?.instruccionesImagenes || []));
+            const instruccionesImagenesEsperadas = JSON.stringify(payloadLocal.instruccionesImagenes);
 
             if (
                 !docSnap?.exists() ||
                 instruccionesPersistidas !== String(contenidoHTML || "").trim() ||
+                instruccionesImagenesPersistidas !== instruccionesImagenesEsperadas ||
                 incluirOriginalPersistido !== payloadLocal.incluirInstruccionOriginalEnPropuesta ||
                 incluirImagenOriginalPersistido !== payloadLocal.incluirImagenOriginalEnPropuesta ||
                 generarGraficoPersistido !== payloadLocal.generarGrafico ||
                 ignorarContextoPersistido !== payloadLocal.ignorarContextoOtrosModulos
             ) {
                 throw new Error("Las instrucciones o sus opciones no quedaron persistidas en Firebase.");
+            }
+
+            if (Array.isArray(prepared?.warnings) && prepared.warnings.length) {
+                console.warn("Advertencias al guardar instrucciones Gemini:", prepared.warnings);
             }
 
             if (docId) {
