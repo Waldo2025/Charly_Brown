@@ -4554,10 +4554,15 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       `Diálogo objetivo: "${String(text).replace(/"/g, '\\"')}"`
     ].filter(Boolean).join("\n");
 
-    const pollUntilDone = async (operationName = "") => {
+    const pollUntilDone = async (operationName = "", options = {}) => {
       const maxAttempts = 54;
       const delayMs = 5000;
+      const requireResolvedMedia = options?.requireResolvedMedia === true;
+      const resolveResult = typeof options?.resolveResult === "function" ? options.resolveResult : null;
+      const postDoneGraceAttempts = Math.max(0, Math.floor(Number(options?.postDoneGraceAttempts || 0) || 0));
+      const postDoneGraceDelayMs = Math.max(250, Number(options?.postDoneGraceDelayMs || delayMs) || delayMs);
       let latest = null;
+      let doneWithoutMediaAttempts = 0;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         // eslint-disable-next-line no-await-in-loop
         const opResponse = await fetchCompat(
@@ -4573,7 +4578,16 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           err.status = Number(opResponse.status || 502);
           throw err;
         }
-        if (opData?.done === true) return opData;
+        if (opData?.done === true) {
+          if (!requireResolvedMedia || !resolveResult) return opData;
+          const resolved = resolveResult(opData);
+          if (resolved?.uri || resolved?.inlineData?.data) return opData;
+          if (doneWithoutMediaAttempts >= postDoneGraceAttempts) return opData;
+          doneWithoutMediaAttempts += 1;
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, postDoneGraceDelayMs));
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -4879,13 +4893,27 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         response?.generateVideoResponse?.generatedSamples?.[0]?.videoUri,
         response?.generateVideoResponse?.generatedSamples?.[0]?.uri,
         response?.generateVideoResponse?.generatedSamples?.[0]?.video?.fileUri,
+        response?.generate_video_response?.generated_samples?.[0]?.video?.uri,
+        response?.generate_video_response?.generated_samples?.[0]?.video_uri,
+        response?.generate_video_response?.generated_samples?.[0]?.uri,
+        response?.generate_video_response?.generated_samples?.[0]?.video?.file_uri,
         response?.generatedVideos?.[0]?.video?.uri,
         response?.generatedVideos?.[0]?.videoUri,
         response?.generatedVideos?.[0]?.uri,
+        response?.generated_videos?.[0]?.video?.uri,
+        response?.generated_videos?.[0]?.video_uri,
+        response?.generated_videos?.[0]?.uri,
         response?.videos?.[0]?.video?.uri,
         response?.videos?.[0]?.uri,
+        response?.video?.fileUri,
+        response?.video?.file_uri,
         response?.video?.uri,
-        response?.videoUri
+        response?.videoUri,
+        response?.video_uri,
+        response?.fileData?.fileUri,
+        response?.fileData?.uri,
+        response?.file_data?.file_uri,
+        response?.file_data?.uri
       ];
       for (const candidate of uriCandidates) {
         const uri = String(candidate || "").trim();
@@ -4895,23 +4923,27 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         response?.generateVideoResponse?.generatedSamples?.[0]?.video?.inlineData,
         response?.generateVideoResponse?.generatedSamples?.[0]?.inlineData,
         response?.generatedVideos?.[0]?.video?.inlineData,
-        response?.generatedVideos?.[0]?.inlineData
+        response?.generatedVideos?.[0]?.inlineData,
+        response?.generate_video_response?.generated_samples?.[0]?.video?.inline_data,
+        response?.generate_video_response?.generated_samples?.[0]?.inline_data,
+        response?.generated_videos?.[0]?.video?.inline_data,
+        response?.generated_videos?.[0]?.inline_data
       ].filter(Boolean);
       for (const inlineData of inlineCandidates) {
-        const data = String(inlineData?.data || inlineData?.bytesBase64Encoded || "").trim();
-        const mimeType = String(inlineData?.mimeType || "video/mp4").trim() || "video/mp4";
+        const data = String(inlineData?.data || inlineData?.bytesBase64Encoded || inlineData?.bytes_base64_encoded || "").trim();
+        const mimeType = String(inlineData?.mimeType || inlineData?.mime_type || "video/mp4").trim() || "video/mp4";
         if (data) return { inlineData: { data, mimeType } };
       }
       const parts = Array.isArray(response?.candidates?.[0]?.content?.parts)
         ? response.candidates[0].content.parts
         : [];
       for (const part of parts) {
-        const fileUri = String(part?.fileData?.fileUri || part?.fileData?.uri || "").trim();
+        const fileUri = String(part?.fileData?.fileUri || part?.fileData?.uri || part?.file_data?.file_uri || part?.file_data?.uri || "").trim();
         if (fileUri) return { uri: fileUri };
         const partUri = String(part?.video?.uri || part?.videoUri || part?.uri || "").trim();
         if (partUri) return { uri: partUri };
-        const data = String(part?.inlineData?.data || part?.inlineData?.bytesBase64Encoded || "").trim();
-        const mimeType = String(part?.inlineData?.mimeType || "").trim();
+        const data = String(part?.inlineData?.data || part?.inlineData?.bytesBase64Encoded || part?.inlineData?.bytes_base64_encoded || part?.inline_data?.data || part?.inline_data?.bytesBase64Encoded || part?.inline_data?.bytes_base64_encoded || "").trim();
+        const mimeType = String(part?.inlineData?.mimeType || part?.inlineData?.mime_type || part?.inline_data?.mimeType || part?.inline_data?.mime_type || "").trim();
         if (data && mimeType.toLowerCase().startsWith("video/")) return { inlineData: { data, mimeType } };
       }
       return null;
@@ -4946,7 +4978,12 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         let operationDone = null;
         try {
           // eslint-disable-next-line no-await-in-loop
-          operationDone = await pollUntilDone(operationName);
+          operationDone = await pollUntilDone(operationName, {
+            requireResolvedMedia: true,
+            resolveResult: resolveVeoVideoResult,
+            postDoneGraceAttempts: 6,
+            postDoneGraceDelayMs: 2500
+          });
         } catch (error) {
           lastStatus = Number(error?.status || 504) || 504;
           lastErrorDetail = `${videoModel} [${variant.label}]: ${String(error?.message || "Error al esperar operación Veo.")}`;
