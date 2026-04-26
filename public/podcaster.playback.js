@@ -31,6 +31,9 @@ export function createPodcasterStudioPlayback(deps = {}) {
     getInactiveStageVideoEl,
     setActiveStageVideoSlot,
     shouldUseNativeVideoAudioForRow,
+    resolveDialogueAudioForRow,
+    resolveStorageAudioUrl,
+    resolvePodcastStageAudioSrc,
     syncGeminiDialogueTrackWithRuntime,
     syncPodcastOnScreenTextOverlay
   } = deps;
@@ -177,6 +180,45 @@ export function createPodcasterStudioPlayback(deps = {}) {
     previewSceneAudio = null;
     previewSceneAudioRowId = "";
     previewSceneAudioSrc = "";
+  }
+
+  function resolveFreshVoiceAudioSrc(segment = null, runtime = null) {
+    const rowId = String(segment?.rowId || runtime?.rowId || "").trim();
+    const session = getActiveSession();
+    const storedAudio = rowId && typeof resolveDialogueAudioForRow === "function"
+      ? resolveDialogueAudioForRow(session, rowId)
+      : null;
+    const storedSrc = storedAudio && typeof resolveStorageAudioUrl === "function"
+      ? String(resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "") || "").trim()
+      : "";
+    const runtimeSrc = String(runtime?.audioSrc || "").trim();
+    const segmentSrc = String(segment?.audioSrc || "").trim();
+    return storedSrc || runtimeSrc || segmentSrc;
+  }
+
+  function buildPreviewAudioSource(src = "") {
+    const cleanSrc = String(src || "").trim();
+    if (!cleanSrc) return "";
+    return typeof resolvePodcastStageAudioSrc === "function"
+      ? String(resolvePodcastStageAudioSrc(cleanSrc) || cleanSrc).trim()
+      : cleanSrc;
+  }
+
+  function createPreviewSceneAudio(src = "", rowId = "") {
+    const logicalSrc = String(src || "").trim();
+    const playbackSrc = buildPreviewAudioSource(logicalSrc);
+    if (!playbackSrc) return null;
+    const audio = new Audio(playbackSrc);
+    audio.preload = "auto";
+    audio.__podcasterObjectUrlCacheKey = logicalSrc;
+    audio.addEventListener("error", () => {
+      logMontageDebug("stale-segment-audio-src", {
+        rowId: String(rowId || "").trim(),
+        src: logicalSrc.slice(0, 240)
+      });
+      try { syncGeminiDialogueTrackWithRuntime?.({ render: false, preserveStartMs: true }); } catch (_) {}
+    }, { once: true });
+    return audio;
   }
 
   function stopScrubPreview() {
@@ -1625,7 +1667,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       const rowId = String(segment?.rowId || "").trim();
       if (!rowId) return null;
       const runtime = runtimeByRowId.get(rowId) || null;
-      const audioSrc = String(segment?.audioSrc || runtime?.audioSrc || "").trim();
+      const audioSrc = resolveFreshVoiceAudioSrc(segment, runtime);
       if (!audioSrc) return null;
       const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
       const durationMs = Math.max(
@@ -2615,6 +2657,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
         && cfg.geminiDialogueTrack.segments.length > 0;
 
       if (wantsGeminiTimelinePreview) {
+        try { syncGeminiDialogueTrackWithRuntime?.({ render: false, preserveStartMs: true }); } catch (_) {}
         const voiceEntries = buildMontageVoiceTimelineEntries(cfg, runtimeEntries);
         const activeVoiceEntries = Array.isArray(voiceEntries)
           ? voiceEntries.filter((entry) => Number(currentMs || 0) >= Number(entry?.startMs || 0) && Number(currentMs || 0) < Number(entry?.endMs || 0))
@@ -2623,7 +2666,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
           .slice()
           .sort((a, b) => Number(b.startMs || 0) - Number(a.startMs || 0) || Number(b.zIndex || 0) - Number(a.zIndex || 0))[0] || null;
         const selectedRowId = String(selected?.rowId || "").trim();
-        const srcAudio = String(selected?.audioSrc || "").trim();
+        const srcAudio = resolveFreshVoiceAudioSrc(selected, selected);
         const clip = selected?.clip && typeof selected.clip === "object" ? selected.clip : null;
         const baseGeminiVolumePct = Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)));
         const overridePctRaw = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
@@ -2654,8 +2697,11 @@ export function createPodcasterStudioPlayback(deps = {}) {
           const shouldSwap = previewSceneAudioRowId !== selectedRowId || previewSceneAudioSrc !== srcAudio || !previewSceneAudio;
           if (shouldSwap) {
             stopPreviewSceneAudio();
-            previewSceneAudio = new Audio(srcAudio);
-            previewSceneAudio.preload = "auto";
+            previewSceneAudio = createPreviewSceneAudio(srcAudio, selectedRowId);
+            if (!previewSceneAudio) {
+              stopPreviewSceneAudio();
+              return;
+            }
             previewSceneAudioRowId = selectedRowId;
             previewSceneAudioSrc = srcAudio;
             previewSceneAudio.volume = effectiveVolume;
@@ -2663,6 +2709,11 @@ export function createPodcasterStudioPlayback(deps = {}) {
             try { previewSceneAudio.currentTime = offsetWithinAudio; } catch (_) {}
             previewSceneAudio.play().catch(() => {});
           } else {
+            try {
+              if (typeof resolvePodcastStageAudioSrc === "function" && previewSceneAudio?.__podcasterObjectUrlCacheKey) {
+                resolvePodcastStageAudioSrc(previewSceneAudio.__podcasterObjectUrlCacheKey);
+              }
+            } catch (_) {}
             previewSceneAudio.volume = effectiveVolume;
             previewSceneAudio.playbackRate = speed;
             const currentAudioTime = Number(previewSceneAudio.currentTime || 0);
@@ -2689,8 +2740,11 @@ export function createPodcasterStudioPlayback(deps = {}) {
           const shouldSwap = previewSceneAudioRowId !== rowId || previewSceneAudioSrc !== srcAudio || !previewSceneAudio;
           if (shouldSwap) {
             stopPreviewSceneAudio();
-            previewSceneAudio = new Audio(srcAudio);
-            previewSceneAudio.preload = "auto";
+            previewSceneAudio = createPreviewSceneAudio(srcAudio, rowId);
+            if (!previewSceneAudio) {
+              stopPreviewSceneAudio();
+              return;
+            }
             previewSceneAudioRowId = rowId;
             previewSceneAudioSrc = srcAudio;
             previewSceneAudio.volume = masterVolume;
@@ -2698,6 +2752,11 @@ export function createPodcasterStudioPlayback(deps = {}) {
             try { previewSceneAudio.currentTime = offsetWithinAudio; } catch (_) {}
             previewSceneAudio.play().catch(() => {});
           } else {
+            try {
+              if (typeof resolvePodcastStageAudioSrc === "function" && previewSceneAudio?.__podcasterObjectUrlCacheKey) {
+                resolvePodcastStageAudioSrc(previewSceneAudio.__podcasterObjectUrlCacheKey);
+              }
+            } catch (_) {}
             previewSceneAudio.volume = masterVolume;
             previewSceneAudio.playbackRate = speed;
             const currentAudioTime = Number(previewSceneAudio.currentTime || 0);

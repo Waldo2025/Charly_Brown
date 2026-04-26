@@ -748,6 +748,8 @@ const PODCAST_STAGE_VIDEO_CACHE_LIMIT = 12;
 const podcastStageVideoCache = new Map();
 const PODCAST_STAGE_AUDIO_CACHE_LIMIT = 24;
 const podcastStageAudioCache = new Map();
+const staleProxyMediaUrls = new Set();
+const staleDialogueVideoSourceKeys = new Set();
 let localProxyMediaUnavailable = false;
 let localProxyMediaUnavailableAt = 0;
 const LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS = 45000;
@@ -779,6 +781,53 @@ function shouldShortCircuitLocalProxyMediaFetch(url = "") {
   if (!isLocalProxyMediaUrl(url)) return false;
   if (!localProxyMediaUnavailable || !localProxyMediaUnavailableAt) return false;
   return (Date.now() - localProxyMediaUnavailableAt) <= LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS;
+}
+
+function buildDialogueVideoSourceKey(sessionId = "", rowId = "", storagePath = "", downloadUrl = "") {
+  const cleanSessionId = String(sessionId || "").trim();
+  const cleanRowId = String(rowId || "").trim();
+  const cleanStoragePath = String(storagePath || "").trim();
+  const cleanDownloadUrl = String(downloadUrl || "").trim();
+  if (!cleanRowId) return "";
+  return `${cleanSessionId}:${cleanRowId}:${cleanStoragePath || cleanDownloadUrl}`;
+}
+
+function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = {}) {
+  const clean = String(url || "").trim();
+  if (!clean) return;
+  staleProxyMediaUrls.add(clean);
+  if (PODCAST_RENDER_DEBUG) {
+    console.warn("[podcaster]", reason, {
+      url: clean.slice(0, 240),
+      ...payload
+    });
+  }
+}
+
+function isMarkedStaleProxyMediaUrl(url = "") {
+  const clean = String(url || "").trim();
+  return clean ? staleProxyMediaUrls.has(clean) : false;
+}
+
+function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {
+  const storagePath = String(source?.storagePath || "").trim();
+  const downloadUrl = String(source?.downloadUrl || "").trim();
+  const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
+  if (key) staleDialogueVideoSourceKeys.add(key);
+  const proxiedUrl = resolveStorageVideoUrl(downloadUrl, storagePath);
+  if (proxiedUrl) {
+    markStaleProxyMediaUrl(proxiedUrl, reason, {
+      rowId,
+      storagePath: storagePath || undefined
+    });
+  }
+}
+
+function isStaleDialogueVideoSource(sessionId = "", rowId = "", source = null) {
+  const storagePath = String(source?.storagePath || "").trim();
+  const downloadUrl = String(source?.downloadUrl || "").trim();
+  const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
+  return key ? staleDialogueVideoSourceKeys.has(key) : false;
 }
 let podcastRenderState = {
   timelineStructureKey: "",
@@ -8291,7 +8340,10 @@ function buildTimelineRuntimeEntries(session = null) {
     const clip = clipMap[rowId];
     if (!clip) return null;
     const sceneClip = resolveDialogueVideoForRow(activeSession, rowId);
-    const primarySegment = resolvePrimaryDialogueVideoSegment(sceneClip);
+    const primarySegment = resolvePrimaryDialogueVideoSegment(sceneClip, {
+      sessionId: String(activeSession?.id || "").trim(),
+      rowId
+    });
     const videoSrc = resolveStorageVideoUrl(
       primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
       primarySegment?.storagePath || sceneClip?.storagePath || ""
@@ -8679,35 +8731,38 @@ function resolveDialogueVideoSegments(clip = null) {
   }];
 }
 
-function resolvePrimaryDialogueVideoSegment(clip = null) {
+function getOrderedDialogueVideoSegmentsForPlayback(clip = null, options = {}) {
   if (!clip || typeof clip !== "object") return clip;
+  const sessionId = String(options?.sessionId || "").trim();
+  const rowId = String(options?.rowId || clip?.rowId || "").trim();
   const segments = resolveDialogueVideoSegments(clip).filter(Boolean);
-  if (!segments.length) return clip;
+  if (!segments.length) return [];
   const candidates = segments.filter((segment) => hasStoredMediaSource(segment));
   const list = candidates.length ? candidates : segments;
   const ready = list.filter((segment) => String(segment?.status || "").trim().toLowerCase() === "ready");
   const pool = ready.length ? ready : list;
+  const ordered = pool.slice().sort((left, right) => {
+    const leftIdx = Number(left?.index);
+    const rightIdx = Number(right?.index);
+    if (Number.isFinite(leftIdx) || Number.isFinite(rightIdx)) {
+      return (Number.isFinite(rightIdx) ? rightIdx : -1) - (Number.isFinite(leftIdx) ? leftIdx : -1);
+    }
+    const leftTs = new Date(String(left?.updatedAt || left?.createdAt || "")).getTime();
+    const rightTs = new Date(String(right?.updatedAt || right?.createdAt || "")).getTime();
+    if (Number.isFinite(leftTs) || Number.isFinite(rightTs)) {
+      return (Number.isFinite(rightTs) ? rightTs : 0) - (Number.isFinite(leftTs) ? leftTs : 0);
+    }
+    return 0;
+  });
+  if (!sessionId || !rowId) return ordered;
+  const fresh = ordered.filter((segment) => !isStaleDialogueVideoSource(sessionId, rowId, segment));
+  return fresh;
+}
 
-  const withIndex = pool
-    .map((segment) => ({ segment, idx: Number(segment?.index) }))
-    .filter((item) => Number.isFinite(item.idx));
-  if (withIndex.length) {
-    withIndex.sort((a, b) => b.idx - a.idx);
-    return withIndex[0].segment || clip;
-  }
-
-  const withTime = pool
-    .map((segment) => {
-      const ts = new Date(String(segment?.updatedAt || segment?.createdAt || "")).getTime();
-      return { segment, ts: Number.isFinite(ts) ? ts : 0 };
-    })
-    .filter((item) => item.ts > 0);
-  if (withTime.length) {
-    withTime.sort((a, b) => b.ts - a.ts);
-    return withTime[0].segment || clip;
-  }
-
-  return pool[pool.length - 1] || clip;
+function resolvePrimaryDialogueVideoSegment(clip = null, options = {}) {
+  const ordered = getOrderedDialogueVideoSegmentsForPlayback(clip, options);
+  if (Array.isArray(ordered)) return ordered[0] || null;
+  return clip || null;
 }
 
 function hasGeneratedDialogueVideoForRow(session = null, rowId = "") {
@@ -17876,6 +17931,7 @@ function syncPodcastStudioRuntimeUi(session = null, rowId = "", speaker = "", op
 
 function syncPodcastVideoStageMedia(session = null, rowId = "") {
   const activeSession = session || getActiveSession();
+  const sessionId = String(activeSession?.id || "").trim();
   const educationalMode = isEducationalVideoMode(activeSession);
   const explicitKey = String(rowId || "").trim();
   const key = explicitKey || String(podcastVideoState.activeRowId || "").trim();
@@ -17904,10 +17960,11 @@ function syncPodcastVideoStageMedia(session = null, rowId = "") {
     return;
   }
   const clip = resolveDialogueVideoForRow(activeSession, key);
-  const firstSegment = resolvePrimaryDialogueVideoSegment(clip);
+  const firstSegment = resolvePrimaryDialogueVideoSegment(clip, { sessionId, rowId: key });
+  const staleBaseClip = isStaleDialogueVideoSource(sessionId, key, clip);
   const src = resolveStorageVideoUrl(
-    firstSegment?.downloadUrl || clip?.downloadUrl || "",
-    firstSegment?.storagePath || clip?.storagePath || ""
+    firstSegment?.downloadUrl || (staleBaseClip ? "" : (clip?.downloadUrl || "")),
+    firstSegment?.storagePath || (staleBaseClip ? "" : (clip?.storagePath || ""))
   );
   const stageVideo = activeBundle.foreground;
   const inactiveVideo = inactiveBundle.foreground;
@@ -18835,6 +18892,9 @@ const podcastStudioPlayback = createPodcasterStudioPlayback({
   getInactiveStageVideoEl,
   setActiveStageVideoSlot,
   shouldUseNativeVideoAudioForRow,
+  resolveDialogueAudioForRow,
+  resolveStorageAudioUrl,
+  resolvePodcastStageAudioSrc,
   syncGeminiDialogueTrackWithRuntime,
   syncPodcastOnScreenTextOverlay
 });
@@ -19147,6 +19207,32 @@ function assignStageVideoElementSource(videoEl = null, source = "", options = {}
     if (mode === "cache" && cacheKey) {
       videoEl.dataset.objectUrlCacheKey = cacheKey;
     }
+  }
+  if (!videoEl.__podcasterStageErrorBound) {
+    videoEl.addEventListener("error", () => {
+      const failedSrc = String(videoEl.dataset.src || videoEl.currentSrc || videoEl.src || "").trim();
+      if (!failedSrc) return;
+      markStaleProxyMediaUrl(failedSrc, "proxy-media-404", {
+        rowId: String(podcastVideoState.activeRowId || "").trim() || undefined
+      });
+      const activeSession = getActiveSession();
+      const activeRowId = String(podcastVideoState.activeRowId || "").trim();
+      if (activeSession && activeRowId) {
+        const clip = resolveDialogueVideoForRow(activeSession, activeRowId);
+        const attemptedSegment = resolveDialogueVideoSegments(clip).find((segment) => {
+          const candidateSrc = resolveStorageVideoUrl(
+            segment?.downloadUrl || clip?.downloadUrl || "",
+            segment?.storagePath || clip?.storagePath || ""
+          );
+          return candidateSrc && candidateSrc === failedSrc;
+        }) || clip;
+        markStaleDialogueVideoSource(String(activeSession?.id || "").trim(), activeRowId, attemptedSegment);
+        queueMicrotask(() => {
+          try { syncPodcastVideoStageMedia(activeSession, activeRowId); } catch (_) {}
+        });
+      }
+    });
+    videoEl.__podcasterStageErrorBound = true;
   }
 
   const preview = els.podcastVideoStage?.querySelector?.(".podcast-video-preview");
