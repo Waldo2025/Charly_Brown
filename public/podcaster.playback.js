@@ -1087,6 +1087,14 @@ export function createPodcasterStudioPlayback(deps = {}) {
     return Math.max(0, Math.min(1, Number(value) || 0));
   }
 
+  function getConfiguredMontageBackgroundDuckFactor() {
+    const panelCfg = typeof getPanelMontageMusicConfig === "function"
+      ? getPanelMontageMusicConfig()
+      : null;
+    const duckingPct = Math.max(0, Math.min(40, Number(panelCfg?.duckingWhenGeminiPct ?? 40) || 0));
+    return clamp01(1 - (duckingPct / 100));
+  }
+
   function setMontageBackgroundDuckFactor(value = 1) {
     montageBackgroundDuckFactor = Math.max(0.18, Math.min(1, Number(value) || 1));
   }
@@ -1827,7 +1835,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       podcastVideoState.montageAudioPlayers = {};
       syncMontageVoiceAudioEl(activeEntries, currentMs, speed, runtimeEntries);
       const voiceVolume = Number(podcastVideoState.audioEl?.volume || 0);
-      setMontageBackgroundDuckFactor(voiceVolume > 0.0001 ? Math.max(0.46, 1 - Math.min(0.54, voiceVolume * 0.50)) : 1);
+      setMontageBackgroundDuckFactor(voiceVolume > 0.0001 ? getConfiguredMontageBackgroundDuckFactor() : 1);
       return;
     }
     const session = getActiveSession();
@@ -1971,7 +1979,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     });
 
     podcastVideoState.montageAudioPlayers = nextMap;
-    setMontageBackgroundDuckFactor(activeVoicePeak > 0.0001 ? Math.max(0.46, 1 - Math.min(0.54, activeVoicePeak * 0.50)) : 1);
+    setMontageBackgroundDuckFactor(activeVoicePeak > 0.0001 ? getConfiguredMontageBackgroundDuckFactor() : 1);
   }
 
   async function syncStudioTimelinePreview(currentMs = 0, runtimeEntries = [], forcedActiveEntries = null, options = {}) {

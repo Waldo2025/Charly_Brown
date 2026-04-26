@@ -181,6 +181,18 @@ function buildFfmpegDuckVolumeExpr(segments = [], duckVolume = 0.46) {
   return `if(gt(${activeExpr},0),${factor},1)`;
 }
 
+function normalizeMontageBackgroundDuckVolume(input = null, fallback = 0.60) {
+  if (input === null || input === undefined || input === "") {
+    return Math.max(0, Math.min(1, Number(fallback) || 0.60));
+  }
+  const raw = Number(input);
+  if (!Number.isFinite(raw)) {
+    return Math.max(0, Math.min(1, Number(fallback) || 0.60));
+  }
+  const factor = raw > 1 ? 1 - (Math.max(0, Math.min(40, raw)) / 100) : raw;
+  return Math.max(0, Math.min(1, Number(factor) || 0.60));
+}
+
 function resolveFfmpegDrawtextFontFile() {
   return FFMPEG_DRAWTEXT_FONT_CANDIDATES.find((candidate) => {
     try {
@@ -5787,7 +5799,8 @@ function normalizeMontageExportRequestBody(body = {}) {
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextSettings,
-    backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null
+    backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,
+    backgroundMusicDuckingPct: Math.max(0, Math.min(40, Number(raw?.backgroundMusicDuckingPct ?? raw?.backgroundMusic?.duckingWhenGeminiPct ?? 40) || 0))
   };
 }
 
@@ -6344,6 +6357,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     let finalOutPath = concatOutPath;
     if (input.useTimelineAudio) {
       const segmentInputs = [];
+      const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
+        input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
+        0.60
+      );
       emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
       for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
         const segment = input.timelineAudioSegments[i] || {};
@@ -6365,7 +6382,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const audioCodec = outExt === "webm" ? "libopus" : "aac";
         const audioBitrate = outExt === "webm" ? "128k" : "160k";
         const filters = [];
-        const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.46));
+        const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume));
         const labels = [];
         segmentInputs.forEach((item, idx) => {
           const segment = item.segment || {};
@@ -6412,6 +6429,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const rawVolumePct = Number(input.backgroundMusic?.volumePct ?? 25);
       const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
       const volume = Math.max(0, Math.min(1, Math.max(0, Math.min(100, legacyScaledPct)) / 100));
+      const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
+        input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
+        0.60
+      );
       const mixedOutPath = path.join(tmpDir, `montage-mixed.${outExt}`);
       const audioCodec = outExt === "webm" ? "libopus" : "aac";
       const audioBitrate = outExt === "webm" ? "128k" : "160k";
@@ -6420,7 +6441,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-i", finalOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
         "-filter_complex",
         input.normalizedGeminiTimelineSegments.length
-          ? `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.46))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
+          ? `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
           : `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
         "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),

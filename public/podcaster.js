@@ -219,6 +219,8 @@ const els = {
   audioTrackSourceInfo: document.getElementById("audioTrackSourceInfo"),
   audioTrackMontageVolume: document.getElementById("audioTrackMontageVolume"),
   audioTrackMontageVolumeNumber: document.getElementById("audioTrackMontageVolumeNumber"),
+  audioTrackDuckVolume: document.getElementById("audioTrackDuckVolume"),
+  audioTrackDuckVolumeNumber: document.getElementById("audioTrackDuckVolumeNumber"),
   audioTrackStabilizeToggle: document.getElementById("audioTrackStabilizeToggle"),
   scriptSetupModal: document.getElementById("scriptSetupModal"),
   closeScriptSetupBtn: document.getElementById("closeScriptSetupBtn"),
@@ -936,6 +938,7 @@ let panelMusicState = {
   preset: "ambient",
   volume: 22,
   montageVolume: 0,
+  duckingWhenGeminiPct: 40,
   stabilize: false,
   playing: false,
   sourceType: "preset",
@@ -4062,6 +4065,7 @@ function loadPanelMusicSettings() {
     const preset = ["ambient", "focus", "pulse"].includes(parsed?.preset) ? parsed.preset : "ambient";
     const volume = Math.max(0, Math.min(100, Number(parsed?.volume ?? 22)));
     const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
+    const duckingWhenGeminiPct = Math.max(0, Math.min(40, Number(parsed?.duckingWhenGeminiPct ?? 40)));
     const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
     const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
     const legacyTrack = normalizePanelMusicTrack(parsed?.track || null);
@@ -4093,6 +4097,7 @@ function loadPanelMusicSettings() {
       preset,
       volume,
       montageVolume,
+      duckingWhenGeminiPct,
       stabilize,
       sourceType,
       selectedTrackKind,
@@ -4105,6 +4110,7 @@ function loadPanelMusicSettings() {
       preset: "ambient",
       volume: 22,
       montageVolume: 0,
+      duckingWhenGeminiPct: 40,
       stabilize: false,
       sourceType: "preset",
       selectedTrackKind: "uploaded",
@@ -4134,6 +4140,7 @@ function persistPanelMusicSettings() {
     preset: panelMusicState.preset,
     volume: panelMusicState.volume,
     montageVolume: panelMusicState.montageVolume,
+    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
     stabilize: panelMusicState.stabilize === true,
     sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
     selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -4181,6 +4188,7 @@ function persistPanelMusicToActiveSession() {
       preset: panelMusicState.preset,
       volume: panelMusicState.volume,
       montageVolume: panelMusicState.montageVolume,
+      duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
       stabilize: panelMusicState.stabilize === true,
       sourceType: panelMusicState.sourceType,
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -11681,6 +11689,14 @@ function setPanelMontageMusicVolume(nextVolume = 22) {
   persistAudioTrackMixSettings();
 }
 
+function setPanelMontageDuckingWhenGeminiPct(nextValue = 40) {
+  const clamped = Math.max(0, Math.min(40, Number(nextValue) || 0));
+  panelMusicState.duckingWhenGeminiPct = clamped;
+  if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(clamped);
+  if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(clamped);
+  persistAudioTrackMixSettings();
+}
+
 function setPanelMontageStabilize(enabled = false) {
   panelMusicState.stabilize = enabled === true;
   if (els.audioTrackStabilizeToggle) {
@@ -12203,6 +12219,12 @@ function syncMusicControls() {
   if (els.audioTrackMontageVolumeNumber) {
     els.audioTrackMontageVolumeNumber.value = String(Math.max(0, Math.min(100, Number(panelMusicState.montageVolume) || 0)));
   }
+  if (els.audioTrackDuckVolume) {
+    els.audioTrackDuckVolume.value = String(Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40) || 0)));
+  }
+  if (els.audioTrackDuckVolumeNumber) {
+    els.audioTrackDuckVolumeNumber.value = String(Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40) || 0)));
+  }
   if (els.audioTrackStabilizeToggle) {
     els.audioTrackStabilizeToggle.checked = panelMusicState.stabilize === true;
   }
@@ -12229,6 +12251,7 @@ function syncPanelMusicStateFromSession(session = null) {
     preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
     volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
     montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 0))),
+    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(cfg?.duckingWhenGeminiPct ?? 40))),
     stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
     sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
     selectedTrackKind: resolvePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
@@ -12249,6 +12272,7 @@ function syncPanelMusicStateFromSession(session = null) {
     preset: next.preset,
     volume: next.volume,
     montageVolume: next.montageVolume,
+    duckingWhenGeminiPct: next.duckingWhenGeminiPct,
     stabilize: next.stabilize,
     sourceType: next.sourceType,
     selectedTrackKind: next.selectedTrackKind,
@@ -12361,6 +12385,7 @@ function getPanelMontageMusicConfig() {
     sourceUrl: String(sourceUrl || "").trim(),
     sourceItems,
     volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
+    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
     stabilize: panelMusicState.stabilize === true,
     durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
     startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
@@ -12458,6 +12483,7 @@ function buildCloudSessionPayload(session = null) {
     preset: panelMusicState.preset,
     volume: panelMusicState.volume,
     montageVolume: panelMusicState.montageVolume,
+    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
     stabilize: panelMusicState.stabilize === true,
     sourceType: panelMusicState.sourceType,
     selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -12523,6 +12549,7 @@ function buildCloudSessionPayload(session = null) {
       preset: String(panelMusicConfig.preset || "ambient"),
       volume: Math.max(0, Math.min(100, Number(panelMusicConfig.volume) || 0)),
       montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? 0))),
+      duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicConfig.duckingWhenGeminiPct ?? 40))),
       stabilize: panelMusicConfig.stabilize === true,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicConfig.selectedTrackKind),
@@ -14474,13 +14501,24 @@ async function playPodcastStageVideo(options = {}) {
         if (fallbackResponse.status === 404 || fallbackResponse.status === 403) {
           const rowId = String(podcastVideoState.activeRowId || "").trim();
           const sessionId = String(getActiveSession()?.id || "").trim();
-          const brokenKey = `${sessionId}:${rowId}`;
-          if (rowId && !brokenDialogueVideoRows.has(brokenKey)) {
-            brokenDialogueVideoRows.add(brokenKey);
-            removeDialogueVideoForRow(rowId, { silent: true });
-            if (!silent) {
-              addChatMessage("system", "Video de escena no disponible o sin acceso, se limpió referencia rota.");
-            }
+          const clip = rowId ? resolveDialogueVideoForRow(getActiveSession(), rowId) : null;
+          const attemptedSegment = resolveDialogueVideoSegments(clip).find((segment) => {
+            const candidateSrc = resolveStorageVideoUrl(
+              segment?.downloadUrl || clip?.downloadUrl || "",
+              segment?.storagePath || clip?.storagePath || ""
+            );
+            return candidateSrc && candidateSrc === fallbackSrc;
+          }) || clip;
+          if (rowId && attemptedSegment) {
+            markStaleDialogueVideoSource(sessionId, rowId, attemptedSegment, "proxy-media-access-denied");
+          }
+          markStaleProxyMediaUrl(fallbackSrc, "proxy-media-access-denied", {
+            kind: "stage-playback-fallback",
+            rowId,
+            status: Number(fallbackResponse.status || 0)
+          });
+          if (!silent) {
+            addChatMessage("system", "Video de escena temporalmente no disponible. Se conservará la referencia y se intentará usar otra fuente.");
           }
           updatePodcastVideoTransportUi();
           return false;
@@ -21242,7 +21280,8 @@ function buildMontageExportPayload(session = null) {
   const backgroundMusic = includeBackgroundMusic ? {
     storagePath: "",
     url: trackUrl,
-    volumePct: trackVolumePct
+    volumePct: trackVolumePct,
+    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusic?.duckingWhenGeminiPct ?? 40)))
   } : null;
 
   const requestedFormat = String(montageExportState.format || "mp4_h264").trim();
@@ -21258,6 +21297,7 @@ function buildMontageExportPayload(session = null) {
     resolution: montageExportState.resolution,
     includeBackgroundMusic,
     backgroundMusic,
+    backgroundMusicDuckingPct: Math.max(0, Math.min(40, Number(panelMusic?.duckingWhenGeminiPct ?? 40))),
     filename: String(montageExportState.filename || defaultMontageExportFilename()).trim(),
     onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
       enabled: true,
@@ -28389,6 +28429,18 @@ function attachEvents() {
   if (els.audioTrackMontageVolumeNumber) {
     els.audioTrackMontageVolumeNumber.addEventListener("input", () => {
       setPanelMontageMusicVolume(els.audioTrackMontageVolumeNumber.value);
+      renderPodcastVideoTimeline(getActiveSession());
+    });
+  }
+  if (els.audioTrackDuckVolume) {
+    els.audioTrackDuckVolume.addEventListener("input", () => {
+      setPanelMontageDuckingWhenGeminiPct(els.audioTrackDuckVolume.value);
+      renderPodcastVideoTimeline(getActiveSession());
+    });
+  }
+  if (els.audioTrackDuckVolumeNumber) {
+    els.audioTrackDuckVolumeNumber.addEventListener("input", () => {
+      setPanelMontageDuckingWhenGeminiPct(els.audioTrackDuckVolumeNumber.value);
       renderPodcastVideoTimeline(getActiveSession());
     });
   }
