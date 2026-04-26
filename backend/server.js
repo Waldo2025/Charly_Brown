@@ -4202,7 +4202,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       ...requestedCandidates.map((item) => normalizeModel(item || "")),
       ...PODCASTER_VIDEO_MODEL_CANDIDATES
     ].filter(Boolean)));
-    const filteredModels = (strictIdentity || relateWithPreviousScene)
+    const filteredModels = strictIdentity
       ? mergedModels.filter((modelName) => !/fast/i.test(String(modelName || "")))
       : mergedModels;
     const videoModels = filteredModels.length ? filteredModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
