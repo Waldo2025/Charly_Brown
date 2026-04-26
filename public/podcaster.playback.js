@@ -1091,8 +1091,8 @@ export function createPodcasterStudioPlayback(deps = {}) {
     const panelCfg = typeof getPanelMontageMusicConfig === "function"
       ? getPanelMontageMusicConfig()
       : null;
-    const duckingPct = Math.max(0, Math.min(40, Number(panelCfg?.duckingWhenGeminiPct ?? 40) || 0));
-    return clamp01(1 - (duckingPct / 100));
+    const duckingPct = Math.max(40, Math.min(100, Number(panelCfg?.duckingWhenGeminiPct ?? 60) || 0));
+    return clamp01(duckingPct / 100);
   }
 
   function setMontageBackgroundDuckFactor(value = 1) {

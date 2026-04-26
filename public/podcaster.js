@@ -938,7 +938,7 @@ let panelMusicState = {
   preset: "ambient",
   volume: 22,
   montageVolume: 0,
-  duckingWhenGeminiPct: 40,
+  duckingWhenGeminiPct: 60,
   stabilize: false,
   playing: false,
   sourceType: "preset",
@@ -4060,12 +4060,19 @@ function redirectToIndex() {
 
 function loadPanelMusicSettings() {
   const storageKey = resolvePanelMusicStorageKey();
+  const normalizePanelMusicDuckingWhenGeminiPct = (value, fallback = 60) => {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return fallback;
+    if (raw >= 40 && raw <= 100) return raw;
+    if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
+    return fallback;
+  };
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
     const preset = ["ambient", "focus", "pulse"].includes(parsed?.preset) ? parsed.preset : "ambient";
     const volume = Math.max(0, Math.min(100, Number(parsed?.volume ?? 22)));
     const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
-    const duckingWhenGeminiPct = Math.max(0, Math.min(40, Number(parsed?.duckingWhenGeminiPct ?? 40)));
+    const duckingWhenGeminiPct = normalizePanelMusicDuckingWhenGeminiPct(parsed?.duckingWhenGeminiPct, 60);
     const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
     const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
     const legacyTrack = normalizePanelMusicTrack(parsed?.track || null);
@@ -4110,7 +4117,7 @@ function loadPanelMusicSettings() {
       preset: "ambient",
       volume: 22,
       montageVolume: 0,
-      duckingWhenGeminiPct: 40,
+      duckingWhenGeminiPct: 60,
       stabilize: false,
       sourceType: "preset",
       selectedTrackKind: "uploaded",
@@ -4140,7 +4147,7 @@ function persistPanelMusicSettings() {
     preset: panelMusicState.preset,
     volume: panelMusicState.volume,
     montageVolume: panelMusicState.montageVolume,
-    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
+    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
     stabilize: panelMusicState.stabilize === true,
     sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
     selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -4188,7 +4195,7 @@ function persistPanelMusicToActiveSession() {
       preset: panelMusicState.preset,
       volume: panelMusicState.volume,
       montageVolume: panelMusicState.montageVolume,
-      duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
+      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicState.stabilize === true,
       sourceType: panelMusicState.sourceType,
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -11689,8 +11696,8 @@ function setPanelMontageMusicVolume(nextVolume = 22) {
   persistAudioTrackMixSettings();
 }
 
-function setPanelMontageDuckingWhenGeminiPct(nextValue = 40) {
-  const clamped = Math.max(0, Math.min(40, Number(nextValue) || 0));
+function setPanelMontageDuckingWhenGeminiPct(nextValue = 60) {
+  const clamped = Math.max(40, Math.min(100, Number(nextValue) || 0));
   panelMusicState.duckingWhenGeminiPct = clamped;
   if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(clamped);
   if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(clamped);
@@ -12220,10 +12227,10 @@ function syncMusicControls() {
     els.audioTrackMontageVolumeNumber.value = String(Math.max(0, Math.min(100, Number(panelMusicState.montageVolume) || 0)));
   }
   if (els.audioTrackDuckVolume) {
-    els.audioTrackDuckVolume.value = String(Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40) || 0)));
+    els.audioTrackDuckVolume.value = String(Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60) || 0)));
   }
   if (els.audioTrackDuckVolumeNumber) {
-    els.audioTrackDuckVolumeNumber.value = String(Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40) || 0)));
+    els.audioTrackDuckVolumeNumber.value = String(Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60) || 0)));
   }
   if (els.audioTrackStabilizeToggle) {
     els.audioTrackStabilizeToggle.checked = panelMusicState.stabilize === true;
@@ -12251,7 +12258,13 @@ function syncPanelMusicStateFromSession(session = null) {
     preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
     volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
     montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 0))),
-    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(cfg?.duckingWhenGeminiPct ?? 40))),
+    duckingWhenGeminiPct: (() => {
+      const raw = Number(cfg?.duckingWhenGeminiPct);
+      if (!Number.isFinite(raw)) return 60;
+      if (raw >= 40 && raw <= 100) return raw;
+      if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
+      return 60;
+    })(),
     stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
     sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
     selectedTrackKind: resolvePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
@@ -12385,7 +12398,7 @@ function getPanelMontageMusicConfig() {
     sourceUrl: String(sourceUrl || "").trim(),
     sourceItems,
     volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
-    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
+    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
     stabilize: panelMusicState.stabilize === true,
     durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
     startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
@@ -12483,7 +12496,7 @@ function buildCloudSessionPayload(session = null) {
     preset: panelMusicState.preset,
     volume: panelMusicState.volume,
     montageVolume: panelMusicState.montageVolume,
-    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicState.duckingWhenGeminiPct ?? 40))),
+    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
     stabilize: panelMusicState.stabilize === true,
     sourceType: panelMusicState.sourceType,
     selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
@@ -12549,7 +12562,7 @@ function buildCloudSessionPayload(session = null) {
       preset: String(panelMusicConfig.preset || "ambient"),
       volume: Math.max(0, Math.min(100, Number(panelMusicConfig.volume) || 0)),
       montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? 0))),
-      duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusicConfig.duckingWhenGeminiPct ?? 40))),
+      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicConfig.stabilize === true,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicConfig.selectedTrackKind),
@@ -21281,7 +21294,7 @@ function buildMontageExportPayload(session = null) {
     storagePath: "",
     url: trackUrl,
     volumePct: trackVolumePct,
-    duckingWhenGeminiPct: Math.max(0, Math.min(40, Number(panelMusic?.duckingWhenGeminiPct ?? 40)))
+    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60)))
   } : null;
 
   const requestedFormat = String(montageExportState.format || "mp4_h264").trim();
@@ -21297,7 +21310,7 @@ function buildMontageExportPayload(session = null) {
     resolution: montageExportState.resolution,
     includeBackgroundMusic,
     backgroundMusic,
-    backgroundMusicDuckingPct: Math.max(0, Math.min(40, Number(panelMusic?.duckingWhenGeminiPct ?? 40))),
+    backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
     filename: String(montageExportState.filename || defaultMontageExportFilename()).trim(),
     onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
       enabled: true,

@@ -189,7 +189,9 @@ function normalizeMontageBackgroundDuckVolume(input = null, fallback = 0.60) {
   if (!Number.isFinite(raw)) {
     return Math.max(0, Math.min(1, Number(fallback) || 0.60));
   }
-  const factor = raw > 1 ? 1 - (Math.max(0, Math.min(40, raw)) / 100) : raw;
+  const factor = raw > 1
+    ? (raw >= 40 && raw <= 100 ? raw / 100 : Math.max(40, 100 - Math.max(0, Math.min(40, raw))) / 100)
+    : raw;
   return Math.max(0, Math.min(1, Number(factor) || 0.60));
 }
 
@@ -5800,7 +5802,13 @@ function normalizeMontageExportRequestBody(body = {}) {
     onScreenTextSegments,
     onScreenTextSettings,
     backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,
-    backgroundMusicDuckingPct: Math.max(0, Math.min(40, Number(raw?.backgroundMusicDuckingPct ?? raw?.backgroundMusic?.duckingWhenGeminiPct ?? 40) || 0))
+    backgroundMusicDuckingPct: (() => {
+      const rawValue = Number(raw?.backgroundMusicDuckingPct ?? raw?.backgroundMusic?.duckingWhenGeminiPct);
+      if (!Number.isFinite(rawValue)) return 60;
+      if (rawValue >= 40 && rawValue <= 100) return rawValue;
+      if (rawValue >= 0 && rawValue < 40) return Math.max(40, 100 - rawValue);
+      return 60;
+    })()
   };
 }
 
