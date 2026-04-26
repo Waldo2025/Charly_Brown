@@ -34,6 +34,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     resolveDialogueAudioForRow,
     resolveStorageAudioUrl,
     resolvePodcastStageAudioSrc,
+    markStaleProxyMediaUrl,
     syncGeminiDialogueTrackWithRuntime,
     syncPodcastOnScreenTextOverlay
   } = deps;
@@ -212,6 +213,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     audio.preload = "auto";
     audio.__podcasterObjectUrlCacheKey = logicalSrc;
     audio.addEventListener("error", () => {
+      try { markStaleProxyMediaUrl?.(logicalSrc, "proxy-media-404", { kind: "preview-scene-audio", rowId: String(rowId || "").trim() }); } catch (_) {}
       logMontageDebug("stale-segment-audio-src", {
         rowId: String(rowId || "").trim(),
         src: logicalSrc.slice(0, 240)
@@ -1905,6 +1907,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
           audio.addEventListener("error", () => {
             failedSceneAudioRows.add(rowId);
             audio.__podcasterErrored = true;
+            try { markStaleProxyMediaUrl?.(src, "proxy-media-404", { kind: "montage-scene-audio", rowId }); } catch (_) {}
             logMontageDebug("scene-audio-error", { rowId, src: String(src || "").trim().slice(0, 240) });
           });
           audio.__podcasterSceneAudioErrorBound = true;

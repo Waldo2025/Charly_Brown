@@ -74,6 +74,8 @@ const SPEECH_WORDS_PER_SEC = 2.4;
 const MAX_LOCAL_MUSIC_DATA_URL_CHARS = 1_800_000;
 const MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS = 900_000;
 const MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS = 8_000_000;
+const MAX_CLOUD_SESSION_PAYLOAD_BYTES = 900 * 1024;
+const CLOUD_SESSION_PAYLOAD_TARGET_BYTES = 860 * 1024;
 const DEFAULT_DISFLUENCY_CONFIG = Object.freeze({
   enabled: false,
   fillerLevel: 20,
@@ -807,6 +809,77 @@ function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = 
 function isMarkedStaleProxyMediaUrl(url = "") {
   const clean = String(url || "").trim();
   return clean ? staleProxyMediaUrls.has(clean) : false;
+}
+
+function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media") {
+  const clean = String(rawUrl || "").trim();
+  const cleanStoragePath = String(storagePath || "").trim();
+  const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
+  if (cleanStoragePath) {
+    const storageProxyUrl = buildApiUrl(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+    if (!isMarkedStaleProxyMediaUrl(storageProxyUrl)) {
+      return storageProxyUrl;
+    }
+    if (PODCAST_RENDER_DEBUG) {
+      console.warn("[podcaster]", `${kind}-storagepath-stale-fallback`, {
+        storagePath: cleanStoragePath,
+        fallbackToUrl: Boolean(clean)
+      });
+    }
+  }
+  if (!clean) return "";
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    return buildApiUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
+  } catch (_) {
+    return clean;
+  }
+}
+
+function parseFirebaseStorageObjectUrl(rawUrl = "") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return null;
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    const host = String(parsed.hostname || "").toLowerCase();
+    const isFirebaseStorageHost = (
+      host === "firebasestorage.googleapis.com"
+      || host.endsWith("firebasestorage.app")
+      || host === "storage.googleapis.com"
+    );
+    if (!isFirebaseStorageHost) return null;
+    if (host === "firebasestorage.googleapis.com") {
+      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+      if (!match) return null;
+      const bucket = String(match[1] || "").trim();
+      let objectPath = String(match[2] || "").trim();
+      if (!bucket || !objectPath) return null;
+      try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+        try { objectPath = decodeURIComponent(objectPath); } catch (_) {}
+      }
+      objectPath = objectPath.replace(/^\/+/, "").trim();
+      return objectPath ? { bucket, storagePath: objectPath } : null;
+    }
+    if (host === "storage.googleapis.com") {
+      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
+      if (parts.length < 2) return null;
+      const bucket = String(parts.shift() || "").trim();
+      const storagePath = parts.join("/").trim();
+      return bucket && storagePath ? { bucket, storagePath } : null;
+    }
+    const pathname = String(parsed.pathname || "").replace(/^\/+/, "").trim();
+    return pathname ? { bucket: host, storagePath: pathname } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
+  const cleanStoragePath = String(storagePath || "").trim();
+  if (cleanStoragePath) return cleanStoragePath;
+  const parsed = parseFirebaseStorageObjectUrl(rawUrl);
+  return String(parsed?.storagePath || "").trim();
 }
 
 function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {
@@ -5491,14 +5564,14 @@ function normalizeDialogueVideoMap(raw = {}) {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
     const downloadUrl = String(clip.downloadUrl || "").trim();
-    const storagePath = String(clip.storagePath || "").trim();
+    const storagePath = deriveStoragePathFromMediaSource(downloadUrl, clip.storagePath || "");
     if (!downloadUrl && !storagePath) return;
     const rawSegments = Array.isArray(clip.segments) ? clip.segments : [];
     const segments = rawSegments
       .map((segment, idx) => {
         if (!segment || typeof segment !== "object") return null;
         const segUrl = String(segment.downloadUrl || "").trim();
-        const segPath = String(segment.storagePath || "").trim();
+        const segPath = deriveStoragePathFromMediaSource(segUrl, segment.storagePath || "");
         if (!segUrl && !segPath) return null;
         return {
           id: String(segment.id || `${key}-seg-${idx + 1}`).trim() || `${key}-seg-${idx + 1}`,
@@ -5550,7 +5623,7 @@ function normalizeDialogueAudioMap(raw = {}) {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
     const downloadUrl = String(clip.downloadUrl || "").trim();
-    const storagePath = String(clip.storagePath || "").trim();
+    const storagePath = deriveStoragePathFromMediaSource(downloadUrl, clip.storagePath || "");
     if (!downloadUrl && !storagePath) return;
     next[key] = {
       rowId: key,
@@ -8817,7 +8890,7 @@ function resolveStorageMediaUrl(rawUrl = "") {
 
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "") {
   const clean = String(rawUrl || "").trim();
-  const cleanStoragePath = String(storagePath || "").trim();
+  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
@@ -8825,14 +8898,14 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "") {
     // Es más estable que depender del token del downloadUrl al insertar en timeline.
     const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
     if (cleanStoragePath && isLibraryAsset) {
-      return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
     if (clean && isLibraryAsset) {
       const parsed = new URL(clean, window.location.origin);
       return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     if (cleanStoragePath) {
-      return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
     if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
@@ -8855,20 +8928,20 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "") {
 
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "") {
   const clean = String(rawUrl || "").trim();
-  const cleanStoragePath = String(storagePath || "").trim();
+  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
     const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
     if (cleanStoragePath && isLibraryAsset) {
-      return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
     if (clean && isLibraryAsset) {
       const parsed = new URL(clean, window.location.origin);
       return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     if (cleanStoragePath) {
-      return buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
     if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
@@ -12588,6 +12661,90 @@ function buildCloudSessionPayload(session = null) {
   };
 }
 
+function measureJsonUtf8Bytes(value = null) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value ?? null)).length;
+  } catch (_) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+function cloneSerializable(value = null) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null));
+  } catch (_) {
+    return value;
+  }
+}
+
+function compactCloudSessionPayload(payload = null) {
+  const source = payload && typeof payload === "object" ? payload : null;
+  if (!source) {
+    return {
+      payload,
+      bytes: 0,
+      strippedReferenceMedia: false,
+      trimmedChat: false
+    };
+  }
+  const initialBytes = measureJsonUtf8Bytes(source);
+  if (initialBytes <= CLOUD_SESSION_PAYLOAD_TARGET_BYTES) {
+    return {
+      payload: source,
+      bytes: initialBytes,
+      strippedReferenceMedia: false,
+      trimmedChat: false
+    };
+  }
+
+  let next = cloneSerializable(source);
+  let strippedReferenceMedia = false;
+  let trimmedChat = false;
+
+  const hasReferenceMedia = Boolean(
+    Object.keys(next?.speakerReferenceImageMap || {}).length
+    || Object.keys(next?.scenarioReferenceImageMap || {}).length
+    || Object.keys(next?.rowReferenceImageListMap || {}).length
+    || Object.keys(next?.rowReferenceImageMap || {}).length
+    || Object.keys(next?.rowReferenceVideoMap || {}).length
+  );
+  if (hasReferenceMedia) {
+    next.speakerReferenceImageMap = {};
+    next.scenarioReferenceImageMap = {};
+    next.rowReferenceImageListMap = {};
+    next.rowReferenceImageMap = {};
+    next.rowReferenceVideoMap = {};
+    next.rowReferenceModeByRowId = {};
+    strippedReferenceMedia = true;
+  }
+
+  let bytes = measureJsonUtf8Bytes(next);
+  if (bytes <= CLOUD_SESSION_PAYLOAD_TARGET_BYTES) {
+    return { payload: next, bytes, strippedReferenceMedia, trimmedChat };
+  }
+
+  const chat = Array.isArray(next?.chat) ? next.chat : [];
+  if (chat.length > 80) {
+    next.chat = chat.slice(-80);
+    trimmedChat = true;
+    bytes = measureJsonUtf8Bytes(next);
+  }
+
+  if (bytes <= CLOUD_SESSION_PAYLOAD_TARGET_BYTES) {
+    return { payload: next, bytes, strippedReferenceMedia, trimmedChat };
+  }
+
+  if (Array.isArray(next?.script?.rows) && next.script.rows.length) {
+    next.script.rows = next.script.rows.map((row) => ({
+      ...row,
+      imagePrompts: []
+    }));
+    bytes = measureJsonUtf8Bytes(next);
+  }
+
+  return { payload: next, bytes, strippedReferenceMedia, trimmedChat };
+}
+
 async function ensurePanelMusicTrackUploaded(sessionId = "", options = {}) {
   const silent = options.silent === true;
   if (panelMusicState.sourceType !== "track" || !panelMusicState.track) return null;
@@ -12661,7 +12818,20 @@ async function saveSessionToCloud(sessionId = null, options = {}) {
     : getActiveSession();
   if (!target) throw new Error("No hay sesión activa para guardar.");
   if (!silent) setGenerationStatus("Guardando sesión en Firebase...", "is-busy");
-  const payload = buildCloudSessionPayload(target);
+  const rawPayload = buildCloudSessionPayload(target);
+  const compacted = compactCloudSessionPayload(rawPayload);
+  const payload = compacted.payload;
+  if (compacted.bytes > MAX_CLOUD_SESSION_PAYLOAD_BYTES) {
+    const error = new Error("La sesión sigue excediendo el tamaño permitido incluso tras compactarla.");
+    error.code = "SESSION_TOO_LARGE";
+    error.detail = {
+      bytes: compacted.bytes,
+      limitBytes: MAX_CLOUD_SESSION_PAYLOAD_BYTES,
+      strippedReferenceMedia: compacted.strippedReferenceMedia,
+      trimmedChat: compacted.trimmedChat
+    };
+    throw error;
+  }
   const response = hasAvailableApiBase()
     ? await authFetchJson("/api/podcaster/sessions/save", {
         method: "POST",
@@ -12684,7 +12854,14 @@ async function saveSessionToCloud(sessionId = null, options = {}) {
   persistSessions();
   if (!silent) {
     addChatMessage("assistant", `Sesión guardada en Firebase (${formatDate(savedAt)}).`);
-    setGenerationStatus("Sesión guardada", "is-live");
+    if (compacted.strippedReferenceMedia || compacted.trimmedChat) {
+      const notes = [];
+      if (compacted.strippedReferenceMedia) notes.push("referencias locales pesadas omitidas del guardado cloud");
+      if (compacted.trimmedChat) notes.push("historial de chat recortado");
+      setGenerationStatus(`Sesión guardada · ${notes.join(" · ")}`, "is-live");
+    } else {
+      setGenerationStatus("Sesión guardada", "is-live");
+    }
     render();
   }
   return response;
@@ -18895,6 +19072,7 @@ const podcastStudioPlayback = createPodcasterStudioPlayback({
   resolveDialogueAudioForRow,
   resolveStorageAudioUrl,
   resolvePodcastStageAudioSrc,
+  markStaleProxyMediaUrl,
   syncGeminiDialogueTrackWithRuntime,
   syncPodcastOnScreenTextOverlay
 });
@@ -19044,7 +19222,12 @@ async function ensurePodcastStageVideoCachedObjectUrl(src = "") {
       mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors",
       cache: "force-cache"
     });
-    if (!response.ok) return "";
+    if (!response.ok) {
+      if (Number(response.status || 0) === 404) {
+        markStaleProxyMediaUrl(cleanSrc, "proxy-media-404", { kind: "video-cache-fetch" });
+      }
+      return "";
+    }
     const blob = await response.blob();
     if (!blob || Number(blob.size || 0) <= 0) return "";
     const objectUrl = URL.createObjectURL(blob);
@@ -19074,7 +19257,12 @@ async function ensurePodcastStageAudioCachedObjectUrl(src = "") {
       mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors",
       cache: "force-cache"
     });
-    if (!response.ok) return "";
+    if (!response.ok) {
+      if (Number(response.status || 0) === 404) {
+        markStaleProxyMediaUrl(cleanSrc, "proxy-media-404", { kind: "audio-cache-fetch" });
+      }
+      return "";
+    }
     const blob = await response.blob();
     if (!blob || Number(blob.size || 0) <= 0) return "";
     const objectUrl = URL.createObjectURL(blob);
@@ -19376,7 +19564,12 @@ async function setPodcastStageVideoSourceForElement(videoEl = null, src = "", op
         method: "GET",
         mode: isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors"
       });
-      if (!response.ok) return false;
+      if (!response.ok) {
+        if (Number(response.status || 0) === 404) {
+          markStaleProxyMediaUrl(cleanSrc, "proxy-media-404", { kind: "video-direct-fetch" });
+        }
+        return false;
+      }
       const blob = await response.blob();
       if (podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
       const blobUrl = URL.createObjectURL(blob);
@@ -29892,7 +30085,7 @@ function attachEvents() {
           podcastVideoState.timelineAudioSelection.geminiRowIds.clear();
           podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
         }
-        selectTimelineSceneRow(rowId, { syncStage: false });
+        selectTimelineSceneRow(rowId, { syncStage: true });
         renderPodcastVideoTimeline(getActiveSession());
         return;
       }
@@ -29900,14 +30093,14 @@ function attachEvents() {
       if (selectBtn) {
         const rowId = String(selectBtn.dataset.rowId || "").trim();
         if (!rowId) return;
-        selectTimelineSceneRow(rowId, { syncStage: false });
+        selectTimelineSceneRow(rowId, { syncStage: true });
         return;
       }
       const clipBody = event.target.closest(".podcast-video-clip-body[data-row-id]");
       if (clipBody && !event.target.closest(".row-icon-btn")) {
         const rowId = String(clipBody.dataset.rowId || "").trim();
         if (!rowId) return;
-        selectTimelineSceneRow(rowId, { syncStage: false });
+        selectTimelineSceneRow(rowId, { syncStage: true });
         return;
       }
 

@@ -1372,12 +1372,12 @@ function sanitizePodcasterSession(raw = {}) {
     const key = clampText(rowId, 120);
     if (!key || !clip || typeof clip !== "object") return;
     const downloadUrl = clampText(clip?.downloadUrl || "", 3000);
-    const storagePath = clampText(clip?.storagePath || "", 700);
+    const storagePath = clampText(deriveStoragePathFromMediaSource(downloadUrl, clip?.storagePath || ""), 700);
     if (!downloadUrl && !storagePath) return;
     const segmentsRaw = Array.isArray(clip?.segments) ? clip.segments : [];
     const segments = segmentsRaw.slice(0, 16).map((segment, idx) => {
       const segUrl = clampText(segment?.downloadUrl || "", 3000);
-      const segPath = clampText(segment?.storagePath || "", 700);
+      const segPath = clampText(deriveStoragePathFromMediaSource(segUrl, segment?.storagePath || ""), 700);
       if (!segUrl && !segPath) return null;
       return {
         id: clampText(segment?.id || `${key}-seg-${idx + 1}`, 120) || `${key}-seg-${idx + 1}`,
@@ -1426,7 +1426,7 @@ function sanitizePodcasterSession(raw = {}) {
     const key = clampText(rowId, 120);
     if (!key || !clip || typeof clip !== "object") return;
     const downloadUrl = clampText(clip?.downloadUrl || "", 3000);
-    const storagePath = clampText(clip?.storagePath || "", 700);
+    const storagePath = clampText(deriveStoragePathFromMediaSource(downloadUrl, clip?.storagePath || ""), 700);
     if (!downloadUrl && !storagePath) return;
     dialogueAudioMap[key] = {
       rowId: key,
@@ -3252,29 +3252,11 @@ app.post("/api/podcaster/scene-library/clone-video", async (req, res) => {
       return res.status(400).json({ error: "Falta sessionId o rowId." });
     }
 
-    const extractFirebaseStoragePathFromUrl = (url = "") => {
-      const clean = String(url || "").trim();
-      if (!clean) return { bucketName: "", storagePath: "" };
-      try {
-        const parsed = new URL(clean);
-        const host = String(parsed.hostname || "").toLowerCase();
-        const allowedHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-        if (!allowedHost) return { bucketName: "", storagePath: "" };
-        const pathParts = String(parsed.pathname || "").split("/").filter(Boolean);
-        // Expected: /v0/b/<bucket>/o/<encodedObjectPath>
-        const bIndex = pathParts.indexOf("b");
-        const oIndex = pathParts.indexOf("o");
-        const bucketName = bIndex >= 0 ? String(pathParts[bIndex + 1] || "").trim() : "";
-        const encodedObj = oIndex >= 0 ? String(pathParts[oIndex + 1] || "").trim() : "";
-        const storagePath = encodedObj ? decodeURIComponent(encodedObj) : "";
-        return { bucketName, storagePath };
-      } catch (_) {
-        return { bucketName: "", storagePath: "" };
-      }
-    };
-
     const requestedStoragePath = normalizeStorageFilePath(sourceStoragePathRaw);
-    const extracted = requestedStoragePath ? { bucketName: "", storagePath: requestedStoragePath } : extractFirebaseStoragePathFromUrl(sourceUrlRaw);
+    const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(sourceUrlRaw);
+    const extracted = requestedStoragePath
+      ? { bucketName: "", storagePath: requestedStoragePath }
+      : { bucketName: String(firebaseObject?.bucket || "").trim(), storagePath: String(firebaseObject?.objectPath || "").trim() };
     const sourceStoragePath = String(extracted.storagePath || "").trim();
     if (!sourceStoragePath) {
       return res.status(400).json({ error: "Falta sourceStoragePath o sourceUrl válido." });
@@ -5482,30 +5464,50 @@ function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
   if (!clean) return null;
   try {
     const parsed = new URL(clean);
-    if (String(parsed.hostname || "").toLowerCase() !== "firebasestorage.googleapis.com") return null;
-    const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
-    if (!match) return null;
-    const bucket = String(match[1] || "").trim();
-    let objectPath = String(match[2] || "").trim();
-    if (!bucket || !objectPath) return null;
-    try {
-      objectPath = decodeURIComponent(objectPath);
-    } catch (_) {
-      // noop
-    }
-    if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (host === "firebasestorage.googleapis.com") {
+      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+      if (!match) return null;
+      const bucket = String(match[1] || "").trim();
+      let objectPath = String(match[2] || "").trim();
+      if (!bucket || !objectPath) return null;
       try {
         objectPath = decodeURIComponent(objectPath);
       } catch (_) {
         // noop
       }
+      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+        try {
+          objectPath = decodeURIComponent(objectPath);
+        } catch (_) {
+          // noop
+        }
+      }
+      objectPath = String(objectPath || "").replace(/^\/+/, "").trim();
+      if (!objectPath) return null;
+      return { bucket, objectPath };
     }
-    objectPath = String(objectPath || "").replace(/^\/+/, "").trim();
-    if (!objectPath) return null;
-    return { bucket, objectPath };
+    if (host === "storage.googleapis.com") {
+      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
+      if (parts.length < 2) return null;
+      const bucket = String(parts.shift() || "").trim();
+      const objectPath = parts.join("/").replace(/^\/+/, "").trim();
+      return bucket && objectPath ? { bucket, objectPath } : null;
+    }
+    if (host.endsWith("firebasestorage.app")) {
+      const objectPath = String(parsed.pathname || "").replace(/^\/+/, "").trim();
+      return objectPath ? { bucket: host, objectPath } : null;
+    }
+    return null;
   } catch (_) {
     return null;
   }
+}
+
+function deriveStoragePathFromMediaSource(url = "", storagePath = "") {
+  const cleanStoragePath = normalizeStorageFilePath(storagePath);
+  if (cleanStoragePath) return cleanStoragePath;
+  return normalizeStorageFilePath(parseFirebaseStorageGoogleApisObjectUrl(url)?.objectPath || "");
 }
 
 async function downloadStoragePathToFile(storagePath = "", outPath = "") {
@@ -7921,20 +7923,16 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       headers: rangeHeader ? { Range: rangeHeader } : undefined
     });
     if (!upstream.ok && upstream.status !== 206) {
-      // Si un link de Firebase Storage (token) expiró o devuelve 403,
-      // intenta recuperar el asset por admin SDK usando el object path (solo librería podcaster).
+      // Si un link de Firebase Storage (token) expiró o devuelve 403/404,
+      // intenta recuperar el asset por admin SDK usando el object path.
       try {
         const shouldTryAdminFallback = upstream.status === 403 || upstream.status === 404;
         if (shouldTryAdminFallback) {
-          const pathname = String(parsed.pathname || "");
-          const parts = pathname.split("/").filter(Boolean);
-          const bIndex = parts.indexOf("b");
-          const oIndex = parts.indexOf("o");
-          const bucketFromUrl = bIndex >= 0 ? String(parts[bIndex + 1] || "").trim() : "";
-          const encodedObj = oIndex >= 0 ? String(parts[oIndex + 1] || "").trim() : "";
-          const objectPath = encodedObj ? decodeURIComponent(encodedObj) : "";
-          const isPodcasterLibrary = /^podcaster\/library\//i.test(String(objectPath || "").trim());
-          if (isPodcasterLibrary && objectPath) {
+          const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(normalizedUrl);
+          const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
+          const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
+          const isPodcasterAsset = /^podcaster\/(?:library|sessions)\//i.test(String(objectPath || "").trim());
+          if (isPodcasterAsset && objectPath) {
             const candidates = (() => {
               const buckets = getStorageBucketCandidates();
               const extra = bucketFromUrl ? [admin.storage().bucket(bucketFromUrl)] : [];
