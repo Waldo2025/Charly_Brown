@@ -8,6 +8,9 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const {
+  buildBufferedMediaPayload
+} = require("./proxy-media-buffer.js");
+const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
@@ -8014,8 +8017,15 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         if (exists === false) continue;
         try {
           const [meta] = await file.getMetadata().catch(() => [{}]);
-          await streamStorageFileToResponse(file, res, { metadata: meta, rangeHeader });
-          return;
+          const [downloaded] = await file.download();
+          const payload = buildBufferedMediaPayload(Buffer.from(downloaded), {
+            mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
+            rangeHeader
+          });
+          Object.entries(payload.headers).forEach(([header, value]) => {
+            if (value) res.setHeader(header, value);
+          });
+          return res.status(payload.status).send(payload.body);
         } catch (error) {
           lastError = error;
           if (res.headersSent) {
@@ -8091,8 +8101,15 @@ app.get("/api/assets/proxy-media", async (req, res) => {
               if (exists === false) continue;
               try {
                 const [meta] = await file.getMetadata().catch(() => [{}]);
-                await streamStorageFileToResponse(file, res, { metadata: meta, rangeHeader });
-                return;
+                const [downloaded] = await file.download();
+                const payload = buildBufferedMediaPayload(Buffer.from(downloaded), {
+                  mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
+                  rangeHeader
+                });
+                Object.entries(payload.headers).forEach(([header, value]) => {
+                  if (value) res.setHeader(header, value);
+                });
+                return res.status(payload.status).send(payload.body);
               } catch (error) {
                 lastError = error;
                 if (res.headersSent) {
