@@ -4303,7 +4303,8 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   if (!cleanJobId) throw new Error("dialogue_video_job_missing");
   const silent = options.silent === true;
   const sceneNumber = String(options.sceneNumber || "").trim();
-  const maxAttempts = 80;
+  const pollIntervalMs = 2500;
+  const maxAttempts = 360;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const data = await authFetchJson(`/api/podcaster/dialogue-videos/generate-status?jobId=${encodeURIComponent(cleanJobId)}`);
     const status = String(data?.status || "").trim().toLowerCase();
@@ -4319,11 +4320,15 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
       throw error;
     }
     if (!silent) {
-      setGenerationStatus(hint || `Generando video${sceneNumber ? ` de escena ${sceneNumber}` : ""}...`, "is-busy");
+      const waitedSec = Math.max(0, Math.round((attempt * pollIntervalMs) / 1000));
+      const fallbackHint = `Generando video${sceneNumber ? ` de escena ${sceneNumber}` : ""}... (${waitedSec}s)`;
+      setGenerationStatus(hint || fallbackHint, "is-busy");
     }
-    await sleep(2500);
+    await sleep(pollIntervalMs);
   }
-  throw new Error("Tiempo de espera agotado al generar video de la escena.");
+  const error = new Error("Tiempo de espera agotado al generar video de la escena.");
+  error.status = 504;
+  throw error;
 }
 
 function toFiniteNumber(value, fallback = 0) {
