@@ -8,6 +8,9 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const {
+  shouldContinueVariantFallback
+} = require("./podcaster-video-variant-fallback.js");
+const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "on-screen-text-render-spec.js"));
@@ -5001,7 +5004,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     };
     for (const videoModel of videoModels) {
       let modelReturnedDoneWithoutMedia = false;
-      for (const variant of requestVariants) {
+      for (const [variantIndex, variant] of requestVariants.entries()) {
         const createOpResponse = await fetchCompat(
           `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
           {
@@ -5065,6 +5068,22 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
           attemptErrors.push(lastErrorDetail);
           modelReturnedDoneWithoutMedia = true;
+          const fallbackDecision = shouldContinueVariantFallback({
+            status: lastStatus,
+            reason: "done_without_media",
+            variantIndex,
+            variantCount: requestVariants.length
+          });
+          console.warn(`[backend][${requestDebugTag}] variant-finished-without-media`, {
+            model: videoModel,
+            variant: String(variant?.label || "").trim(),
+            remainingVariants: fallbackDecision.remainingVariants,
+            continueCurrentModel: fallbackDecision.continueCurrentModel,
+            logReason: fallbackDecision.logReason
+          });
+          if (fallbackDecision.continueCurrentModel) {
+            continue;
+          }
           break;
         }
 
@@ -5106,7 +5125,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       if (modelReturnedDoneWithoutMedia) {
         console.warn(`[backend][${requestDebugTag}] switching-video-model-after-empty-media`, {
           failedModel: videoModel,
-          nextCandidates: videoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim())
+          nextCandidates: videoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
+          attemptedVariants: requestVariants.length,
+          lastErrorDetail
         });
       }
     }
