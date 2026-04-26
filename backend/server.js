@@ -4202,10 +4202,20 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       ...requestedCandidates.map((item) => normalizeModel(item || "")),
       ...PODCASTER_VIDEO_MODEL_CANDIDATES
     ].filter(Boolean)));
+    const canPreferFastModel = !strictIdentity && !portraitUrl && !portraitStoragePath;
     const filteredModels = strictIdentity
       ? mergedModels.filter((modelName) => !/fast/i.test(String(modelName || "")))
       : mergedModels;
-    const videoModels = filteredModels.length ? filteredModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
+    const prioritizedModels = strictIdentity
+      ? filteredModels
+      : filteredModels.slice().sort((a, b) => {
+        const aFast = /fast/i.test(String(a || ""));
+        const bFast = /fast/i.test(String(b || ""));
+        if (aFast === bFast) return 0;
+        if (canPreferFastModel) return aFast ? -1 : 1;
+        return aFast ? 1 : -1;
+      });
+    const videoModels = prioritizedModels.length ? prioritizedModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
     const requestDebugTag = `dialogue-video:${sessionId || "no-session"}:${rowId || "no-row"}`;
 
     if (!sessionId) {
@@ -4990,6 +5000,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       return null;
     };
     for (const videoModel of videoModels) {
+      let modelReturnedDoneWithoutMedia = false;
       for (const variant of requestVariants) {
         const createOpResponse = await fetchCompat(
           `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
@@ -5053,7 +5064,8 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           lastStatus = 502;
           lastErrorDetail = `${videoModel} [${variant.label}]: operación completada sin URI de video`;
           attemptErrors.push(lastErrorDetail);
-          continue;
+          modelReturnedDoneWithoutMedia = true;
+          break;
         }
 
         // eslint-disable-next-line no-await-in-loop
@@ -5091,6 +5103,12 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         break;
       }
       if (finalVideoBuffer) break;
+      if (modelReturnedDoneWithoutMedia) {
+        console.warn(`[backend][${requestDebugTag}] switching-video-model-after-empty-media`, {
+          failedModel: videoModel,
+          nextCandidates: videoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim())
+        });
+      }
     }
 
     if (!finalVideoBuffer) {
