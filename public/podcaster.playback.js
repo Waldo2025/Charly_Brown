@@ -67,6 +67,30 @@ export function createPodcasterStudioPlayback(deps = {}) {
   let mseLastRuntimeRowId = "";
   let mseRuntimeEntries = [];
 
+  function resolveSceneBackgroundMusicVolumePctAtMs(currentMs = 0, fallbackPct = 100, runtimeEntries = []) {
+    const session = getActiveSession();
+    const entries = Array.isArray(runtimeEntries) && runtimeEntries.length
+      ? runtimeEntries
+      : buildTimelineRuntimeEntries(session);
+    const targetMs = Math.max(0, Number(currentMs || 0) || 0);
+    const activeEntry = entries
+      .filter((entry) => targetMs >= Number(entry?.startMs || 0) && targetMs < Number(entry?.endMs || 0))
+      .sort((a, b) => Number(b?.startMs || 0) - Number(a?.startMs || 0) || Number(b?.zIndex || 0) - Number(a?.zIndex || 0))[0] || null;
+    const rowId = String(activeEntry?.rowId || "").trim();
+    const cfg = getPodcastVideoConfig(session);
+    const overridePct = Math.max(
+      0,
+      Math.min(
+        200,
+        toFiniteNumber(cfg?.timelineSceneAudioMixByRowId?.[rowId]?.backgroundMusicVolumePct, Number.NaN)
+      )
+    );
+    const resolvedPct = Number.isFinite(overridePct)
+      ? overridePct
+      : Math.max(0, Math.min(200, toFiniteNumber(fallbackPct, 100)));
+    return clamp01(resolvedPct / 100);
+  }
+
   function getMseEngine() {
     if (mseEngine) return mseEngine;
     const stageVideo = els?.podcastActiveSpeakerVideo || null;
@@ -89,6 +113,16 @@ export function createPodcasterStudioPlayback(deps = {}) {
         const currentMs = Math.max(0, Number(ms || 0));
         podcastVideoState.montageCursorMs = currentMs;
         const session = getActiveSession();
+        const speed = Math.max(0.5, Math.min(1.8, Number(els?.podcastVideoSpeedSelect?.value || 1)));
+        const activeEntries = Array.isArray(mseRuntimeEntries)
+          ? mseRuntimeEntries.filter((entry) => currentMs >= Number(entry?.startMs || 0) && currentMs < Number(entry?.endMs || 0))
+          : [];
+        try {
+          syncMontageAudioPlayers(activeEntries, currentMs, speed, mseRuntimeEntries);
+        } catch (_) {}
+        try {
+          syncMontageBackgroundMusic(currentMs, speed).catch(() => {});
+        } catch (_) {}
         syncPodcastTimelinePlayhead(session);
         updatePodcastVideoTransportUi();
         if (els.podcastStudioScrubber && podcastVideoState.timelineDurationSec > 0) {
@@ -233,6 +267,67 @@ export function createPodcasterStudioPlayback(deps = {}) {
     return els.podcastActiveSpeakerVideo || null;
   }
 
+  function normalizeVisualLayoutMode(value = "") {
+    return String(value || "").trim().toLowerCase() === "blur-backdrop" ? "blur-backdrop" : "default";
+  }
+
+  function resolveStageBackdropEl(isActive = true) {
+    if (isActive) {
+      return Number(podcastVideoState.stageVideoSlot || 0) === 1
+        ? (els.podcastActiveSpeakerBackdropVideoAlt || null)
+        : (els.podcastActiveSpeakerBackdropVideo || null);
+    }
+    return Number(podcastVideoState.stageVideoSlot || 0) === 1
+      ? (els.podcastActiveSpeakerBackdropVideo || null)
+      : (els.podcastActiveSpeakerBackdropVideoAlt || null);
+  }
+
+  function resolveStageVideoBundle(isActive = true) {
+    return {
+      foreground: resolveStageVideoEl(isActive),
+      backdrop: resolveStageBackdropEl(isActive)
+    };
+  }
+
+  function resolveStageVideoBundleForForeground(videoEl = null) {
+    const video = videoEl || null;
+    if (!video) return { foreground: null, backdrop: null };
+    if (video === els.podcastActiveSpeakerVideoAlt) {
+      return {
+        foreground: els.podcastActiveSpeakerVideoAlt || null,
+        backdrop: els.podcastActiveSpeakerBackdropVideoAlt || null
+      };
+    }
+    return {
+      foreground: els.podcastActiveSpeakerVideo || null,
+      backdrop: els.podcastActiveSpeakerBackdropVideo || null
+    };
+  }
+
+  function getAllStageVideoElements() {
+    return [
+      els.podcastActiveSpeakerBackdropVideo,
+      els.podcastActiveSpeakerVideo,
+      els.podcastActiveSpeakerBackdropVideoAlt,
+      els.podcastActiveSpeakerVideoAlt
+    ].filter(Boolean);
+  }
+
+  function applyStageBundleLayout(bundle = null, layoutMode = "default") {
+    const mode = normalizeVisualLayoutMode(layoutMode);
+    const foreground = bundle?.foreground || null;
+    const backdrop = bundle?.backdrop || null;
+    if (foreground) {
+      foreground.classList.toggle("is-blur-backdrop-foreground", mode === "blur-backdrop");
+    }
+    if (backdrop) {
+      backdrop.classList.toggle("is-layout-active", mode === "blur-backdrop");
+      backdrop.style.opacity = mode === "blur-backdrop" ? "1" : "0";
+      backdrop.hidden = mode !== "blur-backdrop";
+      backdrop.style.pointerEvents = "none";
+    }
+  }
+
   function resolveStageVideoSlotForEl(videoEl) {
     const video = videoEl || null;
     if (!video) return 0;
@@ -357,6 +452,84 @@ export function createPodcasterStudioPlayback(deps = {}) {
       }
     } catch (_) {}
     try { video.style.pointerEvents = ""; } catch (_) {}
+  }
+
+  async function ensureStageBundleReady(bundle = null, entry = null, offsetSec = 0, options = {}) {
+    const foreground = bundle?.foreground || null;
+    const backdrop = bundle?.backdrop || null;
+    const nextSrc = String(entry?.videoSrc || "").trim();
+    if (!foreground || !nextSrc) return false;
+    const layoutMode = normalizeVisualLayoutMode(entry?.clip?.visualLayoutMode);
+    const keepHidden = options.keepHidden === true;
+    const playbackRate = Math.max(0.5, Math.min(1.8, Number(options.playbackRate || 1) || 1));
+    const seekToleranceSec = Math.max(0.01, Number(options.seekToleranceSec || 0.05) || 0.05);
+    const forceSeek = options.forceSeek === true;
+    const safeOffsetFor = (video) => {
+      const durationSec = Math.max(0, Number(video?.duration || 0));
+      return durationSec > 0
+        ? Math.max(0, Math.min(Math.max(0, durationSec - 0.04), Number(offsetSec || 0)))
+        : Math.max(0, Number(offsetSec || 0));
+    };
+    const ensureVideoSource = async (video, src, hidden = false) => {
+      if (!video || !src) return false;
+      const alreadyLoaded = String(video.dataset?.src || "").trim() === src
+        && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+      if (!alreadyLoaded && typeof setPodcastStageVideoSourceForElement === "function") {
+        const ok = await setPodcastStageVideoSourceForElement(video, src, { keepHidden: hidden });
+        if (!ok) return false;
+      } else {
+        video.hidden = hidden;
+      }
+      return true;
+    };
+
+    const okForeground = await ensureVideoSource(foreground, nextSrc, keepHidden);
+    if (!okForeground) return false;
+    foreground.hidden = keepHidden;
+    foreground.style.pointerEvents = "none";
+    foreground.playbackRate = playbackRate;
+    const foregroundOffset = safeOffsetFor(foreground);
+    if (forceSeek || Math.abs(Number(foreground.currentTime || 0) - foregroundOffset) > seekToleranceSec) {
+      try { foreground.currentTime = foregroundOffset; } catch (_) {}
+    }
+
+    applyStageBundleLayout(bundle, layoutMode);
+    if (backdrop) {
+      backdrop.muted = true;
+      backdrop.volume = 0;
+      backdrop.playbackRate = playbackRate;
+      if (layoutMode === "blur-backdrop") {
+        const okBackdrop = await ensureVideoSource(backdrop, nextSrc, keepHidden);
+        if (okBackdrop) {
+          backdrop.hidden = keepHidden;
+          const backdropOffset = safeOffsetFor(backdrop);
+          if (forceSeek || Math.abs(Number(backdrop.currentTime || 0) - backdropOffset) > seekToleranceSec) {
+            try { backdrop.currentTime = backdropOffset; } catch (_) {}
+          }
+        }
+      } else {
+        try { backdrop.pause(); } catch (_) {}
+        backdrop.hidden = true;
+      }
+    }
+    return true;
+  }
+
+  function setStageBundleOpacity(bundle = null, opacity = 1) {
+    const value = Math.max(0, Math.min(1, Number(opacity || 0)));
+    [bundle?.backdrop, bundle?.foreground].filter(Boolean).forEach((video) => {
+      video.style.opacity = String(value);
+      video.hidden = value <= 0.0001;
+      video.style.pointerEvents = "none";
+    });
+  }
+
+  function clearStageBundleOpacity(bundle = null) {
+    [bundle?.backdrop, bundle?.foreground].filter(Boolean).forEach((video) => {
+      video.style.opacity = "";
+      video.style.pointerEvents = "none";
+      video.hidden = false;
+    });
   }
 
   function resetPendingStageWork() {
@@ -989,7 +1162,8 @@ export function createPodcasterStudioPlayback(deps = {}) {
     }
 	    const session = getActiveSession();
 	    const studioCfg = getPodcastVideoConfig(session);
-	    const panelVolume = Math.max(0, Math.min(1, toFiniteNumber(panelCfg?.volume, 0) / 100));
+	    const panelVolumePct = Math.max(0, Math.min(200, toFiniteNumber(panelCfg?.volume, 0)));
+	    const panelVolume = resolveSceneBackgroundMusicVolumePctAtMs(currentMs, panelVolumePct, mseRuntimeEntries);
 	    const duckFactor = clamp01(montageBackgroundDuckFactor);
 	    // El volumen del track de audio (MP3/locked lane) se controla desde `audioTrackMixModal`
 	    // (`audioTrackMontageVolume`). No lo escalamos por `masterVolume` (Gemini/voz) para que
@@ -1312,7 +1486,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       podcastVideoState.audioEl.src = "";
     }
     podcastVideoState.audioEl = null;
-    [els.podcastActiveSpeakerVideo, els.podcastActiveSpeakerVideoAlt].filter(Boolean).forEach((video) => {
+    getAllStageVideoElements().forEach((video) => {
       try { video.pause(); } catch (_) {}
       if (!keepCursor && forceResetToStart) {
         try { video.currentTime = 0; } catch (_) {}
@@ -1354,21 +1528,8 @@ export function createPodcasterStudioPlayback(deps = {}) {
     updatePodcastVideoTransportUi();
   }
 
-  function pausePodcastStudioMontage() {
-    if (!podcastVideoState.montageActive) return;
-    previewSyncRequestToken += 1;
-    resetPendingStageWork();
-    if (podcastVideoState.mseEngineActive === true) {
-      try { mseEngine?.pause?.(); } catch (_) {}
-      podcastVideoState.montageActive = false;
-      podcastVideoState.montagePaused = true;
-      setPodcastVideoStatus("Montaje en pausa");
-      updatePodcastVideoTransportUi();
-      return;
-    }
-    try { setTimelinePreviewsSuspended?.(false); } catch (_) {}
-    podcastVideoState.montageActive = false;
-    podcastVideoState.montagePaused = true;
+  function pauseAllMontageMedia() {
+    stageVideoUnmuteToken += 1;
     if (podcastVideoState.montageRafId) {
       cancelAnimationFrame(podcastVideoState.montageRafId);
       podcastVideoState.montageRafId = 0;
@@ -1376,15 +1537,32 @@ export function createPodcasterStudioPlayback(deps = {}) {
     Object.values(podcastVideoState.montageAudioPlayers || {}).forEach((audio) => {
       try { audio.pause(); } catch (_) {}
     });
+    Object.values(montageAudioCache || {}).forEach((audio) => {
+      try { audio.pause(); } catch (_) {}
+    });
+    stopPreviewSceneAudio();
     if (montageBackgroundAudio) {
       try { montageBackgroundAudio.pause(); } catch (_) {}
     }
     if (podcastVideoState.audioEl) {
       try { podcastVideoState.audioEl.pause(); } catch (_) {}
     }
-    [els.podcastActiveSpeakerVideo, els.podcastActiveSpeakerVideoAlt].filter(Boolean).forEach((video) => {
+    getAllStageVideoElements().forEach((video) => {
       try { video.pause(); } catch (_) {}
     });
+  }
+
+  function pausePodcastStudioMontage() {
+    if (!podcastVideoState.montageActive) return;
+    previewSyncRequestToken += 1;
+    resetPendingStageWork();
+    if (podcastVideoState.mseEngineActive === true) {
+      try { mseEngine?.pause?.(); } catch (_) {}
+    }
+    try { setTimelinePreviewsSuspended?.(false); } catch (_) {}
+    podcastVideoState.montageActive = false;
+    podcastVideoState.montagePaused = true;
+    pauseAllMontageMedia();
     // Mantén visible el video activo (evita quedarnos con opacity=0 tras un swap pendiente).
     try { ensureActiveStageVideoVisible(resolveStageVideoEl(true)); } catch (_) {}
     setPodcastVideoStatus("Montaje en pausa");
@@ -1492,16 +1670,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     return String(visual?.rowId || "").trim();
   }
 
-  function syncMontageVoiceAudioEl(activeEntries = [], currentMs = 0, speed = 1, runtimeEntries = []) {
-    const session = getActiveSession();
-    const cfg = getPodcastVideoConfig(session);
-    const baseGeminiVolumePct = Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)));
-
-    const voiceTimelineEntries = buildMontageVoiceTimelineEntries(cfg, runtimeEntries);
-    const visualRowId = resolvePrimaryVisualRowId(activeEntries);
-    // En modo "single", el audio debe respetar la posición del chip (segment.startMs).
-    // Si el usuario movió el chip dentro de la escena, NO se debe calcular offset contra el inicio visual,
-    // porque cortaría el audio (skipping) al entrar en la nueva posición.
+  function selectActiveGeminiVoiceEntry(voiceTimelineEntries = [], currentMs = 0) {
     const activeVoiceEntries = Array.isArray(voiceTimelineEntries)
       ? voiceTimelineEntries.filter((entry) => (
         Number(currentMs || 0) >= Number(entry?.startMs || 0)
@@ -1509,12 +1678,24 @@ export function createPodcasterStudioPlayback(deps = {}) {
         && String(entry?.audioSrc || "").trim()
       ))
       : [];
-    const visualVoiceEntry = visualRowId
-      ? (activeVoiceEntries.find((entry) => String(entry?.rowId || "").trim() === visualRowId) || null)
-      : null;
-    const selected = visualVoiceEntry || activeVoiceEntries
+    return activeVoiceEntries
       .slice()
-      .sort((a, b) => Number(b.startMs || 0) - Number(a.startMs || 0) || Number(b.zIndex || 0) - Number(a.zIndex || 0))[0] || null;
+      .sort((a, b) => (
+        Number(b.startMs || 0) - Number(a.startMs || 0)
+        || Number(b.zIndex || 0) - Number(a.zIndex || 0)
+        || Number(b.index || 0) - Number(a.index || 0)
+      ))[0] || null;
+  }
+
+  function syncMontageVoiceAudioEl(activeEntries = [], currentMs = 0, speed = 1, runtimeEntries = []) {
+    const session = getActiveSession();
+    const cfg = getPodcastVideoConfig(session);
+    const baseGeminiVolumePct = Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)));
+
+    const voiceTimelineEntries = buildMontageVoiceTimelineEntries(cfg, runtimeEntries);
+    // En modo "single", Gemini debe seguir el timeline de su propio clip de audio.
+    // Si el chip se mueve, el audio también se mueve; no debe priorizar la escena visual.
+    const selected = selectActiveGeminiVoiceEntry(voiceTimelineEntries, currentMs);
     const rowId = String(selected?.rowId || "").trim();
     const src = String(selected?.audioSrc || "").trim();
     const clip = selected?.clip && typeof selected.clip === "object" ? selected.clip : null;
@@ -1602,7 +1783,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
       podcastVideoState.montageAudioPlayers = {};
       syncMontageVoiceAudioEl(activeEntries, currentMs, speed, runtimeEntries);
       const voiceVolume = Number(podcastVideoState.audioEl?.volume || 0);
-      setMontageBackgroundDuckFactor(voiceVolume > 0.0001 ? Math.max(0.28, 1 - Math.min(0.72, voiceVolume * 0.72)) : 1);
+      setMontageBackgroundDuckFactor(voiceVolume > 0.0001 ? Math.max(0.46, 1 - Math.min(0.54, voiceVolume * 0.50)) : 1);
       return;
     }
     const session = getActiveSession();
@@ -1745,7 +1926,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
     });
 
     podcastVideoState.montageAudioPlayers = nextMap;
-    setMontageBackgroundDuckFactor(activeVoicePeak > 0.0001 ? Math.max(0.28, 1 - Math.min(0.72, activeVoicePeak * 0.72)) : 1);
+    setMontageBackgroundDuckFactor(activeVoicePeak > 0.0001 ? Math.max(0.46, 1 - Math.min(0.54, activeVoicePeak * 0.50)) : 1);
   }
 
   async function syncStudioTimelinePreview(currentMs = 0, runtimeEntries = [], forcedActiveEntries = null, options = {}) {
@@ -1770,7 +1951,7 @@ export function createPodcasterStudioPlayback(deps = {}) {
             syncPodcastOnScreenTextOverlay(session, {
               rowId,
               currentMs,
-              forceRow: false
+              forceRow: true
             });
           } catch (_) {}
         }
@@ -1816,14 +1997,14 @@ export function createPodcasterStudioPlayback(deps = {}) {
           syncPodcastOnScreenTextOverlay(session, {
             rowId: "",
             currentMs,
-            forceRow: false
+            forceRow: true
           });
         } catch (_) {}
       }
       if (podcastVideoState.speaking) {
         setPodcastVideoSpeaker(session, podcastVideoState.activeSpeaker || "", { speaking: false, rowId: podcastVideoState.activeRowId });
       }
-      [els.podcastActiveSpeakerVideo, els.podcastActiveSpeakerVideoAlt].filter(Boolean).forEach((video) => {
+      getAllStageVideoElements().forEach((video) => {
         if (video && !video.paused) {
           try { video.pause(); } catch (_) {}
         }
@@ -1938,51 +2119,39 @@ export function createPodcasterStudioPlayback(deps = {}) {
     const offsetSec = Math.max(0, clampedOffsetMs / 1000);
     const effectiveClipPct = effectiveVeoPct;
     const src = String(visualEntry.videoSrc || "").trim();
+    const visualLayoutMode = normalizeVisualLayoutMode(visualEntry?.clip?.visualLayoutMode);
 
-    // Preview crossfade por solapamiento (fade out escena A + fade in escena B)
-    // Solo aplica cuando NO hay montaje activo y hay 2+ clips de video activos en el mismo instante.
-    const overlapCandidates = podcastVideoState.montageActive
-      ? []
-      : activeEntries.filter((entry) => Boolean(String(entry?.videoSrc || "").trim()));
-    const canOverlapPreview = Boolean(!podcastVideoState.montageActive && overlapCandidates.length >= 2);
+    // Solapamiento visual: prioriza la escena superior sin crossfade ni opacidad gradual.
+    const overlapCandidates = activeEntries.filter((entry) => Boolean(String(entry?.videoSrc || "").trim()));
+    const canOverlapPreview = Boolean(overlapCandidates.length >= 2);
     if (podcastVideoState.previewOverlapActive === true && !canOverlapPreview) {
       podcastVideoState.previewOverlapActive = false;
-      const primary = resolveStageVideoEl(true);
-      const secondary = resolveStageVideoEl(false);
-      if (primary) {
-        primary.style.opacity = "";
-        primary.style.zIndex = "";
-      }
-      if (secondary) {
-        secondary.style.opacity = "0";
-        secondary.style.zIndex = "";
-        secondary.style.pointerEvents = "none";
-        secondary.hidden = true;
-        try { secondary.pause(); } catch (_) {}
-      }
+      const primaryBundle = resolveStageVideoBundle(true);
+      const secondaryBundle = resolveStageVideoBundle(false);
+      [primaryBundle, secondaryBundle].forEach((bundle) => {
+        [bundle?.foreground, bundle?.backdrop].filter(Boolean).forEach((video) => {
+          video.style.zIndex = "";
+          video.style.pointerEvents = "none";
+        });
+      });
+      clearStageBundleOpacity(primaryBundle);
+      setStageBundleOpacity(secondaryBundle, 0);
+      [secondaryBundle?.foreground, secondaryBundle?.backdrop].filter(Boolean).forEach((video) => {
+        try { video.pause(); } catch (_) {}
+      });
     }
     if (canOverlapPreview) {
-      const primary = resolveStageVideoEl(true);
-      const secondary = resolveStageVideoEl(false);
-      if (primary && secondary) {
-        // Decide A (primera) y B (segunda) por orden temporal (startMs).
-        const byStart = [...overlapCandidates].sort((a, b) => (
-          Number(a.startMs || 0) - Number(b.startMs || 0)
-          || Number(a.zIndex || 0) - Number(b.zIndex || 0)
+      const incomingBundle = resolveStageVideoBundle(true);
+      const outgoingBundle = resolveStageVideoBundle(false);
+      if (incomingBundle?.foreground && outgoingBundle?.foreground) {
+        const byPriority = [...overlapCandidates].sort((a, b) => (
+          Number(b.zIndex || 0) - Number(a.zIndex || 0)
+          || Number(b.startMs || 0) - Number(a.startMs || 0)
         ));
-        const entryA = byStart[0];
-        const entryB = byStart[byStart.length - 1];
-        const aStart = Number(entryA?.startMs || 0);
-        const aEnd = Number(entryA?.endMs || 0);
-        const bStart = Number(entryB?.startMs || 0);
-        const bEnd = Number(entryB?.endMs || 0);
-        const overlapStart = Math.max(aStart, bStart);
-        const overlapEnd = Math.min(aEnd, bEnd);
-        const overlapLen = Math.max(0, overlapEnd - overlapStart);
-        if (overlapLen >= 20) {
-          const ratio = Math.max(0, Math.min(1, (Number(currentMs || 0) - overlapStart) / Math.max(1, overlapLen)));
-          const aOpacity = 1 - ratio;
-          const bOpacity = ratio;
+        const topEntry = byPriority[0] || null;
+        const underEntry = byPriority[1] || null;
+        if (topEntry) {
+          const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
 
           const calcOffsetSecForEntry = (entry) => {
             const trimIn = Math.max(0, Number(entry?.clip?.trimInMs || 0));
@@ -1993,77 +2162,58 @@ export function createPodcasterStudioPlayback(deps = {}) {
             return Math.max(0, clamped / 1000);
           };
 
-          const ensureVideo = async (videoEl, entry, offset) => {
-            const video = videoEl || null;
-            if (!video) return false;
-            const nextSrc = String(entry?.videoSrc || "").trim();
-            if (!nextSrc) return false;
-            const alreadyLoaded = String(video.dataset?.src || "").trim() === nextSrc
-              && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-            if (!alreadyLoaded && typeof setPodcastStageVideoSourceForElement === "function") {
-              const ok = await setPodcastStageVideoSourceForElement(video, nextSrc, { keepHidden: false });
-              if (!ok) return false;
-            }
-            video.hidden = false;
-            video.style.pointerEvents = "none";
-            video.volume = 0;
-            try { video.muted = true; } catch (_) {}
-            const durationSec = Math.max(0, Number(video.duration || 0));
-            const safeOffset = durationSec > 0
-              ? Math.max(0, Math.min(Math.max(0, durationSec - 0.04), offset))
-              : offset;
-            try { video.currentTime = safeOffset; } catch (_) {}
-            await waitForStageVideoReady(video, 720);
-            await waitForStageVideoSeek(video, 520);
-            await Promise.race([waitForStageVideoFrame(video, 260), sleep(80)]);
-            return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-          };
-
-          // Asignación estable: primary = escena B (entra), secondary = escena A (sale).
-          const offsetA = calcOffsetSecForEntry(entryA);
-          const offsetB = calcOffsetSecForEntry(entryB);
-          primary.style.opacity = "0";
-          primary.style.zIndex = "2";
-          secondary.style.opacity = "1";
-          secondary.style.zIndex = "1";
-          secondary.hidden = false;
-
-          const okA = await ensureVideo(secondary, entryA, offsetA);
-          const okB = await ensureVideo(primary, entryB, offsetB);
+          const topOffsetSec = calcOffsetSecForEntry(topEntry);
+          const underOffsetSec = underEntry ? calcOffsetSecForEntry(underEntry) : 0;
+          const seekToleranceSec = shouldAutoplay ? 0.14 : 0.02;
+          const okTop = await ensureStageBundleReady(incomingBundle, topEntry, topOffsetSec, {
+            keepHidden: false,
+            playbackRate: speed,
+            seekToleranceSec,
+            forceSeek: !shouldAutoplay
+          });
+          const okUnder = underEntry
+            ? await ensureStageBundleReady(outgoingBundle, underEntry, underOffsetSec, {
+              keepHidden: false,
+              playbackRate: speed,
+              seekToleranceSec,
+              forceSeek: !shouldAutoplay
+            })
+            : false;
           if (isStaleRequest()) return;
 
-          if (!okA) {
-            secondary.style.opacity = "0";
-            secondary.hidden = true;
-          }
-          if (!okB) {
-            // Si B no está listo, mantenemos A al 100% para evitar negro.
-            primary.style.opacity = "0";
-            primary.hidden = true;
-            secondary.style.opacity = "1";
-          } else {
-            primary.style.opacity = String(bOpacity);
-            secondary.style.opacity = String(aOpacity);
-          }
+          [incomingBundle?.foreground, incomingBundle?.backdrop].filter(Boolean).forEach((video) => {
+            video.style.zIndex = "2";
+          });
+          [outgoingBundle?.foreground, outgoingBundle?.backdrop].filter(Boolean).forEach((video) => {
+            video.style.zIndex = "1";
+          });
 
-          const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
-          primary.playbackRate = speed;
-          secondary.playbackRate = speed;
-          if (shouldAutoplay && !scrubMuteVideo) {
-            if (primary.paused) primary.play().catch(() => {});
-            if (secondary.paused) secondary.play().catch(() => {});
-          } else {
-            if (!primary.paused) { try { primary.pause(); } catch (_) {} }
-            if (!secondary.paused) { try { secondary.pause(); } catch (_) {} }
+          if (!okTop && !okUnder) {
+            podcastVideoState.previewOverlapActive = false;
+            return;
           }
+          setStageBundleOpacity(incomingBundle, okTop ? 1 : 0);
+          setStageBundleOpacity(outgoingBundle, okTop ? 0 : (okUnder ? 1 : 0));
+
+          [incomingBundle, outgoingBundle].forEach((bundle) => {
+            [bundle?.foreground, bundle?.backdrop].filter(Boolean).forEach((video) => {
+              video.playbackRate = speed;
+              video.volume = 0;
+              try { video.muted = true; } catch (_) {}
+              if (shouldAutoplay && !scrubMuteVideo) {
+                if (video.paused) video.play().catch(() => {});
+              } else if (!video.paused) {
+                try { video.pause(); } catch (_) {}
+              }
+            });
+          });
 
           podcastVideoState.previewOverlapActive = true;
-          // Durante la transición, el UI puede seguir la escena que va entrando.
           try {
-            syncPodcastStudioRuntimeUi(session, String(entryB?.rowId || "").trim(), String(entryB?.speakerKey || "").trim(), { speaking: shouldAutoplay });
+            syncPodcastStudioRuntimeUi(session, String(topEntry?.rowId || "").trim(), String(topEntry?.speakerKey || "").trim(), { speaking: shouldAutoplay });
           } catch (_) {}
           stopPreviewSceneAudio();
-          podcastVideoState.montageLastVisualRowId = String(entryB?.rowId || "").trim() || rowId;
+          podcastVideoState.montageLastVisualRowId = String(topEntry?.rowId || "").trim() || rowId;
           return;
         }
       }
@@ -2340,6 +2490,25 @@ export function createPodcasterStudioPlayback(deps = {}) {
       if (mustSeekOnSceneChange || (videoNeedsRecovery && videoDriftSec > 0.18) || videoDriftSec > 0.42) {
         try { stageVideo.currentTime = safeOffsetSec; } catch (_) {}
       }
+      const activeBundleForStage = resolveStageVideoBundleForForeground(stageVideo);
+      await ensureStageBundleReady(activeBundleForStage, {
+        ...visualEntry,
+        clip: {
+          ...(visualEntry?.clip || {}),
+          visualLayoutMode
+        }
+      }, safeOffsetSec, {
+        keepHidden: false,
+        playbackRate: speed,
+        seekToleranceSec: shouldAutoplay ? 0.14 : 0.03,
+        forceSeek: mustSeekOnSceneChange || !shouldAutoplay
+      });
+      const inactiveBundleForStage = resolveStageVideoBundleForForeground(previousStageVideoEl === stageVideo ? resolveStageVideoEl(false) : previousStageVideoEl);
+      applyStageBundleLayout(inactiveBundleForStage, "default");
+      setStageBundleOpacity(inactiveBundleForStage, 0);
+      [inactiveBundleForStage?.foreground, inactiveBundleForStage?.backdrop].filter(Boolean).forEach((video) => {
+        try { video.pause(); } catch (_) {}
+      });
       if (isStaleRequest()) return;
 
       // Si estamos en doble buffer pero NO autoplay (scrub/seek), hacemos el swap tras seek+frame.
@@ -2379,6 +2548,10 @@ export function createPodcasterStudioPlayback(deps = {}) {
             });
           }
         }
+        const activeBackdrop = resolveStageVideoBundleForForeground(stageVideo)?.backdrop || null;
+        if (activeBackdrop && activeBackdrop.hidden !== true && activeBackdrop.paused) {
+          activeBackdrop.play().catch(() => {});
+        }
         if (pendingDoubleBufferSwap && previousStageVideoEl && previousStageVideoEl !== stageVideo) {
           try { await waitForStageVideoReady(stageVideo, 720); } catch (_) {}
           try { await waitForStageVideoSeek(stageVideo, 520); } catch (_) {}
@@ -2414,6 +2587,10 @@ export function createPodcasterStudioPlayback(deps = {}) {
         }
       } else if (!stageVideo.paused) {
         try { stageVideo.pause(); } catch (_) {}
+        const activeBackdrop = resolveStageVideoBundleForForeground(stageVideo)?.backdrop || null;
+        if (activeBackdrop && !activeBackdrop.paused) {
+          try { activeBackdrop.pause(); } catch (_) {}
+        }
       }
       }
     } else {

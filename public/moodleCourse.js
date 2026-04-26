@@ -5141,16 +5141,8 @@ window.guardarCursoFirebase = async function () {
         }
 
         
-        // Crear copia profunda para evitar mutaciones
-        const cursoParaGuardar = JSON.parse(JSON.stringify({
-            cursoId: curso.cursoId || cursoDocId,
-            nombre: curso.nombre || "Curso sin nombre",
-            descripcion: curso.descripcion || "",
-            userId: curso.userId || currentUserId,
-            creado: curso.creado || new Date(),
-            temas: Array.isArray(curso.temas) ? curso.temas : [],
-            actualizado: new Date()
-        }));
+        // Guardar un índice liviano del curso. Los módulos pesados viven en docs separados.
+        const cursoParaGuardar = construirCursoLigeroParaFirestore(curso);
         
         
         // Obtener datos existentes para mantener información de compartir
@@ -5191,6 +5183,32 @@ window.guardarCursoFirebase = async function () {
         alert("Error al guardar el curso: " + error.message);
         return false;
     }
+}
+
+function construirCursoLigeroParaFirestore(source = {}) {
+    const raw = source && typeof source === "object" ? source : {};
+    const temas = Array.isArray(raw.temas) ? raw.temas : [];
+    return {
+        cursoId: raw.cursoId || cursoDocId,
+        nombre: raw.nombre || "Curso sin nombre",
+        descripcion: raw.descripcion || "",
+        userId: raw.userId || currentUserId,
+        creado: raw.creado || new Date(),
+        actualizado: new Date(),
+        temas: temas.map((tema) => {
+            const subtemas = Array.isArray(tema?.subtemas) ? tema.subtemas : [];
+            return {
+                ...tema,
+                subtemas: subtemas.map((subtema) => {
+                    const { modulos, ...subtemaLigero } = subtema || {};
+                    return {
+                        ...subtemaLigero,
+                        modulosIds: Array.isArray(subtemaLigero.modulosIds) ? subtemaLigero.modulosIds : []
+                    };
+                })
+            };
+        })
+    };
 }
 
 

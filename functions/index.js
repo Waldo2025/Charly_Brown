@@ -79,6 +79,7 @@ const ROUTE_RATE_LIMITS = new Map([
   ["/api/podcaster/sessions/list", {limit: 30, windowMs: 60 * 1000}],
   ["/api/podcaster/scene-library/list", {limit: 30, windowMs: 60 * 1000}],
   ["/api/podcaster/scene-library/publish", {limit: 20, windowMs: 60 * 1000}],
+  ["/api/podcaster/scene-library/upload-local", {limit: 20, windowMs: 60 * 1000}],
   ["/api/moodle/share-users", {limit: 20, windowMs: 60 * 1000}],
   ["/api/podcaster/speaker-portraits/generate", {limit: 20, windowMs: 60 * 1000}],
   ["/api/podcaster/scenario-images/generate", {limit: 20, windowMs: 60 * 1000}],
@@ -573,7 +574,57 @@ function sanitizePodcasterSession(raw = {}) {
 
   const speakerReferenceImageMap = sanitizeReferenceImageMap(raw?.speakerReferenceImageMap || {}, 40);
   const scenarioReferenceImageMap = sanitizeReferenceImageMap(raw?.scenarioReferenceImageMap || {}, 120);
+  const sanitizeReferenceImageListMap = (rawMap = {}, maxEntries = 500, maxItemsPerEntry = 4) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      const list = Array.isArray(value) ? value : [];
+      if (!key || !list.length) return;
+      const normalizedList = list.slice(0, maxItemsPerEntry).map((item) => {
+        const dataUrl = clampText(String(item?.dataUrl || "").trim(), 900_000);
+        if (!dataUrl.startsWith("data:image/")) return null;
+        return {
+          name: clampText(item?.name || "Referencia", 180) || "Referencia",
+          dataUrl,
+          mimeType: clampText(item?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
+          updatedAt: clampText(item?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
+        };
+      }).filter(Boolean);
+      if (normalizedList.length) next[key] = normalizedList;
+    });
+    return next;
+  };
+  const rowReferenceImageListMap = sanitizeReferenceImageListMap(raw?.rowReferenceImageListMap || {}, 500, 4);
   const rowReferenceImageMap = sanitizeReferenceImageMap(raw?.rowReferenceImageMap || {}, 500);
+  Object.entries(rowReferenceImageMap).forEach(([key, value]) => {
+    if (!rowReferenceImageListMap[key] && value) rowReferenceImageListMap[key] = [value];
+  });
+  const sanitizeReferenceVideoMap = (rawMap = {}, maxEntries = 500) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      if (!key || !value || typeof value !== "object") return;
+      const dataUrl = clampText(String(value?.dataUrl || "").trim(), 8_000_000);
+      if (!dataUrl.startsWith("data:video/")) return;
+      next[key] = {
+        name: clampText(value?.name || "Referencia de video", 180) || "Referencia de video",
+        dataUrl,
+        mimeType: clampText(value?.mimeType || "video/mp4", 120).trim().toLowerCase() || "video/mp4",
+        updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
+      };
+    });
+    return next;
+  };
+  const rowReferenceVideoMap = sanitizeReferenceVideoMap(raw?.rowReferenceVideoMap || {}, 500);
+  const rowReferenceModeByRowId = {};
+  Object.entries(raw?.rowReferenceModeByRowId && typeof raw.rowReferenceModeByRowId === "object" ? raw.rowReferenceModeByRowId : {}).slice(0, 500).forEach(([rawKey, value]) => {
+    const key = clampText(rawKey || "", 160);
+    const mode = String(value || "").trim().toLowerCase() === "video" ? "video" : "image";
+    if (mode === "video" && rowReferenceVideoMap[key]) rowReferenceModeByRowId[key] = "video";
+    else if (mode === "image" && (rowReferenceImageMap[key] || rowReferenceImageListMap[key]?.length)) rowReferenceModeByRowId[key] = "image";
+  });
   const dialogueVideoMapRaw = raw?.dialogueVideoMap && typeof raw.dialogueVideoMap === "object" ?
     raw.dialogueVideoMap :
     {};
@@ -739,7 +790,10 @@ function sanitizePodcasterSession(raw = {}) {
     speakerPortraitMap,
     speakerReferenceImageMap,
     scenarioReferenceImageMap,
+    rowReferenceImageListMap,
     rowReferenceImageMap,
+    rowReferenceVideoMap,
+    rowReferenceModeByRowId,
     globalScenarioDeck,
     dialogueVideoMap,
     dialogueAudioMap,
@@ -1421,6 +1475,79 @@ async function forwardPodcasterSceneLibraryPublish(req, res) {
   }
 }
 
+async function forwardPodcasterSceneLibraryUploadLocal(req, res) {
+  const uid = String(req.securityContext?.uid || "").trim();
+  const ownerEmail = String(req.securityContext?.email || "").trim();
+  if (!uid) return res.status(401).json({error: "AUTH_REQUIRED"});
+  try {
+    const title = clampText(req.body?.title || req.body?.originalName || "Video local", 180) || "Video local";
+    const originalName = clampText(req.body?.originalName || title, 180) || title;
+    const videoDataUrl = String(req.body?.videoDataUrl || "").trim();
+    const requestedMimeType = clampText(req.body?.mimeType || "video/mp4", 120) || "video/mp4";
+    const durationSec = clampNumber(req.body?.durationSec, 0, 240, 0);
+    const size = Math.max(0, Number(req.body?.size || 0) || 0);
+    const thumbDataUrl = String(req.body?.thumbDataUrl || "").trim();
+    if (!videoDataUrl) return res.status(400).json({error: "Falta videoDataUrl."});
+    const decoded = decodeBase64DataUrl(videoDataUrl, MAX_DIALOGUE_VIDEO_BYTES);
+    const mimeType = String(decoded.mimeType || requestedMimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
+    if (!mimeType.startsWith("video/")) return res.status(400).json({error: "El archivo debe ser un video."});
+    const libraryId = randomUUID();
+    const ext = getVideoExtension(mimeType);
+    const storagePath = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/local-video.${ext}`;
+    const videoAsset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer: decoded.buffer,
+      mimeType,
+      metadata: {
+        kind: "podcaster_scene_library_video",
+        source: "local_upload",
+        libraryId,
+        uid,
+        originalName,
+        size: String(size || decoded.buffer.length),
+      },
+    });
+    const thumbAsset = await uploadSceneLibraryThumb(thumbDataUrl, libraryId);
+    const nowIso = new Date().toISOString();
+    const item = {
+      libraryId,
+      sourceSessionId: "",
+      sourceRowId: "",
+      sourceRowNumber: 0,
+      ownerId: uid,
+      ownerEmail: ownerEmail || null,
+      title,
+      durationSec,
+      downloadUrl: videoAsset.downloadUrl,
+      storagePath: videoAsset.path,
+      mimeType,
+      thumbUrl: thumbAsset.thumbUrl || "",
+      thumbStoragePath: thumbAsset.thumbStoragePath || "",
+      thumbMimeType: thumbAsset.thumbMimeType || "image/jpeg",
+      sceneDescription: "",
+      onScreenText: "",
+      transition: "",
+      visualNotes: "",
+      videoDirective: "",
+      scenePrompt: "",
+      voiceOverText: "",
+      tagLabel: "Local",
+      tagColor: "sky",
+      imagePrompts: [],
+      videoPreset: "local",
+      sourceType: "local_upload",
+      originalName,
+      size: size || decoded.buffer.length,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    await db.collection("podcaster_scene_library").doc(libraryId).set(item, {merge: true});
+    return res.status(200).json({ok: true, item});
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({error: String(error?.message || "No se pudo subir el video local.")});
+  }
+}
+
 async function forwardPodcasterSceneLibraryUpdate(req, res) {
   const uid = String(req.securityContext?.uid || "").trim();
   const libraryId = clampText(req.body?.libraryId || "", 140);
@@ -1651,12 +1778,22 @@ function buildBackendPodcasterStudioScenePrompt({
   return lines.filter(Boolean).join(" ");
 }
 
-async function loadOptionalImageReference({ storagePath = "", url = "" }) {
+async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl = "" }) {
   const cleanStoragePath = clampText(storagePath || "", 700);
   const rawUrl = clampText(url || "", 3200);
   const cleanUrl = rawUrl.includes("%25") ? clampText(decodeURIComponent(rawUrl), 3200) : rawUrl;
+  const cleanDataUrl = String(dataUrl || "").trim();
   let buffer = null;
   let mimeType = "image/png";
+  if (cleanDataUrl) {
+    try {
+      const decoded = decodeBase64DataUrl(cleanDataUrl, MAX_SPEAKER_PORTRAIT_BYTES);
+      buffer = Buffer.from(decoded.buffer);
+      mimeType = String(decoded.mimeType || "image/png").trim().toLowerCase();
+    } catch (_) {
+      buffer = null;
+    }
+  }
   if (cleanStoragePath) {
     try {
       const bucket = admin.storage().bucket();
@@ -2388,6 +2525,18 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
   const originalText = clampText(req.body?.originalText || "", 1600);
   const targetSpeechLine = clampText(req.body?.targetSpeechLine || req.body?.text || "", 1600);
   const text = targetSpeechLine || clampText(req.body?.text || "", 1600);
+  const referenceMode = String(req.body?.referenceMode || "image").trim().toLowerCase() === "video" ? "video" : "image";
+  const referenceImageDataUrls = referenceMode === "image" && Array.isArray(req.body?.referenceImageDataUrls)
+    ? req.body.referenceImageDataUrls.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const referenceImageNames = referenceMode === "image" && Array.isArray(req.body?.referenceImageNames)
+    ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, 4)
+    : [];
+  const referenceImageDataUrl = referenceMode === "image" ? String(req.body?.referenceImageDataUrl || "").trim() : "";
+  const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
+  const referenceVideoDataUrl = referenceMode === "video" ? String(req.body?.referenceVideoDataUrl || "").trim() : "";
+  const referenceVideoName = clampText(req.body?.referenceVideoName || "", 180);
+  const referenceVideoMimeType = clampText(req.body?.referenceVideoMimeType || "video/mp4", 120) || "video/mp4";
   const continuityReferenceImageDataUrl = String(req.body?.continuityReferenceImageDataUrl || "").trim();
   const explicitForceImmediateSceneChange = req.body?.forceImmediateSceneChange === true;
   const dialogueAudioUrl = clampText(req.body?.dialogueAudioUrl || "", 3200);
@@ -2422,6 +2571,7 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     ? mergedModels.filter((modelName) => !/fast/i.test(String(modelName || "")))
     : mergedModels;
   const videoModels = filteredModels.length ? filteredModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
+  const requestDebugTag = `dialogue-video:${sessionId || "no-session"}:${rowId || "no-row"}`;
 
   const shouldForceImmediateSceneChange = (source = "") => {
     const text = String(source || "").toLowerCase();
@@ -2444,23 +2594,9 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     videoDirective,
     performanceDirective,
     imagePrompts.join(" "),
+    referenceImageNames.join(" "),
+    referenceImageName,
   ].filter(Boolean).join(" ")));
-
-  let continuityReferenceImage = null;
-  if (String(continuityReferenceImageDataUrl || "").startsWith("data:image/")) {
-    try {
-      const decoded = decodeDataUrl(continuityReferenceImageDataUrl);
-      continuityReferenceImage = {
-        image: {
-          bytesBase64Encoded: decoded.buffer.toString("base64"),
-          mimeType: String(decoded.mimeType || "image/png").trim().toLowerCase() || "image/png",
-        },
-        referenceType: "asset",
-      };
-    } catch (_) {
-      continuityReferenceImage = null;
-    }
-  }
 
   if (!sessionId) {
     console.warn("[functions][dialogue-video] reject 400 missing sessionId");
@@ -2538,6 +2674,66 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     ? `gs://${bucket.name}/${portraitStoragePath}`
     : "";
   const hasPortraitAsset = Boolean(portraitBase64 || portraitGcsUri);
+  const sceneReferenceSources = referenceImageDataUrls.length ? referenceImageDataUrls : (referenceImageDataUrl ? [referenceImageDataUrl] : []);
+  const sceneReferences = [];
+  for (const imageDataUrl of sceneReferenceSources) {
+    const sceneReference = await loadOptionalImageReference({ dataUrl: imageDataUrl });
+    if (!sceneReference) continue;
+    sceneReferences.push({
+      buffer: sceneReference.buffer,
+      mimeType: String(sceneReference.mimeType || "image/png").trim().toLowerCase() || "image/png",
+    });
+  }
+  const sceneReferenceImages = sceneReferences.map((item) => ({
+    image: {
+      bytesBase64Encoded: item.buffer.toString("base64"),
+      mimeType: item.mimeType,
+    },
+    referenceType: "asset",
+  }));
+  const hasSceneReference = sceneReferenceImages.length > 0;
+  const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
+  let sceneReferenceVideoFrameBase64 = "";
+  let sceneReferenceVideoFrameMimeType = "image/png";
+  if (referenceMode === "video" && referenceVideoDataUrl) {
+    const decodedVideo = decodeBase64DataUrl(referenceVideoDataUrl, MAX_DIALOGUE_VIDEO_BYTES);
+    if (!String(decodedVideo.mimeType || referenceVideoMimeType).toLowerCase().startsWith("video/")) {
+      return res.status(400).json({error: "El video de referencia no es válido."});
+    }
+    try {
+      const frameBuffer = await extractLastVideoFramePng(decodedVideo.buffer, String(decodedVideo.mimeType || referenceVideoMimeType || "video/mp4"));
+      if (frameBuffer?.length) {
+        sceneReferenceVideoFrameBase64 = frameBuffer.toString("base64");
+        sceneReferenceVideoFrameMimeType = "image/png";
+      }
+    } catch (error) {
+      console.warn(`[functions][${requestDebugTag}] reference video frame extraction failed`, {
+        error: String(error?.message || error || "unknown"),
+        referenceVideoName,
+      });
+    }
+    strictIdentity = false;
+  }
+  const hasSceneReferenceVideo = Boolean(sceneReferenceVideoFrameBase64);
+
+  let continuityFrameBase64 = "";
+  let continuityFrameMimeType = "image/png";
+  if (continuityReferenceImageDataUrl && continuityReferenceImageDataUrl.startsWith("data:image/")) {
+    const continuityReference = await loadOptionalImageReference({dataUrl: continuityReferenceImageDataUrl});
+    if (continuityReference?.buffer?.length) {
+      continuityFrameBase64 = continuityReference.buffer.toString("base64");
+      continuityFrameMimeType = String(continuityReference.mimeType || "image/png").trim().toLowerCase() || "image/png";
+    }
+  }
+  console.info(`[functions][${requestDebugTag}] request assets`, {
+    referenceMode,
+    hasSceneReference,
+    sceneReferenceCount: sceneReferenceImages.length,
+    hasSceneReferenceVideo,
+    useSceneReferenceAsInitImage: hasSceneReferenceVideo ? true : useSceneReferenceAsInitImage,
+    hasContinuityReference: Boolean(continuityFrameBase64),
+    hasPortraitAsset,
+  });
   let inferredAudioDurationSec = audioDurationSecInput;
   if (!inferredAudioDurationSec && dialogueAudioStoragePath) {
     try {
@@ -2712,6 +2908,88 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     });
   }
   const requestVariants = [];
+  const sceneReferenceAssets = [...sceneReferenceImages];
+  if (sceneReferenceVideoFrameBase64) {
+    sceneReferenceAssets.push({
+      image: {
+        bytesBase64Encoded: sceneReferenceVideoFrameBase64,
+        mimeType: sceneReferenceVideoFrameMimeType,
+      },
+      referenceType: "asset",
+    });
+  }
+  const derivedHasSceneReference = sceneReferenceAssets.length > 0;
+  const derivedUseSceneReferenceAsInitImage = derivedHasSceneReference && !strictIdentity;
+  const continuityReferenceImage = continuityFrameBase64
+    ? {
+      image: {
+        bytesBase64Encoded: continuityFrameBase64,
+        mimeType: continuityFrameMimeType,
+      },
+      referenceType: "asset",
+    }
+    : null;
+  const referenceDurationSec = inferredTargetDurationSec;
+
+  if (sceneReferenceAssets.length && derivedUseSceneReferenceAsInitImage) {
+    requestVariants.push(
+      {
+        label: "reference-scene+aspect+duration",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+          }],
+          parameters: {
+            aspectRatio: "16:9",
+            durationSeconds: referenceDurationSec,
+          },
+        },
+      },
+      {
+        label: "reference-scene+aspect",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+          }],
+          parameters: {
+            aspectRatio: "16:9",
+          },
+        },
+      },
+    );
+  }
+
+  if (continuityReferenceImage && !strictIdentity) {
+    requestVariants.push(
+      {
+        label: "reference-continuity+aspect+duration",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [continuityReferenceImage],
+          }],
+          parameters: {
+            aspectRatio: "16:9",
+            durationSeconds: referenceDurationSec,
+          },
+        },
+      },
+      {
+        label: "reference-continuity+aspect",
+        body: {
+          instances: [{
+            prompt,
+            referenceImages: [continuityReferenceImage],
+          }],
+          parameters: {
+            aspectRatio: "16:9",
+          },
+        },
+      },
+    );
+  }
   if (portraitGcsUri) {
     requestVariants.push(
       {
@@ -2725,11 +3003,11 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
                 mimeType: portraitMimeType,
               },
               referenceType: "asset",
-            }, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+            }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
           }],
           parameters: {
             aspectRatio: "16:9",
-            durationSeconds: inferredTargetDurationSec,
+            durationSeconds: referenceDurationSec,
           },
         },
       },
@@ -2744,7 +3022,7 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
                 mimeType: portraitMimeType,
               },
               referenceType: "asset",
-            }, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+            }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
           }],
           parameters: {
             aspectRatio: "16:9",
@@ -2766,11 +3044,11 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
                 mimeType: portraitMimeType,
               },
               referenceType: "asset",
-            }, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+            }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
           }],
           parameters: {
             aspectRatio: "16:9",
-            durationSeconds: inferredTargetDurationSec,
+            durationSeconds: referenceDurationSec,
           },
         },
       },
@@ -2785,7 +3063,7 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
                 mimeType: portraitMimeType,
               },
               referenceType: "asset",
-            }, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
+            }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])],
           }],
           parameters: {
             aspectRatio: "16:9",
@@ -2840,11 +3118,16 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
         body: {
           instances: [{
             prompt,
-            ...(continuityReferenceImage ? { referenceImages: [continuityReferenceImage] } : {})
+            ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
+              referenceImages: [
+                ...sceneReferenceAssets,
+                ...(continuityReferenceImage ? [continuityReferenceImage] : []),
+              ],
+            } : {}),
           }],
           parameters: {
             aspectRatio: "16:9",
-            durationSeconds: inferredTargetDurationSec,
+            durationSeconds: referenceDurationSec,
           },
         },
       },
@@ -2853,7 +3136,12 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
         body: {
           instances: [{
             prompt,
-            ...(continuityReferenceImage ? { referenceImages: [continuityReferenceImage] } : {})
+            ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
+              referenceImages: [
+                ...sceneReferenceAssets,
+                ...(continuityReferenceImage ? [continuityReferenceImage] : []),
+              ],
+            } : {}),
           }],
           parameters: {
             aspectRatio: "16:9",
@@ -4058,6 +4346,9 @@ async function routeApi(req, res) {
   }
   if (req.method === "POST" && path === "/api/podcaster/scene-library/publish") {
     return forwardPodcasterSceneLibraryPublish(req, res);
+  }
+  if (req.method === "POST" && path === "/api/podcaster/scene-library/upload-local") {
+    return forwardPodcasterSceneLibraryUploadLocal(req, res);
   }
   if (req.method === "POST" && path === "/api/podcaster/scene-library/update") {
     return forwardPodcasterSceneLibraryUpdate(req, res);

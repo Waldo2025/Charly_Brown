@@ -7,6 +7,10 @@ const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
+const {
+  resolveOnScreenTextExportCanvasSize,
+  resolveOnScreenTextRenderSpec
+} = require(path.resolve(__dirname, "..", "public", "on-screen-text-render-spec.js"));
 
 let admin = null;
 let GoogleGenAI = null;
@@ -94,10 +98,433 @@ const SCREENSHOT_MAX_BYTES = 6 * 1024 * 1024;
 const SCREENSHOT_PERSONAL_LIMIT = 24;
 const SCREENSHOT_SHARED_LIMIT = 48;
 const ACTIVE_PLAYER_WINDOW_MS = 45 * 1000;
+const FFMPEG_DRAWTEXT_FONT_CANDIDATES = Object.freeze([
+  "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+  "/System/Library/Fonts/Supplemental/Arial.ttf",
+  "/System/Library/Fonts/Helvetica.ttc",
+  "/System/Library/Fonts/SFNS.ttf"
+]);
 const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
+
+function clamp01(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return Math.max(0, Math.min(1, Number(fallback) || 0));
+  return Math.max(0, Math.min(1, num));
+}
+
+function clampPct01(value, fallback = 0.5) {
+  return clamp01(value, fallback);
+}
+
+function parseHexColor(value = "", fallback = "F8FAFC") {
+  const raw = String(value || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(raw)) return raw.toUpperCase();
+  if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+    return raw.split("").map((ch) => `${ch}${ch}`).join("").toUpperCase();
+  }
+  return fallback;
+}
+
+function toFfmpegColor(value = "", alpha = 1, fallback = "F8FAFC") {
+  const hex = parseHexColor(value, fallback);
+  return `0x${hex}@${clamp01(alpha, 1).toFixed(3)}`;
+}
+
+function escapeFfmpegDrawtextText(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/%/g, "\\%")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/\r?\n/g, "\\n");
+}
+
+function escapeFfmpegExpr(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function escapeFfmpegFilterPath(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
+function buildFfmpegDuckVolumeExpr(segments = [], duckVolume = 0.46) {
+  const list = Array.isArray(segments) ? segments : [];
+  const windows = list
+    .map((segment) => {
+      const startSec = Math.max(0, Number(segment?.startMs || 0) / 1000);
+      const durationSec = Math.max(0.05, Number(segment?.durationMs || 0) / 1000);
+      const endSec = startSec + durationSec;
+      return `between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`;
+    })
+    .filter(Boolean);
+  if (!windows.length) return "1";
+  const activeExpr = windows.join("+");
+  const factor = Math.max(0, Math.min(1, Number(duckVolume) || 0.46)).toFixed(3);
+  return `if(gt(${activeExpr},0),${factor},1)`;
+}
+
+function resolveFfmpegDrawtextFontFile() {
+  return FFMPEG_DRAWTEXT_FONT_CANDIDATES.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (_) {
+      return false;
+    }
+  }) || "";
+}
+
+function roundEven(value = 0, fallback = 2) {
+  const base = Number.isFinite(Number(value)) ? Math.round(Number(value)) : Math.round(Number(fallback) || 2);
+  const safe = Math.max(2, base);
+  return safe % 2 === 0 ? safe : safe - 1;
+}
+
+function formatTimelineClockMs(ms = 0) {
+  const totalMs = Math.max(0, Math.round(Number(ms || 0) || 0));
+  const hours = Math.floor(totalMs / 3600000);
+  const minutes = Math.floor((totalMs % 3600000) / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const millis = totalMs % 1000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
+function formatMontageReviewTimelineRange(startMs = 0, endMs = 0, durationMs = 0) {
+  const start = Math.max(0, Math.round(Number(startMs || 0) || 0));
+  const end = Math.max(start, Math.round(Number(endMs || 0) || start));
+  const duration = Math.max(0, Math.round(Number(durationMs || 0) || (end - start)));
+  const seconds = Math.round((duration / 1000) * 10) / 10;
+  return `${formatTimelineClockMs(start)} - ${formatTimelineClockMs(end)} · ${seconds.toFixed(1)} s`;
+}
+
+function buildFfmpegTimecodeExpr(secondsExpr = "t") {
+  const expr = String(secondsExpr || "t").trim() || "t";
+  return [
+    `%{eif\\:trunc((${expr})/3600)\\:d\\:2}`,
+    `%{eif\\:trunc(mod((${expr})/60\\,60))\\:d\\:2}`,
+    `%{eif\\:trunc(mod(${expr}\\,60))\\:d\\:2}`,
+    `%{eif\\:trunc(mod((${expr})*1000\\,1000))\\:d\\:3}`
+  ].join("\\:");
+}
+
+function escapeFfmpegStaticTextFragment(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function wrapMontageReviewText(value = "", options = {}) {
+  const fallback = String(options?.fallback || "Sin definir").trim() || "Sin definir";
+  const maxChars = Math.max(10, Math.round(Number(options?.maxChars || 36) || 36));
+  const maxLines = Math.max(1, Math.round(Number(options?.maxLines || 3) || 3));
+  const rawLines = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim());
+  const sourceLines = rawLines.some(Boolean) ? rawLines : [fallback];
+  const lines = [];
+  let truncated = false;
+
+  const pushLine = (line) => {
+    if (!line) return;
+    if (lines.length < maxLines) {
+      lines.push(line);
+    } else {
+      truncated = true;
+    }
+  };
+
+  const wrapSingleLine = (input = "") => {
+    const words = String(input || "").split(" ").filter(Boolean);
+    let current = "";
+    for (const word of words) {
+      const chunks = [];
+      if (word.length <= maxChars) {
+        chunks.push(word);
+      } else {
+        for (let cursor = 0; cursor < word.length; cursor += maxChars) {
+          chunks.push(word.slice(cursor, cursor + maxChars));
+        }
+      }
+      for (const chunk of chunks) {
+        const next = current ? `${current} ${chunk}` : chunk;
+        if (next.length <= maxChars) {
+          current = next;
+        } else {
+          pushLine(current);
+          current = chunk;
+        }
+        if (lines.length >= maxLines) {
+          truncated = true;
+          return;
+        }
+      }
+    }
+    if (!truncated && current) pushLine(current);
+  };
+
+  for (const sourceLine of sourceLines) {
+    wrapSingleLine(sourceLine || fallback);
+    if (truncated || lines.length >= maxLines) {
+      truncated = truncated || sourceLines.indexOf(sourceLine) < sourceLines.length - 1;
+      break;
+    }
+  }
+  const safeLines = lines.length ? lines.slice(0, maxLines) : [fallback];
+  if (truncated) {
+    const last = safeLines[safeLines.length - 1] || "";
+    safeLines[safeLines.length - 1] = `${last.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+  }
+  return safeLines.join("\n");
+}
+
+function countWrappedLines(value = "") {
+  const lines = String(value || "").split(/\r?\n/).filter((line) => line.length || line === "");
+  return Math.max(1, lines.length);
+}
+
+function extractVideoDimensionsFromFfmpegStderr(output = "") {
+  const lines = String(output || "").split(/\r?\n/);
+  for (const line of lines) {
+    if (!/Video:/i.test(line)) continue;
+    const match = line.match(/(\d{2,5})x(\d{2,5})/);
+    if (!match) continue;
+    const width = roundEven(match[1], 1280);
+    const height = roundEven(match[2], 720);
+    if (width > 0 && height > 0) {
+      return { width, height };
+    }
+  }
+  return { width: 0, height: 0 };
+}
+
+async function probeMediaVideoDimensionsWithFfmpeg(inputPath = "", label = "probe") {
+  const probeResult = await runFfmpegCommand([
+    "-hide_banner",
+    "-i",
+    String(inputPath || "").trim(),
+    "-f",
+    "null",
+    "-"
+  ], { stage: `${label}_probe_dimensions` });
+  return extractVideoDimensionsFromFfmpegStderr(probeResult.stderr || "");
+}
+
+async function probeMediaHasAudioWithFfmpeg(inputPath = "") {
+  try {
+    const probeResult = await runFfmpegCommand([
+      "-hide_banner",
+      "-i", String(inputPath || "").trim(),
+      "-f", "null", "-"
+    ], { stage: "probe_audio" });
+    return /Stream #.*: Audio:/i.test(probeResult.stderr || "");
+  } catch (_) {
+    return false;
+  }
+}
+
+function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
+  const preset = String(resolution || "source").trim();
+  if (preset === "1080p") return { width: 1920, height: 1080 };
+  if (preset === "720p") return { width: 1280, height: 720 };
+  if (preset === "480p") return { width: 854, height: 480 };
+  const largestSide = Math.max(Number(sourceWidth || 0), Number(sourceHeight || 0));
+  if (largestSide >= 1800) return { width: 1920, height: 1080 };
+  if (largestSide >= 1100) return { width: 1280, height: 720 };
+  if (largestSide >= 760) return { width: 854, height: 480 };
+  return { width: 640, height: 360 };
+}
+
+function buildMontageReviewVideoFilter(entries = [], options = {}) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  const width = roundEven(options?.width || 1280, 1280);
+  const height = roundEven(options?.height || 720, 720);
+  const isCompactReview = height <= 500 || width <= 900;
+  const isLargeReview = height >= 1000 || width >= 1800;
+  const leftPaneRatio = isCompactReview ? 0.525 : (isLargeReview ? 0.56 : 0.55);
+  const leftPaneW = roundEven(width * leftPaneRatio, width / 2);
+  const panelX = leftPaneW;
+  const panelW = Math.max(120, width - panelX);
+  const panelInsetLeft = Math.max(10, Math.round(width * (isCompactReview ? 0.010 : 0.014)));
+  const panelInsetRight = Math.max(10, Math.round(width * (isCompactReview ? 0.009 : 0.012)));
+  const panelInnerX = panelX + panelInsetLeft;
+  const panelInnerW = Math.max(80, panelW - panelInsetLeft - panelInsetRight);
+  const panelInnerRight = panelX + panelW - panelInsetRight;
+  const panelTop = Math.max(18, Math.round(height * (isCompactReview ? 0.048 : 0.055)));
+  const panelBottom = Math.max(18, Math.round(height * (isCompactReview ? 0.048 : 0.055)));
+  const headerFont = Math.max(
+    isCompactReview ? 18 : 24,
+    Math.min(
+      Math.round(height * (isCompactReview ? 0.033 : 0.040)),
+      Math.round(panelInnerW * (isCompactReview ? 0.108 : 0.095))
+    )
+  );
+  const labelFont = Math.max(
+    isCompactReview ? 11 : 13,
+    Math.min(
+      Math.round(height * (isCompactReview ? 0.0155 : 0.020)),
+      Math.round(panelInnerW * 0.038)
+    )
+  );
+  const bodyFont = Math.max(
+    isCompactReview ? 13 : 16,
+    Math.min(
+      Math.round(height * (isCompactReview ? 0.0225 : 0.0265)),
+      Math.round(panelInnerW * (isCompactReview ? 0.060 : 0.054))
+    )
+  );
+  const timeFont = Math.max(bodyFont, Math.round(bodyFont * (isCompactReview ? 1.0 : 1.04)));
+  const lineSpacing = Math.max(isCompactReview ? 2 : 4, Math.round(bodyFont * (isCompactReview ? 0.22 : 0.3)));
+  const labelGap = Math.max(isCompactReview ? 3 : 5, Math.round(height * (isCompactReview ? 0.0055 : 0.008)));
+  const sectionGap = Math.max(isCompactReview ? 8 : 12, Math.round(height * (isCompactReview ? 0.017 : 0.024)));
+  const bodyLineHeight = Math.max(bodyFont + lineSpacing, Math.round(bodyFont * (isCompactReview ? 1.24 : 1.34)));
+  const timeLineHeight = Math.max(timeFont + Math.round(lineSpacing * 0.7), Math.round(timeFont * (isCompactReview ? 1.18 : 1.28)));
+  const bodyChars = Math.max(18, Math.floor(panelInnerW / Math.max(11, bodyFont * (isCompactReview ? 0.82 : 0.92))));
+  const shortChars = Math.max(16, Math.floor(panelInnerW / Math.max(12, bodyFont * (isCompactReview ? 0.88 : 0.98))));
+  const counterFont = Math.max(isCompactReview ? 12 : 16, Math.round(height * (isCompactReview ? 0.020 : 0.023)));
+  const counterX = Math.max(16, Math.round(width * 0.022));
+  const counterY = Math.max(isCompactReview ? 10 : 14, Math.round(height * (isCompactReview ? 0.024 : 0.030)));
+  const totalDurationMs = Math.max(
+    0,
+    Math.round(Number(options?.montageTotalDurationMs || 0) || 0),
+    ...list.map((entry) => Math.max(0, Math.round(Number(entry?.reviewEndMs || 0) || 0)))
+  );
+  const staticCounterMs = Math.max(0, Math.min(
+    totalDurationMs,
+    Math.round(Number(options?.globalCounterCurrentMs ?? 0) || 0)
+  ));
+  const dividerX = Math.max(0, panelX - 1);
+  const enableFor = (startMs, endMs) => escapeFfmpegExpr(`between(t,${(Math.max(0, startMs) / 1000).toFixed(3)},${(Math.max(startMs, endMs) / 1000).toFixed(3)})`);
+  const drawtext = (text, x, y, fontSize, color, enableExpr, options2 = {}) => {
+    const shadowX = Math.max(-24, Math.min(24, Math.round(Number(options2?.shadowX ?? 1) || 1)));
+    const shadowY = Math.max(-24, Math.min(24, Math.round(Number(options2?.shadowY ?? 1) || 1)));
+    const borderW = Math.max(0, Math.min(6, Math.round(Number(options2?.borderW ?? 1) || 1)));
+    const localLineSpacing = Math.max(0, Math.round(Number(options2?.lineSpacing ?? lineSpacing) || lineSpacing));
+    const rawText = options2?.rawText === true;
+    const textFilePath = typeof options?.textFileResolver === "function"
+      ? (!rawText ? options.textFileResolver(String(text || "")) : "")
+      : "";
+    const textSource = textFilePath
+      ? `textfile='${escapeFfmpegFilterPath(textFilePath)}':reload=0`
+      : `text='${rawText ? String(text || "") : escapeFfmpegDrawtextText(text)}'`;
+    const boxEnabled = options2?.boxEnabled === true;
+    const boxColor = String(options2?.boxColor || "0x020617@0.480").trim();
+    const boxBorderW = Math.max(0, Math.round(Number(options2?.boxBorderW ?? 0) || 0));
+    const enableSegment = enableExpr ? `:enable='${enableExpr}'` : "";
+    return `drawtext=${textSource}:fontsize=${fontSize}:fontcolor=${color}:x=${Math.round(x)}:y=${Math.round(y)}:fix_bounds=1:line_spacing=${localLineSpacing}:shadowx=${shadowX}:shadowy=${shadowY}:shadowcolor=0x020617@0.420:borderw=${borderW}:bordercolor=0x020617@0.180:${boxEnabled ? "box=1" : "box=0"}:boxcolor=${boxColor}:boxborderw=${boxBorderW}${enableSegment}`;
+  };
+
+  const filterSteps = [
+    `scale=w=${leftPaneW}:h=${height}:force_original_aspect_ratio=decrease`,
+    "setsar=1",
+    `pad=${width}:${height}:((${leftPaneW}-iw)/2):((oh-ih)/2):color=0x05070B`
+  ];
+
+  const drawFilters = [
+    `drawbox=x=${panelX}:y=0:w=${panelW}:h=${height}:color=0x0F172A@0.960:t=fill`,
+    `drawbox=x=${dividerX}:y=0:w=2:h=${height}:color=0xE2E8F0@0.140:t=fill`,
+    `drawbox=x=${panelInnerX}:y=${Math.round(panelTop + headerFont + (isCompactReview ? 8 : 12))}:w=${Math.max(40, panelInnerW)}:h=2:color=0x38BDF8@0.800:t=fill`
+  ];
+
+  const globalCounterText = options?.globalCounterMode === "static"
+    ? `${escapeFfmpegStaticTextFragment(formatTimelineClockMs(staticCounterMs))} / ${escapeFfmpegStaticTextFragment(formatTimelineClockMs(totalDurationMs))}`
+    : `${buildFfmpegTimecodeExpr("t")} / ${escapeFfmpegStaticTextFragment(formatTimelineClockMs(totalDurationMs))}`;
+  drawFilters.push(
+    drawtext(globalCounterText, counterX, counterY, counterFont, "0xF8FAFC@0.980", "", {
+      rawText: true,
+      lineSpacing: 2,
+      shadowX: 0,
+      shadowY: 1,
+      borderW: 0,
+      boxEnabled: true,
+      boxColor: "0x020617@0.520",
+      boxBorderW: Math.max(8, Math.round(counterFont * 0.52))
+    })
+  );
+
+  list.forEach((entry) => {
+    const startMs = Math.max(0, Math.round(Number(entry?.reviewStartMs || 0) || 0));
+    const endMs = Math.max(startMs + 50, Math.round(Number(entry?.reviewEndMs || 0) || 0));
+    const enableExpr = enableFor(startMs, endMs);
+    const timelineLabel = wrapMontageReviewText(String(entry?.timelineLabel || ""), {
+      fallback: "Sin definir",
+      maxChars: shortChars,
+      maxLines: 2
+    });
+    const scriptText = wrapMontageReviewText(String(entry?.voiceOverText || ""), {
+      fallback: "Sin texto",
+      maxChars: bodyChars,
+      maxLines: 5
+    });
+    const sceneText = wrapMontageReviewText(String(entry?.sceneDescription || ""), {
+      fallback: "Sin definir",
+      maxChars: bodyChars,
+      maxLines: 4
+    });
+    const onScreenText = wrapMontageReviewText(String(entry?.onScreenText || ""), {
+      fallback: "Sin texto",
+      maxChars: bodyChars,
+      maxLines: 3
+    });
+    const visualText = wrapMontageReviewText(String(entry?.visualNotes || ""), {
+      fallback: "Sin definir",
+      maxChars: Math.max(24, bodyChars + (isCompactReview ? 6 : 12)),
+      maxLines: 5
+    });
+    const sections = [
+      { label: "TIEMPO", value: timelineLabel, fontSize: timeFont, color: "0xE2E8F0@0.960", lineHeight: timeLineHeight },
+      { label: "GUIÓN", value: scriptText, fontSize: bodyFont, color: "0xF8FAFC@0.980", lineHeight: bodyLineHeight },
+      { label: "DESCRIPCIÓN DE ESCENA", value: sceneText, fontSize: bodyFont, color: "0xE2E8F0@0.960", lineHeight: bodyLineHeight },
+      { label: "TEXTO EN PANTALLA", value: onScreenText, fontSize: bodyFont, color: "0xF8FAFC@0.980", lineHeight: bodyLineHeight },
+      { label: "ELEMENTO VISUAL", value: visualText, fontSize: bodyFont, color: "0xE2E8F0@0.960", lineHeight: bodyLineHeight }
+    ];
+    let yCursor = panelTop;
+    drawFilters.push(
+      drawtext(`Escena ${Math.max(1, Number(entry?.sceneIndex || 1) || 1)}`, panelInnerX, yCursor, headerFont, "0xF8FAFC@1.000", enableExpr, { lineSpacing: Math.max(2, Math.round(lineSpacing * 0.6)), shadowX: 0, shadowY: 1, borderW: 1 })
+    );
+    yCursor += headerFont + Math.max(isCompactReview ? 10 : 18, Math.round(height * (isCompactReview ? 0.026 : 0.040)));
+    sections.forEach((section, index) => {
+      if (yCursor > (height - panelBottom - section.lineHeight)) return;
+      drawFilters.push(
+        drawtext(section.label, panelInnerX, yCursor, labelFont, "0x7DD3FC@0.950", enableExpr, { lineSpacing: 2, shadowX: 0, shadowY: 0, borderW: 0 })
+      );
+      yCursor += labelFont + labelGap;
+      drawFilters.push(
+        drawtext(section.value, panelInnerX, yCursor, section.fontSize, section.color, enableExpr, { lineSpacing, shadowX: 0, shadowY: 1, borderW: 0 })
+      );
+      yCursor += (countWrappedLines(section.value) * section.lineHeight);
+      if (index < sections.length - 1) {
+        yCursor += sectionGap;
+      }
+    });
+    drawFilters.push(
+      `drawbox=x=${panelInnerX}:y=${Math.round(panelTop + headerFont + (isCompactReview ? 8 : 12))}:w=${Math.max(40, panelInnerRight - panelInnerX)}:h=2:color=0x38BDF8@0.800:t=fill:enable='${enableExpr}'`
+    );
+  });
+
+  return [...filterSteps, ...drawFilters].join(",");
+}
 
 function parseAllowedOrigins() {
   const defaults = [
@@ -332,6 +759,8 @@ async function downloadStorageObjectToBuffer(storagePath = "") {
 const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
+const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const montageExportJobs = new Map();
 
 async function ensureMontageExportCacheDir() {
   await fs.promises.mkdir(MONTAGE_EXPORT_CACHE_DIR, { recursive: true });
@@ -402,6 +831,77 @@ async function cleanupMontageExportCache() {
     }
   } catch (_) {
     // best-effort
+  }
+}
+
+function sanitizeMontageJobPublicPayload(job = null) {
+  const source = job && typeof job === "object" ? job : {};
+  const payload = {
+    ok: true,
+    jobId: String(source.jobId || "").trim(),
+    status: String(source.status || "queued").trim() || "queued",
+    stage: String(source.stage || "validate_payload").trim() || "validate_payload",
+    progress: Math.max(0, Math.min(1, Number(source.progress || 0) || 0)),
+    hint: String(source.hint || "").trim(),
+    updatedAt: String(source.updatedAt || "").trim() || new Date().toISOString()
+  };
+  if (Number.isFinite(Number(source.currentSceneIndex))) payload.currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex) || 0));
+  if (source.currentRowId) payload.currentRowId = String(source.currentRowId || "").trim();
+  if (Number.isFinite(Number(source.totalScenes))) payload.totalScenes = Math.max(0, Math.round(Number(source.totalScenes) || 0));
+  if (Array.isArray(source.warnings) && source.warnings.length) payload.warnings = source.warnings;
+  if (source.error && typeof source.error === "object") payload.error = source.error;
+  if (source.export && typeof source.export === "object") payload.export = source.export;
+  if (source.downloadUrl) payload.downloadUrl = String(source.downloadUrl || "").trim();
+  return payload;
+}
+
+function upsertMontageExportJob(jobId = "", patch = {}) {
+  const id = clampExportId(jobId);
+  if (!id) return null;
+  const prev = montageExportJobs.get(id) || {
+    jobId: id,
+    status: "queued",
+    stage: "validate_payload",
+    progress: 0,
+    hint: "",
+    warnings: [],
+    export: null,
+    error: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    expiresAtMs: Date.now() + MONTAGE_EXPORT_JOB_TTL_MS
+  };
+  const next = {
+    ...prev,
+    ...patch,
+    jobId: id,
+    progress: Math.max(0, Math.min(1, Number(patch?.progress ?? prev.progress ?? 0) || 0)),
+    updatedAt: new Date().toISOString(),
+    expiresAtMs: Date.now() + MONTAGE_EXPORT_JOB_TTL_MS
+  };
+  if (Array.isArray(patch?.warnings)) next.warnings = patch.warnings;
+  montageExportJobs.set(id, next);
+  return next;
+}
+
+function getMontageExportJob(jobId = "") {
+  const id = clampExportId(jobId);
+  if (!id) return null;
+  const job = montageExportJobs.get(id) || null;
+  if (!job) return null;
+  if (Number(job.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < Date.now()) {
+    montageExportJobs.delete(id);
+    return null;
+  }
+  return job;
+}
+
+function cleanupMontageExportJobs() {
+  const now = Date.now();
+  for (const [jobId, job] of montageExportJobs.entries()) {
+    if (Number(job?.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < now) {
+      montageExportJobs.delete(jobId);
+    }
   }
 }
 
@@ -730,6 +1230,15 @@ function sanitizePodcasterSession(raw = {}) {
     mediaCue: clampText(row?.mediaCue || "Sin media", 80) || "Sin media",
     text: clampText(row?.text || "", 12000),
     notes: clampText(row?.notes || "", 5000),
+    voiceOverText: clampText(row?.voiceOverText || "", 12000),
+    voiceOverOriginalText: clampText(row?.voiceOverOriginalText || "", 12000),
+    sceneDescription: clampText(row?.sceneDescription || "", 5000),
+    onScreenText: clampText(row?.onScreenText || "", 1600),
+    onScreenTextNoSummarize: row?.onScreenTextNoSummarize === true,
+    transition: clampText(row?.transition || "", 1200),
+    visualNotes: clampText(row?.visualNotes || "", 5000),
+    visualNotesOriginalText: clampText(row?.visualNotesOriginalText || "", 5000),
+    visualNotesOriginalStored: row?.visualNotesOriginalStored === true,
     videoDirective: clampText(row?.videoDirective || "", 1400),
     scenePrompt: clampText(row?.scenePrompt || "", 1200),
     imagePrompts: Array.isArray(row?.imagePrompts)
@@ -751,6 +1260,7 @@ function sanitizePodcasterSession(raw = {}) {
     ? raw.script.hosts.slice(0, 10).map((host) => clampText(host, 80)).filter(Boolean)
     : [];
   const scriptVideoMode = raw?.script?.videoMode === true;
+  const rowIdSet = new Set(rows.map((row) => String(row?.id || "").trim()).filter(Boolean));
   const chat = Array.isArray(raw?.chat)
     ? raw.chat.slice(-220).map((msg, index) => ({
         id: clampText(msg?.id || `msg_${index + 1}`, 80) || `msg_${index + 1}`,
@@ -803,7 +1313,57 @@ function sanitizePodcasterSession(raw = {}) {
 
   const speakerReferenceImageMap = sanitizeReferenceImageMap(raw?.speakerReferenceImageMap || {}, 40);
   const scenarioReferenceImageMap = sanitizeReferenceImageMap(raw?.scenarioReferenceImageMap || {}, 120);
+  const sanitizeReferenceImageListMap = (rawMap = {}, maxEntries = 500, maxItemsPerEntry = 4) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      const list = Array.isArray(value) ? value : [];
+      if (!key || !list.length) return;
+      const normalizedList = list.slice(0, maxItemsPerEntry).map((item) => {
+        const dataUrl = clampText(String(item?.dataUrl || "").trim(), 900_000);
+        if (!dataUrl.startsWith("data:image/")) return null;
+        return {
+          name: clampText(item?.name || "Referencia", 180) || "Referencia",
+          dataUrl,
+          mimeType: clampText(item?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
+          updatedAt: clampText(item?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
+        };
+      }).filter(Boolean);
+      if (normalizedList.length) next[key] = normalizedList;
+    });
+    return next;
+  };
+  const rowReferenceImageListMap = sanitizeReferenceImageListMap(raw?.rowReferenceImageListMap || {}, 500, 4);
   const rowReferenceImageMap = sanitizeReferenceImageMap(raw?.rowReferenceImageMap || {}, 500);
+  Object.entries(rowReferenceImageMap).forEach(([key, value]) => {
+    if (!rowReferenceImageListMap[key] && value) rowReferenceImageListMap[key] = [value];
+  });
+  const sanitizeReferenceVideoMap = (rawMap = {}, maxEntries = 500) => {
+    const source = rawMap && typeof rawMap === "object" ? rawMap : {};
+    const next = {};
+    Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
+      const key = clampText(rawKey || "", 160);
+      if (!key || !value || typeof value !== "object") return;
+      const dataUrl = clampText(String(value?.dataUrl || "").trim(), 8_000_000);
+      if (!dataUrl.startsWith("data:video/")) return;
+      next[key] = {
+        name: clampText(value?.name || "Referencia de video", 180) || "Referencia de video",
+        dataUrl,
+        mimeType: clampText(value?.mimeType || "video/mp4", 120).trim().toLowerCase() || "video/mp4",
+        updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
+      };
+    });
+    return next;
+  };
+  const rowReferenceVideoMap = sanitizeReferenceVideoMap(raw?.rowReferenceVideoMap || {}, 500);
+  const rowReferenceModeByRowId = {};
+  Object.entries(raw?.rowReferenceModeByRowId && typeof raw.rowReferenceModeByRowId === "object" ? raw.rowReferenceModeByRowId : {}).slice(0, 500).forEach(([rawKey, value]) => {
+    const key = clampText(rawKey || "", 160);
+    const mode = String(value || "").trim().toLowerCase() === "video" ? "video" : "image";
+    if (mode === "video" && rowReferenceVideoMap[key]) rowReferenceModeByRowId[key] = "video";
+    else if (mode === "image" && (rowReferenceImageMap[key] || rowReferenceImageListMap[key]?.length)) rowReferenceModeByRowId[key] = "image";
+  });
   const dialogueVideoMapRaw = raw?.dialogueVideoMap && typeof raw.dialogueVideoMap === "object"
     ? raw.dialogueVideoMap
     : {};
@@ -961,16 +1521,145 @@ function sanitizePodcasterSession(raw = {}) {
         geminiVolumeOverridePct: normalizeSceneVolumeOverridePct(
           clip?.geminiVolumeOverridePct != null ? clip.geminiVolumeOverridePct : clip?.geminiVolumePct
         ),
+        visualLayoutMode: String(clip?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
+          ? "blur-backdrop"
+          : "default",
         zIndex
       };
     });
     return next;
   };
+  const sanitizeOnScreenTextTrack = (trackRaw = {}) => ({
+    enabled: trackRaw?.enabled !== false,
+    showTrack: trackRaw?.showTrack !== false,
+    fontFamily: clampText(trackRaw?.fontFamily || "unbounded", 80) || "unbounded",
+    fontSizePx: clampNumber(trackRaw?.fontSizePx, 16, 96, 44),
+    stylePreset: clampText(trackRaw?.stylePreset || "3d", 40) || "3d",
+    fontWeight: clampText(trackRaw?.fontWeight || "bold", 24) || "bold",
+    fontStyle: clampText(trackRaw?.fontStyle || "normal", 24) || "normal",
+    textAlign: clampText(trackRaw?.textAlign || "center", 24) || "center",
+    textColor: clampText(trackRaw?.textColor || "#FFFFFF", 24) || "#FFFFFF",
+    strokeColor: clampText(trackRaw?.strokeColor || "#0f172a", 24) || "#0f172a",
+    strokeWidthPx: clampNumber(trackRaw?.strokeWidthPx, 0, 12, 2),
+    textOpacity: clampNumber(trackRaw?.textOpacity, 0, 1, 1),
+    bgPreset: clampText(trackRaw?.bgPreset || "glass-dark", 40) || "glass-dark",
+    bgOpacity: clampNumber(trackRaw?.bgOpacity, 0, 1, 0.72),
+    bgScale: clampNumber(trackRaw?.bgScale, 0.6, 2.5, 1),
+    shadowEnabled: trackRaw?.shadowEnabled !== false,
+    shadowBlurPx: clampNumber(trackRaw?.shadowBlurPx, 0, 80, 18),
+    shadowOffsetXPx: clampNumber(trackRaw?.shadowOffsetXPx, -80, 80, 0),
+    shadowOffsetYPx: clampNumber(trackRaw?.shadowOffsetYPx, -80, 80, 8),
+    shadowOpacity: clampNumber(trackRaw?.shadowOpacity, 0, 1, 0.48),
+    overlayXPct: clampNumber(trackRaw?.overlayXPct, 0, 1, 0.5),
+    overlayYPct: clampNumber(trackRaw?.overlayYPct, 0, 1, 0.82)
+  });
+  const sanitizeOnScreenTextClipsByRowId = (rawClips = {}) => {
+    const source = rawClips && typeof rawClips === "object" ? rawClips : {};
+    const next = {};
+    Object.entries(source).slice(0, 900).forEach(([rowIdRaw, clip]) => {
+      const rowId = clampText(rowIdRaw || clip?.rowId || "", 120);
+      if (!rowId || !clip || typeof clip !== "object") return;
+      const sourceDurationMs = Math.max(500, Math.min(1800 * 1000, Math.round(Number(clip?.sourceDurationMs) || 8000)));
+      const trimInMs = Math.max(0, Math.min(sourceDurationMs - 500, Math.round(Number(clip?.trimInMs) || 0)));
+      const trimOutMs = Math.max(
+        trimInMs + 500,
+        Math.min(sourceDurationMs, Math.round(Number(clip?.trimOutMs) || sourceDurationMs))
+      );
+      next[rowId] = {
+        rowId,
+        startMs: Math.max(0, Math.min(3600 * 1000, Math.round(Number(clip?.startMs) || 0))),
+        sourceDurationMs,
+        trimInMs,
+        trimOutMs,
+        hidden: clip?.hidden === true,
+        autoHidden: clip?.autoHidden === true,
+        zIndex: Math.max(1, Math.min(999, Math.round(Number(clip?.zIndex) || 1)))
+      };
+    });
+    return next;
+  };
+  const sanitizeOnScreenTextLayoutByRowId = (rawLayouts = {}) => {
+    const source = rawLayouts && typeof rawLayouts === "object" ? rawLayouts : {};
+    const next = {};
+    Object.entries(source).slice(0, 900).forEach(([rowIdRaw, layout]) => {
+      const rowId = clampText(rowIdRaw || layout?.rowId || "", 120);
+      if (!rowId || !layout || typeof layout !== "object") return;
+      next[rowId] = {
+        rowId,
+        xPct: clampNumber(layout?.xPct, 0, 0.98, 0.31),
+        yPct: clampNumber(layout?.yPct, 0, 0.98, 0.72),
+        widthPct: clampNumber(layout?.widthPct, 0.08, 0.9, 0.38),
+        heightPct: clampNumber(layout?.heightPct, 0.05, 0.6, 0.14),
+        zIndex: Math.max(1, Math.min(999, Math.round(Number(layout?.zIndex) || 1)))
+      };
+    });
+    return next;
+  };
+  const sanitizeGeminiDialogueTrack = (rawTrack = {}) => {
+    const segments = Array.isArray(rawTrack?.segments)
+      ? rawTrack.segments.slice(0, 900).map((segment, index) => {
+          if (!segment || typeof segment !== "object") return null;
+          const rowId = clampText(segment?.rowId || "", 120);
+          const audioSrc = clampText(segment?.audioSrc || "", 3200);
+          if (!rowId || !audioSrc) return null;
+          const startMs = Math.max(0, Math.min(3600 * 1000, Math.round(Number(segment?.startMs) || 0)));
+          const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs) || 0));
+          const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs) || trimInMs + 500));
+          const durationMs = Math.max(500, Math.round(Number(segment?.durationMs) || (trimOutMs - trimInMs)));
+          return {
+            rowId,
+            sceneIndex: Math.max(1, Math.min(999, Math.round(Number(segment?.sceneIndex) || index + 1))),
+            speakerName: clampText(segment?.speakerName || "", 160),
+            audioSrc,
+            startMs,
+            anchorStartMs: Math.max(0, Math.min(3600 * 1000, Math.round(Number(segment?.anchorStartMs) || startMs))),
+            endMs: Math.max(startMs + 500, Math.min(3600 * 1000, Math.round(Number(segment?.endMs) || (startMs + durationMs)))),
+            trimInMs,
+            trimOutMs,
+            durationMs
+          };
+        }).filter(Boolean)
+      : [];
+    return {
+      enabled: rawTrack?.enabled === true && segments.length > 0,
+      updatedAt: clampText(rawTrack?.updatedAt || "", 64),
+      segments,
+      missingRowIds: Array.isArray(rawTrack?.missingRowIds)
+        ? Array.from(new Set(rawTrack.missingRowIds.map((rowId) => clampText(rowId || "", 120)).filter(Boolean))).slice(0, 900)
+        : []
+    };
+  };
   const audioModeRaw = String(raw?.podcastVideoConfig?.audioMode || "").trim().toLowerCase();
   const timelineViewModeRaw = String(raw?.podcastVideoConfig?.timelineViewMode || "").trim().toLowerCase();
+  const rawStudioUiState = raw?.podcastStudioUiState && typeof raw.podcastStudioUiState === "object"
+    ? raw.podcastStudioUiState
+    : {};
+  const podcastStudioUiState = {
+    inspectorCollapsed: rawStudioUiState?.inspectorCollapsed === true,
+    inspectorWidthPx: clampNumber(rawStudioUiState?.inspectorWidthPx, 280, 960, 420),
+    stageWidthRatio: rawStudioUiState?.stageWidthRatio === null
+      ? null
+      : clampNumber(rawStudioUiState?.stageWidthRatio, 0.1, 1, 1),
+    timelineViewMode: String(rawStudioUiState?.timelineViewMode || "").trim().toLowerCase() === "normal" ? "normal" : "tracks",
+    showMontageAudioSubtracks: rawStudioUiState?.showMontageAudioSubtracks === true,
+    lastActiveRowId: rowIdSet.has(String(rawStudioUiState?.lastActiveRowId || "").trim())
+      ? String(rawStudioUiState?.lastActiveRowId || "").trim()
+      : "",
+    collapsedRowIds: Array.isArray(rawStudioUiState?.collapsedRowIds)
+      ? Array.from(new Set(
+        rawStudioUiState.collapsedRowIds
+          .map((rowId) => clampText(rowId || "", 120))
+          .filter((rowId) => rowIdSet.has(String(rowId || "").trim()))
+      )).slice(0, 400)
+      : []
+  };
   const podcastVideoConfig = {
     enabled: raw?.podcastVideoConfig?.enabled === true,
     editorEnabled: raw?.podcastVideoConfig?.editorEnabled === true,
+    autoGenerateScenarioImages: raw?.podcastVideoConfig?.autoGenerateScenarioImages === true,
+    autoGeneratePortraits: raw?.podcastVideoConfig?.autoGeneratePortraits === true,
+    allowLivePreviewWithoutStoredAudio: raw?.podcastVideoConfig?.allowLivePreviewWithoutStoredAudio === true,
+    cheapVideoMode: raw?.podcastVideoConfig?.cheapVideoMode !== false,
     transitionsByEdge,
     audioMode: audioModeRaw === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene",
     masterVolume: clampNumber(raw?.podcastVideoConfig?.masterVolume, 0, 100, 100),
@@ -979,8 +1668,15 @@ function sanitizePodcasterSession(raw = {}) {
     timelineTrackVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineTrackVersion) || 1))),
     timelineTracks: sanitizeTimelineTracks(raw?.podcastVideoConfig?.timelineTracks || []),
     timelineClipsByRowId: sanitizeTimelineClipsByRowId(raw?.podcastVideoConfig?.timelineClipsByRowId || {}),
+    timelineOnScreenTextTrackVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineOnScreenTextTrackVersion) || 1))),
+    timelineOnScreenTextClipsByRowId: sanitizeOnScreenTextClipsByRowId(raw?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId || {}),
+    timelineOnScreenTextLayoutByRowId: sanitizeOnScreenTextLayoutByRowId(raw?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId || {}),
+    timelineOnScreenTextDefaultsVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineOnScreenTextDefaultsVersion) || 1))),
     timelineTrackHeightsById: sanitizeTimelineTrackHeightsById(raw?.podcastVideoConfig?.timelineTrackHeightsById || {}),
     timelineViewMode: timelineViewModeRaw === "normal" ? "normal" : "tracks",
+    onScreenTextTrack: sanitizeOnScreenTextTrack(raw?.podcastVideoConfig?.onScreenTextTrack || {}),
+    geminiDialogueTrack: sanitizeGeminiDialogueTrack(raw?.podcastVideoConfig?.geminiDialogueTrack || {}),
+    geminiDialogueTrackIndex: Math.max(0, Math.min(999, Math.floor(Number(raw?.podcastVideoConfig?.geminiDialogueTrackIndex) || 0))),
     montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
     montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100)
   };
@@ -1026,6 +1722,17 @@ function sanitizePodcasterSession(raw = {}) {
               .map((item) => Math.max(0, Math.floor(Number(item) || 0)))
               .filter((item) => Number.isFinite(item) && item >= 0 && item <= 999)
           )).sort((a, b) => a - b)
+          : [],
+        segmentStartOverrides: Array.isArray(trackRaw?.segmentStartOverrides)
+          ? Array.from(new Map(
+            trackRaw.segmentStartOverrides
+              .filter((item) => item && typeof item === "object")
+              .map((item) => {
+                const loopIndex = Math.max(0, Math.floor(Number(item.loopIndex) || 0));
+                const startMs = clampNumber(item.startMs, 0, 3600 * 1000, 0);
+                return [loopIndex, { loopIndex, startMs }];
+              })
+          ).values()).sort((a, b) => a.loopIndex - b.loopIndex)
           : []
       }
       : null
@@ -1082,6 +1789,7 @@ function sanitizePodcasterSession(raw = {}) {
     prompt: clampText(raw?.prompt || "", 5000),
     archived: raw?.archived === true,
     updatedAt: clampText(raw?.updatedAt || new Date().toISOString(), 64),
+    podcastStudioUiState,
     chat,
     script: {
       episodeTitle: clampText(raw?.script?.episodeTitle || (scriptVideoMode ? "Video educativo" : "Podcast"), 220),
@@ -1098,7 +1806,10 @@ function sanitizePodcasterSession(raw = {}) {
     speakerPortraitMap,
     speakerReferenceImageMap,
     scenarioReferenceImageMap,
+    rowReferenceImageListMap,
     rowReferenceImageMap,
+    rowReferenceVideoMap,
+    rowReferenceModeByRowId,
     globalScenarioDeck,
     dialogueVideoMap,
     dialogueAudioMap,
@@ -1569,6 +2280,25 @@ function extractMediaStreamInfoFromFfmpegStderr(stderrText = "") {
   };
 }
 
+function parseFfmpegDurationSeconds(durationText = "") {
+  const clean = String(durationText || "").trim();
+  const match = clean.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
+  if (!match) return 0;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3] || 0);
+  if (![hours, minutes, seconds].every(Number.isFinite)) return 0;
+  return Math.max(0, (hours * 3600) + (minutes * 60) + seconds);
+}
+
+function extractRenderedVideoFrameCount(stderrText = "") {
+  const source = String(stderrText || "");
+  const matches = Array.from(source.matchAll(/frame=\s*([0-9]+)/g));
+  if (!matches.length) return 0;
+  const value = Number(matches[matches.length - 1]?.[1] || 0);
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
 function runFfmpegCommand(args = [], context = {}) {
   return new Promise((resolve, reject) => {
     if (!isFfmpegAvailable()) {
@@ -1607,6 +2337,11 @@ function runFfmpegCommand(args = [], context = {}) {
       err.stage = String(context?.stage || "run").trim() || "run";
       err.stdout = stdout;
       err.stderr = stderr;
+      err.detail = {
+        stage: err.stage,
+        stderrPreview: String(stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200),
+        stdoutPreview: String(stdout || "").split(/\r?\n/).slice(-8).join(" | ").slice(0, 1200)
+      };
       reject(err);
     });
   });
@@ -1651,6 +2386,191 @@ async function extractLastVideoFramePng(videoBuffer = Buffer.alloc(0), sourceMim
     await safeUnlink(inputPath);
     await safeUnlink(outputPath);
   }
+}
+
+async function extractStoryboardAndKeyframesFromVideo(videoBuffer = Buffer.alloc(0), sourceMimeType = "video/mp4") {
+  const source = Buffer.isBuffer(videoBuffer) ? videoBuffer : Buffer.from(videoBuffer || []);
+  if (!source.length) {
+    const err = new Error("empty_video_buffer");
+    err.code = "empty_video_buffer";
+    err.stage = "input";
+    throw err;
+  }
+  const ext = getVideoExtension(sourceMimeType);
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const inputPath = path.join(os.tmpdir(), `cb-storyboard-${token}.${ext}`);
+  const storyboardPath = path.join(os.tmpdir(), `cb-storyboard-${token}.png`);
+  const keyframePaths = [
+    path.join(os.tmpdir(), `cb-storyboard-${token}-start.png`),
+    path.join(os.tmpdir(), `cb-storyboard-${token}-middle.png`),
+    path.join(os.tmpdir(), `cb-storyboard-${token}-end.png`)
+  ];
+  try {
+    await fs.promises.writeFile(inputPath, source);
+    const probe = await runFfmpegCommand([
+      "-hide_banner",
+      "-i",
+      inputPath,
+      "-map",
+      "0:v:0",
+      "-f",
+      "null",
+      "-"
+    ], { stage: "storyboard_probe" });
+    const mediaInfo = extractMediaStreamInfoFromFfmpegStderr(probe.stderr || "");
+    const frameCount = Math.max(1, extractRenderedVideoFrameCount(probe.stderr || ""));
+    const durationSec = Math.max(0.1, parseFfmpegDurationSeconds(mediaInfo.duration || ""));
+    const tileColumns = frameCount <= 24 ? 4 : frameCount <= 64 ? 6 : frameCount <= 120 ? 8 : 10;
+    const tileRows = Math.max(1, Math.ceil(frameCount / tileColumns));
+    const tileWidth = frameCount > 180 ? 72 : frameCount > 120 ? 80 : frameCount > 64 ? 88 : 96;
+    await runFfmpegCommand([
+      "-hide_banner",
+      "-y",
+      "-i",
+      inputPath,
+      "-vsync",
+      "0",
+      "-vf",
+      `scale=${tileWidth}:-1:flags=lanczos,tile=${tileColumns}x${tileRows}:padding=2:margin=2:color=black`,
+      "-frames:v",
+      "1",
+      storyboardPath
+    ], { stage: "storyboard_sheet" });
+    const storyboardBuffer = await fs.promises.readFile(storyboardPath);
+    const storyboardMimeType = "image/png";
+    const keyframeTimes = [
+      Math.max(0, Math.min(durationSec * 0.05, Math.max(0, durationSec - 0.05))),
+      Math.max(0, Math.min(durationSec * 0.5, Math.max(0, durationSec - 0.05))),
+      Math.max(0, Math.min(durationSec * 0.95, Math.max(0, durationSec - 0.05)))
+    ];
+    const keyframes = [];
+    for (let index = 0; index < keyframeTimes.length; index += 1) {
+      const seekSec = keyframeTimes[index];
+      const outputPath = keyframePaths[index];
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await runFfmpegCommand([
+          "-hide_banner",
+          "-y",
+          "-ss",
+          String(seekSec.toFixed(3)),
+          "-i",
+          inputPath,
+          "-frames:v",
+          "1",
+          "-vf",
+          "scale=1280:-1:flags=lanczos",
+          outputPath
+        ], { stage: `storyboard_keyframe_${index}` });
+        // eslint-disable-next-line no-await-in-loop
+        const buffer = await fs.promises.readFile(outputPath);
+        if (buffer?.length) {
+          keyframes.push({
+            label: index === 0 ? "inicio" : index === 1 ? "mitad" : "final",
+            buffer,
+            mimeType: "image/png"
+          });
+        }
+      } catch (_) {
+        // noop
+      }
+    }
+    return {
+      storyboardBuffer,
+      storyboardMimeType,
+      keyframes,
+      durationSec,
+      frameCount
+    };
+  } finally {
+    await safeUnlink(inputPath);
+    await safeUnlink(storyboardPath);
+    for (const item of keyframePaths) {
+      await safeUnlink(item);
+    }
+  }
+}
+
+async function buildDialogueVideoRegenerationAnalysis(options = {}) {
+  const videoBuffer = Buffer.isBuffer(options?.videoBuffer) ? options.videoBuffer : Buffer.from(options?.videoBuffer || []);
+  if (!videoBuffer.length || !hasGeminiKey()) return null;
+  const sourceMimeType = String(options?.sourceMimeType || "video/mp4").trim() || "video/mp4";
+  const assets = await extractStoryboardAndKeyframesFromVideo(videoBuffer, sourceMimeType);
+  const prompt = [
+    "Analiza un storyboard que contiene todos los frames del clip original en orden temporal y tres keyframes adicionales (inicio, mitad, final).",
+    "Tu tarea es construir una guía breve para regenerar el mismo clip con mejor calidad visual, sin cambiar su intención dramática ni su contenido base.",
+    options?.speakerName ? `Personaje principal: ${options.speakerName}.` : "",
+    options?.scenePrompt ? `Descripcion de escena actual: ${options.scenePrompt}` : "",
+    options?.videoDirective ? `Indicacion visual actual: ${options.videoDirective}` : "",
+    options?.targetSpeechLine ? `Dialogo objetivo: ${options.targetSpeechLine}` : "",
+    "",
+    "Devuelve SOLO JSON valido con esta estructura:",
+    "{",
+    '  "summary": "string",',
+    '  "preserve": ["string"],',
+    '  "improve": ["string"],',
+    '  "avoid": ["string"],',
+    '  "qualityPrompt": "string"',
+    "}",
+    "",
+    "Reglas:",
+    "- preserve: rasgos clave a conservar del clip actual.",
+    "- improve: mejoras concretas de calidad visual, nitidez, iluminacion, continuidad, composicion o movimiento.",
+    "- avoid: defectos a evitar en la regeneracion.",
+    "- qualityPrompt: un solo parrafo utilizable directamente como instruccion adicional para regenerar el video con mejor calidad."
+  ].filter(Boolean).join("\n");
+  const parts = [
+    { text: prompt },
+    {
+      inline_data: {
+        mime_type: assets.storyboardMimeType,
+        data: assets.storyboardBuffer.toString("base64")
+      }
+    }
+  ];
+  assets.keyframes.forEach((frame) => {
+    parts.push({ text: `Keyframe ${String(frame?.label || "").trim() || "escena"}.` });
+    parts.push({
+      inline_data: {
+        mime_type: String(frame?.mimeType || "image/png").trim() || "image/png",
+        data: Buffer.from(frame.buffer).toString("base64")
+      }
+    });
+  });
+  const upstream = await fetchCompat(
+    `${GEMINI_BASE}/models/${encodeURIComponent("gemini-2.5-flash")}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: "application/json"
+        }
+      })
+    }
+  );
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    const err = new Error(String(data?.error?.message || data?.error || `HTTP ${upstream.status}`));
+    err.status = Number(upstream.status || 502);
+    throw err;
+  }
+  const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+  const parsed = parseJsonObjectFromModelTextLocal(text);
+  return {
+    frameCount: assets.frameCount,
+    durationSec: assets.durationSec,
+    summary: clampText(parsed?.summary || "", 1200),
+    preserve: Array.isArray(parsed?.preserve) ? parsed.preserve.map((item) => clampText(item, 220)).filter(Boolean).slice(0, 6) : [],
+    improve: Array.isArray(parsed?.improve) ? parsed.improve.map((item) => clampText(item, 220)).filter(Boolean).slice(0, 6) : [],
+    avoid: Array.isArray(parsed?.avoid) ? parsed.avoid.map((item) => clampText(item, 220)).filter(Boolean).slice(0, 6) : [],
+    qualityPrompt: clampText(parsed?.qualityPrompt || "", 2200)
+  };
 }
 
 async function safeUnlink(filePath = "") {
@@ -3201,10 +4121,20 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     const requestedDurationSecInput = clampNumber(req.body?.requestedDurationSec, 4, 8, 0);
     const portraitUrl = clampText(req.body?.portraitUrl || "", 3200);
     const portraitStoragePath = clampText(req.body?.portraitStoragePath || "", 700);
-    const referenceImageDataUrl = String(req.body?.referenceImageDataUrl || "").trim();
+    const referenceMode = String(req.body?.referenceMode || "image").trim().toLowerCase() === "video" ? "video" : "image";
+    const referenceImageDataUrls = referenceMode === "image" && Array.isArray(req.body?.referenceImageDataUrls)
+      ? req.body.referenceImageDataUrls.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const referenceImageNames = referenceMode === "image" && Array.isArray(req.body?.referenceImageNames)
+      ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, 4)
+      : [];
+    const referenceImageDataUrl = referenceMode === "image" ? String(req.body?.referenceImageDataUrl || "").trim() : "";
     const continuityReferenceImageDataUrl = String(req.body?.continuityReferenceImageDataUrl || "").trim();
     const explicitForceImmediateSceneChange = req.body?.forceImmediateSceneChange === true;
     const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
+    const referenceVideoDataUrl = referenceMode === "video" ? String(req.body?.referenceVideoDataUrl || "").trim() : "";
+    const referenceVideoName = clampText(req.body?.referenceVideoName || "", 180);
+    const referenceVideoMimeType = clampText(req.body?.referenceVideoMimeType || "video/mp4", 120) || "video/mp4";
     const relateWithPreviousScene = req.body?.relateWithPreviousScene === true;
     const previousSceneRaw = req.body?.previousScene && typeof req.body.previousScene === "object" ? req.body.previousScene : null;
     const previousScene = previousSceneRaw ? {
@@ -3223,7 +4153,11 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     } : null;
     let strictIdentity = req.body?.strictIdentity !== false;
     const regenerate = req.body?.regenerate === true;
+    const enhanceFromExistingVideo = req.body?.enhanceFromExistingVideo === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
+    const analysisVideoDownloadUrl = clampText(req.body?.analysisVideoDownloadUrl || "", 3200);
+    const analysisVideoStoragePath = clampText(req.body?.analysisVideoStoragePath || "", 700);
+    const analysisVideoMimeType = clampText(req.body?.analysisVideoMimeType || "video/mp4", 80) || "video/mp4";
     const requestedCandidates = Array.isArray(req.body?.modelCandidates) ? req.body.modelCandidates : [];
     const requestedModel = normalizeModel(req.body?.model || DEFAULT_PODCASTER_VIDEO_MODEL);
     const mergedModels = Array.from(new Set([
@@ -3327,13 +4261,47 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       : "";
     const hasPortraitAsset = Boolean(portraitBase64 || portraitGcsUri);
 
-    const sceneReference = await loadOptionalImageReference({
-      dataUrl: referenceImageDataUrl
-    });
-    const sceneReferenceBase64 = sceneReference ? sceneReference.buffer.toString("base64") : "";
-    const sceneReferenceMimeType = sceneReference ? String(sceneReference.mimeType || "image/png").trim().toLowerCase() : "image/png";
-    const hasSceneReference = Boolean(sceneReferenceBase64);
+    const sceneReferenceSources = referenceImageDataUrls.length ? referenceImageDataUrls : (referenceImageDataUrl ? [referenceImageDataUrl] : []);
+    const sceneReferences = [];
+    for (const imageDataUrl of sceneReferenceSources) {
+      const sceneReference = await loadOptionalImageReference({ dataUrl: imageDataUrl });
+      if (!sceneReference) continue;
+      sceneReferences.push({
+        buffer: sceneReference.buffer,
+        mimeType: String(sceneReference.mimeType || "image/png").trim().toLowerCase() || "image/png"
+      });
+    }
+    const sceneReferenceImages = sceneReferences.map((item) => ({
+      image: {
+        bytesBase64Encoded: item.buffer.toString("base64"),
+        mimeType: item.mimeType
+      },
+      referenceType: "asset"
+    }));
+    const hasSceneReference = sceneReferenceImages.length > 0;
     const useSceneReferenceAsInitImage = hasSceneReference && !strictIdentity;
+    let sceneReferenceVideoFrameBase64 = "";
+    let sceneReferenceVideoFrameMimeType = "image/png";
+    if (referenceMode === "video" && referenceVideoDataUrl) {
+      const decodedVideo = decodeBase64DataUrl(referenceVideoDataUrl, MAX_DIALOGUE_VIDEO_BYTES);
+      if (!String(decodedVideo.mimeType || referenceVideoMimeType).toLowerCase().startsWith("video/")) {
+        return res.status(400).json({ error: "El video de referencia no es válido." });
+      }
+      try {
+        const frameBuffer = await extractLastVideoFramePng(decodedVideo.buffer, String(decodedVideo.mimeType || referenceVideoMimeType || "video/mp4"));
+        if (frameBuffer?.length) {
+          sceneReferenceVideoFrameBase64 = frameBuffer.toString("base64");
+          sceneReferenceVideoFrameMimeType = "image/png";
+        }
+      } catch (error) {
+        console.warn(`[backend][${requestDebugTag}] reference video frame extraction failed`, {
+          error: String(error?.message || error || "unknown"),
+          referenceVideoName
+        });
+      }
+      strictIdentity = false;
+    }
+    const hasSceneReferenceVideo = Boolean(sceneReferenceVideoFrameBase64);
 
     const shouldForceImmediateSceneChange = (source = "") => {
       const text = String(source || "").toLowerCase();
@@ -3356,6 +4324,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       videoDirective,
       performanceDirective,
       imagePrompts.join(" "),
+      referenceImageNames.join(" "),
       referenceImageName
     ].filter(Boolean).join(" ")));
 
@@ -3403,7 +4372,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       educationalVideo,
       hasPortraitAsset,
       hasSceneReference,
-      useSceneReferenceAsInitImage,
+      sceneReferenceCount: sceneReferenceImages.length,
+      hasSceneReferenceVideo,
+      useSceneReferenceAsInitImage: hasSceneReferenceVideo ? true : useSceneReferenceAsInitImage,
       relateWithPreviousScene,
       hasContinuityFrame: Boolean(continuityFrameBase64),
       hasPortraitUrl: Boolean(portraitUrl),
@@ -3458,12 +4429,53 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       `${sceneVisualPrompt} Variante en plano cerrado, y otra toma de apoyo del set.`
     ] : []);
 
+    let regenerationAnalysis = null;
+    if (enhanceFromExistingVideo && (analysisVideoStoragePath || analysisVideoDownloadUrl) && hasGeminiKey() && isFfmpegAvailable()) {
+      try {
+        let analysisVideoBuffer = null;
+        if (analysisVideoStoragePath) {
+          const downloaded = await downloadStorageObjectToBuffer(analysisVideoStoragePath);
+          analysisVideoBuffer = Buffer.from(downloaded.buffer);
+        } else if (analysisVideoDownloadUrl) {
+          const videoResponse = await fetchCompat(analysisVideoDownloadUrl, { method: "GET" });
+          if (videoResponse.ok) {
+            analysisVideoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+          }
+        }
+        if (analysisVideoBuffer?.length) {
+          regenerationAnalysis = await buildDialogueVideoRegenerationAnalysis({
+            videoBuffer: analysisVideoBuffer,
+            sourceMimeType: analysisVideoMimeType,
+            speakerName,
+            scenePrompt,
+            videoDirective,
+            targetSpeechLine: text
+          });
+        }
+      } catch (error) {
+        console.warn(`[backend][${requestDebugTag}] regeneration analysis failed`, {
+          error: String(error?.message || error || "unknown"),
+          analysisVideoStoragePath,
+          hasAnalysisVideoDownloadUrl: Boolean(analysisVideoDownloadUrl)
+        });
+        regenerationAnalysis = null;
+      }
+    }
+
     const prompt = [
       educationalVideo
         ? "Genera un video educativo corto, claro y realista."
         : "Genera un video cinematográfico corto y realista para podcast.",
+      regenerationAnalysis?.summary ? `Resumen del clip actual a conservar: ${regenerationAnalysis.summary}` : "",
+      regenerationAnalysis?.preserve?.length ? `Conserva del clip existente: ${regenerationAnalysis.preserve.join(" | ")}` : "",
+      regenerationAnalysis?.improve?.length ? `Mejora en la nueva version: ${regenerationAnalysis.improve.join(" | ")}` : "",
+      regenerationAnalysis?.avoid?.length ? `Evita en la nueva version: ${regenerationAnalysis.avoid.join(" | ")}` : "",
+      regenerationAnalysis?.qualityPrompt ? `Instruccion extra de mejora de calidad basada en todo el clip anterior: ${regenerationAnalysis.qualityPrompt}` : "",
       useSceneReferenceAsInitImage
         ? `La imagen adjunta${referenceImageName ? ` (${referenceImageName})` : ""} es referencia visual principal de la escena. Debe guiar composición, estilo, ambientación y continuidad.`
+        : "",
+      hasSceneReferenceVideo
+        ? `El video adjunto${referenceVideoName ? ` (${referenceVideoName})` : ""} se convirtió a un frame de referencia para guiar encuadre, continuidad y estilo visual de la escena.`
         : "",
       videoDirective ? `Prioridad máxima: cumple esta especificación adicional del usuario${educationalVideo ? " para narrativa visual educativa" : " sin romper identidad, sincronía labial ni continuidad del set"}: ${videoDirective}` : "",
       sceneVisualPrompt ? `${educationalVideo ? "Dirección pedagógica de la escena" : "Dirección visual de la escena"}: ${sceneVisualPrompt}` : "",
@@ -3586,15 +4598,18 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       });
     }
     const requestVariants = [];
-    const sceneReferenceImage = sceneReferenceBase64
-      ? {
+    const sceneReferenceAssets = [...sceneReferenceImages];
+    if (sceneReferenceVideoFrameBase64) {
+      sceneReferenceAssets.push({
         image: {
-          bytesBase64Encoded: sceneReferenceBase64,
-          mimeType: sceneReferenceMimeType
+          bytesBase64Encoded: sceneReferenceVideoFrameBase64,
+          mimeType: sceneReferenceVideoFrameMimeType
         },
         referenceType: "asset"
-      }
-      : null;
+      });
+    }
+    const derivedHasSceneReference = sceneReferenceAssets.length > 0;
+    const derivedUseSceneReferenceAsInitImage = derivedHasSceneReference && !strictIdentity;
     const continuityReferenceImage = continuityFrameBase64
       ? {
         image: {
@@ -3606,14 +4621,14 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
       : null;
     const referenceDurationSec = inferredTargetDurationSec;
 
-    if (sceneReferenceImage && useSceneReferenceAsInitImage) {
+    if (sceneReferenceAssets.length && derivedUseSceneReferenceAsInitImage) {
       requestVariants.push(
         {
           label: "reference-scene+aspect+duration",
           body: {
             instances: [{
               prompt,
-              referenceImages: [sceneReferenceImage, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -3626,7 +4641,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
           body: {
             instances: [{
               prompt,
-              referenceImages: [sceneReferenceImage, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              referenceImages: [...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9"
@@ -3678,7 +4693,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -3697,7 +4712,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9"
@@ -3719,7 +4734,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9",
@@ -3738,7 +4753,7 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
                   mimeType: portraitMimeType
                 },
                 referenceType: "asset"
-              }, ...(sceneReferenceImage ? [sceneReferenceImage] : []), ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
+              }, ...sceneReferenceAssets, ...(continuityReferenceImage ? [continuityReferenceImage] : [])]
             }],
             parameters: {
               aspectRatio: "16:9"
@@ -3791,7 +4806,15 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         {
           label: "text-only+aspect+duration",
           body: {
-            instances: [{ prompt }],
+            instances: [{
+              prompt,
+              ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
+                referenceImages: [
+                  ...sceneReferenceAssets,
+                  ...(continuityReferenceImage ? [continuityReferenceImage] : [])
+                ]
+              } : {})
+            }],
             parameters: {
               aspectRatio: "16:9",
               durationSeconds: inferredTargetDurationSec
@@ -3801,7 +4824,15 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         {
           label: "text-only+aspect",
           body: {
-            instances: [{ prompt }],
+            instances: [{
+              prompt,
+              ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
+                referenceImages: [
+                  ...sceneReferenceAssets,
+                  ...(continuityReferenceImage ? [continuityReferenceImage] : [])
+                ]
+              } : {})
+            }],
             parameters: {
               aspectRatio: "16:9"
             }
@@ -4067,8 +5098,13 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         speakerLabel,
         speakerName,
         referenceImageName,
+        referenceMode,
+        referenceVideoName,
         hasSceneReference: hasSceneReference ? "1" : "0",
-        usedSceneReference: useSceneReferenceAsInitImage ? "1" : "0",
+        hasSceneReferenceVideo: hasSceneReferenceVideo ? "1" : "0",
+        enhanceFromExistingVideo: enhanceFromExistingVideo ? "1" : "0",
+        regenerationAnalysisFrames: String(Math.max(0, Number(regenerationAnalysis?.frameCount || 0) || 0)),
+        usedSceneReference: (hasSceneReferenceVideo || useSceneReferenceAsInitImage) ? "1" : "0",
         model: resolvedModel,
         sourceMimeType: sourceVideoMimeType,
         videoCodec: String(transcodeMeta?.videoCodec || "h264").trim() || "h264",
@@ -4364,17 +5400,6 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
       aArgs: ["-b:a", "128k"]
     };
   }
-  if (cleanFormat === "mp4_h265") {
-    const crf = preset === "high" ? 22 : preset === "small" ? 28 : 24;
-    const x265Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
-    return {
-      container: "mp4",
-      vCodec: "libx265",
-      vArgs: ["-preset", x265Preset, "-crf", String(crf), "-tag:v", "hvc1", "-movflags", "+faststart"],
-      aCodec: "aac",
-      aArgs: ["-b:a", "160k"]
-    };
-  }
   const crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
   const x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
   return {
@@ -4656,204 +5681,474 @@ async function downloadUrlToFile(url = "", outPath = "") {
   return targetPath;
 }
 
-app.post("/api/podcaster/montage/export", async (req, res) => {
+function normalizeMontageExportRequestBody(body = {}) {
+  const raw = body && typeof body === "object" ? body : {};
+  const sessionId = clampText(raw?.sessionId || "", 140);
+  const exportMode = String(raw?.exportMode || "normal").trim().toLowerCase();
+  const requestedFormat = String(raw?.format || "mp4_h264").trim();
+  const format = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
+  const qualityPreset = String(raw?.qualityPreset || "balanced").trim();
+  const resolution = String(raw?.resolution || "source").trim();
+  const includeBackgroundMusic = raw?.includeBackgroundMusic === true;
+  const filename = clampText(raw?.filename || "montage", 160) || "montage";
+  const previewRowId = clampText(raw?.previewRowId || "", 140);
+  const entriesRaw = Array.isArray(raw?.entries) ? raw.entries : [];
+  const entries = entriesRaw.slice(0, MAX_MONTAGE_EXPORT_SCENES).map((item) => (item && typeof item === "object" ? item : null)).filter(Boolean);
+  const audioTimelineRaw = raw?.audioTimeline && typeof raw.audioTimeline === "object" ? raw.audioTimeline : null;
+  const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
+    ? raw.onScreenTextTimeline
+    : null;
+  const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
+  const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
+
+  const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
+    if (!segment || typeof segment !== "object") return null;
+    const url = String(segment?.url || "").trim();
+    const storagePath = clampText(segment?.storagePath || "", 900);
+    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+    const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
+    const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
+    const rawVolumePct = Number(segment?.volumePct ?? 100);
+    const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
+    const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
+    if (!storagePath && !url) return null;
+    if (volumePct <= 0.0001) return null;
+    return {
+      kind: clampText(segment?.kind || "audio", 40) || "audio",
+      id: clampText(segment?.id || `${idx + 1}`, 140) || `${idx + 1}`,
+      rowId: clampText(segment?.rowId || "", 140),
+      trackIndex: Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0)),
+      loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
+      url,
+      storagePath,
+      mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
+      startMs,
+      durationMs,
+      trimInMs,
+      trimOutMs,
+      volumePct
+    };
+  };
+
+  const normalizeOnScreenTextSegment = (segment = {}, idx = 0) => {
+    if (!segment || typeof segment !== "object") return null;
+    const text = clampText(segment?.text || "", 500);
+    if (!text) return null;
+    const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+    const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
+    return {
+      id: clampText(segment?.id || `text-${idx + 1}`, 140) || `text-${idx + 1}`,
+      rowId: clampText(segment?.rowId || "", 140),
+      sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || idx + 1) || idx + 1)),
+      text,
+      startMs,
+      durationMs,
+      zIndex: Math.max(1, Math.round(Number(segment?.zIndex || idx + 1) || idx + 1)),
+      layout: {
+        xPct: clampNumber(segment?.layout?.xPct, 0, 0.98, 0.075),
+        yPct: clampNumber(segment?.layout?.yPct, 0, 0.98, 0.88),
+        widthPct: clampNumber(segment?.layout?.widthPct, 0.08, 0.96, 0.85),
+        heightPct: clampNumber(segment?.layout?.heightPct, 0.05, 0.6, 0.14)
+      }
+    };
+  };
+
+  const timelineAudioSegments = [...geminiSegmentsRaw, ...backgroundSegmentsRaw]
+    .slice(0, 600)
+    .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
+    .filter(Boolean);
+  const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => String(segment?.kind || "").trim().toLowerCase() !== "uploaded");
+  const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
+  const onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
+    ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
+    : [];
+  const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
+    ? onScreenTextTimelineRaw.settings
+    : null;
+
+  return {
+    sessionId,
+    exportMode,
+    format,
+    qualityPreset,
+    resolution,
+    includeBackgroundMusic,
+    filename,
+    previewRowId,
+    entriesRaw,
+    entries,
+    audioTimelineRaw,
+    onScreenTextTimelineRaw,
+    timelineAudioSegments,
+    normalizedGeminiTimelineSegments,
+    useTimelineAudio,
+    onScreenTextSegments,
+    onScreenTextSettings,
+    backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null
+  };
+}
+
+function validateMontageExportRequest(input = {}) {
+  if (!String(input?.sessionId || "").trim()) {
+    const err = new Error("Falta sessionId.");
+    err.status = 400;
+    throw err;
+  }
+  if (!Array.isArray(input?.entries) || !input.entries.length) {
+    const err = new Error("No hay entradas para exportar.");
+    err.status = 400;
+    throw err;
+  }
+  if (Number(input?.entriesRaw?.length || 0) > MAX_MONTAGE_EXPORT_SCENES) {
+    const err = new Error(`Demasiadas escenas para exportar (máx ${MAX_MONTAGE_EXPORT_SCENES}).`);
+    err.status = 413;
+    throw err;
+  }
+  if (!new Set(["normal", "review"]).has(String(input?.exportMode || "").trim())) {
+    const err = new Error("Modo de exportación inválido.");
+    err.status = 400;
+    throw err;
+  }
+  if (!new Set(["mp4_h264", "webm_vp9"]).has(String(input?.format || "").trim())) {
+    const err = new Error("Formato inválido.");
+    err.status = 400;
+    throw err;
+  }
+  if (!new Set(["source", "1080p", "720p", "480p"]).has(String(input?.resolution || "").trim())) {
+    const err = new Error("Resolución inválida.");
+    err.status = 400;
+    throw err;
+  }
+  const totalDurationSec = (Array.isArray(input?.entries) ? input.entries : []).reduce((acc, entry) => acc + Math.max(0, Number(entry?.durationMs || 0) / 1000), 0);
+  if (totalDurationSec > MAX_MONTAGE_EXPORT_TOTAL_SEC) {
+    const err = new Error(`Montaje demasiado largo para exportar (máx ${MAX_MONTAGE_EXPORT_TOTAL_SEC} s).`);
+    err.status = 413;
+    throw err;
+  }
+}
+
+function buildMontageSkippedEntry(entry = {}, index = 0, reason = "scene_asset_unavailable", detail = {}) {
+  return {
+    sceneIndex: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
+    rowId: clampText(entry?.rowId || "", 140),
+    speaker: clampText(entry?.speaker || "", 120),
+    sceneLabel: clampText(entry?.sceneLabel || "", 180),
+    kind: clampText(detail?.kind || "video", 40) || "video",
+    reason: clampText(reason || "scene_asset_unavailable", 120) || "scene_asset_unavailable",
+    storagePath: clampText(detail?.storagePath || "", 900),
+    url: detail?.url ? redactUrlForLogs(detail.url) : "",
+    code: clampText(detail?.code || "", 80),
+    index: Math.max(0, Number(detail?.index || index) || index),
+    lastError: clampText(detail?.lastError || detail?.message || "", 280)
+  };
+}
+
+function shouldSkipMontageEntryError(error) {
+  const code = String(error?.code || error?.message || "").trim();
+  return code === "storage_not_found" || code === "missing_download_source";
+}
+
+function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
+  return async (asset = {}, kind = "video", index = 0) => {
+    const storagePath = clampText(asset?.storagePath || "", 900);
+    const url = String(asset?.url || "").trim();
+    if (!storagePath && !url) {
+      const err = new Error("missing_download_source");
+      err.code = "missing_download_source";
+      err.status = 404;
+      err.detail = { kind, index, storagePath: "", url: "" };
+      throw err;
+    }
+    const isAudioKind = kind !== "video";
+    const ext = isAudioKind
+      ? (getAudioExtension(String(asset?.mimeType || "audio/mpeg")) || "audio")
+      : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
+    const outPath = path.join(tmpDir, `in-${kind}-${String(index + 1).padStart(3, "0")}.${ext}`);
+    const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
+      const clean = normalizeStorageFilePath(pathInput);
+      const uidClean = String(uidRaw || "").trim();
+      if (!clean || !uidClean) return [];
+      const marker = "/owners/";
+      const i = clean.indexOf(marker);
+      if (i < 0) return [];
+      const prefix = clean.slice(0, i + marker.length);
+      const rest = clean.slice(i + marker.length);
+      const slash = rest.indexOf("/");
+      if (slash < 0) return [];
+      const currentOwner = rest.slice(0, slash);
+      const suffix = rest.slice(slash);
+      const candidates = [uidClean, uidClean.toLowerCase(), normalizeStorageSegment(uidClean, "anon")]
+        .map((owner) => String(owner || "").trim())
+        .filter(Boolean);
+      const nextOwners = Array.from(new Set(candidates)).filter((owner) => owner && owner !== currentOwner);
+      return nextOwners.map((owner) => `${prefix}${owner}${suffix}`);
+    };
+
+    if (storagePath) {
+      try {
+        await downloadStoragePathToFile(storagePath, outPath);
+        return outPath;
+      } catch (error) {
+        const code = String(error?.code || error?.message || "").trim();
+        if (code === "storage_not_found") {
+          const altPaths = resolveAlternateOwnerStoragePaths(storagePath, uid);
+          for (const altPath of altPaths) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await downloadStoragePathToFile(altPath, outPath);
+              return outPath;
+            } catch (_) {}
+          }
+          if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
+            await downloadUrlToFile(url, outPath);
+            return outPath;
+          }
+        }
+        error.detail = {
+          ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
+          kind,
+          index,
+          storagePath,
+          url: url ? redactUrlForLogs(url) : ""
+        };
+        throw error;
+      }
+    }
+    await downloadUrlToFile(url, outPath);
+    return outPath;
+  };
+}
+
+function createMontageStageReporter(onStage = null) {
+  return (stage = "validate_payload", progress = 0, hint = "", extra = {}) => {
+    if (typeof onStage === "function") {
+      onStage({
+        stage: String(stage || "validate_payload").trim() || "validate_payload",
+        progress: Math.max(0, Math.min(1, Number(progress || 0) || 0)),
+        hint: String(hint || "").trim(),
+        ...extra
+      });
+    }
+  };
+}
+
+function createMontageReviewTextFileResolver(tmpDir = "", prefix = "review") {
+  const baseDir = String(tmpDir || "").trim();
+  let counter = 0;
+  return (text = "") => {
+    if (!baseDir) return "";
+    counter += 1;
+    const filePath = path.join(baseDir, `${prefix}-text-${String(counter).padStart(3, "0")}.txt`);
+    fs.writeFileSync(filePath, String(text || ""), "utf8");
+    return filePath;
+  };
+}
+
+async function storeMontageExportResult(finalOutPath = "", input = {}, context = {}) {
+  await cleanupMontageExportCache();
+  await ensureMontageExportCacheDir();
+  const exportId = randomUUID();
+  const token = randomUUID();
+  const outExt = getMontageExportExtension(input?.format || "mp4_h264");
+  const createdAtIso = new Date().toISOString();
+  const expiresAtIso = new Date(Date.now() + MONTAGE_EXPORT_CACHE_TTL_MS).toISOString();
+  const cacheFilePath = path.join(MONTAGE_EXPORT_CACHE_DIR, `montage-${exportId}.${outExt}`);
+  await fs.promises.copyFile(finalOutPath, cacheFilePath);
+  await fs.promises.writeFile(path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`), JSON.stringify({
+    exportId,
+    token,
+    uid: String(context?.uid || "").trim(),
+    sessionId: String(input?.sessionId || "").trim(),
+    filename: `${String(input?.filename || "montage").trim() || "montage"}.${outExt}`,
+    mimeType: getMontageExportMimeType(input?.format || "mp4_h264"),
+    filePath: cacheFilePath,
+    createdAt: createdAtIso,
+    expiresAt: expiresAtIso,
+    exportMode: String(input?.exportMode || "normal").trim(),
+    format: String(input?.format || "").trim(),
+    qualityPreset: String(input?.qualityPreset || "").trim(),
+    resolution: String(input?.resolution || "").trim()
+  }, null, 2), "utf8");
+  const base = String(context?.baseUrl || "").trim() || `http://127.0.0.1:${PORT}`;
+  const downloadUrl = `${base}/api/assets/montage-download?exportId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+  return {
+    exportId,
+    downloadUrl,
+    createdAtIso,
+    expiresAtIso,
+    filename: `${String(input?.filename || "montage").trim() || "montage"}.${outExt}`,
+    mimeType: getMontageExportMimeType(input?.format || "mp4_h264")
+  };
+}
+
+function buildMontagePreviewPipelineInput(rawInput = {}) {
+  const input = rawInput && typeof rawInput === "object" ? rawInput : {};
+  return {
+    ...input,
+    format: "mp4_h264",
+    qualityPreset: "small",
+    resolution: input?.resolution === "1080p" || input?.resolution === "720p" ? "720p" : "480p",
+    includeBackgroundMusic: false,
+    backgroundMusic: null,
+    useTimelineAudio: false,
+    timelineAudioSegments: [],
+    normalizedGeminiTimelineSegments: [],
+    entries: Array.isArray(input?.entries)
+      ? input.entries.map((entry) => ({
+        ...entry,
+        audio: null,
+        useNativeVideoAudio: false
+      }))
+      : []
+  };
+}
+
+function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolution = "source") {
+  const safeWidth = Math.max(2, Math.round(Number(sourceWidth || 1280) || 1280));
+  const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
+  const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
+  const key = String(resolution || "source").trim().toLowerCase();
+  if (key === "1080p") return { width: 1920, height: 1080 };
+  if (key === "720p") return { width: 1280, height: 720 };
+  if (key === "480p") return { width: 854, height: 480 };
+  return { width: even(safeWidth), height: even(safeHeight) };
+}
+
+function buildMontageOverlapCompositionPlan(exportedEntries = []) {
+  const ordered = (Array.isArray(exportedEntries) ? exportedEntries : [])
+    .filter(Boolean)
+    .slice()
+    .sort((a, b) => (
+      Number(a?.timelineStartMs || 0) - Number(b?.timelineStartMs || 0)
+      || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
+      || Number(a?.sceneIndex || 0) - Number(b?.sceneIndex || 0)
+    ));
+  const planned = ordered.map((entry, index) => {
+    const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+    const endMs = Math.max(startMs + 500, Math.round(Number(entry?.timelineEndMs || (startMs + Number(entry?.durationMs || 500))) || 0));
+    const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || (endMs - startMs)) || (endMs - startMs) || 500));
+    return {
+      ...entry,
+      orderIndex: index,
+      timelineStartMs: startMs,
+      timelineEndMs: endMs,
+      durationMs
+    };
+  });
+  let hasOverlap = false;
+  for (let index = 1; index < planned.length; index += 1) {
+    const previous = planned[index - 1];
+    const current = planned[index];
+    if (Number(current?.timelineStartMs || 0) < Number(previous?.timelineEndMs || 0)) {
+      hasOverlap = true;
+      break;
+    }
+  }
+  const totalDurationMs = planned.reduce((max, entry) => Math.max(max, Number(entry?.timelineEndMs || 0)), 0);
+  return { entries: planned, hasOverlap, totalDurationMs: Math.max(500, totalDurationMs) };
+}
+
+async function renderMontageOverlapComposition({
+  input = {},
+  tmpDir = "",
+  params = {},
+  outExt = "mp4",
+  intermediatePaths = [],
+  exportedEntries = []
+} = {}) {
+  const plan = buildMontageOverlapCompositionPlan(exportedEntries);
+  if (!plan.hasOverlap || !intermediatePaths.length || intermediatePaths.length !== plan.entries.length) {
+    return "";
+  }
+  const firstDims = await probeMediaVideoDimensionsWithFfmpeg(intermediatePaths[0], "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }));
+  const canvas = resolveMontageCanvasSize(firstDims?.width || 1280, firstDims?.height || 720, input?.resolution || "source");
+  const totalSec = Math.max(0.25, plan.totalDurationMs / 1000);
+  const scaleFilter = resolveMontageExportScaleFilter(input?.resolution || "source");
+  const colorInputIndex = intermediatePaths.length;
+  const silentAudioInputIndex = intermediatePaths.length + 1;
+  const filters = [`[${colorInputIndex}:v]format=rgba[base0]`];
+  const audioLabels = [];
+  const includeSceneAudio = input?.useTimelineAudio !== true;
+
+  plan.entries.forEach((entry, index) => {
+    const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
+    const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
+    const videoLabel = `v${index}`;
+    let videoChain = `[${index}:v]scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+    if (scaleFilter) videoChain += `,${scaleFilter}`;
+    videoChain += `,pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2:color=0x05070B,format=rgba`;
+    videoChain += `,setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${videoLabel}]`;
+    filters.push(videoChain);
+    filters.push(`[base${index}][${videoLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[base${index + 1}]`);
+
+    if (includeSceneAudio) {
+      const audioLabel = `a${index}`;
+      let audioChain = `[${index}:a]atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`;
+      const delayMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      audioChain += `,adelay=${delayMs}|${delayMs}[${audioLabel}]`;
+      filters.push(audioChain);
+      audioLabels.push(audioLabel);
+    }
+  });
+
+  if (audioLabels.length) {
+    filters.push(`${audioLabels.map((label) => `[${label}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[aout_mix]`);
+    filters.push(`[aout_mix][${silentAudioInputIndex}:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]`);
+  } else {
+    filters.push(`[${silentAudioInputIndex}:a]atrim=start=0:duration=${totalSec.toFixed(3)},asetpts=PTS-STARTPTS[aout]`);
+  }
+
+  const outPath = path.join(tmpDir, `montage-overlap.${outExt}`);
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    ...intermediatePaths.flatMap((p) => ["-i", p]),
+    "-f", "lavfi", "-i", `color=c=black:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
+    "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
+    "-filter_complex", filters.join(";"),
+    "-map", `[base${plan.entries.length}]`,
+    "-map", "[aout]",
+    "-r", "24",
+    "-c:v", params.vCodec,
+    ...params.vArgs,
+    "-pix_fmt", "yuv420p",
+    "-c:a", params.aCodec,
+    "-ar", "48000",
+    ...params.aArgs,
+    ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+    outPath
+  ], { stage: "montage_overlap_compose" });
+  return outPath;
+}
+
+async function executeMontageExportPipeline(rawInput = {}, context = {}) {
+  const input = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const uid = String(context?.uid || "").trim();
+  const emitStage = createMontageStageReporter(context?.onStage);
   let tmpDir = "";
   try {
     if (!isFfmpegAvailable()) {
-      return res.status(500).json({ error: "ffmpeg_static_missing" });
+      const err = new Error("ffmpeg_static_missing");
+      err.status = 500;
+      throw err;
     }
-    const uid = String(req.authContext?.uid || "").trim();
-    const sessionId = clampText(req.body?.sessionId || "", 140);
-    const format = String(req.body?.format || "mp4_h264").trim();
-    const qualityPreset = String(req.body?.qualityPreset || "balanced").trim();
-    const resolution = String(req.body?.resolution || "source").trim();
-    const includeBackgroundMusic = req.body?.includeBackgroundMusic === true;
-    const filename = clampText(req.body?.filename || "montage", 160) || "montage";
-    const entriesRaw = Array.isArray(req.body?.entries) ? req.body.entries : [];
-    const entries = entriesRaw.slice(0, MAX_MONTAGE_EXPORT_SCENES).map((item) => (item && typeof item === "object" ? item : null)).filter(Boolean);
-    const audioTimelineRaw = req.body?.audioTimeline && typeof req.body.audioTimeline === "object" ? req.body.audioTimeline : null;
-    const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
-    const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
-    const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
-      if (!segment || typeof segment !== "object") return null;
-      const url = String(segment?.url || "").trim();
-      const storagePath = clampText(segment?.storagePath || "", 900);
-      const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-      const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
-      const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
-      const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
-      const rawVolumePct = Number(segment?.volumePct ?? 100);
-      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1
-        ? rawVolumePct * 100
-        : rawVolumePct;
-      const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
-      if (!storagePath && !url) return null;
-      if (volumePct <= 0.0001) return null;
-      return {
-        kind: clampText(segment?.kind || "audio", 40) || "audio",
-        id: clampText(segment?.id || `${idx + 1}`, 140) || `${idx + 1}`,
-        rowId: clampText(segment?.rowId || "", 140),
-        trackIndex: Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0)),
-        loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
-        url,
-        storagePath,
-        mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
-        startMs,
-        durationMs,
-        trimInMs,
-        trimOutMs,
-        volumePct
-      };
-    };
-    const timelineAudioSegments = [...geminiSegmentsRaw, ...backgroundSegmentsRaw]
-      .slice(0, 600)
-      .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
-      .filter(Boolean);
-    const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
+    validateMontageExportRequest(input);
+    emitStage("validate_payload", 0.08, "Validando escenas, pistas y formato.");
 
-    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
-    if (!entries.length) return res.status(400).json({ error: "No hay entradas para exportar." });
-    if (entriesRaw.length > MAX_MONTAGE_EXPORT_SCENES) {
-      return res.status(413).json({ error: `Demasiadas escenas para exportar (máx ${MAX_MONTAGE_EXPORT_SCENES}).` });
-    }
-
-    const allowedFormats = new Set(["mp4_h264", "mp4_h265", "webm_vp9"]);
-    if (!allowedFormats.has(String(format).trim())) {
-      return res.status(400).json({ error: "Formato inválido." });
-    }
-    const allowedRes = new Set(["source", "1080p", "720p", "480p"]);
-    if (!allowedRes.has(String(resolution).trim())) {
-      return res.status(400).json({ error: "Resolución inválida." });
-    }
-    const totalDurationSec = entries.reduce((acc, entry) => acc + Math.max(0, Number(entry?.durationMs || 0) / 1000), 0);
-    if (totalDurationSec > MAX_MONTAGE_EXPORT_TOTAL_SEC) {
-      return res.status(413).json({ error: `Montaje demasiado largo para exportar (máx ${MAX_MONTAGE_EXPORT_TOTAL_SEC} s).` });
-    }
-
-    const exportId = randomUUID();
-    tmpDir = path.join(os.tmpdir(), `cb-montage-export-${exportId}`);
+    tmpDir = path.join(os.tmpdir(), `cb-montage-export-${randomUUID()}`);
     await fs.promises.mkdir(tmpDir, { recursive: true });
 
-    const params = resolveMontageExportVideoParams(format, qualityPreset);
-    const outExt = getMontageExportExtension(format);
-    const scaleFilter = resolveMontageExportScaleFilter(resolution);
+    const params = resolveMontageExportVideoParams(input.format, input.qualityPreset);
+    const outExt = getMontageExportExtension(input.format);
+    const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
+    const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
     const intermediatePaths = [];
     const skippedEntries = [];
     const exportedEntries = [];
+    emitStage("download_assets", 0.14, "Descargando videos y audio fuente.");
 
-    const buildMontageSkippedEntry = (entry = {}, index = 0, reason = "scene_asset_unavailable", detail = {}) => ({
-      sceneIndex: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
-      rowId: clampText(entry?.rowId || "", 140),
-      speaker: clampText(entry?.speaker || "", 120),
-      sceneLabel: clampText(entry?.sceneLabel || "", 180),
-      kind: clampText(detail?.kind || "video", 40) || "video",
-      reason: clampText(reason || "scene_asset_unavailable", 120) || "scene_asset_unavailable",
-      storagePath: clampText(detail?.storagePath || "", 900),
-      url: detail?.url ? redactUrlForLogs(detail.url) : "",
-      code: clampText(detail?.code || "", 80),
-      index: Math.max(0, Number(detail?.index || index) || index),
-      lastError: clampText(detail?.lastError || detail?.message || "", 280)
-    });
-
-    const shouldSkipMontageEntryError = (error) => {
-      const code = String(error?.code || error?.message || "").trim();
-      return code === "storage_not_found" || code === "missing_download_source";
-    };
-
-    const downloadInput = async (asset = {}, kind = "video", index = 0) => {
-      const storagePath = clampText(asset?.storagePath || "", 900);
-      const url = String(asset?.url || "").trim();
-      if (!storagePath && !url) {
-        const err = new Error("missing_download_source");
-        err.code = "missing_download_source";
-        err.status = 404;
-        err.detail = {
-          kind,
-          index,
-          storagePath: "",
-          url: ""
-        };
-        throw err;
-      }
-      const isAudioKind = kind !== "video";
-      const ext = isAudioKind
-        ? (getAudioExtension(String(asset?.mimeType || "audio/mpeg")) || "audio")
-        : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
-      const outPath = path.join(tmpDir, `in-${kind}-${String(index + 1).padStart(3, "0")}.${ext}`);
-      const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
-        const clean = normalizeStorageFilePath(pathInput);
-        const uidClean = String(uidRaw || "").trim();
-        if (!clean || !uidClean) return [];
-        const marker = "/owners/";
-        const i = clean.indexOf(marker);
-        if (i < 0) return [];
-        const prefix = clean.slice(0, i + marker.length);
-        const rest = clean.slice(i + marker.length);
-        const slash = rest.indexOf("/");
-        if (slash < 0) return [];
-        const currentOwner = rest.slice(0, slash);
-        const suffix = rest.slice(slash);
-        const candidates = [
-          uidClean,
-          uidClean.toLowerCase(),
-          normalizeStorageSegment(uidClean, "anon"),
-        ]
-          .map((owner) => String(owner || "").trim())
-          .filter(Boolean);
-        const nextOwners = Array.from(new Set(candidates)).filter((owner) => owner && owner !== currentOwner);
-        return nextOwners.map((owner) => `${prefix}${owner}${suffix}`);
-      };
-      if (storagePath) {
-        try {
-          await downloadStoragePathToFile(storagePath, outPath);
-          return outPath;
-        } catch (error) {
-          const code = String(error?.code || error?.message || "").trim();
-          if (code === "storage_not_found") {
-            const altPaths = resolveAlternateOwnerStoragePaths(storagePath, uid);
-            for (const altPath of altPaths) {
-              try {
-                // eslint-disable-next-line no-await-in-loop
-                await downloadStoragePathToFile(altPath, outPath);
-                console.info("[backend][montage-export] recovered storagePath via alt owner", {
-                  kind,
-                  index,
-                  storagePath,
-                  altPath
-                });
-                return outPath;
-              } catch (_) {
-                // keep trying
-              }
-            }
-
-            if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
-              console.info("[backend][montage-export] storage_not_found -> url fallback", {
-                kind,
-                index,
-                storagePath,
-                url: redactUrlForLogs(url)
-              });
-              await downloadUrlToFile(url, outPath);
-              return outPath;
-            }
-          }
-          error.detail = {
-            ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
-            kind,
-            index,
-            storagePath,
-            url: url ? redactUrlForLogs(url) : ""
-          };
-          throw error;
-        }
-      }
-      await downloadUrlToFile(url, outPath);
-      return outPath;
-    };
-
-    for (let i = 0; i < entries.length; i += 1) {
-      const entry = entries[i] || {};
+    for (let i = 0; i < input.entries.length; i += 1) {
+      const entry = input.entries[i] || {};
       const rowId = clampText(entry?.rowId || "", 140);
       const sceneIndex = Math.max(1, Number(entry?.sceneIndex || i + 1) || i + 1);
       const trimInMs = Math.max(0, Number(entry?.trimInMs || 0) || 0);
@@ -4864,146 +6159,192 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
 
-      if (!rowId) return res.status(400).json({ error: `Entrada inválida (rowId) en índice ${i}.` });
+      if (!rowId) {
+        const err = new Error(`Entrada inválida (rowId) en índice ${i}.`);
+        err.status = 400;
+        throw err;
+      }
       if (!videoAsset?.storagePath && !videoAsset?.url) {
-        const skipped = buildMontageSkippedEntry(entry, i, "missing_video_source", {
+        skippedEntries.push(buildMontageSkippedEntry(entry, i, "missing_video_source", {
           kind: "video",
           code: "missing_download_source",
           index: i,
           lastError: `Escena ${sceneIndex} sin video fuente para exportar.`
-        });
-        skippedEntries.push(skipped);
-        console.warn("[backend][montage-export] skip scene without video source", skipped);
+        }));
         continue;
       }
 
+      emitStage("render_scene_segments", 0.18 + ((i / Math.max(1, input.entries.length)) * 0.26), `Renderizando escena ${sceneIndex} de ${input.entries.length}.`, {
+        currentSceneIndex: sceneIndex,
+        currentRowId: rowId,
+        totalScenes: input.entries.length
+      });
       try {
         const inputVideoPath = await downloadInput(videoAsset, "video", i);
-        const forceSilentAudio = useTimelineAudio === true && !useNativeVideoAudio;
+        const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
         const inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
-
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
-        const args = [
-          "-y",
-          "-hide_banner",
-          "-loglevel",
-          "warning",
-          "-i",
-          inputVideoPath,
-        ];
-        let nullAudioInputIndex = -1;
-        if (forceSilentAudio) {
-          nullAudioInputIndex = 1;
-          args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-        } else if (!useNativeVideoAudio && inputAudioPath) {
+        const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
+          ? "blur-backdrop"
+          : "default";
+        const videoHasAudio = await probeMediaHasAudioWithFfmpeg(inputVideoPath);
+        const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, `montage_scene_probe_${sceneIndex}`).catch(() => ({ width: 1280, height: 720 }));
+        const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
+        const args = ["-y", "-hide_banner", "-loglevel", "warning", "-i", inputVideoPath];
+        
+        // Input 1: anullsrc como fallback universal para asegurar pista de audio
+        args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
+        
+        if (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) {
           args.push("-i", inputAudioPath);
-        } else if (useNativeVideoAudio) {
-          // native audio from video (if present)
-        } else {
-          nullAudioInputIndex = 1;
-          args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
         }
 
-        args.push(
-          "-ss",
-          String(trimSec),
-          "-t",
-          String(durSec),
-          "-map",
-          "0:v:0"
-        );
+        const veoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 100)));
+        const veoVolume = (veoVolumePct / 100).toFixed(3);
+        
+        // Mapeo de audio dinámico para asegurar consistencia en concat
+        let audioMapLabel = "[aout]";
+        let audioFilterGraph = "";
+        
         if (forceSilentAudio) {
-          args.push("-map", `${nullAudioInputIndex}:a:0`);
+          audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         } else if (!useNativeVideoAudio && inputAudioPath) {
-          args.push("-map", "1:a:0");
-        } else if (useNativeVideoAudio) {
-          args.push("-map", "0:a:0?");
+          audioFilterGraph = `[2:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
+        } else if (useNativeVideoAudio && videoHasAudio) {
+          // Normalizamos a -16 LUFS antes de aplicar el volumen del usuario para consistencia
+          audioFilterGraph = `[0:a:0]loudnorm=I=-16:TP=-1.5:LRA=11,volume=${veoVolume},aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[v];[v][1:a]amix=inputs=2:duration=first:dropout_transition=0.05:normalize=0[aout]`;
         } else {
-          args.push("-map", `${nullAudioInputIndex}:a:0`);
+          audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         }
 
-        args.push(
-          "-r",
-          "24",
-          "-c:v",
-          params.vCodec
-        );
-        if (scaleFilter) {
-          args.push("-vf", scaleFilter);
+        args.push("-ss", String(trimSec), "-t", String(durSec));
+        
+        // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
+        let videoFilterGraph = "";
+        if (visualLayoutMode === "blur-backdrop") {
+          const fgWidth = Math.max(2, Math.round((canvas.width * 0.76) / 2) * 2);
+          const fgHeight = Math.max(2, Math.round((canvas.height * 0.76) / 2) * 2);
+          videoFilterGraph = [
+            `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`,
+            `[vbg_src]scale=${canvas.width}:${canvas.height}:force_original_aspect_ratio=increase,crop=${canvas.width}:${canvas.height},boxblur=24:8,eq=saturation=1.08[bg]`,
+            `[vfg_src]scale=${fgWidth}:${fgHeight}:force_original_aspect_ratio=decrease,pad=${fgWidth}:${fgHeight}:(ow-iw)/2:(oh-ih)/2:color=0x05070B[fg]`,
+            `[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto[vout]`
+          ].join(";");
+        } else {
+          videoFilterGraph = `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`;
         }
-        args.push(...params.vArgs);
-        args.push(
-          "-pix_fmt",
-          "yuv420p",
-          "-c:a",
-          params.aCodec,
-          "-ar",
-          "48000",
-        );
-        args.push(...params.aArgs);
-        args.push(intermediatePath);
 
+        args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
+        args.push("-map", "[vout]", "-map", audioMapLabel);
+        args.push("-r", "24", "-c:v", params.vCodec);
+        args.push(...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", params.aCodec, "-ar", "48000", ...params.aArgs, intermediatePath);
         await runFfmpegCommand(args, { stage: `montage_scene_${sceneIndex}` });
         intermediatePaths.push(intermediatePath);
         exportedEntries.push({
           sceneIndex,
           rowId,
-          durationSec: durSec
+          zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
+          durationSec: durSec,
+          durationMs,
+          visualLayoutMode,
+          timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0)),
+          timelineEndMs: Math.max(0, Math.round(Number(entry?.timelineEndMs || 0) || 0)),
+          voiceOverText: clampText(entry?.voiceOverText || "", 1600),
+          sceneDescription: clampText(entry?.sceneDescription || "", 1600),
+          onScreenText: clampText(entry?.onScreenText || "", 600),
+          visualNotes: clampText(entry?.visualNotes || "", 2200),
+          videoDirective: clampText(entry?.videoDirective || "", 2200)
         });
       } catch (error) {
         if (!shouldSkipMontageEntryError(error)) throw error;
         const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
-        const skipped = buildMontageSkippedEntry(entry, i, String(error?.code || error?.message || "scene_asset_unavailable"), {
+        skippedEntries.push(buildMontageSkippedEntry(entry, i, String(error?.code || error?.message || "scene_asset_unavailable"), {
           ...detail,
           code: String(error?.code || "").trim(),
           index: Number(detail?.index || i) || i,
           lastError: String(detail?.lastError || detail?.message || error?.message || "").trim()
-        });
-        skippedEntries.push(skipped);
-        console.warn("[backend][montage-export] skip scene missing asset", skipped);
+        }));
       }
     }
 
     if (!intermediatePaths.length) {
-      return res.status(404).json({
-        error: "No hay escenas válidas para exportar.",
-        code: "montage_no_valid_entries",
-        detail: {
-          skippedEntries
-        }
-      });
+      const err = new Error("No hay escenas válidas para exportar.");
+      err.status = 404;
+      err.code = "montage_no_valid_entries";
+      err.detail = { skippedEntries };
+      throw err;
     }
 
-    const concatListPath = path.join(tmpDir, "concat-list.txt");
-    await fs.promises.writeFile(
-      concatListPath,
-      intermediatePaths.map((p) => `file '${String(p).replace(/'/g, "'\\''")}'`).join("\n") + "\n",
-      "utf8"
-    );
+    let reviewCursorMs = 0;
+    exportedEntries.forEach((entry) => {
+      const reviewDurationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || (Number(entry?.durationSec || 0) * 1000) || 500));
+      entry.reviewStartMs = reviewCursorMs;
+      entry.reviewEndMs = reviewCursorMs + reviewDurationMs;
+      entry.timelineLabel = formatMontageReviewTimelineRange(entry?.timelineStartMs || 0, entry?.timelineEndMs || 0, reviewDurationMs);
+      reviewCursorMs = entry.reviewEndMs;
+    });
+    const montageTotalDurationMs = reviewCursorMs;
 
-    const concatOutPath = path.join(tmpDir, `montage-concat.${outExt}`);
-    await runFfmpegCommand([
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "warning",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      concatListPath,
-      "-c",
-      "copy",
-      concatOutPath
-    ], { stage: "montage_concat" });
+    const overlapPlan = buildMontageOverlapCompositionPlan(exportedEntries);
+    let concatOutPath = "";
+    emitStage("concat_timeline", 0.48, overlapPlan.hasOverlap ? "Componiendo escenas con transiciones por solapamiento." : "Uniendo escenas en un solo timeline.");
+    if (overlapPlan.hasOverlap) {
+      concatOutPath = await renderMontageOverlapComposition({
+        input,
+        tmpDir,
+        params,
+        outExt,
+        intermediatePaths,
+        exportedEntries
+      });
+    }
+    if (!concatOutPath) {
+      const concatListPath = path.join(tmpDir, "concat-list.txt");
+      await fs.promises.writeFile(concatListPath, intermediatePaths.map((p) => `file '${String(p).replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
+      concatOutPath = path.join(tmpDir, `montage-concat.${outExt}`);
+      await runFfmpegCommand([
+        "-y", "-hide_banner", "-loglevel", "warning",
+        "-fflags", "+genpts",
+        "-f", "concat", "-safe", "0", "-i", concatListPath,
+        "-r", "24",
+        "-c:v", params.vCodec,
+        ...params.vArgs,
+        "-pix_fmt", "yuv420p",
+        "-c:a", params.aCodec,
+        "-ar", "48000",
+        ...params.aArgs,
+        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+        concatOutPath
+      ], { stage: "montage_concat" });
+    }
 
-    const exportedDurationSec = exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
+    const exportOffsetsByRowId = new Map();
+    const overlapAwareEntries = overlapPlan.entries.length ? overlapPlan.entries : exportedEntries;
+    let cursorMs = 0;
+    overlapAwareEntries.forEach((entry) => {
+      const rowId = String(entry?.rowId || "").trim();
+      const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+      if (rowId) {
+        exportOffsetsByRowId.set(String(entry.rowId || "").trim(), {
+          startMs: overlapPlan.hasOverlap
+            ? Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
+            : cursorMs,
+          durationMs,
+          timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
+        });
+      }
+      cursorMs += overlapPlan.hasOverlap ? 0 : durationMs;
+    });
+
+    const exportedDurationSec = overlapPlan.hasOverlap
+      ? Math.max(0.5, overlapPlan.totalDurationMs / 1000)
+      : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
     let finalOutPath = concatOutPath;
-    if (useTimelineAudio) {
+    if (input.useTimelineAudio) {
       const segmentInputs = [];
-      for (let i = 0; i < timelineAudioSegments.length; i += 1) {
-        const segment = timelineAudioSegments[i] || {};
+      emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
+      for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
+        const segment = input.timelineAudioSegments[i] || {};
         try {
           // eslint-disable-next-line no-await-in-loop
           const p = await downloadInput({
@@ -5013,205 +6354,349 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
           }, "timeline-audio", i);
           if (p) segmentInputs.push({ path: p, segment });
         } catch (error) {
-          // Skip missing audio pieces; export should still succeed with partial audio.
           if (String(error?.code || "") === "storage_not_found") continue;
           throw error;
         }
       }
-
       if (segmentInputs.length) {
         const timelineMixedOutPath = path.join(tmpDir, `montage-timeline-audio.${outExt}`);
         const audioCodec = outExt === "webm" ? "libopus" : "aac";
         const audioBitrate = outExt === "webm" ? "128k" : "160k";
         const filters = [];
+        const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.46));
         const labels = [];
         segmentInputs.forEach((item, idx) => {
           const segment = item.segment || {};
           const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-          const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
-          const durationMs = Math.max(100, Math.round(Number(segment?.durationMs || 0) || 0));
-          // En export, el largo efectivo del segmento lo define `durationMs` (timeline),
-          // no el `trimOutMs` del asset original. Si no, el audio puede "derramarse"
-          // a escenas siguientes y sonar junto.
-          const trimOutMs = Math.max(trimInMs + 100, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
-          const trimInSec = Math.max(0, trimInMs / 1000);
-          const durationSec = Math.max(0.1, durationMs / 1000);
-          const volumePct = Math.max(0, Math.min(100, Number(segment?.volumePct ?? 100)));
-          const volume = Math.max(0, Math.min(2, volumePct / 100));
+          const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
+          const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
+          const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(100, Number(segment?.volumePct ?? 100))) / 100));
           const inputIndex = idx + 1;
           const label = `a${idx}`;
           labels.push(label);
-          filters.push(
-            `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${startMs}|${startMs},volume=${volume.toFixed(3)}[${label}]`
-          );
+          const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
+          const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || startMs) || 0));
+          const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
+          const adjustedStartMs = exportOffset
+            ? Math.max(0, exportOffset.startMs + relativeStartMs)
+            : startMs;
+          const baseChain = `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${adjustedStartMs}|${adjustedStartMs}`;
+          const kind = String(segment?.kind || "").trim().toLowerCase();
+          filters.push(kind === "uploaded" && input.normalizedGeminiTimelineSegments.length
+            ? `${baseChain},volume='${bgDuckExprEscaped}*${volume.toFixed(3)}':eval=frame[${label}]`
+            : `${baseChain},volume=${volume.toFixed(3)}[${label}]`);
         });
-        // Normaliza loudness para evitar exports demasiado bajitos.
-        const mix = `${labels.map((l) => `[${l}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=2,aresample=48000,loudnorm=I=-16:TP=-1.5:LRA=11[mix]`;
-        const filterComplex = `${filters.join(";")};${mix}`;
-
+        const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
+        const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
         await runFfmpegCommand([
-          "-y",
-          "-hide_banner",
-          "-loglevel",
-          "warning",
-          "-i",
-          finalOutPath,
+          "-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath,
           ...segmentInputs.flatMap((item) => ["-i", item.path]),
-          "-filter_complex",
-          filterComplex,
-          "-map",
-          "0:v:0",
-          "-map",
-          "[mix]",
-          "-c:v",
-          "copy",
-          "-c:a",
-          audioCodec,
-          "-ar",
-          "48000",
-          "-b:a",
-          audioBitrate,
+          "-filter_complex", `${filters.join(";")};${mix}`,
+          "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
           ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
           timelineMixedOutPath
         ], { stage: "montage_mix_timeline_audio" });
         finalOutPath = timelineMixedOutPath;
       }
     }
-    if (includeBackgroundMusic) {
-      const bg = req.body?.backgroundMusic && typeof req.body.backgroundMusic === "object" ? req.body.backgroundMusic : null;
-      if (!bg) return res.status(400).json({ error: "includeBackgroundMusic requiere backgroundMusic." });
-      const musicPath = await downloadInput(bg, "music", 0);
-      if (!musicPath) return res.status(400).json({ error: "No se pudo descargar música de fondo." });
-      const rawVolumePct = Number(bg?.volumePct ?? 25);
-      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1
-        ? rawVolumePct * 100
-        : rawVolumePct;
-      const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
-      const volume = Math.max(0, Math.min(1, volumePct / 100));
-
+    if (input.includeBackgroundMusic) {
+      emitStage("mix_background_music", 0.7, "Mezclando música de fondo.");
+      if (!input.backgroundMusic || typeof input.backgroundMusic !== "object") {
+        const err = new Error("includeBackgroundMusic requiere backgroundMusic.");
+        err.status = 400;
+        throw err;
+      }
+      const musicPath = await downloadInput(input.backgroundMusic, "music", 0);
+      const rawVolumePct = Number(input.backgroundMusic?.volumePct ?? 25);
+      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
+      const volume = Math.max(0, Math.min(1, Math.max(0, Math.min(100, legacyScaledPct)) / 100));
       const mixedOutPath = path.join(tmpDir, `montage-mixed.${outExt}`);
       const audioCodec = outExt === "webm" ? "libopus" : "aac";
       const audioBitrate = outExt === "webm" ? "128k" : "160k";
       await runFfmpegCommand([
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-i",
-        finalOutPath,
-        "-stream_loop",
-        "-1",
-        "-i",
-        musicPath,
-        "-t",
-        String(exportedDurationSec),
+        "-y", "-hide_banner", "-loglevel", "warning",
+        "-i", finalOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
         "-filter_complex",
-        `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]sidechaincompress=threshold=0.02:ratio=8:attack=10:release=250:makeup=2:link=average[ducked];[ducked]loudnorm=I=-16:TP=-1.5:LRA=11[outa]`,
-        "-map",
-        "0:v:0",
-        "-map",
-        "[outa]",
-        "-c:v",
-        "copy",
-        "-c:a",
-        audioCodec,
-        "-ar",
-        "48000",
-        "-b:a",
-        audioBitrate,
+        input.normalizedGeminiTimelineSegments.length
+          ? `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.46))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
+          : `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
+        "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         mixedOutPath
       ], { stage: "montage_mix_music" });
       finalOutPath = mixedOutPath;
     } else if (outExt === "mp4") {
       const remuxOutPath = path.join(tmpDir, "montage-faststart.mp4");
-      await runFfmpegCommand([
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-i",
-        finalOutPath,
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
-        remuxOutPath
-      ], { stage: "montage_faststart" });
+      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-c", "copy", "-movflags", "+faststart", remuxOutPath], { stage: "montage_faststart" });
       finalOutPath = remuxOutPath;
     }
 
-    await cleanupMontageExportCache();
-    await ensureMontageExportCacheDir();
-    const token = randomUUID();
-    const createdAtIso = new Date().toISOString();
-    const expiresAtIso = new Date(Date.now() + MONTAGE_EXPORT_CACHE_TTL_MS).toISOString();
-    const cacheFilePath = path.join(MONTAGE_EXPORT_CACHE_DIR, `montage-${exportId}.${outExt}`);
-    await fs.promises.copyFile(finalOutPath, cacheFilePath);
-    await fs.promises.writeFile(path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`), JSON.stringify({
-      exportId,
-      token,
-      uid,
-      sessionId,
-      filename: `${filename}.${outExt}`,
-      mimeType: getMontageExportMimeType(format),
-      filePath: cacheFilePath,
-      createdAt: createdAtIso,
-      expiresAt: expiresAtIso,
-      format: String(format || "").trim(),
-      qualityPreset: String(qualityPreset || "").trim(),
-      resolution: String(resolution || "").trim()
-    }, null, 2), "utf8");
-    const base = resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`;
-    const downloadUrl = `${base}/api/assets/montage-download?exportId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+    if (input.onScreenTextTimelineRaw?.enabled === true && input.onScreenTextSettings && input.onScreenTextSegments.length) {
+      emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla.");
+      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_onscreen_input").catch(() => ({ width: 1280, height: 720 }));
+      const textColor = toFfmpegColor(input.onScreenTextSettings?.textColor || "#F8FAFC", input.onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
+      const strokeColor = toFfmpegColor(input.onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
+      const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
+      const drawFilters = input.onScreenTextSegments
+        .slice()
+        .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
+        .map((segment) => {
+          const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+          const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+          const layout = segment?.layout && typeof segment.layout === "object" ? segment.layout : {};
+          const spec = resolveOnScreenTextRenderSpec({
+            settings: {
+              ...input.onScreenTextSettings,
+              boxEnabled: false
+            },
+            layout,
+            resolution: input.resolution,
+            sourceWidth: sourceDims.width,
+            sourceHeight: sourceDims.height,
+            text: segment.text || "",
+            fallback: ""
+          });
+          const textPath = textFileResolver(String(spec.wrappedText || "").trim());
+          const shadowColor = spec.shadowEnabled
+            ? `0x020617@${spec.shadowOpacity.toFixed(3)}`
+            : "0x020617@0.000";
+          return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}':reload=0:fontsize=${spec.fontSizePx}:fontcolor=${textColor}:x='${spec.xExpr}':y=${spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${spec.strokeEnabled ? spec.strokeWidthPx : 0}:bordercolor=${strokeColor}:shadowx=${spec.shadowEnabled ? spec.shadowX : 0}:shadowy=${spec.shadowEnabled ? spec.shadowY : 0}:shadowcolor=${shadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`)}'`;
+        });
+      if (drawFilters.length) {
+        const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);
+        await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
+        finalOutPath = overlayOutPath;
+      }
+    }
 
-    return res.status(200).json({
-      ok: true,
+    if (input.exportMode === "review" && exportedEntries.length) {
+      emitStage("apply_review_layout", 0.88, "Componiendo layout de revisión.");
+      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_review_input").catch(() => ({ width: 1280, height: 720 }));
+      const canvas = resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height);
+      const reviewOutPath = path.join(tmpDir, `montage-review.${outExt}`);
+      const reviewTextFileResolver = createMontageReviewTextFileResolver(tmpDir, "review-export");
+      const reviewFilter = buildMontageReviewVideoFilter(exportedEntries, {
+        width: canvas.width,
+        height: canvas.height,
+        montageTotalDurationMs,
+        globalCounterMode: "dynamic",
+        textFileResolver: reviewTextFileResolver
+      });
+      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", reviewFilter, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), reviewOutPath], { stage: "montage_review_layout" });
+      finalOutPath = reviewOutPath;
+    }
+
+    if (context?.previewOnly === true) {
+      const previewBuffer = await fs.promises.readFile(finalOutPath);
+      return {
+        previewBuffer,
+        previewMimeType: getMontageExportMimeType(input?.format || "mp4_h264"),
+        exportedEntries
+      };
+    }
+
+    emitStage("cache_output", 0.96, "Guardando archivo final para descarga.");
+    const stored = await storeMontageExportResult(finalOutPath, input, context);
+    emitStage("ready", 1, "Exportación lista.");
+    return {
       export: {
-        filename: `${filename}.${outExt}`,
-        mimeType: getMontageExportMimeType(format),
+        filename: stored.filename,
+        mimeType: stored.mimeType,
         storagePath: "",
-        downloadUrl,
-        createdAt: createdAtIso,
-        expiresAt: expiresAtIso,
-        exportId
+        downloadUrl: stored.downloadUrl,
+        createdAt: stored.createdAtIso,
+        expiresAt: stored.expiresAtIso,
+        exportId: stored.exportId
       },
+      downloadUrl: stored.downloadUrl,
       warnings: skippedEntries.length ? {
         skippedEntries,
-        requestedSceneCount: entries.length,
+        requestedSceneCount: input.entries.length,
         exportedSceneCount: exportedEntries.length
-      } : undefined
-    });
-  } catch (error) {
-    console.error("[backend][montage-export] error", {
-      status: Number(error?.status || 500),
-      message: String(error?.message || "montage_export_failed"),
-      code: String(error?.code || ""),
-      stack: String(error?.stack || "").split("\n").slice(0, 3).join(" | "),
-      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
-    });
-    const rawCode = error?.code;
-    const rawStatus = error?.status ?? error?.statusCode;
-    const code = typeof rawCode === "string" ? rawCode.trim() : "";
-    const message = String(error?.message || "").trim();
-    const isNumericCode = typeof rawCode === "number" || (/^\d+$/.test(code) && code.length <= 4);
-    const statusNum = Number(rawStatus || 0) || 0;
-    const errorLabel = (!isNumericCode && code) ? code : (message || "No se pudo exportar el montaje.");
-    const payload = {
-      error: errorLabel
+      } : undefined,
+      exportedEntries
     };
-    if (code) payload.code = code;
-    if (statusNum) payload.status = statusNum;
-    if (error?.detail && typeof error.detail === "object") {
-      payload.detail = error.detail;
-    }
-    return res.status(Number(error?.status || 500)).json(payload);
   } finally {
     if (tmpDir) {
-      try {
-        await fs.promises.rm(tmpDir, { recursive: true, force: true });
-      } catch (_) {}
+      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
+  }
+}
+
+async function renderMontagePreviewImage(rawInput = {}, context = {}) {
+  const input = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const uid = String(context?.uid || "").trim();
+  validateMontageExportRequest(input);
+  const previewEntries = Array.isArray(input.entries) ? input.entries.slice() : [];
+  const targetIndex = Math.max(0, previewEntries.findIndex((entry) => String(entry?.rowId || "").trim() === String(input.previewRowId || "").trim()));
+  const targetEntry = previewEntries[targetIndex] || previewEntries[0];
+  const montageTotalDurationMs = previewEntries.reduce((acc, entry) => acc + Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0)), 0);
+  const globalCounterCurrentMs = previewEntries
+    .slice(0, Math.max(0, targetIndex))
+    .reduce((acc, entry) => acc + Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0)), 0);
+  const tmpDir = path.join(os.tmpdir(), `cb-montage-preview-${randomUUID()}`);
+  await fs.promises.mkdir(tmpDir, { recursive: true });
+  try {
+    const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
+    const inputVideoPath = await downloadInput(targetEntry?.video || {}, "video", 0);
+    const trimSec = Math.max(0, Number(targetEntry?.trimInMs || 0) / 1000);
+    const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, "montage_preview_input").catch(() => ({ width: 1280, height: 720 }));
+    const canvas = resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height);
+    const previewPath = path.join(tmpDir, "preview.jpg");
+    const baseFilter = input.exportMode === "review"
+      ? buildMontageReviewVideoFilter([{
+        ...targetEntry,
+        reviewStartMs: 0,
+        reviewEndMs: Math.max(1000, Number(targetEntry?.durationMs || 4000) || 4000),
+        timelineLabel: formatMontageReviewTimelineRange(targetEntry?.timelineStartMs || 0, targetEntry?.timelineEndMs || 0, targetEntry?.durationMs || 0),
+        visualNotes: clampText(targetEntry?.visualNotes || "", 2200)
+      }], {
+        width: canvas.width,
+        height: canvas.height,
+        montageTotalDurationMs,
+        globalCounterMode: "static",
+        globalCounterCurrentMs,
+        textFileResolver: createMontageReviewTextFileResolver(tmpDir, "review-preview")
+      })
+      : `${resolveMontageExportScaleFilter(input.resolution) || "scale=trunc(iw/2)*2:trunc(ih/2)*2"},pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2:color=0x05070B`;
+    await runFfmpegCommand([
+      "-y", "-hide_banner", "-loglevel", "warning",
+      "-ss", String(trimSec), "-i", inputVideoPath,
+      "-frames:v", "1",
+      "-vf", baseFilter,
+      previewPath
+    ], { stage: input.exportMode === "review" ? "montage_preview_review" : "montage_preview_normal" });
+    const previewBuffer = await fs.promises.readFile(previewPath);
+    const imageDataUrl = `data:image/jpeg;base64,${previewBuffer.toString("base64")}`;
+    return {
+      ok: true,
+      mode: input.exportMode,
+      sceneIndex: Math.max(1, Number(targetEntry?.sceneIndex || 1) || 1),
+      rowId: String(targetEntry?.rowId || "").trim(),
+      mediaType: "image/jpeg",
+      previewDataUrl: imageDataUrl,
+      imageDataUrl
+    };
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
+  const input = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const previewInput = buildMontagePreviewPipelineInput(input);
+  const targetIndex = Math.max(0, previewInput.entries.findIndex((entry) => String(entry?.rowId || "").trim() === String(input.previewRowId || "").trim()));
+  const targetEntry = previewInput.entries[targetIndex] || previewInput.entries[0] || {};
+  try {
+    const result = await executeMontageExportPipeline(previewInput, {
+      uid: String(context?.uid || "").trim(),
+      baseUrl: String(context?.baseUrl || "").trim(),
+      previewOnly: true
+    });
+    const previewDataUrl = `data:${String(result?.previewMimeType || "video/mp4").trim()};base64,${Buffer.from(result?.previewBuffer || Buffer.alloc(0)).toString("base64")}`;
+    return {
+      ok: true,
+      mode: previewInput.exportMode,
+      sceneIndex: Math.max(1, Number(targetEntry?.sceneIndex || 1) || 1),
+      rowId: String(targetEntry?.rowId || "").trim(),
+      mediaType: String(result?.previewMimeType || "video/mp4").trim() || "video/mp4",
+      previewDataUrl
+    };
+  } catch (error) {
+    return renderMontagePreviewImage(input, context);
+  }
+}
+
+app.post("/api/podcaster/montage/export", async (req, res) => {
+  try {
+    cleanupMontageExportJobs();
+    const uid = String(req.authContext?.uid || "").trim();
+    const input = normalizeMontageExportRequestBody(req.body || {});
+    validateMontageExportRequest(input);
+    const jobId = clampExportId(randomUUID());
+    const initial = upsertMontageExportJob(jobId, {
+      status: "running",
+      stage: "validate_payload",
+      progress: 0.04,
+      hint: "Preparando exportación."
+    });
+    const baseUrl = resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`;
+    void executeMontageExportPipeline(input, {
+      uid,
+      baseUrl,
+      onStage: ({ stage, progress, hint }) => {
+        upsertMontageExportJob(jobId, {
+          status: stage === "ready" ? "ready" : "running",
+          stage,
+          progress,
+          hint
+        });
+      }
+    }).then((result) => {
+      upsertMontageExportJob(jobId, {
+        status: "ready",
+        stage: "ready",
+        progress: 1,
+        hint: "Exportación lista.",
+        warnings: result?.warnings ? [result.warnings] : [],
+        export: result?.export || null,
+        downloadUrl: String(result?.downloadUrl || "").trim()
+      });
+    }).catch((error) => {
+      console.error("[backend][montage-export] error", {
+        status: Number(error?.status || 500),
+        message: String(error?.message || "montage_export_failed"),
+        code: String(error?.code || ""),
+        detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined,
+        stderrPreview: String(error?.stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200)
+      });
+      upsertMontageExportJob(jobId, {
+        status: "error",
+        stage: "error",
+        progress: Math.max(0.04, Math.min(0.98, Number(getMontageExportJob(jobId)?.progress || 0) || 0)),
+        hint: String(error?.message || error?.code || "No se pudo exportar el montaje.").trim(),
+        error: {
+          error: String(error?.code || error?.message || "montage_export_failed").trim(),
+          code: String(error?.code || "").trim(),
+          status: Number(error?.status || 500),
+          detail: error?.detail && typeof error.detail === "object" ? error.detail : {
+            stage: String(error?.detail?.stage || error?.stage || "").trim() || undefined,
+            stderrPreview: String(error?.stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200) || undefined
+          }
+        }
+      });
+    });
+    return res.status(202).json(sanitizeMontageJobPublicPayload(initial));
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.code || error?.message || "montage_export_failed").trim(),
+      code: String(error?.code || "").trim() || undefined,
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+  }
+});
+
+app.get("/api/podcaster/montage/export-status", async (req, res) => {
+  cleanupMontageExportJobs();
+  const jobId = clampExportId(req.query?.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "Falta jobId." });
+  const job = getMontageExportJob(jobId);
+  if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+  return res.status(200).json(sanitizeMontageJobPublicPayload(job));
+});
+
+app.post("/api/podcaster/montage/preview", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const input = normalizeMontageExportRequestBody(req.body || {});
+    const preview = await renderMontagePreviewMedia(input, { uid, baseUrl: resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}` });
+    return res.status(200).json(preview);
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.code || error?.message || "montage_preview_failed").trim(),
+      code: String(error?.code || "").trim() || undefined,
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
   }
 });
 
@@ -5519,6 +7004,79 @@ app.post("/api/podcaster/scene-library/publish", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo publicar la escena pública.") });
+  }
+});
+
+app.post("/api/podcaster/scene-library/upload-local", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const ownerEmail = String(req.authContext?.email || "").trim();
+    if (!uid) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    const title = clampText(req.body?.title || req.body?.originalName || "Video local", 180) || "Video local";
+    const originalName = clampText(req.body?.originalName || title, 180) || title;
+    const videoDataUrl = String(req.body?.videoDataUrl || "").trim();
+    const requestedMimeType = clampText(req.body?.mimeType || "video/mp4", 120) || "video/mp4";
+    const durationSec = clampNumber(req.body?.durationSec, 0, 240, 0);
+    const size = Math.max(0, Number(req.body?.size || 0) || 0);
+    const thumbDataUrl = String(req.body?.thumbDataUrl || "").trim();
+    if (!videoDataUrl) return res.status(400).json({ error: "Falta videoDataUrl." });
+    const decoded = decodeBase64DataUrl(videoDataUrl, MAX_DIALOGUE_VIDEO_BYTES);
+    const mimeType = String(decoded.mimeType || requestedMimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
+    if (!mimeType.startsWith("video/")) return res.status(400).json({ error: "El archivo debe ser un video." });
+    const libraryId = randomUUID();
+    const ext = getVideoExtension(mimeType);
+    const storagePath = `podcaster/library/scenes/${normalizeStorageSegment(libraryId, "scene")}/local-video.${ext}`;
+    const videoAsset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer: decoded.buffer,
+      mimeType,
+      metadata: {
+        kind: "podcaster_scene_library_video",
+        source: "local_upload",
+        libraryId,
+        uid,
+        originalName,
+        size: String(size || decoded.buffer.length)
+      }
+    });
+    const thumbAsset = await uploadSceneLibraryThumb(thumbDataUrl, libraryId);
+    const nowIso = new Date().toISOString();
+    const item = {
+      libraryId,
+      sourceSessionId: "",
+      sourceRowId: "",
+      sourceRowNumber: 0,
+      ownerId: uid,
+      ownerEmail: ownerEmail || null,
+      title,
+      durationSec,
+      downloadUrl: videoAsset.downloadUrl,
+      storagePath: videoAsset.path,
+      mimeType,
+      thumbUrl: thumbAsset.thumbUrl || "",
+      thumbStoragePath: thumbAsset.thumbStoragePath || "",
+      thumbMimeType: thumbAsset.thumbMimeType || "image/jpeg",
+      sceneDescription: "",
+      onScreenText: "",
+      transition: "",
+      visualNotes: "",
+      videoDirective: "",
+      scenePrompt: "",
+      voiceOverText: "",
+      tagLabel: "Local",
+      tagColor: "sky",
+      imagePrompts: [],
+      videoPreset: "local",
+      sourceType: "local_upload",
+      originalName,
+      size: size || decoded.buffer.length,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    await db.collection("podcaster_scene_library").doc(libraryId).set(item, { merge: true });
+    return res.status(200).json({ ok: true, item });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir el video local.") });
   }
 });
 
