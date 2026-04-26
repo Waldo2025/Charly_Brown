@@ -195,6 +195,47 @@ function normalizeMontageBackgroundDuckVolume(input = null, fallback = 0.60) {
   return Math.max(0, Math.min(1, Number(factor) || 0.60));
 }
 
+function parseHttpByteRange(rangeHeader = "", total = 0) {
+  const raw = String(rangeHeader || "").trim();
+  const totalBytes = Math.max(0, Number(total || 0) || 0);
+  if (!raw || !totalBytes) return null;
+  const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match) return null;
+  const start = match[1] ? Math.max(0, Number(match[1] || 0)) : 0;
+  const end = match[2] ? Math.min(totalBytes - 1, Number(match[2] || (totalBytes - 1))) : totalBytes - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalBytes) return null;
+  return { start, end };
+}
+
+async function streamStorageFileToResponse(file, res, options = {}) {
+  const targetFile = file && typeof file.createReadStream === "function" ? file : null;
+  if (!targetFile) {
+    const err = new Error("invalid_storage_file");
+    err.code = "invalid_storage_file";
+    throw err;
+  }
+  const metadata = options?.metadata && typeof options.metadata === "object" ? options.metadata : {};
+  const mime = String(metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+  const total = Math.max(0, Number(metadata?.size || 0) || 0);
+  const range = parseHttpByteRange(options?.rangeHeader || "", total);
+  res.setHeader("Content-Type", mime);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "private, max-age=120");
+  if (range) {
+    const length = Math.max(0, (range.end - range.start) + 1);
+    res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${total}`);
+    res.setHeader("Content-Length", String(length));
+    const stream = targetFile.createReadStream({ start: range.start, end: range.end });
+    await pipeline(stream, res.status(206));
+    return;
+  }
+  if (total > 0) {
+    res.setHeader("Content-Length", String(total));
+  }
+  const stream = targetFile.createReadStream();
+  await pipeline(stream, res.status(200));
+}
+
 function resolveFfmpegDrawtextFontFile() {
   return FFMPEG_DRAWTEXT_FONT_CANDIDATES.find((candidate) => {
     try {
@@ -7934,26 +7975,19 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         if (exists === false) continue;
         try {
           const [meta] = await file.getMetadata().catch(() => [{}]);
-          const [buffer] = await file.download();
-          const mime = String(meta?.contentType || "application/octet-stream");
-          res.setHeader("Content-Type", mime);
-          res.setHeader("Content-Length", String(buffer.length));
-          res.setHeader("Accept-Ranges", "bytes");
-          res.setHeader("Cache-Control", "private, max-age=120");
-          if (rangeHeader) {
-            const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
-            if (match) {
-              const start = Math.max(0, Number(match[1] || 0));
-              const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
-              const chunk = buffer.subarray(start, end + 1);
-              res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
-              res.setHeader("Content-Length", String(chunk.length));
-              return res.status(206).send(chunk);
-            }
-          }
-          return res.status(200).send(buffer);
+          await streamStorageFileToResponse(file, res, { metadata: meta, rangeHeader });
+          return;
         } catch (error) {
           lastError = error;
+          if (res.headersSent) {
+            console.error("[backend][proxy-media] storage stream failed after headers", {
+              storagePath,
+              bucket: String(bucket?.name || "").trim(),
+              message: String(error?.message || error)
+            });
+            try { res.destroy(error); } catch (_) {}
+            return;
+          }
         }
       }
       return res.status(404).json({
@@ -8018,26 +8052,19 @@ app.get("/api/assets/proxy-media", async (req, res) => {
               if (exists === false) continue;
               try {
                 const [meta] = await file.getMetadata().catch(() => [{}]);
-                const [buffer] = await file.download();
-                const mime = String(meta?.contentType || "application/octet-stream");
-                res.setHeader("Content-Type", mime);
-                res.setHeader("Content-Length", String(buffer.length));
-                res.setHeader("Accept-Ranges", "bytes");
-                res.setHeader("Cache-Control", "private, max-age=120");
-                if (rangeHeader) {
-                  const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
-                  if (match) {
-                    const start = Math.max(0, Number(match[1] || 0));
-                    const end = match[2] ? Math.min(buffer.length - 1, Number(match[2])) : buffer.length - 1;
-                    const chunk = buffer.subarray(start, end + 1);
-                    res.setHeader("Content-Range", `bytes ${start}-${end}/${buffer.length}`);
-                    res.setHeader("Content-Length", String(chunk.length));
-                    return res.status(206).send(chunk);
-                  }
-                }
-                return res.status(200).send(buffer);
+                await streamStorageFileToResponse(file, res, { metadata: meta, rangeHeader });
+                return;
               } catch (error) {
                 lastError = error;
+                if (res.headersSent) {
+                  console.error("[backend][proxy-media] admin fallback stream failed after headers", {
+                    objectPath,
+                    bucket: String(bucket?.name || "").trim(),
+                    message: String(error?.message || error)
+                  });
+                  try { res.destroy(error); } catch (_) {}
+                  return;
+                }
               }
             }
             // Fallthrough: no se pudo leer por admin, devuelve upstream.
