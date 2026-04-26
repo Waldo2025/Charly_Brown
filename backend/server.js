@@ -77,6 +77,7 @@ const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
 const MAX_REFERENCE_FRAME_BYTES = 6 * 1024 * 1024;
 const MAX_MONTAGE_EXPORT_SCENES = 40;
 const MAX_MONTAGE_EXPORT_TOTAL_SEC = 10 * 60;
+const DIALOGUE_VIDEO_JOB_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
 const DEFAULT_MOODLE_GRAPHIC_MODEL = "gemini-2.5-flash-image";
@@ -114,6 +115,7 @@ const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
+const dialogueVideoJobs = new Map();
 
 function clamp01(value, fallback = 0) {
   const num = Number(value);
@@ -914,6 +916,70 @@ function sanitizeMontageJobPublicPayload(job = null) {
   if (source.export && typeof source.export === "object") payload.export = source.export;
   if (source.downloadUrl) payload.downloadUrl = String(source.downloadUrl || "").trim();
   return payload;
+}
+
+function sanitizeDialogueVideoJobPublicPayload(job = null) {
+  const source = job && typeof job === "object" ? job : {};
+  const payload = {
+    ok: true,
+    jobId: String(source.jobId || "").trim(),
+    status: String(source.status || "queued").trim() || "queued",
+    stage: String(source.stage || "queued").trim() || "queued",
+    progress: Math.max(0, Math.min(1, Number(source.progress || 0) || 0)),
+    hint: String(source.hint || "").trim(),
+    updatedAt: String(source.updatedAt || "").trim() || new Date().toISOString()
+  };
+  if (source.error && typeof source.error === "object") payload.error = source.error;
+  if (source.dialogueVideo && typeof source.dialogueVideo === "object") payload.dialogueVideo = source.dialogueVideo;
+  return payload;
+}
+
+function upsertDialogueVideoJob(jobId = "", patch = {}) {
+  const id = clampExportId(jobId);
+  if (!id) return null;
+  const prev = dialogueVideoJobs.get(id) || {
+    jobId: id,
+    status: "queued",
+    stage: "queued",
+    progress: 0,
+    hint: "",
+    error: null,
+    dialogueVideo: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    expiresAtMs: Date.now() + DIALOGUE_VIDEO_JOB_TTL_MS
+  };
+  const next = {
+    ...prev,
+    ...patch,
+    jobId: id,
+    progress: Math.max(0, Math.min(1, Number(patch?.progress ?? prev.progress ?? 0) || 0)),
+    updatedAt: new Date().toISOString(),
+    expiresAtMs: Date.now() + DIALOGUE_VIDEO_JOB_TTL_MS
+  };
+  dialogueVideoJobs.set(id, next);
+  return next;
+}
+
+function getDialogueVideoJob(jobId = "") {
+  const id = clampExportId(jobId);
+  if (!id) return null;
+  const job = dialogueVideoJobs.get(id) || null;
+  if (!job) return null;
+  if (Number(job.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < Date.now()) {
+    dialogueVideoJobs.delete(id);
+    return null;
+  }
+  return job;
+}
+
+function cleanupDialogueVideoJobs() {
+  const now = Date.now();
+  for (const [jobId, job] of dialogueVideoJobs.entries()) {
+    if (Number(job?.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < now) {
+      dialogueVideoJobs.delete(jobId);
+    }
+  }
 }
 
 function upsertMontageExportJob(jobId = "", patch = {}) {
@@ -4107,6 +4173,93 @@ app.post("/api/podcaster/scenario-images/generate", async (req, res) => {
 });
 
 app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
+  if (!ensureGeminiKey(res)) return;
+  cleanupDialogueVideoJobs();
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+    const jobId = clampExportId(randomUUID());
+    const initial = upsertDialogueVideoJob(jobId, {
+      status: "running",
+      stage: "queued",
+      progress: 0.02,
+      hint: "Encolando generacion de video."
+    });
+    const authHeader = String(req.headers.authorization || "").trim();
+    const loopbackBaseUrl = `http://127.0.0.1:${PORT}`;
+    const requestBody = req.body && typeof req.body === "object" ? req.body : {};
+    void (async () => {
+      try {
+        upsertDialogueVideoJob(jobId, {
+          status: "running",
+          stage: "dispatch",
+          progress: 0.08,
+          hint: "Iniciando generacion en backend."
+        });
+        const syncResponse = await fetchCompat(`${loopbackBaseUrl}/api/podcaster/dialogue-videos/generate-sync`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(authHeader ? { Authorization: authHeader } : {})
+          },
+          body: JSON.stringify(requestBody)
+        });
+        const data = await safeJson(syncResponse);
+        if (!syncResponse.ok) {
+          upsertDialogueVideoJob(jobId, {
+            status: "error",
+            stage: "error",
+            progress: 1,
+            hint: String(data?.error || `HTTP ${syncResponse.status}`).trim() || "No se pudo generar el video.",
+            error: {
+              error: String(data?.error || "dialogue_video_generate_failed").trim(),
+              code: String(data?.code || "").trim() || undefined,
+              status: Number(syncResponse.status || 500),
+              detail: data?.detail && typeof data.detail === "object" ? data.detail : undefined
+            }
+          });
+          return;
+        }
+        upsertDialogueVideoJob(jobId, {
+          status: "ready",
+          stage: "ready",
+          progress: 1,
+          hint: "Video generado.",
+          dialogueVideo: data?.dialogueVideo && typeof data.dialogueVideo === "object" ? data.dialogueVideo : null
+        });
+      } catch (error) {
+        upsertDialogueVideoJob(jobId, {
+          status: "error",
+          stage: "error",
+          progress: 1,
+          hint: String(error?.message || "dialogue_video_generate_failed").trim() || "No se pudo generar el video.",
+          error: {
+            error: String(error?.message || "dialogue_video_generate_failed").trim(),
+            status: Number(error?.status || 500) || 500
+          }
+        });
+      }
+    })();
+    return res.status(202).json(sanitizeDialogueVideoJobPublicPayload(initial));
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.code || error?.message || "dialogue_video_job_failed").trim()
+    });
+  }
+});
+
+app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
+  cleanupDialogueVideoJobs();
+  const jobId = clampExportId(req.query?.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "Falta jobId." });
+  const job = getDialogueVideoJob(jobId);
+  if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+  return res.status(200).json(sanitizeDialogueVideoJobPublicPayload(job));
+});
+
+app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();

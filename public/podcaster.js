@@ -4298,6 +4298,34 @@ function sleep(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) throw new Error("dialogue_video_job_missing");
+  const silent = options.silent === true;
+  const sceneNumber = String(options.sceneNumber || "").trim();
+  const maxAttempts = 80;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const data = await authFetchJson(`/api/podcaster/dialogue-videos/generate-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    const status = String(data?.status || "").trim().toLowerCase();
+    const hint = String(data?.hint || "").trim();
+    if (status === "ready" && data?.dialogueVideo && typeof data.dialogueVideo === "object") {
+      return data;
+    }
+    if (status === "error") {
+      const message = String(data?.error?.error || hint || "No se pudo generar el video.").trim() || "No se pudo generar el video.";
+      const error = new Error(message);
+      error.status = Number(data?.error?.status || 500) || 500;
+      error.detail = data?.error?.detail || data?.error || null;
+      throw error;
+    }
+    if (!silent) {
+      setGenerationStatus(hint || `Generando video${sceneNumber ? ` de escena ${sceneNumber}` : ""}...`, "is-busy");
+    }
+    await sleep(2500);
+  }
+  throw new Error("Tiempo de espera agotado al generar video de la escena.");
+}
+
 function toFiniteNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -18696,6 +18724,12 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
               method: "POST",
               body: JSON.stringify(requestBody)
             });
+            if (!response?.dialogueVideo && response?.jobId) {
+              response = await pollDialogueVideoGenerationJob(response.jobId, {
+                silent,
+                sceneNumber: resolveSceneNumberByRowId(key, session)
+              });
+            }
             lastError = null;
             break;
           } catch (error) {
