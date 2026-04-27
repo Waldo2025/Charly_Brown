@@ -21086,6 +21086,18 @@ async function refreshMontageExportPreviewNow(options = {}) {
       body: payload
     });
     if (montageExportPreviewState.requestSeq !== requestSeq) return;
+    if (data?.ok === false) {
+      setMontageExportPreviewState({
+        loading: false,
+        error: "No se pudo generar el preview real del export.",
+        dataUrl: "",
+        mediaType: "",
+        mode: data?.mode || payload.exportMode,
+        sceneIndex: 0,
+        meta: "Puedes exportar aunque el preview falle."
+      });
+      return;
+    }
     setMontageExportPreviewState({
       loading: false,
       error: "",

@@ -7106,6 +7106,29 @@ app.post("/api/podcaster/montage/preview", async (req, res) => {
     });
     return res.status(200).json(preview);
   } catch (error) {
+    const knownPreviewFailure = [
+      "ffmpeg_exit_code",
+      "storage_not_found",
+      "download_failed",
+      "download_stream_unavailable"
+    ].includes(String(error?.code || "").trim());
+    if (knownPreviewFailure) {
+      return res.status(200).json({
+        ok: false,
+        mode: String(req.body?.exportMode || "normal").trim() || "normal",
+        sceneIndex: 0,
+        rowId: clampText(req.body?.previewRowId || "", 140),
+        mediaType: "",
+        previewDataUrl: "",
+        degraded: true,
+        error: String(error?.code || error?.message || "montage_preview_unavailable").trim(),
+        detail: error?.detail && typeof error.detail === "object"
+          ? error.detail
+          : {
+            stderrPreview: String(error?.stderr || "").split(/\r?\n/).slice(-8).join(" | ").slice(0, 1400) || undefined
+          }
+      });
+    }
     return res.status(Number(error?.status || 500)).json({
       error: String(error?.code || error?.message || "montage_preview_failed").trim(),
       code: String(error?.code || "").trim() || undefined,
