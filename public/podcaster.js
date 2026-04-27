@@ -20889,7 +20889,13 @@ async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
   try {
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache"
+      }
+    });
     if (String(montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     montageExportJobState.pollFailureCount = 0;
     const stage = String(data?.stage || "").trim();
@@ -21120,6 +21126,11 @@ async function refreshMontageExportPreviewNow(options = {}) {
   try {
     const data = await authFetchJson("/api/podcaster/montage/preview", {
       method: "POST",
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache"
+      },
       body: payload
     });
     if (montageExportPreviewState.requestSeq !== requestSeq) return;

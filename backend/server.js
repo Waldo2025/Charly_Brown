@@ -7126,6 +7126,10 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
   cleanupMontageExportJobs();
   const jobId = clampExportId(req.query?.jobId || "");
   if (!jobId) return res.status(400).json({ error: "Falta jobId." });
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
   let job = getMontageExportJob(jobId);
   if (!job) {
     job = await readPersistedMontageExportJob(jobId);
@@ -7139,6 +7143,10 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
 
 app.post("/api/podcaster/montage/preview", async (req, res) => {
   try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
     // Keep montage preview cheap in production so it does not compete with the
