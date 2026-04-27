@@ -842,7 +842,8 @@ const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cach
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
-const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 90 * 1000;
+const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 8 * 60 * 1000;
+const MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS = 90 * 1000;
 const MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS = 30 * 1000;
 const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = 3 * 60 * 1000;
 const montageExportJobs = new Map();
@@ -6221,7 +6222,56 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
     if (!bucket) continue;
     const file = bucket.file(cleanPath);
     try {
-      await file.download({ destination: targetPath });
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+      await new Promise((resolve, reject) => {
+        const readStream = file.createReadStream();
+        const writeStream = fs.createWriteStream(targetPath);
+        let settled = false;
+        let idleTimer = null;
+
+        const clearIdleTimer = () => {
+          if (idleTimer) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+          }
+        };
+
+        const armIdleTimer = () => {
+          clearIdleTimer();
+          idleTimer = setTimeout(() => {
+            const err = new Error("storage_download_idle_timeout");
+            err.code = "storage_download_idle_timeout";
+            err.status = 504;
+            err.detail = {
+              storagePath: cleanPath,
+              bucket: String(bucket?.name || "").trim(),
+              idleTimeoutMs: MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS
+            };
+            try { readStream.destroy(err); } catch (_) {}
+            try { writeStream.destroy(err); } catch (_) {}
+          }, MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS);
+        };
+
+        const finish = (error = null) => {
+          if (settled) return;
+          settled = true;
+          clearIdleTimer();
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve(targetPath);
+        };
+
+        armIdleTimer();
+        readStream.on("data", () => {
+          armIdleTimer();
+        });
+        readStream.on("error", (error) => finish(error));
+        writeStream.on("error", (error) => finish(error));
+        writeStream.on("close", () => finish(null));
+        readStream.pipe(writeStream);
+      });
       return targetPath;
     } catch (error) {
       lastError = error;
