@@ -45,7 +45,8 @@ const PODCAST_STAGE_MAX_HEIGHT_PX_MAX = 3600;
 const PODCAST_STAGE_WIDTH_RATIO_KEY = "cb_podcast_stage_width_ratio_v1";
 const PODCAST_STAGE_MIN_WIDTH_PX = 420;
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
-const MONTAGE_EXPORT_POLL_MAX_MS = 10 * 60 * 1000;
+// 0 = sin timeout de polling (seguimiento indefinido del export).
+const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_DEVTOOLS_LOG_ENABLED = true;
 
 const VOICES = ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host"];
@@ -1186,7 +1187,9 @@ function isRenderBackedApiRuntime() {
 }
 
 function shouldDisableMontagePreviewInCurrentRuntime() {
-  return isRenderBackedApiRuntime();
+  // El preview del modal se resuelve desde frontend (sin endpoint de render preview),
+  // por lo que no debemos desactivarlo en runtime Render.
+  return false;
 }
 
 function shouldSuspendMontagePreviewActivity() {
@@ -21015,10 +21018,11 @@ function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, total
 async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
+  const maxPollMs = Math.max(0, Number(MONTAGE_EXPORT_POLL_MAX_MS || 0) || 0);
   const startedAtMs = Math.max(0, Number(montageExportJobState.startedAtMs || 0) || 0);
-  if (startedAtMs > 0 && (Date.now() - startedAtMs) > MONTAGE_EXPORT_POLL_MAX_MS) {
+  if (maxPollMs > 0 && startedAtMs > 0 && (Date.now() - startedAtMs) > maxPollMs) {
     logMontageExportDevtools("poll_timeout_stop", {
-      maxMs: MONTAGE_EXPORT_POLL_MAX_MS
+      maxMs: maxPollMs
     }, "warn");
     clearMontageExportPolling();
     montageExportBusy = false;
@@ -21284,6 +21288,22 @@ function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, t
   }).catch(() => {});
 }
 
+function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  if (!entries.length) return null;
+  const cleanRowId = String(previewRowId || "").trim();
+  const selected = entries.find((entry) => String(entry?.rowId || "").trim() === cleanRowId) || entries[0];
+  if (!selected || typeof selected !== "object") return null;
+  const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
+  const src = resolveStorageVideoUrl(String(video?.url || "").trim(), String(video?.storagePath || "").trim());
+  if (!src) return null;
+  return {
+    src,
+    sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
+    rowId: String(selected?.rowId || "").trim()
+  };
+}
+
 async function refreshMontageExportPreviewNow(options = {}) {
   if (!els.montageExportModal || els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity()) {
@@ -21318,6 +21338,21 @@ async function refreshMontageExportPreviewNow(options = {}) {
     ...prepared.payload,
     previewRowId
   };
+  const frontendPreview = resolveMontageExportFrontendPreview(payload, previewRowId);
+  if (frontendPreview?.src) {
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: frontendPreview.src,
+      mediaType: "video/mp4",
+      mode: payload.exportMode,
+      sceneIndex: frontendPreview.sceneIndex || 0,
+      meta: frontendPreview.sceneIndex
+        ? `Escena ${frontendPreview.sceneIndex} de referencia (preview frontend).`
+        : "Preview frontend de la exportación."
+    });
+    return;
+  }
   const signature = JSON.stringify({
     exportMode: payload.exportMode,
     format: payload.format,
@@ -21348,54 +21383,16 @@ async function refreshMontageExportPreviewNow(options = {}) {
     sceneIndex: 0,
     meta: String(options?.loadingMeta || "").trim()
   });
-  try {
-    const data = await authFetchJson("/api/podcaster/montage/preview", {
-      method: "POST",
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache"
-      },
-      body: payload
-    });
-    if (montageExportPreviewState.requestSeq !== requestSeq) return;
-    if (data?.ok === false) {
-      const previewDisabled = String(data?.code || "").trim() === "preview_temporarily_disabled";
-      setMontageExportPreviewState({
-        loading: false,
-        error: previewDisabled ? "" : "No se pudo generar el preview real del export.",
-        dataUrl: "",
-        mediaType: "",
-        mode: data?.mode || payload.exportMode,
-        sceneIndex: 0,
-        disabled: previewDisabled,
-        meta: previewDisabled
-          ? "El preview quedó pausado mientras corre la exportación."
-          : "Puedes exportar aunque el preview falle."
-      });
-      return;
-    }
-    setMontageExportPreviewState({
-      loading: false,
-      error: "",
-      dataUrl: data?.previewDataUrl || data?.imageDataUrl || "",
-      mediaType: data?.mediaType || (String(data?.previewDataUrl || "").startsWith("data:video/") ? "video/mp4" : "image/jpeg"),
-      mode: data?.mode || payload.exportMode,
-      sceneIndex: data?.sceneIndex || 0,
-      meta: data?.sceneIndex ? `Escena ${data.sceneIndex} de referencia.` : "Así se vería tu video exportado."
-    });
-  } catch (_) {
-    if (montageExportPreviewState.requestSeq !== requestSeq) return;
-    setMontageExportPreviewState({
-      loading: false,
-      error: "No se pudo generar el preview real del export.",
-      dataUrl: "",
-      mediaType: "",
-      mode: payload.exportMode,
-      sceneIndex: 0,
-      meta: "Puedes exportar aunque el preview falle."
-    });
-  }
+  if (montageExportPreviewState.requestSeq !== requestSeq) return;
+  setMontageExportPreviewState({
+    loading: false,
+    error: "No hay video fuente disponible para mostrar preview frontend.",
+    dataUrl: "",
+    mediaType: "",
+    mode: payload.exportMode,
+    sceneIndex: 0,
+    meta: "Puedes exportar aunque el preview no esté disponible."
+  });
 }
 
 function scheduleMontageExportPreviewRefresh(delayMs = 280) {
