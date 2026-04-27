@@ -47,6 +47,11 @@ const PODCAST_STAGE_MIN_WIDTH_PX = 420;
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
 
 const VOICES = ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host"];
+// Montage export retry management
+let montageExportRetryCount = 0;
+const MONTAGE_EXPORT_MAX_RETRIES = 6;
+// Progressive backoff delays for retrying montage export (ms)
+const MONTAGE_EXPORT_RETRY_DELAYS_MS = [5000, 10000, 20000, 30000, 60000, 120000];
 const DEFAULT_HOSTS = Object.freeze(["Host A", "Host B"]);
 const EXPRESSIONS = ["Neutral", "Enérgico", "Cálido", "Curioso", "Serio", "Inspirador"];
 const MEDIA_CUES = ["Sin media", "Intro musical", "Transición", "Efecto sutil", "CTA final"];
@@ -21788,13 +21793,31 @@ async function runMontageExport() {
       { tone: "neutral" }
     );
     pollMontageExportJob(jobId).catch(() => {});
+    // Reset retry counter on successful submission
+    montageExportRetryCount = 0;
   } catch (error) {
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
     const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
-    console.warn("[podcaster] montage export failed", { status, code, apiPayload, error });
+    // Early retry handling for specific 503 condition to avoid flooding logs with errors
+    if (status === 503 && code === "montage_export_queue_unavailable") {
+      montageExportRetryCount = (montageExportRetryCount || 0) + 1;
+      if (montageExportRetryCount <= MONTAGE_EXPORT_MAX_RETRIES) {
+        const delay = MONTAGE_EXPORT_RETRY_DELAYS_MS[montageExportRetryCount - 1] || 60000;
+        setMontageExportStatus("La cola de exportación está ocupada. Reintentando...", "Reintentando…", { tone: "neutral" });
+        window.setTimeout(runMontageExport, delay);
+        return;
+      } else {
+        setMontageExportStatus("No pudimos exportar tu video.", "Intenta nuevamente más tarde.", { tone: "error" });
+        montageExportBusy = false;
+        setTimelinePreviewsSuspended(false);
+        setMontageExportBusy(false);
+        return;
+      }
+    }
+    // Fallback para otros errores
     const hintParts = [];
     if (skippedEntries.length) {
       hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);

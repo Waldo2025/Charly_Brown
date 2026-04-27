@@ -156,16 +156,20 @@ export async function authFetchJson(url, options = {}) {
     }
   }
   if (!response.ok) {
-    try {
-      console.error("[api-client] request failed", {
-        url: finalUrl,
-        method: String(requestInit?.method || "GET").toUpperCase(),
-        status: Number(response.status || 0),
-        error: data?.error || null,
-        detail: data || null
-      });
-    } catch (_) {
-      // no-op
+    // Suppress noisy logs for known transient backend 503 error montage_export_queue_unavailable to avoid log flood
+    const isMontageQueueUnavailable = response.status === 503 && data && (data.error === 'montage_export_queue_unavailable' || data.code === 'montage_export_queue_unavailable');
+    if (!isMontageQueueUnavailable) {
+      try {
+        console.error("[api-client] request failed", {
+          url: finalUrl,
+          method: String(requestInit?.method || "GET").toUpperCase(),
+          status: Number(response.status || 0),
+          error: data?.error || null,
+          detail: data || null
+        });
+      } catch (_) {
+        // no-op
+      }
     }
     throw buildHttpError(response, data);
   }
