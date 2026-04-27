@@ -20,10 +20,8 @@ const {
   sanitizeMontageExportJobPublicPayload
 } = require("./montage-export/public-payload.js");
 const {
-  createMontageExportQueue,
-  createBullMqQueue,
-  resolveRedisConnectionUrl
-} = require("./montage-export/queue-bullmq.js");
+  createProcessMontageExportJob
+} = require("./montage-export/worker-runner.js");
 const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
@@ -747,6 +745,11 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 const storageBucket = admin.storage().bucket();
+const EXPLICIT_STORAGE_BUCKET_NAME = String(
+  process.env.FIREBASE_STORAGE_BUCKET
+  || process.env.STORAGE_BUCKET
+  || ""
+).trim();
 const PRIMARY_STORAGE_BUCKET_NAME = String(admin.app()?.options?.storageBucket || "").trim();
 const PRIMARY_PROJECT_ID = String(
   admin.app()?.options?.projectId
@@ -754,35 +757,25 @@ const PRIMARY_PROJECT_ID = String(
   || process.env.PROJECT_ID
   || ""
 ).trim();
-const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
-  storageBucket?.name || "",
+const STORAGE_BUCKET_CANDIDATE_NAMES = Array.from(new Set([
+  EXPLICIT_STORAGE_BUCKET_NAME,
   PRIMARY_STORAGE_BUCKET_NAME,
-  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.appspot.com` : "",
   // Some projects may use the newer *.firebasestorage.app bucket naming.
-  // Keep it as a fallback candidate; if it doesn't exist, we'll treat it as a 404-like miss.
-  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.firebasestorage.app` : ""
+  // Prioritize it over *.appspot.com to avoid long misses in export downloads.
+  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.firebasestorage.app` : "",
+  PRIMARY_PROJECT_ID ? `${PRIMARY_PROJECT_ID}.appspot.com` : "",
+  storageBucket?.name || ""
 ].map((item) => String(item || "").trim()).filter(Boolean)));
-const FALLBACK_STORAGE_BUCKETS = STORAGE_BUCKET_CANDIDATES
-  .filter((name) => name !== String(storageBucket?.name || "").trim())
-  .map((name) => admin.storage().bucket(name));
+const STORAGE_BUCKET_CANDIDATES = STORAGE_BUCKET_CANDIDATE_NAMES
+  .map((name) => (
+    name === String(storageBucket?.name || "").trim()
+      ? storageBucket
+      : admin.storage().bucket(name)
+  ));
 const montageExportJobStore = createMontageExportJobStore({ db });
-let montageExportQueue = null;
-let montageExportQueueInitError = null;
-
-try {
-  montageExportQueue = createMontageExportQueue({
-    queue: createBullMqQueue()
-  });
-} catch (error) {
-  montageExportQueueInitError = error;
-  console.warn("[backend][montage-export] queue unavailable during startup", {
-    message: String(error?.message || error),
-    redisConfigured: Boolean(resolveRedisConnectionUrl())
-  });
-}
 
 function getStorageBucketCandidates() {
-  return [storageBucket, ...FALLBACK_STORAGE_BUCKETS].filter(Boolean);
+  return STORAGE_BUCKET_CANDIDATES.filter(Boolean);
 }
 
 let resolvedWritableStorageBucket = null;
@@ -868,7 +861,7 @@ const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cach
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
-const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 8 * 60 * 1000;
+const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS = 90 * 1000;
 const MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS = 30 * 1000;
 const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = 3 * 60 * 1000;
@@ -6260,6 +6253,43 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
     if (!bucket) continue;
     const file = bucket.file(cleanPath);
     try {
+      // Validate object metadata first so a wrong/missing bucket is skipped
+      // before opening a potentially slow stream.
+      // eslint-disable-next-line no-await-in-loop
+      await file.getMetadata();
+    } catch (metaError) {
+      lastMetaError = metaError;
+      lastError = metaError;
+      const status = Number(metaError?.code || metaError?.statusCode || metaError?.status || 0) || 0;
+      const metaMessage = String(metaError?.message || "").toLowerCase();
+      if (status === 404 || metaMessage.includes("bucket does not exist")) {
+        continue;
+      }
+      if (status === 401 || status === 403) {
+        const err = new Error("storage_forbidden");
+        err.code = "storage_forbidden";
+        err.status = 502;
+        err.detail = {
+          storagePath: cleanPath,
+          bucket: String(bucket?.name || "").trim(),
+          message: String(metaError?.message || metaError),
+        };
+        throw err;
+      }
+      if (String(metaError?.code || "") === "ENOTFOUND" || String(metaError?.code || "") === "ECONNRESET") {
+        const err = new Error("storage_not_available");
+        err.code = "storage_not_available";
+        err.status = 502;
+        err.detail = {
+          storagePath: cleanPath,
+          bucket: String(bucket?.name || "").trim(),
+          message: String(metaError?.message || metaError),
+        };
+        throw err;
+      }
+      continue;
+    }
+    try {
       await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
       await new Promise((resolve, reject) => {
         const readStream = file.createReadStream();
@@ -6313,37 +6343,11 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
       return targetPath;
     } catch (error) {
       lastError = error;
-      // Differentiate "not found" vs permission/network so callers don't
-      // incorrectly fallback to downloadUrl (which depends on tokens).
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await file.getMetadata();
-      } catch (metaError) {
-        lastMetaError = metaError;
-        const status = Number(metaError?.code || metaError?.statusCode || metaError?.status || 0) || 0;
-        const metaMessage = String(metaError?.message || "").toLowerCase();
-        if (status === 404) {
-          // Not found in this bucket, try next candidate.
-          continue;
-        }
-        if (metaMessage.includes("bucket does not exist")) {
-          // Treat missing bucket as a miss and try next candidate.
-          continue;
-        }
-        if (status === 401 || status === 403) {
-          const err = new Error("storage_forbidden");
-          err.code = "storage_forbidden";
-          err.status = 502;
-          err.detail = {
-            storagePath: cleanPath,
-            bucket: String(bucket?.name || "").trim(),
-            message: String(metaError?.message || metaError),
-          };
-          throw err;
-        }
-      }
       const message = String(error?.message || "").toLowerCase();
       const status = Number(error?.code || error?.statusCode || error?.status || 0) || 0;
+      if (status === 404 || message.includes("no such object")) {
+        continue;
+      }
       if (status === 401 || status === 403 || message.includes("permission") || message.includes("forbidden")) {
         const err = new Error("storage_forbidden");
         err.code = "storage_forbidden";
@@ -6725,7 +6729,19 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
               await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath), "storage_download");
               // eslint-disable-next-line no-await-in-loop
               return await validateDownloadedAsset(outPath);
-            } catch (_) {}
+            } catch (altError) {
+              const altCode = String(altError?.code || altError?.message || "").trim();
+              if (altCode !== "storage_not_found") {
+                altError.detail = {
+                  ...(altError?.detail && typeof altError.detail === "object" ? altError.detail : {}),
+                  kind,
+                  index,
+                  storagePath: altPath,
+                  url: url ? redactUrlForLogs(url) : ""
+                };
+                throw altError;
+              }
+            }
           }
           if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
             await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
@@ -6805,13 +6821,14 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     normalizeStorageSegment(String(input?.sessionId || "").trim(), "session"),
     `${exportId}.${outExt}`
   ].join("/");
-  await storageBucket.upload(finalOutPath, {
+  const targetBucket = await resolveWritableStorageBucket();
+  await targetBucket.upload(finalOutPath, {
     destination: storagePath,
     metadata: {
       contentType: mimeType
     }
   });
-  const uploadedFile = storageBucket.file(storagePath);
+  const uploadedFile = targetBucket.file(storagePath);
   const [meta] = await uploadedFile.getMetadata().catch(() => [{}]);
   const base = String(context?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
   const downloadUrl = `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
@@ -7659,16 +7676,6 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
     const input = normalizeMontageExportRequestBody(req.body || {});
     validateMontageExportRequest(input);
     const jobId = clampExportId(randomUUID());
-    if (!montageExportQueue) {
-      return res.status(503).json({
-        error: "montage_export_queue_unavailable",
-        code: "montage_export_queue_unavailable",
-        detail: {
-          message: String(montageExportQueueInitError?.message || "No export queue is configured.").trim(),
-          redisConfigured: Boolean(resolveRedisConnectionUrl())
-        }
-      });
-    }
     const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
     const initial = await montageExportJobStore.createJob({
       jobId,
@@ -7676,13 +7683,57 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       ownerId: uid,
       totalScenes: input.entries.length
     });
-    await montageExportQueue.enqueueExportJob({
-      jobId,
-      sessionId: input.sessionId,
-      ownerId: uid,
-      input,
-      baseUrl
+    upsertMontageExportJob(jobId, initial);
+
+    const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+    if (!slot.ok) {
+      return res.status(429).json({
+        error: "backend_busy_with_export",
+        message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+        detail: slot.error?.detail
+      });
+    }
+
+    setImmediate(async () => {
+      try {
+        const directJobStore = {
+          createJob: async (args) => {
+            const job = await montageExportJobStore.createJob(args);
+            upsertMontageExportJob(job.jobId, job);
+            return job;
+          },
+          updateJob: async (id, patch) => {
+            upsertMontageExportJob(id, patch);
+            montageExportJobStore.updateJob(id, patch).catch(() => {});
+          },
+          getJob: async (id) => {
+            return montageExportJobs.get(id) || await montageExportJobStore.getJob(id);
+          }
+        };
+        const processFn = createProcessMontageExportJob({
+          jobStore: directJobStore,
+          executeMontageExportPipeline,
+          buildMontageSceneFailure
+        });
+        await processFn({
+          data: {
+            jobId,
+            sessionId: input.sessionId,
+            ownerId: uid,
+            input,
+            baseUrl
+          }
+        });
+      } catch (err) {
+        console.error("[backend][montage-export] direct export failed", {
+          jobId,
+          error: String(err?.message || err)
+        });
+      } finally {
+        releaseHeavyWorkSlot("montage_export", jobId);
+      }
     });
+
     return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({
@@ -7700,7 +7751,13 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
-  const job = await montageExportJobStore.getJob(jobId);
+
+  // Optimización: En local, preferimos la memoria interna para evitar lags de red con Firestore
+  let job = montageExportJobs.get(jobId);
+  if (!job) {
+    job = await montageExportJobStore.getJob(jobId);
+  }
+
   if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
   return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
 });
@@ -8868,8 +8925,19 @@ app.get("/api/assets/montage-download", async (req, res) => {
         return res.status(403).json({ error: "Token inválido para descarga." });
       }
       const rangeHeader = String(req.headers.range || "").trim();
-      const file = storageBucket.file(storagePath);
-      const [meta] = await file.getMetadata().catch(() => [null]);
+      const buckets = getStorageBucketCandidates();
+      let file = null;
+      let meta = null;
+      for (const bucket of buckets) {
+        if (!bucket) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const candidateMeta = await bucket.file(storagePath).getMetadata().catch(() => null);
+        if (Array.isArray(candidateMeta) && candidateMeta[0]) {
+          file = bucket.file(storagePath);
+          meta = candidateMeta[0];
+          break;
+        }
+      }
       if (!meta) return res.status(404).json({ error: "Export no encontrado o expirado." });
       const filename = String(result?.filename || `${jobId}.${getMontageExportExtension(job?.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
       const mimeType = String(result?.mimeType || meta?.contentType || "application/octet-stream").trim() || "application/octet-stream";

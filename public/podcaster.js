@@ -45,13 +45,10 @@ const PODCAST_STAGE_MAX_HEIGHT_PX_MAX = 3600;
 const PODCAST_STAGE_WIDTH_RATIO_KEY = "cb_podcast_stage_width_ratio_v1";
 const PODCAST_STAGE_MIN_WIDTH_PX = 420;
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
+const MONTAGE_EXPORT_POLL_MAX_MS = 10 * 60 * 1000;
+const MONTAGE_EXPORT_DEVTOOLS_LOG_ENABLED = true;
 
 const VOICES = ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host"];
-// Montage export retry management
-let montageExportRetryCount = 0;
-const MONTAGE_EXPORT_MAX_RETRIES = 6;
-// Progressive backoff delays for retrying montage export (ms)
-const MONTAGE_EXPORT_RETRY_DELAYS_MS = [5000, 10000, 20000, 30000, 60000, 120000];
 const DEFAULT_HOSTS = Object.freeze(["Host A", "Host B"]);
 const EXPRESSIONS = ["Neutral", "Enérgico", "Cálido", "Curioso", "Serio", "Inspirador"];
 const MEDIA_CUES = ["Sin media", "Intro musical", "Transición", "Efecto sutil", "CTA final"];
@@ -1212,6 +1209,7 @@ let montageExportPreviewState = {
 let montageExportJobState = {
   jobId: "",
   pollTimer: null,
+  startedAtMs: 0,
   lastStage: "",
   lastSceneSubstage: "",
   lastHint: "",
@@ -1226,6 +1224,25 @@ let panelMusicAudioCtx = null;
 let panelMusicNodes = [];
 let panelMusicAudioEl = null;
 let panelMusicAiGenerating = false;
+
+function logMontageExportDevtools(event = "", payload = {}, level = "info") {
+  if (!MONTAGE_EXPORT_DEVTOOLS_LOG_ENABLED) return;
+  const method = level === "error" ? "error" : level === "warn" ? "warn" : "info";
+  const startedAtMs = Math.max(0, Number(montageExportJobState?.startedAtMs || 0) || 0);
+  const elapsedMs = startedAtMs > 0 ? Math.max(0, Date.now() - startedAtMs) : 0;
+  const meta = {
+    event: String(event || "").trim() || "unknown",
+    ts: new Date().toISOString(),
+    elapsedMs,
+    jobId: String(montageExportJobState?.jobId || "").trim() || undefined,
+    ...payload
+  };
+  try {
+    console[method]("[podcaster][montage-export]", meta);
+  } catch (_) {
+    console.info("[podcaster][montage-export]", meta);
+  }
+}
 let panelMusicDurationProbeCtx = null;
 const panelMusicDurationProbePendingKinds = new Set();
 let panelMusicGlobalLibraryState = {
@@ -1612,32 +1629,25 @@ function persistSessions(uid = resolveCurrentUid(), sessions = state.sessions) {
 
 async function loadCloudSessions() {
   const deletedSessionIds = new Set(loadDeletedSessionIds());
-  let apiSessions = [];
-  let apiError = null;
-  if (hasAvailableApiBase()) {
+  const canUseApi = hasAvailableApiBase();
+  if (canUseApi) {
     try {
-      const response = await authFetchJson("/api/podcaster/sessions/list", {
-        method: "GET"
-      });
-      apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+      const response = await authFetchJson("/api/podcaster/sessions/list", { method: "GET" });
+      const apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
+      return apiSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     } catch (error) {
-      apiError = error;
+      // WebChannel puede reportar ERR_QUIC_PROTOCOL_ERROR.QUIC_NETWORK_IDLE_TIMEOUT
+      // por transporte/idle. En runtime con apiBase, no hacemos fallback a Firestore:
+      // mantenemos "solo API backend" para evitar doble lectura y ruido de red.
+      console.warn("[podcaster] no se pudieron cargar sesiones por API backend", {
+        status: Number(error?.status || 0) || undefined,
+        message: String(error?.message || error?.error || "").trim() || undefined
+      });
+      return [];
     }
   }
-  let directSessions = [];
-  try {
-    directSessions = await loadCloudSessionsDirect();
-  } catch (directError) {
-    if (apiError) throw apiError;
-    throw directError;
-  }
-  const filteredApiSessions = apiSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
-  const filteredDirectSessions = directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
-  if (filteredApiSessions.length || filteredDirectSessions.length) {
-    return mergeSessionsById(filteredApiSessions, filteredDirectSessions);
-  }
-  if (apiError) throw apiError;
-  return [];
+  const directSessions = await loadCloudSessionsDirect();
+  return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
 }
 
 async function loadCloudSessionsDirect() {
@@ -20796,6 +20806,7 @@ function resetMontageExportJobState() {
   montageExportJobState = {
     jobId: "",
     pollTimer: null,
+    startedAtMs: 0,
     lastStage: "",
     lastSceneSubstage: "",
     lastHint: "",
@@ -20990,6 +21001,23 @@ function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, total
 async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
+  const startedAtMs = Math.max(0, Number(montageExportJobState.startedAtMs || 0) || 0);
+  if (startedAtMs > 0 && (Date.now() - startedAtMs) > MONTAGE_EXPORT_POLL_MAX_MS) {
+    logMontageExportDevtools("poll_timeout_stop", {
+      maxMs: MONTAGE_EXPORT_POLL_MAX_MS
+    }, "warn");
+    clearMontageExportPolling();
+    montageExportBusy = false;
+    setTimelinePreviewsSuspended(false);
+    setMontageExportBusy(false);
+    setMontageExportProgress(null);
+    setMontageExportStatus(
+      "La exportación tardó demasiado.",
+      "Detuvimos el seguimiento automático para evitar tráfico excesivo. Puedes reintentar manualmente.",
+      { tone: "warning" }
+    );
+    return;
+  }
   try {
     const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
       cache: "no-store",
@@ -21015,6 +21043,18 @@ async function pollMontageExportJob(jobId = "") {
       montageExportJobState.lastSceneSubstage = sceneSubstage;
       montageExportJobState.lastHint = hint;
       montageExportJobState.lastProgress = progress;
+      logMontageExportDevtools("stage_transition", {
+        status: String(data?.status || "").trim(),
+        stage,
+        substage: sceneSubstage || undefined,
+        progress,
+        currentSceneIndex,
+        totalScenes,
+        currentRowId: currentRowId || undefined,
+        failedSceneIndex: failedSceneIndex || undefined,
+        failedSubstage: failedSubstage || undefined,
+        hint: hint || undefined
+      });
       setMontageExportProgress(progress);
       const stageLabel = stage === "render_scene_segments" && sceneSubstage
         ? describeMontageExportSceneSubstage(sceneSubstage, currentSceneIndex, totalScenes) || describeMontageExportStage(stage, montageExportState.exportMode)
@@ -21031,6 +21071,11 @@ async function pollMontageExportJob(jobId = "") {
       });
     }
     if (String(data?.status || "").trim() === "ready") {
+      logMontageExportDevtools("export_ready", {
+        stage,
+        progress,
+        warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
+      });
       clearMontageExportPolling();
       const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
       let statusText = "Tu video está listo.";
@@ -21074,8 +21119,16 @@ async function pollMontageExportJob(jobId = "") {
       return;
     }
     if (String(data?.status || "").trim() === "error") {
-      clearMontageExportPolling();
       const err = data?.error && typeof data.error === "object" ? data.error : null;
+      logMontageExportDevtools("export_error", {
+        stage,
+        progress,
+        failedSceneIndex: failedSceneIndex || undefined,
+        failedSubstage: failedSubstage || undefined,
+        error: err?.error || err?.code || undefined,
+        detail: err?.detail || undefined
+      }, "error");
+      clearMontageExportPolling();
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
       const failedLabel = failedSubstage
         ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
@@ -21125,7 +21178,15 @@ async function pollMontageExportJob(jobId = "") {
       status: errorStatus,
       message: String(error?.message || error?.error || "").trim()
     });
-    if (failureCount >= 12) {
+    logMontageExportDevtools("poll_failed", {
+      failureCount,
+      status: errorStatus || undefined,
+      message: String(error?.message || error?.error || "").trim() || undefined
+    }, "warn");
+    if (failureCount >= 8) {
+      logMontageExportDevtools("poll_failed_stop", {
+        failureCount
+      }, "error");
       clearMontageExportPolling();
       montageExportBusy = false;
       setMontageExportBusy(false);
@@ -21145,12 +21206,12 @@ async function pollMontageExportJob(jobId = "") {
     );
     montageExportJobState.pollTimer = window.setTimeout(() => {
       pollMontageExportJob(cleanJobId).catch(() => {});
-    }, Math.min(6000, 1300 + (failureCount * 350)));
+    }, Math.min(8000, 2000 + (failureCount * 600)));
     return;
   }
   montageExportJobState.pollTimer = window.setTimeout(() => {
     pollMontageExportJob(cleanJobId).catch(() => {});
-  }, 1300);
+  }, 2000);
 }
 
 function getMontagePreviewRowId() {
@@ -21747,6 +21808,12 @@ async function runMontageExport() {
   if (montageExportBusy) return;
   const session = getActiveSession();
   const prepared = buildMontageExportPayload(session);
+  logMontageExportDevtools("submit_clicked", {
+    hasSession: Boolean(session),
+    preparedOk: Boolean(prepared?.ok),
+    entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
+    exportMode: String(montageExportState.exportMode || "").trim() || undefined
+  });
   if (!prepared.ok) {
     setMontageExportProgress(null);
     setMontageExportStatus(prepared.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
@@ -21786,42 +21853,42 @@ async function runMontageExport() {
     montageExportJobState.reviewExcelEnabled = montageExportState.exportMode === "review" && montageExportState.includeReviewExcel !== false;
     montageExportJobState.reviewExcelPayload = prepared.payload;
     montageExportJobState.reviewExcelFilename = String(prepared.payload?.filename || montageExportState.filename || "").trim();
+    logMontageExportDevtools("submit_accepted", {
+      jobId,
+      stage: String(data?.stage || "").trim() || undefined,
+      progress: Math.max(0, Math.min(1, Number(data?.progress || 0) || 0)),
+      hint: String(data?.hint || "").trim() || undefined
+    });
     setMontageExportProgress(montageExportJobState.lastProgress);
     setMontageExportStatus(
       describeMontageExportStage(montageExportJobState.lastStage, montageExportState.exportMode),
       montageExportJobState.lastHint,
       { tone: "neutral" }
     );
+    montageExportJobState.startedAtMs = Date.now();
     pollMontageExportJob(jobId).catch(() => {});
-    // Reset retry counter on successful submission
-    montageExportRetryCount = 0;
   } catch (error) {
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
     const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
-    // Early retry handling for specific 503 condition to avoid flooding logs with errors
-    if (status === 503 && code === "montage_export_queue_unavailable") {
-      montageExportRetryCount = (montageExportRetryCount || 0) + 1;
-      if (montageExportRetryCount <= MONTAGE_EXPORT_MAX_RETRIES) {
-        const delay = MONTAGE_EXPORT_RETRY_DELAYS_MS[montageExportRetryCount - 1] || 60000;
-        setMontageExportStatus("La cola de exportación está ocupada. Reintentando...", "Reintentando…", { tone: "neutral" });
-        window.setTimeout(runMontageExport, delay);
-        return;
-      } else {
-        setMontageExportStatus("No pudimos exportar tu video.", "Intenta nuevamente más tarde.", { tone: "error" });
-        montageExportBusy = false;
-        setTimelinePreviewsSuspended(false);
-        setMontageExportBusy(false);
-        return;
-      }
-    }
+    logMontageExportDevtools("submit_failed", {
+      status: status || undefined,
+      code: code || undefined,
+      skippedEntries: skippedEntries.length
+    }, "error");
     // Fallback para otros errores
     const hintParts = [];
     if (skippedEntries.length) {
       hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
+    } else if (status === 429 || code === "backend_busy_with_export") {
+      hintParts.push("El servidor está ocupado con otra exportación.");
+      hintParts.push("Intenta de nuevo manualmente en unos segundos.");
+    } else if (status === 503 && code === "montage_export_queue_unavailable") {
+      hintParts.push("El backend no pudo iniciar la exportación en este momento.");
+      hintParts.push("Intenta de nuevo manualmente.");
     } else if (status === 503 && String(apiPayload?.code || "").trim() === "backend_busy") {
       hintParts.push("El backend está ocupado con otra exportación o generación de video.");
       hintParts.push("Reintenta en unos segundos.");
