@@ -14,6 +14,17 @@ const {
   sanitizeDialogueVideoJobPublicPayload
 } = require("./dialogue-video-job-state.js");
 const {
+  createMontageExportJobStore
+} = require("./montage-export/job-store-firestore.js");
+const {
+  sanitizeMontageExportJobPublicPayload
+} = require("./montage-export/public-payload.js");
+const {
+  createMontageExportQueue,
+  createBullMqQueue,
+  resolveRedisConnectionUrl
+} = require("./montage-export/queue-bullmq.js");
+const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
@@ -754,6 +765,21 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 const FALLBACK_STORAGE_BUCKETS = STORAGE_BUCKET_CANDIDATES
   .filter((name) => name !== String(storageBucket?.name || "").trim())
   .map((name) => admin.storage().bucket(name));
+const montageExportJobStore = createMontageExportJobStore({ db });
+let montageExportQueue = null;
+let montageExportQueueInitError = null;
+
+try {
+  montageExportQueue = createMontageExportQueue({
+    queue: createBullMqQueue()
+  });
+} catch (error) {
+  montageExportQueueInitError = error;
+  console.warn("[backend][montage-export] queue unavailable during startup", {
+    message: String(error?.message || error),
+    redisConfigured: Boolean(resolveRedisConnectionUrl())
+  });
+}
 
 function getStorageBucketCandidates() {
   return [storageBucket, ...FALLBACK_STORAGE_BUCKETS].filter(Boolean);
@@ -1257,7 +1283,19 @@ function startBackendCleanupInterval() {
   }, 60 * 1000).unref?.();
 }
 
-startBackendCleanupInterval();
+const IS_MAIN_MODULE = require.main === module;
+
+if (IS_MAIN_MODULE) {
+  startBackendCleanupInterval();
+}
+
+function getBackendPublicBaseUrl() {
+  const direct = String(process.env.PUBLIC_BACKEND_BASE_URL || "").trim();
+  if (direct) return direct.replace(/\/+$/, "");
+  const renderHostname = String(process.env.RENDER_EXTERNAL_HOSTNAME || "").trim();
+  if (renderHostname) return `https://${renderHostname}`;
+  return "";
+}
 
 function resolvePublicBaseUrl(req) {
   const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
@@ -6753,39 +6791,40 @@ function createMontageReviewTextFileResolver(tmpDir = "", prefix = "review") {
 }
 
 async function storeMontageExportResult(finalOutPath = "", input = {}, context = {}) {
-  await cleanupMontageExportCache();
-  await ensureMontageExportCacheDir();
-  const exportId = randomUUID();
+  const exportId = clampExportId(context?.jobId || randomUUID());
   const token = randomUUID();
   const outExt = getMontageExportExtension(input?.format || "mp4_h264");
   const createdAtIso = new Date().toISOString();
   const expiresAtIso = new Date(Date.now() + MONTAGE_EXPORT_CACHE_TTL_MS).toISOString();
-  const cacheFilePath = path.join(MONTAGE_EXPORT_CACHE_DIR, `montage-${exportId}.${outExt}`);
-  await fs.promises.copyFile(finalOutPath, cacheFilePath);
-  await fs.promises.writeFile(path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`), JSON.stringify({
-    exportId,
-    token,
-    uid: String(context?.uid || "").trim(),
-    sessionId: String(input?.sessionId || "").trim(),
-    filename: `${String(input?.filename || "montage").trim() || "montage"}.${outExt}`,
-    mimeType: getMontageExportMimeType(input?.format || "mp4_h264"),
-    filePath: cacheFilePath,
-    createdAt: createdAtIso,
-    expiresAt: expiresAtIso,
-    exportMode: String(input?.exportMode || "normal").trim(),
-    format: String(input?.format || "").trim(),
-    qualityPreset: String(input?.qualityPreset || "").trim(),
-    resolution: String(input?.resolution || "").trim()
-  }, null, 2), "utf8");
-  const base = String(context?.baseUrl || "").trim() || `http://127.0.0.1:${PORT}`;
-  const downloadUrl = `${base}/api/assets/montage-download?exportId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+  const filename = `${String(input?.filename || "montage").trim() || "montage"}.${outExt}`;
+  const mimeType = getMontageExportMimeType(input?.format || "mp4_h264");
+  const storagePath = [
+    "podcaster",
+    "exports",
+    normalizeStorageSegment(String(context?.uid || "").trim(), "anon"),
+    normalizeStorageSegment(String(input?.sessionId || "").trim(), "session"),
+    `${exportId}.${outExt}`
+  ].join("/");
+  await storageBucket.upload(finalOutPath, {
+    destination: storagePath,
+    metadata: {
+      contentType: mimeType
+    }
+  });
+  const uploadedFile = storageBucket.file(storagePath);
+  const [meta] = await uploadedFile.getMetadata().catch(() => [{}]);
+  const base = String(context?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
+  const downloadUrl = `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
   return {
     exportId,
     downloadUrl,
+    downloadToken: token,
+    storagePath,
     createdAtIso,
     expiresAtIso,
-    filename: `${String(input?.filename || "montage").trim() || "montage"}.${outExt}`,
-    mimeType: getMontageExportMimeType(input?.format || "mp4_h264")
+    filename,
+    mimeType,
+    sizeBytes: Math.max(0, Number(meta?.size || 0) || 0)
   };
 }
 
@@ -7507,8 +7546,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       export: {
         filename: stored.filename,
         mimeType: stored.mimeType,
-        storagePath: "",
+        storagePath: stored.storagePath,
         downloadUrl: stored.downloadUrl,
+        downloadToken: stored.downloadToken,
+        sizeBytes: stored.sizeBytes,
         createdAt: stored.createdAtIso,
         expiresAt: stored.expiresAtIso,
         exportId: stored.exportId
@@ -7613,84 +7654,37 @@ async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
 }
 
 app.post("/api/podcaster/montage/export", async (req, res) => {
-  let acquiredJobId = "";
   try {
-    cleanupMontageExportJobs();
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
     validateMontageExportRequest(input);
     const jobId = clampExportId(randomUUID());
-    const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
-    if (!slot?.ok) {
-      const busyError = slot?.error || buildHeavyWorkBusyError("montage_export", getActiveHeavyWorkJobId());
-      return res.status(Number(busyError?.status || 503)).json(buildBackendBusyJson("montage_export", String(busyError?.detail?.activeJobId || "").trim()));
+    if (!montageExportQueue) {
+      return res.status(503).json({
+        error: "montage_export_queue_unavailable",
+        code: "montage_export_queue_unavailable",
+        detail: {
+          message: String(montageExportQueueInitError?.message || "No export queue is configured.").trim(),
+          redisConfigured: Boolean(resolveRedisConnectionUrl())
+        }
+      });
     }
-    acquiredJobId = jobId;
-    const initial = upsertMontageExportJob(jobId, {
-      status: "running",
-      stage: "validate_payload",
-      progress: 0.04,
-      hint: "Preparando exportación."
-    });
-    await persistMontageExportJob(initial);
-    const baseUrl = resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`;
-    void executeMontageExportPipeline(input, {
-      uid,
+    const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
+    const initial = await montageExportJobStore.createJob({
       jobId,
-      baseUrl,
-      onStage: ({ stage, progress, hint, ...extra }) => {
-        upsertMontageExportJob(jobId, {
-          status: stage === "ready" ? "ready" : "running",
-          stage,
-          progress,
-          hint,
-          lastHeartbeatAt: new Date().toISOString(),
-          ...extra
-        });
-      }
-    }).then((result) => {
-      upsertMontageExportJob(jobId, {
-        status: "ready",
-        stage: "ready",
-        progress: 1,
-        hint: "Exportación lista.",
-        warnings: result?.warnings ? [result.warnings] : [],
-        export: result?.export || null,
-        downloadUrl: String(result?.downloadUrl || "").trim(),
-        sceneSubstage: "scene_complete",
-        lastHeartbeatAt: new Date().toISOString()
-      });
-      releaseHeavyWorkSlot("montage_export", jobId);
-    }).catch((error) => {
-      console.error("[backend][montage-export] error", {
-        status: Number(error?.status || 500),
-        message: String(error?.message || "montage_export_failed"),
-        code: String(error?.code || ""),
-        detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined,
-        stderrPreview: buildMontageStderrPreview(error?.stderr || "")
-      });
-      const sceneFailure = buildMontageSceneFailure(error, {
-        failedSceneIndex: Number(error?.detail?.failedSceneIndex || 0) || 0,
-        failedRowId: String(error?.detail?.failedRowId || "").trim(),
-        failedSubstage: String(error?.detail?.failedSubstage || "").trim(),
-        stage: String(error?.detail?.stage || error?.stage || "").trim()
-      });
-      upsertMontageExportJob(jobId, {
-        status: "error",
-        stage: "error",
-        progress: Math.max(0.04, Math.min(0.98, Number(getMontageExportJob(jobId)?.progress || 0) || 0)),
-        hint: String(error?.message || error?.code || "No se pudo exportar el montaje.").trim(),
-        failedSceneIndex: sceneFailure?.detail?.failedSceneIndex || undefined,
-        failedRowId: sceneFailure?.detail?.failedRowId || undefined,
-        failedSubstage: sceneFailure?.detail?.failedSubstage || undefined,
-        lastHeartbeatAt: new Date().toISOString(),
-        error: sceneFailure
-      });
-      releaseHeavyWorkSlot("montage_export", jobId);
+      sessionId: input.sessionId,
+      ownerId: uid,
+      totalScenes: input.entries.length
     });
-    return res.status(202).json(sanitizeMontageJobPublicPayload(initial));
+    await montageExportQueue.enqueueExportJob({
+      jobId,
+      sessionId: input.sessionId,
+      ownerId: uid,
+      input,
+      baseUrl
+    });
+    return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
   } catch (error) {
-    if (acquiredJobId) releaseHeavyWorkSlot("montage_export", acquiredJobId);
     return res.status(Number(error?.status || 500)).json({
       error: String(error?.code || error?.message || "montage_export_failed").trim(),
       code: String(error?.code || "").trim() || undefined,
@@ -7700,22 +7694,15 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 });
 
 app.get("/api/podcaster/montage/export-status", async (req, res) => {
-  cleanupMontageExportJobs();
   const jobId = clampExportId(req.query?.jobId || "");
   if (!jobId) return res.status(400).json({ error: "Falta jobId." });
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
-  let job = getMontageExportJob(jobId);
-  if (!job) {
-    job = await readPersistedMontageExportJob(jobId);
-    if (job) {
-      montageExportJobs.set(jobId, job);
-    }
-  }
+  const job = await montageExportJobStore.getJob(jobId);
   if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
-  return res.status(200).json(sanitizeMontageJobPublicPayload(job));
+  return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
 });
 
 app.post("/api/podcaster/montage/preview", async (req, res) => {
@@ -8867,10 +8854,40 @@ app.get("/api/assets/proxy-image", async (req, res) => {
 
 app.get("/api/assets/montage-download", async (req, res) => {
   try {
+    const jobId = clampExportId(req.query?.jobId || "");
+    const token = clampText(String(req.query?.token || "").trim(), 180);
+    if (jobId && token) {
+      const job = await montageExportJobStore.getJob(jobId);
+      const result = job?.result && typeof job.result === "object" ? job.result : job?.export && typeof job.export === "object" ? job.export : null;
+      const storagePath = normalizeStorageFilePath(result?.storagePath || "");
+      const expectedToken = clampText(String(result?.downloadToken || "").trim(), 180);
+      if (!job || !result || !storagePath || !expectedToken) {
+        return res.status(404).json({ error: "Export no encontrado o expirado." });
+      }
+      if (expectedToken !== token) {
+        return res.status(403).json({ error: "Token inválido para descarga." });
+      }
+      const rangeHeader = String(req.headers.range || "").trim();
+      const file = storageBucket.file(storagePath);
+      const [meta] = await file.getMetadata().catch(() => [null]);
+      if (!meta) return res.status(404).json({ error: "Export no encontrado o expirado." });
+      const filename = String(result?.filename || `${jobId}.${getMontageExportExtension(job?.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
+      const mimeType = String(result?.mimeType || meta?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
+      await streamStorageFileToResponse(file, res, {
+        metadata: meta,
+        rangeHeader
+      });
+      return;
+    }
+
     await cleanupMontageExportCache();
     const exportId = clampExportId(req.query?.exportId || "");
-    const token = clampText(String(req.query?.token || "").trim(), 180);
-    if (!exportId || !token) {
+    const legacyToken = clampText(String(req.query?.token || "").trim(), 180);
+    if (!exportId || !legacyToken) {
       return res.status(400).json({ error: "Falta exportId o token." });
     }
     await ensureMontageExportCacheDir();
@@ -8886,7 +8903,7 @@ app.get("/api/assets/montage-download", async (req, res) => {
     if (!meta || String(meta.exportId || "") !== exportId) {
       return res.status(404).json({ error: "Export no encontrado o expirado." });
     }
-    if (String(meta.token || "") !== token) {
+    if (String(meta.token || "") !== legacyToken) {
       return res.status(403).json({ error: "Token inválido para descarga." });
     }
     const expiresAtMs = Number(new Date(meta.expiresAt || 0).getTime() || 0) || 0;
@@ -9081,14 +9098,26 @@ app.get("/api/assets/proxy-media", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log("[backend] startup signature", {
-    file: "backend/server.js",
-    pid: process.pid,
-    startedAt: BACKEND_BOOT_ISO,
-    startupSignature: BACKEND_BOOT_SIGNATURE,
-    moodleModuleGraphicsRoute: true,
-    podcasterDialogueAudioRoute: true
+if (IS_MAIN_MODULE) {
+  app.listen(PORT, HOST, () => {
+    console.log("[backend] startup signature", {
+      file: "backend/server.js",
+      pid: process.pid,
+      startedAt: BACKEND_BOOT_ISO,
+      startupSignature: BACKEND_BOOT_SIGNATURE,
+      moodleModuleGraphicsRoute: true,
+      podcasterDialogueAudioRoute: true
+    });
+    console.log(`[gemini-backend] listening on http://${HOST}:${PORT}`);
   });
-  console.log(`[gemini-backend] listening on http://${HOST}:${PORT}`);
-});
+}
+
+module.exports = {
+  app,
+  db,
+  storageBucket,
+  montageExportJobStore,
+  executeMontageExportPipeline,
+  buildMontageSceneFailure,
+  getBackendPublicBaseUrl
+};

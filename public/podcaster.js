@@ -20951,6 +20951,7 @@ function describeMontageExportStage(stage = "", mode = montageExportState.export
   const clean = String(stage || "").trim();
   const review = mode === "review";
   const map = {
+    queued: "Export en cola…",
     validate_payload: review ? "Validando exportación de revisión…" : "Validando exportación…",
     download_assets: "Descargando recursos fuente…",
     render_scene_segments: "Renderizando escenas…",

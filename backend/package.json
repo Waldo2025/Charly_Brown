@@ -7,14 +7,17 @@
     "node": "22"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "worker:montage": "node workers/podcaster-montage-export-worker.js"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
+    "bullmq": "^5.58.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "ffmpeg-static": "^5.2.0",
     "firebase-admin": "^12.6.0",
+    "ioredis": "^5.8.1",
     "node-fetch": "^3.3.2"
   }
 }

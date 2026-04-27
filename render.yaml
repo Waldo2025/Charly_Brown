@@ -17,7 +17,43 @@ services:
         value: charly-brown
       - key: CORS_ALLOWED_ORIGINS
         value: https://charly-brown.web.app,https://charly-brown.firebaseapp.com,https://*.onrender.com
+      - key: PUBLIC_BACKEND_BASE_URL
+        value: https://charly-brown-gemini-backend.onrender.com
+      - key: RENDER_KEY_VALUE_CONNECTION_STRING
+        fromService:
+          type: keyvalue
+          name: charly-brown-podcaster-queue
+          property: connectionString
       - key: GEMINI_API_KEY
         sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
+  - type: worker
+    name: charly-brown-podcaster-export-worker
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: node backend/workers/podcaster-montage-export-worker.js
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: FIREBASE_PROJECT_ID
+        value: charly-brown
+      - key: PUBLIC_BACKEND_BASE_URL
+        value: https://charly-brown-gemini-backend.onrender.com
+      - key: RENDER_KEY_VALUE_CONNECTION_STRING
+        fromService:
+          type: keyvalue
+          name: charly-brown-podcaster-queue
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+  - type: keyvalue
+    name: charly-brown-podcaster-queue
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
