@@ -1,6 +1,7 @@
 window.__CHARLY_CONFIG__ = Object.assign(
   {
-    apiBaseUrl: "https://charly-brown.onrender.com/api",
+    // Produccion: usar el backend API dedicado en Render.
+    apiBaseUrl: "https://charly-brown-gemini-backend.onrender.com/api",
     allowSameOriginApi: false,
     allowDirectGemini: false,
     forceDirectGemini: false,
