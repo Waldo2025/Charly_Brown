@@ -361,6 +361,7 @@ const els = {
   montageExportModal: document.getElementById("montageExportModal"),
   closeMontageExportBtn: document.getElementById("closeMontageExportBtn"),
   cancelMontageExportBtn: document.getElementById("cancelMontageExportBtn"),
+  continueMontageExportBtn: document.getElementById("continueMontageExportBtn"),
   confirmMontageExportBtn: document.getElementById("confirmMontageExportBtn"),
   montageExportMode: document.getElementById("montageExportMode"),
   montageExportFormat: document.getElementById("montageExportFormat"),
@@ -20801,6 +20802,17 @@ function clearMontageExportPolling() {
   }
 }
 
+function setMontageExportContinueButton({ visible = false, label = "Continuar exportación" } = {}) {
+  if (!els.continueMontageExportBtn) return;
+  const hasJobId = Boolean(String(montageExportJobState.jobId || "").trim());
+  const shouldShow = Boolean(visible) && hasJobId;
+  els.continueMontageExportBtn.hidden = !shouldShow;
+  const textEl = els.continueMontageExportBtn.querySelector("span");
+  if (textEl) {
+    textEl.textContent = String(label || "Continuar exportación").trim() || "Continuar exportación";
+  }
+}
+
 function resetMontageExportJobState() {
   clearMontageExportPolling();
   montageExportJobState = {
@@ -20816,6 +20828,7 @@ function resetMontageExportJobState() {
     reviewExcelPayload: null,
     reviewExcelFilename: ""
   };
+  setMontageExportContinueButton({ visible: false });
 }
 
 function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false } = {}) {
@@ -20941,6 +20954,7 @@ function setMontageExportStatus(text = "", hint = "", options = {}) {
 
 function setMontageExportBusy(isBusy = false) {
   if (els.confirmMontageExportBtn) els.confirmMontageExportBtn.disabled = Boolean(isBusy);
+  if (els.continueMontageExportBtn) els.continueMontageExportBtn.disabled = Boolean(isBusy);
   if (els.generateAllDialogueVideosBtn) els.generateAllDialogueVideosBtn.disabled = Boolean(isBusy) || podcastVideoState.busy;
   if (els.regenerateAllDialogueVideosBtn) els.regenerateAllDialogueVideosBtn.disabled = Boolean(isBusy) || podcastVideoState.busy;
   if (els.generateDialogueVideoBtn) els.generateDialogueVideoBtn.disabled = Boolean(isBusy);
@@ -21013,9 +21027,10 @@ async function pollMontageExportJob(jobId = "") {
     setMontageExportProgress(null);
     setMontageExportStatus(
       "La exportación tardó demasiado.",
-      "Detuvimos el seguimiento automático para evitar tráfico excesivo. Puedes reintentar manualmente.",
+      "Detuvimos el seguimiento automático para evitar tráfico excesivo. Puedes usar \"Continuar exportación\" para retomar el seguimiento.",
       { tone: "warning" }
     );
+    setMontageExportContinueButton({ visible: true });
     return;
   }
   try {
@@ -21077,6 +21092,7 @@ async function pollMontageExportJob(jobId = "") {
         warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
       });
       clearMontageExportPolling();
+      setMontageExportContinueButton({ visible: false });
       const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
       let statusText = "Tu video está listo.";
       let hintText = "";
@@ -21129,6 +21145,7 @@ async function pollMontageExportJob(jobId = "") {
         detail: err?.detail || undefined
       }, "error");
       clearMontageExportPolling();
+      setMontageExportContinueButton({ visible: false });
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
       const failedLabel = failedSubstage
         ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
@@ -21165,6 +21182,7 @@ async function pollMontageExportJob(jobId = "") {
         "El backend se reinició durante la exportación. Vuelve a exportar.",
         { tone: "error" }
       );
+      setMontageExportContinueButton({ visible: false });
       return;
     }
     montageExportJobState.pollFailureCount = Math.max(0, Number(montageExportJobState.pollFailureCount || 0) || 0) + 1;
@@ -21193,10 +21211,11 @@ async function pollMontageExportJob(jobId = "") {
       setMontageExportProgress(null);
       setMontageExportStatus(
         "No pudimos consultar el progreso del export.",
-        "La conexión con el backend falló varias veces seguidas. Intenta exportar otra vez.",
+        "La conexión con el backend falló varias veces seguidas. Puedes usar \"Continuar exportación\" para reconectar con el job activo.",
         { tone: "error" }
       );
       setTimelinePreviewsSuspended(false);
+      setMontageExportContinueButton({ visible: true });
       return;
     }
     setMontageExportStatus(
@@ -21212,6 +21231,33 @@ async function pollMontageExportJob(jobId = "") {
   montageExportJobState.pollTimer = window.setTimeout(() => {
     pollMontageExportJob(cleanJobId).catch(() => {});
   }, 2000);
+}
+
+async function continueMontageExportPolling() {
+  const jobId = String(montageExportJobState.jobId || "").trim();
+  if (!jobId) {
+    setMontageExportStatus(
+      "No encontramos un export activo para continuar.",
+      "Inicia una nueva exportación.",
+      { tone: "warning" }
+    );
+    setMontageExportContinueButton({ visible: false });
+    return;
+  }
+  logMontageExportDevtools("continue_polling_clicked", { jobId });
+  clearMontageExportPolling();
+  montageExportBusy = true;
+  setTimelinePreviewsSuspended(true);
+  setMontageExportBusy(true);
+  setMontageExportContinueButton({ visible: false });
+  montageExportJobState.pollFailureCount = 0;
+  montageExportJobState.startedAtMs = Date.now();
+  setMontageExportStatus(
+    "Reanudando seguimiento del export…",
+    "Consultando estado actual del backend.",
+    { tone: "neutral" }
+  );
+  pollMontageExportJob(jobId).catch(() => {});
 }
 
 function getMontagePreviewRowId() {
@@ -21806,6 +21852,7 @@ function buildMontageExportPayload(session = null) {
 
 async function runMontageExport() {
   if (montageExportBusy) return;
+  const previousJobId = String(montageExportJobState.jobId || "").trim();
   const session = getActiveSession();
   const prepared = buildMontageExportPayload(session);
   logMontageExportDevtools("submit_clicked", {
@@ -21837,6 +21884,7 @@ async function runMontageExport() {
     meta: "Preview pausado mientras se exporta el video."
   });
   resetMontageExportJobState();
+  setMontageExportContinueButton({ visible: false });
   setMontageExportProgress(0.08);
   setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
   try {
@@ -21885,7 +21933,13 @@ async function runMontageExport() {
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
     } else if (status === 429 || code === "backend_busy_with_export") {
       hintParts.push("El servidor está ocupado con otra exportación.");
-      hintParts.push("Intenta de nuevo manualmente en unos segundos.");
+      hintParts.push(previousJobId
+        ? "Usa \"Continuar exportación\" para retomar el job activo."
+        : "Intenta de nuevo manualmente en unos segundos.");
+      if (previousJobId) {
+        montageExportJobState.jobId = previousJobId;
+        setMontageExportContinueButton({ visible: true });
+      }
     } else if (status === 503 && code === "montage_export_queue_unavailable") {
       hintParts.push("El backend no pudo iniciar la exportación en este momento.");
       hintParts.push("Intenta de nuevo manualmente.");
@@ -29675,6 +29729,11 @@ function attachEvents() {
   if (els.confirmMontageExportBtn) {
     els.confirmMontageExportBtn.addEventListener("click", () => {
       runMontageExport().catch(() => {});
+    });
+  }
+  if (els.continueMontageExportBtn) {
+    els.continueMontageExportBtn.addEventListener("click", () => {
+      continueMontageExportPolling().catch(() => {});
     });
   }
   if (els.montageExportFormat) {
