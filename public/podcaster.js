@@ -884,18 +884,53 @@ function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
   return String(parsed?.storagePath || "").trim();
 }
 
+function normalizePersistedMediaReference(rawUrl = "", storagePath = "") {
+  const cleanUrl = String(rawUrl || "").trim();
+  const cleanStoragePath = deriveStoragePathFromMediaSource(cleanUrl, storagePath || "");
+  if (!cleanUrl && !cleanStoragePath) {
+    return {
+      downloadUrl: "",
+      storagePath: ""
+    };
+  }
+  return {
+    storagePath: cleanStoragePath,
+    downloadUrl: cleanStoragePath ? "" : cleanUrl
+  };
+}
+
 function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {
-  const storagePath = String(source?.storagePath || "").trim();
+  const normalized = normalizePersistedMediaReference(source?.downloadUrl || "", source?.storagePath || "");
+  const storagePath = String(normalized.storagePath || "").trim();
   const downloadUrl = String(source?.downloadUrl || "").trim();
   const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
   if (key) staleDialogueVideoSourceKeys.add(key);
-  const proxiedUrl = resolveStorageVideoUrl(downloadUrl, storagePath);
-  if (proxiedUrl) {
-    markStaleProxyMediaUrl(proxiedUrl, reason, {
+  const storageProxyUrl = storagePath ? buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`) : "";
+  const downloadProxyUrl = downloadUrl ? resolveStorageVideoUrl(downloadUrl, "") : "";
+  [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
+    markStaleProxyMediaUrl(url, reason, {
       rowId,
       storagePath: storagePath || undefined
     });
-  }
+    const cachedVideo = podcastStageVideoCache.get(url);
+    if (cachedVideo?.objectUrl) {
+      try { URL.revokeObjectURL(cachedVideo.objectUrl); } catch (_) {}
+    }
+    podcastStageVideoCache.delete(url);
+    const cachedAudio = podcastStageAudioCache.get(url);
+    if (cachedAudio?.objectUrl) {
+      try { URL.revokeObjectURL(cachedAudio.objectUrl); } catch (_) {}
+    }
+    podcastStageAudioCache.delete(url);
+  });
+  logPodcastRenderDebug("dialogue-video-source-stale", {
+    sessionId,
+    rowId,
+    reason,
+    storagePath,
+    downloadUrl: downloadUrl ? `${downloadUrl.slice(0, 180)}${downloadUrl.length > 180 ? "..." : ""}` : "",
+    staleKey: key
+  });
 }
 
 function isStaleDialogueVideoSource(sessionId = "", rowId = "", source = null) {
@@ -975,7 +1010,31 @@ function normalizeMontageExportSettings(raw = {}) {
   };
 }
 
-function defaultMontageExportFilename() {
+function sanitizeMontageFilenamePart(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function isLegacyAutoMontageFilename(value = "") {
+  const clean = String(value || "").trim();
+  return !clean || /^montage-\d{4}-\d{2}-\d{2}t/i.test(clean);
+}
+
+function defaultMontageExportFilename(session = null) {
+  const activeSession = session || getActiveSession?.() || null;
+  const preferred = sanitizeMontageFilenamePart(
+    activeSession?.title
+    || activeSession?.script?.episodeTitle
+    || activeSession?.script?.summary
+    || activeSession?.prompt
+    || ""
+  );
+  if (preferred) return preferred;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `montage-${stamp}`;
 }
@@ -1098,10 +1157,10 @@ function loadMontageExportSettings() {
   try {
     const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
     const normalized = normalizeMontageExportSettings(parsed || {});
-    if (!normalized.filename) normalized.filename = defaultMontageExportFilename();
+    if (isLegacyAutoMontageFilename(normalized.filename)) normalized.filename = "";
     return normalized;
   } catch (_) {
-    return normalizeMontageExportSettings({ filename: defaultMontageExportFilename() });
+    return normalizeMontageExportSettings({ filename: "" });
   }
 }
 
@@ -1134,6 +1193,7 @@ let montageExportJobState = {
   lastStage: "",
   lastHint: "",
   lastProgress: -1,
+  pollFailureCount: 0,
   reviewExcelEnabled: false,
   reviewExcelPayload: null,
   reviewExcelFilename: ""
@@ -4305,10 +4365,40 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   const sceneNumber = String(options.sceneNumber || "").trim();
   const pollIntervalMs = 2500;
   const maxAttempts = 360;
+  let lastStateKey = "";
+  let lastData = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const data = await authFetchJson(`/api/podcaster/dialogue-videos/generate-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    lastData = data;
     const status = String(data?.status || "").trim().toLowerCase();
     const hint = String(data?.hint || "").trim();
+    const stateKey = [
+      String(data?.stage || "").trim(),
+      String(data?.model || "").trim(),
+      String(data?.variant || "").trim(),
+      String(data?.attempt || "").trim(),
+      String(data?.segmentIndex || "").trim(),
+      String(data?.updatedAt || "").trim()
+    ].join("|");
+    if (stateKey && stateKey !== lastStateKey) {
+      lastStateKey = stateKey;
+      try {
+        console.info("[podcaster] dialogue video job update", {
+          jobId: cleanJobId,
+          status,
+          stage: String(data?.stage || "").trim(),
+          model: String(data?.model || "").trim(),
+          variant: String(data?.variant || "").trim(),
+          attempt: Number(data?.attempt || 0) || 0,
+          segmentIndex: Number(data?.segmentIndex || 0) || 0,
+          segmentCount: Number(data?.segmentCount || 0) || 0,
+          updatedAt: String(data?.updatedAt || "").trim(),
+          hint
+        });
+      } catch (_) {
+        // no-op
+      }
+    }
     if (status === "ready" && data?.dialogueVideo && typeof data.dialogueVideo === "object") {
       return data;
     }
@@ -4328,6 +4418,7 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
   }
   const error = new Error("Tiempo de espera agotado al generar video de la escena.");
   error.status = 504;
+  error.detail = lastData;
   throw error;
 }
 
@@ -5611,16 +5702,18 @@ function normalizeDialogueVideoMap(raw = {}) {
   Object.entries(raw).forEach(([rowId, clip]) => {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
-    const downloadUrl = String(clip.downloadUrl || "").trim();
-    const storagePath = deriveStoragePathFromMediaSource(downloadUrl, clip.storagePath || "");
-    if (!downloadUrl && !storagePath) return;
+    const mediaRef = normalizePersistedMediaReference(clip.downloadUrl || "", clip.storagePath || "");
+    const downloadUrl = String(mediaRef.downloadUrl || "").trim();
+    const storagePath = String(mediaRef.storagePath || "").trim();
+    if (!storagePath && !downloadUrl) return;
     const rawSegments = Array.isArray(clip.segments) ? clip.segments : [];
     const segments = rawSegments
       .map((segment, idx) => {
         if (!segment || typeof segment !== "object") return null;
-        const segUrl = String(segment.downloadUrl || "").trim();
-        const segPath = deriveStoragePathFromMediaSource(segUrl, segment.storagePath || "");
-        if (!segUrl && !segPath) return null;
+        const segmentRef = normalizePersistedMediaReference(segment.downloadUrl || "", segment.storagePath || "");
+        const segUrl = String(segmentRef.downloadUrl || "").trim();
+        const segPath = String(segmentRef.storagePath || "").trim();
+        if (!segPath && !segUrl) return null;
         return {
           id: String(segment.id || `${key}-seg-${idx + 1}`).trim() || `${key}-seg-${idx + 1}`,
           index: Math.max(0, Number(segment.index) || idx),
@@ -5670,9 +5763,10 @@ function normalizeDialogueAudioMap(raw = {}) {
   Object.entries(raw).forEach(([rowId, clip]) => {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
-    const downloadUrl = String(clip.downloadUrl || "").trim();
-    const storagePath = deriveStoragePathFromMediaSource(downloadUrl, clip.storagePath || "");
-    if (!downloadUrl && !storagePath) return;
+    const mediaRef = normalizePersistedMediaReference(clip.downloadUrl || "", clip.storagePath || "");
+    const downloadUrl = String(mediaRef.downloadUrl || "").trim();
+    const storagePath = String(mediaRef.storagePath || "").trim();
+    if (!storagePath && !downloadUrl) return;
     next[key] = {
       rowId: key,
       speaker: String(clip.speaker || "").trim(),
@@ -8953,7 +9047,10 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "") {
       return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     if (cleanStoragePath) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
+      const storageProxyUrl = buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return isMarkedStaleProxyMediaUrl(storageProxyUrl)
+        ? ""
+        : resolveStaleAwareProxyMediaUrl("", cleanStoragePath, "media");
     }
     if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
@@ -8989,7 +9086,10 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "") {
       return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
     }
     if (cleanStoragePath) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
+      const storageProxyUrl = buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      return isMarkedStaleProxyMediaUrl(storageProxyUrl)
+        ? ""
+        : resolveStaleAwareProxyMediaUrl("", cleanStoragePath, "media");
     }
     if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
     if (clean.startsWith("/api/assets/proxy-image?")) {
@@ -12925,6 +13025,11 @@ async function saveSessionToCloud(sessionId = null, options = {}) {
       : session
   ));
   persistSessions();
+  logPodcastRenderDebug("cloud-session-save-media", {
+    sessionId: String(target?.id || "").trim(),
+    dialogueVideoKeys: Object.keys(getDialogueVideoMap(payload)).length,
+    dialogueAudioKeys: Object.keys(getDialogueAudioMap(payload)).length
+  });
   if (!silent) {
     addChatMessage("assistant", `Sesión guardada en Firebase (${formatDate(savedAt)}).`);
     if (compacted.strippedReferenceMedia || compacted.trimmedChat) {
@@ -20601,6 +20706,7 @@ function resetMontageExportJobState() {
     lastStage: "",
     lastHint: "",
     lastProgress: -1,
+    pollFailureCount: 0,
     reviewExcelEnabled: false,
     reviewExcelPayload: null,
     reviewExcelFilename: ""
@@ -20767,6 +20873,7 @@ async function pollMontageExportJob(jobId = "") {
   try {
     const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
     if (String(montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    montageExportJobState.pollFailureCount = 0;
     const stage = String(data?.stage || "").trim();
     const hint = String(data?.hint || "").trim();
     const progress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
@@ -20848,11 +20955,38 @@ async function pollMontageExportJob(jobId = "") {
       return;
     }
   } catch (error) {
-    clearMontageExportPolling();
-    montageExportBusy = false;
-    setMontageExportBusy(false);
-    setMontageExportProgress(null);
-    setMontageExportStatus("No pudimos consultar el progreso del export.", "Intenta exportar otra vez.", { tone: "error" });
+    if (String(montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    montageExportJobState.pollFailureCount = Math.max(0, Number(montageExportJobState.pollFailureCount || 0) || 0) + 1;
+    const failureCount = montageExportJobState.pollFailureCount;
+    const transientHint = failureCount > 1
+      ? `Reconectando con el export… intento ${failureCount}.`
+      : "Reconectando con el export…";
+    console.warn("[podcaster] montage export status poll failed", {
+      jobId: cleanJobId,
+      failureCount,
+      status: Number(error?.status || error?.detail?.status || 0) || 0,
+      message: String(error?.message || error?.error || "").trim()
+    });
+    if (failureCount >= 12) {
+      clearMontageExportPolling();
+      montageExportBusy = false;
+      setMontageExportBusy(false);
+      setMontageExportProgress(null);
+      setMontageExportStatus(
+        "No pudimos consultar el progreso del export.",
+        "La conexión con el backend falló varias veces seguidas. Intenta exportar otra vez.",
+        { tone: "error" }
+      );
+      return;
+    }
+    setMontageExportStatus(
+      describeMontageExportStage(String(montageExportJobState.lastStage || "").trim(), montageExportState.exportMode),
+      transientHint,
+      { tone: "warning" }
+    );
+    montageExportJobState.pollTimer = window.setTimeout(() => {
+      pollMontageExportJob(cleanJobId).catch(() => {});
+    }, Math.min(6000, 1300 + (failureCount * 350)));
     return;
   }
   montageExportJobState.pollTimer = window.setTimeout(() => {
@@ -20868,6 +21002,8 @@ function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, t
   const cleanRowId = String(rowId || "").trim();
   if (!cleanRowId || !els.montageExportModal || els.montageExportModal.hidden) return;
   const now = Date.now();
+  if (montageExportPreviewState.loading) return;
+  if ((now - Math.max(0, Number(montageExportPreviewState.lastJobPreviewAt || 0) || 0)) < 12000) return;
   const sameRow = cleanRowId === String(montageExportPreviewState.lastJobPreviewRowId || "").trim();
   if (sameRow) return;
   montageExportPreviewState.lastJobPreviewRowId = cleanRowId;
@@ -20970,10 +21106,13 @@ function scheduleMontageExportPreviewRefresh(delayMs = 280) {
 
 function syncMontageExportUi() {
   montageExportState = normalizeMontageExportSettings(montageExportState);
+  if (isLegacyAutoMontageFilename(montageExportState.filename)) {
+    montageExportState.filename = "";
+  }
   if (els.montageExportMode) els.montageExportMode.value = montageExportState.exportMode;
   if (els.montageExportFormat) els.montageExportFormat.value = montageExportState.format;
   if (els.montageExportResolution) els.montageExportResolution.value = montageExportState.resolution;
-  if (els.montageExportFilename) els.montageExportFilename.value = montageExportState.filename || defaultMontageExportFilename();
+  if (els.montageExportFilename) els.montageExportFilename.value = montageExportState.filename || defaultMontageExportFilename(getActiveSession());
   if (els.montageExportIncludeReviewExcel) {
     els.montageExportIncludeReviewExcel.checked = montageExportState.includeReviewExcel !== false;
   }
@@ -20992,7 +21131,8 @@ function syncMontageExportUi() {
 
 function openMontageExportModal() {
   montageExportState = normalizeMontageExportSettings(montageExportState);
-  if (!montageExportState.filename) montageExportState.filename = defaultMontageExportFilename();
+  if (isLegacyAutoMontageFilename(montageExportState.filename)) montageExportState.filename = "";
+  if (!montageExportState.filename) montageExportState.filename = defaultMontageExportFilename(getActiveSession());
   setMontageExportOpen(true);
   syncMontageExportUi();
   resetMontageExportJobState();

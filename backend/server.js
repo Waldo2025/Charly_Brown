@@ -8,8 +8,11 @@ const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
 const {
-  buildBufferedMediaPayload
-} = require("./proxy-media-buffer.js");
+  normalizePersistedMediaReference
+} = require("./media-reference.js");
+const {
+  sanitizeDialogueVideoJobPublicPayload
+} = require("./dialogue-video-job-state.js");
 const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
@@ -918,22 +921,6 @@ function sanitizeMontageJobPublicPayload(job = null) {
   return payload;
 }
 
-function sanitizeDialogueVideoJobPublicPayload(job = null) {
-  const source = job && typeof job === "object" ? job : {};
-  const payload = {
-    ok: true,
-    jobId: String(source.jobId || "").trim(),
-    status: String(source.status || "queued").trim() || "queued",
-    stage: String(source.stage || "queued").trim() || "queued",
-    progress: Math.max(0, Math.min(1, Number(source.progress || 0) || 0)),
-    hint: String(source.hint || "").trim(),
-    updatedAt: String(source.updatedAt || "").trim() || new Date().toISOString()
-  };
-  if (source.error && typeof source.error === "object") payload.error = source.error;
-  if (source.dialogueVideo && typeof source.dialogueVideo === "object") payload.dialogueVideo = source.dialogueVideo;
-  return payload;
-}
-
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
@@ -1498,14 +1485,22 @@ function sanitizePodcasterSession(raw = {}) {
   Object.entries(dialogueVideoMapRaw).slice(0, 800).forEach(([rowId, clip]) => {
     const key = clampText(rowId, 120);
     if (!key || !clip || typeof clip !== "object") return;
-    const downloadUrl = clampText(clip?.downloadUrl || "", 3000);
-    const storagePath = clampText(deriveStoragePathFromMediaSource(downloadUrl, clip?.storagePath || ""), 700);
-    if (!downloadUrl && !storagePath) return;
+    const mediaRef = normalizePersistedMediaReference({
+      downloadUrl: clampText(clip?.downloadUrl || "", 3000),
+      storagePath: clampText(clip?.storagePath || "", 700)
+    });
+    const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
+    const storagePath = clampText(mediaRef.storagePath || "", 700);
+    if (!storagePath && !downloadUrl) return;
     const segmentsRaw = Array.isArray(clip?.segments) ? clip.segments : [];
     const segments = segmentsRaw.slice(0, 16).map((segment, idx) => {
-      const segUrl = clampText(segment?.downloadUrl || "", 3000);
-      const segPath = clampText(deriveStoragePathFromMediaSource(segUrl, segment?.storagePath || ""), 700);
-      if (!segUrl && !segPath) return null;
+      const segmentRef = normalizePersistedMediaReference({
+        downloadUrl: clampText(segment?.downloadUrl || "", 3000),
+        storagePath: clampText(segment?.storagePath || "", 700)
+      });
+      const segUrl = clampText(segmentRef.downloadUrl || "", 3000);
+      const segPath = clampText(segmentRef.storagePath || "", 700);
+      if (!segPath && !segUrl) return null;
       return {
         id: clampText(segment?.id || `${key}-seg-${idx + 1}`, 120) || `${key}-seg-${idx + 1}`,
         index: Math.max(0, Number(segment?.index) || idx),
@@ -1552,9 +1547,13 @@ function sanitizePodcasterSession(raw = {}) {
   Object.entries(dialogueAudioMapRaw).slice(0, 800).forEach(([rowId, clip]) => {
     const key = clampText(rowId, 120);
     if (!key || !clip || typeof clip !== "object") return;
-    const downloadUrl = clampText(clip?.downloadUrl || "", 3000);
-    const storagePath = clampText(deriveStoragePathFromMediaSource(downloadUrl, clip?.storagePath || ""), 700);
-    if (!downloadUrl && !storagePath) return;
+    const mediaRef = normalizePersistedMediaReference({
+      downloadUrl: clampText(clip?.downloadUrl || "", 3000),
+      storagePath: clampText(clip?.storagePath || "", 700)
+    });
+    const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
+    const storagePath = clampText(mediaRef.storagePath || "", 700);
+    if (!storagePath && !downloadUrl) return;
     dialogueAudioMap[key] = {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
@@ -4189,7 +4188,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     });
     const authHeader = String(req.headers.authorization || "").trim();
     const loopbackBaseUrl = `http://127.0.0.1:${PORT}`;
-    const requestBody = req.body && typeof req.body === "object" ? req.body : {};
+    const requestBody = req.body && typeof req.body === "object"
+      ? { ...req.body, __job: { jobId } }
+      : { __job: { jobId } };
     void (async () => {
       try {
         upsertDialogueVideoJob(jobId, {
@@ -4262,6 +4263,12 @@ app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
 app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
+    const jobMeta = req.body?.__job && typeof req.body.__job === "object" ? req.body.__job : null;
+    const jobId = clampExportId(jobMeta?.jobId || "");
+    const updateDialogueVideoJob = (patch = {}) => {
+      if (!jobId) return null;
+      return upsertDialogueVideoJob(jobId, patch);
+    };
     const uid = String(req.authContext?.uid || "").trim();
     const sessionId = clampText(req.body?.sessionId || "", 140);
     const rowId = clampText(req.body?.rowId || "", 120);
@@ -4376,6 +4383,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       });
     const videoModels = prioritizedModels.length ? prioritizedModels : [DEFAULT_PODCASTER_VIDEO_MODEL];
     const requestDebugTag = `dialogue-video:${sessionId || "no-session"}:${rowId || "no-row"}`;
+    updateDialogueVideoJob({
+      status: "running",
+      stage: "validate_payload",
+      progress: 0.12,
+      hint: "Validando solicitud de video.",
+      rowId
+    });
 
     if (!sessionId) {
       console.warn(`[backend][${requestDebugTag}] reject 400 missing sessionId`);
@@ -4771,9 +4785,18 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       const resolveResult = typeof options?.resolveResult === "function" ? options.resolveResult : null;
       const postDoneGraceAttempts = Math.max(0, Math.floor(Number(options?.postDoneGraceAttempts || 0) || 0));
       const postDoneGraceDelayMs = Math.max(250, Number(options?.postDoneGraceDelayMs || delayMs) || delayMs);
+      const onPoll = typeof options?.onPoll === "function" ? options.onPoll : null;
       let latest = null;
       let doneWithoutMediaAttempts = 0;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (onPoll) {
+          onPoll({
+            attempt: attempt + 1,
+            maxAttempts,
+            doneWithoutMediaAttempts,
+            operationName
+          });
+        }
         // eslint-disable-next-line no-await-in-loop
         const opResponse = await fetchCompat(
           `${GEMINI_BASE}/${operationName}?key=${encodeURIComponent(GEMINI_API_KEY)}`,
@@ -5161,6 +5184,16 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     for (const videoModel of videoModels) {
       let modelReturnedDoneWithoutMedia = false;
       for (const [variantIndex, variant] of requestVariants.entries()) {
+        updateDialogueVideoJob({
+          status: "running",
+          stage: "request_variant",
+          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, requestVariants.length)) * 0.2))),
+          hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}.`,
+          model: videoModel,
+          variant: String(variant?.label || "").trim(),
+          segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+          segmentCount: Number(req.body?.segmentCount || 0) || 0
+        });
         const createOpResponse = await fetchCompat(
           `${GEMINI_BASE}/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(GEMINI_API_KEY)}`,
           {
@@ -5193,7 +5226,20 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             requireResolvedMedia: true,
             resolveResult: resolveVeoVideoResult,
             postDoneGraceAttempts: 6,
-            postDoneGraceDelayMs: 2500
+            postDoneGraceDelayMs: 2500,
+            onPoll: ({ attempt, maxAttempts }) => {
+              updateDialogueVideoJob({
+                status: "running",
+                stage: "poll_operation",
+                progress: Math.max(0.22, Math.min(0.92, 0.22 + ((attempt / Math.max(1, maxAttempts)) * 0.56))),
+                hint: `Esperando respuesta de Veo (${attempt}/${maxAttempts}).`,
+                model: videoModel,
+                variant: String(variant?.label || "").trim(),
+                attempt,
+                segmentIndex: Number(req.body?.segmentIndex || 0) || 0,
+                segmentCount: Number(req.body?.segmentCount || 0) || 0
+              });
+            }
           });
         } catch (error) {
           lastStatus = Number(error?.status || 504) || 504;
@@ -5284,6 +5330,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           nextCandidates: videoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
           attemptedVariants: requestVariants.length,
           lastErrorDetail
+        });
+        updateDialogueVideoJob({
+          status: "running",
+          stage: "switch_model",
+          progress: 0.72,
+          hint: `Cambiando de modelo tras respuesta vacia de ${videoModel}.`,
+          model: videoModel
         });
       }
     }
@@ -6993,7 +7046,12 @@ app.post("/api/podcaster/montage/preview", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
-    const preview = await renderMontagePreviewMedia(input, { uid, baseUrl: resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}` });
+    // Keep montage preview cheap in production so it does not compete with the
+    // export pipeline and trigger platform timeouts while the user is polling.
+    const preview = await renderMontagePreviewImage(input, {
+      uid,
+      baseUrl: resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`
+    });
     return res.status(200).json(preview);
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({
@@ -8170,15 +8228,11 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         if (exists === false) continue;
         try {
           const [meta] = await file.getMetadata().catch(() => [{}]);
-          const [downloaded] = await file.download();
-          const payload = buildBufferedMediaPayload(Buffer.from(downloaded), {
-            mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
+          await streamStorageFileToResponse(file, res, {
+            metadata: meta,
             rangeHeader
           });
-          Object.entries(payload.headers).forEach(([header, value]) => {
-            if (value) res.setHeader(header, value);
-          });
-          return res.status(payload.status).send(payload.body);
+          return;
         } catch (error) {
           lastError = error;
           if (res.headersSent) {
@@ -8254,15 +8308,11 @@ app.get("/api/assets/proxy-media", async (req, res) => {
               if (exists === false) continue;
               try {
                 const [meta] = await file.getMetadata().catch(() => [{}]);
-                const [downloaded] = await file.download();
-                const payload = buildBufferedMediaPayload(Buffer.from(downloaded), {
-                  mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
+                await streamStorageFileToResponse(file, res, {
+                  metadata: meta,
                   rangeHeader
                 });
-                Object.entries(payload.headers).forEach(([header, value]) => {
-                  if (value) res.setHeader(header, value);
-                });
-                return res.status(payload.status).send(payload.body);
+                return;
               } catch (error) {
                 lastError = error;
                 if (res.headersSent) {
@@ -8297,13 +8347,19 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const contentRange = String(upstream.headers.get("content-range") || "").trim();
     const acceptRanges = String(upstream.headers.get("accept-ranges") || "bytes").trim() || "bytes";
     const cacheControl = String(upstream.headers.get("cache-control") || "private, max-age=120").trim();
-    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const stream = coerceReadableStream(upstream.body);
+    if (!stream) {
+      const err = new Error("proxy_media_stream_unavailable");
+      err.code = "proxy_media_stream_unavailable";
+      throw err;
+    }
     res.setHeader("Content-Type", mime);
     if (contentLength) res.setHeader("Content-Length", contentLength);
     if (contentRange) res.setHeader("Content-Range", contentRange);
     if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
     if (cacheControl) res.setHeader("Cache-Control", cacheControl);
-    return res.status(upstream.status === 206 ? 206 : 200).send(buffer);
+    await pipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
+    return;
   } catch (error) {
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
   }
