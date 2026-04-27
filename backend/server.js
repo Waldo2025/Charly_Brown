@@ -17,6 +17,10 @@ const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
+  createHeavyWorkCoordinator,
+  validateDialogueVideoInlineReferenceBudget
+} = require("./podcaster-stability.js");
+const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "on-screen-text-render-spec.js"));
@@ -119,6 +123,14 @@ const fetchCompat = (...args) => {
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
 const dialogueVideoJobs = new Map();
+const heavyWorkCoordinator = createHeavyWorkCoordinator();
+const heavyWorkState = heavyWorkCoordinator.state;
+const {
+  tryAcquireHeavyWorkSlot,
+  releaseHeavyWorkSlot,
+  buildHeavyWorkBusyError
+} = heavyWorkCoordinator;
+let cleanupIntervalRunning = false;
 
 function clamp01(value, fallback = 0) {
   const num = Number(value);
@@ -393,21 +405,25 @@ async function probeMediaVideoDimensionsWithFfmpeg(inputPath = "", label = "prob
     "-f",
     "null",
     "-"
-  ], { stage: `${label}_probe_dimensions` });
+  ], {
+    stage: `${label}_probe_dimensions`,
+    timeoutMs: MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS,
+    timeoutCode: "scene_probe_timeout"
+  });
   return extractVideoDimensionsFromFfmpegStderr(probeResult.stderr || "");
 }
 
 async function probeMediaHasAudioWithFfmpeg(inputPath = "") {
-  try {
-    const probeResult = await runFfmpegCommand([
-      "-hide_banner",
-      "-i", String(inputPath || "").trim(),
-      "-f", "null", "-"
-    ], { stage: "probe_audio" });
-    return /Stream #.*: Audio:/i.test(probeResult.stderr || "");
-  } catch (_) {
-    return false;
-  }
+  const probeResult = await runFfmpegCommand([
+    "-hide_banner",
+    "-i", String(inputPath || "").trim(),
+    "-f", "null", "-"
+  ], {
+    stage: "probe_audio",
+    timeoutMs: MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS,
+    timeoutCode: "scene_probe_timeout"
+  });
+  return /Stream #.*: Audio:/i.test(probeResult.stderr || "");
 }
 
 function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
@@ -826,6 +842,9 @@ const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cach
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 90 * 1000;
+const MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS = 30 * 1000;
+const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = 3 * 60 * 1000;
 const montageExportJobs = new Map();
 
 function getMontageExportJobMetaPath(jobId = "") {
@@ -844,6 +863,8 @@ function clampExportId(value = "") {
 }
 
 async function cleanupMontageExportCache() {
+  let removedMetaCount = 0;
+  let removedFileCount = 0;
   try {
     await ensureMontageExportCacheDir();
     const names = await fs.promises.readdir(MONTAGE_EXPORT_CACHE_DIR).catch(() => []);
@@ -865,9 +886,13 @@ async function cleanupMontageExportCache() {
         const raw = await fs.promises.readFile(metaPath, "utf8");
         const meta = JSON.parse(raw);
         const filePath = String(meta?.filePath || "").trim();
-        if (filePath) await fs.promises.rm(filePath, { force: true }).catch(() => {});
+        if (filePath) {
+          const fileRemoved = await fs.promises.rm(filePath, { force: true }).then(() => true).catch(() => false);
+          if (fileRemoved) removedFileCount += 1;
+        }
       } catch (_) {}
-      await fs.promises.rm(metaPath, { force: true }).catch(() => {});
+      const metaRemoved = await fs.promises.rm(metaPath, { force: true }).then(() => true).catch(() => false);
+      if (metaRemoved) removedMetaCount += 1;
     };
 
     for (const item of items) {
@@ -904,6 +929,10 @@ async function cleanupMontageExportCache() {
   } catch (_) {
     // best-effort
   }
+  return {
+    removedMetaCount,
+    removedFileCount
+  };
 }
 
 function sanitizeMontageJobPublicPayload(job = null) {
@@ -919,6 +948,13 @@ function sanitizeMontageJobPublicPayload(job = null) {
   };
   if (Number.isFinite(Number(source.currentSceneIndex))) payload.currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex) || 0));
   if (source.currentRowId) payload.currentRowId = String(source.currentRowId || "").trim();
+  if (source.sceneSubstage) payload.sceneSubstage = String(source.sceneSubstage || "").trim();
+  if (source.currentStoragePath) payload.currentStoragePath = String(source.currentStoragePath || "").trim();
+  if (source.currentDownloadUrl) payload.currentDownloadUrl = String(source.currentDownloadUrl || "").trim();
+  if (source.lastHeartbeatAt) payload.lastHeartbeatAt = String(source.lastHeartbeatAt || "").trim();
+  if (Number.isFinite(Number(source.failedSceneIndex))) payload.failedSceneIndex = Math.max(0, Math.round(Number(source.failedSceneIndex) || 0));
+  if (source.failedRowId) payload.failedRowId = String(source.failedRowId || "").trim();
+  if (source.failedSubstage) payload.failedSubstage = String(source.failedSubstage || "").trim();
   if (Number.isFinite(Number(source.totalScenes))) payload.totalScenes = Math.max(0, Math.round(Number(source.totalScenes) || 0));
   if (Array.isArray(source.warnings) && source.warnings.length) payload.warnings = source.warnings;
   if (source.error && typeof source.error === "object") payload.error = source.error;
@@ -946,6 +982,100 @@ function logMontageMemory(stage = "", extra = {}) {
     stage: String(stage || "").trim() || "unknown",
     ...extra,
     memory: summarizeMemoryUsage()
+  });
+}
+
+function logHeavyWorkMemory(kind = "", stage = "", extra = {}) {
+  console.info("[backend][heavy-work][memory]", {
+    kind: String(kind || "").trim() || "unknown",
+    stage: String(stage || "").trim() || "unknown",
+    ...extra,
+    memory: summarizeMemoryUsage()
+  });
+}
+
+function getActiveHeavyWorkJobId() {
+  return String(heavyWorkState.activeMontageExportJobId || heavyWorkState.activeDialogueVideoJobId || "").trim();
+}
+
+function getActiveHeavyWorkKind() {
+  if (String(heavyWorkState.activeMontageExportJobId || "").trim()) return "montage_export";
+  if (String(heavyWorkState.activeDialogueVideoJobId || "").trim()) return "dialogue_video";
+  return "";
+}
+
+function buildBackendBusyJson(kind = "", activeJobId = "") {
+  const error = buildHeavyWorkBusyError(kind, activeJobId);
+  return {
+    error: String(error.message || "backend_busy").trim() || "backend_busy",
+    code: String(error.code || "backend_busy").trim() || "backend_busy",
+    detail: error.detail && typeof error.detail === "object" ? error.detail : {
+      kind: String(kind || "").trim() || "unknown",
+      activeJobId: String(activeJobId || "").trim(),
+      retryable: true
+    }
+  };
+}
+
+function buildMontageStderrPreview(value = "", maxLines = 12, maxChars = 2200) {
+  return String(value || "").split(/\r?\n/).slice(-Math.max(1, Number(maxLines) || 1)).join(" | ").slice(0, Math.max(120, Number(maxChars) || 2200));
+}
+
+function buildMontageSceneTrace({
+  jobId = "",
+  sceneIndex = 0,
+  rowId = "",
+  storagePath = "",
+  downloadUrl = "",
+  substage = "",
+  elapsedMs = 0,
+  extra = {}
+} = {}) {
+  return {
+    jobId: clampExportId(jobId),
+    sceneIndex: Math.max(0, Number(sceneIndex || 0) || 0),
+    rowId: clampText(rowId || "", 160),
+    storagePath: clampText(storagePath || "", 900),
+    downloadUrl: redactUrlForLogs(downloadUrl),
+    substage: String(substage || "").trim() || undefined,
+    elapsedMs: Math.max(0, Math.round(Number(elapsedMs || 0) || 0)),
+    ...extra,
+    memory: summarizeMemoryUsage()
+  };
+}
+
+function withTimeout(task, timeoutMs = 0, buildError = null) {
+  const ms = Math.max(0, Number(timeoutMs || 0) || 0);
+  if (!ms) return Promise.resolve().then(() => task());
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finishResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      const timeoutError = typeof buildError === "function"
+        ? buildError(ms)
+        : (() => {
+            const err = new Error(`timeout_${ms}`);
+            err.code = "timeout";
+            err.timeoutMs = ms;
+            return err;
+          })();
+      finishReject(timeoutError);
+    }, ms);
+    Promise.resolve()
+      .then(() => task())
+      .then(finishResolve)
+      .catch(finishReject);
   });
 }
 
@@ -1020,11 +1150,14 @@ function getDialogueVideoJob(jobId = "") {
 
 function cleanupDialogueVideoJobs() {
   const now = Date.now();
+  let removedCount = 0;
   for (const [jobId, job] of dialogueVideoJobs.entries()) {
     if (Number(job?.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < now) {
       dialogueVideoJobs.delete(jobId);
+      removedCount += 1;
     }
   }
+  return removedCount;
 }
 
 function upsertMontageExportJob(jobId = "", patch = {}) {
@@ -1076,16 +1209,54 @@ function getMontageExportJob(jobId = "") {
 
 function cleanupMontageExportJobs() {
   const now = Date.now();
+  let removedCount = 0;
   for (const [jobId, job] of montageExportJobs.entries()) {
     if (Number(job?.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < now) {
       montageExportJobs.delete(jobId);
+      removedCount += 1;
       const metaPath = getMontageExportJobMetaPath(jobId);
       if (metaPath) {
         void fs.promises.rm(metaPath, { force: true }).catch(() => {});
       }
     }
   }
+  return removedCount;
 }
+
+function startBackendCleanupInterval() {
+  setInterval(() => {
+    if (cleanupIntervalRunning) return;
+    cleanupIntervalRunning = true;
+    const memoryBefore = summarizeMemoryUsage();
+    void (async () => {
+      try {
+        const dialogueJobsRemoved = cleanupDialogueVideoJobs();
+        const montageJobsRemoved = cleanupMontageExportJobs();
+        const cacheSummary = await cleanupMontageExportCache();
+        const removedMetaCount = Math.max(0, Number(cacheSummary?.removedMetaCount || 0) || 0);
+        const removedFileCount = Math.max(0, Number(cacheSummary?.removedFileCount || 0) || 0);
+        if (dialogueJobsRemoved || montageJobsRemoved || removedMetaCount || removedFileCount) {
+          console.info("[backend][cleanup]", {
+            dialogueJobsRemoved,
+            montageJobsRemoved,
+            removedMetaCount,
+            removedFileCount,
+            memoryBefore,
+            memoryAfter: summarizeMemoryUsage()
+          });
+        }
+      } catch (error) {
+        console.warn("[backend][cleanup]", {
+          message: String(error?.message || error || "cleanup_failed")
+        });
+      } finally {
+        cleanupIntervalRunning = false;
+      }
+    })();
+  }, 60 * 1000).unref?.();
+}
+
+startBackendCleanupInterval();
 
 function resolvePublicBaseUrl(req) {
   const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
@@ -2505,8 +2676,37 @@ function runFfmpegCommand(args = [], context = {}) {
     const child = spawn(ffmpegStaticPath, args, {
       stdio: ["ignore", "pipe", "pipe"]
     });
+    const timeoutMs = Math.max(0, Number(context?.timeoutMs || 0) || 0);
+    let timeoutId = null;
+    let settled = false;
+    let didTimeout = false;
     let stdout = "";
     let stderr = "";
+    const finalizeReject = (error) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      reject(error);
+    };
+    const finalizeResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      resolve(value);
+    };
+    if (timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        didTimeout = true;
+        try {
+          child.kill("SIGTERM");
+        } catch (_) {}
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch (_) {}
+        }, 1500).unref?.();
+      }, timeoutMs);
+    }
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk || "");
     });
@@ -2518,11 +2718,27 @@ function runFfmpegCommand(args = [], context = {}) {
       err.code = "ffmpeg_spawn_error";
       err.stage = String(context?.stage || "spawn").trim() || "spawn";
       err.stderr = stderr;
-      reject(err);
+      finalizeReject(err);
     });
     child.on("close", (code) => {
+      if (didTimeout) {
+        const err = new Error(`${String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout"}_${timeoutMs}`);
+        err.code = String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout";
+        err.timeoutMs = timeoutMs;
+        err.stage = String(context?.stage || "run").trim() || "run";
+        err.stdout = stdout;
+        err.stderr = stderr;
+        err.detail = {
+          stage: err.stage,
+          timeoutMs,
+          stderrPreview: buildMontageStderrPreview(stderr),
+          stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
+        };
+        finalizeReject(err);
+        return;
+      }
       if (Number(code || 0) === 0) {
-        resolve({ stdout, stderr, code: 0 });
+        finalizeResolve({ stdout, stderr, code: 0 });
         return;
       }
       const err = new Error(`ffmpeg_exit_code_${code}`);
@@ -2533,10 +2749,10 @@ function runFfmpegCommand(args = [], context = {}) {
       err.stderr = stderr;
       err.detail = {
         stage: err.stage,
-        stderrPreview: String(stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200),
-        stdoutPreview: String(stdout || "").split(/\r?\n/).slice(-8).join(" | ").slice(0, 1200)
+        stderrPreview: buildMontageStderrPreview(stderr),
+        stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
       };
-      reject(err);
+      finalizeReject(err);
     });
   });
 }
@@ -4247,6 +4463,11 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
+    const activeHeavyWorkKind = getActiveHeavyWorkKind();
+    const activeHeavyWorkJobId = getActiveHeavyWorkJobId();
+    if (activeHeavyWorkKind) {
+      return res.status(503).json(buildBackendBusyJson("dialogue_video", activeHeavyWorkJobId));
+    }
     const jobId = clampExportId(randomUUID());
     const initial = upsertDialogueVideoJob(jobId, {
       status: "running",
@@ -4330,9 +4551,14 @@ app.get("/api/podcaster/dialogue-videos/generate-status", async (req, res) => {
 
 app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
   if (!ensureGeminiKey(res)) return;
+  const jobMeta = req.body?.__job && typeof req.body.__job === "object" ? req.body.__job : null;
+  const jobId = clampExportId(jobMeta?.jobId || "") || clampExportId(randomUUID());
+  const slot = tryAcquireHeavyWorkSlot("dialogue_video", jobId);
+  if (!slot?.ok) {
+    const busyError = slot?.error || buildHeavyWorkBusyError("dialogue_video", getActiveHeavyWorkJobId());
+    return res.status(Number(busyError?.status || 503)).json(buildBackendBusyJson("dialogue_video", String(busyError?.detail?.activeJobId || "").trim()));
+  }
   try {
-    const jobMeta = req.body?.__job && typeof req.body.__job === "object" ? req.body.__job : null;
-    const jobId = clampExportId(jobMeta?.jobId || "");
     const updateDialogueVideoJob = (patch = {}) => {
       if (!jobId) return null;
       return upsertDialogueVideoJob(jobId, patch);
@@ -4393,17 +4619,18 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const portraitUrl = clampText(req.body?.portraitUrl || "", 3200);
     const portraitStoragePath = clampText(req.body?.portraitStoragePath || "", 700);
     const referenceMode = String(req.body?.referenceMode || "image").trim().toLowerCase() === "video" ? "video" : "image";
-    const referenceImageDataUrls = referenceMode === "image" && Array.isArray(req.body?.referenceImageDataUrls)
-      ? req.body.referenceImageDataUrls.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4)
+    const inlineReferenceBudget = validateDialogueVideoInlineReferenceBudget(req.body || {});
+    const referenceImageDataUrls = referenceMode === "image"
+      ? inlineReferenceBudget.referenceImageDataUrls
       : [];
     const referenceImageNames = referenceMode === "image" && Array.isArray(req.body?.referenceImageNames)
       ? req.body.referenceImageNames.map((item) => clampText(item || "", 180)).filter(Boolean).slice(0, 4)
       : [];
     const referenceImageDataUrl = referenceMode === "image" ? String(req.body?.referenceImageDataUrl || "").trim() : "";
-    const continuityReferenceImageDataUrl = String(req.body?.continuityReferenceImageDataUrl || "").trim();
+    const continuityReferenceImageDataUrl = String(inlineReferenceBudget?.continuityReferenceImageDataUrl || "").trim();
     const explicitForceImmediateSceneChange = req.body?.forceImmediateSceneChange === true;
     const referenceImageName = clampText(req.body?.referenceImageName || "", 180);
-    const referenceVideoDataUrl = referenceMode === "video" ? String(req.body?.referenceVideoDataUrl || "").trim() : "";
+    const referenceVideoDataUrl = referenceMode === "video" ? String(inlineReferenceBudget?.referenceVideoDataUrl || "").trim() : "";
     const referenceVideoName = clampText(req.body?.referenceVideoName || "", 180);
     const referenceVideoMimeType = clampText(req.body?.referenceVideoMimeType || "video/mp4", 120) || "video/mp4";
     const relateWithPreviousScene = req.body?.relateWithPreviousScene === true;
@@ -4458,6 +4685,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       hint: "Validando solicitud de video.",
       rowId
     });
+    logHeavyWorkMemory("dialogue_video", "validate_payload", {
+      jobId,
+      sessionId,
+      rowId,
+      totalInlineBytes: Number(inlineReferenceBudget?.totalInlineBytes || 0) || 0
+    });
 
     if (!sessionId) {
       console.warn(`[backend][${requestDebugTag}] reject 400 missing sessionId`);
@@ -4489,6 +4722,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     let portraitMimeType = "image/png";
     let portraitLoadedFromStorage = false;
     let portraitSourceBucketName = "";
+    logHeavyWorkMemory("dialogue_video", "load_portrait", {
+      jobId,
+      sessionId,
+      rowId
+    });
     if (portraitUrl || portraitStoragePath) {
       if (portraitStoragePath) {
         try {
@@ -4549,6 +4787,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       : "";
     const hasPortraitAsset = Boolean(portraitBase64 || portraitGcsUri);
 
+    logHeavyWorkMemory("dialogue_video", "load_scene_references", {
+      jobId,
+      sessionId,
+      rowId,
+      imageReferenceCount: referenceImageDataUrls.length,
+      videoReferenceCount: referenceVideoDataUrl ? 1 : 0
+    });
     const sceneReferenceSources = referenceImageDataUrls.length ? referenceImageDataUrls : (referenceImageDataUrl ? [referenceImageDataUrl] : []);
     const sceneReferences = [];
     for (const imageDataUrl of sceneReferenceSources) {
@@ -4571,6 +4816,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     let sceneReferenceVideoFrameBase64 = "";
     let sceneReferenceVideoFrameMimeType = "image/png";
     if (referenceMode === "video" && referenceVideoDataUrl) {
+      logHeavyWorkMemory("dialogue_video", "extract_reference_frame", {
+        jobId,
+        sessionId,
+        rowId
+      });
       const decodedVideo = decodeBase64DataUrl(referenceVideoDataUrl, MAX_DIALOGUE_VIDEO_BYTES);
       if (!String(decodedVideo.mimeType || referenceVideoMimeType).toLowerCase().startsWith("video/")) {
         return res.status(400).json({ error: "El video de referencia no es válido." });
@@ -4626,6 +4876,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
     }
     if (!continuityFrameBase64 && relateWithPreviousScene && previousScene?.hasVideo) {
+      logHeavyWorkMemory("dialogue_video", "download_previous_scene", {
+        jobId,
+        sessionId,
+        rowId
+      });
       const previousVideoStoragePath = String(previousScene?.videoStoragePath || "").trim();
       const previousVideoUrl = String(previousScene?.videoDownloadUrl || "").trim();
       const previousVideoHintMimeType = String(previousScene?.videoMimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
@@ -5296,6 +5551,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             postDoneGraceAttempts: 6,
             postDoneGraceDelayMs: 2500,
             onPoll: ({ attempt, maxAttempts }) => {
+              logHeavyWorkMemory("dialogue_video", "poll_operation", {
+                jobId,
+                sessionId,
+                rowId,
+                attempt,
+                maxAttempts
+              });
               updateDialogueVideoJob({
                 status: "running",
                 stage: "poll_operation",
@@ -5363,6 +5625,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           headers: {
             "x-goog-api-key": GEMINI_API_KEY
           }
+        });
+        logHeavyWorkMemory("dialogue_video", "download_generated_video", {
+          jobId,
+          sessionId,
+          rowId,
+          model: videoModel,
+          variant: String(variant?.label || "").trim()
         });
         if (!videoResponse.ok) {
           // eslint-disable-next-line no-await-in-loop
@@ -5433,6 +5702,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const sourceVideoBytes = Number(finalVideoBuffer?.length || 0);
     let transcodeMeta = null;
     try {
+      logHeavyWorkMemory("dialogue_video", "transcode_video", {
+        jobId,
+        sessionId,
+        rowId,
+        sourceBytes: sourceVideoBytes
+      });
       transcodeMeta = await transcodeDialogueVideoToMp4(finalVideoBuffer, sourceVideoMimeType);
       finalVideoBuffer = Buffer.from(transcodeMeta.buffer);
       finalVideoMimeType = String(transcodeMeta.mimeType || "video/mp4").trim() || "video/mp4";
@@ -5477,6 +5752,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const speakerSlug = normalizeStorageSegment(speakerLabel, "speaker");
     const clipId = randomUUID();
     const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/videos/${rowSlug}-${speakerSlug}/${clipId}.${ext}`;
+    logHeavyWorkMemory("dialogue_video", "upload_result", {
+      jobId,
+      sessionId,
+      rowId,
+      outputBytes: Number(finalVideoBuffer?.length || 0) || 0
+    });
     const asset = await uploadScreenshotAsset({
       path: storagePath,
       buffer: finalVideoBuffer,
@@ -5537,7 +5818,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       message: String(error?.message || "No se pudo generar video del diálogo."),
       stack: String(error?.stack || "").split("\n").slice(0, 3).join(" | ")
     });
-    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo generar video del diálogo.") });
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.message || "No se pudo generar video del diálogo."),
+      code: String(error?.code || "").trim() || undefined,
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
+  } finally {
+    releaseHeavyWorkSlot("dialogue_video", jobId);
   }
 });
 
@@ -6282,6 +6569,40 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       ? (getAudioExtension(String(asset?.mimeType || "audio/mpeg")) || "audio")
       : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
     const outPath = path.join(tmpDir, `in-${kind}-${String(index + 1).padStart(3, "0")}.${ext}`);
+    const validateDownloadedAsset = async (targetPath = "") => {
+      const stat = await fs.promises.stat(targetPath).catch(() => null);
+      if (!stat || !stat.isFile() || Number(stat.size || 0) <= 0) {
+        const err = new Error("downloaded_asset_invalid");
+        err.code = "downloaded_asset_invalid";
+        err.status = 502;
+        err.detail = {
+          kind,
+          index,
+          outPath: targetPath,
+          sizeBytes: Number(stat?.size || 0) || 0
+        };
+        throw err;
+      }
+      return targetPath;
+    };
+    const downloadWithTimeout = async (task, label = "download") => withTimeout(
+      task,
+      MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS,
+      (timeoutMs) => {
+        const err = new Error(`${label}_timeout`);
+        err.code = "scene_download_timeout";
+        err.status = 504;
+        err.timeoutMs = timeoutMs;
+        err.detail = {
+          kind,
+          index,
+          storagePath,
+          url: url ? redactUrlForLogs(url) : "",
+          label
+        };
+        return err;
+      }
+    );
     const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
       const clean = normalizeStorageFilePath(pathInput);
       const uidClean = String(uidRaw || "").trim();
@@ -6304,8 +6625,8 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
 
     if (storagePath) {
       try {
-        await downloadStoragePathToFile(storagePath, outPath);
-        return outPath;
+        await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath), "storage_download");
+        return validateDownloadedAsset(outPath);
       } catch (error) {
         const code = String(error?.code || error?.message || "").trim();
         if (code === "storage_not_found") {
@@ -6313,13 +6634,14 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
           for (const altPath of altPaths) {
             try {
               // eslint-disable-next-line no-await-in-loop
-              await downloadStoragePathToFile(altPath, outPath);
-              return outPath;
+              await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath), "storage_download");
+              // eslint-disable-next-line no-await-in-loop
+              return await validateDownloadedAsset(outPath);
             } catch (_) {}
           }
           if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
-            await downloadUrlToFile(url, outPath);
-            return outPath;
+            await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+            return validateDownloadedAsset(outPath);
           }
         }
         error.detail = {
@@ -6332,8 +6654,8 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
         throw error;
       }
     }
-    await downloadUrlToFile(url, outPath);
-    return outPath;
+    await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+    return validateDownloadedAsset(outPath);
   };
 }
 
@@ -6346,6 +6668,24 @@ function createMontageStageReporter(onStage = null) {
         hint: String(hint || "").trim(),
         ...extra
       });
+    }
+  };
+}
+
+function buildMontageSceneFailure(error = null, fallback = {}) {
+  const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
+  return {
+    error: String(error?.code || error?.message || fallback?.error || "montage_scene_failed").trim(),
+    code: String(error?.code || fallback?.code || "").trim(),
+    status: Number(error?.status || fallback?.status || 500) || 500,
+    detail: {
+      ...detail,
+      stage: String(detail?.stage || error?.stage || fallback?.stage || "").trim() || undefined,
+      failedSceneIndex: Number(fallback?.failedSceneIndex || detail?.failedSceneIndex || 0) || undefined,
+      failedRowId: String(fallback?.failedRowId || detail?.failedRowId || "").trim() || undefined,
+      failedSubstage: String(fallback?.failedSubstage || detail?.failedSubstage || "").trim() || undefined,
+      stderrPreview: buildMontageStderrPreview(error?.stderr || detail?.stderrPreview || "", 12, 2200) || undefined,
+      stdoutPreview: buildMontageStderrPreview(error?.stdout || detail?.stdoutPreview || "", 8, 1200) || undefined
     }
   };
 }
@@ -6563,6 +6903,26 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediatePaths = [];
     const skippedEntries = [];
     const exportedEntries = [];
+    const emitSceneSubstage = ({
+      sceneIndex = 0,
+      rowId = "",
+      totalScenes = 0,
+      substage = "",
+      hint = "",
+      progress = 0,
+      storagePath = "",
+      downloadUrl = ""
+    } = {}) => {
+      emitStage("render_scene_segments", progress, hint, {
+        currentSceneIndex: sceneIndex,
+        currentRowId: rowId,
+        totalScenes,
+        sceneSubstage: String(substage || "").trim() || undefined,
+        currentStoragePath: clampText(storagePath || "", 900) || undefined,
+        currentDownloadUrl: downloadUrl ? redactUrlForLogs(downloadUrl) : undefined,
+        lastHeartbeatAt: new Date().toISOString()
+      });
+    };
     emitStage("download_assets", 0.14, "Descargando videos y audio fuente.");
     logMontageMemory("download_assets_start", {
       jobId,
@@ -6602,16 +6962,113 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         totalScenes: input.entries.length
       });
       logMontageMemory("render_scene_before", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
+      let currentSceneSubstage = "scene_download_video";
       try {
+        const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
+        const videoDownloadUrl = String(videoAsset?.url || "").trim();
+        const sceneProgressBase = 0.18 + ((i / Math.max(1, input.entries.length)) * 0.26);
+        const sceneStepStartMs = Date.now();
+        emitSceneSubstage({
+          sceneIndex,
+          rowId,
+          totalScenes: input.entries.length,
+          substage: currentSceneSubstage,
+          hint: `Descargando asset de la escena ${sceneIndex} de ${input.entries.length}.`,
+          progress: sceneProgressBase,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl
+        });
+        console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_download_video"
+        }));
         const inputVideoPath = await downloadInput(videoAsset, "video", i);
+        const downloadedVideoStat = await fs.promises.stat(inputVideoPath).catch(() => null);
+        console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_download_video",
+          elapsedMs: Date.now() - sceneStepStartMs,
+          extra: {
+            localPath: inputVideoPath,
+            sizeBytes: Number(downloadedVideoStat?.size || 0) || 0
+          }
+        }));
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
         const inputAudioPath = (!forceSilentAudio && !useNativeVideoAudio && audioAsset) ? await downloadInput(audioAsset, "audio", i) : "";
         const intermediatePath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}.${outExt}`);
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
           : "default";
+        emitSceneSubstage({
+          sceneIndex,
+          rowId,
+          totalScenes: input.entries.length,
+          substage: "scene_probe_audio",
+          hint: `Analizando audio de la escena ${sceneIndex} de ${input.entries.length}.`,
+          progress: sceneProgressBase + 0.015,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl
+        });
+        console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_probe_audio"
+        }));
+        const probeAudioStartMs = Date.now();
+        currentSceneSubstage = "scene_probe_audio";
         const videoHasAudio = await probeMediaHasAudioWithFfmpeg(inputVideoPath);
-        const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, `montage_scene_probe_${sceneIndex}`).catch(() => ({ width: 1280, height: 720 }));
+        console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_probe_audio",
+          elapsedMs: Date.now() - probeAudioStartMs,
+          extra: { videoHasAudio }
+        }));
+        emitSceneSubstage({
+          sceneIndex,
+          rowId,
+          totalScenes: input.entries.length,
+          substage: "scene_probe_dimensions",
+          hint: `Analizando dimensiones de la escena ${sceneIndex} de ${input.entries.length}.`,
+          progress: sceneProgressBase + 0.03,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl
+        });
+        console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_probe_dimensions"
+        }));
+        const probeDimensionsStartMs = Date.now();
+        currentSceneSubstage = "scene_probe_dimensions";
+        const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, `montage_scene_probe_${sceneIndex}`);
+        console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_probe_dimensions",
+          elapsedMs: Date.now() - probeDimensionsStartMs,
+          extra: sourceDims
+        }));
         const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
         const args = ["-y", "-hide_banner", "-loglevel", "warning", "-i", inputVideoPath];
         
@@ -6661,7 +7118,45 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         args.push("-map", "[vout]", "-map", audioMapLabel);
         args.push("-r", "24", "-c:v", params.vCodec);
         args.push(...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", params.aCodec, "-ar", "48000", ...params.aArgs, intermediatePath);
-        await runFfmpegCommand(args, { stage: `montage_scene_${sceneIndex}` });
+        emitSceneSubstage({
+          sceneIndex,
+          rowId,
+          totalScenes: input.entries.length,
+          substage: "scene_ffmpeg_render",
+          hint: `Renderizando video de la escena ${sceneIndex} de ${input.entries.length}.`,
+          progress: sceneProgressBase + 0.05,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl
+        });
+        console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_ffmpeg_render"
+        }));
+        const renderStartMs = Date.now();
+        currentSceneSubstage = "scene_ffmpeg_render";
+        await runFfmpegCommand(args, {
+          stage: `montage_scene_${sceneIndex}`,
+          timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
+          timeoutCode: "scene_render_timeout"
+        });
+        const renderedSceneStat = await fs.promises.stat(intermediatePath).catch(() => null);
+        console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
+          jobId,
+          sceneIndex,
+          rowId,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl,
+          substage: "scene_ffmpeg_render",
+          elapsedMs: Date.now() - renderStartMs,
+          extra: {
+            outputPath: intermediatePath,
+            outputSizeBytes: Number(renderedSceneStat?.size || 0) || 0
+          }
+        }));
         intermediatePaths.push(intermediatePath);
         exportedEntries.push({
           sceneIndex,
@@ -6678,8 +7173,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           visualNotes: clampText(entry?.visualNotes || "", 2200),
           videoDirective: clampText(entry?.videoDirective || "", 2200)
         });
+        emitSceneSubstage({
+          sceneIndex,
+          rowId,
+          totalScenes: input.entries.length,
+          substage: "scene_complete",
+          hint: `Escena ${sceneIndex} lista.`,
+          progress: sceneProgressBase + 0.07,
+          storagePath: videoStoragePath,
+          downloadUrl: videoDownloadUrl
+        });
         logMontageMemory("render_scene_after", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       } catch (error) {
+        error.detail = {
+          ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
+          failedSceneIndex: sceneIndex,
+          failedRowId: rowId,
+          failedSubstage: String(error?.detail?.failedSubstage || currentSceneSubstage || error?.code || "").trim() || undefined
+        };
         if (!shouldSkipMontageEntryError(error)) throw error;
         const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
         skippedEntries.push(buildMontageSkippedEntry(entry, i, String(error?.code || error?.message || "scene_asset_unavailable"), {
@@ -7052,12 +7563,19 @@ async function renderMontagePreviewMedia(rawInput = {}, context = {}) {
 }
 
 app.post("/api/podcaster/montage/export", async (req, res) => {
+  let acquiredJobId = "";
   try {
     cleanupMontageExportJobs();
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
     validateMontageExportRequest(input);
     const jobId = clampExportId(randomUUID());
+    const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+    if (!slot?.ok) {
+      const busyError = slot?.error || buildHeavyWorkBusyError("montage_export", getActiveHeavyWorkJobId());
+      return res.status(Number(busyError?.status || 503)).json(buildBackendBusyJson("montage_export", String(busyError?.detail?.activeJobId || "").trim()));
+    }
+    acquiredJobId = jobId;
     const initial = upsertMontageExportJob(jobId, {
       status: "running",
       stage: "validate_payload",
@@ -7070,12 +7588,14 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       uid,
       jobId,
       baseUrl,
-      onStage: ({ stage, progress, hint }) => {
+      onStage: ({ stage, progress, hint, ...extra }) => {
         upsertMontageExportJob(jobId, {
           status: stage === "ready" ? "ready" : "running",
           stage,
           progress,
-          hint
+          hint,
+          lastHeartbeatAt: new Date().toISOString(),
+          ...extra
         });
       }
     }).then((result) => {
@@ -7086,34 +7606,41 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         hint: "Exportación lista.",
         warnings: result?.warnings ? [result.warnings] : [],
         export: result?.export || null,
-        downloadUrl: String(result?.downloadUrl || "").trim()
+        downloadUrl: String(result?.downloadUrl || "").trim(),
+        sceneSubstage: "scene_complete",
+        lastHeartbeatAt: new Date().toISOString()
       });
+      releaseHeavyWorkSlot("montage_export", jobId);
     }).catch((error) => {
       console.error("[backend][montage-export] error", {
         status: Number(error?.status || 500),
         message: String(error?.message || "montage_export_failed"),
         code: String(error?.code || ""),
         detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined,
-        stderrPreview: String(error?.stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200)
+        stderrPreview: buildMontageStderrPreview(error?.stderr || "")
+      });
+      const sceneFailure = buildMontageSceneFailure(error, {
+        failedSceneIndex: Number(error?.detail?.failedSceneIndex || 0) || 0,
+        failedRowId: String(error?.detail?.failedRowId || "").trim(),
+        failedSubstage: String(error?.detail?.failedSubstage || "").trim(),
+        stage: String(error?.detail?.stage || error?.stage || "").trim()
       });
       upsertMontageExportJob(jobId, {
         status: "error",
         stage: "error",
         progress: Math.max(0.04, Math.min(0.98, Number(getMontageExportJob(jobId)?.progress || 0) || 0)),
         hint: String(error?.message || error?.code || "No se pudo exportar el montaje.").trim(),
-        error: {
-          error: String(error?.code || error?.message || "montage_export_failed").trim(),
-          code: String(error?.code || "").trim(),
-          status: Number(error?.status || 500),
-          detail: error?.detail && typeof error.detail === "object" ? error.detail : {
-            stage: String(error?.detail?.stage || error?.stage || "").trim() || undefined,
-            stderrPreview: String(error?.stderr || "").split(/\r?\n/).slice(-12).join(" | ").slice(0, 2200) || undefined
-          }
-        }
+        failedSceneIndex: sceneFailure?.detail?.failedSceneIndex || undefined,
+        failedRowId: sceneFailure?.detail?.failedRowId || undefined,
+        failedSubstage: sceneFailure?.detail?.failedSubstage || undefined,
+        lastHeartbeatAt: new Date().toISOString(),
+        error: sceneFailure
       });
+      releaseHeavyWorkSlot("montage_export", jobId);
     });
     return res.status(202).json(sanitizeMontageJobPublicPayload(initial));
   } catch (error) {
+    if (acquiredJobId) releaseHeavyWorkSlot("montage_export", acquiredJobId);
     return res.status(Number(error?.status || 500)).json({
       error: String(error?.code || error?.message || "montage_export_failed").trim(),
       code: String(error?.code || "").trim() || undefined,
@@ -7147,6 +7674,19 @@ app.post("/api/podcaster/montage/preview", async (req, res) => {
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
+    if (getActiveHeavyWorkKind()) {
+      return res.status(200).json({
+        ok: false,
+        code: "preview_temporarily_disabled",
+        hint: "El preview quedó pausado mientras corre la exportación o generación pesada.",
+        degraded: true,
+        mode: String(req.body?.exportMode || "normal").trim() || "normal",
+        sceneIndex: 0,
+        rowId: clampText(req.body?.previewRowId || "", 140),
+        mediaType: "",
+        previewDataUrl: ""
+      });
+    }
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
     // Keep montage preview cheap in production so it does not compete with the

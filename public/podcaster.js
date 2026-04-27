@@ -74,6 +74,8 @@ const SPEECH_WORDS_PER_SEC = 2.4;
 const MAX_LOCAL_MUSIC_DATA_URL_CHARS = 1_800_000;
 const MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS = 900_000;
 const MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS = 8_000_000;
+const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 2;
+const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 const MAX_CLOUD_SESSION_PAYLOAD_BYTES = 900 * 1024;
 const CLOUD_SESSION_PAYLOAD_TARGET_BYTES = 860 * 1024;
 const DEFAULT_DISFLUENCY_CONFIG = Object.freeze({
@@ -1184,6 +1186,10 @@ function shouldDisableMontagePreviewInCurrentRuntime() {
   return isRenderBackedApiRuntime();
 }
 
+function shouldSuspendMontagePreviewActivity() {
+  return montageExportBusy === true || shouldDisableMontagePreviewInCurrentRuntime();
+}
+
 let montageExportPreviewState = {
   loading: false,
   error: "",
@@ -1202,6 +1208,7 @@ let montageExportJobState = {
   jobId: "",
   pollTimer: null,
   lastStage: "",
+  lastSceneSubstage: "",
   lastHint: "",
   lastProgress: -1,
   pollFailureCount: 0,
@@ -4367,6 +4374,60 @@ function nowIso() {
 
 function sleep(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function estimateInlineDataUrlBytes(dataUrl = "") {
+  const value = String(dataUrl || "").trim();
+  if (!value.startsWith("data:")) return 0;
+  const commaIndex = value.indexOf(",");
+  if (commaIndex < 0) return 0;
+  const header = value.slice(0, commaIndex).toLowerCase();
+  const payload = value.slice(commaIndex + 1).replace(/\s+/g, "");
+  if (!payload) return 0;
+  if (!header.includes(";base64")) return payload.length;
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+}
+
+function normalizeInlineDataUrl(value = "") {
+  const clean = String(value || "").trim();
+  return clean.startsWith("data:") ? clean : "";
+}
+
+function buildDialogueVideoInlineReferenceBudget(rowReferenceImages = [], rowReferenceVideo = null, continuityReferenceImageDataUrl = "") {
+  const referenceImageDataUrls = rowReferenceImages
+    .map((item) => normalizeInlineDataUrl(item?.dataUrl || ""))
+    .filter(Boolean)
+    .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
+  const referenceVideoDataUrl = normalizeInlineDataUrl(rowReferenceVideo?.dataUrl || "");
+  const continuityDataUrl = normalizeInlineDataUrl(continuityReferenceImageDataUrl || "");
+  const totalInlineBytes = [
+    ...referenceImageDataUrls,
+    referenceVideoDataUrl,
+    continuityDataUrl
+  ].reduce((sum, item) => sum + estimateInlineDataUrlBytes(item), 0);
+  return {
+    referenceImageDataUrls,
+    referenceVideoDataUrl,
+    continuityReferenceImageDataUrl: continuityDataUrl,
+    totalInlineBytes
+  };
+}
+
+function buildPodcasterApiErrorMessage(error = null, fallback = "") {
+  const status = Number(error?.status || 0) || 0;
+  const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
+  const code = String(detail?.code || error?.code || error?.message || "").trim();
+  if (status === 503 && code === "backend_busy") {
+    return "El backend está ocupado con otra exportación o generación de video. Reintenta en unos segundos.";
+  }
+  if (status === 413 && code === "payload_too_large") {
+    return "La escena tiene demasiadas referencias cargadas para procesarla de forma estable.";
+  }
+  if (status === 404 && code === "job_not_found") {
+    return "Render reinició el servicio y se perdió el estado del job.";
+  }
+  return String(fallback || error?.message || "No se pudo completar la acción.").trim() || "No se pudo completar la acción.";
 }
 
 async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
@@ -18734,6 +18795,14 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
       const rowReferenceVideo = getRowReferenceVideoMap(session)[key] || null;
       const rowReferenceMode = (getRowReferenceModeByRowId(session)[key] === "video" && rowReferenceVideo) ? "video" : "image";
+      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(
+        rowReferenceImages,
+        rowReferenceMode === "video" ? rowReferenceVideo : null,
+        continuityReferenceImageDataUrl
+      );
+      if (inlineReferenceBudget.totalInlineBytes > DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES) {
+        throw new Error("La escena tiene demasiadas referencias cargadas para procesarla de forma estable.");
+      }
       const segmentCount = cheapVideoMode
         ? 1
         : Math.max(1, Math.min(12, Math.ceil(Math.max(0.1, audioDurationSec || 0.1) / 8)));
@@ -18787,17 +18856,17 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           portraitStoragePath,
           referenceMode: rowReferenceMode,
           referenceImageDataUrls: rowReferenceMode === "image"
-            ? rowReferenceImages.map((item) => String(item?.dataUrl || "").trim()).filter(Boolean).slice(0, 4)
+            ? inlineReferenceBudget.referenceImageDataUrls
             : [],
           referenceImageNames: rowReferenceMode === "image"
-            ? rowReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, 4)
+            ? rowReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT)
             : [],
-          referenceImageDataUrl: rowReferenceMode === "image" ? String(rowReferenceImage?.dataUrl || "").trim() : "",
+          referenceImageDataUrl: rowReferenceMode === "image" ? String(inlineReferenceBudget.referenceImageDataUrls[0] || "").trim() : "",
           referenceImageName: rowReferenceMode === "image" ? String(rowReferenceImage?.name || "").trim() : "",
-          referenceVideoDataUrl: rowReferenceMode === "video" ? String(rowReferenceVideo?.dataUrl || "").trim() : "",
+          referenceVideoDataUrl: rowReferenceMode === "video" ? String(inlineReferenceBudget.referenceVideoDataUrl || "").trim() : "",
           referenceVideoName: rowReferenceMode === "video" ? String(rowReferenceVideo?.name || "").trim() : "",
           referenceVideoMimeType: rowReferenceMode === "video" ? String(rowReferenceVideo?.mimeType || "video/mp4").trim() : "",
-          continuityReferenceImageDataUrl: (relateWithPreviousScene && i === 0) ? String(continuityReferenceImageDataUrl || "").trim() : "",
+          continuityReferenceImageDataUrl: (relateWithPreviousScene && i === 0) ? String(inlineReferenceBudget.continuityReferenceImageDataUrl || "").trim() : "",
           forceImmediateSceneChange: (relateWithPreviousScene && i === 0) ? forceImmediateSceneChange : false,
           previousScene: previousRow
             ? {
@@ -18856,6 +18925,12 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           } catch (error) {
             lastError = error;
             const status = Number(error?.status || 0);
+            if (status === 503 && String(error?.detail?.code || error?.message || "").trim() === "backend_busy") {
+              throw new Error("El backend está ocupado con otra exportación o generación de video. Reintenta en unos segundos.");
+            }
+            if (status === 413 && String(error?.detail?.code || error?.message || "").trim() === "payload_too_large") {
+              throw new Error("La escena tiene demasiadas referencias cargadas para procesarla de forma estable.");
+            }
             if (status !== 429 || attempt >= maxAttempts) {
               throw error;
             }
@@ -18942,6 +19017,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       }
       return first;
     } catch (error) {
+      const normalizedMessage = buildPodcasterApiErrorMessage(error, error?.message || "error desconocido");
       try {
         console.error("[podcaster] generateDialogueVideoForRow failed", {
           sessionId,
@@ -18953,7 +19029,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           hasPortraitAsset,
           educationalMode,
           status: Number(error?.status || 0),
-          message: String(error?.message || "error desconocido"),
+          message: normalizedMessage,
           detail: error?.detail || null
         });
       } catch (_) {
@@ -18962,8 +19038,9 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       logPodcastBatchDebug("generate-row-task-error", {
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
-        message: String(error?.message || "error desconocido")
+        message: normalizedMessage
       });
+      error.message = normalizedMessage;
       throw error;
     } finally {
       dialogueVideoGenerationPending.delete(pendingKey);
@@ -20715,6 +20792,7 @@ function resetMontageExportJobState() {
     jobId: "",
     pollTimer: null,
     lastStage: "",
+    lastSceneSubstage: "",
     lastHint: "",
     lastProgress: -1,
     pollFailureCount: 0,
@@ -20847,6 +20925,9 @@ function setMontageExportStatus(text = "", hint = "", options = {}) {
 
 function setMontageExportBusy(isBusy = false) {
   if (els.confirmMontageExportBtn) els.confirmMontageExportBtn.disabled = Boolean(isBusy);
+  if (els.generateAllDialogueVideosBtn) els.generateAllDialogueVideosBtn.disabled = Boolean(isBusy) || podcastVideoState.busy;
+  if (els.regenerateAllDialogueVideosBtn) els.regenerateAllDialogueVideosBtn.disabled = Boolean(isBusy) || podcastVideoState.busy;
+  if (els.generateDialogueVideoBtn) els.generateDialogueVideoBtn.disabled = Boolean(isBusy);
   if (els.montageExportModal) {
     els.montageExportModal.classList.toggle("is-busy", Boolean(isBusy));
     if (!isBusy) els.montageExportModal.classList.remove("is-progress");
@@ -20885,6 +20966,21 @@ function describeMontageExportStage(stage = "", mode = montageExportState.export
   return map[clean] || (review ? "Creando tu video de revisión…" : "Creando tu video…");
 }
 
+function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, totalScenes = 0) {
+  const clean = String(substage || "").trim();
+  const sceneLabel = sceneIndex > 0
+    ? `escena ${sceneIndex}${totalScenes > 0 ? ` de ${totalScenes}` : ""}`
+    : "escena actual";
+  const map = {
+    scene_download_video: `Descargando asset de ${sceneLabel}…`,
+    scene_probe_audio: `Analizando audio de ${sceneLabel}…`,
+    scene_probe_dimensions: `Analizando dimensiones de ${sceneLabel}…`,
+    scene_ffmpeg_render: `Renderizando video de ${sceneLabel}…`,
+    scene_complete: sceneIndex > 0 ? `Escena ${sceneIndex} lista.` : "Escena lista."
+  };
+  return map[clean] || "";
+}
+
 async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
@@ -20899,22 +20995,29 @@ async function pollMontageExportJob(jobId = "") {
     if (String(montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     montageExportJobState.pollFailureCount = 0;
     const stage = String(data?.stage || "").trim();
+    const sceneSubstage = String(data?.sceneSubstage || "").trim();
     const hint = String(data?.hint || "").trim();
     const progress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
     const currentRowId = String(data?.currentRowId || "").trim();
     const currentSceneIndex = Math.max(0, Number(data?.currentSceneIndex || 0) || 0);
     const totalScenes = Math.max(0, Number(data?.totalScenes || 0) || 0);
-    const changed = stage !== montageExportJobState.lastStage || hint !== montageExportJobState.lastHint || Math.abs(progress - montageExportJobState.lastProgress) > 0.001;
+    const failedSceneIndex = Math.max(0, Number(data?.failedSceneIndex || data?.error?.detail?.failedSceneIndex || 0) || 0);
+    const failedSubstage = String(data?.failedSubstage || data?.error?.detail?.failedSubstage || "").trim();
+    const changed = stage !== montageExportJobState.lastStage || sceneSubstage !== montageExportJobState.lastSceneSubstage || hint !== montageExportJobState.lastHint || Math.abs(progress - montageExportJobState.lastProgress) > 0.001;
     if (changed) {
       montageExportJobState.lastStage = stage;
+      montageExportJobState.lastSceneSubstage = sceneSubstage;
       montageExportJobState.lastHint = hint;
       montageExportJobState.lastProgress = progress;
       setMontageExportProgress(progress);
-      setMontageExportStatus(describeMontageExportStage(stage, montageExportState.exportMode), hint, {
+      const stageLabel = stage === "render_scene_segments" && sceneSubstage
+        ? describeMontageExportSceneSubstage(sceneSubstage, currentSceneIndex, totalScenes) || describeMontageExportStage(stage, montageExportState.exportMode)
+        : describeMontageExportStage(stage, montageExportState.exportMode);
+      setMontageExportStatus(stageLabel, hint, {
         tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
       });
     }
-    if (stage === "render_scene_segments" && currentRowId && !shouldDisableMontagePreviewInCurrentRuntime()) {
+    if (stage === "render_scene_segments" && currentRowId && !shouldSuspendMontagePreviewActivity()) {
       maybeRefreshMontageExportPreviewFromJob({
         rowId: currentRowId,
         sceneIndex: currentSceneIndex,
@@ -20968,12 +21071,19 @@ async function pollMontageExportJob(jobId = "") {
       clearMontageExportPolling();
       const err = data?.error && typeof data.error === "object" ? data.error : null;
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
+      const failedLabel = failedSubstage
+        ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
+        : "";
       setMontageExportProgress(null);
       setMontageExportStatus(
         "No pudimos exportar tu video.",
         skippedEntries.length
           ? `Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`
-          : String(err?.detail?.stderrPreview || hint || err?.error || "Revisa la composición review y vuelve a intentar.").trim(),
+          : [
+              failedLabel ? `${failedLabel}` : "",
+              failedSceneIndex > 0 ? `Fallo en la escena ${failedSceneIndex}.` : "",
+              String(err?.detail?.stderrPreview || hint || err?.error || "Revisa la composición review y vuelve a intentar.").trim()
+            ].filter(Boolean).join(" "),
         { tone: "error" }
       );
       montageExportBusy = false;
@@ -20993,7 +21103,7 @@ async function pollMontageExportJob(jobId = "") {
       setMontageExportProgress(null);
       setMontageExportStatus(
         "Se perdió el estado del export en el backend.",
-        "El servicio probablemente se reinició durante la exportación. Intenta exportar otra vez.",
+        "El backend se reinició durante la exportación. Vuelve a exportar.",
         { tone: "error" }
       );
       return;
@@ -21042,7 +21152,7 @@ function getMontagePreviewRowId() {
 }
 
 function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
-  if (shouldDisableMontagePreviewInCurrentRuntime()) return;
+  if (shouldSuspendMontagePreviewActivity()) return;
   const cleanRowId = String(rowId || "").trim();
   if (!cleanRowId || !els.montageExportModal || els.montageExportModal.hidden) return;
   const now = Date.now();
@@ -21063,7 +21173,7 @@ function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, t
 
 async function refreshMontageExportPreviewNow(options = {}) {
   if (!els.montageExportModal || els.montageExportModal.hidden) return;
-  if (shouldDisableMontagePreviewInCurrentRuntime()) {
+  if (shouldSuspendMontagePreviewActivity()) {
     setMontageExportPreviewState({
       loading: false,
       error: "",
@@ -21072,7 +21182,9 @@ async function refreshMontageExportPreviewNow(options = {}) {
       mode: montageExportState.exportMode,
       sceneIndex: 0,
       disabled: true,
-      meta: "Preview desactivado temporalmente para priorizar la exportación."
+      meta: montageExportBusy
+        ? "Preview pausado mientras se exporta el video."
+        : "Preview desactivado temporalmente para priorizar la exportación."
     });
     return;
   }
@@ -21135,14 +21247,18 @@ async function refreshMontageExportPreviewNow(options = {}) {
     });
     if (montageExportPreviewState.requestSeq !== requestSeq) return;
     if (data?.ok === false) {
+      const previewDisabled = String(data?.code || "").trim() === "preview_temporarily_disabled";
       setMontageExportPreviewState({
         loading: false,
-        error: "No se pudo generar el preview real del export.",
+        error: previewDisabled ? "" : "No se pudo generar el preview real del export.",
         dataUrl: "",
         mediaType: "",
         mode: data?.mode || payload.exportMode,
         sceneIndex: 0,
-        meta: "Puedes exportar aunque el preview falle."
+        disabled: previewDisabled,
+        meta: previewDisabled
+          ? "El preview quedó pausado mientras corre la exportación."
+          : "Puedes exportar aunque el preview falle."
       });
       return;
     }
@@ -21170,7 +21286,7 @@ async function refreshMontageExportPreviewNow(options = {}) {
 }
 
 function scheduleMontageExportPreviewRefresh(delayMs = 280) {
-  if (shouldDisableMontagePreviewInCurrentRuntime()) {
+  if (shouldSuspendMontagePreviewActivity()) {
     if (!els.montageExportModal || els.montageExportModal.hidden) return;
     setMontageExportPreviewState({
       loading: false,
@@ -21180,7 +21296,9 @@ function scheduleMontageExportPreviewRefresh(delayMs = 280) {
       mode: montageExportState.exportMode,
       sceneIndex: 0,
       disabled: true,
-      meta: "Preview desactivado temporalmente para priorizar la exportación."
+      meta: montageExportBusy
+        ? "Preview pausado mientras se exporta el video."
+        : "Preview desactivado temporalmente para priorizar la exportación."
     });
     return;
   }
@@ -21631,6 +21749,20 @@ async function runMontageExport() {
   montageExportBusy = true;
   setTimelinePreviewsSuspended(true);
   setMontageExportBusy(true);
+  if (montageExportPreviewState.debounceTimer) {
+    window.clearTimeout(montageExportPreviewState.debounceTimer);
+    montageExportPreviewState.debounceTimer = null;
+  }
+  setMontageExportPreviewState({
+    loading: false,
+    error: "",
+    dataUrl: "",
+    mediaType: "",
+    mode: montageExportState.exportMode,
+    sceneIndex: 0,
+    disabled: true,
+    meta: "Preview pausado mientras se exporta el video."
+  });
   resetMontageExportJobState();
   setMontageExportProgress(0.08);
   setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
@@ -21666,6 +21798,9 @@ async function runMontageExport() {
     if (skippedEntries.length) {
       hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
+    } else if (status === 503 && String(apiPayload?.code || "").trim() === "backend_busy") {
+      hintParts.push("El backend está ocupado con otra exportación o generación de video.");
+      hintParts.push("Reintenta en unos segundos.");
     } else if (String(code).includes("storage_not_found")) {
       hintParts.push("Hay escenas que ya no tienen su archivo de video/audio.");
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
