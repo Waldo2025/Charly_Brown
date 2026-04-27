@@ -927,6 +927,28 @@ function sanitizeMontageJobPublicPayload(job = null) {
   return payload;
 }
 
+function summarizeMemoryUsage() {
+  try {
+    const usage = process.memoryUsage();
+    return {
+      rssMb: Math.round((Number(usage?.rss || 0) / (1024 * 1024)) * 10) / 10,
+      heapUsedMb: Math.round((Number(usage?.heapUsed || 0) / (1024 * 1024)) * 10) / 10,
+      heapTotalMb: Math.round((Number(usage?.heapTotal || 0) / (1024 * 1024)) * 10) / 10,
+      externalMb: Math.round((Number(usage?.external || 0) / (1024 * 1024)) * 10) / 10
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function logMontageMemory(stage = "", extra = {}) {
+  console.info("[backend][montage-export][memory]", {
+    stage: String(stage || "").trim() || "unknown",
+    ...extra,
+    memory: summarizeMemoryUsage()
+  });
+}
+
 async function persistMontageExportJob(job = null) {
   const source = job && typeof job === "object" ? job : null;
   const jobId = clampExportId(source?.jobId || "");
@@ -6519,6 +6541,7 @@ async function renderMontageOverlapComposition({
 async function executeMontageExportPipeline(rawInput = {}, context = {}) {
   const input = rawInput && typeof rawInput === "object" ? rawInput : {};
   const uid = String(context?.uid || "").trim();
+  const jobId = clampExportId(context?.jobId || "");
   const emitStage = createMontageStageReporter(context?.onStage);
   let tmpDir = "";
   try {
@@ -6541,6 +6564,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const skippedEntries = [];
     const exportedEntries = [];
     emitStage("download_assets", 0.14, "Descargando videos y audio fuente.");
+    logMontageMemory("download_assets_start", {
+      jobId,
+      sceneCount: Array.isArray(input.entries) ? input.entries.length : 0
+    });
 
     for (let i = 0; i < input.entries.length; i += 1) {
       const entry = input.entries[i] || {};
@@ -6574,6 +6601,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         currentRowId: rowId,
         totalScenes: input.entries.length
       });
+      logMontageMemory("render_scene_before", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       try {
         const inputVideoPath = await downloadInput(videoAsset, "video", i);
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
@@ -6650,6 +6678,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           visualNotes: clampText(entry?.visualNotes || "", 2200),
           videoDirective: clampText(entry?.videoDirective || "", 2200)
         });
+        logMontageMemory("render_scene_after", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       } catch (error) {
         if (!shouldSkipMontageEntryError(error)) throw error;
         const detail = error?.detail && typeof error.detail === "object" ? error.detail : {};
@@ -6683,6 +6712,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const overlapPlan = buildMontageOverlapCompositionPlan(exportedEntries);
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, overlapPlan.hasOverlap ? "Componiendo escenas con transiciones por solapamiento." : "Uniendo escenas en un solo timeline.");
+    logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
     if (overlapPlan.hasOverlap) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
@@ -6712,6 +6742,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         concatOutPath
       ], { stage: "montage_concat" });
     }
+    logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
 
     const exportOffsetsByRowId = new Map();
     const overlapAwareEntries = overlapPlan.entries.length ? overlapPlan.entries : exportedEntries;
@@ -6742,6 +6773,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         0.60
       );
       emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
+      logMontageMemory("mix_timeline_audio_start", {
+        jobId,
+        timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0
+      });
       for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
         const segment = input.timelineAudioSegments[i] || {};
         try {
@@ -6797,6 +6832,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         ], { stage: "montage_mix_timeline_audio" });
         finalOutPath = timelineMixedOutPath;
       }
+      logMontageMemory("mix_timeline_audio_after", {
+        jobId,
+        timelineSegmentCount: segmentInputs.length
+      });
     }
     if (input.includeBackgroundMusic) {
       emitStage("mix_background_music", 0.7, "Mezclando música de fondo.");
@@ -6899,7 +6938,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     }
 
     emitStage("cache_output", 0.96, "Guardando archivo final para descarga.");
+    logMontageMemory("cache_output_start", { jobId, exportedSceneCount: exportedEntries.length });
     const stored = await storeMontageExportResult(finalOutPath, input, context);
+    logMontageMemory("cache_output_after", { jobId, exportId: String(stored?.exportId || "").trim() });
     emitStage("ready", 1, "Exportación lista.");
     return {
       export: {
@@ -7023,9 +7064,11 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       progress: 0.04,
       hint: "Preparando exportación."
     });
+    await persistMontageExportJob(initial);
     const baseUrl = resolvePublicBaseUrl(req) || `http://127.0.0.1:${PORT}`;
     void executeMontageExportPipeline(input, {
       uid,
+      jobId,
       baseUrl,
       onStage: ({ stage, progress, hint }) => {
         upsertMontageExportJob(jobId, {

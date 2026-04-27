@@ -1174,6 +1174,16 @@ function persistMontageExportSettings() {
 
 let montageExportState = loadMontageExportSettings();
 let montageExportBusy = false;
+
+function isRenderBackedApiRuntime() {
+  const apiBase = String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim().toLowerCase();
+  return apiBase.includes(".onrender.com/api");
+}
+
+function shouldDisableMontagePreviewInCurrentRuntime() {
+  return isRenderBackedApiRuntime();
+}
+
 let montageExportPreviewState = {
   loading: false,
   error: "",
@@ -1181,6 +1191,7 @@ let montageExportPreviewState = {
   mediaType: "",
   mode: "normal",
   sceneIndex: 0,
+  disabled: false,
   lastSignature: "",
   debounceTimer: null,
   requestSeq: 0,
@@ -20713,17 +20724,20 @@ function resetMontageExportJobState() {
   };
 }
 
-function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = montageExportState.exportMode, sceneIndex = 0, meta = "" } = {}) {
+function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false } = {}) {
   montageExportPreviewState.loading = Boolean(loading);
   montageExportPreviewState.error = String(error || "").trim();
   montageExportPreviewState.dataUrl = String(dataUrl || "").trim();
   montageExportPreviewState.mediaType = String(mediaType || "").trim().toLowerCase();
   montageExportPreviewState.mode = String(mode || montageExportState.exportMode || "normal").trim() || "normal";
   montageExportPreviewState.sceneIndex = Math.max(0, Number(sceneIndex || 0) || 0);
+  montageExportPreviewState.disabled = Boolean(disabled);
   if (els.montageExportPreviewBox) {
     els.montageExportPreviewBox.dataset.mode = montageExportPreviewState.mode;
     els.montageExportPreviewBox.dataset.state = montageExportPreviewState.loading
       ? "loading"
+      : montageExportPreviewState.disabled
+        ? "disabled"
       : montageExportPreviewState.error
         ? "error"
         : montageExportPreviewState.dataUrl
@@ -20775,6 +20789,8 @@ function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "
     els.montageExportPreviewPlaceholder.hidden = hasReadyPreview;
     els.montageExportPreviewPlaceholder.textContent = montageExportPreviewState.loading
       ? "Generando preview real del export…"
+      : montageExportPreviewState.disabled
+        ? "Preview desactivado temporalmente para priorizar la exportación."
       : montageExportPreviewState.error
         ? montageExportPreviewState.error
         : "El preview aparecerá aquí.";
@@ -20792,6 +20808,7 @@ function resetMontageExportPreviewState() {
     mediaType: "",
     mode: montageExportState.exportMode,
     sceneIndex: 0,
+    disabled: false,
     lastSignature: "",
     debounceTimer: null,
     requestSeq: montageExportPreviewState.requestSeq || 0,
@@ -20805,6 +20822,7 @@ function closeMontageExportModal() {
   resetMontageExportJobState();
   resetMontageExportPreviewState();
   montageExportBusy = false;
+  setTimelinePreviewsSuspended(false);
   setMontageExportBusy(false);
   setMontageExportOpen(false);
 }
@@ -20890,7 +20908,7 @@ async function pollMontageExportJob(jobId = "") {
         tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
       });
     }
-    if (stage === "render_scene_segments" && currentRowId) {
+    if (stage === "render_scene_segments" && currentRowId && !shouldDisableMontagePreviewInCurrentRuntime()) {
       maybeRefreshMontageExportPreviewFromJob({
         rowId: currentRowId,
         sceneIndex: currentSceneIndex,
@@ -20929,12 +20947,14 @@ async function pollMontageExportJob(jobId = "") {
           hintText = hintText ? `${hintText} ${extra}` : extra;
           setMontageExportStatus(statusText, hintText, { tone: "warning" });
           montageExportBusy = false;
+          setTimelinePreviewsSuspended(false);
           setMontageExportBusy(false);
           return;
         }
       }
       setMontageExportStatus(statusText, hintText, { tone: warningBlock?.skippedEntries?.length ? "warning" : "success" });
       montageExportBusy = false;
+      setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
       return;
     }
@@ -20951,6 +20971,7 @@ async function pollMontageExportJob(jobId = "") {
         { tone: "error" }
       );
       montageExportBusy = false;
+      setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
       return;
     }
@@ -20961,6 +20982,7 @@ async function pollMontageExportJob(jobId = "") {
     if (errorStatus === 404 && errorCode === "job_not_found") {
       clearMontageExportPolling();
       montageExportBusy = false;
+      setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
       setMontageExportProgress(null);
       setMontageExportStatus(
@@ -20991,6 +21013,7 @@ async function pollMontageExportJob(jobId = "") {
         "La conexión con el backend falló varias veces seguidas. Intenta exportar otra vez.",
         { tone: "error" }
       );
+      setTimelinePreviewsSuspended(false);
       return;
     }
     setMontageExportStatus(
@@ -21013,6 +21036,7 @@ function getMontagePreviewRowId() {
 }
 
 function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
+  if (shouldDisableMontagePreviewInCurrentRuntime()) return;
   const cleanRowId = String(rowId || "").trim();
   if (!cleanRowId || !els.montageExportModal || els.montageExportModal.hidden) return;
   const now = Date.now();
@@ -21033,6 +21057,19 @@ function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, t
 
 async function refreshMontageExportPreviewNow(options = {}) {
   if (!els.montageExportModal || els.montageExportModal.hidden) return;
+  if (shouldDisableMontagePreviewInCurrentRuntime()) {
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: "",
+      mediaType: "",
+      mode: montageExportState.exportMode,
+      sceneIndex: 0,
+      disabled: true,
+      meta: "Preview desactivado temporalmente para priorizar la exportación."
+    });
+    return;
+  }
   const prepared = buildMontageExportPayload(getActiveSession());
   if (!prepared.ok) {
     setMontageExportPreviewState({
@@ -21122,6 +21159,20 @@ async function refreshMontageExportPreviewNow(options = {}) {
 }
 
 function scheduleMontageExportPreviewRefresh(delayMs = 280) {
+  if (shouldDisableMontagePreviewInCurrentRuntime()) {
+    if (!els.montageExportModal || els.montageExportModal.hidden) return;
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: "",
+      mediaType: "",
+      mode: montageExportState.exportMode,
+      sceneIndex: 0,
+      disabled: true,
+      meta: "Preview desactivado temporalmente para priorizar la exportación."
+    });
+    return;
+  }
   if (montageExportPreviewState.debounceTimer) {
     window.clearTimeout(montageExportPreviewState.debounceTimer);
   }
@@ -21172,7 +21223,20 @@ function openMontageExportModal() {
       : "Usa el timeline tal como está (escenas + audio).",
     { tone: "neutral" }
   );
-  scheduleMontageExportPreviewRefresh(60);
+  if (shouldDisableMontagePreviewInCurrentRuntime()) {
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: "",
+      mediaType: "",
+      mode: montageExportState.exportMode,
+      sceneIndex: 0,
+      disabled: true,
+      meta: "Preview desactivado temporalmente para priorizar la exportación."
+    });
+  } else {
+    scheduleMontageExportPreviewRefresh(60);
+  }
 }
 
 function validateMontageExportLinearTimeline(runtimeEntries = []) {
@@ -21554,6 +21618,7 @@ async function runMontageExport() {
     return;
   }
   montageExportBusy = true;
+  setTimelinePreviewsSuspended(true);
   setMontageExportBusy(true);
   resetMontageExportJobState();
   setMontageExportProgress(0.08);
@@ -21601,6 +21666,7 @@ async function runMontageExport() {
     setMontageExportProgress(null);
     setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
     montageExportBusy = false;
+    setTimelinePreviewsSuspended(false);
     setMontageExportBusy(false);
   }
 }
