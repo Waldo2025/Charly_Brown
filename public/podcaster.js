@@ -20956,6 +20956,20 @@ async function pollMontageExportJob(jobId = "") {
     }
   } catch (error) {
     if (String(montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
+    const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
+    if (errorStatus === 404 && errorCode === "job_not_found") {
+      clearMontageExportPolling();
+      montageExportBusy = false;
+      setMontageExportBusy(false);
+      setMontageExportProgress(null);
+      setMontageExportStatus(
+        "Se perdió el estado del export en el backend.",
+        "El servicio probablemente se reinició durante la exportación. Intenta exportar otra vez.",
+        { tone: "error" }
+      );
+      return;
+    }
     montageExportJobState.pollFailureCount = Math.max(0, Number(montageExportJobState.pollFailureCount || 0) || 0) + 1;
     const failureCount = montageExportJobState.pollFailureCount;
     const transientHint = failureCount > 1
@@ -20964,7 +20978,7 @@ async function pollMontageExportJob(jobId = "") {
     console.warn("[podcaster] montage export status poll failed", {
       jobId: cleanJobId,
       failureCount,
-      status: Number(error?.status || error?.detail?.status || 0) || 0,
+      status: errorStatus,
       message: String(error?.message || error?.error || "").trim()
     });
     if (failureCount >= 12) {

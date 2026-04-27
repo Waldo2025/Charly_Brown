@@ -828,6 +828,12 @@ const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const montageExportJobs = new Map();
 
+function getMontageExportJobMetaPath(jobId = "") {
+  const clean = clampExportId(jobId);
+  if (!clean) return "";
+  return path.join(MONTAGE_EXPORT_CACHE_DIR, `job-${clean}.json`);
+}
+
 async function ensureMontageExportCacheDir() {
   await fs.promises.mkdir(MONTAGE_EXPORT_CACHE_DIR, { recursive: true });
   return MONTAGE_EXPORT_CACHE_DIR;
@@ -921,6 +927,36 @@ function sanitizeMontageJobPublicPayload(job = null) {
   return payload;
 }
 
+async function persistMontageExportJob(job = null) {
+  const source = job && typeof job === "object" ? job : null;
+  const jobId = clampExportId(source?.jobId || "");
+  if (!source || !jobId) return;
+  await ensureMontageExportCacheDir();
+  const metaPath = getMontageExportJobMetaPath(jobId);
+  if (!metaPath) return;
+  await fs.promises.writeFile(metaPath, JSON.stringify(source), "utf8");
+}
+
+async function readPersistedMontageExportJob(jobId = "") {
+  const clean = clampExportId(jobId);
+  if (!clean) return null;
+  const metaPath = getMontageExportJobMetaPath(clean);
+  if (!metaPath) return null;
+  const raw = await fs.promises.readFile(metaPath, "utf8").catch(() => "");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || String(parsed.jobId || "").trim() !== clean) return null;
+    if (Number(parsed.expiresAtMs || 0) && Number(parsed.expiresAtMs || 0) < Date.now()) {
+      await fs.promises.rm(metaPath, { force: true }).catch(() => {});
+      return null;
+    }
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
@@ -995,6 +1031,12 @@ function upsertMontageExportJob(jobId = "", patch = {}) {
   };
   if (Array.isArray(patch?.warnings)) next.warnings = patch.warnings;
   montageExportJobs.set(id, next);
+  void persistMontageExportJob(next).catch((error) => {
+    console.warn("[backend][montage-export] persist job failed", {
+      jobId: id,
+      message: String(error?.message || error)
+    });
+  });
   return next;
 }
 
@@ -1015,6 +1057,10 @@ function cleanupMontageExportJobs() {
   for (const [jobId, job] of montageExportJobs.entries()) {
     if (Number(job?.expiresAtMs || 0) && Number(job.expiresAtMs || 0) < now) {
       montageExportJobs.delete(jobId);
+      const metaPath = getMontageExportJobMetaPath(jobId);
+      if (metaPath) {
+        void fs.promises.rm(metaPath, { force: true }).catch(() => {});
+      }
     }
   }
 }
@@ -7037,7 +7083,13 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
   cleanupMontageExportJobs();
   const jobId = clampExportId(req.query?.jobId || "");
   if (!jobId) return res.status(400).json({ error: "Falta jobId." });
-  const job = getMontageExportJob(jobId);
+  let job = getMontageExportJob(jobId);
+  if (!job) {
+    job = await readPersistedMontageExportJob(jobId);
+    if (job) {
+      montageExportJobs.set(jobId, job);
+    }
+  }
   if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
   return res.status(200).json(sanitizeMontageJobPublicPayload(job));
 });
