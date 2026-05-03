@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.29";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.30";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -32854,6 +32854,12 @@ function init() {
       render();
     }
     consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
+    
+    // Finalización de carga - Ocultar splash screen
+    const loader = document.getElementById("appLoadingScreen");
+    if (loader) {
+      setTimeout(() => loader.classList.add("is-hidden"), 300); // Pequeño delay para suavidad
+    }
   });
   window.addEventListener("beforeunload", () => {
     stopPanelMusic();
@@ -32864,6 +32870,14 @@ function init() {
   });
   setPromptInputContent(demoPrompt);
   autoResizePrompt();
+
+  // Safety timeout para quitar el loader si algo falla catastróficamente
+  setTimeout(() => {
+    const loader = document.getElementById("appLoadingScreen");
+    if (loader && !loader.classList.contains("is-hidden")) {
+      loader.classList.add("is-hidden");
+    }
+  }, 5000);
 }
 
 init();

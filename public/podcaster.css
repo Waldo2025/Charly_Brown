@@ -1,3 +1,56 @@
+/* App Loading Screen */
+#appLoadingScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  background: var(--pod-bg, #f8fafc);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+#appLoadingScreen.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loading-spinner-snoopy {
+  width: 110px;
+  height: auto;
+  filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));
+  animation: snoopy-float 2.4s ease-in-out infinite;
+}
+
+@keyframes snoopy-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-20px) scale(1.05); }
+}
+
+.loading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.loading-dots span {
+  width: 10px;
+  height: 10px;
+  background: var(--pod-accent, #3f4d98);
+  border-radius: 50%;
+  animation: dot-pulse 1.4s infinite;
+}
+
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
 :root {
   --pod-bg: color-mix(in srgb, var(--app-bg-color, #f8fafc) 98%, #eef2f7 2%);
   --pod-surface: color-mix(in srgb, var(--app-bg-color, #ffffff) 99%, #f3f5f8 1%);
