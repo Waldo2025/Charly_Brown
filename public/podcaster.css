@@ -3645,6 +3645,7 @@ body.is-resizing-podcast-stage {
 .podcast-video-timeline-canvas {
   position: relative;
   display: grid;
+  grid-auto-rows: max-content;
   gap: 8px;
   min-height: 180px;
   --pod-timeline-px-per-sec: 52px;
@@ -3704,7 +3705,7 @@ body.is-resizing-podcast-stage {
   display: grid;
   grid-template-columns: var(--pod-track-label-width) minmax(0, 1fr);
   gap: 8px;
-  align-items: stretch;
+  align-items: start;
   position: relative;
 }
 
