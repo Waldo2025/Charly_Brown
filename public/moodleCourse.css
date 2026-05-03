@@ -6179,3 +6179,86 @@ body[data-page="moodlecourse.html"] .btn-guardar-gemini.is-loading .btn-guardar-
 .dark .cb-notes-section-extension { background-color: rgba(124, 58, 237, 0.15); color: #ddd6fe; }
 .dark .cb-notes-section-support { background-color: rgba(190, 18, 60, 0.15); color: #fda4af; }
 .dark .cb-notes-section-closing { background-color: rgba(51, 65, 85, 0.15); color: #cbd5e1; }
+/* ============================================
+   NUEVO SWITCH ÚNICO - Charly Brown Style
+   ============================================ */
+.cb-switch-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: hsl(var(--accent) / 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--border));
+  border-radius: 100px;
+  transition: all var(--transition-base);
+}
+
+.cb-switch-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground));
+  user-select: none;
+}
+
+.cb-switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 22px;
+}
+
+.cb-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.cb-switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: hsl(var(--muted));
+  border-radius: 34px;
+  transition: .4s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1.5px solid hsl(var(--border));
+}
+
+.cb-switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 2.5px;
+  background-color: white;
+  border-radius: 50%;
+  transition: .4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.cb-switch input:checked + .cb-switch-slider {
+  background-color: #10b981; /* Success Green */
+  border-color: #059669;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+.cb-switch input:checked + .cb-switch-slider:before {
+  transform: translateX(19px);
+}
+
+.cb-switch input:focus + .cb-switch-slider {
+  box-shadow: 0 0 1px #10b981;
+}
+
+/* Estado activo del contenedor */
+.cb-switch-container:has(input:checked) {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.cb-switch-container:has(input:checked) .cb-switch-label {
+  color: #059669;
+}

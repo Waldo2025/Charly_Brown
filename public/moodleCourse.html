@@ -9,9 +9,9 @@
   <!-- Font Awesome -->
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <!-- CSS Personalizado con soporte para temas -->
-  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.1.31">
-  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.1.31">
-  <link rel="stylesheet" href="moodleCourse-graphicPreview.css?v=2026-1.0.1.31">
+  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.1.32">
+  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.1.32">
+  <link rel="stylesheet" href="moodleCourse-graphicPreview.css?v=2026-1.0.1.32">
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
@@ -139,11 +139,12 @@
             aria-label="Mostrar/Ocultar módulos archivados">
             <i class="fas fa-box-archive"></i>
           </button>
-          <div class="flex items-center gap-2 px-2 py-1 bg-accent/50 rounded-lg border border-border ml-auto">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Publicar</span>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="checkPublicarCurso" class="sr-only peer">
-              <div class="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+          <!-- Switch Publicar con estilo único -->
+          <div class="cb-switch-container ml-auto">
+            <span class="cb-switch-label">Publicar</span>
+            <label class="cb-switch">
+              <input type="checkbox" id="checkPublicarCurso">
+              <span class="cb-switch-slider"></span>
             </label>
           </div>
         </div>
@@ -1040,7 +1041,7 @@
 
 <script src="chromeLayout.js?v=2026-1.0.1.14"></script>
   <script type="module" src="sidebar.js?v=2026-1.0.1.14"></script>
-<script type="module" src="moodleCourse.js?v=2026-1.0.1.31"></script>
+<script type="module" src="moodleCourse.js?v=2026-1.0.1.32"></script>
 <script type="module" src="moodleCourse-Theme.js?v=2026-1.0.1.14"></script>
 
 <script src="update-banner-loader.js" defer></script>
