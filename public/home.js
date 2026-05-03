@@ -43,10 +43,24 @@ onAuthStateChanged(auth, async (user) => {
     await renderLecturas();
     await renderImagenesCompartidas();
     await loadUserStats();
+
+    // Finalización de carga - Ocultar splash screen
+    const loader = document.getElementById("appLoadingScreen");
+    if (loader) {
+      setTimeout(() => loader.classList.add("is-hidden"), 300);
+    }
   } else {
     window.location.href = "login.html";
   }
 });
+
+// Safety timeout para quitar el loader si algo falla
+setTimeout(() => {
+  const loader = document.getElementById("appLoadingScreen");
+  if (loader && !loader.classList.contains("is-hidden")) {
+    loader.classList.add("is-hidden");
+  }
+}, 5000);
 
 // Función para notificar actividad al Studio (podcaster.js)
 async function notifyActivity(action = "", sceneIndex = -1) {

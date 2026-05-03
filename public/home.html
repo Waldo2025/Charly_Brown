@@ -22,7 +22,7 @@
 
   <!-- Incluir Font Awesome para los iconos -->
   <link rel="stylesheet" href="sidebar.css">
-  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="home.css?v=2026-1.0.1.30">
   <link rel="stylesheet" href="chatbot.css">
   <link rel="stylesheet" href="header.css">
   <script src="vendor/chartjs/chart.umd.js"></script>
@@ -30,6 +30,15 @@
 </head>
 
 <body>
+  <div id="appLoadingScreen">
+    <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="loading-spinner-snoopy">
+    <div class="loading-dots">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  </div>
+
   <header class="main-header">
     <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
@@ -748,7 +757,7 @@
 
   <script src="on-screen-text-render-spec.js"></script>
   <script type="module" src="podcaster-playback-controller.js"></script>
-  <script type="module" src="home.js"></script>
+  <script type="module" src="home.js?v=2026-1.0.1.30"></script>
   <script src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="chatbot.js"></script>
