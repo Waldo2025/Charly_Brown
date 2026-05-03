@@ -2481,7 +2481,11 @@ const multimediaPlaybackDeps = {
   isDashboard: true,
   getPlaybackSpeed: () => 1,
   getPodcastVideoConfig: (s) => {
-    const cfg = s?.podcastVideoConfig || s?.podcastStudioUiState?.podcastVideoConfig || {};
+    if (!s) return {};
+    if (!s.podcastVideoConfig) {
+      s.podcastVideoConfig = s.podcastStudioUiState?.podcastVideoConfig || {};
+    }
+    const cfg = s.podcastVideoConfig;
     
     // 1. SINTETIZAR PISTA DE DIÁLOGO
     if (!cfg.geminiDialogueTrack || !cfg.geminiDialogueTrack.segments?.length) {
@@ -2510,7 +2514,8 @@ const multimediaPlaybackDeps = {
       const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
       entries.forEach(entry => {
         // Usar el texto de la fila o un genérico
-        const row = (s.rows || []).find(r => r.id === entry.rowId);
+        const allRows = s.rows || s.script?.rows || [];
+        const row = allRows.find(r => r.id === entry.rowId);
         const dialogueText = row?.onScreenText || row?.text || "";
         if (dialogueText) {
           textClips[entry.rowId] = {
@@ -2718,6 +2723,7 @@ const multimediaPlaybackDeps = {
   getOnScreenTextClipText: (row) => row.onScreenText || row.text || "",
   resolveOnScreenTextRenderMetrics: (s, o) => window.resolveOnScreenTextRenderMetrics ? window.resolveOnScreenTextRenderMetrics(s, o) : {},
   getOnScreenTextStylePresetClass: (p) => window.getOnScreenTextStylePresetClass ? window.getOnScreenTextStylePresetClass(p) : "",
+  getOnScreenTextBgPresetClass: (p) => window.getOnScreenTextBgPresetClass ? window.getOnScreenTextBgPresetClass(p) : "",
   buildOnScreenTextBubbleInlineStyle: (s, o) => window.buildOnScreenTextBubbleInlineStyle ? window.buildOnScreenTextBubbleInlineStyle(s, o) : "",
   escapeHtml: (t) => {
     const div = document.createElement('div');

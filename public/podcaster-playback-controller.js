@@ -781,7 +781,8 @@ export class PodcasterPlaybackController extends EventEmitter {
       return;
     }
 
-    const row = session?.script?.rows?.find(r => r.id === selected.rowId) || null;
+    const allRows = session?.rows || session?.script?.rows || [];
+    const row = allRows.find(r => r.id === selected.rowId) || null;
     const text = (selected.text || selected.onScreenText || (row && this.deps?.getOnScreenTextClipText?.(row)) || "").trim();
     if (!text) {
       overlay.innerHTML = "";
@@ -805,14 +806,15 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const renderMetrics = this.deps?.resolveOnScreenTextRenderMetrics?.(settings, renderOptions) || {};
     const presetClass = this.deps?.getOnScreenTextStylePresetClass?.(settings.stylePreset) || "";
-    const inlineStyle = this.deps?.buildOnScreenTextBubbleInlineStyle?.(settings, renderOptions) || "";
+    const bgClass = this.deps?.getOnScreenTextBgPresetClass?.(settings.bgPreset) || "";
+    const inlineStyle = renderMetrics.inlineStyle || (this.deps.buildOnScreenTextBubbleInlineStyle ? this.deps.buildOnScreenTextBubbleInlineStyle(settings, renderMetrics) : "");
 
     const contentHtml = this.deps.escapeHtml(renderMetrics.wrappedText || text);
 
     const unescapeMap = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'" };
     const rawCssText = String(inlineStyle).replace(/&amp;|&lt;|&gt;|&quot;|&#039;/g, m => unescapeMap[m]);
 
-    overlay.innerHTML = `<div class="podcast-on-screen-text-content ${presetClass}" data-row-id="${this.deps.escapeHtml(selected.rowId)}">${contentHtml}</div>`;
+    overlay.innerHTML = `<div class="podcast-on-screen-text-content ${presetClass} ${bgClass}" data-row-id="${this.deps.escapeHtml(selected.rowId)}">${contentHtml}</div>`;
     const contentNode = overlay.querySelector('.podcast-on-screen-text-content');
     if (contentNode) {
       const properties = rawCssText.split(';').filter(Boolean);

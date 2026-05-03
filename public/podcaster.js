@@ -412,6 +412,7 @@ const els = {
   montageExportStatus: document.getElementById("montageExportStatus"),
   montageExportHint: document.getElementById("montageExportHint"),
   montageExportProgressBar: document.getElementById("montageExportProgressBar"),
+  montageExportOnlyAudio: document.getElementById("montageExportOnlyAudio"),
   podcastStudioScrubber: document.getElementById("podcastStudioScrubber"),
   podcastStudioTime: document.getElementById("podcastStudioTime"),
   podcastStudioInspectorScene: document.getElementById("podcastStudioInspectorScene"),
@@ -1179,7 +1180,8 @@ function normalizeMontageExportSettings(raw = {}) {
     maxBitrate,
     minBitrate,
     filename,
-    includeReviewExcel
+    includeReviewExcel,
+    onlyAudio: source.onlyAudio === true
   };
 }
 
@@ -21749,6 +21751,37 @@ function syncMontageExportUi() {
   if (els.montageExportReviewExcelField) {
     els.montageExportReviewExcelField.hidden = montageExportState.exportMode !== "review";
   }
+  if (els.montageExportOnlyAudio) {
+    els.montageExportOnlyAudio.checked = montageExportState.onlyAudio === true;
+  }
+
+  // Si es solo audio, ocultamos campos irrelevantes de video
+  const onlyAudio = montageExportState.onlyAudio === true;
+  if (els.montageExportFormat) els.montageExportFormat.closest(".row-field").hidden = onlyAudio;
+  if (els.montageExportResolution) els.montageExportResolution.closest(".row-field").hidden = onlyAudio;
+  if (els.montageExportBitrateMode) els.montageExportBitrateMode.closest(".row-field").hidden = onlyAudio;
+  if (els.montageExportCustomBitrateBox) els.montageExportCustomBitrateBox.hidden = onlyAudio || montageExportState.bitrateMode !== "custom";
+  
+  const qualityField = els.montageExportModal?.querySelector(".montage-export-quality");
+  if (qualityField) qualityField.hidden = onlyAudio;
+
+  if (els.montageExportPreviewBox) {
+    els.montageExportPreviewBox.hidden = onlyAudio;
+  }
+
+  if (!montageExportBusy) {
+    if (onlyAudio) {
+      setMontageExportStatus("Listo para exportar audio.", "Se descargará un archivo MP3 con todo el montaje.", { tone: "neutral" });
+    } else {
+       setMontageExportStatus(
+        "Listo. Presiona Exportar para generar tu video.",
+        montageExportState.exportMode === "review"
+          ? "Revisión crea un split-screen con video y ficha editorial por escena."
+          : "Usa el timeline tal como está (escenas + audio).",
+        { tone: "neutral" }
+      );
+    }
+  }
   if (els.montageExportModal) {
     const btns = Array.from(els.montageExportModal.querySelectorAll("[data-quality]"));
     btns.forEach((btn) => {
@@ -22136,6 +22169,7 @@ function buildMontageExportPayload(session = null) {
   const payload = {
     sessionId,
     exportMode: montageExportState.exportMode,
+    onlyAudio: montageExportState.onlyAudio === true,
     format: effectiveFormat,
     qualityPreset: montageExportState.qualityPreset,
     resolution: montageExportState.resolution,
@@ -30375,6 +30409,14 @@ function attachEvents() {
     els.montageExportIncludeReviewExcel.addEventListener("change", () => {
       montageExportState.includeReviewExcel = els.montageExportIncludeReviewExcel.checked === true;
       persistMontageExportSettings();
+    });
+  }
+  if (els.montageExportOnlyAudio) {
+    els.montageExportOnlyAudio.addEventListener("change", () => {
+      montageExportState.onlyAudio = els.montageExportOnlyAudio.checked === true;
+      persistMontageExportSettings();
+      syncMontageExportUi();
+      scheduleMontageExportPreviewRefresh();
     });
   }
   if (els.montageExportModal) {

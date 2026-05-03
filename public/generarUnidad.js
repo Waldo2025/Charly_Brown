@@ -30168,8 +30168,7 @@ document.getElementById("btnReiniciarFiltros")?.addEventListener("click", () => 
 });
 
 
-document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e) => {
-  e.preventDefault();
+async function accionGuardarUnidadFirebase({ silent = false } = {}) {
   const nivel = selectNivel?.value || "";
   const grado = selectGrado?.value || "";
   const trimestre = selectTrimestre?.value || "";
@@ -30253,31 +30252,29 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       }
     }
   } catch (e) {
+    console.warn("[unidad] Error procesando metadatos de lectura:", e);
   }
 
-  // Debug detallado: muestra cuáles faltan realmente
   const faltantes = [];
   if (!nivel) faltantes.push("nivel");
   if (!grado) faltantes.push("grado");
   if (!trimestre) faltantes.push("trimestre");
   if (!unidad) faltantes.push("unidad");
-  if (!lecturaId) faltantes.push("lecturaId (selectTema / selectTemaASC)");
-  if (!htmlContenido) faltantes.push("htmlContenido (respuestaFinal/DOM)");
-
+  if (!lecturaId) faltantes.push("lecturaId");
+  if (!htmlContenido) faltantes.push("htmlContenido");
 
   if (faltantes.length) {
-    alert(`❌ Faltan datos para guardar la unidad.\n→ Revisa: ${faltantes.join(", ")}`);
-    return;
+    if (!silent) alert(`❌ Faltan datos para guardar la unidad.\n→ Revisa: ${faltantes.join(", ")}`);
+    return false;
   }
 
   try {
     const user = await _unidadGetAuthUser();
     if (!user?.uid) {
-      alert("❌ Debes iniciar sesión para guardar la unidad.");
-      return;
+      if (!silent) alert("❌ Debes iniciar sesión para guardar la unidad.");
+      return false;
     }
 
-    // Si el HTML trae imágenes dataURL (base64), subirlas a Firebase Storage y guardar SOLO las URLs.
     let htmlContenidoParaGuardar = htmlContenido;
     let uploadsContenido = [];
     try {
@@ -30293,9 +30290,8 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       uploadsContenido = Array.isArray(out?.uploads) ? out.uploads : [];
     } catch (uploadErr) {
       console.warn("[unidad] No se pudieron subir imágenes a Storage:", uploadErr);
-      // Si no se pudo, NO intentamos guardar el HTML con base64 porque rompe Firestore por tamaño.
-      alert(`❌ No se pudo subir las imágenes a Storage.\nDetalle: ${String(uploadErr?.message || uploadErr)}`);
-      return;
+      if (!silent) alert(`❌ No se pudo subir las imágenes a Storage.\nDetalle: ${String(uploadErr?.message || uploadErr)}`);
+      return false;
     }
 
     const unidadDoc = {
@@ -30309,14 +30305,12 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       email: String(user.email || "").trim().toLowerCase(),
       lecturaId,
       lecturaIds,
-      contenido: htmlContenido,
-      // 🆕 Metadatos de la lectura
-      lecturaOrigen: origenLectura || null,     // "lecturasNuevas" | "lecturasASC"
+      contenido: htmlContenidoParaGuardar,
+      lecturaOrigen: origenLectura || null,
       lecturasOrigenes: lecturasOrigenes || [],
       lecturaTitulo: tituloLectura || null,
       lecturaTexto: textoLectura || null,
       preguntasLectura: preguntasLectura || [],
-      // Activos subidos para evitar contenido base64 en Firestore
       contenidoAssets: uploadsContenido || [],
       tipoDocumento: "unidad_generada",
       origen: "generarUnidadDidactica",
@@ -30328,38 +30322,33 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       published: false
     };
 
-    // Guardar el HTML final (con URLs de Storage)
-    unidadDoc.contenido = htmlContenidoParaGuardar;
-
     if (currentUnidadGuardadaId) {
-      // Actualizar unidad existente
       await setDoc(doc(db, "unidadesGeneradas", currentUnidadGuardadaId), unidadDoc, { merge: true });
       logVisual(`🔄 Unidad actualizada (ID: ${currentUnidadGuardadaId})`);
     } else {
-      // Crear nueva unidad
       const docRef = await addDoc(collection(db, "unidadesGeneradas"), unidadDoc);
       currentUnidadGuardadaId = docRef.id;
       logVisual(`✅ Nueva unidad creada (ID: ${currentUnidadGuardadaId})`);
     }
 
     _unidadSetSaveNeeded(false);
-    alert("✅ Unidad guardada correctamente en Firestore.");
-    // Mantener el estado actual para continuar editando/regenerando sin recargar.
+    if (!silent) alert("✅ Unidad guardada correctamente en Firestore.");
     guardarSelectsUnidad();
+    return true;
   } catch (err) {
-    console.warn("[unidad] No se pudo guardar la unidad:", err);
-    const code = String(err?.code || "").trim();
-    const msg = String(err?.message || err || "").trim();
-    if (code.includes("permission") || msg.toLowerCase().includes("permission")) {
-      alert("❌ No se pudo guardar la unidad (permisos). Verifica reglas de Firestore para `unidadesGeneradas`.");
-      return;
+    console.error("[unidad] No se pudo guardar la unidad:", err);
+    if (!silent) {
+      const code = String(err?.code || "").trim();
+      const msg = String(err?.message || err || "").trim();
+      alert(`❌ No se pudo guardar la unidad.\n${code ? `Código: ${code}\n` : ""}${msg ? `Detalle: ${msg}` : ""}`.trim());
     }
-    if (code.includes("unauth") || msg.toLowerCase().includes("auth")) {
-      alert("❌ No se pudo guardar la unidad (sesión). Cierra sesión e inicia de nuevo.");
-      return;
-    }
-    alert(`❌ No se pudo guardar la unidad.\n${code ? `Código: ${code}\n` : ""}${msg ? `Detalle: ${msg}` : ""}`.trim());
+    return false;
   }
+}
+
+document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  await accionGuardarUnidadFirebase({ silent: false });
 });
 
 
@@ -30586,7 +30575,10 @@ async function _unidadCopiarHtmlPlano(html = "", emptyMessage = "No hay contenid
 }
 
 
-document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
+document.getElementById("btnDescargarWord")?.addEventListener("click", async () => {
+  // Guardar en Firebase en automático
+  await accionGuardarUnidadFirebase({ silent: true });
+
   const htmlAlumno = _unidadBuildAlumnoHtmlDesdeResultado();
 
   if (!htmlAlumno.trim()) {
@@ -30610,7 +30602,10 @@ document.getElementById("btnDescargarWord")?.addEventListener("click", () => {
 });
 
 
-document.getElementById("btnDescargarMaestro")?.addEventListener("click", () => {
+document.getElementById("btnDescargarMaestro")?.addEventListener("click", async () => {
+  // Guardar en Firebase en automático
+  await accionGuardarUnidadFirebase({ silent: true });
+
   const htmlMaestro = _unidadBuildMaestroHtmlDesdeResultado();
 
   if (!htmlMaestro.trim()) {
