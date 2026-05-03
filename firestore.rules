@@ -61,8 +61,9 @@ service cloud.firestore {
       return isAdmin() ||
         hasAnyRole([
           "author", "Author", "autor", "Autor", "autores", "autoria", "Autoria",
-          "editor", "Editor", "editorial", "Editorial",
-          "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev"
+          "editor", "Editor", "editorial", "Editorial", "Editoria", "editoria",
+          "developer", "Developer", "desarrollo", "Desarrollo", "dev", "Dev",
+          "profe", "Profe", "profesor", "Profesor", "docente", "Docente"
         ]);
     }
 
@@ -237,7 +238,7 @@ service cloud.firestore {
 
     // Sesiones de Podcaster: owner o compartidos por UID.
     match /podcaster_sessions/{sessionId} {
-      allow read: if isAdmin() || isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data) || isPublished(resource.data);
+      allow read: if isAdmin() || isPublished(resource.data) || isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data);
       allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
       allow update, delete: if isAdmin() || (
         isSignedIn() &&

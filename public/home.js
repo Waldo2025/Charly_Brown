@@ -1824,7 +1824,7 @@ async function loadUserStats() {
 }
 
 function isCurrentUserAdmin() {
-  return ["admin", "Admin", "superAdmin", "superadmin", "SuperAdmin"].includes(currentUserRole);
+  return ["admin", "Admin", "superAdmin", "superadmin", "SuperAdmin", "administrador", "Administrador"].includes(currentUserRole);
 }
 
 function configureWorkbenchFilters() {
