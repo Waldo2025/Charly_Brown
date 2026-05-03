@@ -2103,7 +2103,7 @@ async function loadUserMultimedia() {
         q = query(collection(db, "podcaster_sessions"), where("publicar", "==", true), limit(150));
       } else {
         // Otros roles solo ven lo suyo publicado
-        q = query(collection(db, "podcaster_sessions"), where("userId", "==", user.uid), where("publicar", "==", true), limit(150));
+        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), limit(150));
       }
     } else {
       // Filtro "Mis Documentos" (o "Todos" para Admin)
@@ -2111,7 +2111,7 @@ async function loadUserMultimedia() {
         q = query(collection(db, "podcaster_sessions"), limit(150));
       } else {
         // Solo lo propio para Author/Editor
-        q = query(collection(db, "podcaster_sessions"), where("userId", "==", user.uid), limit(150));
+        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), limit(150));
       }
     }
 
@@ -2192,13 +2192,13 @@ async function loadUserPodcasts() {
       if (isAdmin || isEditorial) {
         q = query(collection(db, "podcaster_sessions"), where("publicar", "==", true), limit(150));
       } else {
-        q = query(collection(db, "podcaster_sessions"), where("userId", "==", user.uid), where("publicar", "==", true), limit(150));
+        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), limit(150));
       }
     } else {
       if (isAdmin) {
         q = query(collection(db, "podcaster_sessions"), limit(150));
       } else {
-        q = query(collection(db, "podcaster_sessions"), where("userId", "==", user.uid), limit(150));
+        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), limit(150));
       }
     }
 

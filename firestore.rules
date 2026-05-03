@@ -237,7 +237,7 @@ service cloud.firestore {
 
     // Sesiones de Podcaster: owner o compartidos por UID.
     match /podcaster_sessions/{sessionId} {
-      allow read: if isAdmin() || isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data);
+      allow read: if isAdmin() || isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data) || isPublished(resource.data);
       allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
       allow update, delete: if isAdmin() || (
         isSignedIn() &&
