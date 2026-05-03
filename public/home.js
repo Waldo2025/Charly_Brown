@@ -2502,7 +2502,7 @@ const multimediaPlaybackDeps = {
 
     // 2. SINTETIZAR TEXTO EN PANTALLA Y SUS CLIPS
     if (!cfg.onScreenTextTrack) {
-      cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'modern_bubble' };
+      cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
     }
     
     if (!cfg.timelineOnScreenTextClipsByRowId) {

@@ -503,6 +503,17 @@
               --pod-onscreen-text-preset-shadow: 0 4px 10px rgba(15, 23, 42, 0.46);
             }
 
+            .podcast-on-screen-text-content.is-style-glow {
+              max-width: min(96%, 1400px) !important;
+              --pod-onscreen-text-preset-shadow: 0 0 8px rgba(255, 255, 255, 0.18), 0 0 18px rgba(56, 189, 248, 0.24), 0 6px 16px rgba(2, 6, 23, 0.24);
+              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.42);
+            }
+
+            .podcast-on-screen-text-content.is-style-chrome {
+              --pod-onscreen-text-preset-shadow: 0 2px 8px rgba(2, 6, 23, 0.30), 0 10px 22px rgba(2, 6, 23, 0.22);
+              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.48);
+            }
+
             .podcast-on-screen-text-content.is-bg-solid {
               background: rgba(2, 6, 23, calc(0.82 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
               box-shadow: 0 14px 30px rgba(2, 6, 23, 0.36);
