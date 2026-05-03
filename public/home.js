@@ -1824,7 +1824,11 @@ async function loadUserStats() {
 }
 
 function isCurrentUserAdmin() {
-  return ["admin", "Admin", "superAdmin", "superadmin", "SuperAdmin", "administrador", "Administrador"].includes(currentUserRole);
+  return ["admin", "Admin", "superAdmin", "superadmin", "SuperAdmin", "administrador", "Administrador", "owner", "Owner"].includes(currentUserRole);
+}
+
+function isCurrentUserEditorial() {
+  return isCurrentUserAdmin() || ["author", "Author", "autor", "Autor", "editor", "Editor", "editorial", "Editorial", "editoria", "Editoria"].includes(currentUserRole);
 }
 
 function configureWorkbenchFilters() {
@@ -1924,7 +1928,7 @@ async function loadUserLecturas() {
     const filter = workbenchFilters.lecturas || "published";
 
     let lecturas = [];
-    const isEditorial = ["author", "editor"].includes(currentUserRole);
+    const isEditorial = isCurrentUserEditorial();
 
     if (filter === "published") {
       // TODOS los publicados para Admin, Author y Editor
@@ -2002,7 +2006,7 @@ async function loadUserUnidades() {
     const isAdmin = isCurrentUserAdmin();
     const filter = workbenchFilters.unidades || "published";
     let unidades = [];
-    const isEditorial = ["author", "editor"].includes(currentUserRole);
+    const isEditorial = isCurrentUserEditorial();
 
     if (filter === "published") {
       if (isAdmin || isEditorial) {
@@ -2093,7 +2097,7 @@ async function loadUserMultimedia() {
 
   try {
     const isAdmin = isCurrentUserAdmin();
-    const isEditorial = ["author", "editor"].includes(currentUserRole);
+    const isEditorial = isCurrentUserEditorial();
     const filter = workbenchFilters.multimedia || "published";
 
     let q;
@@ -2184,7 +2188,7 @@ async function loadUserPodcasts() {
 
   try {
     const isAdmin = isCurrentUserAdmin();
-    const isEditorial = ["author", "editor"].includes(currentUserRole);
+    const isEditorial = isCurrentUserEditorial();
     const filter = workbenchFilters.podcasts || "published";
 
     let q;
