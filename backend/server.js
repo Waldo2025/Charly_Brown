@@ -4096,6 +4096,76 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
   }
 });
 
+app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+    const sessionId = String(req.query?.sessionId || req.query?.sessionSlug || "").trim();
+    const rowId = String(req.query?.rowId || "").trim();
+    if (!sessionId) {
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+
+    const sessionSlug = normalizeStorageSegment(sessionId, "session");
+    const ownerSlug = normalizeStorageSegment(uid, "anon");
+
+    // List all videos for the session/owner.
+    const prefix = `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/`;
+
+    const buckets = getStorageBucketCandidates();
+    const filesByPath = new Map();
+
+    await Promise.allSettled(buckets.map(async (bucket) => {
+      if (!bucket) return;
+      try {
+        // Use delimiter:"" to list all files recursively under prefix
+        const [files] = await bucket.getFiles({ prefix, maxResults: 200 });
+        for (const file of files) {
+          const filePath = String(file.name || "").trim();
+          if (!filePath || filesByPath.has(filePath)) continue;
+          // Only include video files
+          const ext = filePath.split(".").pop().toLowerCase();
+          if (!["mp4", "webm", "mov", "mkv"].includes(ext)) continue;
+          const [metadata] = await file.getMetadata().catch(() => [{}]);
+          const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "").trim();
+          const downloadUrl = token
+            ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
+            : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
+          // Extract row slug from path: videos/{rowSlug}/{filename}
+          const pathParts = filePath.split("/");
+          const fileIdx = pathParts.indexOf("videos");
+          const rowFolder = fileIdx >= 0 && pathParts[fileIdx + 1] ? pathParts[fileIdx + 1] : "";
+          const fileName = pathParts[pathParts.length - 1] || filePath;
+          filesByPath.set(filePath, {
+            name: fileName,
+            rowFolder,
+            storagePath: filePath,
+            downloadUrl,
+            size: Number(metadata?.size || 0),
+            updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
+          });
+        }
+      } catch (_) {
+        // Ignore per-bucket errors and try next bucket
+      }
+    }));
+
+    const videos = Array.from(filesByPath.values())
+      .sort((a, b) => {
+        // Sort by rowFolder first, then by updatedAt desc
+        if (a.rowFolder < b.rowFolder) return -1;
+        if (a.rowFolder > b.rowFolder) return 1;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+      });
+
+    return res.status(200).json({ ok: true, prefix, videos });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar videos de la sesión.") });
+  }
+});
+
 app.post("/api/podcaster/sessions/delete", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -6131,11 +6201,34 @@ function resolveMontageExportScaleFilter(resolution = "source") {
 function normalizeStorageFilePath(value = "") {
   let raw = String(value || "").trim();
   if (!raw) return "";
+  try { raw = decodeURIComponent(raw); } catch (_) {}
+  const shouldParseAsUrl = /^https?:\/\//i.test(raw) || raw.startsWith("/api/assets/proxy-media");
+  if (shouldParseAsUrl) try {
+    const parsed = new URL(raw, "http://local.invalid");
+    const storagePath = String(parsed.searchParams.get("storagePath") || "").trim();
+    if (storagePath) return normalizeStorageFilePath(storagePath);
+    const parsedObject = parseFirebaseStorageGoogleApisObjectUrl(raw);
+    if (parsedObject?.objectPath) return normalizeStorageFilePath(parsedObject.objectPath);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (host === "firebasestorage.googleapis.com") {
+      const marker = "/o/";
+      const pathname = String(parsed.pathname || "");
+      const markerIndex = pathname.indexOf(marker);
+      if (markerIndex >= 0) return normalizeStorageFilePath(pathname.slice(markerIndex + marker.length));
+    }
+    if (host === "storage.googleapis.com") {
+      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
+      if (parts.length >= 2) return normalizeStorageFilePath(parts.slice(1).join("/"));
+    }
+    return "";
+  } catch (_) {}
   if (raw.startsWith("gs://")) {
     raw = raw.replace(/^gs:\/\//i, "");
     const slash = raw.indexOf("/");
     raw = slash >= 0 ? raw.slice(slash + 1) : "";
   }
+  const queryIndex = raw.indexOf("?");
+  if (queryIndex >= 0) raw = raw.slice(0, queryIndex);
   raw = raw.replace(/^\/+/, "");
   // Algunas rutas pueden venir URL-encoded (p.ej. %2F). Decodifica best-effort.
   if (/%2f/i.test(raw) || /%25/i.test(raw)) {
@@ -8993,7 +9086,7 @@ app.get("/api/assets/montage-download", async (req, res) => {
 
     const total = Number(stat.size || 0) || 0;
     if (rangeHeader) {
-      const match = rangeHeader.match(/^bytes=(\\d*)-(\\d*)$/i);
+      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
       if (match) {
         const start = Math.max(0, Number(match[1] || 0));
         const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
