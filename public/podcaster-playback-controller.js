@@ -64,11 +64,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   async getBlobUrl(url) {
     if (!url) return "";
-    console.log('[PlaybackController] getBlobUrl ->', url);
+    // console.log('[PlaybackController] getBlobUrl ->', url);
     if (this.blobCache.has(url)) return this.blobCache.get(url);
     if (this.fetchPromises.has(url)) return this.fetchPromises.get(url);
     
-    console.log("[PlaybackController] Fetching Blob URL:", url);
+    // console.log("[PlaybackController] Fetching Blob URL:", url);
 
     const p = (async () => {
       try {
@@ -117,10 +117,10 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Handle Firebase Storage paths (gs://)
         if (finalUrl.startsWith("gs://")) {
-          console.log('[PlaybackController] Detected gs:// path, resolving...');
+          // console.log('[PlaybackController] Detected gs:// path, resolving...');
           if (this.deps?.resolveFirebaseStorageUrl) {
             finalUrl = await this.deps.resolveFirebaseStorageUrl(finalUrl);
-            console.log('[PlaybackController] Resolved to:', finalUrl);
+            // console.log('[PlaybackController] Resolved to:', finalUrl);
           } else {
             console.warn('[PlaybackController] No resolveFirebaseStorageUrl dependency found for:', finalUrl);
             return "";
@@ -130,7 +130,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         // Try to fetch the direct URL if we resolved one
         if (finalUrl !== url && finalUrl.startsWith('http')) {
           try {
-            console.log('[PlaybackController] Attempting direct fetch:', finalUrl);
+            // console.log('[PlaybackController] Attempting direct fetch:', finalUrl);
             const resp = await fetch(finalUrl);
             if (resp.ok) {
               const blob = await resp.blob();
@@ -156,7 +156,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
         }
 
-        console.log('[PlaybackController] Fetching blob from:', finalUrl);
+        // console.log('[PlaybackController] Fetching blob from:', finalUrl);
         const resp = await fetch(finalUrl, fetchOptions);
         if (!resp.ok) {
           console.error('[PlaybackController] Fetch failed:', resp.status, finalUrl);
@@ -167,7 +167,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
         const blob = await resp.blob();
         const objectUrl = URL.createObjectURL(blob);
-        console.log('[PlaybackController] Blob created for:', url, 'Size:', blob.size);
+        // console.log('[PlaybackController] Blob created for:', url, 'Size:', blob.size);
         this.blobCache.set(url, objectUrl);
         return objectUrl;
       } catch (e) {
@@ -191,7 +191,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (v) v.crossOrigin = "anonymous";
     });
 
-    console.log('[PlaybackController] Initialized with elements:', Object.keys(els));
+    // console.log('[PlaybackController] Initialized with elements:', Object.keys(els));
   }
 
   sync(session, config) {
@@ -240,7 +240,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   // --- Transport ---
   play(fromMs = null) {
-    console.log("[PlaybackController] Play at:", fromMs);
+    // console.log("[PlaybackController] Play at:", fromMs);
     this.sync();
     if (fromMs !== null) this.state.currentMs = fromMs;
     this.state.isPlaying = true;
@@ -321,7 +321,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   startClock() {
-    console.log("[PlaybackController] startClock called. State:", this.state);
+    // console.log("[PlaybackController] startClock called. State:", this.state);
     this.stopClock();
     let lastTime = performance.now();
     const tickLoop = async (now) => {
@@ -357,7 +357,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     // Find previous marker (with 500ms threshold: if we are >500ms into a scene, go to start of scene, else go to prev scene)
     const targetMs = [...markers].reverse().find(ms => ms < current - 500) ?? 0;
 
-    console.log('[PlaybackController] Prev: current=', current, 'markers=', markers, 'target=', targetMs);
+    // console.log('[PlaybackController] Prev: current=', current, 'markers=', markers, 'target=', targetMs);
     this.stop({ keepStatus: true, keepCursor: true });
     this.state.currentMs = targetMs;
     await this.tick(targetMs);
@@ -376,7 +376,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const targetMs = markers.find(ms => ms > current + 120) ?? markers[markers.length - 1];
 
-    console.log('[PlaybackController] Next: current=', current, 'markers=', markers, 'target=', targetMs);
+    // console.log('[PlaybackController] Next: current=', current, 'markers=', markers, 'target=', targetMs);
     this.stop({ keepStatus: true, keepCursor: true });
     this.state.currentMs = targetMs;
     await this.tick(targetMs);
@@ -386,7 +386,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   async seek(targetMs) {
     const ms = Math.max(0, Math.min(this.state.totalDurationMs || 9999999, Number(targetMs) || 0));
-    console.log('[PlaybackController] Seeking to:', ms);
+    // console.log('[PlaybackController] Seeking to:', ms);
     this.state.currentMs = ms;
     await this.tick(ms);
     this.emit('seek', { currentMs: ms });
@@ -452,7 +452,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       hasVoice = true;
       let audio = this.dialoguePlayers[rowId];
       if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
-        console.log('[PlaybackController] Creating new Audio for row:', rowId, audioSrc);
+        // console.log('[PlaybackController] Creating new Audio for row:', rowId, audioSrc);
         if (audio) try { audio.pause(); } catch (_) { }
         audio = new Audio();
         audio.crossOrigin = 'anonymous';
@@ -494,13 +494,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       // Precision sync: if just started or drift > 0.2s
       const drift = Math.abs(audio.currentTime - offsetSec);
       if (audio.dataset.initialized === "false" || drift > 0.2) {
-        console.log('[PlaybackController] Syncing audio currentTime:', rowId, offsetSec);
+        // console.log('[PlaybackController] Syncing audio currentTime:', rowId, offsetSec);
         this.seekTo(audio, offsetSec);
         audio.dataset.initialized = "true";
       }
 
       if (this.state.isPlaying && audio.paused) {
-        console.log('[PlaybackController] Playing audio:', rowId);
+        // console.log('[PlaybackController] Playing audio:', rowId);
         audio.play().catch(e => console.warn('[PlaybackController] Audio play failed:', rowId, e));
       }
     }
@@ -520,15 +520,15 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     const rawSrc = activeSegment ? activeSegment.sourceUrl : panelCfg.sourceUrl;
-    console.log('[PlaybackController] syncBackgroundMusic rawSrc:', rawSrc);
+    // console.log('[PlaybackController] syncBackgroundMusic rawSrc:', rawSrc);
     if (!rawSrc) {
-      if (this.backgroundAudio) console.log('[PlaybackController] No background src for background music, stopping.');
+      // if (this.backgroundAudio) console.log('[PlaybackController] No background src for background music, stopping.');
       this.stopBackgroundMusic();
       return;
     }
 
     if (this.backgroundSrc !== rawSrc) {
-      console.log('[PlaybackController] Switching background music to:', rawSrc);
+      // console.log('[PlaybackController] Switching background music to:', rawSrc);
       this.stopBackgroundMusic();
       this.backgroundSrc = rawSrc;
       const blobSrc = await this.getBlobUrl(rawSrc);
@@ -641,7 +641,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const activeEl = activeSlot === 1 ? alt : primary;
     const inactiveEl = activeSlot === 1 ? primary : alt;
     
-    console.log("[PlaybackController] syncStageSwitching. Entry RowId:", entry.rowId, "VideoSrc:", !!entry.videoSrc, "ActiveSlot:", activeSlot);
+    // console.log("[PlaybackController] syncStageSwitching. Entry RowId:", entry.rowId, "VideoSrc:", !!entry.videoSrc, "ActiveSlot:", activeSlot);
 
     if (!activeEl) return;
 
@@ -651,18 +651,18 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.seekTo(activeEl, offsetSec);
       }
       if (this.state.isPlaying && activeEl.paused) {
-        console.log('[PlaybackController] Resuming activeEl', activeEl.id);
+        // console.log('[PlaybackController] Resuming activeEl', activeEl.id);
         activeEl.play().catch(err => console.warn('[PlaybackController] Play error:', err));
       }
       
-      console.log('[PlaybackController] Showing activeEl:', activeEl.id, 'Opacity: 1, zIndex: 2');
+      // console.log('[PlaybackController] Showing activeEl:', activeEl.id, 'Opacity: 1, zIndex: 2');
       activeEl.style.zIndex = "2";
       activeEl.style.opacity = "1";
       activeEl.style.visibility = "visible";
       activeEl.hidden = false;
       
       if (inactiveEl) {
-        console.log('[PlaybackController] Hiding inactiveEl:', inactiveEl.id, 'Opacity: 0');
+        // console.log('[PlaybackController] Hiding inactiveEl:', inactiveEl.id, 'Opacity: 0');
         inactiveEl.style.zIndex = "1";
         inactiveEl.style.opacity = "0";
         if (inactiveEl.dataset.src !== entry.videoSrc) {
@@ -685,7 +685,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         return; // Already switching to this one
       }
 
-      console.log('[PlaybackController] Switching scene to:', entry.videoSrc, 'at', offsetSec);
+      // console.log('[PlaybackController] Switching scene to:', entry.videoSrc, 'at', offsetSec);
       this.stageMachine.loadingSrc = entry.videoSrc;
 
       try {
@@ -708,7 +708,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Seamless swap mode (requires both active and inactive elements)
         if (inactiveEl.dataset.src !== entry.videoSrc) {
-          console.log('[PlaybackController] Loading new source into inactiveEl');
+          // console.log('[PlaybackController] Loading new source into inactiveEl');
           await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, blobUrl);
           inactiveEl.dataset.src = entry.videoSrc;
         }
@@ -722,7 +722,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         inactiveEl.hidden = false;
 
         if (this.state.isPlaying) {
-          console.log('[PlaybackController] Playing inactiveEl after switch');
+          // console.log('[PlaybackController] Playing inactiveEl after switch');
           await inactiveEl.play().catch(err => console.warn('[PlaybackController] Inactive play failed:', err));
         }
 
@@ -734,7 +734,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Swap slot globally
         const nextSlot = activeSlot === 1 ? 0 : 1;
-        console.log('[PlaybackController] Swapping slot to:', nextSlot);
+        // console.log('[PlaybackController] Swapping slot to:', nextSlot);
         this.deps?.setActiveStageVideoSlot?.(nextSlot);
       } catch (e) {
         console.error('[PlaybackController] Scene switch failed:', e);
@@ -756,7 +756,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const isEnabled = settings?.enabled && settings?.showTrack !== false;
 
     // Debug log to console to see what's happening
-    console.log(`[PlaybackController] syncOverlay ms:${Math.round(currentMs)} enabled:${isEnabled}`);
+    // console.log(`[PlaybackController] syncOverlay ms:${Math.round(currentMs)} enabled:${isEnabled}`);
 
     if (!isEnabled) {
       overlay.style.display = "none";

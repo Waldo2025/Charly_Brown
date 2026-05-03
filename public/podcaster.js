@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.29";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -540,7 +540,7 @@ function setupActivityListener(sessionId) {
   }
   if (!sessionId) return;
 
-  console.log("[Studio] Iniciando listener de actividad para:", sessionId);
+  // console.log("[Studio] Iniciando listener de actividad para:", sessionId);
   const sessionRef = doc(firestoreDb, "podcaster_sessions", sessionId);
   activityUnsubscribe = onSnapshot(sessionRef, (snapshot) => {
     try {
@@ -548,12 +548,12 @@ function setupActivityListener(sessionId) {
       const data = snapshot.data();
       const activity = data.recentActivity;
 
-      console.log("[Studio] Cambio detectado en sesión. Actividad:", activity);
+      // console.log("[Studio] Cambio detectado en sesión. Actividad:", activity);
 
       if (activity) {
         // Solo mostrar si es reciente (menos de 15 segundos)
         const diff = Date.now() - (activity.timestamp || 0);
-        console.log("[Studio] Evaluando notificación. Diferencia tiempo (ms):", diff);
+        // console.log("[Studio] Evaluando notificación. Diferencia tiempo (ms):", diff);
         if (diff < 15000) {
           showActivityNotification(activity);
         }
@@ -565,14 +565,14 @@ function setupActivityListener(sessionId) {
 }
 
 function showActivityNotification(activity) {
-  console.log("[Studio] Mostrando notificación de actividad:", activity);
+  // console.log("[Studio] Mostrando notificación de actividad:", activity);
   const pods = ["podcastVideoActivityNotification", "creativeVideoActivityNotification", "mainStudioActivityNotification"];
   let foundAtLeastOne = false;
 
   pods.forEach(id => {
     const el = document.getElementById(id);
     if (!el) {
-      console.log(`[Studio] Elemento #${id} no encontrado.`);
+      // console.log(`[Studio] Elemento #${id} no encontrado.`);
       return;
     }
     
@@ -584,7 +584,7 @@ function showActivityNotification(activity) {
     }
     
     el.style.display = "flex";
-    console.log(`[Studio] Notificación visible en #${id}`);
+    // console.log(`[Studio] Notificación visible en #${id}`);
   });
 
   if (!foundAtLeastOne) {
@@ -596,7 +596,7 @@ function showActivityNotification(activity) {
  * Oculta todos los contenedores de notificación de actividad.
  */
 function clearAllActivityNotifications() {
-  console.log("[Studio] Quitando todas las notificaciones de actividad.");
+  // console.log("[Studio] Quitando todas las notificaciones de actividad.");
   const pods = ["podcastVideoActivityNotification", "creativeVideoActivityNotification", "mainStudioActivityNotification"];
   pods.forEach(id => {
     const el = document.getElementById(id);
@@ -1528,10 +1528,10 @@ function isPodcasterLiveDebugEnabled() {
 function logPodcasterLiveDebug(event, payload = {}) {
   if (!isPodcasterLiveDebugEnabled()) return;
   try {
-    console.log("[podcaster-live]", event, {
-      at: new Date().toISOString(),
-      ...payload
-    });
+    // console.log("[podcaster-live]", event, {
+    //   at: new Date().toISOString(),
+    //   ...payload
+    // });
   } catch (_) {
     // noop
   }
@@ -1541,10 +1541,10 @@ function logVideoCreateDebug(stage = "", payload = {}) {
   if (!isPodcasterLiveDebugEnabled()) return;
   try {
     console.groupCollapsed(`video/create · ${stage}`);
-    console.log({
-      at: new Date().toISOString(),
-      ...payload
-    });
+    // console.log({
+    //   at: new Date().toISOString(),
+    //   ...payload
+    // });
     console.groupEnd();
   } catch (_) {
     // noop
@@ -1556,12 +1556,12 @@ function setPodcastPlaybackRowStatus(status = "", details = {}) {
   podcastPlaybackState.currentRowError = String(details?.error || "").trim();
   podcastPlaybackState.currentRowStartedAt = Number(details?.startedAt || Date.now()) || Date.now();
   try {
-    console.log("[podcaster-playback]", {
-      at: new Date().toISOString(),
-      rowId: String(details?.rowId || playingRowId || "").trim(),
-      status: podcastPlaybackState.currentRowStatus,
-      error: podcastPlaybackState.currentRowError
-    });
+    // console.log("[podcaster-playback]", {
+    //   at: new Date().toISOString(),
+    //   rowId: String(details?.rowId || playingRowId || "").trim(),
+    //   status: podcastPlaybackState.currentRowStatus,
+    //   error: podcastPlaybackState.currentRowError
+    // });
   } catch (_) {
     // noop
   }
@@ -5487,7 +5487,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
   const preserveExactVisualNotes = options?.preserveExactVisualNotes === true;
   const validationStage = String(options?.validationStage || "video creativo").trim() || "video creativo";
   if (row.visualNotesProposal) {
-    console.log(`[Studio] Normalizando fila ${row.id} CON PROPUESTA:`, row.visualNotesProposal);
+    // console.log(`[Studio] Normalizando fila ${row.id} CON PROPUESTA:`, row.visualNotesProposal);
   }
   if (validationStage === "video/create") {
     logVideoCreateDebug("normalizeCreativeRow-start", {
@@ -9812,7 +9812,7 @@ async function setActiveSession(sessionId) {
     if (els.sessionPublishToggle) {
       const isPublished = nextSession?.publicar === true;
       els.sessionPublishToggle.checked = isPublished;
-      console.log(`[Sync] Session ${nextSession?.id} publication state: ${isPublished}`);
+      // console.log(`[Sync] Session ${nextSession?.id} publication state: ${isPublished}`);
     }
     setPodcastVideoStageMaxHeight(ui.stageMaxHeightPx || podcastStageMaxHeightPx, { persist: false });
     if (ui.timelineViewMode) {
@@ -23723,7 +23723,7 @@ function renderScript(session) {
 
   const buildScriptRowCard = (row, index) => {
     if (row.visualNotesProposal) {
-      console.log(`[Studio] Detectada PROPUESTA NUEVA en fila ${row.id}:`, row.visualNotesProposal);
+      // console.log(`[Studio] Detectada PROPUESTA NUEVA en fila ${row.id}:`, row.visualNotesProposal);
     }
     return `
     <article class="script-row${isScriptRowCollapsed(row.id, session) ? " is-collapsed" : ""}" data-row-id="${escapeHtml(row.id)}" tabindex="-1">
@@ -27889,11 +27889,11 @@ async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, cons
     });
   }
   if (videoMode && Array.isArray(normalized?.rows)) {
-    console.log("[podcaster-video] normalize-result", {
-      rows: normalized.rows.length,
-      firstText: String(normalized.rows[0]?.voiceOverText || normalized.rows[0]?.text || "").slice(0, 120),
-      firstScene: String(normalized.rows[0]?.sceneDescription || normalized.rows[0]?.scenePrompt || "").slice(0, 120)
-    });
+    // console.log("[podcaster-video] normalize-result", {
+    //   rows: normalized.rows.length,
+    //   firstText: String(normalized.rows[0]?.voiceOverText || normalized.rows[0]?.text || "").slice(0, 120),
+    //   firstScene: String(normalized.rows[0]?.sceneDescription || normalized.rows[0]?.scenePrompt || "").slice(0, 120)
+    // });
   }
   if (Array.isArray(normalized?.rows)) {
     normalized.rows = normalized.rows.map((row) => ({
@@ -30752,7 +30752,7 @@ function attachEvents() {
             return fileName.includes(target) || folderName.includes(target);
           });
           if (match) {
-            console.log("[podcaster][autolink] Linked", rowId, "->", match.storagePath);
+            // console.log("[podcaster][autolink] Linked", rowId, "->", match.storagePath);
             upsertActiveSession((current) => {
               const nextVideoMap = {
                 ...getDialogueVideoMap(current),
@@ -30774,7 +30774,7 @@ function attachEvents() {
             }, { render: false });
             linkedVideos++;
           } else {
-            console.log("[podcaster][autolink] No match for row", rowId);
+            // console.log("[podcaster][autolink] No match for row", rowId);
           }
           const audioMatch = audios.find((a) => {
             const folderName = String(a?.rowFolder || "").toLowerCase();
@@ -32639,7 +32639,7 @@ function attachEvents() {
       // Usar la infraestructura de guardado existente (API o Directo) para persistir en la nube
       try {
         await saveSessionToCloud(session.id, { silent: true });
-        console.log(`[Publish] Sesión ${session.id} sincronizada -> ${isChecked ? 'Pública' : 'Borrador'}`);
+        // console.log(`[Publish] Sesión ${session.id} sincronizada -> ${isChecked ? 'Pública' : 'Borrador'}`);
       } catch (err) {
         console.error("[Publish] Error al sincronizar estado de publicación:", err);
       }
@@ -32815,7 +32815,7 @@ function init() {
     if (user) {
       obtenerNombreUsuarioStudio(user).then(name => {
         currentUserName = name;
-        console.log("[Studio] Usuario identificado:", currentUserName);
+        // console.log("[Studio] Usuario identificado:", currentUserName);
       });
     }
 
