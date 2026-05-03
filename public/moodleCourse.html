@@ -139,6 +139,13 @@
             aria-label="Mostrar/Ocultar módulos archivados">
             <i class="fas fa-box-archive"></i>
           </button>
+          <div class="flex items-center gap-2 px-2 py-1 bg-accent/50 rounded-lg border border-border ml-auto">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Publicar</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="checkPublicarCurso" class="sr-only peer">
+              <div class="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+            </label>
+          </div>
         </div>
         <ul id="listaTemasSidebar" class="space-y-1 text-xs"></ul>
       </div>

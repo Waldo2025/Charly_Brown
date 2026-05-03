@@ -2713,11 +2713,43 @@ function inicializarBotonExportCursoWord() {
 }
 
 if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", inicializarResizersPaneles);
+    document.addEventListener("DOMContentLoaded", inicializarPublicarCursoUI);
     document.addEventListener("DOMContentLoaded", inicializarToggleArchivadosUI);
     document.addEventListener("DOMContentLoaded", inicializarBotonExportCursoWord);
 } else {
     inicializarToggleArchivadosUI();
     inicializarBotonExportCursoWord();
+    inicializarPublicarCursoUI();
+}
+
+function inicializarPublicarCursoUI() {
+  const checkPublicar = document.getElementById("checkPublicarCurso");
+  if (!checkPublicar) return;
+
+  checkPublicar.addEventListener("change", async (e) => {
+    if (!cursoDocId) return;
+    const valor = e.target.checked;
+    try {
+      await updateDoc(doc(db, "moodleCourses", cursoDocId), {
+        publicar: valor
+      });
+      // Actualizar objeto local
+      if (curso) curso.publicar = valor;
+      // Actualizar en cursosUsuario
+      const cIdx = cursosUsuario.findIndex(c => c.id === cursoDocId);
+      if (cIdx !== -1) {
+        cursosUsuario[cIdx].publicar = valor;
+      }
+      
+      mostrarNotificacion(valor ? "Sesión publicada en Dashboard" : "Sesión ocultada en Dashboard", "success");
+    } catch (err) {
+      console.error("Error al publicar curso:", err);
+      mostrarNotificacion("Error al cambiar estado de publicación", "error");
+      // Revertir switch
+      e.target.checked = !valor;
+    }
+  });
 }
 
 /* ESPERAR A QUE EL USUARIO INICIE SESIÓN */
@@ -2734,11 +2766,17 @@ onAuthStateChanged(auth, async (user) => {
   await syncGeminiModelOptionsForMoodle();
   await cargarCursosUsuario();
 
-  const cursoIdGuardado = localStorage.getItem("cursoSeleccionado");
+  const urlParams = new URLSearchParams(window.location.search);
+  const cursoIdUrl = urlParams.get("cursoId");
+  const cursoIdGuardado = cursoIdUrl || localStorage.getItem("cursoSeleccionado");
+  
   if (cursoIdGuardado) {
     const cursoGuardadoExiste = cursosUsuario.some(c => c.id === cursoIdGuardado);
     if (cursoGuardadoExiste) {
       await seleccionarCurso(cursoIdGuardado);
+    } else if (cursoIdUrl) {
+      // Si viene por URL pero no está en la lista local, intentar cargar igual (podría ser compartido)
+      await seleccionarCurso(cursoIdUrl);
     } else {
       localStorage.removeItem("cursoSeleccionado");
       localStorage.removeItem("temaAbierto");
@@ -4532,6 +4570,14 @@ async function seleccionarCurso(id) {
             } else {
                 btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
             }
+        }
+
+        // Actualizar switch de publicación
+        const checkPublicar = document.getElementById("checkPublicarCurso");
+        if (checkPublicar) {
+            checkPublicar.checked = !!cursoLocal.publicar;
+            // Solo el propietario puede publicar si se desea restringir
+            checkPublicar.disabled = !tienePermisoEditar;
         }
 
         // Botón exportar curso (disponible también en solo lectura)

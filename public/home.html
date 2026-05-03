@@ -109,14 +109,14 @@
               </div>
               <i class="fas fa-arrow-right"></i>
             </div>
-            <a href="moodleCourse.html" class="section-card flow-status-action flow-amber">
+            <div class="section-card flow-status-action flow-amber" data-view="viewAprende">
               <img src="woodstock.png" alt="Aprende" class="flow-status-img">
               <div>
                 <span>Publicar en LMS</span>
                 <strong>Contenido Aprende</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </a>
+            </div>
             <div class="section-card flow-status-action flow-slate" data-view="viewDownloads">
               <img src="charlyEditor.png" alt="Descargas" class="flow-status-img">
               <div>
@@ -320,6 +320,53 @@
         </div>
       </div>
     </section>
+    <!-- SECCIÓN APRENDE (AMBER) -->
+    <section id="viewAprende" class="home-view hidden">
+      <div class="flow-hero-panel">
+        <div class="flow-hero-copy">
+          <button class="flow-back-btn" data-view="viewDashboard">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <h1 id="homeLauncherTitle">
+            <img src="woodstock.png" alt="Woodstock" class="flow-hero-logo">
+          </h1>
+          <h2 class="flow-hero-title">Contenido Aprende</h2>
+
+          <div class="flow-search-box" style="margin: 1.5rem 0;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchAprende" placeholder="Buscar sesión..." class="flow-search-input">
+          </div>
+
+          <div class="flow-stats-minimal" style="margin-top: 1rem;">
+            <div class="flow-stat">
+              <span id="aprendeWorkbenchTotal">--</span>
+              <small>Total</small>
+            </div>
+            <div class="flow-stat">
+              <span id="aprendeWorkbenchPublished">--</span>
+              <small>Publicadas</small>
+            </div>
+          </div>
+        </div>
+        <div class="flow-hero-status" style="max-height: 85vh; overflow-y: auto; padding: 1rem;">
+          <div class="flow-sub-hero-actions">
+            <button type="button" class="workbench-filter is-active" data-workbench-view="aprende"
+              data-workbench-filter="published">
+              <i class="fas fa-check-circle"></i>
+              <span>Publicadas</span>
+            </button>
+            <button type="button" class="workbench-filter" data-workbench-view="aprende" data-workbench-filter="mine">
+              <i class="fas fa-folder-open"></i>
+              <span data-admin-label="Todos los documentos" data-user-label="Mis documentos">Mis documentos</span>
+            </button>
+          </div>
+          <div id="contenedorAprendeUser" class="flow-repository-list">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- SECCIÓN DESCARGAS -->
     <section id="viewDownloads" class="home-view hidden">
       <button class="btn-back" data-view="viewDashboard">

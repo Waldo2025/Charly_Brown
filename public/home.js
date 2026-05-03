@@ -40,7 +40,8 @@ onAuthStateChanged(auth, async (user) => {
     configurarBusquedaWorkbench();
     initDashboardNavigation();
 
-    await renderLecturas();
+    await loadUserLecturas();
+    await loadUserAprende();
     await renderImagenesCompartidas();
     await loadUserStats();
 
@@ -937,6 +938,45 @@ const configurarEventos = () => {
 };
 
 
+async function loadUserAprende() {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const contenedor = document.getElementById("contenedorAprendeUser");
+  if (!contenedor) return;
+
+  configureWorkbenchFilters();
+  updateWorkbenchFilterButtons("aprende");
+  updateWorkbenchListTitle("aprende");
+  contenedor.innerHTML = '<p class="text-muted">Cargando tus sesiones...</p>';
+
+  try {
+    const isAdmin = ["admin", "superAdmin"].includes(currentUserRole);
+    const filter = workbenchFilters.aprende || "published";
+
+    let sesiones = [];
+    if (filter === "published") {
+      const q = query(collection(db, "moodleCourses"), where("publicar", "==", true)); 
+      const snap = await getDocs(q);
+      sesiones = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+    } else {
+      const q = isAdmin
+        ? collection(db, "moodleCourses")
+        : query(collection(db, "moodleCourses"), where("userId", "==", user.uid));
+      
+      const snap = await getDocs(q);
+      sesiones = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+    }
+
+    updateWorkbenchStats('aprende', sesiones);
+    renderUserItemList(contenedor, sesiones, 'aprende');
+
+  } catch (err) {
+    console.error("[Dashboard] Error al cargar Aprende:", err);
+    contenedor.innerHTML = '<p class="text-danger">Error al cargar las sesiones.</p>';
+  }
+}
+
 function agregarMarcadoresDePosicion(elemento) {
   // Limpiar marcadores existentes
   const existingMarkers = elemento.querySelectorAll('span[data-start-pos]');
@@ -1021,6 +1061,7 @@ const configurarBusquedaWorkbench = () => {
   setupSearch("searchUnidades", "contenedorUnidadesUser");
   setupSearch("searchMultimedia", "contenedorMultimediaUser");
   setupSearch("searchPodcasts", "contenedorPodcastsUser");
+  setupSearch("searchAprende", "contenedorAprendeUser");
 };
 
 
@@ -1120,7 +1161,8 @@ imagenesCache.forEach(img => {
   }
 });
 
-await renderLecturas(); // ✅ Ahora ya tiene acceso al mapa de imágenes
+await loadUserLecturas(); // ✅ Ahora ya tiene acceso al mapa de imágenes
+await loadUserAprende();
 
 configurarEventos();
 configurarBuscador();
@@ -1183,7 +1225,8 @@ document.getElementById("toggleArchivadosBtn")?.addEventListener("click", () => 
     ? `<i class='bx bx-box'></i> Ocultar archivados`
     : `<i class='bx bx-box'></i> Mostrar archivados`;
 
-  renderLecturas();
+  loadUserLecturas();
+  loadUserAprende();
   renderImagenesCompartidas();
 });
 
@@ -1863,6 +1906,7 @@ function configureWorkbenchFilters() {
       if (view === "unidades") loadUserUnidades();
       if (view === "multimedia") loadUserMultimedia();
       if (view === "podcasts") loadUserPodcasts();
+      if (view === "aprende") loadUserAprende();
     });
     button.dataset.workbenchBound = "1";
   });
@@ -1880,15 +1924,17 @@ function updateWorkbenchFilterButtons(view) {
 function updateWorkbenchListTitle(scope) {
   const isAdmin = isCurrentUserAdmin();
   const filter = workbenchFilters[scope] || "published";
-  const label = filter === "published"
-    ? (scope === "unidades" ? "Unidades publicadas" : "Lecturas publicadas")
-    : (
-      isAdmin
-        ? (scope === "unidades" ? "Todas las unidades" : "Todas las lecturas")
-        : (scope === "unidades" ? "Mis unidades creadas" : "Mis lecturas creadas")
-    );
-  const id = scope === "unidades" ? "unidadesWorkbenchListTitle" : "lecturasWorkbenchListTitle";
-  const title = document.getElementById(id);
+  const labels = {
+    lecturas: { published: "Lecturas publicadas", all: "Todas las lecturas", mine: "Mis lecturas creadas" },
+    unidades: { published: "Unidades publicadas", all: "Todas las unidades", mine: "Mis unidades creadas" },
+    aprende: { published: "Sesiones publicadas", all: "Todas las sesiones", mine: "Mis sesiones creadas" }
+  };
+  
+  const scopeLabels = labels[scope] || labels.lecturas;
+  const label = filter === "published" ? scopeLabels.published : (isAdmin ? scopeLabels.all : scopeLabels.mine);
+  
+  const idMap = { lecturas: "lecturasWorkbenchListTitle", unidades: "unidadesWorkbenchListTitle", aprende: "aprendeWorkbenchListTitle" };
+  const title = document.getElementById(idMap[scope] || "lecturasWorkbenchListTitle");
   if (title) title.textContent = label;
 }
 
@@ -3519,6 +3565,7 @@ function renderUserItemList(container, items, type) {
     let accentClass = "workbench-item-lectura";
     if (type === "unidad") accentClass = "workbench-item-unidad";
     if (type === "download") accentClass = "workbench-item-download";
+    if (type === "aprende") accentClass = "workbench-item-aprende";
     if (type === "multimedia" || type === "podcast") accentClass = "workbench-item-multimedia";
     
     card.className = `workbench-item ${accentClass}`;
@@ -3566,7 +3613,8 @@ function renderUserItemList(container, items, type) {
     if (type === 'download') iconClass = "fas fa-file-word";
     if (type === 'multimedia') iconClass = "fas fa-video";
     if (type === 'podcast') iconClass = "fas fa-microphone-lines";
-    const typeLabel = type === 'lectura' ? 'Lectura' : type === 'unidad' ? 'Unidad' : 'Descarga';
+    if (type === 'aprende') iconClass = "fas fa-wand-magic-sparkles";
+    const typeLabel = type === 'lectura' ? 'Lectura' : type === 'unidad' ? 'Unidad' : type === 'aprende' ? 'Aprende' : 'Descarga';
     const statusLabel = item.publicar === true || item.published === true ? 'Publicada' : 'Borrador';
 
     let unitTypeLabel = "";
@@ -3661,7 +3709,7 @@ function renderUserItemList(container, items, type) {
       card.innerHTML = `
         <div class="workbench-accordion-header">
           <div class="workbench-item-icon" aria-hidden="true">
-            <img src="SnoopyPodcastCreator.png" alt="Icon" class="flow-status-img" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">
+            <img src="${type === 'aprende' ? 'woodstock.png' : 'SnoopyPodcastCreator.png'}" alt="Icon" class="flow-status-img" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">
           </div>
 
           <div class="workbench-item-copy">
@@ -3764,6 +3812,8 @@ function renderUserItemList(container, items, type) {
         window.location.href = `podcaster.html?sessionId=${id}`;
       } else if (type === 'podcast') {
         window.location.href = `podcaster.html?sessionId=${id}`;
+      } else if (type === 'aprende') {
+        window.location.href = `moodleCourse.html?cursoId=${id}`;
       }
     } else if (btnVer) {
       const id = btnVer.dataset.id;
