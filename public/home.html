@@ -476,8 +476,12 @@
               transform: translate(-50%, -100%);
               display: block;
               box-sizing: border-box;
-              padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
+              padding: calc(0.36em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
               border-radius: calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
+              background: rgba(15, 23, 42, 0.75) !important;
+              backdrop-filter: blur(8px) saturate(1.1) !important;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
               color: var(--pod-onscreen-text-color, #f8fafc);
               font-family: var(--pod-onscreen-text-font-family, inherit);
               font-size: var(--pod-onscreen-text-font-size, 16px);
