@@ -812,7 +812,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const unescapeMap = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'" };
     const rawCssText = String(inlineStyle).replace(/&amp;|&lt;|&gt;|&quot;|&#039;/g, m => unescapeMap[m]);
 
-    overlay.innerHTML = `<div class="podcast-on-screen-text-content ${presetClass}" data-row-id="${this.deps.escapeHtml(selected.rowId)}">${contentHtml}</div>`;
+    const bgClass = settings.bgPreset ? `is-bg-${settings.bgPreset}` : "is-bg-glass";
+    overlay.innerHTML = `<div class="podcast-on-screen-text-content ${presetClass} ${bgClass}" data-row-id="${this.deps.escapeHtml(selected.rowId)}">${contentHtml}</div>`;
     const contentNode = overlay.querySelector('.podcast-on-screen-text-content');
     if (contentNode) {
       const properties = rawCssText.split(';').filter(Boolean);
