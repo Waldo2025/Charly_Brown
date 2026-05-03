@@ -826,7 +826,8 @@ function normalizePodcastStudioUiState(raw = null, session = null) {
     timelineViewMode: String(source.timelineViewMode || cfg.timelineViewMode || "tracks").trim().toLowerCase() === "normal" ? "normal" : "tracks",
     showMontageAudioSubtracks: source.showMontageAudioSubtracks === true,
     lastActiveRowId: validRowIds.has(lastActiveRowId) ? lastActiveRowId : "",
-    collapsedRowIds
+    collapsedRowIds,
+    composerGenerationMode: String(raw?.composerGenerationMode || "script").trim() === "video" ? "video" : "script"
   };
 }
 
@@ -9469,6 +9470,7 @@ function createSession(overrides = {}) {
     prompt: "",
     archived: false,
     updatedAt: nowIso(),
+    podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode }),
     chat: [
       {
         id: makeId("msg"),
@@ -9777,6 +9779,7 @@ function setActiveSession(sessionId) {
         podcastVideoState.transitionFromRowId = ui.lastActiveRowId;
       }
     }
+    setComposerGenerationMode(ui.composerGenerationMode);
   } catch (_) {
     // noop
   } finally {
@@ -12113,7 +12116,9 @@ function isCurrentModeVideo() {
 }
 
 function setComposerGenerationMode(mode = "script") {
-  composerGenerationMode = String(mode || "").trim() === "video" ? "video" : "script";
+  const newMode = String(mode || "").trim() === "video" ? "video" : "script";
+  const changed = newMode !== composerGenerationMode;
+  composerGenerationMode = newMode;
   try {
     window.localStorage.setItem(COMPOSER_GENERATION_MODE_KEY, composerGenerationMode);
   } catch (_) {
@@ -12127,6 +12132,9 @@ function setComposerGenerationMode(mode = "script") {
     if (els.composerTableModeToggle) {
       els.composerTableModeToggle.disabled = false;
     }
+  }
+  if (changed) {
+    upsertPodcastStudioUiState({ composerGenerationMode }, { autosaveReason: "composer-mode" });
   }
   const session = getActiveSession();
   if (session) {
@@ -32788,6 +32796,7 @@ function init() {
     if (podcastVideoState.showMontageAudioSubtracks && getTimelineViewMode(getActiveSession()) !== "tracks") {
       upsertPodcastVideoConfig((cfg) => ({ ...cfg, timelineViewMode: "tracks" }));
     }
+    setComposerGenerationMode(activeUi.composerGenerationMode);
     // Iniciar listener de actividad para la sesión inicial
     if (state.activeSessionId) {
       setupActivityListener(state.activeSessionId);
