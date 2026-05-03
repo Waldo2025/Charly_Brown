@@ -1043,7 +1043,7 @@ body.is-resizing-podcast-stage {
 #podcastVideoShell.floating-panel-card {
   width: 100vw;
   max-width: none;
-  height: 100vh;
+  min-height: 100vh; height: auto;
   max-height: none;
   margin: 0;
   border-radius: 0;
@@ -2358,12 +2358,12 @@ body.is-resizing-podcast-stage {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(var(--pod-studio-inspector-min), var(--pod-studio-inspector-width), var(--pod-studio-inspector-max));
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto;
   gap: 10px;
   min-height: 0;
   position: relative;
   transition: grid-template-columns 0.22s ease;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .podcast-studio-layout.is-inspector-collapsed {
@@ -2405,8 +2405,8 @@ body.is-resizing-podcast-stage {
 
 #podcastVideoShell.floating-panel-card {
   overflow-x: hidden;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  overflow-y: auto;
+  
 }
 
 #podcastVideoShell.floating-panel-card::-webkit-scrollbar {
@@ -3521,7 +3521,7 @@ body.is-resizing-podcast-stage {
   padding: 8px;
   display: grid;
   gap: 8px;
-  min-height: 700px;
+  min-height: 1000px;
   align-content: start;
   flex: 1 1 auto;
   grid-template-rows: auto auto minmax(0, 1fr);
