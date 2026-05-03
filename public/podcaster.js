@@ -10,7 +10,9 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -1830,19 +1832,29 @@ async function loadCloudSessionsDirect() {
   if (!uid) return [];
   const deletedSessionIds = new Set(loadDeletedSessionIds(uid));
   const ownedSnap = await getDocs(
-    query(collection(firestoreDb, "podcaster_sessions"), where("ownerId", "==", uid))
+    query(
+      collection(firestoreDb, "podcaster_sessions"),
+      where("ownerId", "==", uid),
+      orderBy("updatedAt", "desc"),
+      limit(40)
+    )
   );
   const sharedSnap = { docs: [] };
   const merged = new Map();
   [...ownedSnap.docs, ...sharedSnap.docs].forEach((docSnap) => {
     const data = docSnap.data() || {};
+    // Si la sesión aún tiene el campo 'session' (legado), lo usamos directamente.
+    // Si no, es una sesión "shallow" (stub) y cargaremos el payload después.
     const sessionData = data.session && typeof data.session === "object" ? data.session : null;
-    if (!sessionData) return;
     if (deletedSessionIds.has(String(docSnap.id || "").trim())) return;
     merged.set(docSnap.id, {
-      ...sessionData,
-      id: docSnap.id, // Asegurar que el ID sea el de Firestore
+      ...(sessionData || {}),
+      id: docSnap.id,
+      title: data.title || sessionData?.title || "Sin título",
+      updatedAt: data.sessionUpdatedAt || sessionData?.updatedAt || data.updatedAt?.toDate?.().toISOString() || nowIso(),
+      archived: data.archived === true,
       publicar: data.publicar === true,
+      isStub: !sessionData, // Marcamos como stub si no tiene el payload embebido
       cloudMeta: {
         ownerId: String(data.ownerId || "").trim() || null,
         savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
@@ -1850,6 +1862,21 @@ async function loadCloudSessionsDirect() {
     });
   });
   return Array.from(merged.values()).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+async function loadCloudSessionPayloadDirect(sessionId) {
+  const uid = resolveCurrentUid();
+  if (!uid || !sessionId) return null;
+  try {
+    const payloadRef = doc(firestoreDb, "podcaster_sessions_payloads", sessionId);
+    const snap = await getDoc(payloadRef);
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return data.payload || null;
+  } catch (error) {
+    console.error("[podcaster] Error cargando payload de sesión:", error);
+    return null;
+  }
 }
 
 function mergeSessionsById(primary = [], secondary = []) {
@@ -9720,7 +9747,7 @@ function resetPodcastStudioSessionUiState(session = null) {
   }
 }
 
-function setActiveSession(sessionId) {
+async function setActiveSession(sessionId) {
   backgroundDialogueAudioWarmupToken = 0;
   playbackController.stop({ keepStatus: true });
   state.activeSessionId = sessionId;
@@ -9729,6 +9756,26 @@ function setActiveSession(sessionId) {
   setupActivityListener(sessionId);
   
   const nextSession = getActiveSession();
+  
+  // Si es una sesión "Shallow" (stub), cargar el contenido completo antes de continuar
+  if (nextSession?.isStub) {
+    try {
+      setGenerationStatus("Cargando...", "Descargando contenido de la sesión...");
+      const fullPayload = await loadCloudSessionPayloadDirect(sessionId);
+      if (fullPayload) {
+        // Combinar el payload completo en el objeto de la sesión actual
+        Object.assign(nextSession, fullPayload);
+        nextSession.isStub = false;
+        setGenerationStatus("Listo", "");
+      } else {
+        setGenerationStatus("Error", "No se encontró el contenido en la nube.");
+      }
+    } catch (error) {
+      console.error("[podcaster] Error activando sesión stub:", error);
+      setGenerationStatus("Error", "Error de red al cargar sesión.");
+    }
+  }
+
   resetPodcastStudioSessionUiState(nextSession);
   // Restaurar estado visual del Studio desde la sesión (Firebase/localStorage fallback).
   try {
@@ -9788,6 +9835,10 @@ function setActiveSession(sessionId) {
   if (typeof playbackController?.sync === "function") {
     playbackController.sync(nextSession, getPodcastVideoConfig(nextSession));
   }
+  try {
+    normalizeLegacyGeminiTrackOffsets(nextSession);
+    applyGeminiSubtitleInsetForReorderedTimeline(nextSession, STUDIO_REORDER_SUBTITLE_INSET_PX);
+  } catch (_) { }
   render();
 }
 
@@ -13359,18 +13410,29 @@ async function saveSessionToCloudDirect(payload) {
   if (existing && String(existing.ownerId || "").trim() !== uid) {
     throw new Error("No puedes sobrescribir una sesión de otro usuario.");
   }
+  const sessionUpdatedAt = sanitized.updatedAt || nowIso();
+  // Guardar Metadatos (Shallow)
   await setDoc(sessionRef, {
     ownerId: uid,
     title: sanitized.title,
     archived: sanitized.archived === true,
     publicar: sanitized.publicar === true,
-    sessionUpdatedAt: sanitized.updatedAt || nowIso(),
-    session: sanitized,
+    sessionUpdatedAt,
+    // Eliminamos 'session' de aquí para que la lista sea ligera
     sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
     sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
     createdAt: existing?.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
+
+  // Guardar Payload (Heavy)
+  const payloadRef = doc(firestoreDb, "podcaster_sessions_payloads", sanitized.id);
+  await setDoc(payloadRef, {
+    ownerId: uid,
+    sessionId: sanitized.id,
+    payload: sanitized,
+    updatedAt: serverTimestamp()
+  });
   return {
     ok: true,
     sessionId: sanitized.id,
@@ -32786,23 +32848,11 @@ function init() {
     persistSessions(nextUid, finalSessions);
     state.activeSessionId = null;
     ensureSession();
-    const activeUi = normalizePodcastStudioUiState(getActiveSession()?.podcastStudioUiState || null, getActiveSession());
-    setPodcastVideoLibraryCollapsed(activeUi.libraryCollapsed || podcastVideoLibraryCollapsed);
-    setPodcastVideoStageMaxHeight(activeUi.stageMaxHeightPx || podcastStageMaxHeightPx, { persist: false });
-    try {
-      normalizeLegacyGeminiTrackOffsets(getActiveSession());
-      applyGeminiSubtitleInsetForReorderedTimeline(getActiveSession(), STUDIO_REORDER_SUBTITLE_INSET_PX);
-    } catch (_) { }
-    if (podcastVideoState.showMontageAudioSubtracks && getTimelineViewMode(getActiveSession()) !== "tracks") {
-      upsertPodcastVideoConfig((cfg) => ({ ...cfg, timelineViewMode: "tracks" }));
-    }
-    setComposerGenerationMode(activeUi.composerGenerationMode);
-    // Iniciar listener de actividad para la sesión inicial
     if (state.activeSessionId) {
-      setupActivityListener(state.activeSessionId);
+      await setActiveSession(state.activeSessionId);
+    } else {
+      render();
     }
-
-    render();
     consumeImportedVideoPromptBridge({ renderAfter: true, clearAfterRead: true });
   });
   window.addEventListener("beforeunload", () => {

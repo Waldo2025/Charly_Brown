@@ -1,11 +1,11 @@
 {
-  "version": "2026-1.0.1.28",
+  "version": "2026-1.0.1.29",
   "title": "Nuevas actualizaciones",
   "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
   "forceClearCache": false,
   "forceClearCacheReason": "",
   "updates": [
-    "Nuevo: Opción 'Solo Audio' (MP3) en la exportación de montajes (Podcaster Studio).",
+    "Mejora: Carga ultrarrápida de sesiones (Arquitectura Shallow) en Podcaster Studio.",
     "Mejora: Guardado automático en Firebase al descargar documentos Word (Generar Unidad).",
     "Fix: Persistencia de modo Podcast/Video vinculada a la sesión de Firebase.",
     "Fix: Corrección de error de sintaxis en el guardado de unidades."
