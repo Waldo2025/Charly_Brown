@@ -1806,33 +1806,7 @@ body, body * {
               box-shadow 300ms ease-in-out;
 }
 
-body #sidebar > #menuToggle {
-  background: transparent !important;
-  color: #ffffff !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
 
-body #sidebar > #menuToggle:hover,
-body #sidebar > #menuToggle:focus,
-body #sidebar > #menuToggle:focus-visible,
-body #sidebar > #menuToggle:active {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-body #sidebar > #menuToggle:focus-visible {
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.32) !important;
-}
-
-body #sidebar > #menuToggle i {
-  color: inherit !important;
-}
 
 /* Asegurar que los inputs y textareas tengan buen contraste en modo oscuro */
 .dark input,

@@ -12739,14 +12739,102 @@ function construirContenidoHtmlWord(value = "") {
     return `<p>${escapeHtml(raw).replace(/\n/g, "<br>")}</p>`;
 }
 
+function normalizarTextoWord(value = "") {
+    return String(value || "")
+        .replace(/\u00a0/g, " ")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function quitarPrefijoTituloWord(value = "") {
+    return String(value || "").replace(/^t[ií]tulo\s*:\s*/i, "").trim();
+}
+
+function esTextoIgualWord(value = "", referencia = "") {
+    const texto = normalizarTextoWord(value);
+    const ref = normalizarTextoWord(referencia);
+    return !!texto && !!ref && texto === ref;
+}
+
+function esEncabezadoOriginalWord(value = "") {
+    const texto = String(value || "").trim();
+    return /^actividad(?:\s+\d+)?\s+original\b/i.test(texto) ||
+        /^instrucci[oó]n(?:\s+\d+)?\s+original\b/i.test(texto);
+}
+
+function contenidoEmpiezaConTituloWord(html = "", titulo = "") {
+    const raw = String(html || "").trim();
+    if (!raw || !titulo) return false;
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+    const first = Array.from(root.children).find((node) => String(node.textContent || "").trim());
+    return first ? esTextoIgualWord(first.textContent || "", titulo) : false;
+}
+
+function limpiarEncabezadosDuplicadosWord(html = "", tituloReferencia = "", { quitarTituloGenerico = true } = {}) {
+    const raw = String(html || "").trim();
+    if (!raw || !tituloReferencia) return raw;
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+
+    root.querySelectorAll("h1, h2, h3, h4").forEach((node) => {
+        const text = String(node.textContent || "").trim();
+        if (esTextoIgualWord(text, tituloReferencia)) {
+            node.remove();
+        }
+    });
+
+    if (quitarTituloGenerico) {
+        root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote").forEach((node) => {
+            const text = String(node.textContent || "").trim();
+            if (!/^t[ií]tulo\s*:/i.test(text)) return;
+            if (esTextoIgualWord(quitarPrefijoTituloWord(text), tituloReferencia)) {
+                node.remove();
+            }
+        });
+    }
+
+    return root.innerHTML.trim();
+}
+
+function limpiarContenidoModuloParaWord(html = "", modulo = {}) {
+    let limpio = String(html || "").trim();
+    limpio = quitarActividadOriginalDelContenido(limpio);
+    limpio = limpiarEncabezadosDuplicadosWord(limpio, modulo?.nombre || "", { quitarTituloGenerico: true });
+    return limpio;
+}
+
+function construirIntroduccionWord(value = "", tituloReferencia = "", headingTag = "h3") {
+    const contenido = limpiarEncabezadosDuplicadosWord(
+        construirContenidoHtmlWord(value),
+        tituloReferencia,
+        { quitarTituloGenerico: false }
+    );
+    const tag = headingTag === "h4" ? "h4" : "h3";
+    const tituloIntroduccion = contenidoEmpiezaConTituloWord(contenido, "Introducción")
+        ? ""
+        : `<${tag} class="word-section-title">Introducción</${tag}>`;
+
+    return `
+        <section>
+            ${tituloIntroduccion}
+            ${contenido || "<p>(Sin contenido)</p>"}
+        </section>
+    `;
+}
+
 function construirContenidoModuloWord(modulo = {}) {
-    const contenidoLimpio = construirContenidoHtmlWord(modulo.contenido || "<p>(Sin contenido)</p>")
+    const contenidoBase = construirContenidoHtmlWord(modulo.contenido || "<p>(Sin contenido)</p>")
         .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-background[^"]*shadow-sm[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
         .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-muted\/40[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
         .replace(/<div[^>]*class="[^"]*text-xs[^"]*text-gray-500[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
         .replace(/<p[^>]*>\s*M[oó]dulo analizado:[\s\S]*?<\/p>/gi, "")
         .replace(/<label[^>]*class="[^"]*section-title[^"]*"[^>]*>[\s\S]*?<\/label>/gi, "")
         .replace(/<h1[^>]*class="[^"]*font-semibold[^"]*text-slate-900[^"]*mt-3[^"]*mb-2[^"]*"[^>]*>([\s\S]*?)<\/h1>/gi, '<h2 class="word-titulo2">$1</h2>');
+    const contenidoLimpio = limpiarContenidoModuloParaWord(contenidoBase, modulo);
 
     const instruccionOriginal = modulo.incluirInstruccionOriginalEnPropuesta === true && String(modulo.instrucciones || "").trim()
         ? `
@@ -12790,7 +12878,7 @@ function contenidoModuloYaIncluyeActividadOriginal(html = "") {
     root.innerHTML = raw;
     if (root.querySelector(".cb-module-block-title.is-original, .word-instruccion-original")) return true;
     return Array.from(root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote"))
-        .some((node) => String(node.textContent || "").trim().toLowerCase() === "actividad original");
+        .some((node) => esEncabezadoOriginalWord(node.textContent || ""));
 }
 
 function quitarActividadOriginalDelContenido(html = "") {
@@ -12799,12 +12887,14 @@ function quitarActividadOriginalDelContenido(html = "") {
     const root = document.createElement("div");
     root.innerHTML = raw;
 
+    root.querySelectorAll(".word-instruccion-original").forEach((node) => node.remove());
+
     const headings = Array.from(root.querySelectorAll(".cb-module-block-title.is-original, h1, h2, h3, h4, p, li, blockquote"));
     headings.forEach((heading) => {
         const text = String(heading.textContent || "").trim();
         const esBloqueOriginal =
             heading.classList?.contains("is-original") ||
-            /^actividad(?:\s+\d+)?\s+original\b/i.test(text);
+            esEncabezadoOriginalWord(text);
         if (!esBloqueOriginal) return;
 
         let cursor = heading.nextElementSibling;
@@ -12814,7 +12904,7 @@ function quitarActividadOriginalDelContenido(html = "") {
             const textCursor = String(cursor.textContent || "").trim();
             const esSiguienteSeparador =
                 cursor.classList?.contains("cb-module-block-title") ||
-                /^actividad(?:\s+\d+)?\s+original\b/i.test(textCursor) ||
+                esEncabezadoOriginalWord(textCursor) ||
                 /^propuesta(?:\s+actividad(?:\s+\d+)?)?\b/i.test(textCursor);
             if (esSiguienteSeparador) break;
             nodesToRemove.push(cursor);
@@ -13043,7 +13133,8 @@ function crearEstilosWordCurso() {
 }
 
 async function construirDocumentoWordSubtema(subtema) {
-    const tituloSubtema = escapeHtml(subtema?.nombre || "Subtema");
+    const nombreSubtema = subtema?.nombre || "Subtema";
+    const tituloSubtema = escapeHtml(nombreSubtema);
     let html = `
 <!DOCTYPE html>
 <html>
@@ -13060,12 +13151,7 @@ async function construirDocumentoWordSubtema(subtema) {
 
     const contenidoGenerado = String(subtema?.contenidoGenerado || "").trim();
     if (contenidoGenerado) {
-        html += `
-        <section>
-            <h2 class="word-section-title">Introducción</h2>
-            ${construirContenidoHtmlWord(contenidoGenerado)}
-        </section>
-        `;
+        html += construirIntroduccionWord(contenidoGenerado, nombreSubtema, "h3");
     }
 
     html += `<section><h2 class="word-section-title">Módulos</h2>`;
@@ -13110,8 +13196,7 @@ async function exportarTemaWord(tema) {
         <div class="subtema">
             <h2 class="word-subtema-title">${sub.nombre}</h2>
 
-            <h3 class="word-section-title">Introducción</h3>
-            ${construirContenidoHtmlWord(sub.contenidoGenerado || "<p>(Sin contenido)</p>")}
+            ${construirIntroduccionWord(sub.contenidoGenerado || "<p>(Sin contenido)</p>", sub.nombre || "Subtema", "h3")}
 
             <h3 class="word-section-title">Módulos</h3>
         `;
@@ -13197,12 +13282,7 @@ async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = fals
 
                 const contenidoGenerado = String(sub?.contenidoGenerado || "").trim();
                 if (contenidoGenerado) {
-                    html += `
-                        <section>
-                            <h4 class="word-section-title">Introducción</h4>
-                            ${construirContenidoHtmlWord(contenidoGenerado)}
-                        </section>
-                    `;
+                    html += construirIntroduccionWord(contenidoGenerado, sub?.nombre || "Subtema", "h4");
                 }
 
                 if (!sub?.modulosIds?.length) {

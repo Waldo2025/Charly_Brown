@@ -158,7 +158,7 @@ service cloud.firestore {
     }
 
     function isPublished(data) {
-      return data.published == true || data.estatusLectura == "Compartido";
+      return data.publicar == true || data.published == true || data.estatusLectura == "Compartido";
     }
 
     function isLecturaSharedWithUser(data) {
@@ -465,6 +465,15 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn();
+    }
+
+    match /wordDownloads/{docId} {
+      allow read: if isAdmin() || (isSignedIn() && isDocOwner(resource.data));
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        isDocOwner(request.resource.data)
+      );
+      allow update, delete: if isAdmin() || (isSignedIn() && isDocOwner(resource.data));
     }
 
     match /analisisLecturas/{docId} {

@@ -1,30 +1,14 @@
-// generarLectura.js
-import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
-import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy  } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
-import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { getStorage } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
+import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
 import { buildApiUrl } from "./api-client.js";
+import { db, auth, storage } from './firebase-instance.js';
 import setupImageGenerator from './imageGenerator.js';
 import { sanitizeHtml, sanitizeRichText, sanitizeTextInput, escapeHtml, sanitizeAssistantHtml, setSanitizedHtml } from './security-utils.js';
-import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js";
-import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-
-// Config
-// Configuración Firebase
-const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
-
-
-// ✅ Inicializar Firebase
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-void bootstrapFirebaseAppCheck(app);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const storage = getStorage(app);
 
 // ⚙️ Ejecutar el generador de imágenes
 setupImageGenerator(storage);
 
-export { auth, storage, db }; // ahora sí puedes exportar ambos
+export { auth, storage, db };
 
 
 let currentUserId = null;

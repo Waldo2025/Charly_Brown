@@ -93,57 +93,43 @@
         align-items: center;
         justify-content: center;
         gap: 8px;
-        min-height: 40px;
-        padding: 0 18px;
-        overflow: hidden;
-        border: 1px solid rgba(250, 204, 21, 0.9);
+        height: 30px;
+        padding: 0 0.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.4);
         border-radius: 999px;
-        background: linear-gradient(135deg, #1f1600 0%, #111111 54%, #332200 100%);
-        color: #fff7d6 !important;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
+        background: rgba(255, 255, 255, 0.18);
+        color: #fff !important;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        text-transform: none;
         cursor: pointer;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34), 0 0 0 0 rgba(250, 204, 21, 0.45);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
         margin-left: auto;
         white-space: nowrap;
-        transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, color 160ms ease;
-        animation: cb-update-alert-pulse 1.45s ease-in-out infinite;
-      }
-      #${LAUNCHER_ID}.update-banner-launcher::before {
-        content: "";
-        position: absolute;
-        inset: 2px;
-        border-radius: inherit;
-        background: linear-gradient(90deg, transparent 0%, rgba(250, 204, 21, 0.18) 48%, transparent 100%);
-        opacity: 0;
-        pointer-events: none;
-        transform: translateX(-55%);
-        animation: cb-update-alert-sheen 2.2s ease-in-out infinite;
+        transition: all 0.2s ease;
       }
       #${LAUNCHER_ID}.update-banner-launcher,
       #${LAUNCHER_ID}.update-banner-launcher:visited,
       #${LAUNCHER_ID}.update-banner-launcher:active {
-        color: #fff7d6 !important;
-        border-color: rgba(250, 204, 21, 0.9);
+        color: #fff !important;
+        border-color: rgba(255, 255, 255, 0.4);
         text-decoration: none !important;
         opacity: 1 !important;
       }
       #${LAUNCHER_ID}.update-banner-launcher:hover {
-        background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%);
-        color: #111111;
+        background: rgba(255, 255, 255, 0.28);
+        border-color: rgba(255, 255, 255, 0.6);
         transform: translateY(-1px);
-        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32), 0 0 0 4px rgba(250, 204, 21, 0.22);
-        animation-play-state: paused;
+        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.18);
       }
       #${LAUNCHER_ID}.update-banner-launcher:hover,
       #${LAUNCHER_ID}.update-banner-launcher:hover span,
       #${LAUNCHER_ID}.update-banner-launcher:hover i {
-        color: #111111 !important;
+        color: #ffffff !important;
       }
       #${LAUNCHER_ID}.update-banner-launcher:focus-visible {
-        outline: 2px solid rgba(250, 204, 21, 0.55);
+        outline: 2px solid rgba(255, 255, 255, 0.5);
         outline-offset: 2px;
       }
       #${LAUNCHER_ID}.update-banner-launcher span,
@@ -165,36 +151,13 @@
       }
       #${LAUNCHER_ID} .update-banner-launcher-icon {
         color: #facc15;
-        font-size: 13px;
+        font-size: 11px;
         line-height: 1;
-        filter: drop-shadow(0 0 5px rgba(250, 204, 21, 0.45));
       }
       #${LAUNCHER_ID}.update-banner-launcher:hover .update-banner-launcher-icon {
-        color: #111111;
+        color: #facc15;
       }
-      @keyframes cb-update-alert-pulse {
-        0%, 100% {
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34), 0 0 0 0 rgba(250, 204, 21, 0.42);
-          transform: translateY(0) scale(1);
-        }
-        50% {
-          box-shadow: 0 14px 30px rgba(0, 0, 0, 0.38), 0 0 0 5px rgba(250, 204, 21, 0.18);
-          transform: translateY(-1px) scale(1.015);
-        }
-      }
-      @keyframes cb-update-alert-sheen {
-        0%, 42% {
-          opacity: 0;
-          transform: translateX(-55%);
-        }
-        58% {
-          opacity: 1;
-        }
-        100% {
-          opacity: 0;
-          transform: translateX(55%);
-        }
-      }
+
       @media (prefers-reduced-motion: reduce) {
         #${LAUNCHER_ID}.update-banner-launcher,
         #${LAUNCHER_ID}.update-banner-launcher::before {

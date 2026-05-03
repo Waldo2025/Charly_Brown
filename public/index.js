@@ -226,6 +226,7 @@ async function routeAuthenticatedUser(user, { showAlerts = true } = {}) {
 
   if (profile) {
     const isAdmin = canonicalRole(profile.role) === "admin";
+    
     if (profile.approvalStatus === "rejected") {
       await signOut(auth);
       if (showAlerts) {
@@ -233,6 +234,8 @@ async function routeAuthenticatedUser(user, { showAlerts = true } = {}) {
       }
       return false;
     }
+    
+    // Si no es admin, debe estar aprobado y tener un rol que no sea 'pending'
     if (!isAdmin && (profile.approvalStatus !== "approved" || profile.role === "pending")) {
       await signOut(auth);
       if (showAlerts) {
@@ -240,16 +243,9 @@ async function routeAuthenticatedUser(user, { showAlerts = true } = {}) {
       }
       return false;
     }
-    if (!profile.role) {
-      await signOut(auth);
-      if (showAlerts) {
-        alert("Tu cuenta no tiene rol asignado. Contacta al administrador.");
-      }
-      return false;
-    }
   }
 
-  window.location.href = "generarLectura.html";
+  window.location.href = "home.html";
   return true;
 }
 
@@ -318,7 +314,7 @@ document.addEventListener("DOMContentLoaded", () => {
           (isFirestorePermissionError(error) && auth.currentUser)
         ) {
           if (auth.currentUser) {
-            window.location.href = "generarLectura.html";
+            window.location.href = "home.html";
             return;
           }
         }

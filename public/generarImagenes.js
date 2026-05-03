@@ -7,6 +7,8 @@ import { buildApiUrl } from './api-client.js';
 import { firebaseWebConfig, assertFirebaseWebConfig } from './firebase-web-config.js';
 import { bootstrapFirebaseAppCheck } from './firebase-app-check.js';
 import { escapeHtml } from './security-utils.js';
+import setupImageGenerator from './imageGenerator.js';
+
 
 
 const app = getApps().length ? getApp() : initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
@@ -88,37 +90,118 @@ document.addEventListener("keydown", (e) => {
 
 document.addEventListener("DOMContentLoaded", () => {
   // ——— Abrir/Cerrar galería de imágenes ———
-  const btnGaleria    = document.getElementById("btnAbrirPanelImagenes");
-  const modalGaleria  = document.getElementById("modalImagenes");
-  const closeGaleria  = modalGaleria.querySelector(".close-modal");
-  if (btnGaleria && modalGaleria && closeGaleria) {
+  const btnGaleria    = document.getElementById("btnAbrirPanelImagenes") || document.getElementById("btnAbrirPanelGuardadas");
+  const modalGaleria  = document.getElementById("modalImagenes") || document.getElementById("modalGaleriaImagenes");
+  
+  if (btnGaleria && modalGaleria) {
+    const closeGaleria = modalGaleria.querySelector(".close-modal") || modalGaleria.querySelector(".btn-cerrar");
+    
     btnGaleria.addEventListener("click", () => {
       modalGaleria.style.display = "block";
     });
-    closeGaleria.addEventListener("click", () => {
-      modalGaleria.style.display = "none";
-    });
+    
+    if (closeGaleria) {
+      closeGaleria.addEventListener("click", () => {
+        modalGaleria.style.display = "none";
+      });
+    }
   }
 
   // ——— Abrir/Cerrar generador de ilustración ———
   const btnGenerador    = document.getElementById("btnAbrirGeneradorImagenes");
-  const modalGenerador  = document.getElementById("modalGeneradorIlustracion");
-  const closeGenerador  = modalGenerador.querySelector(".close-modal");
-  if (btnGenerador && modalGenerador && closeGenerador) {
+  const modalGenerador  = document.getElementById("modalGeneradorIlustracion") || document.getElementById("contenedorGeneradorImagenes");
+  
+  if (btnGenerador && modalGenerador) {
+    const closeGenerador = modalGenerador.querySelector(".close-modal") || document.getElementById("cerrarGeneradorImagenes");
+    
     btnGenerador.addEventListener("click", () => {
       // 1) mostramos el modal
       modalGenerador.style.display = "block";
       // 2) cargamos la galería dentro de ese modal
-      const galeriaEnModal = modalGenerador.querySelector("#contenedorGuardadasManual");
+      const galeriaEnModal = modalGenerador.querySelector("#contenedorGuardadasManual") || modalGenerador.querySelector("#galeriaImagenesGuardadas");
       if (galeriaEnModal) {
         cargarGaleriaImagenesGeneradas(galeriaEnModal, true);
       }
     });
-    closeGenerador.addEventListener("click", () => {
-      modalGenerador.style.display = "none";
-    });
+    
+    if (closeGenerador) {
+      closeGenerador.addEventListener("click", () => {
+        modalGenerador.style.display = "none";
+      });
+    }
   }
 });
+
+/**
+ * Inyecta la UI del generador de imágenes en el contenedor especificado
+ * y lo inicializa usando imageGenerator.js
+ */
+export function insertarGeneradorImagenes(selector) {
+  const container = document.querySelector(selector);
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="gen-container-inner" style="padding: 20px; background: #fff; border-radius: 12px;">
+      <h3 style="margin-top:0;">🎨 Generador de IA</h3>
+      <form id="formGeneradorImagenes" class="gen-form">
+        <div style="margin-bottom: 15px;">
+          <label style="display:block; font-weight:bold; margin-bottom:5px;">¿Qué deseas crear?</label>
+          <textarea id="gen_prompt" class="form-control" placeholder="Ej: Un Snoopy astronauta estilo acuarela..." required style="width:100%; min-height:80px; border-radius:8px; border:1px solid #ddd; padding:10px;"></textarea>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
+          <label>Modelo
+            <select id="gen_modelo" class="form-select" style="width:100%;">
+              <option value="black-forest-labs/FLUX.1-schnell">FLUX.1 Schnell</option>
+              <option value="black-forest-labs/FLUX.1-dev">FLUX.1 Dev</option>
+              <option value="stabilityai/stable-diffusion-xl-base-1.0">SDXL Base</option>
+            </select>
+          </label>
+          <label>Estilo
+            <select id="gen_estilo" class="form-select" style="width:100%;">
+              <option value="">Ninguno</option>
+              <option value="realista">Realista</option>
+              <option value="digital">Digital Art</option>
+              <option value="anime">Anime</option>
+              <option value="caricatura">Caricatura</option>
+            </select>
+          </label>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
+           <label>Aspect Ratio
+            <select id="gen_ratio" class="form-select" style="width:100%;">
+              <option value="1:1">1:1 (Cuadrado)</option>
+              <option value="3:4">3:4 (Vertical)</option>
+              <option value="4:3">4:3 (Horizontal)</option>
+              <option value="16:9">16:9 (Cine)</option>
+            </select>
+          </label>
+          <label>Cantidad
+            <input id="gen_count" type="number" min="1" max="4" value="1" class="form-control" style="width:100%;" />
+          </label>
+        </div>
+
+        <div style="display:none;">
+           <input id="gen_guidance" type="number" value="7.5" />
+           <input id="gen_steps" type="number" value="30" />
+           <textarea id="gen_negative"></textarea>
+        </div>
+
+        <button type="submit" id="gen_submit" class="btn btn-primary w-100" style="background: #7c3aed; border:none; padding:12px; font-weight:bold;">
+          ✨ Generar Imagen
+        </button>
+      </form>
+      <div id="gen_status" class="gen-status" style="margin-top:15px; font-size:0.9rem; text-align:center;"></div>
+      <div id="gen_results" style="margin-top:20px; display:grid; gap:10px;"></div>
+    </div>
+  `;
+
+  // Inicializar la lógica del generador
+  if (typeof setupImageGenerator === 'function') {
+    setupImageGenerator(storage);
+  }
+}
 
 
 
@@ -354,10 +437,23 @@ async function cargarGaleriaImagenesGeneradas(panel, forceUpdate = false) {
     const storageRef = ref(storage, `imagenes/${user.uid}/`);
     localStorage.removeItem(`galeria_${user.uid}`);
 
-    const result = await listAll(storageRef);
+    try {
+      const result = await listAll(storageRef);
 
-    if (result.items.length === 0) {
-      panel.innerHTML = '<p class="empty-message">No hay imágenes guardadas aún</p>';
+      if (result.items.length === 0) {
+        panel.innerHTML = '<p class="empty-message">No hay imágenes guardadas aún</p>';
+        return;
+      }
+    } catch (err) {
+      console.error("Error al listar imágenes de Firebase Storage:", err);
+      panel.innerHTML = `
+        <div class="error-container" style="text-align: center; padding: 20px;">
+          <p class="error-message" style="color: #ef4444;">❌ Error de conexión con el almacenamiento.</p>
+          <p style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+            Si eres el administrador, asegúrate de aplicar las políticas CORS en Google Cloud Console.
+          </p>
+        </div>
+      `;
       return;
     }
 

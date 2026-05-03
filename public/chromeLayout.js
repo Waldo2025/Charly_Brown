@@ -13,7 +13,7 @@
   const THEME_STORAGE_KEY = 'cb_theme_settings_v1';
 
   const pageConfig = {
-    'home.html': { title: 'Home', header: 'filters' },
+    'home.html': { title: 'Home', header: 'simple' },
     'unidadhome.html': { title: 'Mis Unidades', header: 'filters' },
     'crearunidades.html': { title: 'Crear Unidades', header: 'filters' },
     'contenidounidad.html': { title: 'Contenido', header: 'filters' },
@@ -261,7 +261,8 @@
 
   function renderSidebar(currentPage, showFavoritesToggle) {
     const links = [
-      { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,developer' },
+      { href: 'home.html', icon: 'fas fa-home', label: 'Inicio' },
+      { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
       { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },

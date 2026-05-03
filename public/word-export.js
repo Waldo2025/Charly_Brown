@@ -735,6 +735,12 @@ export async function downloadStyledDocx({ html = "", title = "", subtitle = "",
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
+  
+  // Dispatch event for tracking
+  window.dispatchEvent(new CustomEvent('word-download-started', {
+    detail: { filename, title, mode: 'estilizado' }
+  }));
+
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -794,6 +800,12 @@ export async function downloadDocxFromTemplate({
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
+
+  // Dispatch event for tracking
+  window.dispatchEvent(new CustomEvent('word-download-started', {
+    detail: { filename, title, mode }
+  }));
+
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

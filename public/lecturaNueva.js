@@ -1879,6 +1879,45 @@ document.addEventListener('DOMContentLoaded', () => {
   const gradoSelect = $('#gradoNuevo');
   const autorSelect = $('#autorReferencia');
 
+  // 🚀 LÓGICA DE AUTO-EDICIÓN DESDE HOME (Inyectada en el scope correcto)
+  async function checkAutoEditFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get('editId');
+    if (!editId) return;
+
+    console.log("Detectado editId en URL, iniciando auto-edición para:", editId);
+    
+    // 1. Abrir el modal de lista de lecturas nuevas si es necesario
+    try {
+      if (typeof window.cbUnidadDock?.openSection === 'function') {
+        window.cbUnidadDock.openSection('modalLecturasNuevas');
+      }
+      const modalNuevas = document.getElementById('modalLecturasNuevas');
+      if (modalNuevas) {
+        modalNuevas.style.display = 'block';
+      }
+    } catch (_) {}
+
+    // 2. Esperar a que las lecturas se carguen (cacheLecturas no vacío)
+    let intentos = 0;
+    while (cacheLecturas.length === 0 && intentos < 50) {
+      await new Promise(r => setTimeout(r, 200));
+      intentos++;
+    }
+
+    // 3. Buscar el botón de editar correspondiente y disparar click
+    setTimeout(() => {
+      const btn = document.querySelector(`.btn-editar[data-id="${editId}"]`);
+      if (btn) {
+        console.log("Botón de edición encontrado, disparando click...");
+        btn.click();
+      } else {
+        console.warn("No se encontró el botón de edición para el ID:", editId);
+      }
+    }, 800);
+  }
+  setTimeout(checkAutoEditFromUrl, 1500);
+
   // Estado
   let cacheLecturas = [];
   let cacheAudioSessions = [];
@@ -2670,8 +2709,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const trimestre = escapeHTML(it.trimestre || '—');
       const unidad = escapeHTML(resolverUnidadLectura(it));
       const id = escapeHTML(it.id || '');
-      const published = it?.published === true;
-      const publishLabel = published ? 'Despublicar lectura' : 'Publicar lectura';
+      const publicar = it?.publicar === true;
+      const publishLabel = publicar ? 'Despublicar lectura' : 'Publicar lectura';
 
       return `
         <tr data-id="${id}">
@@ -2688,7 +2727,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   type="checkbox"
                   class="lectura-publish-switch-input btn-toggle-published"
                   data-id="${id}"
-                  ${published ? 'checked' : ''}
+                  ${publicar ? 'checked' : ''}
                   aria-label="${publishLabel}"
                 >
                 <span class="lectura-publish-switch-track" aria-hidden="true">
@@ -2899,7 +2938,7 @@ document.addEventListener('DOMContentLoaded', () => {
       gamePath: String(music?.gamePath || music?.juegoPath || d?.musicGamePath || "").trim()
     };
 
-    const contenidoHTML = d.contenidoHTML || '<p>(Sin contenido)</p>';
+    const contenidoHTML = d.contenidoHTML || d.texto || d.textoLectura || d.contenidoPlano || '<p>(Sin contenido)</p>';
     if (typeof window.cbOpenLecturasAgentViewer === "function") {
       window.cbOpenLecturasAgentViewer({
         id,
@@ -3060,6 +3099,7 @@ document.addEventListener('DOMContentLoaded', () => {
     input.disabled = true;
     try {
       await updateDoc(doc(db, 'lecturasNuevas', id), {
+        publicar: nextPublished,
         published: nextPublished
       });
       const label = input.closest('.lectura-publish-switch');
@@ -3070,7 +3110,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       input.setAttribute('aria-label', nextLabel);
       const idx = cacheLecturas.findIndex((it) => it?.id === id);
-      if (idx >= 0) cacheLecturas[idx].published = nextPublished;
+      if (idx >= 0) cacheLecturas[idx].publicar = nextPublished;
     } catch (err) {
       input.checked = !nextPublished;
       alert('❌ No se pudo actualizar el estado de publicación.');
@@ -3086,10 +3126,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const snap = await getDoc(ref);
     if (!snap.exists()) return alert('No encontrada.');
     const d = snap.data();
-    const contenidoLectura = d.contenidoHTML || d.textoLectura || d.lecturaHTML || d.htmlLectura || '';
+    const contenidoLectura = d.contenidoHTML || d.texto || d.textoLectura || d.lecturaHTML || d.htmlLectura || '';
     const contenidoPlanoLectura = d.contenidoPlano || htmlToPlainText(contenidoLectura || '');
 
-    if (typeof window.cbOpenLecturaEditorCompartido === 'function') {
+      if (typeof window.cbOpenLecturaEditorCompartido === 'function') {
       await window.cbOpenLecturaEditorCompartido({
         id,
         mode: 'lecturas-nuevas',
@@ -3101,6 +3141,19 @@ document.addEventListener('DOMContentLoaded', () => {
         unidad: d.unidad || d.unidadNumero || d.unidad_numero || d.numeroUnidad || d.numUnidad || '',
         contenidoHTML: contenidoLectura,
         contenidoPlano: contenidoPlanoLectura,
+        publicar: d.publicar === true,
+        onPublishChange: async (publicar) => {
+          await updateDoc(doc(db, 'lecturasNuevas', id), {
+            publicar: publicar === true,
+            published: publicar === true,
+            updatedAt: new Date()
+          });
+          const idx = cacheLecturas.findIndex((it) => it?.id === id);
+          if (idx >= 0) {
+            cacheLecturas[idx].publicar = publicar === true;
+            cacheLecturas[idx].published = publicar === true;
+          }
+        },
         onSave: async (payload) => {
           const htmlSan = sanitizeHTML(cleanGeneratedHTML(payload.contenidoHTML || ''));
           await updateDoc(doc(db, 'lecturasNuevas', id), {
@@ -3110,6 +3163,8 @@ document.addEventListener('DOMContentLoaded', () => {
             grado: payload.grado,
             trimestre: payload.trimestre,
             unidad: payload.unidad,
+            publicar: payload.publicar === true,
+            published: payload.publicar === true,
             contenidoHTML: htmlSan,
             contenidoPlano: htmlToPlainText(htmlSan || payload.contenidoPlano || ''),
             updatedAt: new Date()
@@ -3828,6 +3883,7 @@ Devuelve únicamente HTML, sin bloques Markdown ni comentarios fuera del conteni
           contenidoPlano: htmlToPlainText(htmlFinal),
           analizadaASC: !!usarASC,
           preguntas: preguntasFinales,  // ✅ AÑADE ESTO
+          publicar: false,
           published: false,
           userId: user?.uid || 'anon',
           timestamp: new Date()

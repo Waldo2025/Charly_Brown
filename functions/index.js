@@ -2874,8 +2874,8 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
     `Diálogo objetivo: "${String(text).replace(/"/g, '\\"')}"`,
   ].filter(Boolean).join("\n");
 
-  const pollUntilDone = async (operationName = "") => {
-    const maxAttempts = 54;
+  const pollUntilDone = async (operationName = "", options = {}) => {
+    const maxAttempts = Math.max(12, Math.min(54, Math.floor(Number(options?.maxAttempts || 54) || 54)));
     const delayMs = 5000;
     let latest = null;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -3234,8 +3234,22 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
 
     return null;
   };
-  for (const videoModel of videoModels) {
-    for (const variant of requestVariants) {
+  const requestedMaxVariantAttempts = Math.max(1, Math.min(
+    requestVariants.length || 1,
+    Math.floor(clampNumber(req.body?.maxVariantAttempts, 1, requestVariants.length || 1, requestVariants.length || 1))
+  ));
+  const effectiveRequestVariants = requestVariants.slice(0, requestedMaxVariantAttempts);
+  const requestedMaxOperationPollAttempts = Math.max(12, Math.min(
+    54,
+    Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
+  ));
+  const effectiveVideoModels = videoModels.slice(0, Math.max(1, Math.min(
+    videoModels.length || 1,
+    Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
+  )));
+
+  for (const videoModel of effectiveVideoModels) {
+    for (const variant of effectiveRequestVariants) {
       const createEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(videoModel)}:predictLongRunning?key=${encodeURIComponent(key)}`;
       const createResponse = await fetch(createEndpoint, {
         method: "POST",
@@ -3260,7 +3274,9 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
       }
 
       // eslint-disable-next-line no-await-in-loop
-      const pollResult = await pollUntilDone(operationName);
+      const pollResult = await pollUntilDone(operationName, {
+        maxAttempts: requestedMaxOperationPollAttempts,
+      });
       if (!pollResult.ok) {
         lastStatus = Number(pollResult.status || 504) || 504;
         lastError = `${videoModel} [${variant.label}]: ${String(pollResult.error || "Error al esperar operación Veo.")}`;

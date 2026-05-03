@@ -1,7 +1,7 @@
 // generarUnidad.js
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getFirestore, addDoc, collection, doc, getDoc, getDocs, updateDoc, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { sanitizeRichText, escapeHtml } from "./security-utils.js";
 
 // Configuración Firebase
@@ -153,12 +153,21 @@ async function abrirEditorUnidadCompartido({ id = "", collectionName = UNIDADES_
     trimestre: data.trimestre || "",
     unidad: data.unidad || "",
     contenidoHTML: html,
+    publicar: data.publicar === true || data.published === true,
     serieLabel: "Lectura",
     nivelLabel: "Nivel",
     gradoLabel: "Grado",
     trimestreLabel: "Trimestre",
     unidadLabel: "Unidad",
     titlePlaceholder: "Título de la unidad",
+    onPublishChange: async (publicar) => {
+      await updateDoc(doc(db, collectionName || UNIDADES_COLLECTION, id), {
+        publicar: publicar === true,
+        published: publicar === true,
+        editadoEn: new Date(),
+        editadoPor: auth.currentUser?.email || auth.currentUser?.uid || "Desconocido"
+      });
+    },
     onSave: async (payload) => {
       await updateDoc(doc(db, collectionName || UNIDADES_COLLECTION, id), {
         contenido: payload.contenidoHTML,
@@ -167,7 +176,10 @@ async function abrirEditorUnidadCompartido({ id = "", collectionName = UNIDADES_
         grado: payload.grado,
         trimestre: payload.trimestre,
         unidad: payload.unidad,
-        editadoEn: new Date()
+        publicar: payload.publicar === true,
+        published: payload.publicar === true,
+        editadoEn: new Date(),
+        editadoPor: auth.currentUser?.email || auth.currentUser?.uid || "Desconocido"
       });
     }
   });
@@ -373,7 +385,8 @@ btnVerUnidades?.addEventListener("click", async () => {
         await updateDoc(unidadRef, {
           contenido: nuevoContenido,
           tituloUnidad: nuevoTitulo,   // ✅ Guardamos un campo explícito
-          editadoEn: new Date()
+          editadoEn: new Date(),
+          editadoPor: auth.currentUser?.email || auth.currentUser?.uid || "Desconocido"
         });
 
 
@@ -533,7 +546,8 @@ editorUnidad?.addEventListener("input", () => {
     const nuevoContenido = editorUnidad.innerHTML;
     updateDoc(doc(db, unidadEditandoCollection || UNIDADES_COLLECTION, unidadEditandoId), {
       contenido: nuevoContenido,
-      editadoEn: new Date()
+      editadoEn: new Date(),
+      editadoPor: auth.currentUser?.email || auth.currentUser?.uid || "Desconocido"
     }).then(() => {
     }).catch(e => {
     });
@@ -558,3 +572,51 @@ function limpiarHTML(html) {
 
   return corregido;
 }
+
+// ✅ Manejo de parámetros de URL para apertura automática
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return;
+
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get("action");
+  const unidadId = params.get("unidadId");
+
+  if (action === "openUnidad" && unidadId) {
+    console.log(`[Unidad2] Detectada acción abrir unidad: ${unidadId}`);
+    
+    try {
+      const collectionName = params.get("col") || UNIDADES_COLLECTION;
+      const docRef = doc(db, collectionName, unidadId);
+      const snap = await getDoc(docRef);
+      
+      if (snap.exists()) {
+        console.log(`[Unidad2] Documento encontrado, abriendo editor directo...`);
+        const data = snap.data();
+        const html = obtenerContenidoUnidadGuardada(data);
+        
+        // Abrir el editor directamente
+        await abrirEditorUnidadCompartido({
+          id: unidadId,
+          collectionName,
+          data,
+          html
+        });
+      } else {
+        console.warn(`[Unidad2] El documento ${unidadId} no existe en ${collectionName}.`);
+        // Opcional: mostrar la lista como fallback
+        if (btnVerUnidades) btnVerUnidades.click();
+      }
+    } catch (err) {
+      console.error(`[Unidad2] Error al cargar unidad directa:`, err);
+      if (btnVerUnidades) btnVerUnidades.click();
+    }
+    
+    // Limpiar URL para evitar reaperturas accidentales
+    const cleanParams = new URLSearchParams(window.location.search);
+    cleanParams.delete("action");
+    cleanParams.delete("unidadId");
+    const newSearch = cleanParams.toString();
+    const newUrl = window.location.pathname + (newSearch ? "?" + newSearch : "");
+    window.history.replaceState({}, document.title, newUrl);
+  }
+});

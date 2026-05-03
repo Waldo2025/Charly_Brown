@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8">
   <script src="runtime-config-loader.js" defer></script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title></title>
   <link href="vendor/boxicons/boxicons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
@@ -14,60 +15,347 @@
   <link rel="stylesheet" href="local-fonts.css">
   <!-- Bootstrap CSS -->
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-  <!-- Bootstrap Select CSS -->
-  <link rel="stylesheet" href="vendor/bootstrap-select/bootstrap-select.min.css">
+  <!-- Bulma CSS for modern UI components -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
+  <!-- Flowbite CSS for the alternate home launcher UI -->
+  <link href="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.css" rel="stylesheet" />
 
   <!-- Incluir Font Awesome para los iconos -->
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="home.css">
   <link rel="stylesheet" href="chatbot.css">
   <link rel="stylesheet" href="header.css">
+  <script src="vendor/chartjs/chart.umd.js"></script>
 
 </head>
+
 <body>
-
-
   <header class="main-header">
     <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
     </div>
   </header>
-  
-  
-  
-<div id="sidebar">
+
+
+  <div id="sidebar">
     <button id="menuToggle" aria-label="Abrir menú">
       <i class="fas fa-bars"></i>
     </button>
-
     <div class="sidebar-menu">
       <!-- sidebar-menu loaded from chromeLayout.js -->
     </div>
-</div>
-
-
-
-
-
-<!-- Modal de Updates -->
-<div id="modalUpdates" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); z-index:9999; justify-content:center; align-items:center;">
-  <div style="background:white; padding:30px; border-radius:10px; max-width:500px; width:90%; text-align:center; position:relative;">
-    <span id="cerrarUpdates" style="position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer;">&times;</span>
-    <h2 style="color: black;">🚀 Novedades de la plataforma</h2>
-    <p style="color: black;">Te presento las nuevas funciones y mejoras de esta semana:</p>
-    <ul style="text-align:left; color: black;">
-      <li>Sección Home con Lecturas Nuevas</li>
-      <li>Compartir Lecturas con usuarios Exclusiva para autores</li>
-      <li>Sección análisis editorial exclusiva para autores</li>
-      <li>Asignar propuesta de Imágen, exclusiva para autores</li>
-    </ul>
-    <button id="btnCerrarUpdates" style="margin-top:20px; padding:10px 20px;">Entendido</button>
   </div>
-</div>
-<div class="chatbot-container resizable" id="chatbotContainer" data-x="0">
+
+  <main class="home-wrapper">
+    <!-- DASHBOARD PRINCIPAL -->
+    <section id="viewDashboard" class="home-view">
+      <div class="flow-home-shell">
+        <section class="flow-hero-panel" aria-labelledby="homeLauncherTitle">
+          <div class="flow-hero-copy">
+            <h1 id="homeLauncherTitle">
+              <img src="charlyEditor.png" alt="Charly Editor" class="flow-hero-logo">
+            </h1>
+            <h2 class="flow-hero-title">Charly Brown Editor</h2>
+            <div class="flow-hero-actions">
+              <button type="button" class="flow-primary-action section-card" data-view="viewLecturas">
+                <i class="fas fa-book-open"></i>
+                <span>Abrir lecturas</span>
+              </button>
+              <a href="moodleCourse.html" class="flow-secondary-action">
+                <i class="fas fa-wand-magic-sparkles"></i>
+                <span>Crear Aprende</span>
+              </a>
+            </div>
+          </div>
+          <div class="flow-hero-status" aria-label="Flujos principales">
+            <div class="section-card flow-status-action flow-blue" data-view="viewLecturas">
+              <img src="charlyEditor.png" alt="Lecturas" class="flow-status-img">
+              <div>
+                <span>Crear y revisar</span>
+                <strong>Lecturas Primaria</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </div>
+            <div class="section-card flow-status-action flow-green" data-view="viewUnidades">
+              <img src="charlyEditor.png" alt="Unidades" class="flow-status-img">
+              <div>
+                <span>Organizar contenidos</span>
+                <strong>Unidades Primaria</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </div>
+            <div class="section-card flow-status-action flow-rose" data-view="viewMultimedia">
+              <img src="SnoopyPodcastCreator.png" alt="Videos" class="flow-status-img">
+              <div>
+                <span>Producir multimedia</span>
+                <strong>Videos</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </div>
+            <div class="section-card flow-status-action flow-violet" data-view="viewPodcasts">
+              <img src="SnoopyPodcastCreator.png" alt="Podcast" class="flow-status-img">
+              <div>
+                <span>Guiones y audio</span>
+                <strong>Podcast</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </div>
+            <a href="moodleCourse.html" class="section-card flow-status-action flow-amber">
+              <img src="SnoopyPodcastCreator.png" alt="Aprende" class="flow-status-img">
+              <div>
+                <span>Publicar en LMS</span>
+                <strong>Contenido Aprende</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </a>
+            <div class="section-card flow-status-action flow-slate" data-view="viewDownloads">
+              <img src="charlyEditor.png" alt="Descargas" class="flow-status-img">
+              <div>
+                <span>Exportaciones</span>
+                <strong>Descargas Word</strong>
+              </div>
+              <i class="fas fa-arrow-right"></i>
+            </div>
+          </div>
+        </section>
+
+
+      </div>
+    </section>
+
+    <!-- SECCIÓN LECTURAS -->
+    <section id="viewLecturas" class="home-view hidden">
+      <div class="flow-hero-panel">
+        <div class="flow-hero-copy">
+          <button class="flow-back-btn" data-view="viewDashboard">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <h1 id="homeLauncherTitle">
+            <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
+          </h1>
+          <h2 class="flow-hero-title">Lecturas Primaria</h2>
+
+          <div class="flow-search-box" style="margin: 1.5rem 0;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchLecturas" placeholder="Buscar lectura..." class="flow-search-input">
+          </div>
+
+          <div class="flow-stats-minimal" style="margin-top: 1rem;">
+            <div class="flow-stat">
+              <span id="lecturasWorkbenchTotal">--</span>
+              <small>Total</small>
+            </div>
+            <div class="flow-stat">
+              <span id="lecturasWorkbenchPublished">--</span>
+              <small>Publicadas</small>
+            </div>
+          </div>
+        </div>
+        <div class="flow-hero-status" style="max-height: 85vh; overflow-y: auto; padding: 1rem;">
+          <div class="flow-sub-hero-actions">
+            <button type="button" class="workbench-filter is-active" data-workbench-view="lecturas"
+              data-workbench-filter="published">
+              <i class="fas fa-check-circle"></i>
+              <span>Publicadas</span>
+            </button>
+            <button type="button" class="workbench-filter" data-workbench-view="lecturas" data-workbench-filter="mine">
+              <i class="fas fa-folder-open"></i>
+              <span data-admin-label="Todos los documentos" data-user-label="Mis documentos">Mis documentos</span>
+            </button>
+          </div>
+          <div id="contenedorLecturasUser" class="flow-repository-list">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECCIÓN UNIDADES -->
+    <section id="viewUnidades" class="home-view hidden">
+      <div class="flow-hero-panel">
+        <div class="flow-hero-copy">
+          <button class="flow-back-btn" data-view="viewDashboard">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <h1 id="homeLauncherTitle">
+            <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
+          </h1>
+          <h2 class="flow-hero-title">Unidades Primaria</h2>
+
+          <div class="flow-search-box" style="margin: 1.5rem 0;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchUnidades" placeholder="Buscar unidad..." class="flow-search-input">
+          </div>
+
+          <div class="flow-stats-minimal" style="margin-top: 1rem;">
+            <div class="flow-stat">
+              <span id="unidadesWorkbenchTotal">--</span>
+              <small>Total</small>
+            </div>
+            <div class="flow-stat">
+              <span id="unidadesWorkbenchPublished">--</span>
+              <small>Publicadas</small>
+            </div>
+          </div>
+        </div>
+        <div class="flow-hero-status" style="max-height: 85vh; overflow-y: auto; padding: 1rem;">
+          <div class="flow-sub-hero-actions">
+            <button type="button" class="workbench-filter is-active" data-workbench-view="unidades"
+              data-workbench-filter="published">
+              <i class="fas fa-check-circle"></i>
+              <span>Publicadas</span>
+            </button>
+            <button type="button" class="workbench-filter" data-workbench-view="unidades" data-workbench-filter="mine">
+              <i class="fas fa-folder-open"></i>
+              <span data-admin-label="Todos los documentos" data-user-label="Mis documentos">Mis documentos</span>
+            </button>
+          </div>
+          <div id="contenedorUnidadesUser" class="flow-repository-list">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECCIÓN MULTIMEDIA (VIDEOS ROSE) -->
+    <section id="viewMultimedia" class="home-view hidden">
+      <div class="flow-hero-panel">
+        <div class="flow-hero-copy">
+          <button class="flow-back-btn" data-view="viewDashboard">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <h1 id="homeLauncherTitle">
+            <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
+          </h1>
+          <h2 class="flow-hero-title">Videos y Multimedia</h2>
+
+          <div class="flow-search-box" style="margin: 1.5rem 0;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchMultimedia" placeholder="Buscar video..." class="flow-search-input">
+          </div>
+
+          <div class="flow-stats-minimal" style="margin-top: 1rem;">
+            <div class="flow-stat">
+              <span id="multimediaWorkbenchTotal">--</span>
+              <small>Total</small>
+            </div>
+            <div class="flow-stat">
+              <span id="multimediaWorkbenchPublished">--</span>
+              <small>Publicados</small>
+            </div>
+          </div>
+        </div>
+        <div class="flow-hero-status" style="max-height: 85vh; overflow-y: auto; padding: 1rem;">
+          <div class="flow-sub-hero-actions">
+            <button type="button" class="workbench-filter is-active" data-workbench-view="multimedia"
+              data-workbench-filter="published">
+              <i class="fas fa-check-circle"></i>
+              <span>Publicadas</span>
+            </button>
+            <button type="button" class="workbench-filter" data-workbench-view="multimedia"
+              data-workbench-filter="mine">
+              <i class="fas fa-folder-open"></i>
+              <span data-admin-label="Todos los documentos" data-user-label="Mis documentos">Mis documentos</span>
+            </button>
+          </div>
+          <div id="contenedorMultimediaUser" class="flow-repository-list">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECCIÓN PODCASTS (VIOLET) -->
+    <section id="viewPodcasts" class="home-view hidden">
+      <div class="flow-hero-panel">
+        <div class="flow-hero-copy">
+          <button class="flow-back-btn" data-view="viewDashboard">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <h1 id="homeLauncherTitle">
+            <img src="SnoopyPodcastCreator.png" alt="Snoopy" class="flow-hero-logo">
+          </h1>
+          <h2 class="flow-hero-title">Proyectos de Podcast</h2>
+
+          <div class="flow-search-box" style="margin: 1.5rem 0;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchPodcasts" placeholder="Buscar podcast..." class="flow-search-input">
+          </div>
+
+          <div class="flow-stats-minimal" style="margin-top: 1rem;">
+            <div class="flow-stat">
+              <span id="podcastsWorkbenchTotal">--</span>
+              <small>Total</small>
+            </div>
+            <div class="flow-stat">
+              <span id="podcastsWorkbenchPublished">--</span>
+              <small>Publicados</small>
+            </div>
+          </div>
+        </div>
+        <div class="flow-hero-status" style="max-height: 85vh; overflow-y: auto; padding: 1rem;">
+          <div class="flow-sub-hero-actions">
+            <button type="button" class="workbench-filter is-active" data-workbench-view="podcasts"
+              data-workbench-filter="published">
+              <i class="fas fa-check-circle"></i>
+              <span>Publicadas</span>
+            </button>
+            <button type="button" class="workbench-filter" data-workbench-view="podcasts" data-workbench-filter="mine">
+              <i class="fas fa-folder-open"></i>
+              <span data-admin-label="Todos los documentos" data-user-label="Mis documentos">Mis documentos</span>
+            </button>
+          </div>
+          <div id="contenedorPodcastsUser" class="flow-repository-list">
+            <!-- Cargado dinámicamente -->
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- SECCIÓN DESCARGAS -->
+    <section id="viewDownloads" class="home-view hidden">
+      <button class="btn-back" data-view="viewDashboard">
+        <i class="fas fa-arrow-left"></i> Volver al Panel
+      </button>
+      <header class="home-header">
+        <h1>Descargas de Word</h1>
+        <p>Registro de documentos exportados por los usuarios.</p>
+      </header>
+
+      <div class="stats-container">
+        <div class="chart-wrapper">
+          <canvas id="chartDownloads"></canvas>
+        </div>
+      </div>
+
+      <div id="contenedorDownloadsUser" class="item-list-grid">
+        <!-- Cargado dinámicamente -->
+      </div>
+    </section>
+  </main>
+
+
+
+
+
+  <!-- Modal de Updates -->
+  <div id="modalUpdates" class="modal-overlay hidden">
+    <div class="modal-card">
+      <span id="cerrarUpdates" class="modal-close">&times;</span>
+      <h2>🚀 Novedades de la plataforma</h2>
+      <p>Te presento las nuevas funciones y mejoras de esta semana:</p>
+      <ul>
+        <li>Sección Home con Lecturas Nuevas</li>
+        <li>Compartir Lecturas con usuarios Exclusiva para autores</li>
+        <li>Sección análisis editorial exclusiva para autores</li>
+        <li>Asignar propuesta de Imágen, exclusiva para autores</li>
+      </ul>
+      <button id="btnCerrarUpdates" class="btn btn-primary">Entendido</button>
+    </div>
+  </div>
+  <div class="chatbot-container resizable" id="chatbotContainer" data-x="0">
     <!-- 🟣 Handle invisible para arrastrar (resize desde el lado izquierdo) -->
     <div class="chatbot-resize-handle"></div>
-  
+
     <div class="chatbot-header">
       <div class="chatbot-brand">
         <img src="logoCharly3.png" alt="Logo" class="chatbot-logo" />
@@ -75,55 +363,255 @@
       </div>
       <button class="chatbot-close" id="chatbotClose">&times;</button>
     </div>
-    
+
     <div class="chatbot-messages" id="chatbotMessages">
       <!-- Aquí se mostrarán los mensajes -->
     </div>
-  
+
     <div class="chatbot-input">
       <div id="chatbotInput" contenteditable="true" placeholder="Escribe aquí..."></div>
       <button id="chatbotSend"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>
-  
-  
-  <div id="app-container-home" class="container-fluid">
-    <div class="main-content">
-      <button id="toggleArchivadosBtn" class="btn btn-sm btn-secondary mb-3" style="margin-bottom: 5px !important; margin-top: 20px; width: 140px; font-size: smaller;">
-        <i class='bx bx-box'></i> Mostrar archivados
-      </button>
-  
-      <button id="toggleIlustracionesBtn" class="btn btn-sm btn-secondary mb-3" style="margin-bottom: 5px  !important; margin-top: 20px; width: 140px; font-size: smaller;">
-        <i class='bx bx-image'></i> Mostrar ilustraciones
-      </button>
-  
-      <div id="contenedorPublicaciones">
-        <div class="contenedorLecturas">
-          <h4 class="fw-bold">Lecturas compartidas</h4>
-          <div id="contenedorLecturas"></div>
+
+
+  <!-- Modal para agregar comentario -->
+  <div id="modalComentario" class="modal-overlay hidden">
+    <div class="modal-content">
+      <span class="cerrar-modal">&times;</span>
+      <h3>Escribe tu comentario</h3>
+      <textarea id="inputComentario" placeholder="Escribe tu comentario sobre la selección..."></textarea>
+      <button id="guardarComentarioBtn">Guardar Comentario</button>
+    </div>
+  </div>
+
+
+  <!-- Reproductor Multimedia (Dashboard) -->
+  <div id="modalMultimediaPlayer" class="modal-overlay hidden">
+    <div class="modal-content multimedia-player-card">
+      <div class="multimedia-player-head">
+        <div class="player-info">
+          <i class="fas fa-video"></i>
+          <div class="player-titles">
+            <strong id="playerTitle">Reproductor</strong>
+            <span id="playerSessionId">ID: --</span>
+          </div>
         </div>
-  
-        <div id="contenedorImagenes" class="contenedorImagenes" style="display: none;">
-          <h4 class="fw-bold">Propuesta de ilustración</h4>
-          <div id="contenedorImagenesCompartidas"></div>
+        <div class="player-head-actions">
+          <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
+            <i class="fas fa-file-export"></i>
+          </button>
+          <button id="btnToggleSceneInfo" class="player-action-btn" title="Datos de la escena">
+            <i class="fas fa-info-circle"></i>
+          </button>
+          <button id="cerrarMultimediaPlayer" class="modal-close-btn">&times;</button>
         </div>
+      </div>
+
+      <div class="multimedia-player-content">
+        <div class="multimedia-player-main">
+          <div id="playerStage" class="player-stage">
+          <video id="playerVideoA" class="player-video" playsinline muted preload="auto"></video>
+          <video id="playerVideoB" class="player-video" playsinline muted preload="auto" style="opacity: 0;"></video>
+          <div id="playerOverlay" class="player-overlay"></div>
+          <style>
+            .player-stage {
+              position: relative;
+              aspect-ratio: 16 / 9;
+              background: #000;
+              overflow: hidden;
+              border-radius: 8px;
+            }
+            .player-video {
+              position: absolute;
+              inset: 0;
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              /* IMPORTANTE: El controlador original usa opacidad y z-index */
+              opacity: 0;
+              visibility: hidden;
+              z-index: 1;
+              display: block !important;
+              transition: opacity 0.3s ease;
+            }
+            /* El controlador aplicará estilos en línea que sobreescribirán esto */
+            .player-overlay {
+              position: absolute;
+              inset: 0;
+              z-index: 20;
+              pointer-events: none;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+            /* Estilos para los subtítulos sintetizados */
+            .podcast-onscreen-text-clip-content {
+              --pod-onscreen-text-color: #f8fafc;
+              position: absolute;
+              left: var(--pod-onscreen-text-x, 50%);
+              top: var(--pod-onscreen-text-y, 90%);
+              transform: translate(-50%, -50%);
+              background: rgba(0, 0, 0, 0.75);
+              backdrop-filter: blur(4px);
+              padding: 0.6rem 1.2rem;
+              border-radius: 12px;
+              color: var(--pod-onscreen-text-color);
+              font-size: 1.1rem;
+              font-weight: 500;
+              text-align: center;
+              max-width: 80%;
+              border: 1px solid rgba(255, 255, 255, 0.15);
+              box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+              white-space: pre-wrap;
+              pointer-events: none;
+            }
+
+            .podcast-on-screen-text-content {
+              --pod-onscreen-text-preset-shadow: 0 3px 14px rgba(2, 6, 23, 0.24);
+              max-width: min(88%, 1000px);
+              position: absolute;
+              left: var(--pod-onscreen-text-x, 50%);
+              top: var(--pod-onscreen-text-y, 92%);
+              transform: translate(-50%, -100%);
+              display: block;
+              box-sizing: border-box;
+              padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
+              border-radius: calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
+              color: var(--pod-onscreen-text-color, #f8fafc);
+              font-family: var(--pod-onscreen-text-font-family, inherit);
+              font-size: var(--pod-onscreen-text-font-size, 16px);
+              font-weight: var(--pod-onscreen-text-font-weight, 500);
+              font-style: var(--pod-onscreen-text-font-style, normal);
+              text-align: var(--pod-onscreen-text-align, center);
+              line-height: var(--pod-onscreen-text-line-height, 1.22em);
+              white-space: pre-wrap;
+              text-shadow: var(--pod-onscreen-text-stroke-shadow, 0 0 0 transparent), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow, 0 0 0 transparent);
+              opacity: var(--pod-onscreen-text-opacity, 1);
+              transition: opacity 0.18s ease;
+            }
+
+            .podcast-on-screen-text-content.is-bg-solid {
+              background: rgba(2, 6, 23, calc(0.82 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
+              box-shadow: 0 14px 30px rgba(2, 6, 23, 0.36);
+              backdrop-filter: blur(7px) saturate(1.02) !important;
+            }
+
+            .podcast-on-screen-text-content.is-bg-glass {
+              background: rgba(15, 23, 42, calc(0.65 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
+              backdrop-filter: blur(12px) saturate(1.1) !important;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .podcast-on-screen-text-content.is-bg-none {
+              background: transparent !important;
+              box-shadow: none !important;
+              backdrop-filter: none !important;
+            }
+
+            .multimedia-render-btn {
+              background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+              color: white !important;
+              border-radius: 6px !important;
+              padding: 0 1rem !important;
+              margin-left: 10px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              font-size: 13px;
+              height: 36px;
+            }
+
+            .multimedia-render-btn:hover {
+              filter: brightness(1.1);
+            }
+          </style>
+        </div>
+          <div id="playerControls" class="player-controls">
+            <div class="player-transport-btns">
+              <button id="playerPrevBtn" class="player-btn" title="Escena anterior"><i class="fas fa-step-backward"></i></button>
+              <button id="playerPlayBtn" class="player-btn is-play" title="Reproducir"><i class="fas fa-play"></i></button>
+              <button id="playerPauseBtn" class="player-btn" title="Pausar" style="display: none;"><i class="fas fa-pause"></i></button>
+              <button id="playerStopBtn" class="player-btn" title="Detener"><i class="fas fa-stop"></i></button>
+              <button id="playerNextBtn" class="player-btn" title="Siguiente escena"><i class="fas fa-step-forward"></i></button>
+            </div>
+            <div class="player-timeline-wrapper">
+              <input type="range" id="playerTimeline" class="player-timeline" value="0" min="0" max="100">
+              <span id="playerTimeLabel" class="player-time-label">00:00 / 00:00</span>
+            </div>
+          </div>
+        </div> <!-- Fin multimedia-player-main -->
+
+        <aside id="playerSidePanel" class="player-side-panel">
+          <div class="side-panel-header">
+            <h3>Monitor de Escena</h3>
+          </div>
+          <div id="sceneInfoContent" class="side-panel-content">
+            <div class="info-group">
+              <span class="info-label">Guion / Diálogo</span>
+              <div id="infoSceneScript" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Descripción de Escena</span>
+              <div id="infoSceneDesc" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label">Texto en Pantalla</span>
+              <div id="infoSceneOST" class="info-value-box">--</div>
+            </div>
+            <div class="info-group">
+              <span class="info-label" style="display: flex; align-items: center; justify-content: space-between;">
+                Elemento Visual
+                <button id="btnShowNewProposal" title="Proponer cambios nuevos" style="background: none; border: none; color: #38bdf8; cursor: pointer; font-size: 14px; padding: 0;">
+                  <i class="fas fa-plus-circle"></i>
+                </button>
+              </span>
+              <div id="infoSceneVisual" class="info-value-box">--</div>
+            </div>
+
+            <div class="info-group" id="infoSceneActiveProposalGroup" style="display: none;">
+              <span class="info-label" style="color: #fbbf24; display: flex; align-items: center; justify-content: space-between;">
+                Propuesta Pendiente
+                <div style="display: flex; gap: 8px;">
+                  <button id="btnApplyActiveProposal" title="Aplicar esta propuesta" style="background: none; border: none; color: #10b981; cursor: pointer; font-size: 14px; padding: 0;">
+                    <i class="fas fa-check-circle"></i>
+                  </button>
+                  <button id="btnDeleteActiveProposal" title="Eliminar esta propuesta" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 14px; padding: 0;">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </span>
+              <div id="infoSceneActiveProposal" class="info-value-box" style="border-color: #fbbf24; background: rgba(251, 191, 36, 0.05);">--</div>
+            </div>
+
+            <div class="info-group" id="infoSceneProposalsGroup" style="display: none;">
+              <span class="info-label">Historial de Propuestas</span>
+              <div id="infoSceneProposalsList" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                <!-- Lista de propuestas -->
+              </div>
+            </div>
+
+            <div id="newProposalContainer" class="info-group" style="display: none; margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
+              <span class="info-label">Proponer Cambios Nuevos</span>
+              <p style="font-size: 11px; color: #64748b; margin-bottom: 0.75rem;">Sugiere una mejora para la generación de este elemento visual.</p>
+              <textarea id="infoSceneProposalText" class="info-textarea" placeholder="Escribe aquí tu propuesta de cambio visual..."></textarea>
+              <button id="btnSaveVisualProposal" class="btn-save-proposal">
+                <i class="fas fa-save"></i> Guardar Propuesta
+              </button>
+            </div>
+            
+            <div class="info-group" style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+              <span class="info-label">Tiempo Actual</span>
+              <span id="infoSceneTime" style="color: #38bdf8; font-family: monospace; font-size: 1.2rem;">00:00.0</span>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   </div>
 
-<!-- Modal para agregar comentario -->
-<div id="modalComentario" class="contenedorImagenes" style="display: none;">
-  <div class="modal-content">
-    <span class="cerrar-modal">&times;</span>
-    <h3>Escribe tu comentario</h3>
-    <textarea id="inputComentario" placeholder="Escribe tu comentario sobre la selección..."></textarea>
-    <button id="guardarComentarioBtn">Guardar Comentario</button>
-  </div>
-</div>
-
-  
   <!-- Modal para lectura -->
-  <div id="modalLectura" class="modal-lectura" style="display: none;">
+  <div id="modalLectura" class="modal-lectura hidden">
     <div class="modal-contenidoHome">
       <!-- Encabezado -->
       <div class="modal-header-home">
@@ -138,22 +626,105 @@
           <i class="fas fa-edit" title="Editar lectura"></i> <span class="btn-title">Editar</span>
         </div>
         <div id="exportarModalInDesignBtn" class="btn-icono">
-          <i class="fas fa-file-export" title="Exportar para InDesign"></i> <span class="btn-title">Exportar InDesign</span>
+          <i class="fas fa-file-export" title="Exportar para InDesign"></i> <span class="btn-title">Exportar
+            InDesign</span>
         </div>
-        <button id="btnGuardarLectura" class="btn btn-success" style="display: none;">Guardar</button>
-        <button id="comentarBtn" class="btn btn-primary" style="display: none;">Comentar</button>
+        <button id="btnGuardarLectura" class="btn btn-success hidden">Guardar</button>
+        <button id="comentarBtn" class="btn btn-primary hidden">Comentar</button>
       </div>
       <!-- Comentarios flotante y panel (sin cambios) -->
-      <button id="toggleComentariosBtn" class="btn-flotante" title="Ver comentarios"><i class="bx bx-comment"></i></button>
+      <button id="toggleComentariosBtn" class="btn-flotante" title="Ver comentarios"><i
+          class="bx bx-comment"></i></button>
       <div id="panelComentarios" class="panel-comentarios">
         <h3>Comentarios</h3>
         <div id="comentarios-lista"></div>
       </div>
     </div>
   </div>
-  
 
 
+
+  <!-- Modal de Exportación de Video -->
+  <div id="videoExportModal" class="modal-home hidden">
+    <div class="modal-overlay-home" onclick="document.getElementById('videoExportModal').classList.add('hidden')"></div>
+    <div class="modal-content export-modal-card">
+      <div class="export-modal-head">
+        <div class="export-modal-title">
+          <i class="fas fa-file-export"></i>
+          <div>
+            <strong>Exportar Video</strong>
+            <span>Configura los parámetros de renderizado</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="document.getElementById('videoExportModal').classList.add('hidden')">&times;</button>
+      </div>
+      
+      <div class="export-modal-body">
+        <div class="export-config-group">
+          <label class="export-label">Resolución</label>
+          <div class="export-options-grid">
+            <label class="export-option">
+              <input type="radio" name="exportResolution" value="source" checked>
+              <span>Original</span>
+            </label>
+            <label class="export-option">
+              <input type="radio" name="exportResolution" value="1080p">
+              <span>Full HD (1080p)</span>
+            </label>
+            <label class="export-option">
+              <input type="radio" name="exportResolution" value="720p">
+              <span>HD (720p)</span>
+            </label>
+            <label class="export-option">
+              <input type="radio" name="exportResolution" value="480p">
+              <span>SD (480p)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="export-config-group">
+          <label class="export-label">Tipo de Bitrate</label>
+          <div class="export-options-grid">
+            <label class="export-option">
+              <input type="radio" name="exportBitrateMode" value="custom" checked>
+              <span>Variable (VBR)</span>
+            </label>
+            <label class="export-option">
+              <input type="radio" name="exportBitrateMode" value="cbr">
+              <span>Constante (CBR)</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="exportBitrateValueGroup" class="export-config-group" style="display: none;">
+          <label class="export-label">Bitrate Objetivo (Mbps)</label>
+          <div class="export-range-wrap">
+            <input type="range" id="exportBitrateMbps" min="0.5" max="20" step="0.5" value="5">
+            <span id="exportBitrateValue">5 Mbps</span>
+          </div>
+        </div>
+
+        <div id="exportCrfValueGroup" class="export-config-group">
+          <label class="export-label">Calidad (CRF: 0-51)</label>
+          <div class="export-range-wrap">
+            <input type="range" id="exportCrfValue" min="0" max="51" step="1" value="23">
+            <span id="exportCrfLabel">23 (Balanceado)</span>
+          </div>
+          <small class="export-hint">Valores menores (18-20) dan más calidad y archivos más grandes. 23 es estándar.</small>
+        </div>
+      </div>
+
+      <div class="export-modal-footer">
+        <button class="btn btn-secondary" onclick="document.getElementById('videoExportModal').classList.add('hidden')">Cancelar</button>
+        <button id="btnConfirmExport" class="btn btn-primary">
+          <i class="fas fa-check"></i> Iniciar Exportación
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="on-screen-text-render-spec.js"></script>
+  <script type="module" src="podcaster-playback-controller.js"></script>
   <script type="module" src="home.js"></script>
   <script src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
@@ -163,9 +734,11 @@
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <!-- Bootstrap Select JS -->
   <script src="vendor/bootstrap-select/bootstrap-select.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.js"></script>
 
   <script src="vendor/vanilla-tilt/vanilla-tilt.min.js"></script>
 
   <script src="update-banner-loader.js" defer></script>
 </body>
+
 </html>

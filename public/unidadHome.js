@@ -26,14 +26,7 @@ onAuthStateChanged(auth, async (user) => {
     const userDocRef = doc(db, 'users', user.uid);
     const userSnap = await getDoc(userDocRef);
     
-    if (userSnap.exists()) {
-      const userData = userSnap.data();
-      if (userData.role === "admin") {
-        document.getElementById('gestionUsuariosLink').style.display = 'block';
-      } else {
-        document.getElementById('gestionUsuariosLink').style.display = 'none';
-      }
-    }
+      // Logic moved to sidebar.js
   } else {
     const storedUser = localStorage.getItem("user");
     if (!storedUser) {

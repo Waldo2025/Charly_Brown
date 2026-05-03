@@ -62,16 +62,7 @@ onAuthStateChanged(auth, async (user) => {
         const userSnap = await getDoc(userDocRef);
 
         if (userSnap.exists()) {
-            const userData = userSnap.data();
-
-            // Verificar si el rol es 'admin'
-            if (userData.role === "admin") {
-                // Mostrar la sección de "Gestionar Usuarios" para el admin
-                document.getElementById('gestionUsuariosLink').style.display = 'block';
-            } else {
-                // Si no es admin, ocultar la sección
-                document.getElementById('gestionUsuariosLink').style.display = 'none';
-            }
+            // Logic moved to sidebar.js
         }
 
         // Obtener parámetros de la URL

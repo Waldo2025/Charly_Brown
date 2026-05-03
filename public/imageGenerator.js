@@ -1,5 +1,5 @@
 import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
-import { auth } from './generarLectura.js';
+import { auth } from './firebase-instance.js';
 import { listAll } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 import { buildApiUrl, getAuthHeaders } from './api-client.js';
 
@@ -236,8 +236,11 @@ async function cargarGaleria(storage, userId) {
 // Lightbox cierre por clic
 document.addEventListener("DOMContentLoaded", () => {
   const overlay = document.getElementById("lightboxOverlay");
-  overlay.addEventListener("click", () => {
-    overlay.style.display = "none";
-    document.getElementById("lightboxImage").src = "";
-  });
+  if (overlay) {
+    overlay.addEventListener("click", () => {
+      overlay.style.display = "none";
+      const lightboxImg = document.getElementById("lightboxImage");
+      if (lightboxImg) lightboxImg.src = "";
+    });
+  }
 });

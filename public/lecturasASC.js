@@ -1781,6 +1781,7 @@ document.addEventListener("DOMContentLoaded", () => {
   ascAiClose?.addEventListener("click", closeAscAiEditor);
   ascAiSend?.addEventListener("click", enviarAscAiPrompt);
   ascAiRefreshScope?.addEventListener("click", () => refrescarAscAiScope(true));
+  bindAscPublicarSwitch();
   ascForm?.addEventListener("submit", onSubmit);
   bindAscEditorToolbar();
   bindPreguntasAsc();
@@ -1904,6 +1905,7 @@ function collectSharedEditorPayload() {
   const html = String(ascTexto?.innerHTML || "").trim();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
+  const publicar = getAscPublicarValue();
   if (ascSharedEditorContext?.mode === "unidad-generada") {
     persistirAscUnidadSeccionActual();
     const contenidoHTML = reconstruirAscUnidadHtml();
@@ -1917,7 +1919,8 @@ function collectSharedEditorPayload() {
       trimestre: String(ascTrimestre?.value || "").trim(),
       unidad: String(ascUnidad?.value || "").trim(),
       contenidoHTML,
-      contenidoPlano: String(tmp.textContent || tmp.innerText || "").trim()
+      contenidoPlano: String(tmp.textContent || tmp.innerText || "").trim(),
+      publicar
     };
   }
   return {
@@ -1929,7 +1932,8 @@ function collectSharedEditorPayload() {
     trimestre: String(ascTrimestre?.value || "").trim(),
     unidad: String(ascUnidad?.value || "").trim(),
     contenidoHTML: html,
-    contenidoPlano: String(tmp.textContent || tmp.innerText || "").trim()
+    contenidoPlano: String(tmp.textContent || tmp.innerText || "").trim(),
+    publicar
   };
 }
 
@@ -3652,8 +3656,8 @@ async function renderTabla(){
 
   let html = "";
   for (const r of cache){
-      const published = r?.published === true;
-      const publishLabel = published ? "Despublicar lectura" : "Publicar lectura";
+      const publicar = r?.publicar === true;
+      const publishLabel = publicar ? "Despublicar lectura" : "Publicar lectura";
       const hasMusic = _ascHasMusicAssets(r);
       const musicLabel = hasMusic ? "Re-generar música" : "Generar música";
       html += `
@@ -3667,7 +3671,7 @@ async function renderTabla(){
         <td>
           <div class="lectura-row-actions">
             <label class="lectura-publish-switch" title="${publishLabel}" aria-label="${publishLabel}">
-              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${published ? "checked" : ""} aria-label="${publishLabel}">
+              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${publicar ? "checked" : ""} aria-label="${publishLabel}">
               <span class="lectura-publish-switch-track" aria-hidden="true">
                 <span class="lectura-publish-switch-thumb"></span>
               </span>
@@ -3788,8 +3792,8 @@ function aplicarFiltrosAsc(){
 
   let html = "";
   for (const r of filtradas){
-      const published = r?.published === true;
-      const publishLabel = published ? "Despublicar lectura" : "Publicar lectura";
+      const publicar = r?.publicar === true;
+      const publishLabel = publicar ? "Despublicar lectura" : "Publicar lectura";
       const hasMusic = _ascHasMusicAssets(r);
       const musicLabel = hasMusic ? "Re-generar música" : "Generar música";
       html += `
@@ -3803,7 +3807,7 @@ function aplicarFiltrosAsc(){
         <td>
           <div class="lectura-row-actions">
             <label class="lectura-publish-switch" title="${publishLabel}" aria-label="${publishLabel}">
-              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${published ? "checked" : ""} aria-label="${publishLabel}">
+              <input type="checkbox" class="lectura-publish-switch-input ascPublishToggle" ${publicar ? "checked" : ""} aria-label="${publishLabel}">
               <span class="lectura-publish-switch-track" aria-hidden="true">
                 <span class="lectura-publish-switch-thumb"></span>
               </span>
@@ -3872,6 +3876,7 @@ function openEditorNew(){
   if (ascEditorZoomRange) ascEditorZoomRange.value = "100";
   if (ascEditorSheetSize) ascEditorSheetSize.value = "carta";
   aplicarTamanoHojaEditor("carta");
+  setAscPublicarValue(false);
 
   // limpiar preguntas con scope
   getPRefs().forEach(ref=>{
@@ -3908,6 +3913,7 @@ async function onEditRow(e){
   ascTrimestre.value = x.trimestre ?? "";
   ascUnidad.value    = x.unidad ?? "";
   ascTitulo.value    = x.titulo || "";
+  setAscPublicarValue(x.publicar === true || x.published === true);
   const contenidoLectura = x.textoLectura || x.contenidoHTML || x.lecturaHTML || x.htmlLectura || "";
   ascTexto.innerHTML = normalizarContenidoAscEditor(contenidoLectura || "<p></p>");
   if (!String(ascTexto.innerHTML || "").trim()) {
@@ -4425,7 +4431,7 @@ async function onTogglePublishedRow(e){
   input.disabled = true;
   try {
     await updateDoc(doc(db, "lecturasASC", id), {
-      published: nextPublished
+      publicar: nextPublished
     });
     const label = input.closest(".lectura-publish-switch");
     const nextLabel = nextPublished ? "Despublicar lectura" : "Publicar lectura";
@@ -4435,7 +4441,7 @@ async function onTogglePublishedRow(e){
     }
     input.setAttribute("aria-label", nextLabel);
     const idx = cache.findIndex((r) => r?.id === id);
-    if (idx >= 0) cache[idx].published = nextPublished;
+    if (idx >= 0) cache[idx].publicar = nextPublished;
   } catch (_) {
     input.checked = !nextPublished;
     alert("❌ No se pudo actualizar el estado de publicación.");
@@ -4471,7 +4477,7 @@ async function onSubmit(ev){
     if (MODO==="edit" && ascId.value){
       await updateDoc(doc(db,"lecturasASC", ascId.value), payload);
     } else {
-      await addDoc(collection(db,"lecturasASC"), { ...payload, published: false, createdAt:new Date(), userId: auth.currentUser?.uid || "anónimo" });
+      await addDoc(collection(db,"lecturasASC"), { ...payload, createdAt:new Date(), userId: auth.currentUser?.uid || "anónimo" });
     }
     closeEditorModal();
     await renderTabla();
@@ -4508,6 +4514,7 @@ function collectForm(){
   // 🔥 CONVERTIR GRADO A STRING
   const gradoRaw = ascGrado?.value || "";
   const gradoFinal = String(gradoRaw).trim();
+  const publicar = getAscPublicarValue();
 
   return {
     serie: (ascSerie?.value || "").trim(),
@@ -4517,8 +4524,48 @@ function collectForm(){
     unidad: ascUnidad?.value ? String(ascUnidad.value).trim() : "",
     titulo: (ascTitulo?.value || "").trim(),
     textoLectura: (ascTexto?.innerHTML || "").trim(),
-    preguntas: preguntas
+    preguntas: preguntas,
+    publicar
   };
+}
+
+function getAscPublicarValue() {
+  const input = document.getElementById("ascPublicar");
+  if (ascEditorModal?.dataset?.publicarDirty === "1") {
+    return ascEditorModal.dataset.publicar === "true";
+  }
+  return input instanceof HTMLInputElement && input.checked === true;
+}
+
+function setAscPublicarValue(value, { dirty = false } = {}) {
+  const next = value === true;
+  const input = document.getElementById("ascPublicar");
+  if (input instanceof HTMLInputElement) input.checked = next;
+  if (ascEditorModal) {
+    ascEditorModal.dataset.publicar = next ? "true" : "false";
+    ascEditorModal.dataset.publicarDirty = dirty ? "1" : "0";
+  }
+}
+
+function bindAscPublicarSwitch() {
+  const input = document.getElementById("ascPublicar");
+  if (!(input instanceof HTMLInputElement) || input.dataset.ascPublishBound === "1") return;
+  input.addEventListener("change", async () => {
+    const next = input.checked === true;
+    const previous = ascEditorModal?.dataset?.publicar === "true";
+    setAscPublicarValue(next, { dirty: true });
+    if (!ascSharedEditorContext?.onPublishChange) return;
+    input.disabled = true;
+    try {
+      await ascSharedEditorContext.onPublishChange(next);
+    } catch (_) {
+      setAscPublicarValue(previous, { dirty: true });
+      alert("❌ No se pudo actualizar el estado de publicación.");
+    } finally {
+      input.disabled = false;
+    }
+  });
+  input.dataset.ascPublishBound = "1";
 }
 
 window.cbOpenLecturaEditorCompartido = async function cbOpenLecturaEditorCompartido(options = {}) {
@@ -4530,7 +4577,8 @@ window.cbOpenLecturaEditorCompartido = async function cbOpenLecturaEditorCompart
     trimestreLabel: options.trimestreLabel || "Trimestre",
     unidadLabel: options.unidadLabel || "Unidad",
     titlePlaceholder: options.titlePlaceholder || "Escribe el título de la lectura",
-    onSave: typeof options.onSave === "function" ? options.onSave : null
+    onSave: typeof options.onSave === "function" ? options.onSave : null,
+    onPublishChange: typeof options.onPublishChange === "function" ? options.onPublishChange : null
   };
   configureAscSharedEditor(context);
   MODO = "shared";
@@ -4541,13 +4589,23 @@ window.cbOpenLecturaEditorCompartido = async function cbOpenLecturaEditorCompart
   if (ascTrimestre) ascTrimestre.value = String(options.trimestre || "");
   if (ascUnidad) ascUnidad.value = String(options.unidad || "");
   if (ascTitulo) ascTitulo.value = String(options.titulo || "");
+  setAscPublicarValue(options.publicar === true || options.published === true);
   if (context.mode === "unidad-generada") {
     inicializarAscUnidadEditor(options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>");
   }
   if (ascTextoSingle) {
-    const contenidoInicial = context.mode === "unidad-generada"
-      ? (ascUnitEditorState?.sections?.pages?.alumno?.[0]?.html || ascUnitEditorState?.sections?.alumno || "<p></p>")
-      : (options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>");
+    let contenidoInicial = "";
+    if (context.mode === "unidad-generada") {
+      contenidoInicial = (ascUnitEditorState?.sections?.pages?.alumno?.[0]?.html || ascUnitEditorState?.sections?.alumno || "<p></p>");
+    } else {
+      // Priorizar contenidoHTML, luego textoLectura, luego contenidoPlano.
+      // Usamos fallbacks encadenados asegurando que no pase "undefined" como string.
+      contenidoInicial = options.contenidoHTML || options.textoLectura || options.contenidoPlano || "<p></p>";
+    }
+    
+    // Seguridad extra: si por alguna razón llega la palabra "undefined" como string desde el origen
+    if (String(contenidoInicial) === "undefined") contenidoInicial = "<p></p>";
+
     ascTextoSingle.innerHTML = normalizarContenidoAscEditor(contenidoInicial);
     if (!String(ascTextoSingle.innerHTML || "").trim()) ascTextoSingle.innerHTML = "<p></p>";
   }
@@ -4622,7 +4680,7 @@ async function importarXlsx(file){
         unidad: r.unidad||"",
         titulo: r.titulo||"",
         textoLectura: textoFormateado,
-        published: false,
+        publicar: false,
         preguntas,
         createdAt: new Date()
       };

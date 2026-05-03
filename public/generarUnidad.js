@@ -1924,15 +1924,19 @@ function getSelectedModel() {
 }
 
 function buildGenerationConfig(modelo) {
-  if (!modelo) return null;
-  if (modelo.startsWith("gemini-3")) {
-    // Gemini 3 usa thinking high por defecto; LOW reduce latencia para este flujo.
+  const normalized = normalizeGeminiModel(modelo);
+  if (normalized.startsWith("gemini-3")) {
     return {
       maxOutputTokens: 8192,
       thinkingConfig: { thinkingLevel: "LOW" }
     };
   }
-  return null;
+  return {
+    maxOutputTokens: 8192,
+    temperature: 1,
+    topP: 0.95,
+    topK: 40
+  };
 }
 
 function getGeminiEndpoint(modeloOverride) {
@@ -9819,15 +9823,17 @@ async function _lecturasAgentResolveStoredImageByDocAndFile(path = "") {
 
       let picked = items.find((it) => String(it?.name || "") === fileName) || null;
       if (!picked) {
-        // Fallback robusto: si no existe portada o hash exacto, usa la primera imagen disponible.
         picked = items.find((it) => /\.(png|jpe?g|webp)$/i.test(String(it?.name || ""))) || items[0];
       }
       if (!picked) continue;
 
       const url = await getDownloadURL(picked);
       if (url) return url;
-    } catch (_) {
-      // try next prefix
+    } catch (err) {
+      if (err?.code === 'storage/unauthorized') {
+        console.debug(`[Storage] Sin permiso para listar: ${prefix}`);
+      }
+      continue;
     }
   }
   return "";
@@ -30314,9 +30320,12 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
       contenidoAssets: uploadsContenido || [],
       tipoDocumento: "unidad_generada",
       origen: "generarUnidadDidactica",
-      timestamp: new Date()
-      // Si usas Firestore serverTimestamp:
-      // timestamp: serverTimestamp()
+      creadoPor: String(user.email || user.uid || "Desconocido").trim().toLowerCase(),
+      timestamp: new Date(),
+      editadoEn: new Date(),
+      editadoPor: String(user.email || user.uid || "Desconocido").trim().toLowerCase(),
+      publicar: false,
+      published: false
     };
 
     // Guardar el HTML final (con URLs de Storage)
@@ -31880,6 +31889,7 @@ async function _cargarLecturasPermitidasUnidad(collectionName, tipo = "principal
   }
 
   const candidateQueries = [
+    query(colRef, where("publicar", "==", true)),
     query(colRef, where("published", "==", true)),
     query(colRef, where("estatusLectura", "==", "Compartido"))
   ];

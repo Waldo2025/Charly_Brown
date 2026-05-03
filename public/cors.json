@@ -2,11 +2,13 @@
   {
     "origin": [
       "https://charly-brown.web.app",
+      "http://127.0.0.1:5010",
+      "http://localhost:5010",
       "http://127.0.0.1:5501",
       "http://localhost:3000"
     ],
-    "method": ["GET", "HEAD", "OPTIONS"],
-    "responseHeader": ["Content-Type"],
+    "method": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "DELETE"],
+    "responseHeader": ["Content-Type", "x-goog-resumable"],
     "maxAgeSeconds": 3600
   }
 ]

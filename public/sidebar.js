@@ -1,6 +1,6 @@
 import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-config.js?v=2026-1.0.0.59";
 import {
-  initializeApp
+  initializeApp, getApps, getApp
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
   getFirestore, collection, collectionGroup, query, where, getDocs, doc, 
@@ -19,8 +19,8 @@ const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
 
 
 
-// Inicializa Firebase solo una vez
-const app = initializeApp(firebaseConfig);
+// Inicializa Firebase solo una vez (evitando error si ya está inicializada por otro script)
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 const db = getFirestore(app);
 
@@ -254,53 +254,58 @@ async function resolveRoleFromToken(user) {
   }
 }
 
-
-
-
-
-onAuthStateChanged(auth, async user => {
-  if (!user) {
-    if (typeof unsubscribeSidebarUnread === "function") unsubscribeSidebarUnread();
-    unsubscribeSidebarUnread = null;
-    updateChatBadge(0);
-    setHeaderUserEmail("");
-    applySidebarRoleVisibility("");
-    return;
-  }
-  setHeaderUserEmail(user.email || "");
-  let role = null;
-  // 1) priorizar claims/token, igual que el backend de seguridad
-  if (!role) {
-    role = await resolveRoleFromToken(user);
-  }
-  if (!role) {
-    try {
-      // 2) fallback a Firestore (compatibilidad con docs legacy)
-      role = await resolveUserRole(user);
-    } catch (_) {
-      role = null;
-    }
-  }
-  // 2) aplicar visibilidad por rol para enlaces del sidebar
-  applySidebarRoleVisibility(role);
-  // 3) compatibilidad legacy por id (si falta data-role-visibility)
-  const analisisLink = document.getElementById("analisisEditorialLink");
-  if (analisisLink && !analisisLink.dataset.roleVisibility) {
-    const permitidos = ["admin","author","developer"];
-    analisisLink.classList.toggle("d-none", !permitidos.includes(canonicalRole(role)));
-  }
-  const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
-  if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) {
-    gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
-  }
-
-  startSidebarUnreadListener(user.uid);
-});
-
-
 document.addEventListener("DOMContentLoaded", () => {
   setHeaderUserEmail(auth.currentUser?.email || "");
   applySidebarRoleVisibility("");
+
+  // Escucha cambios de autenticación dentro del DOMContentLoaded para asegurar que el DOM está listo
+  onAuthStateChanged(auth, async user => {
+    if (!user) {
+      if (typeof unsubscribeSidebarUnread === "function") unsubscribeSidebarUnread();
+      unsubscribeSidebarUnread = null;
+      updateChatBadge(0);
+      setHeaderUserEmail("");
+      applySidebarRoleVisibility("");
+      return;
+    }
+    setHeaderUserEmail(user.email || "");
+    
+    let role = null;
+    // 1) priorizar claims/token, igual que el backend de seguridad
+    role = await resolveRoleFromToken(user);
+    
+    if (!role) {
+      try {
+        // 2) fallback a Firestore (compatibilidad con docs legacy)
+        role = await resolveUserRole(user);
+      } catch (_) {
+        role = null;
+      }
+    }
+    
+    // 2) aplicar visibilidad por rol para enlaces del sidebar
+    // Lo ejecutamos inmediatamente y con un pequeño delay por si chromeLayout.js sigue trabajando
+    applySidebarRoleVisibility(role);
+    setTimeout(() => applySidebarRoleVisibility(role), 100);
+    
+    // 3) compatibilidad legacy por id (si falta data-role-visibility)
+    const analisisLink = document.getElementById("analisisEditorialLink");
+    if (analisisLink && !analisisLink.dataset.roleVisibility) {
+      const permitidos = ["admin","author","editor","developer"];
+      analisisLink.classList.toggle("d-none", !permitidos.includes(canonicalRole(role)));
+    }
+    const gestionUsuariosLink = document.getElementById("gestionUsuariosLink");
+    if (gestionUsuariosLink && !gestionUsuariosLink.dataset.roleVisibility) {
+      gestionUsuariosLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
+    }
+    const lecturasGameLink = document.getElementById("lecturasGameLink");
+    if (lecturasGameLink && !lecturasGameLink.dataset.roleVisibility) {
+      lecturasGameLink.classList.toggle("d-none", canonicalRole(role) !== "admin");
+    }
+
+    startSidebarUnreadListener(user.uid);
+  });
+
   const sidebar = document.getElementById("sidebar");
   const toggleBtn = document.getElementById("menuToggle");
   if (!sidebar) return;
@@ -354,22 +359,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Cerrar sesión
-// Cerrar sesión y redirigir a index.html
-const logoutLink = document.getElementById("logoutLink");
-if (logoutLink) {
-  logoutLink.addEventListener("click", async (e) => {
-    e.preventDefault();
-    try {
-      const auth = getAuth(); // Obtener instancia de auth
-      await signOut(auth); // Cerrar sesión
-      localStorage.clear(); // Limpiar todo el almacenamiento local
-
-      // Redirigir a la página index.html dentro de la app Electron
-      window.location.href = "index.html"; // Redirige a la página index.html de la app local
-    } catch (err) {
-      alert("Error al cerrar sesión.");
-    }
-  });
-}
-
+  const logoutLink = document.getElementById("logoutLink");
+  if (logoutLink) {
+    logoutLink.addEventListener("click", async (e) => {
+      e.preventDefault();
+      try {
+        const auth = getAuth(); // Obtener instancia de auth
+        await signOut(auth); // Cerrar sesión
+        localStorage.clear(); // Limpiar todo el almacenamiento local
+        window.location.href = "index.html"; 
+      } catch (err) {
+        alert("Error al cerrar sesión.");
+      }
+    });
+  }
 });

@@ -629,6 +629,8 @@ function parseAllowedOrigins() {
     "http://localhost:5010",
     "http://127.0.0.1:5500",
     "http://localhost:5500",
+    "http://127.0.0.1:5010",
+    "http://localhost:5010",
     "https://charly-brown.web.app",
     "https://charly-brown.firebaseapp.com",
     "https://charly-brown-gemini-backend.onrender.com",
@@ -2185,6 +2187,7 @@ function sanitizePodcasterSession(raw = {}) {
     title: clampText(raw?.title || "Sesión sin título", 180) || "Sesión sin título",
     prompt: clampText(raw?.prompt || "", 5000),
     archived: raw?.archived === true,
+    publicar: raw?.publicar === true,
     updatedAt: clampText(raw?.updatedAt || new Date().toISOString(), 64),
     podcastStudioUiState,
     chat,
@@ -3696,9 +3699,10 @@ app.post("/api/podcaster/scene-library/clone-video", async (req, res) => {
 
     const requestedStoragePath = normalizeStorageFilePath(sourceStoragePathRaw);
     const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(sourceUrlRaw);
-    const extracted = requestedStoragePath
-      ? { bucketName: "", storagePath: requestedStoragePath }
-      : { bucketName: String(firebaseObject?.bucket || "").trim(), storagePath: String(firebaseObject?.objectPath || "").trim() };
+    const extracted = {
+      bucketName: String(firebaseObject?.bucket || "").trim(),
+      storagePath: requestedStoragePath || String(firebaseObject?.objectPath || "").trim()
+    };
     const sourceStoragePath = String(extracted.storagePath || "").trim();
     if (!sourceStoragePath) {
       return res.status(400).json({ error: "Falta sourceStoragePath o sourceUrl válido." });
@@ -3996,6 +4000,7 @@ app.post("/api/podcaster/sessions/save", async (req, res) => {
         ownerId: uid,
         title: sanitized.title,
         archived: sanitized.archived === true,
+        publicar: sanitized.publicar === true,
         sessionUpdatedAt: sanitized.updatedAt || new Date().toISOString(),
         session: sanitized,
         sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
@@ -4083,6 +4088,7 @@ app.get("/api/podcaster/sessions/list", async (req, res) => {
       if (!sessionData) return;
       merged.set(docSnap.id, {
         ...sessionData,
+        publicar: data.publicar === true,
         cloudMeta: {
           ownerId: String(data.ownerId || "").trim() || null,
           savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
@@ -4103,16 +4109,16 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
     const sessionId = String(req.query?.sessionId || req.query?.sessionSlug || "").trim();
-    const rowId = String(req.query?.rowId || "").trim();
+    const includeAllOwners = String(req.query?.allOwners || "").trim() === "1";
     if (!sessionId) {
       return res.status(400).json({ error: "Falta sessionId." });
     }
 
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
     const ownerSlug = normalizeStorageSegment(uid, "anon");
-
-    // List all videos for the session/owner.
-    const prefix = `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/`;
+    const prefix = includeAllOwners
+      ? `podcaster/sessions/${sessionSlug}/owners/`
+      : `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/`;
 
     const buckets = getStorageBucketCandidates();
     const filesByPath = new Map();
@@ -4133,13 +4139,16 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
           const downloadUrl = token
             ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
             : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
-          // Extract row slug from path: videos/{rowSlug}/{filename}
+          // Extract row slug from path: .../videos/{rowSlug}/{filename}
           const pathParts = filePath.split("/");
           const fileIdx = pathParts.indexOf("videos");
           const rowFolder = fileIdx >= 0 && pathParts[fileIdx + 1] ? pathParts[fileIdx + 1] : "";
+          const ownerIdx = pathParts.indexOf("owners");
+          const ownerFolder = ownerIdx >= 0 && pathParts[ownerIdx + 1] ? pathParts[ownerIdx + 1] : "";
           const fileName = pathParts[pathParts.length - 1] || filePath;
           filesByPath.set(filePath, {
             name: fileName,
+            ownerFolder,
             rowFolder,
             storagePath: filePath,
             downloadUrl,
@@ -4163,6 +4172,70 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
     return res.status(200).json({ ok: true, prefix, videos });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar videos de la sesión.") });
+  }
+});
+
+app.get("/api/podcaster/sessions/list-audios", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+    const sessionId = String(req.query?.sessionId || req.query?.sessionSlug || "").trim();
+    if (!sessionId) {
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+
+    const sessionSlug = normalizeStorageSegment(sessionId, "session");
+    const ownerSlug = normalizeStorageSegment(uid, "anon");
+    const prefix = `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/audio/`;
+
+    const buckets = getStorageBucketCandidates();
+    const filesByPath = new Map();
+
+    await Promise.allSettled(buckets.map(async (bucket) => {
+      if (!bucket) return;
+      try {
+        const [files] = await bucket.getFiles({ prefix, maxResults: 400 });
+        for (const file of files) {
+          const filePath = String(file.name || "").trim();
+          if (!filePath || filesByPath.has(filePath)) continue;
+          const ext = String(filePath.split(".").pop() || "").toLowerCase();
+          if (!["wav", "mp3", "ogg", "m4a", "flac", "aac", "webm"].includes(ext)) continue;
+          const [metadata] = await file.getMetadata().catch(() => [{}]);
+          const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "").trim();
+          const downloadUrl = token
+            ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
+            : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
+          const pathParts = filePath.split("/");
+          const audioIdx = pathParts.indexOf("audio");
+          const rowFolder = audioIdx >= 0 && pathParts[audioIdx + 1] ? pathParts[audioIdx + 1] : "";
+          const fileName = pathParts[pathParts.length - 1] || filePath;
+          filesByPath.set(filePath, {
+            name: fileName,
+            rowFolder,
+            storagePath: filePath,
+            downloadUrl,
+            contentType: String(metadata?.contentType || `audio/${ext === "wav" ? "wav" : ext}`).trim(),
+            size: Number(metadata?.size || 0),
+            updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
+          });
+        }
+      } catch (_) {
+        // Ignore per-bucket errors and continue.
+      }
+    }));
+
+    const audios = Array.from(filesByPath.values())
+      .sort((a, b) => {
+        if (a.rowFolder < b.rowFolder) return -1;
+        if (a.rowFolder > b.rowFolder) return 1;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+      });
+
+    return res.status(200).json({ ok: true, prefix, audios });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar audios de la sesión.") });
   }
 });
 
@@ -5204,7 +5277,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     ].filter(Boolean).join("\n");
 
     const pollUntilDone = async (operationName = "", options = {}) => {
-      const maxAttempts = 54;
+      const maxAttempts = Math.max(12, Math.min(54, Math.floor(Number(options?.maxAttempts || 54) || 54)));
       const delayMs = 5000;
       const requireResolvedMedia = options?.requireResolvedMedia === true;
       const resolveResult = typeof options?.resolveResult === "function" ? options.resolveResult : null;
@@ -5606,13 +5679,27 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
       return null;
     };
-    for (const videoModel of videoModels) {
+    const requestedMaxVariantAttempts = Math.max(1, Math.min(
+      requestVariants.length || 1,
+      Math.floor(clampNumber(req.body?.maxVariantAttempts, 1, requestVariants.length || 1, requestVariants.length || 1))
+    ));
+    const effectiveRequestVariants = requestVariants.slice(0, requestedMaxVariantAttempts);
+    const requestedMaxOperationPollAttempts = Math.max(12, Math.min(
+      54,
+      Math.floor(clampNumber(req.body?.maxOperationPollAttempts, 12, 54, 54))
+    ));
+    const effectiveVideoModels = videoModels.slice(0, Math.max(1, Math.min(
+      videoModels.length || 1,
+      Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
+    )));
+
+    for (const videoModel of effectiveVideoModels) {
       let modelReturnedDoneWithoutMedia = false;
-      for (const [variantIndex, variant] of requestVariants.entries()) {
+      for (const [variantIndex, variant] of effectiveRequestVariants.entries()) {
         updateDialogueVideoJob({
           status: "running",
           stage: "request_variant",
-          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, requestVariants.length)) * 0.2))),
+          progress: Math.max(0.18, Math.min(0.78, 0.18 + (((variantIndex + 1) / Math.max(1, effectiveRequestVariants.length)) * 0.2))),
           hint: `Probando ${videoModel} · ${String(variant?.label || "").trim() || "variant"}.`,
           model: videoModel,
           variant: String(variant?.label || "").trim(),
@@ -5648,6 +5735,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         try {
           // eslint-disable-next-line no-await-in-loop
           operationDone = await pollUntilDone(operationName, {
+            maxAttempts: requestedMaxOperationPollAttempts,
             requireResolvedMedia: true,
             resolveResult: resolveVeoVideoResult,
             postDoneGraceAttempts: 6,
@@ -5706,7 +5794,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             status: lastStatus,
             reason: "done_without_media",
             variantIndex,
-            variantCount: requestVariants.length
+            variantCount: effectiveRequestVariants.length
           });
           console.warn(`[backend][${requestDebugTag}] variant-finished-without-media`, {
             model: videoModel,
@@ -5766,8 +5854,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       if (modelReturnedDoneWithoutMedia) {
         console.warn(`[backend][${requestDebugTag}] switching-video-model-after-empty-media`, {
           failedModel: videoModel,
-          nextCandidates: videoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
-          attemptedVariants: requestVariants.length,
+          nextCandidates: effectiveVideoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
+          attemptedVariants: effectiveRequestVariants.length,
           lastErrorDetail
         });
         updateDialogueVideoJob({
@@ -6164,11 +6252,12 @@ function getMontageExportMimeType(format = "mp4_h264") {
   return ext === "webm" ? "video/webm" : "video/mp4";
 }
 
-function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "balanced") {
+function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "balanced", bitrateSettings = null) {
   const cleanFormat = String(format || "").trim().toLowerCase();
   const preset = ["high", "balanced", "small"].includes(String(qualityPreset || "").trim().toLowerCase())
     ? String(qualityPreset).trim().toLowerCase()
     : "balanced";
+
   if (cleanFormat === "webm_vp9") {
     const crf = preset === "high" ? 28 : preset === "small" ? 36 : 32;
     return {
@@ -6179,12 +6268,40 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
       aArgs: ["-b:a", "128k"]
     };
   }
-  const crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
-  const x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
+
+  let crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
+  let x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
+  let maxRate = preset === "high" ? "8M" : (preset === "small" ? "2M" : "5M");
+  let bufSize = preset === "high" ? "16M" : (preset === "small" ? "4M" : "10M");
+  let isCbr = false;
+
+  // Apply manual settings if provided
+  if (bitrateSettings && typeof bitrateSettings === "object") {
+    if (bitrateSettings.mode === "custom") {
+      crf = Math.max(0, Math.min(51, Number(bitrateSettings.minBitrateCrf || 23)));
+      const customMax = Math.max(0.1, Math.min(100, Number(bitrateSettings.maxBitrateMbps || 5)));
+      maxRate = `${customMax}M`;
+      bufSize = `${customMax * 2}M`;
+    } else if (bitrateSettings.mode === "cbr") {
+      isCbr = true;
+      const customMax = Math.max(0.1, Math.min(100, Number(bitrateSettings.maxBitrateMbps || 5)));
+      maxRate = `${customMax}M`;
+      bufSize = `${customMax}M`; // For CBR, maxrate and bufsize should be same or tight
+    }
+  }
+
+  const vArgs = ["-preset", x264Preset];
+  if (isCbr) {
+    vArgs.push("-b:v", maxRate, "-maxrate", maxRate, "-bufsize", bufSize);
+  } else {
+    vArgs.push("-crf", String(crf), "-maxrate", maxRate, "-bufsize", bufSize);
+  }
+  vArgs.push("-movflags", "+faststart");
+
   return {
     container: "mp4",
     vCodec: "libx264",
-    vArgs: ["-preset", x264Preset, "-crf", String(crf), "-movflags", "+faststart"],
+    vArgs,
     aCodec: "aac",
     aArgs: ["-b:a", "160k"]
   };
@@ -6628,10 +6745,10 @@ function normalizeMontageExportRequestBody(body = {}) {
       durationMs,
       zIndex: Math.max(1, Math.round(Number(segment?.zIndex || idx + 1) || idx + 1)),
       layout: {
-        xPct: clampNumber(segment?.layout?.xPct, 0, 0.98, 0.075),
-        yPct: clampNumber(segment?.layout?.yPct, 0, 0.98, 0.88),
-        widthPct: clampNumber(segment?.layout?.widthPct, 0.08, 0.96, 0.85),
-        heightPct: clampNumber(segment?.layout?.heightPct, 0.05, 0.6, 0.14)
+        yPct: clampNumber(segment?.layout?.yPct, 0, 1, 0.92),
+        widthPct: clampNumber(segment?.layout?.widthPct, 0.05, 1, 0.85),
+        heightPct: clampNumber(segment?.layout?.heightPct, 0.05, 1, 0.14),
+        xPct: clampNumber(segment?.layout?.xPct, 0, 1, 0)
       }
     };
   };
@@ -6674,7 +6791,8 @@ function normalizeMontageExportRequestBody(body = {}) {
       if (rawValue >= 40 && rawValue <= 100) return rawValue;
       if (rawValue >= 0 && rawValue < 40) return Math.max(40, 100 - rawValue);
       return 60;
-    })()
+    })(),
+    bitrateSettings: raw?.bitrateSettings && typeof raw.bitrateSettings === "object" ? raw.bitrateSettings : null
   };
 }
 
@@ -6993,16 +7111,23 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
     };
   });
   let hasOverlap = false;
+  let hasGaps = false;
   for (let index = 1; index < planned.length; index += 1) {
     const previous = planned[index - 1];
     const current = planned[index];
-    if (Number(current?.timelineStartMs || 0) < Number(previous?.timelineEndMs || 0)) {
+    const currentStartMs = Math.round(Number(current?.timelineStartMs || 0) || 0);
+    const previousEndMs = Math.round(Number(previous?.timelineEndMs || 0) || 0);
+    
+    if (currentStartMs < previousEndMs - 1) {
       hasOverlap = true;
-      break;
     }
+    if (currentStartMs > previousEndMs + 1) {
+      hasGaps = true;
+    }
+    if (hasOverlap && hasGaps) break;
   }
   const totalDurationMs = planned.reduce((max, entry) => Math.max(max, Number(entry?.timelineEndMs || 0)), 0);
-  return { entries: planned, hasOverlap, totalDurationMs: Math.max(500, totalDurationMs) };
+  return { entries: planned, hasOverlap, hasGaps, totalDurationMs: Math.max(500, totalDurationMs) };
 }
 
 async function renderMontageOverlapComposition({
@@ -7014,7 +7139,7 @@ async function renderMontageOverlapComposition({
   exportedEntries = []
 } = {}) {
   const plan = buildMontageOverlapCompositionPlan(exportedEntries);
-  if (!plan.hasOverlap || !intermediatePaths.length || intermediatePaths.length !== plan.entries.length) {
+  if ((!plan.hasOverlap && !plan.hasGaps) || !intermediatePaths.length || intermediatePaths.length !== plan.entries.length) {
     return "";
   }
   const firstDims = await probeMediaVideoDimensionsWithFfmpeg(intermediatePaths[0], "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }));
@@ -7042,7 +7167,7 @@ async function renderMontageOverlapComposition({
       const audioLabel = `a${index}`;
       let audioChain = `[${index}:a]atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`;
       const delayMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-      audioChain += `,adelay=${delayMs}|${delayMs}[${audioLabel}]`;
+      audioChain += `,adelay=${delayMs}ms|${delayMs}ms[${audioLabel}]`;
       filters.push(audioChain);
       audioLabels.push(audioLabel);
     }
@@ -7095,7 +7220,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     tmpDir = path.join(os.tmpdir(), `cb-montage-export-${randomUUID()}`);
     await fs.promises.mkdir(tmpDir, { recursive: true });
 
-    const params = resolveMontageExportVideoParams(input.format, input.qualityPreset);
+    const params = resolveMontageExportVideoParams(input.format, input.qualityPreset, input.bitrateSettings);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
@@ -7421,9 +7546,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
 
     const overlapPlan = buildMontageOverlapCompositionPlan(exportedEntries);
     let concatOutPath = "";
-    emitStage("concat_timeline", 0.48, overlapPlan.hasOverlap ? "Componiendo escenas con transiciones por solapamiento." : "Uniendo escenas en un solo timeline.");
+    emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
-    if (overlapPlan.hasOverlap) {
+    if (overlapPlan.hasOverlap || overlapPlan.hasGaps) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
         tmpDir,
@@ -7462,17 +7587,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
       if (rowId) {
         exportOffsetsByRowId.set(String(entry.rowId || "").trim(), {
-          startMs: overlapPlan.hasOverlap
+          startMs: (overlapPlan.hasOverlap || overlapPlan.hasGaps)
             ? Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
             : cursorMs,
           durationMs,
           timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
         });
       }
-      cursorMs += overlapPlan.hasOverlap ? 0 : durationMs;
+      cursorMs += (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? 0 : durationMs;
     });
 
-    const exportedDurationSec = overlapPlan.hasOverlap
+    const exportedDurationSec = (overlapPlan.hasOverlap || overlapPlan.hasGaps)
       ? Math.max(0.5, overlapPlan.totalDurationMs / 1000)
       : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
     let finalOutPath = concatOutPath;
@@ -7520,11 +7645,20 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           labels.push(label);
           const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
           const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || startMs) || 0));
-          const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
-          const adjustedStartMs = exportOffset
-            ? Math.max(0, exportOffset.startMs + relativeStartMs)
-            : startMs;
-          const baseChain = `[${inputIndex}:a]atrim=start=${trimInSec.toFixed(3)}:duration=${durationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${adjustedStartMs}|${adjustedStartMs}`;
+          const relativeStartMs = startMs - baseTimelineStartMs;
+          
+          let finalAdjustedStartMs = exportOffset ? (exportOffset.startMs + relativeStartMs) : startMs;
+          let finalTrimInSec = trimInSec;
+          let finalDurationSec = durationSec;
+          
+          if (finalAdjustedStartMs < 0) {
+            const shiftSec = Math.abs(finalAdjustedStartMs) / 1000;
+            finalTrimInSec += shiftSec;
+            finalDurationSec = Math.max(0.1, finalDurationSec - shiftSec);
+            finalAdjustedStartMs = 0;
+          }
+
+          const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
           const kind = String(segment?.kind || "").trim().toLowerCase();
           filters.push(kind === "uploaded" && input.normalizedGeminiTimelineSegments.length
             ? `${baseChain},volume='${bgDuckExprEscaped}*${volume.toFixed(3)}':eval=frame[${label}]`
@@ -7556,8 +7690,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       }
       const musicPath = await downloadInput(input.backgroundMusic, "music", 0);
       const rawVolumePct = Number(input.backgroundMusic?.volumePct ?? 25);
-      const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
-      const volume = Math.max(0, Math.min(1, Math.max(0, Math.min(100, legacyScaledPct)) / 100));
+      const volume = Math.max(0, Math.min(1, (Number.isFinite(rawVolumePct) ? rawVolumePct : 25) / 100));
       const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
         input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
         0.60
@@ -7602,7 +7735,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               boxEnabled: false
             },
             layout,
-            resolution: input.resolution,
+            resolution: "source", // Use source to match probed sourceDims perfectly
             sourceWidth: sourceDims.width,
             sourceHeight: sourceDims.height,
             text: segment.text || "",
@@ -9115,12 +9248,19 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     if (storagePath) {
       const buckets = getStorageBucketCandidates();
       let lastError = null;
+      console.info("[backend][proxy-media] attempting storage resolution", { storagePath, bucketCount: buckets.length });
+      
       for (const bucket of buckets) {
         if (!bucket) continue;
         const file = bucket.file(storagePath);
-        const [exists] = await file.exists().catch(() => [null]);
-        if (exists === false) continue;
         try {
+          const [exists] = await file.exists();
+          if (exists === false) {
+            console.debug(`[backend][proxy-media] file not in bucket: ${bucket.name}`);
+            continue;
+          }
+          
+          console.info(`[backend][proxy-media] streaming from bucket: ${bucket.name}`);
           const [meta] = await file.getMetadata().catch(() => [{}]);
           await streamStorageFileToResponse(file, res, {
             metadata: meta,
@@ -9129,6 +9269,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
           return;
         } catch (error) {
           lastError = error;
+          console.warn(`[backend][proxy-media] error in bucket ${bucket?.name}:`, error?.message || error);
           if (res.headersSent) {
             console.error("[backend][proxy-media] storage stream failed after headers", {
               storagePath,
