@@ -24,7 +24,7 @@
   <script src="vendor/datatables/jquery.dataTables.min.js"></script>
 
 
-  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.16">
+  <link rel="stylesheet" href="generarLectura.css?v=2026-1.0.1.30">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
   <link rel="stylesheet" href="chatbot.css">
@@ -410,6 +410,15 @@
 </head>
 
 <body>
+  <div id="appLoadingScreen">
+    <img src="charlyEditor.png" alt="Charly" class="loading-spinner-charly">
+    <div class="loading-dots">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  </div>
+
   <div id="updateBanner" class="update-banner" role="button" tabindex="0" aria-live="polite">
     Nuevas Actualizaciones
   </div>
@@ -4153,7 +4162,7 @@
   <script src="vendor/trumbowyg/plugins/trumbowyg.colors.min.js"></script>
 
 
-  <script type="module" src="generarLectura.js"></script>
+  <script type="module" src="generarLectura.js?v=2026-1.0.1.30"></script>
   <script src="chromeLayout.js?v=2026-1.0.0.22"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="imageGenerator.js"></script>

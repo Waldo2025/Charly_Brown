@@ -79,8 +79,22 @@ onAuthStateChanged(auth, async (user) => {
     if (!authInitialized) {
       authInitialized = true;
       resolveAuthReady?.();
+      
+      // Finalización de carga - Ocultar splash screen
+      const loader = document.getElementById("appLoadingScreen");
+      if (loader) {
+        setTimeout(() => loader.classList.add("is-hidden"), 300);
+      }
     }
   });
+
+// Safety timeout para quitar el loader si algo falla
+setTimeout(() => {
+  const loader = document.getElementById("appLoadingScreen");
+  if (loader && !loader.classList.contains("is-hidden")) {
+    loader.classList.add("is-hidden");
+  }
+}, 5000);
 
 const charts = [];
 
