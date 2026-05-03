@@ -2748,9 +2748,7 @@ onAuthStateChanged(auth, async (user) => {
   }
   
   // 🔥 CORRECCIÓN: NO abrir automáticamente el modal
-  // En lugar de eso, puedes mostrar un mensaje o botón para crear el primer curso
   if (cursosUsuario.length === 0) {
-    // OPCIONAL: Mostrar un mensaje amigable en la lista de cursos
     listaCursos.innerHTML = `
       <li class="p-4 text-center">
         <p class="text-sm text-gray-600 mb-3">No tienes cursos aún</p>
@@ -2761,12 +2759,25 @@ onAuthStateChanged(auth, async (user) => {
       </li>
     `;
     
-    // Agregar evento al botón personalizado
     document.getElementById("btnPrimerCurso")?.addEventListener("click", () => {
       document.getElementById("btnNuevoCurso").click();
     });
   }
+
+  // Finalización de carga - Ocultar splash screen
+  const loader = document.getElementById("appLoadingScreen");
+  if (loader) {
+    setTimeout(() => loader.classList.add("is-hidden"), 300);
+  }
 });
+
+// Safety timeout para quitar el loader si algo falla
+setTimeout(() => {
+  const loader = document.getElementById("appLoadingScreen");
+  if (loader && !loader.classList.contains("is-hidden")) {
+    loader.classList.add("is-hidden");
+  }
+}, 5000);
 
 
 async function cargarCursosUsuario() {

@@ -9,9 +9,9 @@
   <!-- Font Awesome -->
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
   <!-- CSS Personalizado con soporte para temas -->
-  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.1.16">
-  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.1.16">
-  <link rel="stylesheet" href="moodleCourse-graphicPreview.css?v=2026-1.0.1.16">
+  <link rel="stylesheet" href="tailwind-lite.css?v=2026-1.0.1.30">
+  <link rel="stylesheet" href="moodleCourse.css?v=2026-1.0.1.30">
+  <link rel="stylesheet" href="moodleCourse-graphicPreview.css?v=2026-1.0.1.30">
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
@@ -39,7 +39,16 @@
 </head>
 
 <body data-page="moodlecourse.html" class="bg-background text-foreground transition-colors duration-200">
-<header class="main-header">
+  <div id="appLoadingScreen">
+    <img src="woodstock.png" alt="Woodstock" class="loading-spinner-woodstock">
+    <div class="loading-dots">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  </div>
+
+  <header class="main-header">
     <div class="header-content">
       <!-- header-content loaded from chromeLayout.js -->
     </div>
@@ -1024,7 +1033,7 @@
 
 <script src="chromeLayout.js?v=2026-1.0.1.14"></script>
   <script type="module" src="sidebar.js?v=2026-1.0.1.14"></script>
-<script type="module" src="moodleCourse.js?v=2026-1.0.1.14"></script>
+<script type="module" src="moodleCourse.js?v=2026-1.0.1.30"></script>
 <script type="module" src="moodleCourse-Theme.js?v=2026-1.0.1.14"></script>
 
 <script src="update-banner-loader.js" defer></script>
