@@ -2882,7 +2882,8 @@ async function cargarCursosUsuario() {
                 },
                 tipo: "propio",
                 compartidoCon: data.compartidoCon || [],
-                compartidoConDetalles: data.compartidoConDetalles || []
+                compartidoConDetalles: data.compartidoConDetalles || [],
+                publicar: data.publicar || false
             };
             
             cursosMap.set(cursoId, curso);
@@ -2939,7 +2940,8 @@ async function cargarCursosUsuario() {
                 fechaCompartido: data.actualizado || new Date(),
                 acceso: permisosUsuario.editar ? "editable" : "lectura",
                 compartidoCon: data.compartidoCon || [],
-                compartidoConDetalles: data.compartidoConDetalles || []
+                compartidoConDetalles: data.compartidoConDetalles || [],
+                publicar: data.publicar || false
             };
             
             cursosMap.set(cursoId, curso);
@@ -4465,7 +4467,8 @@ async function seleccionarCurso(id) {
                     temas: Array.isArray(cursoData.temas) ? cursoData.temas : [],
                     esPropio: esPropietario,
                     permisos: permisosUsuario,
-                    tipo: esPropietario ? "propio" : "compartido"
+                    tipo: esPropietario ? "propio" : "compartido",
+                    publicar: cursoData.publicar || false
                 };
                 
                 // Agregar a la lista local
