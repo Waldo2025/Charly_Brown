@@ -2364,7 +2364,13 @@ body.is-resizing-podcast-stage {
   position: relative;
   transition: grid-template-columns 0.22s ease;
   overflow-y: auto;
+  scrollbar-width: none;
   height: 100%;
+}
+
+.podcast-studio-layout::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .podcast-studio-layout.is-inspector-collapsed {
