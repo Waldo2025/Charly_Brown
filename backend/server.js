@@ -6442,11 +6442,16 @@ function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
       } catch (_) {
         // noop
       }
-      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
-        try {
-          objectPath = decodeURIComponent(objectPath);
-        } catch (_) {
-          // noop
+      // Handle multi-encoded paths (common with Firebase Storage URLs in some environments)
+      for (let i = 0; i < 3; i++) {
+        if (/%[0-9a-f]{2}/i.test(objectPath)) {
+          try {
+            objectPath = decodeURIComponent(objectPath);
+          } catch (_) {
+            break;
+          }
+        } else {
+          break;
         }
       }
       objectPath = String(objectPath || "").replace(/^\/+/, "").trim();
