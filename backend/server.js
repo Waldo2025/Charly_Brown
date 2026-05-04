@@ -54,6 +54,21 @@ try {
 }
 console.log(`[backend] ffmpeg static path: ${ffmpegStaticPath || "not found"}`);
 
+// Startup diagnostic for ffmpeg filters
+if (ffmpegStaticPath) {
+  try {
+    const { execSync } = require("child_process");
+    const filters = execSync(`"${ffmpegStaticPath}" -filters`, { encoding: "utf8" });
+    if (filters.includes("drawtext")) {
+      console.log("[backend] ffmpeg diagnostic: 'drawtext' filter IS available.");
+    } else {
+      console.warn("[backend] ffmpeg diagnostic WARNING: 'drawtext' filter NOT found in binary filters list.");
+    }
+  } catch (err) {
+    console.error("[backend] ffmpeg diagnostic error:", err.message);
+  }
+}
+
 function loadLocalEnvFile() {
   const envPath = path.resolve(__dirname, "..", ".env");
   if (!fs.existsSync(envPath)) return;
@@ -128,7 +143,11 @@ const FFMPEG_DRAWTEXT_FONT_CANDIDATES = Object.freeze([
   "/System/Library/Fonts/Helvetica.ttc",
   "/System/Library/Fonts/SFNS.ttf",
   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+  "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+  "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
   "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
 ]);
 const fetchCompat = (...args) => {
@@ -527,7 +546,11 @@ function buildMontageReviewVideoFilter(entries = [], options = {}) {
     const boxColor = String(options2?.boxColor || "0x020617@0.480").trim();
     const boxBorderW = Math.max(0, Math.round(Number(options2?.boxBorderW ?? 0) || 0));
     const fontFile = resolveFfmpegDrawtextFontFile();
-    const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : "";
+    const fontSource = fontFile
+      ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
+      : ":font='Sans'"; // Fallback for Linux if physical file not found
+    if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
+    else console.warn("[backend] drawtext using fallback font hint: Sans");
     const enableSegment = enableExpr ? `:enable='${enableExpr}'` : "";
     return `drawtext=${textSource}${fontSource}:fontsize=${fontSize}:fontcolor=${color}:x=${Math.round(x)}:y=${Math.round(y)}:fix_bounds=1:line_spacing=${localLineSpacing}:shadowx=${shadowX}:shadowy=${shadowY}:shadowcolor=0x020617@0.420:borderw=${borderW}:bordercolor=0x020617@0.180:${boxEnabled ? "box=1" : "box=0"}:boxcolor=${boxColor}:boxborderw=${boxBorderW}${enableSegment}`;
   };
@@ -7729,7 +7752,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const strokeColor = toFfmpegColor(input.onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
       const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
       const fontFile = resolveFfmpegDrawtextFontFile();
-      const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : "";
+      const fontSource = fontFile
+        ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
+        : ":font='Sans'"; // Fallback for Linux if physical file not found
+      if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
+      else console.warn("[backend] drawtext using fallback font hint: Sans");
       const drawFilters = input.onScreenTextSegments
         .slice()
         .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
