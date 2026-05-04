@@ -7714,10 +7714,18 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const label = `a${idx}`;
           labels.push(label);
           const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
-          const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || startMs) || 0));
-          const relativeStartMs = startMs - baseTimelineStartMs;
-          
-          let finalAdjustedStartMs = exportOffset ? (exportOffset.startMs + relativeStartMs) : startMs;
+          // If startMs is explicitly provided and non-zero, it likely represents the absolute timeline position.
+          // We use a simpler logic for manual adjustments to avoid offset drift.
+          let finalAdjustedStartMs = startMs;
+          if (exportOffset) {
+            // For segments tied to a row, we may need to apply the row's relative offset if they are part of a sequence.
+            // But if the user moved them manually, startMs is usually already updated.
+            const rowBaseStartMs = Number(exportOffset.startMs || 0);
+            if (rowBaseStartMs > 0 && Math.abs(startMs - rowBaseStartMs) < 10) {
+               // If it's very close to the row base, it's likely still tied to the row start.
+               finalAdjustedStartMs = rowBaseStartMs;
+            }
+          }
           let finalTrimInSec = trimInSec;
           let finalDurationSec = durationSec;
           
@@ -7773,8 +7781,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-i", finalOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
         "-filter_complex",
         input.normalizedGeminiTimelineSegments.length
-          ? `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
-          : `[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
+          ? `[1:a]volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
+          : `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
         "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         mixedOutPath
