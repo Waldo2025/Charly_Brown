@@ -185,7 +185,8 @@ function parseHexColor(value = "", fallback = "F8FAFC") {
 
 function toFfmpegColor(value = "", alpha = 1, fallback = "F8FAFC") {
   const hex = parseHexColor(value, fallback);
-  return `0x${hex}@${clamp01(alpha, 1).toFixed(3)}`;
+  const a = Math.max(0, Math.min(1, Number(alpha) || 0));
+  return `#${hex}@${a.toFixed(3)}`;
 }
 
 function escapeFfmpegDrawtextText(value = "") {
@@ -7783,13 +7784,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           });
           const textPath = textFileResolver(String(spec.wrappedText || "").trim());
           const shadowColor = spec.shadowEnabled
-            ? `0x020617@${spec.shadowOpacity.toFixed(3)}`
-            : "0x020617@0.000";
+            ? `#020617@${spec.shadowOpacity.toFixed(3)}`
+            : "#020617@0.000";
           return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${spec.fontSizePx}:fontcolor=${textColor}:x='${spec.xExpr}':y=${spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${spec.strokeEnabled ? spec.strokeWidthPx : 0}:bordercolor=${strokeColor}:shadowx=${spec.shadowEnabled ? spec.shadowX : 0}:shadowy=${spec.shadowEnabled ? spec.shadowY : 0}:shadowcolor=${shadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`)}'`;
         });
       if (drawFilters.length) {
         const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);
-        await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
+        try {
+          await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
+        } catch (err) {
+          console.error("[backend][montage-export] montage_overlay_text stage failed:", err.message);
+          if (err.stderr) {
+            console.error("[backend][montage-export] ffmpeg stderr:", err.stderr.slice(-2000));
+          }
+          throw err;
+        }
         finalOutPath = overlayOutPath;
       }
     }
