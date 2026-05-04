@@ -2712,24 +2712,27 @@ function inicializarBotonExportCursoWord() {
     btn.dataset.cbBound = "1";
 }
 
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", inicializarResizersPaneles);
-    document.addEventListener("DOMContentLoaded", inicializarPublicarCursoUI);
-    document.addEventListener("DOMContentLoaded", inicializarToggleArchivadosUI);
-    document.addEventListener("DOMContentLoaded", inicializarBotonExportCursoWord);
-} else {
-    inicializarToggleArchivadosUI();
-    inicializarBotonExportCursoWord();
-    inicializarPublicarCursoUI();
-}
+
 
 function inicializarPublicarCursoUI() {
   const checkPublicar = document.getElementById("checkPublicarCurso");
-  if (!checkPublicar) return;
+  if (!checkPublicar) {
+      console.warn("[Aprende] Elemento 'checkPublicarCurso' no encontrado.");
+      return;
+  }
+  if (checkPublicar.dataset.cbBound) return;
+  checkPublicar.dataset.cbBound = "true";
+
+  console.log("[Aprende] Inicializando UI de publicación...");
 
   checkPublicar.addEventListener("change", async (e) => {
-    if (!cursoDocId) return;
+    if (!cursoDocId) {
+        console.error("[Aprende] Error: cursoDocId es nulo al intentar publicar.");
+        mostrarNotificacion("Error: No hay un curso seleccionado", "error");
+        return;
+    }
     const valor = e.target.checked;
+    console.log(`[Aprende] Cambiando estado de publicación para ${cursoDocId} a ${valor}`);
     try {
       await updateDoc(doc(db, "moodleCourses", cursoDocId), {
         publicar: valor
@@ -2743,8 +2746,9 @@ function inicializarPublicarCursoUI() {
       }
       
       mostrarNotificacion(valor ? "Sesión publicada en Dashboard" : "Sesión ocultada en Dashboard", "success");
+      console.log("[Aprende] Publicación actualizada correctamente.");
     } catch (err) {
-      console.error("Error al publicar curso:", err);
+      console.error("[Aprende] Error al publicar curso:", err);
       mostrarNotificacion("Error al cambiar estado de publicación", "error");
       // Revertir switch
       e.target.checked = !valor;
@@ -4637,26 +4641,22 @@ async function seleccionarCurso(id) {
             }
         }
         
-        // 🔥 SUSCRIPCIÓN A CAMBIOS SOLO PARA CURSOS COMPARTIDOS
-        if (!esCursoPropio) {
-            // Cancelar suscripción anterior si existe
-            if (window.cursoSnapshotUnsubscribe && typeof window.cursoSnapshotUnsubscribe === 'function') {
-                window.cursoSnapshotUnsubscribe();
-            }
-            
-            // Suscribirse a cambios en este curso
-            const unsubscribe = suscribirACambiosCurso(id);
-            
-            if (unsubscribe) {
-                window.cursoSnapshotUnsubscribe = unsubscribe;
-                window.suscripcionCursoId = id;
-            } else {
-            }
-        } else if (window.cursoSnapshotUnsubscribe) {
-            // Si es curso propio pero hay suscripción anterior, limpiarla
+        // 🔥 SUSCRIPCIÓN A CAMBIOS PARA TODOS LOS CURSOS (Propio o Compartido)
+        // Esto permite sincronizar entre pestañas o con otros colaboradores
+        
+        // Cancelar suscripción anterior si existe
+        if (window.cursoSnapshotUnsubscribe && typeof window.cursoSnapshotUnsubscribe === 'function') {
+            console.log("[Aprende] Cancelando suscripción anterior:", window.suscripcionCursoId);
             window.cursoSnapshotUnsubscribe();
-            window.cursoSnapshotUnsubscribe = null;
-            window.suscripcionCursoId = null;
+        }
+        
+        // Suscribirse a cambios en este curso
+        console.log("[Aprende] Suscribiéndose a cambios del curso:", id);
+        const unsubscribe = suscribirACambiosCurso(id);
+        
+        if (unsubscribe) {
+            window.cursoSnapshotUnsubscribe = unsubscribe;
+            window.suscripcionCursoId = id;
         }
 
         // Forzar actualización de la lista de cursos
@@ -4923,17 +4923,27 @@ function suscribirACambiosCurso(cursoId) {
                     }
                 }
                 
-                // Resto del código para actualizar contenido en tiempo real...
-                // (mantener el código existente para temas, módulos, etc.)
-                
-                // 🔥 NUEVO: Actualizar contenido de módulos en tiempo real
+                // 🔥 ACTUALIZACIÓN EN TIEMPO REAL DEL ESTADO DE PUBLICACIÓN
                 if (cursoDocId === cursoId && data) {
-                    // ... (código existente)
-                }
-                
-                // Actualizar datos del curso si es necesario
-                if (cursoDocId === cursoId) {
-                    // ... (código existente)
+                    const checkPublicar = document.getElementById("checkPublicarCurso");
+                    if (checkPublicar && !checkPublicar.matches(':focus')) {
+                        // Solo actualizar si el usuario no lo está manipulando en este momento
+                        const nuevoEstado = !!data.publicar;
+                        if (checkPublicar.checked !== nuevoEstado) {
+                            console.log(`[Aprende] Sincronizando switch de publicación: ${nuevoEstado}`);
+                            checkPublicar.checked = nuevoEstado;
+                        }
+                    }
+                    
+                    // Actualizar objetos globales para consistencia
+                    if (curso && curso.id === cursoId) {
+                        curso.publicar = !!data.publicar;
+                    }
+                    
+                    const cIdx = cursosUsuario.findIndex(c => c.id === cursoId);
+                    if (cIdx !== -1) {
+                        cursosUsuario[cIdx].publicar = !!data.publicar;
+                    }
                 }
             }, 
             (error) => {
@@ -14785,4 +14795,26 @@ if (storedVersion && storedVersion !== APP_VERSION) {
   window.location.reload(true);
 } else {
   localStorage.setItem("APP_VERSION", APP_VERSION);
+}
+
+function bootMoodleCourseUI() {
+    try {
+        if (window.moodleCourseUIBooted) return;
+        window.moodleCourseUIBooted = true;
+        console.log("[Aprende] Ejecutando bootMoodleCourseUI...");
+
+        inicializarResizersPaneles();
+        inicializarPublicarCursoUI();
+        inicializarToggleArchivadosUI();
+        inicializarBotonExportCursoWord();
+        console.log("[Aprende] bootMoodleCourseUI completado.");
+    } catch (e) {
+        console.error("[Aprende] Error en bootMoodleCourseUI:", e);
+    }
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootMoodleCourseUI);
+} else {
+    bootMoodleCourseUI();
 }

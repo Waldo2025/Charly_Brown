@@ -522,8 +522,10 @@ function buildMontageReviewVideoFilter(entries = [], options = {}) {
     const boxEnabled = options2?.boxEnabled === true;
     const boxColor = String(options2?.boxColor || "0x020617@0.480").trim();
     const boxBorderW = Math.max(0, Math.round(Number(options2?.boxBorderW ?? 0) || 0));
+    const fontFile = resolveFfmpegDrawtextFontFile();
+    const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : "";
     const enableSegment = enableExpr ? `:enable='${enableExpr}'` : "";
-    return `drawtext=${textSource}:fontsize=${fontSize}:fontcolor=${color}:x=${Math.round(x)}:y=${Math.round(y)}:fix_bounds=1:line_spacing=${localLineSpacing}:shadowx=${shadowX}:shadowy=${shadowY}:shadowcolor=0x020617@0.420:borderw=${borderW}:bordercolor=0x020617@0.180:${boxEnabled ? "box=1" : "box=0"}:boxcolor=${boxColor}:boxborderw=${boxBorderW}${enableSegment}`;
+    return `drawtext=${textSource}${fontSource}:fontsize=${fontSize}:fontcolor=${color}:x=${Math.round(x)}:y=${Math.round(y)}:fix_bounds=1:line_spacing=${localLineSpacing}:shadowx=${shadowX}:shadowy=${shadowY}:shadowcolor=0x020617@0.420:borderw=${borderW}:bordercolor=0x020617@0.180:${boxEnabled ? "box=1" : "box=0"}:boxcolor=${boxColor}:boxborderw=${boxBorderW}${enableSegment}`;
   };
 
   const filterSteps = [
@@ -7722,6 +7724,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const textColor = toFfmpegColor(input.onScreenTextSettings?.textColor || "#F8FAFC", input.onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
       const strokeColor = toFfmpegColor(input.onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
       const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
+      const fontFile = resolveFfmpegDrawtextFontFile();
+      const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : "";
       const drawFilters = input.onScreenTextSegments
         .slice()
         .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
@@ -7745,7 +7749,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const shadowColor = spec.shadowEnabled
             ? `0x020617@${spec.shadowOpacity.toFixed(3)}`
             : "0x020617@0.000";
-          return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}':reload=0:fontsize=${spec.fontSizePx}:fontcolor=${textColor}:x='${spec.xExpr}':y=${spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${spec.strokeEnabled ? spec.strokeWidthPx : 0}:bordercolor=${strokeColor}:shadowx=${spec.shadowEnabled ? spec.shadowX : 0}:shadowy=${spec.shadowEnabled ? spec.shadowY : 0}:shadowcolor=${shadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`)}'`;
+          return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${spec.fontSizePx}:fontcolor=${textColor}:x='${spec.xExpr}':y=${spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${spec.strokeEnabled ? spec.strokeWidthPx : 0}:bordercolor=${strokeColor}:shadowx=${spec.shadowEnabled ? spec.shadowX : 0}:shadowy=${spec.shadowEnabled ? spec.shadowY : 0}:shadowcolor=${shadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`)}'`;
         });
       if (drawFilters.length) {
         const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);

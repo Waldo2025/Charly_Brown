@@ -21,11 +21,12 @@
   <link href="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.css" rel="stylesheet" />
 
   <!-- Incluir Font Awesome para los iconos -->
-  <link rel="stylesheet" href="sidebar.css">
-  <link rel="stylesheet" href="home.css?v=2026-1.0.1.31">
-  <link rel="stylesheet" href="chatbot.css">
-  <link rel="stylesheet" href="header.css">
+  <link rel="stylesheet" href="sidebar.css?v=2026-1.0.1.36">
+  <link rel="stylesheet" href="home.css?v=2026-1.0.1.36">
+  <link rel="stylesheet" href="chatbot.css?v=2026-1.0.1.36">
+  <link rel="stylesheet" href="header.css?v=2026-1.0.1.36">
   <script src="vendor/chartjs/chart.umd.js"></script>
+  <script src="html-docx.js"></script>
 
 </head>
 
@@ -802,9 +803,41 @@
     </div>
   </div>
 
+  <!-- MODAL EDITOR RECICLADO PARA APRENDE (Style from generarLectura.html) -->
+  <div id="ascEditorModal" class="hidden fixed inset-0 z-[1000000]">
+    <div id="ascEditorBackdrop" class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+    <div class="asc-editor-shell relative flex flex-col overflow-hidden">
+      <div class="asc-editor-topbar">
+        <div class="asc-editor-titlewrap">
+          <label class="asc-editor-field asc-editor-field--title asc-editor-field--header">
+            <input id="ascTitulo" type="text" placeholder="Cargando contenido..." readonly>
+          </label>
+        </div>
+        <div class="asc-editor-window-actions">
+          <button id="ascEditorGoToEdit" type="button" class="asc-editor-window-btn" title="Ir al editor real">
+            <i class="fas fa-external-link-alt"></i>
+          </button>
+          <button id="ascEditorDownloadWord" type="button" class="asc-editor-window-btn" title="Descargar Word">
+            <i class="fas fa-file-word"></i>
+          </button>
+          <button id="ascEditorClose" type="button" class="asc-editor-window-btn is-close" title="Cerrar viewer">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="asc-editor-body-aprende p-8 overflow-y-auto bg-white flex-1">
+        <div id="ascEditorContent" class="editor-doc-surface prose prose-slate max-w-none">
+          <!-- Contenido dinámico aquí -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+
   <script src="on-screen-text-render-spec.js"></script>
   <script type="module" src="podcaster-playback-controller.js"></script>
-  <script type="module" src="home.js?v=2026-1.0.1.31"></script>
+  <script type="module" src="home.js?v=2026-1.0.1.43"></script>
   <script src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="chatbot.js"></script>

@@ -467,7 +467,7 @@ const renderLecturas = () => {
 
   const user = auth.currentUser;
   const userId = user?.uid;
-  let usuariosCache = new Map();
+  // Usar global: usuariosCache
   let unidadesCache = new Map();
 
   const renderizarLecturasDesdeArray = async (lecturas) => {
@@ -958,15 +958,36 @@ async function loadUserAprende() {
     if (filter === "published") {
       const q = query(collection(db, "moodleCourses"), where("publicar", "==", true)); 
       const snap = await getDocs(q);
-      sesiones = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+      sesiones = snap.docs
+        .filter(d => {
+          const data = d.data();
+          if (data.docType === "module") return false;
+          if (data.docType === "course") return true;
+          return !d.id.includes("_") && Array.isArray(data.temas);
+        })
+        .map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
     } else {
       const q = isAdmin
         ? collection(db, "moodleCourses")
         : query(collection(db, "moodleCourses"), where("userId", "==", user.uid));
       
       const snap = await getDocs(q);
-      sesiones = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+      sesiones = snap.docs
+        .filter(d => {
+          const data = d.data();
+          if (data.docType === "module") return false;
+          if (data.docType === "course") return true;
+          return !d.id.includes("_") && Array.isArray(data.temas);
+        })
+        .map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
     }
+
+    const authorIds = new Set();
+    sesiones.forEach(s => {
+      if (s.userId) authorIds.add(s.userId);
+      if (s.uid) authorIds.add(s.uid);
+    });
+    await prefetchUsers(authorIds);
 
     updateWorkbenchStats('aprende', sesiones);
     renderUserItemList(contenedor, sesiones, 'aprende');
@@ -1604,7 +1625,7 @@ async function renderImagenesCompartidas() {
   contenedor.innerHTML = ""; // Limpia antes de renderizar
 
   const user = auth.currentUser;
-  let usuariosCache = new Map();
+  // Usar global: usuariosCache
 
   const mapaGradoTexto = {
     "1": "Primero",
@@ -2037,7 +2058,7 @@ async function loadUserLecturas() {
       if (data.uid) authorIds.add(data.uid);
     });
 
-    if (isAdmin || isEditorial) await prefetchUsers(authorIds);
+    await prefetchUsers(authorIds);
 
     updateWorkbenchStats('lecturas', lecturas);
     renderUserItemList(contenedor, lecturas, 'lectura');
@@ -2099,7 +2120,7 @@ async function loadUserUnidades() {
       unidades = unidades.filter((item) => item.publicar === true || item.published === true);
     }
 
-    if (isAdmin || isEditorial) await prefetchUsers(authorIds);
+    await prefetchUsers(authorIds);
 
     updateWorkbenchStats('unidades', unidades);
     renderUserItemList(contenedor, unidades, 'unidad');
@@ -3599,9 +3620,31 @@ function renderUserItemList(container, items, type) {
     } else {
       displayTitle = item.titulo || item.nombre || "Documento";
       metaLabel = type.toUpperCase();
+      
+      // Ajuste específico para Aprende
+      if (type === 'aprende') {
+        displayTitle = item.nombre || "Sesión de Aprende";
+      }
     }
 
-    const date = item.timestamp?.toDate ? item.timestamp.toDate().toLocaleDateString() : "Fecha desconocida";
+    const rawDate = item.timestamp || item.creado || item.actualizado || item.updatedAt || item.sessionUpdatedAt || item.createdAt;
+    
+    let dateObj = null;
+    if (rawDate) {
+      if (rawDate.toDate) {
+        dateObj = rawDate.toDate();
+      } else if (rawDate.seconds !== undefined) {
+        // Manejar objetos planos que parecen Timestamps {seconds, nanoseconds}
+        dateObj = new Date(rawDate.seconds * 1000);
+      } else {
+        dateObj = new Date(rawDate);
+      }
+    }
+    
+    let date = "Fecha desconocida";
+    if (dateObj && !isNaN(dateObj.getTime())) {
+      date = dateObj.toLocaleDateString();
+    }
     const isAdmin = ["admin", "superAdmin"].includes(currentUserRole);
 
     const contentText = item.texto || item.contenidoHTML || "";
@@ -3624,9 +3667,14 @@ function renderUserItemList(container, items, type) {
       unitTypeLabel = isCategory
         ? `<span class="workbench-tag" title="${escapeHtml(catName)}">Categoría${catName ? ': ' + escapeHtml(catName) : ''}</span>`
         : `<span class="workbench-tag is-status">Unidad completa</span>`;
+    } else if (type === 'aprende') {
+      const numTemas = Array.isArray(item.temas) ? item.temas.length : 0;
+      unitTypeLabel = `<span class="workbench-tag" style="background: rgba(99, 102, 241, 0.1); color: #6366f1; border-color: rgba(99, 102, 241, 0.2);">
+        <i class="fas fa-layer-group mr-1"></i> ${numTemas} ${numTemas === 1 ? 'Tema' : 'Temas'}
+      </span>`;
     }
 
-    let authorName = item.creadoPor || item.autorReferencia || item.authorName || item.usuario || item.email || "Desconocido";
+    let authorName = item.propietarioNombre || item.creadoPor || item.autorReferencia || item.authorName || item.usuario || item.email || "Desconocido";
     const authorId = item.userId || item.uid || item.createdBy || item.ownerId || item.idUsuario;
 
     let editorInfo = "";
@@ -3635,11 +3683,19 @@ function renderUserItemList(container, items, type) {
     }
 
     if (authorId) {
-      const cachedName = usuariosCache.get(authorId);
-      if (cachedName) {
-        authorName = cachedName;
-      } else if (isAdmin) {
-        authorName = item.email || item.userEmail || (authorId.length > 15 ? authorId.slice(0, 8) + "..." : authorId);
+      if (auth.currentUser && authorId === auth.currentUser.uid) {
+        authorName = auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || "Mí mismo";
+      } else {
+        const cached = usuariosCache.get(authorId);
+        if (cached) {
+          if (typeof cached === 'object') {
+            authorName = cached.userName || cached.displayName || cached.nombre || cached.email || authorName;
+          } else {
+            authorName = cached;
+          }
+        } else if (isAdmin) {
+          authorName = item.email || item.userEmail || (authorId.length > 15 ? authorId.slice(0, 8) + "..." : authorId);
+        }
       }
     } else if (item.email) {
       authorName = item.email;
@@ -3758,6 +3814,12 @@ function renderUserItemList(container, items, type) {
                     <span>Ver Lectura</span>
                   </a>
                   ` : ''}
+                  ${type === 'aprende' ? `
+                  <a href="#" class="btn-workbench-action ver-aprende" data-id="${item.id}" title="Ver Contenido" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #f59e0b !important; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3) !important;">
+                    <i class="fas fa-eye"></i>
+                    <span>Ver Contenido</span>
+                  </a>
+                  ` : ''}
                 ` : `
                   <span class="workbench-tag">Solo lectura</span>
                 `}
@@ -3780,7 +3842,14 @@ function renderUserItemList(container, items, type) {
   container.addEventListener('click', async (e) => {
     const btnEdit = e.target.closest('.btn-item-edit');
     const btnVer = e.target.closest('.ver-lectura');
+    const btnVerAprende = e.target.closest('.ver-aprende');
     const btnPlay = e.target.closest('.btn-multimedia-play');
+
+    if (btnVerAprende) {
+      const id = btnVerAprende.dataset.id;
+      openAprendeViewer(id);
+      return;
+    }
 
     if (btnPlay) {
       const id = btnPlay.dataset.id;
@@ -4072,5 +4141,188 @@ window.addEventListener('word-download-started', async (e) => {
   }
 });
 
+
 // Inicializar el reproductor multimedia del dashboard
 initMultimediaPlayer();
+
+/**
+ * Abre el viewer de Aprende (reutilizando el diseño de ascEditorBackdrop)
+ */
+async function openAprendeViewer(cursoId) {
+  const modal = document.getElementById("ascEditorModal");
+  const backdrop = document.getElementById("ascEditorBackdrop");
+  const titleInput = document.getElementById("ascTitulo");
+  const contentDiv = document.getElementById("ascEditorContent");
+  const closeBtn = document.getElementById("ascEditorClose");
+  const editBtn = document.getElementById("ascEditorGoToEdit");
+  const wordBtn = document.getElementById("ascEditorDownloadWord");
+
+  if (!modal || !contentDiv) return;
+
+  // Reset y mostrar loading
+  titleInput.value = "Cargando curso...";
+  contentDiv.innerHTML = `
+    <div class="flex flex-col items-center justify-center py-20 gap-4">
+      <div class="loading-spinner-snoopy w-24 h-auto opacity-50"></div>
+      <p class="text-slate-400 font-medium animate-pulse">Compilando módulos del curso...</p>
+    </div>
+  `;
+  modal.classList.remove("hidden");
+
+  // Botones de acción
+  if (editBtn) {
+    editBtn.onclick = () => {
+      window.open(`generarLectura.html?id=${cursoId}`, '_blank');
+    };
+  }
+
+  if (wordBtn) {
+    wordBtn.onclick = () => {
+      exportarAprendeViewerWord(titleInput.value, contentDiv.innerHTML);
+    };
+  }
+
+  // Cerrar modal
+  const closeModal = () => {
+    modal.classList.add("hidden");
+    contentDiv.innerHTML = "";
+    titleInput.value = "";
+  };
+
+  closeBtn.onclick = closeModal;
+  backdrop.onclick = closeModal;
+
+  try {
+    const docRef = doc(db, "moodleCourses", cursoId);
+    const snap = await getDoc(docRef);
+    
+    if (!snap.exists()) {
+      contentDiv.innerHTML = "<p class='text-danger'>El curso no existe o ha sido eliminado.</p>";
+      return;
+    }
+
+    const curso = snap.data();
+    titleInput.value = curso.titulo || curso.nombre || "Sin título";
+
+    // Recopilar todos los IDs de módulos
+    const modulosIds = [];
+    (curso.temas || []).forEach(tema => {
+      (tema.subtemas || []).forEach(sub => {
+        if (sub.modulosIds) {
+          sub.modulosIds.forEach(mId => {
+            modulosIds.push({
+              id: mId,
+              tema: tema.nombre,
+              subtema: sub.nombre
+            });
+          });
+        }
+      });
+    });
+
+    if (modulosIds.length === 0) {
+      contentDiv.innerHTML = "<p class='text-muted italic text-center py-10'>Este curso aún no tiene módulos de contenido.</p>";
+      return;
+    }
+
+    // Cargar contenidos de módulos en paralelo
+    const promesas = modulosIds.map(async (m) => {
+      const mDocId = m.id.includes('_') ? m.id : `${cursoId}_${m.id}`;
+      const mRef = doc(db, "moodleCourses", mDocId);
+      const mSnap = await getDoc(mRef);
+      return mSnap.exists() ? { ...mSnap.data(), ...m } : null;
+    });
+
+    const resultados = await Promise.all(promesas);
+    
+    // Renderizar
+    let fullHTML = "";
+    let currentTema = "";
+    let currentSubtema = "";
+
+    resultados.filter(r => r && r.contenido).forEach(res => {
+      // Mostrar separadores de tema/subtema si cambian
+      if (res.tema !== currentTema) {
+        fullHTML += `<div class="mt-12 mb-6 pb-2 border-b-2 border-slate-200"><h1 class="text-3xl font-black text-slate-800 uppercase tracking-tight">${escapeHtml(res.tema)}</h1></div>`;
+        currentTema = res.tema;
+      }
+      if (res.subtema !== currentSubtema) {
+        fullHTML += `<div class="mt-8 mb-4"><h2 class="text-xl font-bold text-indigo-600">${escapeHtml(res.subtema)}</h2></div>`;
+        currentSubtema = res.subtema;
+      }
+
+      // El módulo
+      fullHTML += `
+        <div class="aprende-preview-module">
+          <div class="aprende-preview-module-title">
+            <i class="fas fa-cube"></i> ${escapeHtml(res.nombre || 'Módulo')}
+          </div>
+          <div class="aprende-preview-content-html">
+            ${res.contenido}
+          </div>
+        </div>
+      `;
+    });
+
+    if (!fullHTML) {
+      contentDiv.innerHTML = "<p class='text-muted italic text-center py-10'>No se encontró contenido generado en los módulos.</p>";
+    } else {
+      contentDiv.innerHTML = fullHTML;
+    }
+
+  } catch (err) {
+    console.error("[Dashboard] Error al abrir viewer Aprende:", err);
+    contentDiv.innerHTML = "<p class='text-danger'>Error al cargar el contenido del curso.</p>";
+  }
+}
+
+/**
+ * Exporta el contenido del viewer a Word usando htmlDocx
+ */
+function exportarAprendeViewerWord(titulo, htmlContenido) {
+  if (!window.htmlDocx) {
+    alert("La librería de exportación a Word no está lista.");
+    return;
+  }
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${titulo}</title>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; }
+  h1 { color: #1e293b; font-size: 24pt; margin-bottom: 20pt; }
+  h2 { color: #4f46e5; font-size: 18pt; margin-top: 30pt; }
+  h3 { color: #6366f1; font-size: 14pt; margin-top: 20pt; }
+  .aprende-preview-module-title { font-weight: bold; color: #6366f1; text-transform: uppercase; margin-top: 20pt; }
+  .aprende-preview-content-html { margin-bottom: 20pt; }
+  table { border-collapse: collapse; width: 100%; margin: 10pt 0; }
+  th, td { border: 1px solid #cbd5e1; padding: 8pt; text-align: left; }
+</style>
+</head>
+<body>
+  <h1>${titulo}</h1>
+  ${htmlContenido}
+</body>
+</html>
+  `;
+
+  try {
+    const blob = window.htmlDocx.asBlob(html);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${titulo.replace(/[/\\?%*:|"<>]/g, '-')}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  } catch (err) {
+    console.error("Error al exportar a Word:", err);
+    alert("Hubo un error al generar el archivo Word.");
+  }
+}
