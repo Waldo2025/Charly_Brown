@@ -52,6 +52,7 @@ try {
 } catch (_) {
   ffmpegStaticPath = "";
 }
+console.log(`[backend] ffmpeg static path: ${ffmpegStaticPath || "not found"}`);
 
 function loadLocalEnvFile() {
   const envPath = path.resolve(__dirname, "..", ".env");
@@ -125,7 +126,10 @@ const FFMPEG_DRAWTEXT_FONT_CANDIDATES = Object.freeze([
   "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
   "/System/Library/Fonts/Supplemental/Arial.ttf",
   "/System/Library/Fonts/Helvetica.ttc",
-  "/System/Library/Fonts/SFNS.ttf"
+  "/System/Library/Fonts/SFNS.ttf",
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+  "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+  "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
 ]);
 const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
