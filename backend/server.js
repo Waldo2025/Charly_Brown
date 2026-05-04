@@ -3,7 +3,7 @@ const cors = require("cors");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("node:child_process");
+const { spawn, execSync } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { Readable } = require("node:stream");
@@ -47,7 +47,7 @@ try {
 } catch (_) {
   ({ GoogleGenAI } = require("@google/genai"));
 }
-const { execSync, spawn } = require("child_process");
+
 
 function resolveFfmpegBinaryPath() {
   let staticPath = "";
