@@ -47,30 +47,61 @@ try {
 } catch (_) {
   ({ GoogleGenAI } = require("@google/genai"));
 }
-try {
-  ffmpegStaticPath = String(require("ffmpeg-static") || "").trim();
-} catch (_) {
-  ffmpegStaticPath = "";
-}
-console.log(`[backend] ffmpeg static path: ${ffmpegStaticPath || "not found"}`);
+const { execSync, spawn } = require("child_process");
 
-// Startup diagnostic for ffmpeg filters
-if (ffmpegStaticPath) {
+function resolveFfmpegBinaryPath() {
+  let staticPath = "";
   try {
-    const { execSync } = require("child_process");
-    const versionInfo = execSync(`"${ffmpegStaticPath}" -version`, { encoding: "utf8" });
-    const filters = execSync(`"${ffmpegStaticPath}" -filters`, { encoding: "utf8" });
-    
-    console.log("[backend] ffmpeg binary version info (first line):", versionInfo.split("\n")[0]);
-    if (filters.includes("drawtext")) {
-      console.log("[backend] ffmpeg diagnostic: 'drawtext' filter IS available.");
-    } else {
-      console.warn("[backend] ffmpeg diagnostic WARNING: 'drawtext' filter NOT found in binary filters list.");
-      console.log("[backend] ffmpeg available filters (preview):", filters.slice(0, 500));
-    }
-  } catch (err) {
-    console.error("[backend] ffmpeg diagnostic error:", err.message);
+    staticPath = String(require("ffmpeg-static") || "").trim();
+  } catch (_) {
+    // noop
   }
+  
+  // Probe static path first
+  if (staticPath && fs.existsSync(staticPath)) {
+    try {
+      const filters = execSync(`"${staticPath}" -filters`, { encoding: "utf8" });
+      if (filters.includes("drawtext")) {
+        console.log(`[backend] using ffmpeg-static (has drawtext): ${staticPath}`);
+        return staticPath;
+      }
+      console.warn("[backend] ffmpeg-static is missing 'drawtext' filter. Searching for system fallback...");
+    } catch (err) {
+      console.warn("[backend] failed to probe ffmpeg-static:", err.message);
+    }
+  }
+
+  // Fallback to system ffmpeg
+  try {
+    const systemPath = execSync("which ffmpeg", { encoding: "utf8" }).trim();
+    if (systemPath) {
+      const filters = execSync(`"${systemPath}" -filters`, { encoding: "utf8" });
+      if (filters.includes("drawtext")) {
+        console.log(`[backend] using system ffmpeg (has drawtext): ${systemPath}`);
+        return systemPath;
+      }
+      console.warn(`[backend] system ffmpeg at ${systemPath} also missing 'drawtext' filter.`);
+    }
+  } catch (_) {
+    // noop
+  }
+
+  console.error("[backend] CRITICAL: No ffmpeg binary found with 'drawtext' support!");
+  return staticPath || "ffmpeg";
+}
+
+let ffmpegStaticPath = resolveFfmpegBinaryPath();
+
+function isFfmpegAvailable() {
+  return !!ffmpegStaticPath;
+}
+
+// Full Startup diagnostic
+try {
+  const versionInfo = execSync(`"${ffmpegStaticPath}" -version`, { encoding: "utf8" });
+  console.log("[backend] selected ffmpeg version:", versionInfo.split("\n")[0]);
+} catch (err) {
+  console.error("[backend] final ffmpeg diagnostic error:", err.message);
 }
 
 function loadLocalEnvFile() {
