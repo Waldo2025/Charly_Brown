@@ -58,11 +58,15 @@ console.log(`[backend] ffmpeg static path: ${ffmpegStaticPath || "not found"}`);
 if (ffmpegStaticPath) {
   try {
     const { execSync } = require("child_process");
+    const versionInfo = execSync(`"${ffmpegStaticPath}" -version`, { encoding: "utf8" });
     const filters = execSync(`"${ffmpegStaticPath}" -filters`, { encoding: "utf8" });
+    
+    console.log("[backend] ffmpeg binary version info (first line):", versionInfo.split("\n")[0]);
     if (filters.includes("drawtext")) {
       console.log("[backend] ffmpeg diagnostic: 'drawtext' filter IS available.");
     } else {
       console.warn("[backend] ffmpeg diagnostic WARNING: 'drawtext' filter NOT found in binary filters list.");
+      console.log("[backend] ffmpeg available filters (preview):", filters.slice(0, 500));
     }
   } catch (err) {
     console.error("[backend] ffmpeg diagnostic error:", err.message);
