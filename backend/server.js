@@ -9357,7 +9357,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
           const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(normalizedUrl);
           const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
           const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
-          const isPodcasterAsset = /^podcaster\/(?:library|sessions)\//i.test(String(objectPath || "").trim());
+          const isPodcasterAsset = /^podcaster\/(?:library|sessions|videos|audio)\//i.test(String(objectPath || "").trim());
           if (isPodcasterAsset && objectPath) {
             const candidates = (() => {
               const buckets = getStorageBucketCandidates();
