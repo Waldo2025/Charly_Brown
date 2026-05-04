@@ -36,7 +36,7 @@ const {
 
 let admin = null;
 let GoogleGenAI = null;
-let ffmpegStaticPath = "";
+
 try {
   admin = require("firebase-admin");
 } catch (_) {
