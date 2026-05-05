@@ -23312,7 +23312,7 @@ function stopPodcastPlayback(options = {}) {
     setPodcastNowPlaying("Sin reproducción activa");
   }
   const session = getActiveSession();
-  setPodcastVideoRow("", { syncStage: true });
+  setPodcastVideoRow("", { syncStage: true, preserveMontageCursor: true });
   setPodcastVideoSpeaker(session, "", { speaking: false });
   updatePodcastPlayerUi();
 }
