@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.30";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.31";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -16671,6 +16671,14 @@ function deleteSelectedTimelineGap() {
 }
 
 function syncPodcastTimelinePlayhead(session = null, options = {}) {
+  // Robustez: si el primer argumento es un número, se trata de una llamada antigua (ms, duration, session)
+  if (typeof session === "number") {
+    const ms = session;
+    const duration = typeof options === "number" ? options : 0;
+    const actualSession = arguments[2] || getActiveSession();
+    return syncPodcastTimelinePlayhead(actualSession, { currentMs: ms, totalMs: duration, lightweight: true });
+  }
+
   if (!els.podcastVideoTimeline) return;
   const lightweight = options?.lightweight === true;
   const canvas = els.podcastVideoTimeline.querySelector(".podcast-video-timeline-canvas");
