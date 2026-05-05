@@ -8944,7 +8944,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       : delayedStartMsDefault;
     const deltaSceneStartMs = delayedStartMsDefault - existingAnchorStartMs;
     const startMs = (preserveStartMs && existingSegment)
-      ? Math.max(0, Math.round(Number(existingSegment.startMs || 0) + deltaSceneStartMs))
+      ? Math.max(0, Math.round(Number(existingSegment.startMs || 0) + (options?.isTrimStart ? 0 : deltaSceneStartMs)))
       : delayedStartMsDefault;
 
     // Voz Gemini (chip segment): la duración no debe "encogerse" por recortes del clip visual.
@@ -31252,7 +31252,11 @@ function attachEvents() {
         return;
       }
       if (dragMode === "trim-start" || dragMode === "trim-end") {
-        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+        syncGeminiDialogueTrackWithRuntime({ 
+          render: false, 
+          preserveStartMs: true,
+          isTrimStart: dragMode === "trim-start"
+        });
       }
       podcastVideoState.timelineJustDraggedUntil = Date.now() + 240;
       finalizeTimelineClipDrag();
