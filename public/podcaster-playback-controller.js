@@ -31,8 +31,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       session: null,
       config: null,
       useMse: false,
-      activeRowId: ''
+      activeRowId: '',
+      isTickProcessing: false
     };
+    this.lastTickMs = 0;
+    this.cachedTickEntries = null;
+    this.cachedTickEntriesTime = 0;
     this.clockId = null;
     this.audioCtx = null;
     this.dialoguePlayers = {};
@@ -51,6 +55,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       loadingSrc: '',
       activeSlot: 0
     };
+    this.activeLoopId = 0;
   }
 
   // --- Helpers ---
@@ -58,14 +63,28 @@ export class PodcasterPlaybackController extends EventEmitter {
   toFiniteNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
 
   getEntryAtMs(currentMs) {
-    const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
+    const now = performance.now();
+    let entries;
+    if (this.cachedTickEntries && (now - this.cachedTickEntriesTime) < 16) {
+      entries = this.cachedTickEntries;
+    } else {
+      entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
+      this.cachedTickEntries = entries;
+      this.cachedTickEntriesTime = now;
+    }
     return entries.find(e => currentMs >= e.startMs && currentMs < e.endMs);
+  }
+  getBlobUrlSync(url) {
+    if (!url) return "";
+    if (this.blobCache.has(url)) return this.blobCache.get(url);
+    return null;
   }
 
   async getBlobUrl(url) {
     if (!url) return "";
-    // console.log('[PlaybackController] getBlobUrl ->', url);
-    if (this.blobCache.has(url)) return this.blobCache.get(url);
+    const cached = this.getBlobUrlSync(url);
+    if (cached) return cached;
+
     if (this.fetchPromises.has(url)) return this.fetchPromises.get(url);
     
     // console.log("[PlaybackController] Fetching Blob URL:", url);
@@ -254,28 +273,35 @@ export class PodcasterPlaybackController extends EventEmitter {
     } else {
       this.startClock();
     }
+    
+    // Sync UI state
+    if (this.deps?.podcastVideoState) {
+      this.deps.podcastVideoState.montageActive = true;
+      this.deps.podcastVideoState.montagePaused = false;
+    }
+
     this.emit('play', { currentMs: this.state.currentMs });
+    this.deps?.updatePodcastVideoTransportUi?.();
   }
 
   pause() {
-    console.log("[PlaybackController] Pause requested.");
     this.state.isPlaying = false;
     this.stopClock();
 
     Object.values(this.dialoguePlayers).forEach(audio => { 
-      try { audio.pause(); audio.dataset.initialized = "false"; } catch (_) { } 
+      try { audio.pause(); } catch (_) { } 
     });
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
-      if (v) try { v.pause(); v.dataset.initialized = "false"; } catch (_) { }
+      if (v) try { v.pause(); } catch (_) { }
     });
-    if (this.backgroundAudio) { 
-      try { 
-        this.backgroundAudio.pause(); 
-        this.backgroundAudio.dataset.initialized = "false";
-        console.log("[PlaybackController] Background audio paused.");
-      } catch (_) { } 
-    }
+    if (this.backgroundAudio) { try { this.backgroundAudio.pause(); } catch (_) { } }
     if (this.mse?.engine) this.mse.engine.pause();
+    
+    // Sync UI state
+    if (this.deps?.podcastVideoState) {
+      this.deps.podcastVideoState.montagePaused = true;
+    }
+
     this.emit('pause');
     this.deps?.setPodcastVideoStatus?.("Pausado");
     this.deps?.updatePodcastVideoTransportUi?.();
@@ -299,10 +325,20 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (v) try { v.pause(); if (opts.keepCursor !== true) this.seekTo(v, 0); v.style.opacity = 0; v.style.zIndex = 1; } catch (_) { }
     });
 
+    // Sync UI state
+    if (this.deps?.podcastVideoState) {
+      if (opts.keepCursor !== true) {
+        this.deps.podcastVideoState.montageCursorMs = 0;
+      }
+      this.deps.podcastVideoState.montageActive = false;
+      this.deps.podcastVideoState.montagePaused = false;
+    }
+
     // UI Updates
     this.deps?.setPodcastVideoStatus?.(this.state.currentMs === 0 ? 'Detenido' : 'Pausado');
     this.deps?.updatePodcastVideoTransportUi?.();
 
+    this.state.isTickProcessing = false;
     this.tick(this.state.currentMs);
     this.emit('stop', opts);
   }
@@ -332,11 +368,15 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   startClock() {
-    // console.log("[PlaybackController] startClock called. State:", this.state);
     this.stopClock();
+    this.activeLoopId++;
+    const loopId = this.activeLoopId;
     let lastTime = performance.now();
+
     const tickLoop = async (now) => {
-      if (!this.state.isPlaying) return;
+      if (!this.state.isPlaying || loopId !== this.activeLoopId) {
+        return;
+      }
       try {
         const delta = now - lastTime;
         lastTime = now;
@@ -344,16 +384,18 @@ export class PodcasterPlaybackController extends EventEmitter {
         const clampedDelta = Math.min(delta, 100);
         const nextMs = this.state.currentMs + (clampedDelta * speed);
 
-        await this.tick(nextMs);
+        this.state.currentMs = nextMs;
+        // No await here: let the playhead move even if media sync is slow
+        this.tick(nextMs);
 
         if (this.state.currentMs >= this.state.totalDurationMs) {
           this.stop();
-        } else if (this.state.isPlaying) {
+        } else if (this.state.isPlaying && loopId === this.activeLoopId) {
           this.clockId = requestAnimationFrame(tickLoop);
         }
       } catch (error) {
         console.error("[PlaybackController] Error in tickLoop:", error);
-        this.pause(); // Stop and allow recovery
+        this.pause(); 
       }
     };
     this.clockId = requestAnimationFrame(tickLoop);
@@ -411,21 +453,45 @@ export class PodcasterPlaybackController extends EventEmitter {
   async tick(currentMs) {
     const ms = Number.isFinite(Number(currentMs)) ? Number(currentMs) : (this.state.currentMs || 0);
     this.state.currentMs = ms;
+
+    // 1. HIGH-PRIORITY UI UPDATES (Non-blocking, move the playhead)
     if (this.deps?.podcastVideoState) {
       this.deps.podcastVideoState.montageCursorMs = ms;
-      this.deps.podcastVideoState.montageAudioPlayers = this.dialoguePlayers;
     }
     if (this.deps?.syncPodcastTimelinePlayhead) {
-      this.deps.syncPodcastTimelinePlayhead(ms, this.state.totalDurationMs, this.state.session);
+      this.deps.syncPodcastTimelinePlayhead(this.state.session, { 
+        currentMs: ms,
+        totalMs: this.state.totalDurationMs, 
+        lightweight: true 
+      });
     }
-    if (this.deps?.updatePodcastVideoTransportUi) this.deps.updatePodcastVideoTransportUi();
-    const speed = this.deps?.getPlaybackSpeed?.() || 1;
-    await Promise.all([
-      this.syncAudio(ms, speed),
-      this.syncVideo(ms),
-      this.syncOverlay ? this.syncOverlay(ms) : null
-    ]);
-    this.emit('timeupdate', { currentMs: ms });
+
+    // 2. THROTTLED STRUCTURE UPDATES (Avoid churn)
+    if (this.pendingTimelineRender && this.deps?.renderPodcastVideoTimeline) {
+      this.pendingTimelineRender = false;
+      this.deps.renderPodcastVideoTimeline(this.state.session, { force: true, reason: "throttled-metadata-sync" });
+    }
+
+    // 3. MEDIA SYNC (Throttled/Non-blocking)
+    if (this.state.isTickProcessing) return;
+    this.state.isTickProcessing = true;
+    try {
+      if (this.deps?.updatePodcastVideoTransportUi) this.deps.updatePodcastVideoTransportUi();
+      const speed = this.deps?.getPlaybackSpeed?.() || 1;
+      
+      // Perform media sync without awaiting (non-blocking for the clock)
+      Promise.all([
+        this.syncAudio(ms, speed),
+        this.syncVideo(ms),
+        this.syncOverlay ? this.syncOverlay(ms) : null
+      ]).finally(() => {
+        this.state.isTickProcessing = false;
+      });
+
+      this.emit('timeupdate', { currentMs: ms });
+    } catch (e) {
+      this.state.isTickProcessing = false;
+    }
   }
 
   // --- Audio ---
@@ -464,7 +530,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         continue;
       }
 
-      const audioSrc = await this.getBlobUrl(rawAudioSrc);
+      let audioSrc = this.getBlobUrlSync(rawAudioSrc);
+      if (!audioSrc) {
+        audioSrc = await this.getBlobUrl(rawAudioSrc);
+      }
       hasVoice = true;
       let audio = this.dialoguePlayers[rowId];
       if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
@@ -486,10 +555,13 @@ export class PodcasterPlaybackController extends EventEmitter {
               if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
               const prevMs = pvs.montageAudioActualDurationsMs[rowId] || 0;
               const nextMs = Math.round(measuredSec * 1000);
+              // Only re-render if duration changed significantly (>100ms)
               if (Math.abs(nextMs - prevMs) > 100) {
                 pvs.montageAudioActualDurationsMs[rowId] = nextMs;
-                // Re-render timeline so the chip width reflects the real audio length
-                if (this.deps?.renderPodcastVideoTimeline && this.deps?.getActiveSession) {
+                // Avoid re-rendering while playing if possible, or throttle it
+                if (this.state.isPlaying) {
+                  this.pendingTimelineRender = true;
+                } else if (this.deps?.renderPodcastVideoTimeline && this.deps?.getActiveSession) {
                   this.deps.renderPodcastVideoTimeline(this.deps.getActiveSession(), { force: true, reason: "audio-duration-measured" });
                 }
               }
@@ -520,7 +592,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         audio.play().catch(e => console.warn('[PlaybackController] Audio play failed:', rowId, e));
       }
     }
-    this.syncBackgroundMusic(currentMs, speed, hasVoice);
+    await this.syncBackgroundMusic(currentMs, speed, hasVoice);
   }
 
   async syncBackgroundMusic(currentMs, speed, hasVoice = false) {
@@ -634,7 +706,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   // --- Video ---
-  syncVideo(currentMs) {
+  async syncVideo(currentMs) {
     if (this.state.useMse) return;
     const active = this.getEntryAtMs(currentMs);
 
@@ -644,7 +716,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     upcoming.forEach(e => this.getBlobUrl(e.videoSrc));
 
     if (active) {
-      this.syncStageSwitching(active, currentMs);
+      await this.syncStageSwitching(active, currentMs);
+      
+      // Proactive loading of NEXT scene into inactive element
+      const nextIndex = entries.indexOf(active) + 1;
+      const nextEntry = (nextIndex > 0 && nextIndex < entries.length) ? entries[nextIndex] : null;
+      if (nextEntry && nextEntry.videoSrc) {
+        const activeSlot = Number(this.deps?.podcastVideoState?.stageVideoSlot || 0);
+        const inactiveEl = activeSlot === 1 ? this.els?.podcastActiveSpeakerVideo : this.els?.podcastActiveSpeakerVideoAlt;
+        
+        if (inactiveEl && inactiveEl.dataset.src !== nextEntry.videoSrc) {
+          const nextBlobUrl = this.getBlobUrlSync(nextEntry.videoSrc);
+          if (nextBlobUrl) {
+            // Load into inactiveEl now so it's ready for the swap
+            this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, nextBlobUrl, { keepHidden: true, noWait: true });
+            inactiveEl.dataset.src = nextEntry.videoSrc;
+            this.seekTo(inactiveEl, Math.max(0, Number(nextEntry.clip?.trimInMs || 0) / 1000));
+          }
+        }
+      }
     } else {
       [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
         if (v) { v.style.opacity = 0; v.hidden = true; }
@@ -718,7 +808,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.stageMachine.loadingSrc = entry.videoSrc;
 
       try {
-        const blobUrl = await this.getBlobUrl(entry.videoSrc);
+        let blobUrl = this.getBlobUrlSync(entry.videoSrc);
+        if (!blobUrl) {
+          blobUrl = await this.getBlobUrl(entry.videoSrc);
+        }
 
         // If we don't have an inactive element (Single Video Mode, like in Export Preview),
         // we just update the active element directly.
@@ -738,7 +831,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         // Seamless swap mode (requires both active and inactive elements)
         if (inactiveEl.dataset.src !== entry.videoSrc) {
           // console.log('[PlaybackController] Loading new source into inactiveEl');
-          await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, blobUrl);
+          // Non-blocking load if we are in the middle of a switch
+          await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, blobUrl, { noWait: true });
           inactiveEl.dataset.src = entry.videoSrc;
         }
 
@@ -751,8 +845,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         inactiveEl.hidden = false;
 
         if (this.state.isPlaying) {
-          // console.log('[PlaybackController] Playing inactiveEl after switch');
-          await inactiveEl.play().catch(err => console.warn('[PlaybackController] Inactive play failed:', err));
+          // No await here to avoid blocking the tick
+          inactiveEl.play().catch(err => console.warn('[PlaybackController] Inactive play failed:', err));
         }
 
         activeEl.style.zIndex = "1";
@@ -769,7 +863,6 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         // Swap slot globally
         const nextSlot = activeSlot === 1 ? 0 : 1;
-        // console.log('[PlaybackController] Swapping slot to:', nextSlot);
         this.deps?.setActiveStageVideoSlot?.(nextSlot);
       } catch (e) {
         console.error('[PlaybackController] Scene switch failed:', e);

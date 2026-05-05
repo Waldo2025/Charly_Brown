@@ -519,6 +519,18 @@ let state = {
 let activityUnsubscribe = null;
 let currentUserName = "Anónimo";
 
+let studioRuntimeEntriesCache = null;
+let studioRuntimeEntriesCacheKey = null;
+let studioVideoConfigCache = null;
+let studioVideoConfigCacheKey = null;
+
+function invalidateStudioRuntimeCache() {
+  studioRuntimeEntriesCache = null;
+  studioRuntimeEntriesCacheKey = null;
+  studioVideoConfigCache = null;
+  studioVideoConfigCacheKey = null;
+}
+
 
 async function obtenerNombreUsuarioStudio(user) {
   try {
@@ -5359,6 +5371,7 @@ function resolveVideoContentType(session = null, options = {}) {
   );
   if (explicit !== "none") return explicit;
   if (session?.script?.videoMode === true || session?.videoMode === true) return "creative";
+  if (isCurrentModeVideo()) return "creative";
   if (options?.assumeVideoPodcast === true) return "videopodcast";
   return "none";
 }
@@ -8762,6 +8775,13 @@ function snapTimelineMsWithStep(value = 0, stepMs = STUDIO_TIMELINE_SNAP_MS) {
 
 function buildTimelineRuntimeEntries(session = null) {
   const activeSession = session || getActiveSession();
+  if (!activeSession) return [];
+  
+  const cacheKey = `${activeSession.id}:${activeSession.updatedAt || ''}:${state.activeSessionId}`;
+  if (studioRuntimeEntriesCache && studioRuntimeEntriesCacheKey === cacheKey) {
+    return studioRuntimeEntriesCache;
+  }
+
   const educationalMode = isEducationalVideoMode(activeSession);
   const rows = activeSession?.script?.rows || [];
   const clipMap = ensureTimelineClipsByRowId(activeSession);
@@ -8822,8 +8842,11 @@ function buildTimelineRuntimeEntries(session = null) {
     entry.effectiveDurationMs = effectiveDurationMs;
     entry.endMs = Math.max(0, Number(entry.startMs || 0)) + effectiveDurationMs;
   });
-  entries.sort((a, b) => a.startMs - b.startMs || a.index - b.index);
-  return entries;
+  
+  const sorted = entries.sort((a, b) => a.startMs - b.startMs || a.index - b.index);
+  studioRuntimeEntriesCache = sorted;
+  studioRuntimeEntriesCacheKey = cacheKey;
+  return sorted;
 }
 
 function resolveGeminiSegmentStartWithinScene(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS) {
@@ -9739,12 +9762,6 @@ function resetPodcastStudioSessionUiState(session = null) {
   }
   podcastVideoState.timelineDrag = null;
   podcastVideoState.timelineGapSelection = null;
-  // Only reset the montage cursor when playback is stopped – keeps position alive when
-  // sliders or config modals mutate state while the preview is open.
-  if (!podcastVideoState.montageActive) {
-    podcastVideoState.montageCursorMs = 0;
-    podcastVideoState.montageLastVisualRowId = "";
-  }
 }
 
 async function setActiveSession(sessionId) {
@@ -14111,7 +14128,16 @@ function syncPodcastVideoSpeakerCardVisibility() {
 }
 
 function getPodcastVideoConfig(session = null) {
-  return normalizePodcastVideoConfig((session || getActiveSession())?.podcastVideoConfig || {});
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return {};
+  const cacheKey = `${activeSession.id}:${activeSession.updatedAt || ''}:${state.activeSessionId}`;
+  if (studioVideoConfigCache && studioVideoConfigCacheKey === cacheKey) {
+    return studioVideoConfigCache;
+  }
+  const config = normalizePodcastVideoConfig(activeSession?.podcastVideoConfig || {});
+  studioVideoConfigCache = config;
+  studioVideoConfigCacheKey = cacheKey;
+  return config;
 }
 
 function getTimelineSceneAudioMixByRowId(session = null) {
@@ -16652,8 +16678,8 @@ function syncPodcastTimelinePlayhead(session = null, options = {}) {
   if (!playhead) return;
   const activeSession = session || getActiveSession();
   const mode = getTimelineViewMode(activeSession);
-  const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
-  const cursorMs = Math.max(0, Math.min(totalMs, Number(podcastVideoState.montageCursorMs || 0)));
+  const totalMs = options?.totalMs || Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
+  const cursorMs = Math.max(0, Math.min(totalMs, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0)));
   let leftPx = 0;
   let playheadRowId = "";
   const entries = buildTimelineRuntimeEntries(activeSession);
@@ -19103,7 +19129,10 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
   if (!session || !key) return null;
   const panelCopy = getPanelModeCopy(session);
-  const educationalMode = panelCopy.videoMode === true;
+  const videoContentType = panelCopy.videoContentType;
+  const educationalMode = videoContentType === "creative";
+  const videoPodcastMode = videoContentType === "videopodcast";
+  const isAnyVideoMode = educationalMode || videoPodcastMode;
   const row = (session?.script?.rows || []).find((item) => item.id === key) || null;
   const rows = session?.script?.rows || [];
   const rowIndex = rows.findIndex((item) => String(item?.id || "").trim() === key);
@@ -19126,7 +19155,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const counterpartSpeakerName = counterpartSpeakerLabel ? resolveSpeakerDisplayName(counterpartSpeakerLabel, session) : "";
   const scenarioPrompt = resolveSpeakerStudioScenarioPrompt(session, speakerLabel, {
     expression: row.expression,
-    contentMode: educationalMode ? "creative" : "podcast"
+    contentMode: videoContentType !== "none" ? videoContentType : "podcast"
   });
   const rowReferenceImages = getRowReferenceImageListMap(session)[key] || [];
   const rowReferenceImage = rowReferenceImages[0] || getRowReferenceImageMap(session)[key] || null;
@@ -19378,8 +19407,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         const requestBody = {
           sessionId: session.id,
           rowId: key,
-          videoMode: educationalMode,
-          contentMode: educationalMode ? "creative" : "podcast",
+          videoMode: isAnyVideoMode,
+          contentMode: videoContentType !== "none" ? videoContentType : "podcast",
           speakerLabel,
           speakerName: resolveSpeakerDisplayName(speakerLabel, session),
           counterpartSpeakerLabel,
@@ -19756,9 +19785,12 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     }
     if (String(state.activeSessionId || "").trim() === sessionId) {
       // Optimizamos: solo sincronizamos track y timeline, no el shell completo (que renderiza videos y tiras de imágenes)
+      invalidateStudioRuntimeCache();
       syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
       renderPodcastVideoTimeline(refreshed, { force: true, reason: "structure" });
       syncPodcastStudioInspector(refreshed);
+      // Sincronizar el controlador de reproducción para que reconozca el nuevo audio
+      playbackController.sync(refreshed, getPodcastVideoConfig(refreshed));
     }
     return clip;
   } finally {
@@ -19904,7 +19936,7 @@ playbackController.init(els, {
   getPlaybackSpeed: () => Number(els.podcastVideoSpeedSelect?.value || 1),
   toFiniteNumber,
   ensureTimelineClipsByRowId,
-  syncPodcastTimelinePlayhead: (ms, duration, session) => syncPodcastTimelinePlayhead(session, { currentMs: ms }),
+  syncPodcastTimelinePlayhead: (session, options) => syncPodcastTimelinePlayhead(session, options),
   secondsToClock,
   setPodcastVideoStatus,
   updatePodcastVideoTransportUi,
@@ -19971,7 +20003,9 @@ exportPreviewController.init(exportPreviewEls, {
   getPlaybackSpeed: () => 1, // Preview siempre a 1x
   toFiniteNumber,
   ensureTimelineClipsByRowId,
-  syncPodcastTimelinePlayhead: (ms, duration) => {
+  syncPodcastTimelinePlayhead: (session, options) => {
+    const ms = options.currentMs;
+    const duration = options.totalMs;
     if (els.montageExportPreviewSeekbar) {
       els.montageExportPreviewSeekbar.max = String(duration);
       els.montageExportPreviewSeekbar.value = String(ms);
@@ -20526,6 +20560,7 @@ async function setPodcastStageVideoSourceForElement(videoEl = null, src = "", op
   video.preload = "auto";
   // Always force a load after assigning `src` to avoid reusing stale decoded frames.
   try { video.load(); } catch (_) { }
+  if (options.noWait === true) return true;
   const waitForVideoReadiness = async (timeoutMs = 1800) => {
     return new Promise((resolve) => {
       let settled = false;
