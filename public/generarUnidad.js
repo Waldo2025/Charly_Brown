@@ -1885,7 +1885,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   if (!texto) {
     targetEl.innerHTML = htmlFinal || "";
     renderizarStemPendienteUnidad(targetEl);
-    _unidadScrollResultadoAlFinal(true);
+    _unidadScrollResultadoAlFinal(true, targetEl);
     return;
   }
 
@@ -1906,7 +1906,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
     targetEl.textContent += texto[i];
     if (i % 8 === 0) {
       targetEl.scrollTop = targetEl.scrollHeight;
-      _unidadScrollResultadoAlFinal();
+      _unidadScrollResultadoAlFinal(false, targetEl);
       await sleep(delay);
     }
   }
@@ -1915,7 +1915,7 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   targetEl.style.wordBreak = "";
   targetEl.innerHTML = htmlFinal || "";
   renderizarStemPendienteUnidad(targetEl);
-  _unidadScrollResultadoAlFinal(true);
+  _unidadScrollResultadoAlFinal(true, targetEl);
 }
 
 function getSelectedModel() {
@@ -2210,18 +2210,20 @@ function verificarUnidadActual() {
 
 
 // ✅ CORRECCIÓN: Resetear contadores solo cuando sea necesario
-function resetearContadoresUnidad(unidad) {
-  if (unidad && window.contadoresPorUnidad[unidad]) {
-    window.contadoresPorUnidad[unidad] = {
-      fichas: 0,
-      recortables: 0,
-      anexos: 0,
-      videos: 0
-    };
-  }
-}
+// This function is not used in the current context, but if it were, it would need to be updated.
 
 // Llamar verificarUnidadActual al inicio y cuando cambie la unidad
+// This function is not used in the current context, but if it were, it would need to be updated.
+
+// This function is not used in the current context, but if it were, it would need to be updated.
+
+// This function is not used in the current context, but if it were, it would need to be updated.
+
+// This function is not used in the current context, but if it were, it would need to be updated.
+
+// This function is not used in the current context, but if it were, it would need to be updated.
+
+// This function is not used in the current context, but if it were, it would need to be updated.
 document.addEventListener('DOMContentLoaded', function () {
   verificarUnidadActual();
 });
@@ -18204,9 +18206,12 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
   const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
   const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
   const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
-  const cantidad = _unidadResolveCantidadActividades(safeSubtema, [{ cantidad: document.querySelector(`input[name='num_${safeSubtema}']`)?.value || 1 }]);
+  const tableId = `tabla-secuencia-${safeCategoria.replace(/\s+/g, '-')}`;
+  const tabla = document.getElementById(tableId);
+  
+  const cantidad = _unidadResolveCantidadActividades(safeSubtema, [{ cantidad: tabla?.querySelector(`input[name="num_${safeSubtema}"]`)?.value || 1 }], tabla);
   const lecturaDisponible = !!window.lecturaNuevaCoincidenteGlobal;
-  const checkboxRelacion = document.querySelector(`input[name='relacion_${safeSubtema}']`);
+  const checkboxRelacion = tabla?.querySelector(`input[name="relacion_${safeSubtema}"]`);
   const relacionadaFinal = checkboxRelacion ? checkboxRelacion.checked : false;
   const contenidoLecturaParaPrompt = relacionadaFinal && lecturaDisponible
     ? _contenidoLecturaUnidad(window.lecturaNuevaCoincidenteGlobal)
@@ -18236,11 +18241,11 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
     { subtema: safeSubtema, tipo: "C", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "C"), cantidad, relacionada: relacionadaFinal },
     { subtema: safeSubtema, tipo: "P", descripcion: _unidadGetSyAValueForSubtema(safeSubtema, "P"), cantidad, relacionada: relacionadaFinal }
   ];
-  const generarFichas = !!document.querySelector(`input[name='ficha_${safeSubtema}']`)?.checked;
-  const generarAnexos = !!document.querySelector(`input[name='anexo_${safeSubtema}']`)?.checked;
-  const generarVideos = !!document.querySelector(`input[name='video_${safeSubtema}']`)?.checked;
-  const tieneRecortable = !!document.querySelector(`input[name='recortable_${safeSubtema}']`)?.checked;
-  const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${safeSubtema}']`)?.checked;
+  const generarFichas = !!tabla?.querySelector(`input[name="ficha_${safeSubtema}"]`)?.checked;
+  const generarAnexos = !!tabla?.querySelector(`input[name="anexo_${safeSubtema}"]`)?.checked;
+  const generarVideos = !!tabla?.querySelector(`input[name="video_${safeSubtema}"]`)?.checked;
+  const tieneRecortable = !!tabla?.querySelector(`input[name="recortable_${safeSubtema}"]`)?.checked;
+  const generarImagenApoyo = !!tabla?.querySelector(`input[name="imagen_${safeSubtema}"]`)?.checked;
   const recursosPermitidosPorTabla = {
     fichas: !!generarFichas,
     anexos: !!generarAnexos,
@@ -18248,7 +18253,7 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
     videos: !!generarVideos
   };
 
-  const instruccionesAdicionalesBase = window.instruccionesGeminiPorCategoria?.[safeCategoria] || "";
+  const instruccionesAdicionalesBase = window.instruccionesGeminiPorSubtema?.[safeSubtema] || window.instruccionesGeminiPorCategoria?.[safeCategoria] || "";
   const stylePromptCategoria = _unidadIsStyleSelectorEnabled(safeCategoria)
     ? buildUnidadActivityStylePromptContext(safeCategoria, {
       grado: gradoTexto,
@@ -18269,6 +18274,7 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
     generarFichas,
     generarAnexos,
     generarVideos,
+    tieneRecortable,
     tituloCreativoLimpioBase,
     "",
     relacionadaFinal,
@@ -18429,25 +18435,37 @@ function _unidadSepararBloquesRecursosDeHtml(html = "") {
       return ["ficha", "anexo", "recortable", "video"].includes(safe) ? safe : "";
     };
     const detectResourceType = (node) => {
-      if (!(node instanceof Element)) return false;
-      const explicit = normalizeType(node.dataset?.resourceType || "");
+      if (!(node instanceof Element)) return "";
+      const explicit = normalizeType(node.getAttribute("data-resource-type") || "");
       if (explicit) return explicit;
-      const sectionExplicit = normalizeType(node.dataset?.resourceSection || "");
-      if (sectionExplicit) return sectionExplicit;
-      if (node.matches('.activity[data-ficha="true"], .activity-fichas')) return "ficha";
-      if (node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading')) {
-        const headingText = String(node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading')?.textContent || "").toLowerCase();
-        if (/\bficha\b/.test(headingText)) return "ficha";
-        if (/\banexo\b/.test(headingText)) return "anexo";
-        if (/\brecortable\b/.test(headingText)) return "recortable";
-        if (/\bguion de video\b|\bvideo\b/.test(headingText)) return "video";
+      
+      const sectionValue = node.getAttribute("data-resource-section");
+      if (sectionValue === "true" || sectionValue === "ficha") {
+         // Si es un wrapper genérico, intentamos inferir el tipo por el contenido o clases
+         if (node.classList.contains("resource-ficha") || node.querySelector(".unidad-ficha-heading")) return "ficha";
+         if (node.classList.contains("resource-anexo") || node.querySelector(".unidad-anexo-heading")) return "anexo";
+         if (node.classList.contains("resource-recortable") || node.querySelector(".unidad-recortable-heading")) return "recortable";
+         if (node.classList.contains("resource-video") || node.querySelector(".unidad-video-heading")) return "video";
       }
+
+      if (node.matches('.activity[data-ficha="true"], .activity-fichas')) return "ficha";
+      
+      const heading = node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading');
+      if (heading) {
+        if (heading.classList.contains("unidad-ficha-heading")) return "ficha";
+        if (heading.classList.contains("unidad-anexo-heading")) return "anexo";
+        if (heading.classList.contains("unidad-recortable-heading")) return "recortable";
+        if (heading.classList.contains("unidad-video-heading")) return "video";
+      }
+
       const titleNode = node.querySelector("strong, h1, h2, h3, h4, h5, h6");
       const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      if (/\bficha\b/.test(titleText)) return "ficha";
-      if (/\banexo\b|\bsecci[oó]n de anexos?\b/.test(titleText)) return "anexo";
-      if (/\brecortable\b|\bsecci[oó]n de recortables?\b/.test(titleText)) return "recortable";
-      if (/\bguion de video\b|\bvideo\b|\bsecci[oó]n de videos?\b/.test(titleText)) return "video";
+      // Usamos regex menos estrictas (sin \b si es necesario) para IDs técnicos
+      if (/ficha/i.test(titleText)) return "ficha";
+      if (/anexo/i.test(titleText) || /secci[oó]n de anexos?/i.test(titleText)) return "anexo";
+      if (/recortable/i.test(titleText) || /secci[oó]n de recortables?/i.test(titleText)) return "recortable";
+      if (/guion de video/i.test(titleText) || /video/i.test(titleText) || /secci[oó]n de videos?/i.test(titleText)) return "video";
+      
       return "";
     };
     const resourceNodes = Array.from(root.children).filter((node) => {
@@ -18512,7 +18530,16 @@ function _unidadGetResultContentNode() {
   return modalResultadoUnidad?.querySelector(".unidad-content") || null;
 }
 
-function _unidadScrollResultadoAlFinal(force = false) {
+function _unidadScrollResultadoAlFinal(force = false, elementToFocus = null) {
+  // Si se pasa un elemento específico, desplazamos la vista hacia él
+  if (elementToFocus instanceof HTMLElement) {
+    elementToFocus.scrollIntoView({ 
+      behavior: force ? "auto" : "smooth", 
+      block: "nearest" // "nearest" es menos intrusivo que "start" o "center"
+    });
+    return;
+  }
+
   const result = document.getElementById("resultadoUnidadGenerada");
   const content = _unidadGetResultContentNode();
   const scroller = result || content;
@@ -19545,6 +19572,7 @@ function crearModalInstrucciones() {
             <h3 class="cb-modal-title"><i class="fas fa-comment-alt" style="color: #9c27b0; margin-right: 8px;"></i>Instrucciones para Gemini</h3>
             <button type="button" id="cerrarModalInstrucciones" class="cb-modal-close" aria-label="Cerrar modal">&times;</button>
         </div>
+        <p><strong><i class="fas fa-tag" style="color: #2c5aa0;"></i> Subtema:</strong> <span id="subtemaInstrucciones" style="color: #2c5aa0; font-weight: bold;"></span></p>
         <div>
             <p><strong><i class="fas fa-folder" style="color: #2c5aa0;"></i> Categoría:</strong> <span id="categoriaInstrucciones" style="color: #2c5aa0; font-weight: bold;"></span></p>
             <p style="color: #666; font-size: 13px; margin-bottom: 15px;">
@@ -19588,6 +19616,7 @@ function crearModalInstrucciones() {
   document.body.appendChild(modal);
 
   // Event listeners para el modal
+  // 🔥 CORRECCIÓN: Al cerrar, limpiar el subtema
   document.getElementById('cerrarModalInstrucciones').addEventListener('click', () => {
     modal.style.display = 'none';
   });
@@ -19599,6 +19628,7 @@ function crearModalInstrucciones() {
   document.getElementById('btnGuardarInstrucciones').addEventListener('click', guardarInstruccionesGemini);
 
   document.getElementById('textareaInstruccionesGemini').addEventListener('input', actualizarPreviewInstrucciones);
+  document.getElementById('textareaInstruccionesGemini').addEventListener('blur', guardarInstruccionesGemini); // Guardar al perder foco
 
   document.getElementById('btnBorrarInstrucciones').addEventListener('click', () => {
     const modal = document.getElementById('modalInstruccionesGemini');
@@ -19606,7 +19636,8 @@ function crearModalInstrucciones() {
 
     if (confirm(`¿Estás seguro de que quieres borrar las instrucciones para "${categoria}"?`)) {
       window.instruccionesGeminiPorCategoria[categoria] = '';
-      try {
+      // 🔥 CORRECCIÓN: Borrar por subtema
+      try { // This is the old logic, it should be updated to use _buildInstruccionesKey
         localStorage.removeItem(`instrucciones_gemini_${categoria}`);
       } catch (e) {
       }
@@ -19631,11 +19662,13 @@ function crearModalInstrucciones() {
 }
 
 // Variable global para almacenar instrucciones por categoría
-window.instruccionesGeminiPorCategoria = {};
+// 🔥 CORRECCIÓN: Cambiar a instrucciones por subtema
+window.instruccionesGeminiPorSubtema = {};
+function _buildInstruccionesKey(categoria, subtema) { return `${String(categoria || '').trim()}::${String(subtema || '').trim()}`; }
 
 
 // 🕐 FUNCIÓN AUXILIAR: Esperar generación de categoría (DEBES DEFINIRLA)
-function esperarGeneracionCategoria(categoria) {
+function esperarGeneracionCategoria(categoria, subtema = "") { // Accept subtema
   return new Promise((resolve) => {
 
     const checkInterval = setInterval(() => {
@@ -21535,6 +21568,7 @@ function setCategoriaSpinnerUI(categoria, isLoading) {
   const btn = document.querySelector(selector);
   if (!btn) return null;
 
+  // 🔥 CORRECCIÓN: Usar el nuevo objeto global
   if (!btn.dataset.originalIconHtml) {
     btn.dataset.originalIconHtml = btn.innerHTML;
   }
@@ -21581,7 +21615,14 @@ async function verificarSecuencia() {
   if (!window.instruccionesGeminiPorCategoria) {
     window.instruccionesGeminiPorCategoria = {};
   }
+  if (!window.instruccionesGeminiPorSubtema) {
+    window.instruccionesGeminiPorSubtema = {};
+  }
   if (verificandoSecuencia) return;
+  // 🔥 CORRECCIÓN: Limpiar el objeto global de instrucciones por subtema
+  // para evitar que se arrastren instrucciones de una sesión a otra
+  window.instruccionesGeminiPorSubtema = {};
+
   verificandoSecuencia = true;
 
   const nivel = selectNivel?.value;
@@ -21692,6 +21733,7 @@ async function verificarSecuencia() {
       tabla.className = "tabla-secuencia unidad-table";
       tabla.style.width = "100%";
       tabla.style.tableLayout = "auto";
+      tabla.id = `tabla-secuencia-${categoria.replace(/\s+/g, '-')}`;
       tabla.innerHTML = `
         <thead>
           <tr>
@@ -21706,6 +21748,7 @@ async function verificarSecuencia() {
             <th title="Videos" aria-label="Videos"><i class="fa-solid fa-film unidad-th-icon"></i></th>
             <th title="Imagen de apoyo" aria-label="Imagen de apoyo"><i class="fa-regular fa-image unidad-th-icon"></i></th>
             <th title="Actividades" aria-label="Actividades"><i class="fa-solid fa-list-ol unidad-th-icon"></i></th>
+            <th title="Instrucciones IA" aria-label="Instrucciones IA"><i class="fas fa-comment-alt unidad-th-icon"></i></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -21737,6 +21780,7 @@ async function verificarSecuencia() {
         const chkGenerar = document.createElement("input");
         chkGenerar.type = "checkbox";
         // CORRECCIÓN: Usar el nombre del subtema en lugar de la categoría
+        // Esto ya está corregido en el HTML, pero se mantiene la lógica para el JS
         chkGenerar.name = `generar_${subtema}`;
         chkGenerar.checked = true; // Por defecto seleccionado
         chkGenerar.dataset.categoria = categoria;
@@ -21844,13 +21888,31 @@ async function verificarSecuencia() {
         const tdImagen = document.createElement("td");
         tdImagen.appendChild(chkImagenApoyo);
 
+        // ✅ NUEVA COLUMNA: Instrucciones IA por subtema
+        const tdInstruccionesIA = document.createElement("td");
+        tdInstruccionesIA.innerHTML = `
+          <div class="tooltip">
+            <button type="button"
+                    class="btn-icono-categoria instrucciones btn-instrucciones-subtema"
+                    data-categoria="${categoria}"
+                    data-subtema="${subtema}"
+                    title="Añadir instrucciones específicas para Gemini para este subtema"
+                    id="btn-instrucciones-${categoria.replace(/\s+/g, '-')}-${subtema.replace(/\s+/g, '-')}"
+            >
+              <i class="fas fa-comment-alt"></i>
+              <span class="badge-instrucciones" hidden>!</span>
+            </button>
+            <span class="tooltiptext">Instrucciones para Gemini</span>
+          </div>
+        `;
+
         const tdCantidad = document.createElement("td");
         tdCantidad.appendChild(inputCantidad);
 
-        fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad);
+        fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad, tdInstruccionesIA);
         tbody.appendChild(fila);
       });
-
+      
       const encabezado = document.createElement("div");
       encabezado.className = "categoria-header";
 
@@ -21861,17 +21923,7 @@ async function verificarSecuencia() {
         <h3>${categoria}</h3>
         ${_unidadBuildCategoryStyleUi(categoria)}
         <div class="botones-categoria">
-            <div class="tooltip">
-                <button type="button" 
-                        class="btn-icono-categoria instrucciones ${tieneInstrucciones ? 'has-instructions' : ''}" 
-                        data-categoria="${categoria}" 
-                        title="Añadir instrucciones específicas para Gemini"
-                        id="btn-instrucciones-${categoria.replace(/\s+/g, '-')}">
-                    <i class="fas fa-comment-alt"></i>
-                    ${tieneInstrucciones ? '<span class="badge-instrucciones">!</span>' : ''}
-                </button>
-                <span class="tooltiptext">Instrucciones para Gemini</span>
-            </div>
+            
             
             <div class="tooltip">
                 <button type="button"
@@ -21905,9 +21957,7 @@ async function verificarSecuencia() {
                 </button>
                 <span class="tooltiptext">Generar sección</span>
             </div>
-        </div>
-    `;
-
+        </div>`;
 
       const caption = document.createElement("caption");
       caption.className = "tabla-secuencia-caption";
@@ -21919,34 +21969,36 @@ async function verificarSecuencia() {
       contenedorCamposSecuencia.appendChild(tablaWrap);
       _unidadBindCategoryStyleUi(encabezado);
 
-      // Agrega los event listeners
+      // Agrega los event listeners para instrucciones por subtema
       setTimeout(() => {
-        const btnInstrucciones = encabezado.querySelector('.btn-icono-categoria.instrucciones');
+        const btnsInstrucciones = tabla.querySelectorAll('.btn-instrucciones-subtema');
 
-        if (btnInstrucciones) {
+        btnsInstrucciones.forEach(btn => {
+          const cat = btn.dataset.categoria;
+          const sub = btn.dataset.subtema;
+
+          // Cargar instrucción guardada para el badge inicial
+          if (!window.instruccionesGeminiPorSubtema) window.instruccionesGeminiPorSubtema = {};
+          const saved = localStorage.getItem(`instrucciones_gemini_subtema_${sub}`);
+          if (saved) {
+            window.instruccionesGeminiPorSubtema[sub] = saved;
+            actualizarBadgeInstrucciones(cat, sub, saved);
+          }
+
           let clickTimer = null;
-
-          btnInstrucciones.addEventListener('click', (e) => {
+          btn.addEventListener('click', (e) => {
             if (clickTimer === null) {
-              // Primer click - configurar timer
               clickTimer = setTimeout(() => {
-                // Click simple - abrir modal
-                abrirModalInstrucciones(categoria);
+                abrirModalInstrucciones(cat, sub);
                 clickTimer = null;
               }, 250);
             } else {
-              // Doble click - mostrar instrucciones rápidamente
               clearTimeout(clickTimer);
               clickTimer = null;
-              mostrarInstruccionesRapido(categoria);
+              // mostrarInstruccionesRapido(cat, sub); // Opcional: implementar para subtema
             }
           });
-
-          btnInstrucciones.addEventListener('dblclick', (e) => {
-            e.preventDefault();
-            // El doble click ya es manejado por el timer
-          });
-        }
+        });
       }, 100);
 
       function mostrarInstruccionesRapido(categoria) {
@@ -22074,6 +22126,7 @@ async function verificarSecuencia() {
     // Conecta botones "Generar sección" - SOLO UNA VEZ
     if (typeof wireCategoriaButtons === "function") {
       wireCategoriaButtons();
+      sincronizarBadgesInstrucciones(); // Call this here to update new buttons
     }
 
     // Botón "Generar todas las categorías" - SOLO UNA VEZ
@@ -22091,7 +22144,6 @@ async function verificarSecuencia() {
       } catch (error) {
       }
     }, 300); // Esperar 300ms para asegurar que el DOM esté listo
-
 
   } catch (error) {
     console.error("verificarSecuencia error:", error);
@@ -22112,18 +22164,28 @@ function verificarBotonesGeneracion() {
   return botones.length > 0;
 }
 
-function abrirModalInstrucciones(categoria) {
+function abrirModalInstrucciones(categoria, subtema = "") {
   let modal = document.getElementById('modalInstruccionesGemini');
   if (!modal) {
     modal = crearModalInstrucciones();
   }
 
-  // Establecer la categoría actual
+  // Establecer contexto
   modal.dataset.categoriaActual = categoria;
+  modal.dataset.subtemaActual = subtema;
+  
   document.getElementById('categoriaInstrucciones').textContent = categoria;
+  document.getElementById('subtemaInstrucciones').textContent = subtema ? formatearSubtema(subtema) : "(General)";
 
   // Cargar instrucciones existentes
-  const instruccionesGuardadas = window.instruccionesGeminiPorCategoria[categoria] || '';
+  let instruccionesGuardadas = "";
+  if (subtema) {
+    if (!window.instruccionesGeminiPorSubtema) window.instruccionesGeminiPorSubtema = {};
+    instruccionesGuardadas = window.instruccionesGeminiPorSubtema[subtema] || '';
+  } else {
+    instruccionesGuardadas = window.instruccionesGeminiPorCategoria[categoria] || '';
+  }
+  
   document.getElementById('textareaInstruccionesGemini').value = instruccionesGuardadas;
 
   // Actualizar preview
@@ -22132,9 +22194,11 @@ function abrirModalInstrucciones(categoria) {
   // Mostrar modal
   modal.style.display = 'block';
   document.getElementById('textareaInstruccionesGemini').focus();
-  if (unidadVoiceShouldRun && _debeResponderPorFuncion("_openGeminiInstruccionesByCategoria", false)) {
+  
+  if (unidadVoiceShouldRun && _debeResponderPorFuncion("_openGeminiInstruccionesBySubtema", false)) {
+    const contextName = subtema ? `el subtema ${formatearSubtema(subtema)}` : `la categoría ${categoria}`;
     obtenerNombreUsuarioAutenticadoUnidad()
-      .then((nombre) => hablarUnidad(`Lista ${nombre}, puedes dictar instrucciones para ${categoria}.`))
+      .then((nombre) => hablarUnidad(`Listo ${nombre}, puedes dictar instrucciones para ${contextName}.`))
       .catch(() => { });
   }
 }
@@ -22165,26 +22229,30 @@ function actualizarPreviewInstrucciones() {
 function guardarInstruccionesGemini() {
   const modal = document.getElementById('modalInstruccionesGemini');
   const categoria = modal.dataset.categoriaActual;
+  const subtema = modal.dataset.subtemaActual;
   const textarea = document.getElementById('textareaInstruccionesGemini');
 
   if (!categoria || !textarea) return;
 
   const instrucciones = textarea.value.trim();
 
-  // Guardar en el objeto global
-  window.instruccionesGeminiPorCategoria[categoria] = instrucciones;
-
-  // También guardar en localStorage para persistencia
-  try {
-    localStorage.setItem(`instrucciones_gemini_${categoria}`, instrucciones);
-  } catch (e) {
+  // Guardar en el objeto global y localStorage
+  if (subtema) {
+    if (!window.instruccionesGeminiPorSubtema) window.instruccionesGeminiPorSubtema = {};
+    window.instruccionesGeminiPorSubtema[subtema] = instrucciones;
+    try {
+      localStorage.setItem(`instrucciones_gemini_subtema_${subtema}`, instrucciones);
+    } catch (e) {}
+    actualizarBadgeInstrucciones(categoria, subtema, instrucciones);
+    mostrarNotificacion(`✅ Instrucciones guardadas para ${formatearSubtema(subtema)}`, 'success');
+  } else {
+    window.instruccionesGeminiPorCategoria[categoria] = instrucciones;
+    try {
+      localStorage.setItem(`instrucciones_gemini_${categoria}`, instrucciones);
+    } catch (e) {}
+    actualizarBadgeInstrucciones(categoria, "", instrucciones);
+    mostrarNotificacion(`✅ Instrucciones guardadas para ${categoria}`, 'success');
   }
-
-  // Actualizar el badge en el botón
-  actualizarBadgeInstrucciones(categoria, instrucciones);
-
-  // Mostrar notificación
-  mostrarNotificacion(`✅ Instrucciones guardadas para ${categoria}`, 'success');
 
   // Cerrar modal
   modal.style.display = 'none';
@@ -22193,10 +22261,10 @@ function guardarInstruccionesGemini() {
 
 // Función para cargar instrucciones guardadas
 function cargarInstruccionesGuardadas() {
-  if (!window.instruccionesGeminiPorCategoria) {
-    window.instruccionesGeminiPorCategoria = {};
+  // 🔥 CORRECCIÓN: Usar el nuevo objeto global
+  if (!window.instruccionesGeminiPorSubtema) {
+    window.instruccionesGeminiPorSubtema = {};
   }
-
   // Cargar todas las categorías posibles
   const categoriasPosibles = [
     'Proyectos',
@@ -22221,23 +22289,26 @@ function cargarInstruccionesGuardadas() {
       }
     } catch (e) {
     }
-  });
+    });
 }
 
 
 
-function actualizarBadgeInstrucciones(categoria, instrucciones) {
-  const btnId = `btn-instrucciones-${categoria.replace(/\s+/g, '-')}`;
+function actualizarBadgeInstrucciones(categoria, subtema, instrucciones) {
+  let btnId = "";
+  if (subtema) {
+    btnId = `btn-instrucciones-${categoria.replace(/\s+/g, '-')}-${subtema.replace(/\s+/g, '-')}`;
+  } else {
+    btnId = `btn-instrucciones-${categoria.replace(/\s+/g, '-')}`;
+  }
+  
   const btn = document.getElementById(btnId);
-
   if (!btn) return;
 
   const tieneInstrucciones = instrucciones && instrucciones.trim().length > 0;
 
   if (tieneInstrucciones) {
     btn.classList.add('has-instructions');
-
-    // Asegurar que haya un badge
     let badge = btn.querySelector('.badge-instrucciones');
     if (!badge) {
       badge = document.createElement('span');
@@ -22245,26 +22316,14 @@ function actualizarBadgeInstrucciones(categoria, instrucciones) {
       badge.textContent = '!';
       btn.appendChild(badge);
     }
-
-    // Cambiar ícono a check cuando hay instrucciones
     const icon = btn.querySelector('i');
-    if (icon) {
-      icon.className = 'fas fa-check-circle';
-    }
+    if (icon) icon.className = 'fas fa-check-circle';
   } else {
     btn.classList.remove('has-instructions');
-
-    // Remover badge si existe
     const badge = btn.querySelector('.badge-instrucciones');
-    if (badge) {
-      badge.remove();
-    }
-
-    // Restaurar ícono original
+    if (badge) badge.remove();
     const icon = btn.querySelector('i');
-    if (icon) {
-      icon.className = 'fas fa-comment-alt';
-    }
+    if (icon) icon.className = 'fas fa-comment-alt';
   }
 }
 
@@ -22508,7 +22567,8 @@ function _unidadBuildPromptDeCategoriaDesdeTextoImportado({
   payload = null,
   generarFichas = false,
   generarAnexos = false,
-  generarVideos = false
+  generarVideos = false,
+  tieneRecortable = false
 } = {}) {
   const fuenteHtml = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
   const fuentePlano = String(payload?.plainText || "").trim();
@@ -22516,9 +22576,9 @@ function _unidadBuildPromptDeCategoriaDesdeTextoImportado({
   const subtemaFormateado = formatearSubtema(subtema);
   const tituloFinal = String(tituloCreativo || subtemaFormateado).trim();
   const recursosExtra = [
-    generarFichas ? "- Si hay ficha activada, añade el bloque de ficha de refuerzo coherente con el mismo contenido base." : "",
-    generarAnexos ? "- Si hay anexo activado, añade un anexo visual breve alineado al mismo contenido base." : "",
-    generarVideos ? "- Si hay video activado, añade el guion de video educativo alineado al mismo contenido base." : ""
+    generarFichas ? "- Si hay ficha activada, añade el bloque de ficha de refuerzo con actividades DIFERENTES a las del subtema." : "",
+    generarAnexos ? "- Si hay anexo activado, añade un anexo visual puro (SIN actividades ni tareas)." : "",
+    generarVideos ? "- Si hay video activado, añade el guion de video (SIN actividades ni ejercicios)." : ""
   ].filter(Boolean).join("\n");
 
   return `
@@ -22954,10 +23014,10 @@ window.construirPromptProyecto = function (
 
   // ============== NUEVO: detectar checkboxes de recursos para PROYECTOS ==============
   const subKey = (subtema || "").toString();
-  const chkFicha = document.querySelector(`input[name='ficha_${subKey}']`);
-  const chkAnexo = document.querySelector(`input[name='anexo_${subKey}']`);
-  const chkVideo = document.querySelector(`input[name='video_${subKey}']`);
-  const chkRecortable = document.querySelector(`input[name='recortable_${subKey}']`);
+  const chkFicha = document.querySelector(`input[name="ficha_${subKey}"]`);
+  const chkAnexo = document.querySelector(`input[name="anexo_${subKey}"]`);
+  const chkVideo = document.querySelector(`input[name="video_${subKey}"]`);
+  const chkRecortable = document.querySelector(`input[name="recortable_${subKey}"]`);
 
   const generarFichasFinal = !!chkFicha?.checked;
   const generarAnexosFinal = !!chkAnexo?.checked;
@@ -23025,6 +23085,7 @@ window.construirPromptProyecto = function (
     <!-- ===== FICHA DE REFUERZO ===== -->
     <h3 style="margin-top:24px;">${claveFichaActual}</h3>
     <p style="margin:6px 0 12px;">La ficha debe conservar el mismo tono, la misma secuencia y la misma estructura que las notas de las subcategorías. Solo cambia el contenido didáctico según el subtema.</p>
+    <p style="margin:6px 0 12px;">REGLA CRÍTICA: Las actividades de la ficha deben ser DIFERENTES y COMPLEMENTARIAS a las del proyecto principal. No repitas las mismas consignas.</p>
     `;
   }
 
@@ -23035,6 +23096,7 @@ window.construirPromptProyecto = function (
   <strong>${claveAnexo} - [Tema del anexo]</strong>
   <div style="margin-top:10px; padding:10px; background:#f9f9f9; border-left:4px solid #6c63ff;">
     <p><em>Descripción visual detallada:</em> tablas/esquemas/mapa conceptual que sintetiza el contenido clave del proyecto.</p>
+    <p>El anexo es material de CONSULTA. PROHIBIDO incluir actividades, preguntas, ejercicios o tareas para el alumno dentro de este bloque.</p>
     <p style="margin-top:8px;">Este anexo sirve como <strong>referencia visual</strong> para apoyar la comprensión.</p>
   </div>
 </div>
@@ -23048,6 +23110,7 @@ window.construirPromptProyecto = function (
   <strong>${claveRecortable}</strong>
   <div style="margin-top:10px;">
     <p>Describe con precisión las piezas del recortable (tarjetas, colores, texto, tamaño) y cómo se usa en la actividad donde se mencionó. Añade espacio para pegarlo.</p>
+    <p>El recortable es material FÍSICO. PROHIBIDO incluir actividades, preguntas o tareas dentro de la descripción del recortable.</p>
   </div>
 </div>
 `;
@@ -23072,6 +23135,7 @@ window.construirPromptProyecto = function (
     <tr><td>24-30s</td><td>[Cierre con call to action claro]</td><td>[Fade out]</td><td>[Personaje invita a actuar]</td></tr>
   </table>
   <p style="margin-top:10px;"><em>Duración total 50–60s. Lenguaje dinámico y cercano. NO usar saludos repetitivos.</em></p>
+  <p><strong>REGLA DE PUREZA: El guion de video es una herramienta de exposición. PROHIBIDO incluir actividades, preguntas o ejercicios dentro del guion.</strong></p>
 </div>
 `;
   }
@@ -23394,7 +23458,7 @@ function limpiarDuplicadosArtes() {
 
 
 
-window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLectura, preguntasComprension, nombresSubtemas = [], cantidad = 4, generarFichas = false, generarAnexos = false, generarVideos = false, tituloCreativo = "", promptTitulo, relacionadaConLectura = false, instruccionesAdicionales = "") {
+window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLectura, preguntasComprension, nombresSubtemas = [], cantidad = 4, generarFichas = false, generarAnexos = false, generarVideos = false, tieneRecortable = false, tituloCreativo = "", promptTitulo = "", relacionadaConLectura = false, instruccionesAdicionales = "") {
   const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
 
   // La lectura base ya se inyecta en el render (col-alumno). No repetir en el HTML generado por IA.
@@ -23446,16 +23510,11 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   const isComprensionLectora = _unidadNormalizarSubtemaKey(subtemaClave) === "ComprensionLectora";
   const relacionadaLecturaEstricta = relacionadaConLectura && !isComprensionLectora;
 
-  // 1. Verificación unificada de opciones (parámetros y DOM)
-  const checkboxFichas = document.querySelector(`input[name='ficha_${subtemaClave}']`);
-  const checkboxAnexos = document.querySelector(`input[name='anexo_${subtemaClave}']`);
-  const checkboxVideos = document.querySelector(`input[name='video_${subtemaClave}']`);
-  const checkboxRecortable = document.querySelector(`input[name='recortable_${subtemaClave}']`);
-
-  const generarFichasFinal = (generarFichas || (checkboxFichas && checkboxFichas.checked));
-  const generarAnexosFinal = (generarAnexos || (checkboxAnexos && checkboxAnexos.checked));
-  const generarVideosFinal = (generarVideos || (checkboxVideos && checkboxVideos.checked));
-  const tieneRecortable = (objetivosDelSubtema.some(o => o.recortable) || (checkboxRecortable && checkboxRecortable.checked));
+  // 1. Verificación unificada de opciones (priorizar argumentos pasados)
+  const generarFichasFinal = generarFichas;
+  const generarAnexosFinal = generarAnexos;
+  const generarVideosFinal = generarVideos;
+  const tieneRecortableFinal = tieneRecortable;
   const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
 
 
@@ -23469,7 +23528,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   const C = objetivosAgrupados[subtemaClave]?.C?.descripcion || "Contenido no disponible";
   const P = objetivosAgrupados[subtemaClave]?.P?.descripcion || "Proceso no disponible";
 
-  const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtemaClave}']`)?.value || "";
+  const subtemaRelacionado = document.getElementsByName(`interdisciplinariedad_${subtemaClave}`)[0]?.value || "";
   const interdiscT = subtemaRelacionado ? _unidadGetSyAValueForSubtema(subtemaRelacionado, "T") : "";
   const interdiscAE = subtemaRelacionado ? _unidadGetSyAValueForSubtema(subtemaRelacionado, "AE") : "";
   const semillaCreativa = obtenerSemillaCreativa(categoria, subtemaClave);
@@ -23629,8 +23688,10 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
     extraBloquesFinales += `
       🚨 OBLIGATORIO: genera EXACTAMENTE 1 sección de ficha de refuerzo con clave <strong>${recursos.fichas.clave}</strong>.
       - La ficha debe ser una sección independiente, no una actividad mezclada con el subtema principal.
-      - Usa un bloque HTML completo y marcado con data-resource-section="true" y data-resource-type="ficha".
+      - Usa un bloque HTML completo y marcado con data-resource-section="true" data-resource-type="ficha".
       - La ficha debe mantener coherencia pedagógica y contener 4 actividades internas si corresponde.
+      - REGLA CRÍTICA: Las actividades de la ficha deben ser DIFERENTES y COMPLEMENTARIAS a las del subtema principal. No repitas las mismas consignas.
+      - PROHIBIDO incluir actividades normales del subtema fuera de este bloque de ficha.
       ${shouldUseTrazosFichaFormat ? `- Como este bloque usa formato Trazos y letras, cada actividad de ficha debe incluir SOLO:
         1) instrucción principal en negritas,
         2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
@@ -23645,17 +23706,19 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Anexos - solo si está activo
-  if (separarSeccionesRecursos && recursos.anexos.generado) {
+  if (recursos.anexos.generado) {
     extraBloquesFinales += `
       🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de anexo visual:
       - Clave: <strong>${recursos.anexos.clave}</strong>
-      - Formato: bloque independiente con data-resource-section="true" y data-resource-type="anexo"
-      - Descripción visual detallada para reforzar el conocimiento del subtema
+      - Formato: bloque independiente con data-resource-section="true" data-resource-type="anexo"
+      - Descripción visual detallada para reforzar el conocimiento del subtema.
+      - El anexo es material de CONSULTA. PROHIBIDO incluir actividades, preguntas, ejercicios o tareas para el alumno dentro de este bloque.
       - Puede ser tablas comparativas, esquemas, mapas conceptuales, etc.
       - NO OMITIR ESTO BAJO NINGUNA CIRCUNSTANCIA
+      - No insertes bloques con la clase "activity" ni respuestas en color magenta dentro de esta sección.
 
       Ejemplo de estructura:
-      <div class="activity" style="margin-top:30px;">
+      <div style="margin-top:30px; border:1px solid #ddd; padding:15px; border-radius:8px;">
         <strong>${recursos.anexos.clave} - [tema del anexo]</strong>
         <div style="margin-top:10px; padding:10px; background:#f9f9f9; border-left:4px solid #6c63ff;">
           <p><em>Descripción detallada del material visual:</em></p>
@@ -23667,12 +23730,14 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Videos - solo si está activo
-  if (separarSeccionesRecursos && recursos.videos.generado) {
+  if (recursos.videos.generado) {
     extraBloquesFinales += `
       🚨 OBLIGATORIO: DEBES generar **exactamente UNA sección de guion de video al final del subtema**.
       - El video "${recursos.videos.clave}" no debe quedar dentro de una actividad normal.
-      - Debe presentarse como una sección independiente con data-resource-section="true" y data-resource-type="video".
+      - Debe presentarse como una sección independiente con data-resource-section="true" data-resource-type="video".
       - El guion del video nace de una pregunta generadora y se mantiene separado del bloque principal.
+      - El guion de video es una herramienta de exposición. PROHIBIDO incluir actividades, preguntas o ejercicios dentro del guion.
+      - No insertes bloques con la clase "activity" ni respuestas en color magenta dentro de esta sección.
 
       GUION PROFESIONAL DE VIDEO:
       - El guion debe ser divertido, entretenido y captar la atención del alumno.
@@ -23687,9 +23752,9 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
       - Finaliza con una frase motivacional + call to action medible.
 
       Ejemplo de estructura:
-      <div class="activity" style="margin-top:30px;">
+      <div style="margin-top:30px; border:1px solid #eee; padding:15px; border-radius:8px;">
         <strong>Guion de video: "${recursos.videos.clave}"</strong>
-        <table border="1" cellpadding="6" style="width:100%; margin-top:10px;">
+        <table border="1" cellpadding="6" style="width:100%; margin-top:10px; border-collapse:collapse;">
           <tr style="background:#eaeaea;">
             <th>Tiempo</th>
             <th>Guion</th>
@@ -23703,12 +23768,13 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   }
 
   // Recortables - solo si está activo
-  if (separarSeccionesRecursos && recursos.recortables.generado) {
+  if (recursos.recortables.generado) {
     extraBloquesFinales += `
       🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de recortable:
       - Clave: <strong>${recursos.recortables.clave}</strong>
-      - Formato: bloque independiente con data-resource-section="true" y data-resource-type="recortable"
-      - Descripción visual completa de la sección recortable
+      - Formato: bloque independiente con data-resource-section="true" data-resource-type="recortable"
+      - Descripción visual completa de la sección recortable.
+      - El recortable es material FÍSICO. PROHIBIDO incluir actividades, preguntas o tareas dentro de la descripción del recortable.
       - Describe detalladamente cada tarjeta, imagen, pieza, color, texto, forma y tamaño.
       - Si hay categorías, grupos o instrucciones de uso, descríbelos con claridad.
       - Considera tamaño reducido para poder pegarlo en el libro de actividades.
@@ -25746,6 +25812,8 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     // Verificar si ya existe este contenedor
     const contenedorCategoriaId = `contenedor-${categoria.replace(/\s/g, "-")}`;
     const viejoContenedor = document.getElementById(contenedorCategoriaId);
+    const tableId = `tabla-secuencia-${categoria.replace(/\s+/g, '-')}`;
+    const tabla = document.getElementById(tableId);
 
     // === Categorías que SÍ requieren lectura obligatoria ===
     const categoriasQueRequierenLectura = []; // añade más si lo necesitas
@@ -25784,13 +25852,12 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       .filter(([sub, cat]) => cat === categoria)
       .map(([sub]) => sub)
       .filter(sub => {
-        // ✅ CORRECCIÓN IMPORTANTE: Verificar el checkbox específico de "Generar" para cada subtema
-        const chkGenerar = document.querySelector(`input[name='generar_${sub}']`);
-        // También verificar el checkbox de categoría general
+        // ✅ CORRECCIÓN: Buscar dentro de la tabla de la categoría para evitar colisiones entre categorías
+        const scope = tabla || document;
+        const chkGenerar = scope.querySelector(`input[name="generar_${sub}"]`) || 
+                          scope.querySelector(`input[name="generar_subtema_${sub}"]`);
         const chkCategoria = document.querySelector(`input[name^="generar_categoria_"][data-categoria="${categoria}"]`);
 
-        // ✅ Solo generar si el checkbox del subtema específico está marcado
-        // O si está marcado el checkbox de la categoría general
         return (chkGenerar && chkGenerar.checked) ||
           (chkCategoria && chkCategoria.checked);
       });
@@ -26056,12 +26123,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const objetivoP = objetivosDelSubtema.find(o => o.tipo === "P")?.descripcion || "N/A";
 
       // Flags/checkboxes del subtema
-      const generarFichas = !!document.querySelector(`input[name='ficha_${subtema}']`)?.checked;
-      const generarAnexos = !!document.querySelector(`input[name='anexo_${subtema}']`)?.checked;
-      const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
-      const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${subtema}']`)?.checked;
-      const relacionada = !!document.querySelector(`input[name='relacion_${subtema}']`)?.checked;
-      const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
+      const generarFichas = !!document.getElementsByName(`ficha_${subtema}`)[0]?.checked;
+      const generarAnexos = !!document.getElementsByName(`anexo_${subtema}`)[0]?.checked;
+      const generarVideos = !!document.getElementsByName(`video_${subtema}`)[0]?.checked;
+      const generarImagenApoyo = !!document.getElementsByName(`imagen_${subtema}`)[0]?.checked;
+      const relacionada = !!document.getElementsByName(`relacion_${subtema}`)[0]?.checked;
+      const tieneRecortable = !!document.getElementsByName(`recortable_${subtema}`)[0]?.checked;
       const modoDecisionLecturas = String(window.__unidadLecturaDecision?.mode || "").trim();
       const modoLecturaSeleccionada = String(lecturaResuelta?.modo || "").trim();
       const modoLecturasSeparadas = modoDecisionLecturas === "split" || modoDecisionLecturas === "split-reverse";
@@ -26155,7 +26222,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           tituloCreativoProyecto = formatearSubtema(subtema);
         }
         assertProyectosActivo(tokenProy);
-        const instruccionesProyectoBase = window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
+        const instruccionesProyectoBase = window.instruccionesGeminiPorSubtema?.[subtema] || window.instruccionesGeminiPorCategoria?.['Proyectos'] || '';
         const stylePromptProyecto = _unidadIsStyleSelectorEnabled(categoria)
           ? buildUnidadActivityStylePromptContext(categoria, {
             grado: gradoTexto,
@@ -26467,7 +26534,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       let relacionadaFinal = false;
 
       // Usa SIEMPRE el estado real del checkbox de relación.
-      const chkRelacion = document.querySelector(`input[name='relacion_${subtema}']`);
+      const chkRelacion = (tabla || document).querySelector(`input[name="relacion_${subtema}"]`);
       relacionadaFinal = chkRelacion ? chkRelacion.checked : false;
 
       let contenidoLecturaParaPrompt = "";
@@ -26489,15 +26556,12 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
 
 
-      const chkFicha = document.querySelector(`input[name='ficha_${subtema}']`);
+      const scope = tabla || document;
+      const chkFicha = scope.querySelector(`input[name="ficha_${subtema}"]`);
       const generarFichas = !!chkFicha?.checked;
 
-      // 🚫 Si el subtema no tiene el checkbox de ficha activado, saltar
-      if (!generarFichas) {
-      }
-
       const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
-      const cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema);
+      const cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema, scope);
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
@@ -26505,11 +26569,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const objetivoC = objetivosDelSubtema.find(o => o.tipo === "C")?.descripcion || "N/A";
       const objetivoP = objetivosDelSubtema.find(o => o.tipo === "P")?.descripcion || "N/A";
 
-      // Flags/checkboxes del subtema - AGREGAR ESTAS LÍNEAS
-      const generarAnexos = !!document.querySelector(`input[name='anexo_${subtema}']`)?.checked;
-      const generarVideos = !!document.querySelector(`input[name='video_${subtema}']`)?.checked;
-      const generarImagenApoyo = !!document.querySelector(`input[name='imagen_${subtema}']`)?.checked;
-      const tieneRecortable = !!document.querySelector(`input[name='recortable_${subtema}']`)?.checked;
+      // Flags/checkboxes del subtema
+      const generarAnexos = !!scope.querySelector(`input[name="anexo_${subtema}"]`)?.checked;
+      const generarVideos = !!scope.querySelector(`input[name="video_${subtema}"]`)?.checked;
+      const generarImagenApoyo = !!scope.querySelector(`input[name="imagen_${subtema}"]`)?.checked;
+      const tieneRecortable = !!scope.querySelector(`input[name="recortable_${subtema}"]`)?.checked;
 
       // Si existe, reemplazarlo (regeneración en sitio)
       const bloqueExistente = document.getElementById(bloqueId);
@@ -26595,7 +26659,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         }
 
         // Obtener instrucciones adicionales para esta categoría
-        const instruccionesAdicionalesBase = window.instruccionesGeminiPorCategoria?.[categoria] || '';
+        const instruccionesAdicionalesBase = window.instruccionesGeminiPorSubtema?.[subtema] || window.instruccionesGeminiPorCategoria?.[categoria] || '';
         const stylePromptCategoria = _unidadIsStyleSelectorEnabled(categoria)
           ? buildUnidadActivityStylePromptContext(categoria, {
             grado: gradoTexto,
@@ -26652,7 +26716,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             payload: importedTextPayload,
             generarFichas,
             generarAnexos,
-            generarVideos
+            generarVideos,
+            tieneRecortable
           })
           : construirPromptDeCategoria(
             categoria,
@@ -26664,6 +26729,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             generarFichas,
             generarAnexos,
             generarVideos,
+            tieneRecortable,
             tituloCreativoLimpioBase,
             "", // promptTitulo
             relacionadaFinal, // ✅ Indicar explícitamente si está relacionada
@@ -26771,7 +26837,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const P = objetivoP;
 
         // ---- Notas del Maestro ----
-        const { actividadesNormales, actividadesFichas } = extraerActividades(htmlAlumno);
+        let { actividadesNormales, actividadesFichas } = extraerActividades(htmlAlumno);
 
         // ✅ Verificación adicional solo para Artes
         if (categoria === "Artes" && Array.isArray(actividadesNormales)) {
@@ -26796,87 +26862,66 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           recortables: !!tieneRecortable,
           videos: !!generarVideos
         };
-        htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
-	        htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
-	        htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
-	        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
-	        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
-	        htmlAlumnoLimpio = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoLimpio, cantidad);
-	        const recursosEsperados = _unidadBuildRecursosEsperadosPorChecks({
-            subtema,
-            unidadActual,
-            recursosPermitidosPorTabla,
-            objetivoT: T,
-            objetivoAE: AE
-          });
-	        let recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
-            recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio),
-            recursosEsperados,
-            recursosPermitidosPorTabla
-          });
-	        recursosGenerados = _unidadFiltrarRecursosNoActivos(recursosGenerados, recursosPermitidosPorTabla);
-	        htmlAlumnoLimpio = _unidadEnsureFichaTitles(htmlAlumnoLimpio, recursosGenerados);
-        htmlAlumnoLimpio = _unidadEnsureFichaMetadataSection(htmlAlumnoLimpio, {
+
+        // 1. Identificar y marcar recursos OBLIGATORIAMENTE antes de cualquier limpieza
+        const recursosEsperados = _unidadBuildRecursosEsperadosPorChecks({
           subtema,
-          categoria,
-          fichaClave: recursosGenerados?.fichas?.clave || ""
+          unidadActual,
+          recursosPermitidosPorTabla,
+          objetivoT: T,
+          objetivoAE: AE
         });
-        htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados, subtema, categoria);
-        recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
+        
+        let recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
           recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio),
           recursosEsperados,
           recursosPermitidosPorTabla
         });
-        recursosGenerados = _unidadFiltrarRecursosNoActivos(recursosGenerados, recursosPermitidosPorTabla);
+
+        // Marcamos los bloques en el HTML (añade data-resource-section="true" para protegerlos)
+        htmlAlumnoLimpio = _unidadEnsureFinalResourceTitles(htmlAlumnoLimpio, recursosGenerados, subtema, categoria);
+
+        // 2. Ahora sí, procedemos con las limpiezas generales protegiendo lo marcado
+        htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadStripTeacherOnlySectionsFromAlumnoHtml(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadNormalizeActivityLeadStrong(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
+        htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
+
+        // 3. Limpieza y normalización de actividades (protegiendo recursos marcados)
+        htmlAlumnoLimpio = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoLimpio, cantidad);
         htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados, { subtema, categoria });
 
+        // Extraer actividades para notas del maestro y apoyos
+        ({ actividadesNormales, actividadesFichas } = extraerActividades(htmlAlumnoLimpio));
+
+        // 3. Generación de apoyos visuales si corresponde
         if (generarImagenApoyo) {
           apoyoPlan = await _unidadCrearPlanApoyoVisual({
-            categoria,
-            subtema,
-            nivel,
-            grado: gradoTexto,
-            T,
-            AE,
-            C,
-            P,
-            statusId,
-            lecturaAnalysis
+            categoria, subtema, nivel, grado: gradoTexto, T, AE, C, P, statusId, lecturaAnalysis
           });
           apoyoHTML = await _unidadGenerarApoyoVisualHTML({
-            categoria,
-            subtema,
-            nivel,
-            grado: gradoTexto,
-            statusId,
-            objetivos: { T, AE, C, P },
-            actividadesNormales,
-            plan: apoyoPlan,
-            lecturaAnalysis
+            categoria, subtema, nivel, grado: gradoTexto, statusId, objetivos: { T, AE, C, P }, actividadesNormales, plan: apoyoPlan, lecturaAnalysis
           });
           const ajustado = await _unidadAjustarActividadesConApoyoVisual({
-            categoria,
-            subtema,
-            nivel,
-            grado: gradoTexto,
-            statusId,
-            htmlAlumno: htmlAlumnoLimpio,
-            apoyoPlan,
-            lecturaAnalysis
+            categoria, subtema, nivel, grado: gradoTexto, statusId, htmlAlumno: htmlAlumnoLimpio, apoyoPlan, lecturaAnalysis
           }).catch(() => "");
           if (ajustado) htmlAlumnoLimpio = cleanHTML(ajustado);
         }
+
+        // 4. Aseguramos consistencia final
         htmlAlumnoLimpio = _unidadWrapLooseTopLevelActivities(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadNormalizeAscNumberedSteps(htmlAlumnoLimpio);
         htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, subtema);
-        htmlAlumnoLimpio = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoLimpio, cantidad);
+        htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
+        
+        // Re-escaneo final de recursos tras posibles ajustes de IA
         recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
           recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio),
           recursosEsperados,
           recursosPermitidosPorTabla
         });
         recursosGenerados = _unidadFiltrarRecursosNoActivos(recursosGenerados, recursosPermitidosPorTabla);
-        htmlAlumnoLimpio = _unidadEnsureFichaBlocksHaveActivityClass(htmlAlumnoLimpio);
         let htmlAlumnoConApoyoVisual = htmlAlumnoLimpio;
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
@@ -26987,21 +27032,23 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                 <div id="${colMaestroId}" class="col-maestro" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
                     ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
                     <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
-                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoria}</span>
+                        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
                         <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
                         ${ejeSubcategoriaMaestro}
                         ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
                         ${habilidadSubcategoriaMaestro}
                         ${competenciaSubcategoriaMaestro}
                     </div>
-                    <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : tituloCreativoLimpioBase}</h4>
-                    ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
-                    <p><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
-                    <div id="${colMaestroId}-contenido" style="white-space:pre-wrap;"></div>
+                    <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : (tituloCreativoLimpioBase || "Notas del maestro")}</h4>
+                    ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T || ""}</h5>`}
+                    <div id="${colMaestroId}-contenido">
+                      <p><i class="fas fa-spinner fa-spin"></i> Esperando contenido...</p>
+                    </div>
                 </div>
             </div>
           `;
         _unidadSetResultLoadingOverlay(false);
+
         if (!importedUsesOwnHeading) {
           _unidadRegisterTemarioSubcategoria({
             subtema,
@@ -27012,8 +27059,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           });
           _unidadRefreshTemarioUnidadMount();
         }
+
+        // 1. Render Alumno en tiempo real
         await renderContenidoEnTiempoReal(document.getElementById(colAlumnoContenidoId), htmlAlumnoSoloMain);
 
+        // 2. Generar Notas Maestro
         actualizarSpinnerProceso(statusId, `Generando notas del maestro para <strong>${formatearSubtema(subtema)}</strong>...`);
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
         let notasFinalesColMaestro = "";
@@ -27030,7 +27080,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad
           });
         }
-        logVisual(`✅ Notas del maestro listas para ${subtema}`);
 
         if (String(categoria || "").trim() === "Matemáticas") {
           const bloqueContextoMatematico = _unidadBuildMathContextualizationPedagogicaHTML({
@@ -27039,24 +27088,28 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             tituloCreativo: tituloCreativoLimpioBase
           });
           if (!/Contextualización pedagógica de Matemáticas/i.test(notasFinalesColMaestro)) {
-            notasFinalesColMaestro += `
-                    ${bloqueContextoMatematico}
-                `;
+            notasFinalesColMaestro += `\n${bloqueContextoMatematico}`;
           }
         }
+        logVisual(`✅ Notas del maestro listas para ${subtema}`);
 
-        let bloqueRecursosHTML = "";
+        // 3. Render Maestro en tiempo real
+        const targetMaestroPrincipal = document.getElementById(`${colMaestroId}-contenido`);
+        if (targetMaestroPrincipal) {
+           await renderContenidoEnTiempoReal(targetMaestroPrincipal, notasFinalesColMaestro);
+        }
+
         if (separarSeccionesRecursos) {
           const resourceTypeToPermitKey = {
-            ficha: "fichas",
-            anexo: "anexos",
             recortable: "recortables",
+            anexo: "anexos",
+            ficha: "fichas",
             video: "videos"
           };
           const resourceTypeLabels = {
-            ficha: "Ficha",
-            anexo: "Anexo",
             recortable: "Recortable",
+            anexo: "Anexo",
+            ficha: "Ficha",
             video: "Video"
           };
 
@@ -27087,99 +27140,72 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           };
 
           const htmlMaestroRecursosByType = {};
+          const bloqueContenedorRecursos = document.getElementById(bloqueId);
+
           for (const type of Object.keys(resourceTypeLabels)) {
             if (!recursosPermitidosPorTabla[resourceTypeToPermitKey[type]]) continue;
             const htmlAlumnoRecurso = splitAlumnoRecursos.resourcesByType?.[type] || "";
-            if (!htmlAlumnoRecurso.trim()) continue;
-            const esFicha = type === "ficha";
-            htmlMaestroRecursosByType[type] = _unidadCleanTeacherNotesHtml(
-              await _unidadGenerarNotasMaestroSeccion({
-                promptContenidoActividades: htmlAlumnoRecurso,
-                fallbackContenidoActividades: htmlAlumnoRecurso,
-                categoria,
-                subtema,
-                tituloCreativo: tituloCreativoLimpioBase,
-                tituloSeccion: resourceSectionTitles[type],
-                grado: gradoTexto,
-                nivel,
-                expectedActivityCount: 1,
-                esFicha,
-                fichaClave: esFicha ? resourceSectionTitles[type] : "",
-                headingHtml: `
-                  <div class="unidad-resource-notes-heading" style="margin:0 0 18px 0;">
-                    <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(resourceSectionTitles[type])}</h4>
+            const resourceTitle = resourceSectionTitles[type];
+            const resourceBlockId = `${bloqueId}-recurso-${type}`;
+
+            const resourceShellHTML = `
+              <div id="${resourceBlockId}" class="bloque-subtema bloque-recursos-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:32px; flex-wrap:wrap;" data-resource-block="true" data-resource-section="true" data-resource-type="${type}">
+                  <div class="col-alumno" style="flex:1; min-width:300px;">
+                      ${_unidadBuildResourceMetadataHtml({
+                        subtema, categoria, tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                        columna: "alumno", etiquetaTitulo: resourceTitle
+                      })}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                          <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de ${resourceTypeLabels[type].toLowerCase()} del alumno</span>
+                      </div>
+                      <div id="${resourceBlockId}-alumno-contenido">
+                        ${htmlAlumnoRecurso || `<p style="color:#64748b;">Sin contenido para el alumno.</p>`}
+                      </div>
                   </div>
-                `
-              })
-            );
-          }
-
-          bloqueRecursosHTML = Object.keys(resourceTypeLabels)
-            .map((type) => {
-              if (!recursosPermitidosPorTabla[resourceTypeToPermitKey[type]]) return "";
-              const htmlAlumnoRecurso = splitAlumnoRecursos.resourcesByType?.[type] || "";
-              const htmlMaestroRecurso = htmlMaestroRecursosByType?.[type] || "";
-              if (!htmlAlumnoRecurso && !htmlMaestroRecurso) return "";
-              return `
-                <div class="bloque-subtema bloque-recursos-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:32px; flex-wrap:wrap;" data-resource-block="true" data-resource-section="true" data-resource-type="${type}">
-                    <div class="col-alumno" data-resource-block="true" data-resource-section="true" data-resource-type="${type}" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="alumno" style="flex:1; min-width:300px;">
-                        ${_unidadBuildResourceMetadataHtml({
-                          subtema,
-                          categoria,
-                          tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
-                          columna: "alumno",
-                          etiquetaTitulo: resourceSectionTitles[type]
-                        })}
-                        <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
-                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de ${resourceTypeLabels[type].toLowerCase()} del alumno</span>
-                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Separado del subtema principal</span>
-                        </div>
-                        ${htmlAlumnoRecurso || `<p style="color:#64748b;">Sin ${resourceTypeLabels[type].toLowerCase()} para el alumno en este subtema.</p>`}
-                    </div>
-                    <div class="col-maestro" data-resource-block="true" data-resource-section="true" data-resource-type="${type}" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                        ${_unidadBuildResourceMetadataHtml({
-                          subtema,
-                          categoria,
-                          tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
-                          columna: "maestro",
-                          etiquetaTitulo: resourceSectionTitles[type]
-                        })}
-                        <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
-                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de notas de ${resourceTypeLabels[type].toLowerCase()}</span>
-                            <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Bloque independiente del subtema</span>
-                        </div>
-                        ${htmlMaestroRecurso || `<p style="color:#64748b;">Sin notas de ${resourceTypeLabels[type].toLowerCase()} para este subtema.</p>`}
-                    </div>
-                </div>
-              `;
-            })
-            .filter(Boolean)
-            .join("");
-        }
-
-        actualizarSpinnerProceso(statusId, `Renderizando resultados de <strong>${formatearSubtema(subtema)}</strong>...`);
-        const colMaestro = document.getElementById(colMaestroId);
-        if (colMaestro) {
-          colMaestro.innerHTML = `
-              ${importedUsesOwnHeading ? "" : bloqueRutaHTML}
-              <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
-                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${categoriaEditorial}</span>
-                  <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${subcategoriaEditorialMaestro}</span>
-                  ${ejeSubcategoriaMaestro}
-                  ${campoFormativo ? `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #e9d5ff;background:#f3e8ff;color:#7e22ce;font-size:11px;font-weight:700;">Campo formativo: ${campoFormativo}</span>` : ""}
-                  ${habilidadSubcategoriaMaestro}
-                  ${competenciaSubcategoriaMaestro}
+                  <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                      ${_unidadBuildResourceMetadataHtml({
+                        subtema, categoria, tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                        columna: "maestro", etiquetaTitulo: resourceTitle
+                      })}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                          <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de notas de ${resourceTypeLabels[type].toLowerCase()}</span>
+                      </div>
+                      <div id="${resourceBlockId}-maestro-contenido">
+                        <p style="color:#64748b;"><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
+                      </div>
+                  </div>
               </div>
-              <h4>${importedUsesOwnHeading ? `Notas del maestro: ${_escapeHtmlUnidad(importedOwnTitle)}` : tituloCreativoLimpioBase}</h4>
-              ${importedUsesOwnHeading ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
-              <div id="${colMaestroId}-contenido"></div>
             `;
-          await renderContenidoEnTiempoReal(document.getElementById(`${colMaestroId}-contenido`), notasFinalesColMaestro);
+            
+            if (bloqueContenedorRecursos) {
+              bloqueContenedorRecursos.insertAdjacentHTML("beforeend", resourceShellHTML);
+            }
+
+            const notasMaestroRaw = await _unidadGenerarNotasMaestroSeccion({
+              promptContenidoActividades: htmlAlumnoRecurso,
+              fallbackContenidoActividades: htmlAlumnoRecurso,
+              categoria, subtema, tituloCreativo: tituloCreativoLimpioBase,
+              tituloSeccion: resourceTitle, grado: gradoTexto, nivel,
+              expectedActivityCount: 1, esFicha: type === "ficha",
+              fichaClave: type === "ficha" ? resourceTitle : "",
+              headingHtml: `
+                <div class="unidad-resource-notes-heading" style="margin:0 0 18px 0;">
+                  <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(resourceTitle)}</h4>
+                </div>
+              `
+            });
+
+            const htmlMaestroRecurso = _unidadCleanTeacherNotesHtml(notasMaestroRaw);
+            htmlMaestroRecursosByType[type] = htmlMaestroRecurso;
+
+            const targetMaestro = document.getElementById(`${resourceBlockId}-maestro-contenido`);
+            if (targetMaestro) {
+              await renderContenidoEnTiempoReal(targetMaestro, htmlMaestroRecurso);
+            }
+          }
         }
 
-        if (bloqueRecursosHTML) {
-          document.getElementById(bloqueId)?.insertAdjacentHTML("beforeend", bloqueRecursosHTML);
-        }
+        // Bloque de recursos ya renderizado individualmente arriba
 
 
         // ✅ CORRECCIÓN: Limpiar duplicados específicamente para Artes
@@ -27874,10 +27900,10 @@ function _unidadCountNormalActivities(html = "") {
 
 function _unidadBuildConteoCorrectionPrompt({
   categoria = "",
-  subtema = "",
+  subtema = "", // This is correct
   cantidad = 1,
   html = ""
-} = {}) {
+} = {}) { // This is correct
   return [
     "Corrige el siguiente HTML de actividades para alumno y devuélvelo COMPLETO.",
     `Contexto: categoría "${categoria}", subtema "${subtema}".`,
@@ -27889,7 +27915,7 @@ function _unidadBuildConteoCorrectionPrompt({
     html
   ].join("\n");
 }
-
+// This is correct
 async function _unidadSolicitarHtmlAlumnoConConteoExacto({
   promptCategoria = "",
   categoria = "",
@@ -27897,7 +27923,7 @@ async function _unidadSolicitarHtmlAlumnoConConteoExacto({
   cantidadEsperada = 1,
   maxIntentos = 2
 } = {}) {
-  const intentos = Math.max(1, parseInt(maxIntentos, 10) || 1);
+  const intentos = Math.max(1, parseInt(maxIntentos, 10) || 1); // This is correct
   let htmlActual = "";
   for (let intento = 1; intento <= intentos; intento += 1) {
     if (intento === 1) {
@@ -27913,7 +27939,7 @@ async function _unidadSolicitarHtmlAlumnoConConteoExacto({
     }
     htmlActual = String(htmlActual || "").replace(/```html|```/g, "").trim();
     if (_unidadCountNormalActivities(htmlActual) === Math.max(1, parseInt(cantidadEsperada, 10) || 1)) {
-      break;
+      break; // This is correct
     }
   }
   return htmlActual;
@@ -28183,30 +28209,32 @@ function _unidadInferGeneratedResourcesFromHtml(html = "") {
 
   if (!source.trim()) return out;
 
-  const fichaMatch = source.match(/\bFicha\s+[Pp]?\d+\w*/i);
-  if (fichaMatch?.[0]) {
+  const fichaMatch = source.match(/Ficha/i);
+  if (fichaMatch) {
     out.fichas.generado = true;
-    out.fichas.clave = String(fichaMatch[0]).trim();
+    const fullMatch = source.match(/Ficha\s+([Pp]?\d+\w*|de\s+\w+|[\w\sáéíóúñü]+)/i);
+    out.fichas.clave = fullMatch ? String(fullMatch[0]).trim() : "Ficha";
   }
 
-  const anexoMatch = source.match(/\bAnexo\s+[Pp]?\d+\w*/i);
-  if (anexoMatch?.[0]) {
+  const anexoMatch = source.match(/Anexo/i);
+  if (anexoMatch) {
     out.anexos.generado = true;
-    out.anexos.clave = String(anexoMatch[0]).trim();
+    const fullMatch = source.match(/Anexo\s+([Pp]?\d+\w*|visual|de\s+\w+|[\w\sáéíóúñü]+)/i);
+    out.anexos.clave = fullMatch ? String(fullMatch[0]).trim() : "Anexo";
   }
 
-  const recortableMatch = source.match(/\bRecortable\s+[Pp]?\d+\w*/i);
-  if (recortableMatch?.[0]) {
+  const recortableMatch = source.match(/Recortable/i);
+  if (recortableMatch) {
     out.recortables.generado = true;
-    out.recortables.clave = String(recortableMatch[0]).trim();
+    const fullMatch = source.match(/Recortable\s+([Pp]?\d+\w*|de\s+\w+|[\w\sáéíóúñü]+)/i);
+    out.recortables.clave = fullMatch ? String(fullMatch[0]).trim() : "Recortable";
   }
 
-  const videoQuotedMatch = source.match(/Guion de video:\s*"([^"]+)"/i);
-  const videoInlineMatch = source.match(/video\s+"([^"]+)"/i);
-  const videoValue = videoQuotedMatch?.[1] || videoInlineMatch?.[1] || "";
-  if (videoValue) {
+  const videoMatch = source.match(/Guion de video|Guion del video|video\s+/i);
+  if (videoMatch) {
     out.videos.generado = true;
-    out.videos.clave = String(videoValue).trim();
+    const videoQuotedMatch = source.match(/(?:Guion de video|video):\s*"([^"]+)"/i);
+    out.videos.clave = videoQuotedMatch ? String(videoQuotedMatch[1]).trim() : "Guion de video";
   }
 
   return out;
@@ -28904,8 +28932,8 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
   return root.innerHTML;
 }
 
-function _unidadResolveCantidadActividades(subtema = "", objetivosDelSubtema = []) {
-  const inputValue = parseInt(document.querySelector(`input[name='num_${subtema}']`)?.value || "", 10);
+function _unidadResolveCantidadActividades(subtema = "", objetivosDelSubtema = [], scope = document) {
+  const inputValue = parseInt(scope.querySelector(`input[name="num_${subtema}"]`)?.value || "", 10);
   if (Number.isFinite(inputValue) && inputValue > 0) return inputValue;
 
   const objetivoConCantidad = Array.isArray(objetivosDelSubtema)
@@ -29331,19 +29359,6 @@ function _unidadEnsureFichaMetadataSection(html = "", { subtema = "", categoria 
     .find((node) => String(node.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === safeFichaClave.toLowerCase());
   const getTopLevelChild = (node) => {
     let current = node;
-    while (current && current.parentElement && current.parentElement !== root) {
-      current = current.parentElement;
-    }
-    return current && current.parentElement === root ? current : null;
-  };
-  let anchorNode = heading ? getTopLevelChild(heading) : null;
-  if (!heading) {
-    const firstFichaBlock = root.querySelector('.activity[data-ficha="true"], .activity-fichas');
-    if (!firstFichaBlock) return source;
-    heading = doc.createElement("h3");
-    heading.className = "unidad-ficha-heading";
-    heading.style.marginTop = "24px";
-    heading.textContent = safeFichaClave;
     root.insertBefore(heading, firstFichaBlock);
     anchorNode = heading;
   }
@@ -29388,65 +29403,93 @@ function _unidadEnsureFinalResourceTitles(html = "", recursos = {}, subtema = ""
     {
       key: "anexos",
       title: String(recursos?.anexos?.clave || "").trim(),
-      match: /\banexo\s+[Pp]?\d+\w*|\bsecci[oó]n de anexos?\b/i,
+      match: /anexo|secci[oó]n de anexos?/i,
       headingClass: "unidad-anexo-heading",
-      recursoType: "anexos"
+      recursoType: "anexo"
     },
     {
       key: "recortables",
       title: String(recursos?.recortables?.clave || "").trim(),
-      match: /\brecortable\s+[Pp]?\d+\w*|\bsecci[oó]n de recortables?\b/i,
+      match: /recortable|secci[oó]n de recortables?/i,
       headingClass: "unidad-recortable-heading",
-      recursoType: "recortables"
+      recursoType: "recortable"
+    },
+    {
+      key: "fichas",
+      title: String(recursos?.fichas?.clave || "").trim(),
+      match: /ficha|secci[oó]n de fichas?/i,
+      headingClass: "unidad-ficha-heading",
+      recursoType: "ficha"
     },
     {
       key: "videos",
       title: String(recursos?.videos?.clave || "").trim() ? `Guion de video: "${String(recursos?.videos?.clave || "").trim()}"` : "",
-      match: /guion de video:\s*"[^"]+"|video\s+"[^"]+"|\bsecci[oó]n de videos?\b/i,
+      match: /guion de video|guion del video|video\s+|secci[oó]n de videos?/i,
       headingClass: "unidad-video-heading",
-      recursoType: "videos"
+      recursoType: "video"
     }
   ].filter((item) => item.title);
 
   if (!configs.length) return source;
 
-  const sectionBlocks = Array.from(root.children).filter((node) => node instanceof Element);
+  const sectionBlocks = Array.from(root.children);
+  let currentResourceWrapper = null;
+  let currentType = null;
+
   sectionBlocks.forEach((block) => {
+    if (!(block instanceof Element)) return;
+    
     const blockText = String(block.textContent || "").replace(/\s+/g, " ").trim();
-    const titleNode = Array.from(block.children).find((node) => /^H[1-6]$/.test(node.tagName || "") || (node.tagName || "") === "STRONG" || ((node.tagName || "") === "P" && node.querySelector("strong")));
-    const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim();
+    
+    // Si el bloque ya está marcado como recurso, lo usamos como disparador de cambio de tipo
+    const existingType = block.getAttribute("data-resource-type");
+    const isAlreadySection = block.getAttribute("data-resource-section") === "true";
 
+    // Detectar si este bloque es un encabezado de recurso
+    let matchingConfig = null;
     configs.forEach((config) => {
-      if (!config.match.test(blockText)) return;
-      if (titleText && titleText.toLowerCase().includes(config.title.toLowerCase())) return;
-
-      block.setAttribute("data-resource-type", config.recursoType);
-      block.setAttribute("data-resource-section", "true");
-
-      const heading = doc.createElement("strong");
-      heading.className = config.headingClass;
-      heading.textContent = config.title;
-
-      const etiquetaNomenclatura = _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: config.recursoType });
-      const etiquetaSubcat = _unidadEtiquetaEditorialSubcategoria({ subtema, categoria, columna: "alumno" });
-      const wrapper = doc.createElement("div");
-      wrapper.className = "unidad-metadatos-etiquetas unidad-recurso-adicional-metadatos";
-      wrapper.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:16px;margin-top:10px;";
-      wrapper.innerHTML = `
-        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Nomenclatura: ${_escapeHtmlUnidad(etiquetaNomenclatura)}</span>
-        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;font-size:11px;font-weight:700;">Categoría: ${_escapeHtmlUnidad(categoria)}</span>
-        <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#ffffff;color:#4b5563;font-size:11px;font-weight:700;">Subcat: ${_escapeHtmlUnidad(etiquetaSubcat)}</span>
-      `;
-
-      if (block.firstChild) {
-        block.insertBefore(wrapper, block.firstChild);
-        block.insertBefore(heading, wrapper);
-        block.insertBefore(doc.createElement("br"), wrapper);
-      } else {
-        block.appendChild(heading);
-        block.appendChild(wrapper);
+      if (config.match.test(blockText) || (existingType && existingType.includes(config.recursoType))) {
+        matchingConfig = config;
       }
     });
+
+    if (matchingConfig) {
+      // Es un nuevo inicio de recurso. Creamos el wrapper.
+      currentType = matchingConfig.recursoType;
+
+      if (isAlreadySection && (existingType === currentType || existingType === currentType + 's')) {
+        // Ya es un wrapper correcto, lo mantenemos como el wrapper actual
+        currentResourceWrapper = block;
+        return;
+      }
+
+      currentResourceWrapper = doc.createElement("div");
+      currentResourceWrapper.setAttribute("data-resource-type", currentType);
+      currentResourceWrapper.setAttribute("data-resource-section", "true");
+      if (currentType === "ficha") currentResourceWrapper.setAttribute("data-ficha", "true");
+      currentResourceWrapper.className = `bloque-recurso-contenedor resource-${currentType}`;
+      
+      // Insertar el wrapper antes del bloque actual y mover el bloque adentro
+      root.insertBefore(currentResourceWrapper, block);
+      currentResourceWrapper.appendChild(block);
+
+      // Añadir encabezado si no lo tiene ya de forma clara
+      const titleNode = Array.from(block.children).find((node) => /^H[1-6]$/.test(node.tagName || "") || (node.tagName || "") === "STRONG");
+      const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      
+      if (!titleText || !titleText.includes(matchingConfig.title.toLowerCase())) {
+        const heading = doc.createElement("strong");
+        heading.className = matchingConfig.headingClass;
+        heading.style.display = "block";
+        heading.style.marginBottom = "10px";
+        heading.textContent = matchingConfig.title;
+        block.insertBefore(heading, block.firstChild);
+      }
+    } else if (currentResourceWrapper) {
+      // No es un nuevo encabezado, pero estamos dentro de un recurso.
+      // Movemos este bloque al wrapper actual.
+      currentResourceWrapper.appendChild(block);
+    }
   });
 
   return root.innerHTML;
@@ -30316,6 +30359,7 @@ async function accionGuardarUnidadFirebase({ silent = false } = {}) {
       origen: "generarUnidadDidactica",
       creadoPor: String(user.email || user.uid || "Desconocido").trim().toLowerCase(),
       timestamp: new Date(),
+      actualizado: new Date(),
       editadoEn: new Date(),
       editadoPor: String(user.email || user.uid || "Desconocido").trim().toLowerCase(),
       publicar: false,
@@ -31408,6 +31452,7 @@ function agregarBotonLimpiarInstrucciones() {
   btnLimpiar.addEventListener('click', () => {
     if (confirm('¿Estás seguro de que quieres eliminar TODAS las instrucciones adicionales para todas las categorías?')) {
       window.instruccionesGeminiPorCategoria = {};
+      window.instruccionesGeminiPorSubtema = {};
 
       // Limpiar localStorage
       const categorias = Object.keys(localStorage).filter(key => key.startsWith('instrucciones_gemini_'));

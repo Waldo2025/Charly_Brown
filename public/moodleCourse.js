@@ -88,7 +88,9 @@ let moduloEditandoCompleto = null;
 let moduloEditandoInstruccionesId = null;
 let cursosOtrosUsuarios = [];
 let currentUserRole = null;
-const moduloAutosaveTimers = new Map();
+const modulosCache = new Map();
+let geminiModelsSyncPromise = null;
+
 let mostrarModulosArchivados = localStorage.getItem("cb_mostrar_modulos_archivados") === "1";
 
 let textoOriginalParaReformular = "";
@@ -96,8 +98,34 @@ let seleccionOriginalParaReformular = null;
 const USE_SORTABLE_SIDEBAR = typeof window !== 'undefined' && !!window.Sortable;
 let sortableTemasInstance = null;
 let sortableSubtemasInstances = [];
-const modulosCache = new Map();
-let geminiModelsSyncPromise = null;
+
+// --- GESTIÓN DE GUARDADO GLOBAL ---
+let savesInProgressCount = 0;
+const moduloAutosaveTimers = new Map();
+
+window.updateGlobalSaveStatus = function(isSaving) {
+    const statusEl = document.getElementById("globalSaveStatus");
+    if (!statusEl) return;
+
+    if (isSaving) {
+        savesInProgressCount++;
+        statusEl.classList.remove("opacity-0", "pointer-events-none");
+    } else {
+        savesInProgressCount = Math.max(0, savesInProgressCount - 1);
+        if (savesInProgressCount === 0) {
+            statusEl.classList.add("opacity-0", "pointer-events-none");
+        }
+    }
+}
+
+window.addEventListener('beforeunload', (e) => {
+    if (savesInProgressCount > 0 || moduloAutosaveTimers.size > 0) {
+        e.preventDefault();
+        e.returnValue = 'Tienes cambios sin guardar. ¿Estás seguro de que quieres salir?';
+        return e.returnValue;
+    }
+});
+
 
 function resolveMoodleCollabPermissions(data = {}, uid = "") {
     const safeUid = String(uid || "").trim();
@@ -4415,6 +4443,10 @@ async function seleccionarCurso(id) {
     
     seleccionandoCurso = true;
 
+    // 🔥 ESTABLECER IDENTIDAD INMEDIATAMENTE PARA EVITAR CARRERAS
+    cursoDocId = id;
+    localStorage.setItem("cursoSeleccionado", id);
+
     try {
         // 🔥 LIMPIAR SUSCRIPCIONES ANTERIORES (UNA SOLA VEZ)
         if (window.cursoSnapshotUnsubscribe && typeof window.cursoSnapshotUnsubscribe === 'function') {
@@ -4506,15 +4538,10 @@ async function seleccionarCurso(id) {
         
         // Asignar curso a variables globales
         curso = { ...cursoLocal };
-        cursoDocId = id;
         window.curso = curso;
         
         // Asegurar estructura válida
         curso.temas = Array.isArray(curso.temas) ? curso.temas : [];
-        
-        
-        // Guardar selección en LocalStorage
-        localStorage.setItem("cursoSeleccionado", id);
         
         // Actualizar UI de lista de cursos
         document.querySelectorAll('.curso-item').forEach(item => {
@@ -5196,6 +5223,17 @@ window.guardarCursoFirebase = async function () {
     if (!cursoDocId || !curso) {
         return false;
     }
+
+    // 🔥 VERIFICACIÓN DE INTEGRIDAD: Asegurar que el objeto curso coincida con el ID de destino
+    const cursoIdActual = String(curso.id || curso.cursoId || "").trim();
+    if (cursoIdActual !== String(cursoDocId).trim()) {
+        console.error("[Aprende] Error crítico de integridad: Se intentó guardar datos de un curso en el ID de otro.", {
+            cursoIdObjeto: cursoIdActual,
+            cursoDocIdDestino: cursoDocId
+        });
+        mostrarNotificacion("Error de sincronización: El curso en memoria no coincide con el seleccionado. Por favor, refresca la página.", "error", true);
+        return false;
+    }
     
     try {
         // Verificar permisos para cursos compartidos
@@ -5384,16 +5422,25 @@ const btnAddTema = document.getElementById("btnAddTema");
 btnAddTema.disabled = true; // sólo al inicio
 
 function resolveCursoActivoParaNuevoTema() {
-    if (curso && (curso.id || curso.cursoId)) return curso;
     const activeId = String(cursoDocId || localStorage.getItem("cursoSeleccionado") || "").trim();
     if (!activeId) return null;
+
+    // 🔥 VALIDACIÓN DE IDENTIDAD: Solo usar el objeto global si su ID coincide con el activo
+    if (curso && (String(curso.id || "").trim() === activeId || String(curso.cursoId || "").trim() === activeId)) {
+        return curso;
+    }
+
+    // Si no coincide o no hay objeto, buscar en el caché local
     const localCourse = cursosUsuario.find((item) => String(item?.id || item?.cursoId || "").trim() === activeId);
     if (localCourse) {
+        // Clonar para evitar mutaciones accidentales en el caché
         curso = { ...localCourse };
         window.curso = curso;
         cursoDocId = activeId;
         return curso;
     }
+
+    console.warn("[Aprende] No se pudo resolver el curso activo para el ID:", activeId);
     return null;
 }
 
@@ -7399,9 +7446,12 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                             if (!forzar && html === ultimo) return;
 
                             try {
+                                updateGlobalSaveStatus(true);
                                 await guardarModulo(modId, { contenido: html });
                                 contenedor.dataset.lastSavedHtml = html;
-                                contenedor.innerHTML = html;
+                                
+                                // Opcional: No reseteamos el innerHTML aquí para evitar perder el cursor
+                                // contenedor.innerHTML = html; 
 
                                 const spinner = document.getElementById(`spinner-${modId}`);
                                 if (spinner) {
@@ -7409,13 +7459,16 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                                     spinner.innerHTML = `<span class="text-green-600 text-xs">✓ Guardado</span>`;
                                     setTimeout(() => spinner.classList.add("hidden"), 1200);
                                 }
-                            } catch (_) {
+                            } catch (err) {
+                                console.error("Error al autoguardar módulo:", err);
                                 const spinner = document.getElementById(`spinner-${modId}`);
                                 if (spinner) {
                                     spinner.classList.remove("hidden");
                                     spinner.innerHTML = `<span class="text-red-600 text-xs">✗ Error al guardar</span>`;
                                     setTimeout(() => spinner.classList.add("hidden"), 1800);
                                 }
+                            } finally {
+                                updateGlobalSaveStatus(false);
                             }
                         };
 
@@ -14797,6 +14850,62 @@ if (storedVersion && storedVersion !== APP_VERSION) {
   localStorage.setItem("APP_VERSION", APP_VERSION);
 }
 
+function inicializarBotonGuardarSesion() {
+    const btn = document.getElementById("btnGuardarSesion");
+    if (!btn) return;
+
+    btn.addEventListener("click", async () => {
+        try {
+            updateGlobalSaveStatus(true);
+            
+            // 1. Forzar guardado de módulos editándose
+            const promesasModulos = [];
+            document.querySelectorAll('.contenido-editable').forEach(contenedor => {
+                const modId = contenedor.dataset.moduloId;
+                if (!modId) return;
+
+                // Limpiar timers pendientes
+                if (moduloAutosaveTimers.has(modId)) {
+                    clearTimeout(moduloAutosaveTimers.get(modId));
+                    moduloAutosaveTimers.delete(modId);
+                }
+
+                const htmlCrudo = sanitizeRichText(contenedor.innerHTML);
+                const html = normalizarContenidoModuloPersistible(htmlCrudo);
+                const ultimo = contenedor.dataset.lastSavedHtml || "";
+                
+                if (html !== ultimo) {
+                    promesasModulos.push(guardarModulo(modId, { contenido: html }).then(() => {
+                        contenedor.dataset.lastSavedHtml = html;
+                    }));
+                }
+            });
+
+            if (promesasModulos.length > 0) {
+                await Promise.all(promesasModulos);
+            }
+
+            // 2. Guardar estado general del curso
+            await guardarCursoFirebase();
+
+            mostrarNotificacion("Sesión guardada correctamente", "success");
+        } catch (error) {
+            console.error("Error al guardar sesión:", error);
+            mostrarNotificacion("Error al guardar la sesión completa", "error");
+        } finally {
+            updateGlobalSaveStatus(false);
+        }
+    });
+
+    // Ctrl+S / Cmd+S global
+    window.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            btn.click();
+        }
+    });
+}
+
 function bootMoodleCourseUI() {
     try {
         if (window.moodleCourseUIBooted) return;
@@ -14807,6 +14916,7 @@ function bootMoodleCourseUI() {
         inicializarPublicarCursoUI();
         inicializarToggleArchivadosUI();
         inicializarBotonExportCursoWord();
+        inicializarBotonGuardarSesion();
         console.log("[Aprende] bootMoodleCourseUI completado.");
     } catch (e) {
         console.error("[Aprende] Error en bootMoodleCourseUI:", e);

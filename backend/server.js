@@ -2219,6 +2219,13 @@ function sanitizePodcasterSession(raw = {}) {
     },
     track: sanitizePanelMusicTrack(panelMusicTrackRaw, "Audio")
   };
+  
+  // Si no hay un track activo seleccionado explícitamente pero la librería tiene pistas,
+  // y el modo es 'track', intentamos poblarlo para asegurar que el dashboard tenga algo que reproducir.
+  if (panelMusicConfig.sourceType === "track" && !panelMusicConfig.track) {
+    panelMusicConfig.track = panelMusicConfig.trackLibrary.uploaded || panelMusicConfig.trackLibrary.ai;
+  }
+
   if (!panelMusicConfig.trackLibrary.uploaded && panelMusicConfig.trackLibrary.uploadedTracks.length) {
     panelMusicConfig.trackLibrary.uploaded = panelMusicConfig.trackLibrary.uploadedTracks[0];
   }
@@ -6187,6 +6194,8 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const model = normalizeModel(req.body?.model || "gemini-3.1-flash-tts-preview");
+
+    console.log(`[DialogueAudio] Generating for session ${sessionId}, row ${rowId}, regenerate: ${regenerate}, previous: ${!!previousStoragePath}`);
 
     if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
     if (!rowId) return res.status(400).json({ error: "Falta rowId." });

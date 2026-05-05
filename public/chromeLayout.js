@@ -1,4 +1,13 @@
-(function () {
+// Import Firebase modules
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js';
+import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
+import { firebaseWebConfig } from './firebase-web-config.js'; // Assuming this path is correct
+
+// Initialize Firebase
+const app = initializeApp(firebaseWebConfig);
+const auth = getAuth(app);
+
+(function () { // IIFE starts here
   const CHROME_LAYOUT_ASSET_VERSION = '2026-1.0.0.71';
 
   function normalizePageId(pageId, fallback = 'index.html') {
@@ -267,6 +276,7 @@
       { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
       { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
+      { href: 'escapeRoomCreator.html', icon: 'fas fa-door-closed', label: 'Escape Room' },
       { href: 'perfil.html', icon: 'fas fa-user', label: 'Perfil' },
       { href: 'gestionUsuarios.html', icon: 'fas fa-users-cog', label: 'Usuarios', id: 'gestionUsuariosLink', roleVisibility: 'admin' },
       { href: 'chat.html', icon: 'fas fa-comment', label: 'Chat', id: 'chatLink' },

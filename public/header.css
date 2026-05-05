@@ -109,9 +109,9 @@
   max-width: 280px;
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  border: 1px solid color-mix(in srgb, var(--cb-header-text-color, #ffffff) 30%, transparent) !important;
+  background: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 14%, transparent) !important;
+  color: var(--cb-header-text-color, #fff) !important;
   font-size: 0.75rem;
   line-height: 1;
   white-space: nowrap;

@@ -89,55 +89,21 @@
       }
       #${LAUNCHER_ID}.update-banner-launcher {
         display: none;
-        position: relative;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        height: 30px;
-        padding: 0 0.75rem;
-        border: 1px solid rgba(255, 255, 255, 0.4);
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.18);
-        color: #fff !important;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.01em;
-        text-transform: none;
-        cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
         margin-left: auto;
-        white-space: nowrap;
+        cursor: pointer;
         transition: all 0.2s ease;
-      }
-      #${LAUNCHER_ID}.update-banner-launcher,
-      #${LAUNCHER_ID}.update-banner-launcher:visited,
-      #${LAUNCHER_ID}.update-banner-launcher:active {
-        color: #fff !important;
-        border-color: rgba(255, 255, 255, 0.4);
-        text-decoration: none !important;
-        opacity: 1 !important;
+        text-decoration: none;
+        background: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 14%, transparent) !important;
+        color: var(--cb-header-text-color, #ffffff) !important;
+        border: 1px solid color-mix(in srgb, var(--cb-header-text-color, #ffffff) 30%, transparent) !important;
       }
       #${LAUNCHER_ID}.update-banner-launcher:hover {
-        background: rgba(255, 255, 255, 0.28);
-        border-color: rgba(255, 255, 255, 0.6);
+        background: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 24%, transparent) !important;
+        border-color: color-mix(in srgb, var(--cb-header-text-color, #ffffff) 50%, transparent) !important;
         transform: translateY(-1px);
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.18);
       }
-      #${LAUNCHER_ID}.update-banner-launcher:hover,
-      #${LAUNCHER_ID}.update-banner-launcher:hover span,
-      #${LAUNCHER_ID}.update-banner-launcher:hover i {
-        color: #ffffff !important;
-      }
-      #${LAUNCHER_ID}.update-banner-launcher:focus-visible {
-        outline: 2px solid rgba(255, 255, 255, 0.5);
-        outline-offset: 2px;
-      }
-      #${LAUNCHER_ID}.update-banner-launcher span,
-      #${LAUNCHER_ID}.update-banner-launcher i {
-        position: relative;
-        z-index: 1;
-        color: inherit !important;
-        opacity: 1 !important;
+      #${LAUNCHER_ID}.update-banner-launcher:active {
+        transform: translateY(0);
       }
       #${LAUNCHER_ID}.update-banner-launcher.is-visible {
         display: inline-flex;
@@ -153,9 +119,7 @@
         color: #facc15;
         font-size: 11px;
         line-height: 1;
-      }
-      #${LAUNCHER_ID}.update-banner-launcher:hover .update-banner-launcher-icon {
-        color: #facc15;
+        margin-right: 2px;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -220,7 +184,7 @@
       btn = document.createElement('button');
       btn.id = LAUNCHER_ID;
       btn.type = 'button';
-      btn.className = 'update-banner-launcher';
+      btn.className = 'update-banner-launcher header-user-email';
       btn.innerHTML = '<span class="update-banner-launcher-icon" aria-hidden="true">⚠</span><span>Actualizar ahora</span>';
       btn.setAttribute('aria-label', 'Actualizar ahora');
     }

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creador de Escape Rooms Educativos - CharlyBrown</title>
+    <!-- Project-wide CSS -->
+    <link rel="stylesheet" href="tailwind-lite.css?v=1.0.0">
+    <link rel="stylesheet" href="sidebar.css">
+    <link rel="stylesheet" href="header.css">
+    <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; }
+        .loader { border-top-color: #3b82f6; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Adjust main content padding to avoid overlap with fixed header/sidebar */
+        .cb-main-layout {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        #app-container {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+        }
+        .content-wrapper {
+            flex: 1;
+            min-width: 0;
+            padding-top: var(--cb-header-height, 64px); /* Account for fixed header */
+            padding-left: var(--cb-sidebar-collapsed-width, 64px); /* Account for collapsed sidebar */
+            overflow-y: auto;
+        }
+        /* Adjust for expanded sidebar */
+        #sidebar.show ~ .content-wrapper {
+            padding-left: var(--cb-sidebar-expanded-width, 250px);
+        }
+        /* Adjust for mobile */
+        @media (max-width: 768px) {
+            .content-wrapper {
+                padding-top: var(--cb-header-mobile-height, 56px);
+                padding-left: 0; /* Sidebar is usually hidden or overlays on mobile */
+            }
+            #sidebar.show ~ .content-wrapper {
+                padding-left: 0; /* Sidebar overlays on mobile */
+            }
+        }
+        /* New styles for the two-panel layout */
+        .main-content-layout {
+            display: flex;
+            flex-grow: 1; /* Allow it to grow and fill space */
+            gap: 2rem; /* Space between panels */
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
+        .form-panel {
+            flex: 1 1 45%; /* Allow form to grow, shrink, and take at least 45% width */
+            min-width: 300px; /* Minimum width for the form panel */
+            display: flex;
+            flex-direction: column;
+        }
+        .preview-panel {
+            flex: 1 1 50%; /* Allow preview to grow, shrink, and take at least 50% width */
+            min-width: 400px; /* Minimum width for the preview panel */
+            display: flex;
+            flex-direction: column;
+            background-color: #fff; /* Background for the preview panel */
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: 1px solid #e2e8f0;
+            overflow: hidden; /* Ensure iframe content doesn't overflow */
+        }
+        .preview-panel iframe {
+            flex-grow: 1; /* Allow iframe to fill available height */
+            min-height: 400px; /* Minimum height for the iframe */
+        }
+        /* Adjustments for smaller screens */
+        @media (max-width: 1024px) {
+            .main-content-layout {
+                flex-direction: column; /* Stack panels vertically */
+            }
+            .form-panel, .preview-panel {
+                flex: 1 1 100%; /* Take full width */
+                min-width: unset;
+            }
+        }
+        .content-main { flex: 1; display: flex; flex-direction: column; padding: 2rem; } /* Make content-main fill available space and be a flex container */
+        .loader { border-top-color: #3b82f6; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="cb-main-layout">
+
+    <div id="updateBanner" class="update-banner" role="button" tabindex="0" aria-live="polite">
+        Nuevas Actualizaciones
+    </div>
+
+    <div id="app-container">
+        <!-- Main project header -->
+        <div class="main-header">
+            <div class="header-content"></div>
+        </div>
+
+        <!-- Main project sidebar -->
+        <div id="sidebar">
+            <div class="sidebar-menu"></div>
+        </div>
+
+        <!-- Main content wrapper -->
+        <div class="content-wrapper">
+            <main class="content-main">
+                <div class="main-content-layout">
+                    <!-- Left Panel: Form and JSON Preview -->
+                    <div class="form-panel">
+                        <div class="max-w-4xl mx-auto">
+                            <header class="mb-8">
+                                <h1 class="text-3xl font-extrabold text-slate-900">Diseñador de Escape Rooms</h1>
+                                <p class="text-slate-500 mt-2">Genera experiencias inmersivas impulsadas por IA y expórtalas como juegos interactivos (HTML) listos para subir a Moodle.</p>
+                            </header>
+
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 mb-8">
+                                <form id="escapeRoomForm" class="space-y-6">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Nivel Educativo</label>
+                                            <select id="nivelSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                                <option value="Primaria">Primaria</option>
+                                                <option value="Secundaria">Secundaria</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Grado</label>
+                                            <select id="gradoSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                                <option value="Primero">Primero</option>
+                                                <option value="Segundo">Segundo</option>
+                                                <option value="Tercero">Tercero</option>
+                                                <option value="Cuarto">Cuarto</option>
+                                                <option value="Quinto">Quinto</option>
+                                                <option value="Sexto">Sexto</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Número de Misiones/Salas</label>
+                                            <input type="number" id="numMisionesInput" value="4" min="2" max="8" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-2">Tema Curricular</label>
+                                        <input type="text" id="temaInput" placeholder="Ej. El Ciclo del Agua, Ecuaciones Lineales, La Revolución Mexicana..." class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-2">Estilo Narrativo / Temática del Juego</label>
+                                        <select id="narrativaSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                            <option value="Misterio y detectives (Investigación)">🕵️ Misterio y detectives (Investigación)</option>
+                                            <option value="Aventura espacial (Ciencia ficción)">🚀 Aventura espacial (Ciencia ficción)</option>
+                                            <option value="Exploración de ruinas antiguas (Aventura histórica)">🏺 Exploración de ruinas antiguas (Aventura histórica)</option>
+                                            <option value="Laboratorio secreto (Ciencia y experimentos)">🔬 Laboratorio secreto (Ciencia y experimentos)</option>
+                                            <option value="Fantasía mágica (Magia y hechizos)">🧙‍♂️ Fantasía mágica (Magia y hechizos)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="pt-4 flex items-center justify-between border-t border-slate-100">
+                                        <button type="submit" id="btnGenerar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md flex items-center gap-2">
+                                            <i class="fas fa-magic"></i> Crear Escape Room
+                                        </button>
+                                        <div id="loadingIndicator" class="hidden flex items-center gap-3 text-blue-600 font-medium">
+                                            <div class="loader ease-linear rounded-full border-4 border-t-4 border-slate-200 h-6 w-6"></div>
+                                            Diseñando la experiencia...
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- Área de Resultados (JSON Preview) -->
+                            <div id="resultadoContainer" class="hidden bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
+                                <div class="flex justify-between items-center mb-6">
+                                    <h2 class="text-2xl font-bold text-slate-900">Juego Generado (JSON)</h2>
+                                    <button id="btnExportar" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-5 rounded-lg transition-all shadow-sm flex items-center gap-2">
+                                        <i class="fas fa-download"></i> Descargar para Moodle
+                                    </button>
+                                </div>
+                                <div id="jsonPreview" class="bg-slate-50 border border-slate-200 rounded-xl p-6 text-sm text-slate-700 max-h-96 overflow-y-auto font-mono">
+                                    <!-- Preview de datos JSON -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Real Preview -->
+                    <div id="escapeRoomPreviewPanel" class="preview-panel hidden">
+                        <h2 class="text-2xl font-bold text-slate-900 mb-4">Vista Previa del Escape Room</h2>
+                        <iframe id="escapeRoomPreviewFrame" class="w-full h-full border-none rounded-xl shadow-md"></iframe>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    <script type="module" src="chromeLayout.js"></script>
+    <script type="module" src="escapeRoomCreator.js"></script>
+    <script src="update-banner-loader.js" defer></script>
+</body>
+</html>

@@ -113,6 +113,15 @@ const verificarRolUsuario = async (user) => {
 
 let usuariosCache = new Map();
 
+let dashboardUnsubscribes = {
+  lecturas: null,
+  unidades: null,
+  multimedia: null,
+  podcasts: null,
+  aprende: null,
+  downloads: null
+};
+
 let unsubscribeLecturas;
 let unsubscribeComentarios;
 
@@ -665,37 +674,63 @@ function appendLecturaModalImage(container, imageUrl = "") {
   const safeImageUrl = safeUrl(imageUrl, "");
   if (!container || !safeImageUrl) return;
 
-  const imageBlock = document.createElement("div");
-  imageBlock.style.backgroundImage = `url("${safeImageUrl}")`;
-  imageBlock.style.backgroundPosition = "center";
-  imageBlock.style.backgroundSize = "cover";
-  imageBlock.style.backgroundRepeat = "no-repeat";
-  imageBlock.style.width = "100%";
-  imageBlock.style.height = "200px";
-  imageBlock.style.margin = "1rem 0";
-  imageBlock.style.borderRadius = "8px";
-  container.appendChild(imageBlock);
+  const wrapper = document.createElement("div");
+  wrapper.className = "lectura-modal-image-wrapper";
+  
+  const img = document.createElement("img");
+  img.src = safeImageUrl;
+  img.alt = "Imagen de apoyo";
+  
+  wrapper.appendChild(img);
+  container.appendChild(wrapper);
 }
 
-function renderLecturaModalContent(container, rawHtml = "", imageUrl = "") {
+function renderLecturaModalContent(container, rawHtml = "", imageUrl = "", collectionName = "") {
   if (!container) return;
   container.replaceChildren();
+
+  // Crear la superficie de papel (art-surface)
+  const surface = document.createElement("div");
+  surface.className = "modal-lectura-art-surface aprende-preview-content-html";
+  container.appendChild(surface);
 
   const sanitizedHtml = sanitizeRichText(rawHtml || "", { fallback: "<p></p>" });
   const parser = new DOMParser();
   const htmlDoc = parser.parseFromString(sanitizedHtml, "text/html");
   const bloques = Array.from(htmlDoc.body.children);
 
+  const isASC = collectionName === "lecturasASC";
   let insertedImage = false;
+
   bloques.forEach((block) => {
     const clone = block.cloneNode(true);
-    const blockText = String(clone.textContent || "").toLowerCase();
-    container.appendChild(clone);
-    if (!insertedImage && (blockText.includes("análisis") || blockText.includes("competencia") || blockText.includes("estructura"))) {
-      appendLecturaModalImage(container, imageUrl);
+    const blockText = String(clone.textContent || "").trim();
+    if (!blockText && clone.tagName === "P") return; // Saltar párrafos vacíos
+
+    if (isASC && clone.tagName === "P") {
+      // Aplicar estilo de burbuja premium para ASC
+      const bubbleBlock = document.createElement("div");
+      bubbleBlock.className = "lectura-bubble-block";
+      const bubble = document.createElement("div");
+      bubble.className = "lectura-premium-bubble";
+      bubble.appendChild(clone);
+      bubbleBlock.appendChild(bubble);
+      surface.appendChild(bubbleBlock);
+    } else {
+      surface.appendChild(clone);
+    }
+
+    // Inyectar imagen de apoyo si aplica
+    if (!insertedImage && (blockText.toLowerCase().includes("análisis") || blockText.toLowerCase().includes("competencia") || blockText.toLowerCase().includes("estructura"))) {
+      appendLecturaModalImage(surface, imageUrl);
       insertedImage = true;
     }
   });
+
+  // Si no se insertó imagen y hay una disponible, ponerla al final
+  if (!insertedImage && imageUrl) {
+    appendLecturaModalImage(surface, imageUrl);
+  }
 }
 
 
@@ -703,18 +738,37 @@ function renderLecturaModalContent(container, rawHtml = "", imageUrl = "") {
 
 
 // Like, comentario, modal
+let eventosConfigurados = false;
 const configurarEventos = () => {
+  if (eventosConfigurados) return;
+  eventosConfigurados = true;
+
   document.addEventListener("click", async (e) => {
-    // Solo proceder si el click es dentro de un contenedor relevante o tiene una clase de acción
-    const btnAction = e.target.closest(".ver-lectura, .aprobar-icon, .rechazar-icon, .archivar-lectura");
+    // 1. DETECCIÓN DE ELEMENTOS (Header vs Acción)
+    const accHeader = e.target.closest(".workbench-accordion-header, .multimedia-accordion-header");
+    const btnAction = e.target.closest(".ver-lectura, .aprobar-icon, .rechazar-icon, .archivar-lectura, .btn-workbench-action, .btn-multimedia-play");
+
+    // 2. MANEJO DE ACORDEÓN (Si se hace click en el header y NO es un botón de acción)
+    if (accHeader && !btnAction) {
+      const card = accHeader.closest(".workbench-item, .item-lectura, .accordion-item");
+      if (card) {
+        card.classList.toggle("is-expanded");
+        return; 
+      }
+    }
+
+    // 3. FILTRADO DE ACCIONES (Si no hay botón de acción, no hacer nada más)
     if (!btnAction) return;
+
+    // Prevenir comportamiento por defecto para botones de acción (links con #)
+    e.preventDefault();
 
     const id = btnAction.dataset.id;
     const user = auth.currentUser;
     if (!id || !user) return;
 
-    const lecturaItem = e.target.closest(".item-lectura");
-    const coleccion = lecturaItem?.dataset.coleccion || "lecturas";
+    const lecturaItem = e.target.closest(".item-lectura, .workbench-item");
+    const coleccion = btnAction.dataset.coleccion || lecturaItem?.dataset.coleccion || "lecturas";
     const docRef = doc(db, coleccion, id);
 
     // APROBAR
@@ -825,61 +879,47 @@ const configurarEventos = () => {
 
 
 
+    // 4. VER LECTURA
     const btnVer = e.target.closest(".ver-lectura");
     if (btnVer) {
-      const id = btnVer.dataset.id;
-      if (!id) return;
-      if (window.unsubscribeComentarios) window.unsubscribeComentarios();
+      const colVer = btnVer.dataset.coleccion || coleccion || "lecturas";
+      await abrirLecturaDashboard(id, colVer);
+      return;
+    }
 
-      lecturaIdActual = id;
-
-      let snap = await getDoc(doc(db, "lecturas", id));
-      if (snap.exists()) {
-        coleccionLecturaActual = "lecturas";
-      } else {
-        snap = await getDoc(doc(db, "lecturasNuevas", id));
-        if (snap.exists()) {
-          coleccionLecturaActual = "lecturasNuevas";
-        } else {
-          alert("❌ La lectura no se encontró en ninguna colección.");
-          return;
-        }
+    // 5. ACCIONES DEL WORKBENCH (UNIDADES, MULTIMEDIA, APRENDE)
+    const btnWorkbench = e.target.closest('.btn-workbench-action');
+    if (btnWorkbench) {
+      const wbType = btnWorkbench.dataset.type;
+      
+      if (wbType === 'unidad') {
+        window.location.href = `generarLectura.html?unidadId=${id}&userId=${user.uid}&action=openUnidad`;
+      } else if (wbType === 'multimedia' || wbType === 'podcast') {
+        window.location.href = `podcaster.html?sessionId=${id}`;
+      } else if (wbType === 'aprende') {
+        window.location.href = `moodleCourse.html?cursoId=${id}`;
+      } else if (wbType === 'aprende_ver') {
+        openAprendeViewer(id);
       }
+      return;
+    }
 
-      let textoGuardado = localStorage.getItem(`lectura_${id}`) || "";
-      let lecturaDoc = null;
+    // 6. PLAY MULTIMEDIA
+    const btnPlay = e.target.closest('.btn-multimedia-play');
+    if (btnPlay) {
       try {
-        const snap1 = await getDoc(doc(db, "lecturas", id));
-        lecturaDoc = snap1.exists() ? snap1.data() : (await getDoc(doc(db, "lecturasNuevas", id))).data();
-        if (lecturaDoc.texto) {
-          textoGuardado = lecturaDoc.texto;
-          localStorage.setItem(`lectura_${id}`, textoGuardado);
+        const docRefPlay = doc(db, "podcaster_sessions", id);
+        const snapPlay = await getDoc(docRefPlay);
+        if (snapPlay.exists()) {
+          const dataPlay = snapPlay.data();
+          const sessionPlay = dataPlay.session || dataPlay;
+          sessionPlay.id = id;
+          abrirReproductorMultimedia(sessionPlay);
         }
       } catch (err) {
+        console.error("Error al cargar sesión:", err);
       }
-      if (!lecturaDoc) {
-        alert("❌ La lectura no se encontró en Firestore.");
-        return;
-      }
-
-      const unidadRaw = lecturaDoc.unidadData ?? {
-        nivel: lecturaDoc.nivel, grado: lecturaDoc.grado,
-        trimestre: lecturaDoc.trimestre, unidad: lecturaDoc.unidad
-      };
-      const gradoTexto = mapaGradoTexto[String(unidadRaw.grado)] || unidadRaw.grado || "-";
-      const clave = `${unidadRaw.nivel}_${gradoTexto}_${unidadRaw.trimestre}_${unidadRaw.unidad}`.toLowerCase();
-      const urlImagen = window.imagenesRelacionadasPorClave?.[clave];
-
-      const contenedor = document.getElementById("modalTextoLectura");
-      renderLecturaModalContent(contenedor, textoGuardado, urlImagen);
-
-      agregarMarcadoresDePosicion(contenedor);
-      document.getElementById("modalLectura").style.display = "flex";
-      lecturaIdActual = id;
-      window.unsubscribeComentarios = await renderComentarios(id);
-
-      contenedor.style.maxHeight = "none";
-      contenedor.style.overflow = "visible";
+      return;
     }
 
 
@@ -889,11 +929,14 @@ const configurarEventos = () => {
 
   // Cerrar modal
   document.body.addEventListener("click", (e) => {
-    if (e.target.classList.contains("cerrar-modal") || e.target.id === "modalLectura") {
-      document.getElementById("modalLectura").style.display = "none";
-
+    if (e.target.closest(".cerrar-modal") || e.target.id === "modalLectura") {
+      const modal = document.getElementById("modalLectura");
+      if (modal) {
+        modal.classList.add("hidden");
+        modal.style.display = "none";
+        if (window.unsubscribeComentarios) window.unsubscribeComentarios();
+      }
     }
-
   });
 
   document.getElementById("btnEditarLectura").addEventListener("click", () => {
@@ -945,55 +988,58 @@ async function loadUserAprende() {
   const contenedor = document.getElementById("contenedorAprendeUser");
   if (!contenedor) return;
 
+  // Cancelar suscripción previa si existe
+  if (typeof dashboardUnsubscribes.aprende === 'function') {
+    dashboardUnsubscribes.aprende();
+  }
+
   configureWorkbenchFilters();
   updateWorkbenchFilterButtons("aprende");
   updateWorkbenchListTitle("aprende");
-  contenedor.innerHTML = '<p class="text-muted">Cargando tus sesiones...</p>';
+  contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
 
   try {
     const isAdmin = ["admin", "superAdmin"].includes(currentUserRole);
     const filter = workbenchFilters.aprende || "published";
 
-    let sesiones = [];
+    let q;
     if (filter === "published") {
-      const q = query(collection(db, "moodleCourses"), where("publicar", "==", true)); 
-      const snap = await getDocs(q);
-      sesiones = snap.docs
-        .filter(d => {
-          const data = d.data();
-          if (data.docType === "module") return false;
-          if (data.docType === "course") return true;
-          return !d.id.includes("_") && Array.isArray(data.temas);
-        })
-        .map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+      q = query(collection(db, "moodleCourses"), where("publicar", "==", true), orderBy("actualizado", "desc")); 
     } else {
-      const q = isAdmin
-        ? collection(db, "moodleCourses")
-        : query(collection(db, "moodleCourses"), where("userId", "==", user.uid));
-      
-      const snap = await getDocs(q);
-      sesiones = snap.docs
-        .filter(d => {
-          const data = d.data();
-          if (data.docType === "module") return false;
-          if (data.docType === "course") return true;
-          return !d.id.includes("_") && Array.isArray(data.temas);
-        })
-        .map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
+      q = isAdmin
+        ? query(collection(db, "moodleCourses"), orderBy("actualizado", "desc"))
+        : query(collection(db, "moodleCourses"), where("userId", "==", user.uid), orderBy("actualizado", "desc"));
     }
 
-    const authorIds = new Set();
-    sesiones.forEach(s => {
-      if (s.userId) authorIds.add(s.userId);
-      if (s.uid) authorIds.add(s.uid);
-    });
-    await prefetchUsers(authorIds);
+    // Usar onSnapshot para sincronización en tiempo real
+    dashboardUnsubscribes.aprende = onSnapshot(q, async (snap) => {
+      let sesiones = snap.docs
+        .filter(d => {
+          const data = d.data();
+          if (data.docType === "module") return false;
+          if (data.docType === "course") return true;
+          return !d.id.includes("_") && Array.isArray(data.temas);
+        })
+        .map(d => ({ id: d.id, ...d.data(), type: 'aprende' }));
 
-    updateWorkbenchStats('aprende', sesiones);
-    renderUserItemList(contenedor, sesiones, 'aprende');
+      const authorIds = new Set();
+      sesiones.forEach(s => {
+        if (s.userId) authorIds.add(s.userId);
+        if (s.uid) authorIds.add(s.uid);
+      });
+      if (authorIds.size > 0) {
+        await prefetchUsers(authorIds);
+      }
+
+      updateWorkbenchStats('aprende', sesiones);
+      renderUserItemList(contenedor, sesiones, 'aprende');
+    }, (err) => {
+      console.error("[Dashboard] Error en onSnapshot Aprende:", err);
+      contenedor.innerHTML = '<p class="text-danger">Error al sincronizar sesiones.</p>';
+    });
 
   } catch (err) {
-    console.error("[Dashboard] Error al cargar Aprende:", err);
+    console.error("[Dashboard] Error al iniciar carga de Aprende:", err);
     contenedor.innerHTML = '<p class="text-danger">Error al cargar las sesiones.</p>';
   }
 }
@@ -1048,7 +1094,11 @@ function agregarMarcadoresDePosicion(elemento) {
 }
 
 
+let buscadorConfigurado = false;
 const configurarBuscador = () => {
+  if (buscadorConfigurado) return;
+  buscadorConfigurado = true;
+
   const input = document.getElementById("searchInput");
   const filtroNivel = document.getElementById("filtroNivel");
   const filtroGrado = document.getElementById("filtroGrado");
@@ -1101,13 +1151,17 @@ function aplicarFiltros() {
 
   const contenedores = [
     document.getElementById("contenedorLecturas"),
-    document.getElementById("contenedorImagenesCompartidas")
+    document.getElementById("contenedorImagenesCompartidas"),
+    document.getElementById("contenedorUnidadesUser"),
+    document.getElementById("contenedorMultimediaUser"),
+    document.getElementById("contenedorPodcastsUser"),
+    document.getElementById("contenedorAprendeUser")
   ].filter(Boolean);
 
   let hayResultados = false;
 
   contenedores.forEach(contenedor => {
-    const tarjetas = contenedor.querySelectorAll(".item-lectura, .item-imagen");
+    const tarjetas = contenedor.querySelectorAll(".item-lectura, .item-imagen, .workbench-item");
 
     tarjetas.forEach((t) => {
       const visible =
@@ -1117,8 +1171,15 @@ function aplicarFiltros() {
         (trimestre === "" || t.dataset.trimestre === trimestre) &&
         (unidad === "" || t.dataset.unidad === unidad);
 
-      t.style.display = visible ? (t.classList.contains("item-imagen") ? "flex" : "block") : "none";
-      if (visible) hayResultados = true;
+      // Manejar diferentes modos de display
+      if (visible) {
+        if (t.classList.contains("item-imagen")) t.style.display = "flex";
+        else if (t.classList.contains("workbench-item")) t.style.display = "block";
+        else t.style.display = "block";
+        hayResultados = true;
+      } else {
+        t.style.display = "none";
+      }
     });
   });
 
@@ -1185,8 +1246,10 @@ imagenesCache.forEach(img => {
 await loadUserLecturas(); // ✅ Ahora ya tiene acceso al mapa de imágenes
 await loadUserAprende();
 
-configurarEventos();
-configurarBuscador();
+// configurarEventos() y configurarBuscador() ya se llaman en onAuthStateChanged
+// evitaremos la doble llamada para que no se dupliquen los event listeners
+// configurarEventos();
+// configurarBuscador();
 
 
 // Ejecutar los filtros después de que se cargan lecturas e imágenes
@@ -1879,7 +1942,6 @@ function mostrarSeccion(viewId) {
     target.classList.add('active');
     if (viewId === 'viewLecturas') loadUserLecturas();
     if (viewId === 'viewUnidades') loadUserUnidades();
-    if (viewId === 'viewDownloads') loadUserDownloads();
     if (viewId === 'viewMultimedia') loadUserMultimedia();
     if (viewId === 'viewPodcasts') loadUserPodcasts();
   }
@@ -2078,58 +2140,53 @@ async function loadUserUnidades() {
   const contenedor = document.getElementById("contenedorUnidadesUser");
   if (!contenedor) return;
 
+  if (typeof dashboardUnsubscribes.unidades === 'function') {
+    dashboardUnsubscribes.unidades();
+  }
+
   configureWorkbenchFilters();
   updateWorkbenchFilterButtons("unidades");
   updateWorkbenchListTitle("unidades");
-  contenedor.innerHTML = '<p class="text-muted">Cargando tus unidades...</p>';
+  contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
 
   try {
     const isAdmin = isCurrentUserAdmin();
-    const filter = workbenchFilters.unidades || "published";
-    let unidades = [];
     const isEditorial = isCurrentUserEditorial();
+    const filter = workbenchFilters.unidades || "published";
 
+    let q;
     if (filter === "published") {
-      if (isAdmin || isEditorial) {
-        const snap = await getDocs(query(collection(db, COLECCION_UNIDADES), where("publicar", "==", true)));
-        unidades = mergeFirestoreDocs([snap], [COLECCION_UNIDADES]);
-      } else {
-        const owned = await getOwnedDocsFromCollection(COLECCION_UNIDADES, user.uid);
-        unidades = owned.filter(it => it.publicar === true);
-      }
+      q = query(collection(db, COLECCION_UNIDADES), where("publicar", "==", true), orderBy("timestamp", "desc"));
     } else {
-      if (isAdmin) {
-        const snap = await getDocs(collection(db, COLECCION_UNIDADES));
-        unidades = mergeFirestoreDocs([snap], [COLECCION_UNIDADES]);
-      } else {
-        unidades = await getOwnedDocsFromCollection(COLECCION_UNIDADES, user.uid);
+      q = isAdmin
+        ? query(collection(db, COLECCION_UNIDADES), orderBy("timestamp", "desc"))
+        : query(collection(db, COLECCION_UNIDADES), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+    }
+
+    dashboardUnsubscribes.unidades = onSnapshot(q, async (snap) => {
+      let unidades = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'unidad' }));
+
+      // Pre-cargar nombres de autores
+      const authorIds = new Set();
+      unidades.forEach((data) => {
+        if (data.userId) authorIds.add(data.userId);
+        if (data.uid) authorIds.add(data.uid);
+      });
+      if (authorIds.size > 0) {
+        await prefetchUsers(authorIds);
       }
-    }
 
-    if (!isAdmin && filter !== "published") {
-      unidades = unidades.filter((item) => isUserOwnedDoc(item, user.uid));
-    }
-    const authorIds = new Set();
-
-    unidades.forEach((data) => {
-      if (data.userId) authorIds.add(data.userId);
-      if (data.uid) authorIds.add(data.uid);
+      updateWorkbenchStats('unidades', unidades);
+      renderUserItemList(contenedor, unidades, 'unidad');
+      renderUserMonthlyStatsChart('chartUnidades', unidades, 'Unidades por Usuario/Mes', chartUnidadesInstance, (inst) => chartUnidadesInstance = inst);
+    }, (err) => {
+      console.error("Error en onSnapshot unidades:", err);
+      contenedor.innerHTML = '<p class="text-danger">Error al sincronizar unidades.</p>';
     });
-
-    if (filter === "published") {
-      unidades = unidades.filter((item) => item.publicar === true || item.published === true);
-    }
-
-    await prefetchUsers(authorIds);
-
-    updateWorkbenchStats('unidades', unidades);
-    renderUserItemList(contenedor, unidades, 'unidad');
-    renderUserMonthlyStatsChart('chartUnidades', unidades, 'Unidades por Usuario/Mes', chartUnidadesInstance, (inst) => chartUnidadesInstance = inst);
 
   } catch (err) {
     console.error("Error al cargar unidades del usuario:", err);
-    updateWorkbenchStats('unidades', []);
-    contenedor.innerHTML = '<p class="text-danger">Error al cargar datos.</p>';
+    contenedor.innerHTML = '<p class="text-danger">Error al iniciar carga de unidades.</p>';
   }
 }
 
@@ -2152,13 +2209,11 @@ async function prefetchUsers(uids) {
       promises.push(
         getDoc(doc(db, "users", uid)).then(snap => {
           if (snap.exists()) {
-            const d = snap.data();
-            const name = `${d.firstName || ""} ${d.lastName || ""}`.trim() || d.email || "Usuario";
-            usuariosCache.set(uid, name);
+            usuariosCache.set(uid, snap.data());
           } else {
-            usuariosCache.set(uid, "Desconocido");
+            usuariosCache.set(uid, { email: "Desconocido", firstName: "Usuario", lastName: "Desconocido" });
           }
-        }).catch(() => usuariosCache.set(uid, "Error"))
+        }).catch(() => usuariosCache.set(uid, { email: "Error" }))
       );
     }
   });
@@ -2172,9 +2227,13 @@ async function loadUserMultimedia() {
   const contenedor = document.getElementById("contenedorMultimediaUser");
   if (!contenedor) return;
 
+  if (typeof dashboardUnsubscribes.multimedia === 'function') {
+    dashboardUnsubscribes.multimedia();
+  }
+
   configureWorkbenchFilters();
   updateWorkbenchFilterButtons("multimedia");
-  contenedor.innerHTML = '<p class="text-muted">Cargando videos...</p>';
+  contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
 
   try {
     const isAdmin = isCurrentUserAdmin();
@@ -2183,76 +2242,58 @@ async function loadUserMultimedia() {
 
     let q;
     if (filter === "published") {
-      // TODOS los publicados para Admin, Author y Editor
-      if (isAdmin || isEditorial) {
-        q = query(collection(db, "podcaster_sessions"), where("publicar", "==", true), limit(150));
-      } else {
-        // Otros roles solo ven lo suyo publicado
-        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), limit(150));
-      }
+      q = (isAdmin || isEditorial)
+        ? query(collection(db, "podcaster_sessions"), where("publicar", "==", true), orderBy("updatedAt", "desc"), limit(100))
+        : query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), orderBy("updatedAt", "desc"), limit(100));
     } else {
-      // Filtro "Mis Documentos" (o "Todos" para Admin)
-      if (isAdmin) {
-        q = query(collection(db, "podcaster_sessions"), limit(150));
-      } else {
-        // Solo lo propio para Author/Editor
-        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), limit(150));
-      }
+      q = isAdmin
+        ? query(collection(db, "podcaster_sessions"), orderBy("updatedAt", "desc"), limit(100))
+        : query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), orderBy("updatedAt", "desc"), limit(100));
     }
 
-    const snap = await getDocs(q);
-    console.log(`[Dashboard] Multimedia Query found ${snap.size} sessions (Filter: ${filter}).`);
-    let allItems = [];
-    snap.forEach(doc => {
-      const data = doc.data();
-      const session = data.session || data;
-      console.log(`[Dashboard] Checking session ${doc.id}:`, data);
+    dashboardUnsubscribes.multimedia = onSnapshot(q, async (snap) => {
+      let allItems = [];
+      const authorIds = new Set();
+      
+      snap.forEach(docSnap => {
+        const data = docSnap.data();
+        const session = data.session || data;
 
-      // Detección ultra-permisiva de video (incluye videoMode, contentTypes y presencia de clips de video)
-      const isVideo = !!(data.videoMode === true ||
-        session?.videoMode === true ||
-        session?.script?.videoMode === true ||
-        (session?.script?.videoContentType && session.script.videoContentType !== 'none') ||
-        (session?.videoContentType && session.videoContentType !== 'none') ||
-        (data.videoContentType && data.videoContentType !== 'none') ||
-        (session?.dialogueVideoMap && Object.keys(session.dialogueVideoMap).length > 0) ||
-        (session?.podcastStudioUiState?.dialogueVideosByRowId && Object.keys(session.podcastStudioUiState.dialogueVideosByRowId).length > 0));
+        const isVideo = !!(data.videoMode === true ||
+          session?.videoMode === true ||
+          session?.script?.videoMode === true ||
+          (session?.script?.videoContentType && session.script.videoContentType !== 'none') ||
+          (session?.videoContentType && session.videoContentType !== 'none') ||
+          (data.videoContentType && data.videoContentType !== 'none') ||
+          (session?.dialogueVideoMap && Object.keys(session.dialogueVideoMap).length > 0) ||
+          (session?.podcastStudioUiState?.dialogueVideosByRowId && Object.keys(session.podcastStudioUiState.dialogueVideosByRowId).length > 0));
 
-      console.log(`[Dashboard] isVideo check for ${doc.id}:`, isVideo);
-      if (isVideo) {
-        allItems.push({
-          id: doc.id,
-          ...data,
-          titulo: data.title || data.session?.title || "Video sin nombre",
-          coleccion: "podcaster_sessions"
-        });
-      }
+        if (isVideo) {
+          allItems.push({
+            id: docSnap.id,
+            ...data,
+            titulo: data.title || data.session?.title || "Video sin nombre",
+            type: 'multimedia',
+            coleccion: "podcaster_sessions"
+          });
+          const authorId = data.ownerId || data.userId || data.uid;
+          if (authorId) authorIds.add(authorId);
+        }
+      });
+
+      if (authorIds.size > 0) await prefetchUsers(authorIds);
+
+      renderUserItemList(contenedor, allItems, 'multimedia');
+
+      const totalCount = document.getElementById("multimediaWorkbenchTotal");
+      if (totalCount) totalCount.textContent = allItems.length;
+      const pubCount = document.getElementById("multimediaWorkbenchPublished");
+      if (pubCount) pubCount.textContent = allItems.filter(i => i.publicar === true).length;
     });
-
-    // Ordenar en memoria por updatedAt desc
-    allItems.sort((a, b) => {
-      const dateA = a.updatedAt?.toDate ? a.updatedAt.toDate() : new Date(a.updatedAt || 0);
-      const dateB = b.updatedAt?.toDate ? b.updatedAt.toDate() : new Date(b.updatedAt || 0);
-      return dateB - dateA;
-    });
-
-    console.log("[Dashboard] Multimedia list to render:", allItems.length);
-    renderUserItemList(contenedor, allItems, 'multimedia');
-
-    // Actualizar contadores
-    const totalCount = document.getElementById("multimediaWorkbenchTotal");
-    const pubCount = document.getElementById("multimediaWorkbenchPublished");
-    if (totalCount) totalCount.textContent = allItems.length;
-    if (pubCount) pubCount.textContent = allItems.length;
 
   } catch (err) {
-    if (err.code === "permission-denied" || err.message?.includes("permissions")) {
-       console.warn("[Dashboard] El usuario no tiene permisos para ver Multimedia.");
-       if (contenedor) contenedor.innerHTML = '<p class="text-muted" style="font-size: 0.8rem; opacity: 0.7;"><i class="fas fa-lock"></i> No tienes permisos para ver esta sección.</p>';
-    } else {
-       console.error("Error al cargar multimedia:", err);
-       if (contenedor) contenedor.innerHTML = '<p class="text-danger">Error al cargar datos.</p>';
-    }
+    console.error("Error al cargar multimedia:", err);
+    contenedor.innerHTML = '<p class="text-danger">Error al iniciar carga de videos.</p>';
   }
 }
 
@@ -2263,9 +2304,13 @@ async function loadUserPodcasts() {
   const contenedor = document.getElementById("contenedorPodcastsUser");
   if (!contenedor) return;
 
+  if (typeof dashboardUnsubscribes.podcasts === 'function') {
+    dashboardUnsubscribes.podcasts();
+  }
+
   configureWorkbenchFilters();
   updateWorkbenchFilterButtons("podcasts");
-  contenedor.innerHTML = '<p class="text-muted">Cargando podcasts...</p>';
+  contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
 
   try {
     const isAdmin = isCurrentUserAdmin();
@@ -2274,105 +2319,62 @@ async function loadUserPodcasts() {
 
     let q;
     if (filter === "published") {
-      if (isAdmin || isEditorial) {
-        q = query(collection(db, "podcaster_sessions"), where("publicar", "==", true), limit(150));
-      } else {
-        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), limit(150));
-      }
+      q = (isAdmin || isEditorial)
+        ? query(collection(db, "podcaster_sessions"), where("publicar", "==", true), orderBy("updatedAt", "desc"), limit(100))
+        : query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), where("publicar", "==", true), orderBy("updatedAt", "desc"), limit(100));
     } else {
-      if (isAdmin) {
-        q = query(collection(db, "podcaster_sessions"), limit(150));
-      } else {
-        q = query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), limit(150));
-      }
+      q = isAdmin
+        ? query(collection(db, "podcaster_sessions"), orderBy("updatedAt", "desc"), limit(100))
+        : query(collection(db, "podcaster_sessions"), where("ownerId", "==", user.uid), orderBy("updatedAt", "desc"), limit(100));
     }
 
-    const snap = await getDocs(q);
-    console.log(`[Dashboard] Podcasts Query found ${snap.size} sessions (Filter: ${filter}).`);
-    let allItems = [];
-    snap.forEach(doc => {
-      const data = doc.data();
-      const session = data.session || data;
-      // Detección ultra-permisiva de video
-      const isVideo = !!(data.videoMode === true ||
-        session?.videoMode === true ||
-        session?.script?.videoMode === true ||
-        (session?.script?.videoContentType && session.script.videoContentType !== 'none') ||
-        (session?.videoContentType && session.videoContentType !== 'none') ||
-        (data.videoContentType && data.videoContentType !== 'none') ||
-        (session?.dialogueVideoMap && Object.keys(session.dialogueVideoMap).length > 0) ||
-        (session?.podcastStudioUiState?.dialogueVideosByRowId && Object.keys(session.podcastStudioUiState.dialogueVideosByRowId).length > 0));
+    dashboardUnsubscribes.podcasts = onSnapshot(q, async (snap) => {
+      let allItems = [];
+      const authorIds = new Set();
 
-      if (!isVideo) {
-        allItems.push({
-          id: doc.id,
-          ...data,
-          titulo: data.title || data.session?.title || "Podcast sin nombre",
-          coleccion: "podcaster_sessions"
-        });
-      }
+      snap.forEach(docSnap => {
+        const data = docSnap.data();
+        const session = data.session || data;
+        const isVideo = !!(data.videoMode === true ||
+          session?.videoMode === true ||
+          session?.script?.videoMode === true ||
+          (session?.script?.videoContentType && session.script.videoContentType !== 'none') ||
+          (session?.videoContentType && session.videoContentType !== 'none') ||
+          (data.videoContentType && data.videoContentType !== 'none') ||
+          (session?.dialogueVideoMap && Object.keys(session.dialogueVideoMap).length > 0) ||
+          (session?.podcastStudioUiState?.dialogueVideosByRowId && Object.keys(session.podcastStudioUiState.dialogueVideosByRowId).length > 0));
+
+        if (!isVideo) {
+          allItems.push({
+            id: docSnap.id,
+            ...data,
+            titulo: data.title || data.session?.title || "Podcast sin nombre",
+            type: 'podcast',
+            coleccion: "podcaster_sessions"
+          });
+          const authorId = data.ownerId || data.userId || data.uid;
+          if (authorId) authorIds.add(authorId);
+        }
+      });
+
+      if (authorIds.size > 0) await prefetchUsers(authorIds);
+
+      renderUserItemList(contenedor, allItems, 'podcast');
+
+      const totalCount = document.getElementById("podcastsWorkbenchTotal");
+      if (totalCount) totalCount.textContent = allItems.length;
+      const pubCount = document.getElementById("podcastsWorkbenchPublished");
+      if (pubCount) pubCount.textContent = allItems.filter(i => i.publicar === true).length;
     });
-
-    // Ordenar en memoria por updatedAt desc
-    allItems.sort((a, b) => {
-      const dateA = a.updatedAt?.toDate ? a.updatedAt.toDate() : new Date(a.updatedAt || 0);
-      const dateB = b.updatedAt?.toDate ? b.updatedAt.toDate() : new Date(b.updatedAt || 0);
-      return dateB - dateA;
-    });
-
-    renderUserItemList(contenedor, allItems, 'podcast');
-
-    // Actualizar contadores
-    document.getElementById("podcastsWorkbenchTotal").textContent = allItems.length;
-    document.getElementById("podcastsWorkbenchPublished").textContent = allItems.length;
 
   } catch (err) {
     console.error("Error al cargar podcasts:", err);
-    contenedor.innerHTML = '<p class="text-danger">Error al cargar datos.</p>';
+    contenedor.innerHTML = '<p class="text-danger">Error al iniciar carga de podcasts.</p>';
   }
 }
 
-async function loadUserDownloads() {
-  const user = auth.currentUser;
-  if (!user) return;
 
-  const contenedor = document.getElementById("contenedorDownloadsUser");
-  if (!contenedor) return;
-  contenedor.innerHTML = '<p class="text-muted">Cargando registro de descargas...</p>';
 
-  try {
-    const isAdmin = ["admin", "superAdmin"].includes(currentUserRole);
-
-    let q;
-    if (isAdmin) {
-      q = collection(db, COLECCION_DOWNLOADS);
-    } else {
-      q = query(collection(db, COLECCION_DOWNLOADS), where("userId", "==", user.uid));
-    }
-
-    const snap = await getDocs(q);
-    const downloads = [];
-    const authorIds = new Set();
-
-    snap.forEach(doc => {
-      const data = doc.data();
-      downloads.push({ id: doc.id, ...data });
-      if (data.userId) authorIds.add(data.userId);
-      if (data.uid) authorIds.add(data.uid);
-    });
-
-    if (isAdmin || isEditorial) await prefetchUsers(authorIds);
-
-    renderUserItemList(contenedor, downloads, 'download');
-    renderUserMonthlyStatsChart('chartDownloads', downloads, 'Descargas por Usuario/Mes', chartDownloadsInstance, (inst) => chartDownloadsInstance = inst);
-
-  } catch (err) {
-    console.error("Error al cargar descargas:", err);
-    contenedor.innerHTML = '<p class="text-danger">Error al cargar datos.</p>';
-  }
-}
-
-let chartDownloadsInstance = null;
 
 /**
  * REPRODUCTOR MULTIMEDIA (DASHBOARD)
@@ -2414,6 +2416,11 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
   return downloadUrl || "";
 }
 
+let cachedRuntimeEntries = null;
+let cachedRuntimeEntriesSessionId = null;
+let cachedVideoConfig = null;
+let cachedVideoConfigSessionId = null;
+
 const multimediaPlaybackDeps = {
   getTimelineTotalDurationMs: (s) => {
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
@@ -2421,29 +2428,31 @@ const multimediaPlaybackDeps = {
     return Math.max(...entries.map(e => e.endMs));
   },
   buildTimelineRuntimeEntries: (s) => {
+    if (!s) return [];
+    if (cachedRuntimeEntries && cachedRuntimeEntriesSessionId === s.id) {
+      return cachedRuntimeEntries;
+    }
+    
+    console.log("[Dashboard] Building timeline runtime entries (fresh)...");
     const rows = s?.rows || s?.script?.rows || [];
     const videoConfig = s?.podcastVideoConfig || s?.script?.podcastVideoConfig || {};
     const ui = s?.podcastStudioUiState || {};
 
-    // Buscar clipMap en múltiples ubicaciones posibles
     const clipMap = s?.timelineClipMap || videoConfig.timelineClipsByRowId || ui.timelineClipsByRowId || {};
     const videoMap = s?.dialogueVideoMap || ui.dialogueVideosByRowId || {};
     const audioMap = s?.dialogueAudioMap || ui.dialogueAudiosByRowId || {};
 
-    // Asegurar que usamos el acumulado para evitar huecos si los clips no tienen startMs
     let currentMs = 0;
     const entries = rows.map((row, index) => {
       const rowId = row.id || `row_${index}`;
-      if (!row.id) row.id = rowId; // Asegurar en el objeto local
+      if (!row.id) row.id = rowId; 
       let clip = clipMap[rowId];
 
       const sceneClip = videoMap[rowId];
       const audioClip = audioMap[rowId];
 
-      // Si no hay video ni audio, saltar esta fila
       if (!sceneClip && !audioClip) return null;
 
-      // Si no hay clip definido en el timeline, crear uno virtual para el dashboard
       if (!clip) {
         const durationSec = Number(audioClip?.durationSec || 8);
         clip = {
@@ -2482,16 +2491,13 @@ const multimediaPlaybackDeps = {
         zIndex: Number(clip.zIndex || index + 1)
       };
 
-      // DETECCIÓN DE UNIDADES: Si el número es muy pequeño (ej. 2.5), probablemente son segundos.
       let rawDur = Number(clip.durationMs || clip.sourceDurationMs || 0);
       if (rawDur > 0 && rawDur < 100) rawDur *= 1000;
       
-      // Fallback a audio de Gemini
       if (rawDur <= 0) {
         rawDur = Number(audioClip?.durationSec || 0) * 1000;
       }
       
-      // Fallback final
       if (rawDur <= 0) rawDur = 3000;
 
       const trimIn = Number(clip.trimInMs || 0);
@@ -2508,12 +2514,13 @@ const multimediaPlaybackDeps = {
       entry.endMs = entry.startMs + durationMs;
       
       currentMs = entry.endMs;
-      console.log(`[Dashboard] Entry ${index} (${rowId}): ${entry.startMs}ms -> ${entry.endMs}ms`);
       return entry;
     }).filter(Boolean);
 
-    console.log("[Dashboard] Final entries built:", entries.length);
-    return entries.sort((a, b) => a.startMs - b.startMs);
+    const finalEntries = entries.sort((a, b) => a.startMs - b.startMs);
+    cachedRuntimeEntries = finalEntries;
+    cachedRuntimeEntriesSessionId = s.id;
+    return finalEntries;
   },
   resolveFirebaseStorageUrl: async (gsPath) => {
     if (!gsPath) return "";
@@ -2522,7 +2529,6 @@ const multimediaPlaybackDeps = {
       const apiBase = (config.apiBaseUrl || "").replace(/\/api$/, "");
       if (apiBase) {
         const proxyUrl = `${apiBase}/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`;
-        console.log("[Dashboard] Proxy URL resolved:", proxyUrl);
         return proxyUrl;
       }
       return gsPath;
@@ -2534,7 +2540,6 @@ const multimediaPlaybackDeps = {
   setPodcastStageVideoSourceForElement: async (el, url) => {
     if (!el) return;
     return new Promise((resolve) => {
-      console.log("[Dashboard] Loading video source:", url);
       el.src = url;
       el.load();
 
@@ -2549,11 +2554,9 @@ const multimediaPlaybackDeps = {
       el.onloadedmetadata = onDone;
       el.oncanplay = onDone;
       el.onerror = (err) => {
-        console.warn("[Dashboard] Error loading video source:", url, err);
         onDone();
       };
 
-      // Seguridad: no bloquear más de 3.5s si el video es pesado o hay red lenta
       setTimeout(onDone, 3500);
     });
   },
@@ -2563,12 +2566,15 @@ const multimediaPlaybackDeps = {
   getPlaybackSpeed: () => 1,
   getPodcastVideoConfig: (s) => {
     if (!s) return {};
+    if (cachedVideoConfig && cachedVideoConfigSessionId === s.id) {
+      return cachedVideoConfig;
+    }
+    
     if (!s.podcastVideoConfig) {
       s.podcastVideoConfig = s.podcastStudioUiState?.podcastVideoConfig || {};
     }
-    const cfg = s.podcastVideoConfig;
+    const cfg = JSON.parse(JSON.stringify(s.podcastVideoConfig)); 
     
-    // 1. SINTETIZAR PISTA DE DIÁLOGO
     if (!cfg.geminiDialogueTrack || !cfg.geminiDialogueTrack.segments?.length) {
       const segments = [];
       const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
@@ -2585,7 +2591,6 @@ const multimediaPlaybackDeps = {
       cfg.geminiDialogueTrack = { enabled: true, segments };
     }
 
-    // 2. SINTETIZAR TEXTO EN PANTALLA Y SUS CLIPS
     if (!cfg.onScreenTextTrack) {
       cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
     }
@@ -2594,7 +2599,6 @@ const multimediaPlaybackDeps = {
       const textClips = {};
       const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
       entries.forEach(entry => {
-        // Usar el texto de la fila o un genérico
         const allRows = s.rows || s.script?.rows || [];
         const row = allRows.find(r => r.id === entry.rowId);
         const dialogueText = row?.onScreenText || row?.text || "";
@@ -2612,6 +2616,8 @@ const multimediaPlaybackDeps = {
       console.log("[Dashboard] Synthesized on-screen text clips:", Object.keys(textClips).length);
     }
     
+    cachedVideoConfig = cfg;
+    cachedVideoConfigSessionId = s.id;
     return cfg;
   },
   updatePodcastVideoTransportUi: () => {
@@ -2748,40 +2754,69 @@ const multimediaPlaybackDeps = {
     }
   },
   getPanelMontageMusicConfig: (s) => {
-    const cfg = s?.panelMusicConfig || s?.session?.panelMusicConfig || 
+    // Intentar encontrar la configuración en múltiples ubicaciones posibles (compatibilidad con versiones previas y sesiones sanitizadas)
+    const rawCfg = s?.panelMusicConfig || s?.session?.panelMusicConfig || 
                 s?.panelMusicState || s?.session?.panelMusicState ||
                 s?.podcastStudioUiState?.panelMusicState || 
-                s?.podcastStudioUiState?.panelMusicConfig || 
-                { sourceType: 'none' };
+                s?.podcastStudioUiState?.panelMusicConfig;
     
-    // Si ya tiene sourceItems, asegurar que las URLs se resuelvan (vía proxy si es gs://)
+    // Clonar para no mutar el objeto original de forma inesperada (aunque aquí lo normalizamos)
+    const cfg = rawCfg ? JSON.parse(JSON.stringify(rawCfg)) : { sourceType: 'none' };
+    
+    // Asegurar que sourceType sea válido
+    if (!cfg.sourceType) cfg.sourceType = 'none';
+
+    // Si ya tiene sourceItems (chips en timeline), asegurar que las URLs se resuelvan (vía proxy si es gs://)
     if (Array.isArray(cfg.sourceItems)) {
       cfg.sourceItems = cfg.sourceItems.map(item => ({
         ...item,
-        // El controlador usará resolveFirebaseStorageUrl si empieza con gs://
-        // pero aquí podemos asegurar que no venga null
         sourceUrl: item.sourceUrl || ""
       }));
     }
 
-    const rawUrl = cfg.sourceUrl || cfg.url || (cfg.track?.downloadUrl) || "";
-    let finalUrl = rawUrl;
+    // Resolver URL del track principal
+    // Prioridad: sourceUrl (ya resuelta) > track.downloadUrl > track.storagePath > presets
+    let finalUrl = cfg.sourceUrl || cfg.url || (cfg.track?.downloadUrl) || "";
     
-    if (rawUrl && String(rawUrl).startsWith('gs://')) {
+    if (!finalUrl && cfg.track?.storagePath) {
+       finalUrl = cfg.track.storagePath;
+    }
+
+    // SOPORTE PARA PRESETS: Si es un preset y no tiene URL, asignamos un track por defecto del backend si es posible
+    // o al menos marcamos como habilitado para que el controlador intente algo.
+    if (!finalUrl && cfg.sourceType === 'preset') {
+       // Por ahora, si es preset, intentamos ver si hay un track en la librería que podamos usar como fallback
+       const fallbackTrack = cfg.trackLibrary?.ai || cfg.trackLibrary?.uploaded;
+       if (fallbackTrack) {
+          finalUrl = fallbackTrack.downloadUrl || fallbackTrack.storagePath || "";
+          console.log("[Dashboard] Usando track de librería como fallback para preset:", finalUrl);
+       }
+    }
+
+    // Resolución final (gs:// -> Proxy)
+    if (finalUrl && String(finalUrl).startsWith('gs://')) {
       const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || 'charly-brown.firebasestorage.app';
-      const gsPath = rawUrl.startsWith('gs://') ? rawUrl : `gs://${bucket}/${rawUrl}`;
+      const gsPath = finalUrl.startsWith('gs://') ? finalUrl : `gs://${bucket}/${finalUrl}`;
       const apiBase = (window.__CHARLY_CONFIG__?.apiBaseUrl || "").replace(/\/api$/, "");
       finalUrl = `${apiBase}/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`;
     }
     
     cfg.sourceUrl = finalUrl;
     cfg.url = finalUrl;
+    // Soporte para volumen base y ducking (reducción de volumen cuando habla Gemini)
+    cfg.volume = Number(cfg.volume ?? 100);
+    cfg.duckingWhenGeminiPct = Number(cfg.duckingWhenGeminiPct ?? cfg.duckingPct ?? 60);
+    
+    // El audio está habilitado si tiene una URL o si tiene segmentos en el timeline
     cfg.enabled = cfg.sourceType !== 'none' && (!!finalUrl || (cfg.sourceItems && cfg.sourceItems.length > 0));
     
     console.log("[Dashboard] Normalized Background Music Config:", { 
       sourceType: cfg.sourceType, 
       hasSourceUrl: !!cfg.sourceUrl, 
-      sourceItemsCount: cfg.sourceItems?.length || 0 
+      sourceItemsCount: cfg.sourceItems?.length || 0,
+      enabled: cfg.enabled,
+      volume: cfg.volume,
+      ducking: cfg.duckingWhenGeminiPct
     });
     return cfg;
   },
@@ -2798,7 +2833,7 @@ const multimediaPlaybackDeps = {
   resolveDialogueAudioForRow: (s, rowId) => (s?.dialogueAudioMap || s?.podcastStudioUiState?.dialogueAudiosByRowId)?.[rowId],
   resolveStorageAudioUrl: (url, path) => resolveStorageAudioUrl(url, path),
   ensureTimelineClipsByRowId: (s) => s?.timelineClipMap || s?.podcastStudioUiState?.timelineClipsByRowId || {},
-  resolveTimelineClipMix: (s, rowId) => (s?.timelineClipMixes || s?.podcastStudioUiState?.timelineClipMixesByRowId || s?.podcastStudioUiState?.timelineClipMixes)?.[rowId] || { voiceVolume: 1, backgroundVolume: 1 },
+  resolveTimelineClipMix: (s, rowId) => (s?.timelineClipMixes || s?.podcastStudioUiState?.timelineClipMixesByRowId || s?.podcastStudioUiState?.timelineClipMixes)?.[rowId] || { voiceVolume: 1, backgroundVolume: 1, videoVolume: 1 },
   getOnScreenTextClipEffectiveDurationMs: (c) => c?.durationMs || 0,
   normalizeOnScreenTextTrackSettings: (s) => window.normalizeOnScreenTextTrackSettings ? window.normalizeOnScreenTextTrackSettings(s) : { enabled: true, showTrack: true },
   getOnScreenTextClipText: (row) => row.onScreenText || row.text || "",
@@ -3590,6 +3625,12 @@ function renderUserItemList(container, items, type) {
     if (type === "multimedia" || type === "podcast") accentClass = "workbench-item-multimedia";
     
     card.className = `workbench-item ${accentClass}`;
+    
+    // Inyectar metadatos para filtrado (Primaria, Grado, etc.)
+    card.dataset.nivel = String(item.nivel || "").toLowerCase();
+    card.dataset.grado = String(item.grado || "").toLowerCase();
+    card.dataset.trimestre = String(item.trimestre || "").toLowerCase();
+    card.dataset.unidad = String(item.unidad || "").toLowerCase();
 
     let displayTitle = "";
     let metaLabel = "";
@@ -3643,7 +3684,13 @@ function renderUserItemList(container, items, type) {
     
     let date = "Fecha desconocida";
     if (dateObj && !isNaN(dateObj.getTime())) {
-      date = dateObj.toLocaleDateString();
+      const now = new Date();
+      const isToday = dateObj.toDateString() === now.toDateString();
+      if (isToday) {
+        date = `Hoy, ${dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } else {
+        date = dateObj.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
     }
     const isAdmin = ["admin", "superAdmin"].includes(currentUserRole);
 
@@ -3689,7 +3736,10 @@ function renderUserItemList(container, items, type) {
         const cached = usuariosCache.get(authorId);
         if (cached) {
           if (typeof cached === 'object') {
-            authorName = cached.userName || cached.displayName || cached.nombre || cached.email || authorName;
+            const firstName = cached.firstName || "";
+            const lastName = cached.lastName || "";
+            const fullName = `${firstName} ${lastName}`.trim();
+            authorName = fullName || cached.userName || cached.displayName || cached.nombre || cached.email || authorName;
           } else {
             authorName = cached;
           }
@@ -3749,11 +3799,14 @@ function renderUserItemList(container, items, type) {
         </div>
       `;
 
+      // El toggle se maneja globalmente en configurarEventos
+      /*
       const header = card.querySelector('.multimedia-accordion-header');
       header.addEventListener('click', (e) => {
         if (e.target.closest('.btn-multimedia-play')) return;
         card.classList.toggle('is-expanded');
       });
+      */
 
       const video = card.querySelector('video');
       if (video) {
@@ -3762,6 +3815,8 @@ function renderUserItemList(container, items, type) {
       }
     } else {
       card.className = `workbench-item ${accentClass} accordion-item`;
+      card.dataset.id = item.id; // Asegurar ID para el toggle
+      card.dataset.coleccion = item.coleccion || ""; // Guardar colección para acciones (Like, Archive)
       card.innerHTML = `
         <div class="workbench-accordion-header">
           <div class="workbench-item-icon" aria-hidden="true">
@@ -3804,18 +3859,18 @@ function renderUserItemList(container, items, type) {
             <div class="workbench-action-area">
               <div class="workbench-item-actions" style="flex-direction: row; gap: 0.75rem; justify-content: flex-end; width: 100%;">
                 ${type !== 'download' ? `
-                  <a href="#" class="btn-workbench-action btn-item-edit" data-id="${item.id}" data-type="${type}" data-col="${item.coleccion || ''}" title="Editar" style="padding: 0.6rem 1.2rem; font-size: 0.85rem;">
+                  <a href="#" class="btn-workbench-action btn-item-edit" data-id="${item.id}" data-type="${type}" data-coleccion="${item.coleccion || ''}" title="Editar" style="padding: 0.6rem 1.2rem; font-size: 0.85rem;">
                     <i class="fas fa-edit"></i>
                     <span>Editar</span>
                   </a>
                   ${type === 'lectura' ? `
-                  <a href="#" class="btn-workbench-action ver-lectura" data-id="${item.id}" data-col="${item.coleccion || ''}" title="Ver lectura" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #6366f1 !important; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action ver-lectura" data-id="${item.id}" data-coleccion="${item.coleccion || ''}" title="Ver lectura" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #6366f1 !important; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3) !important;">
                     <i class="fas fa-eye"></i>
                     <span>Ver Lectura</span>
                   </a>
                   ` : ''}
                   ${type === 'aprende' ? `
-                  <a href="#" class="btn-workbench-action ver-aprende" data-id="${item.id}" title="Ver Contenido" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #f59e0b !important; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3) !important;">
+                  <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="aprende_ver" title="Ver Contenido" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #f59e0b !important; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3) !important;">
                     <i class="fas fa-eye"></i>
                     <span>Ver Contenido</span>
                   </a>
@@ -3828,110 +3883,8 @@ function renderUserItemList(container, items, type) {
           </div>
         </div>
       `;
-
-      const header = card.querySelector('.workbench-accordion-header');
-      header.addEventListener('click', (e) => {
-        // No expandir si se hace clic en un botón de acción (aunque ahora están en el cuerpo)
-        if (e.target.closest('.workbench-action')) return;
-        card.classList.toggle('is-expanded');
-      });
     }
     container.appendChild(card);
-  });
-
-  container.addEventListener('click', async (e) => {
-    const btnEdit = e.target.closest('.btn-item-edit');
-    const btnVer = e.target.closest('.ver-lectura');
-    const btnVerAprende = e.target.closest('.ver-aprende');
-    const btnPlay = e.target.closest('.btn-multimedia-play');
-
-    if (btnVerAprende) {
-      const id = btnVerAprende.dataset.id;
-      openAprendeViewer(id);
-      return;
-    }
-
-    if (btnPlay) {
-      const id = btnPlay.dataset.id;
-      try {
-        const docRef = doc(db, "podcaster_sessions", id);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          const session = data.session || data;
-          session.id = id; // Crucial: Preservar el ID para guardado posterior
-          abrirReproductorMultimedia(session);
-        }
-      } catch (err) {
-        console.error("Error al cargar sesión para reproducir:", err);
-      }
-      return;
-    }
-
-    if (btnEdit) {
-      const id = btnEdit.dataset.id;
-      const type = btnEdit.dataset.type;
-      if (type === 'lectura') {
-        const col = btnEdit.dataset.col || 'lecturas';
-        coleccionLecturaActual = col;
-        abrirEditorLectura(id, col);
-      } else if (type === 'unidad') {
-        window.location.href = `generarLectura.html?unidadId=${id}&userId=${auth.currentUser.uid}&action=openUnidad`;
-      } else if (type === 'multimedia') {
-        window.location.href = `podcaster.html?sessionId=${id}`;
-      } else if (type === 'podcast') {
-        window.location.href = `podcaster.html?sessionId=${id}`;
-      } else if (type === 'aprende') {
-        window.location.href = `moodleCourse.html?cursoId=${id}`;
-      }
-    } else if (btnVer) {
-      const id = btnVer.dataset.id;
-      const col = btnVer.dataset.col || 'lecturas';
-
-      if (typeof window.cbOpenLecturasAgentViewer === "function") {
-        try {
-          const docRef = doc(db, col, id);
-          const snap = await getDoc(docRef);
-          if (snap.exists()) {
-            const d = snap.data();
-            const music = d?.music || d?.musica || {};
-            const musicAssets = {
-              readingUrl: String(music?.readingUrl || music?.lecturaUrl || d?.musicReadingUrl || "").trim(),
-              gameUrl: String(music?.gameUrl || music?.juegoUrl || d?.musicGameUrl || "").trim(),
-              readingPath: String(music?.readingPath || music?.lecturaPath || d?.musicReadingPath || "").trim(),
-              gamePath: String(music?.gamePath || music?.juegoPath || d?.musicGamePath || "").trim()
-            };
-            window.cbOpenLecturasAgentViewer({
-              id,
-              coleccion: col,
-              sourceCollection: col,
-              titulo: d.titulo || d.tema || d.nombreUnidad || 'Lectura sin título',
-              htmlLectura: d.contenidoHTML || d.texto || '<p>(Sin contenido)</p>',
-              musicAssets,
-              allowMusicGeneration: true,
-              preguntas: Array.isArray(d.preguntas) ? d.preguntas : [],
-              metadatos: {
-                nivel: d.nivel || '',
-                grado: d.grado || '',
-                trimestre: d.trimestre || '',
-                unidad: d.unidad ?? ''
-              }
-            });
-          } else {
-            alert("❌ No se encontró el documento en Firestore.");
-          }
-        } catch (err) {
-          console.error("Error al abrir viewer:", err);
-          alert("❌ Error al cargar los detalles de la lectura.");
-        }
-      } else {
-        console.warn("Viewer no disponible en esta vista.");
-        lecturaIdActual = id;
-        coleccionLecturaActual = col;
-        const btnVerGlobal = document.querySelector(`.ver-lectura[data-id="${id}"]`);
-        if (btnVerGlobal) btnVerGlobal.click();
-      }
-    }
   });
 }
 
@@ -4105,6 +4058,69 @@ function renderStatsChart(canvasId, items, label, existingInstance, setInstance)
   setInstance(newChart);
 }
 
+async function abrirLecturaDashboard(id, col) {
+  const actualColInput = col || "lecturas";
+  if (!id) return;
+  if (window.unsubscribeComentarios) window.unsubscribeComentarios();
+
+  lecturaIdActual = id;
+  coleccionLecturaActual = actualColInput;
+
+  try {
+    let snap = null;
+    let actualCol = actualColInput;
+
+    if (actualCol) {
+      snap = await getDoc(doc(db, actualCol, id));
+    }
+
+    if (!snap || !snap.exists()) {
+      // Búsqueda exhaustiva
+      const fallbackCols = ["lecturas", "lecturasNuevas"];
+      for (const fcol of fallbackCols) {
+        if (fcol === actualCol) continue;
+        const fsnap = await getDoc(doc(db, fcol, id));
+        if (fsnap.exists()) {
+          snap = fsnap;
+          actualCol = fcol;
+          break;
+        }
+      }
+    }
+
+    if (!snap || !snap.exists()) {
+      alert("❌ La lectura no se encontró en Firestore.");
+      return;
+    }
+
+    const lecturaDoc = snap.data();
+    const textoGuardado = lecturaDoc.texto || lecturaDoc.contenidoHTML || "";
+    localStorage.setItem(`lectura_${id}`, textoGuardado);
+
+    const unidadRaw = lecturaDoc.unidadData ?? {
+      nivel: lecturaDoc.nivel, grado: lecturaDoc.grado,
+      trimestre: lecturaDoc.trimestre, unidad: lecturaDoc.unidad
+    };
+    const gradoTexto = mapaGradoTexto[String(unidadRaw.grado)] || unidadRaw.grado || "-";
+    const clave = `${unidadRaw.nivel}_${gradoTexto}_${unidadRaw.trimestre}_${unidadRaw.unidad}`.toLowerCase();
+    const urlImagen = window.imagenesRelacionadasPorClave?.[clave];
+
+    const contenedor = document.getElementById("modalTextoLectura");
+    renderLecturaModalContent(contenedor, textoGuardado, urlImagen, actualCol);
+
+    agregarMarcadoresDePosicion(contenedor);
+    
+    const modal = document.getElementById("modalLectura");
+    modal.classList.remove("hidden");
+    
+    window.unsubscribeComentarios = await renderComentarios(id);
+
+  } catch (err) {
+    console.error("Error al abrir lectura en dashboard:", err);
+    alert("❌ Error al cargar los detalles de la lectura.");
+  }
+}
+
 /**
  * ACCESO DIRECTO AL EDITOR
  */
@@ -4172,7 +4188,7 @@ async function openAprendeViewer(cursoId) {
   // Botones de acción
   if (editBtn) {
     editBtn.onclick = () => {
-      window.open(`generarLectura.html?id=${cursoId}`, '_blank');
+      window.open(`moodleCourse.html?cursoId=${cursoId}`, '_blank');
     };
   }
 

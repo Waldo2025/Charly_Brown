@@ -260,9 +260,25 @@ export function sanitizeHtml(value = "", {allowedTags = null} = {}) {
 }
 
 export function sanitizeRichText(value = "", {fallback = "<p></p>"} = {}) {
-  const clean = sanitizeWithProfile(value, {profile: "rich"});
-  const textOnly = clean.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  return textOnly ? clean : fallback;
+  const clean = sanitizeWithProfile(value, {profile: "rich"}).trim();
+  
+  // Si después de sanitizar no queda nada, devolvemos el fallback
+  if (!clean) return fallback;
+
+  // Verificamos si tiene contenido real: ya sea texto o etiquetas (como <img>, <table>, etc)
+  // Eliminamos solo espacios en blanco y etiquetas vacías comunes para ver si hay algo sustancial
+  const contentCheck = clean
+    .replace(/&nbsp;/g, " ")
+    .replace(/<br\s*\/?>/g, " ")
+    .replace(/<p>\s*<\/p>/g, " ")
+    .trim();
+
+  // Si después de la limpieza profunda no queda nada (ni texto ni etiquetas con contenido), 
+  // pero la cadena original tenía algo que DOMPurify mantuvo (como una imagen), la mantenemos.
+  // Solo devolvemos fallback si el resultado es realmente una estructura vacía.
+  const isEmptyStructure = clean === "<p></p>" || clean === "<div></div>" || clean === "<p>&nbsp;</p>";
+  
+  return isEmptyStructure ? fallback : clean;
 }
 
 export function sanitizeAssistantHtml(value = "") {

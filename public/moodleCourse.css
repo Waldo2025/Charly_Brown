@@ -6262,3 +6262,77 @@ body[data-page="moodlecourse.html"] .btn-guardar-gemini.is-loading .btn-guardar-
 .cb-switch-container:has(input:checked) .cb-switch-label {
   color: #059669;
 }
+
+/* ============================================
+   BOTÓN GUARDAR SESIÓN PREMIUM (V2 - INTEGRADO)
+   ============================================ */
+.btn-save-premium {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 1.15rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 99px; /* Estilo píldora */
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.btn-save-premium:hover {
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1.5px);
+  color: hsl(var(--accent-foreground)) !important;
+}
+
+.btn-save-premium:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.btn-save-premium i {
+  color: hsl(var(--primary));
+  font-size: 0.9rem;
+  transition: transform 0.3s ease;
+}
+
+.btn-save-premium:hover i {
+  transform: scale(1.15) rotate(10deg);
+}
+
+/* Efecto sutil de brillo en hover */
+.btn-save-premium::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 99px;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+
+.btn-save-premium:hover::after {
+  transform: translateX(100%);
+}
+
+/* Estado deshabilitado */
+.btn-save-premium:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: hsl(var(--muted));
+  border-color: hsl(var(--border));
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-save-premium:disabled i {
+  color: hsl(var(--muted-foreground));
+}

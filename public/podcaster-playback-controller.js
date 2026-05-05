@@ -258,16 +258,27 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   pause() {
+    console.log("[PlaybackController] Pause requested.");
     this.state.isPlaying = false;
     this.stopClock();
 
-    Object.values(this.dialoguePlayers).forEach(audio => { try { audio.pause(); } catch (_) { } });
-    [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
-      if (v) try { v.pause(); } catch (_) { }
+    Object.values(this.dialoguePlayers).forEach(audio => { 
+      try { audio.pause(); audio.dataset.initialized = "false"; } catch (_) { } 
     });
-    if (this.backgroundAudio) { try { this.backgroundAudio.pause(); } catch (_) { } }
+    [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
+      if (v) try { v.pause(); v.dataset.initialized = "false"; } catch (_) { }
+    });
+    if (this.backgroundAudio) { 
+      try { 
+        this.backgroundAudio.pause(); 
+        this.backgroundAudio.dataset.initialized = "false";
+        console.log("[PlaybackController] Background audio paused.");
+      } catch (_) { } 
+    }
     if (this.mse?.engine) this.mse.engine.pause();
     this.emit('pause');
+    this.deps?.setPodcastVideoStatus?.("Pausado");
+    this.deps?.updatePodcastVideoTransportUi?.();
   }
 
   stop(opts = {}) {
@@ -326,18 +337,23 @@ export class PodcasterPlaybackController extends EventEmitter {
     let lastTime = performance.now();
     const tickLoop = async (now) => {
       if (!this.state.isPlaying) return;
-      const delta = now - lastTime;
-      lastTime = now;
-      const speed = this.deps?.getPlaybackSpeed?.() || 1;
-      const clampedDelta = Math.min(delta, 100);
-      const nextMs = this.state.currentMs + (clampedDelta * speed);
+      try {
+        const delta = now - lastTime;
+        lastTime = now;
+        const speed = this.deps?.getPlaybackSpeed?.() || 1;
+        const clampedDelta = Math.min(delta, 100);
+        const nextMs = this.state.currentMs + (clampedDelta * speed);
 
-      await this.tick(nextMs);
+        await this.tick(nextMs);
 
-      if (this.state.currentMs >= this.state.totalDurationMs) {
-        this.stop();
-      } else if (this.state.isPlaying) {
-        this.clockId = requestAnimationFrame(tickLoop);
+        if (this.state.currentMs >= this.state.totalDurationMs) {
+          this.stop();
+        } else if (this.state.isPlaying) {
+          this.clockId = requestAnimationFrame(tickLoop);
+        }
+      } catch (error) {
+        console.error("[PlaybackController] Error in tickLoop:", error);
+        this.pause(); // Stop and allow recovery
       }
     };
     this.clockId = requestAnimationFrame(tickLoop);
@@ -528,18 +544,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
 
     if (this.backgroundSrc !== rawSrc) {
-      // console.log('[PlaybackController] Switching background music to:', rawSrc);
+      console.log('[PlaybackController] Switching background music to:', rawSrc);
       this.stopBackgroundMusic();
       this.backgroundSrc = rawSrc;
-      const blobSrc = await this.getBlobUrl(rawSrc);
-      this.backgroundAudio = new Audio();
-      this.backgroundAudio.crossOrigin = 'anonymous';
-      this.backgroundAudio.src = blobSrc;
-      this.backgroundAudio.addEventListener('error', (e) => {
-        console.warn('[PlaybackController] backgroundAudio error:', e, 'src:', blobSrc);
-      });
-      if (activeSegment ? activeSegment.loop : true) {
-        this.backgroundAudio.loop = true;
+      try {
+        const blobSrc = await this.getBlobUrl(rawSrc);
+        this.backgroundAudio = new Audio();
+        this.backgroundAudio.crossOrigin = 'anonymous';
+        this.backgroundAudio.src = blobSrc;
+        this.backgroundAudio.dataset.initialized = "false";
+        this.backgroundAudio.addEventListener('error', (e) => {
+          console.warn('[PlaybackController] backgroundAudio error:', e, 'src:', blobSrc);
+        });
+        if (activeSegment ? activeSegment.loop : true) {
+          this.backgroundAudio.loop = true;
+        }
+      } catch (e) {
+        console.error('[PlaybackController] Failed to initialize background music:', e);
+        this.backgroundSrc = "";
+        return;
       }
     }
 
@@ -660,6 +683,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       activeEl.style.opacity = "1";
       activeEl.style.visibility = "visible";
       activeEl.hidden = false;
+
+      // Aplicar volumen del video (Veo)
+      const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
+      const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
+      const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
+      activeEl.volume = this.clamp01(masterClipVolume * (mix.videoVolume ?? 1.0));
       
       if (inactiveEl) {
         // console.log('[PlaybackController] Hiding inactiveEl:', inactiveEl.id, 'Opacity: 0');
@@ -731,6 +760,12 @@ export class PodcasterPlaybackController extends EventEmitter {
         activeEl.style.visibility = "hidden";
         activeEl.hidden = true;
         activeEl.pause();
+
+        // Aplicar volumen al nuevo elemento activo
+        const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
+        const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
+        const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
+        inactiveEl.volume = this.clamp01(masterClipVolume * (mix.videoVolume ?? 1.0));
 
         // Swap slot globally
         const nextSlot = activeSlot === 1 ? 0 : 1;

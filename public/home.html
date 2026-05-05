@@ -118,14 +118,15 @@
               </div>
               <i class="fas fa-arrow-right"></i>
             </div>
-            <div class="section-card flow-status-action flow-slate" data-view="viewDownloads">
-              <img src="charlyEditor.png" alt="Descargas" class="flow-status-img">
+            
+            <a href="escapeRoomCreator.html" class="section-card flow-status-action flow-rose" style="text-decoration: none;">
+              <i class="fas fa-door-closed" style="font-size: 32px; color: #475569; border-radius: 12px; background: #f1f5f9; padding: 10px;"></i>
               <div>
-                <span>Exportaciones</span>
-                <strong>Descargas Word</strong>
+                <span>Crear experiencias</span>
+                <strong>Escape Room</strong>
               </div>
               <i class="fas fa-arrow-right"></i>
-            </div>
+            </a>
           </div>
         </section>
 
@@ -368,26 +369,6 @@
       </div>
     </section>
 
-    <!-- SECCIÓN DESCARGAS -->
-    <section id="viewDownloads" class="home-view hidden">
-      <button class="btn-back" data-view="viewDashboard">
-        <i class="fas fa-arrow-left"></i> Volver al Panel
-      </button>
-      <header class="home-header">
-        <h1>Descargas de Word</h1>
-        <p>Registro de documentos exportados por los usuarios.</p>
-      </header>
-
-      <div class="stats-container">
-        <div class="chart-wrapper">
-          <canvas id="chartDownloads"></canvas>
-        </div>
-      </div>
-
-      <div id="contenedorDownloadsUser" class="item-list-grid">
-        <!-- Cargado dinámicamente -->
-      </div>
-    </section>
   </main>
 
 
@@ -695,21 +676,20 @@
     <div class="modal-contenidoHome">
       <!-- Encabezado -->
       <div class="modal-header-home">
-        <h3 class="tituloLectura">Unidad/Tema</h3>
-        <span class="cerrar-modal">&times;</span>
+        <h3 class="tituloLectura"><i class="fas fa-book-open"></i> <span>Unidad/Tema</span></h3>
+        <button class="cerrar-modal" title="Cerrar">&times;</button>
       </div>
       <!-- Ahora un solo contenedor de texto -->
       <div id="modalTextoLectura" class="modal-editor-home" contenteditable="false"></div>
       <!-- Botones de acción -->
       <div class="modal-footer-home">
         <div id="btnEditarLectura" class="btn-icono">
-          <i class="fas fa-edit" title="Editar lectura"></i> <span class="btn-title">Editar</span>
+          <i class="fas fa-edit"></i> <span class="btn-title">Editar</span>
         </div>
         <div id="exportarModalInDesignBtn" class="btn-icono">
-          <i class="fas fa-file-export" title="Exportar para InDesign"></i> <span class="btn-title">Exportar
-            InDesign</span>
+          <i class="fas fa-file-export"></i> <span class="btn-title">Exportar InDesign</span>
         </div>
-        <button id="btnGuardarLectura" class="btn btn-success hidden">Guardar</button>
+        <button id="btnGuardarLectura" class="btn btn-success hidden">Guardar Cambios</button>
         <button id="comentarBtn" class="btn btn-primary hidden">Comentar</button>
       </div>
       <!-- Comentarios flotante y panel (sin cambios) -->
@@ -838,7 +818,7 @@
   <script src="on-screen-text-render-spec.js"></script>
   <script type="module" src="podcaster-playback-controller.js"></script>
   <script type="module" src="home.js?v=2026-1.0.1.43"></script>
-  <script src="chromeLayout.js"></script>
+  <script type="module" src="chromeLayout.js"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="chatbot.js"></script>
 

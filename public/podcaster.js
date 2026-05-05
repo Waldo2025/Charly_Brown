@@ -18739,6 +18739,12 @@ function syncPodcastStudioInspector(session = null) {
   if (els.podcastStudioInspector) {
     els.podcastStudioInspector.classList.toggle("is-video-educativo", panelCopy.videoMode);
     els.podcastStudioInspector.setAttribute("aria-label", panelCopy.inspectorTitle);
+    // Asegurar que el ancho y estado colapsado se apliquen correctamente (persistencia UI)
+    const layout = els.podcastVideoShell?.querySelector(".podcast-studio-layout");
+    layout?.classList.toggle("is-inspector-collapsed", podcastStudioInspectorCollapsed);
+    if (els.podcastVideoShell) {
+      els.podcastVideoShell.style.setProperty("--pod-studio-inspector-width", `${podcastStudioInspectorWidth}px`);
+    }
   }
   if (els.podcastStudioInspectorScene) {
     const label = activeRow
@@ -19749,10 +19755,10 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       setGenerationStatus(`Voz lista para escena ${resolveSceneNumberByRowId(key, refreshed)}`, "is-live");
     }
     if (String(state.activeSessionId || "").trim() === sessionId) {
+      // Optimizamos: solo sincronizamos track y timeline, no el shell completo (que renderiza videos y tiras de imágenes)
       syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
       renderPodcastVideoTimeline(refreshed, { force: true, reason: "structure" });
       syncPodcastStudioInspector(refreshed);
-      renderPodcastVideoShell(refreshed);
     }
     return clip;
   } finally {
@@ -23019,6 +23025,10 @@ function renderPodcastVideoShell(session = null) {
   const panelCopy = getPanelModeCopy(activeSession);
   resetPodcastStudioSessionUiState(activeSession);
   setPodcastStudioInspectorCollapsed(podcastStudioInspectorCollapsed);
+  // Persistencia de ancho del inspector al renderizar el shell
+  if (els.podcastVideoShell) {
+    els.podcastVideoShell.style.setProperty("--pod-studio-inspector-width", `${podcastStudioInspectorWidth}px`);
+  }
   ensureTimelineClipsByRowId(activeSession, { persist: !podcastVideoState.montageActive });
   ensureOnScreenTextClipsByRowId(activeSession, { persist: !podcastVideoState.montageActive });
   // Normaliza una sola vez por sesión: duración fija (7s) y centrado respecto a la escena.
@@ -30966,12 +30976,12 @@ function attachEvents() {
       });
       updatePodcastPlayerUi();
       try {
-        await generateDialogueAudioForRow(rowId, { regenerate: shouldRegenerate, silent: false });
-        const refreshed = getActiveSession();
-        syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
-        renderPodcastVideoTimeline(refreshed, { force: true, reason: "structure" });
-        syncPodcastStudioInspector(refreshed);
-        renderPodcastVideoShell(refreshed);
+        const clip = await generateDialogueAudioForRow(rowId, { regenerate: shouldRegenerate, silent: false });
+        if (!clip) {
+          console.warn("[Studio] No se generó audio (posible fallback Live o error silencioso).");
+        }
+        // Nota: generateDialogueAudioForRow ya dispara syncGeminiDialogueTrackWithRuntime y renderPodcastVideoTimeline
+        // No necesitamos llamar a renderPodcastVideoShell aquí para evitar re-renderizar todos los videos.
       } catch (error) {
         setGenerationStatus("Error", "");
         addChatMessage("system", `No se pudo ${shouldRegenerate ? "regenerar" : "generar"} voz de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);

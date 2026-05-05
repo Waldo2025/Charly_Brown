@@ -161,6 +161,20 @@
       <!-- Encabezado -->
 <div class="bg-card border-b border-border px-8 py-4 flex justify-between items-center transition-colors duration-200">
   <h1 class="header-title text-foreground">Editor de contenido</h1>
+  
+  <div class="flex items-center gap-4">
+    <div id="globalSaveStatus" class="flex items-center gap-2 text-xs text-muted-foreground transition-opacity duration-300 opacity-0 pointer-events-none">
+        <i class="fas fa-circle-notch fa-spin text-primary"></i>
+        <span>Guardando cambios...</span>
+    </div>
+    <button id="btnGuardarSesion" 
+            class="btn-save-premium"
+            title="Guardar todos los cambios actuales (Ctrl+S)"
+            aria-label="Guardar sesión">
+        <i class="fas fa-save"></i>
+        <span>Guardar Sesión</span>
+    </button>
+  </div>
 </div>
       <!-- Área de contenido -->
       <div class="p-8">
@@ -1039,7 +1053,7 @@
 <script src="vendor/sortablejs/Sortable.min.js?v=2026-1.0.0.20"></script>
 
 
-<script src="chromeLayout.js?v=2026-1.0.1.14"></script>
+<script type="module" src="chromeLayout.js?v=2026-1.0.1.14"></script>
   <script type="module" src="sidebar.js?v=2026-1.0.1.14"></script>
 <script type="module" src="moodleCourse.js?v=2026-1.0.1.35"></script>
 <script type="module" src="moodleCourse-Theme.js?v=2026-1.0.1.14"></script>

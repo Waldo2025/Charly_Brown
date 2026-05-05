@@ -98,7 +98,7 @@ function configurarAutoguardadoModulo(contenedor, moduloId) {
             const sanitized = sanitizeRichText(contenedor.innerHTML);
             guardarContenidoModulo(moduloId, sanitized);
             contenidoAnterior = sanitized;
-        }, 5000);
+        }, 1000); // Reducido a 1s para mayor seguridad
     });
 
     contenedor.addEventListener("keydown", (e) => {
@@ -115,6 +115,7 @@ function configurarAutoguardadoModulo(contenedor, moduloId) {
 
 async function guardarContenidoModulo(moduloId, contenido) {
     try {
+        if (window.updateGlobalSaveStatus) window.updateGlobalSaveStatus(true);
         const { guardarModulo } = await import('./moodleCourse.js?v=2026-1.0.1.14');
         await guardarModulo(moduloId, { contenido: contenido });
         
@@ -124,6 +125,8 @@ async function guardarContenidoModulo(moduloId, contenido) {
     } catch (error) {
         mostrarErrorGuardado(moduloId);
         return false;
+    } finally {
+        if (window.updateGlobalSaveStatus) window.updateGlobalSaveStatus(false);
     }
 }
 
