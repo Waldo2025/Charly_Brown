@@ -16,13 +16,12 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.31";
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 void bootstrapFirebaseAppCheck(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
-
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
