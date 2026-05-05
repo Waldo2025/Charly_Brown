@@ -17843,26 +17843,54 @@ function applyTimelineClipDrag(event = null) {
       const idx = sameLane.findIndex((item) => String(item?.rowId || "").trim() === String(drag.rowId || "").trim());
       const prev = idx > 0 ? sameLane[idx - 1] : null;
       const minStartMs = prev ? Math.max(0, Number(prev.startMs || 0) + getOnScreenTextClipEffectiveDurationMs(prev)) : 0;
-      const oldStartMs = Math.max(0, Number(current.startMs || 0));
-      const oldTrimInMs = Math.max(0, Number(current.trimInMs || 0));
+      
+      const initialStartMs = Math.max(0, Number(drag.initialStartMs || 0));
+      const initialTrimInMs = Math.max(0, Number(drag.initialTrimInMs || 0));
       const maxTrimIn = Math.max(0, Number(current.trimOutMs || 0) - minTrimLen);
-      const desiredTrimIn = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(Number(drag.initialTrimInMs || 0) + deltaMsRaw, dragStepMs)));
-      const desiredStartMs = oldStartMs + (desiredTrimIn - oldTrimInMs);
-      const constrainedStartMs = Math.max(minStartMs, snapTimelineMsWithStep(desiredStartMs, dragStepMs));
-      const actualTrimIn = Math.max(0, Math.min(maxTrimIn, oldTrimInMs + (constrainedStartMs - oldStartMs)));
-      const updated = normalizeOnScreenTextClipItem({
-        ...current,
-        startMs: constrainedStartMs,
-        trimInMs: actualTrimIn
-      }, drag.rowId);
-      if (!updated) return;
+      
+      // Calculate projected trim and start based on TOTAL delta
+      const nextTrimInRaw = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(initialTrimInMs + deltaMsRaw, dragStepMs)));
+      const trimDeltaMs = nextTrimInRaw - initialTrimInMs;
+      
+      const nextStartMs = Math.max(minStartMs, snapTimelineMsWithStep(initialStartMs + trimDeltaMs, dragStepMs));
+      const actualTrimIn = Math.max(0, Math.min(maxTrimIn, initialTrimInMs + (nextStartMs - initialStartMs)));
+      
+      // Ripple: calculate how much the END of this clip moved.
+      // oldEnd = initialStart + (trimOut - initialTrimIn)
+      // newEnd = nextStart + (trimOut - actualTrimIn)
+      // rippleDelta = newEnd - oldEnd
+      const oldEndMs = initialStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - initialTrimInMs);
+      const newEndMs = nextStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - actualTrimIn);
+      const rippleDeltaMs = newEndMs - oldEndMs;
+
+      const nextClips = {
+        ...(getPodcastVideoConfig(session)?.timelineOnScreenTextClipsByRowId || {}),
+        [drag.rowId]: normalizeOnScreenTextClipItem({
+          ...current,
+          startMs: nextStartMs,
+          trimInMs: actualTrimIn
+        }, drag.rowId)
+      };
+
+      if (rippleDeltaMs !== 0) {
+        sameLane.slice(idx + 1).forEach((item) => {
+          const itemRowId = String(item?.rowId || "").trim();
+          if (!itemRowId) return;
+          nextClips[itemRowId] = normalizeOnScreenTextClipItem({
+            ...item,
+            startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + rippleDeltaMs, dragStepMs))
+          }, itemRowId);
+        });
+      }
+
       upsertPodcastVideoConfig((cfg) => ({
         ...cfg,
         ...buildManualOnScreenTextTrackConfig(cfg, {
-          ...updated,
+          ...(nextClips[drag.rowId] || current),
           hidden: false,
           autoHidden: false
-        }, drag.rowId)
+        }, drag.rowId),
+        timelineOnScreenTextClipsByRowId: nextClips
       }));
       renderPodcastVideoTimeline(getActiveSession(), { lightweight: true });
       syncOnScreenTextTrackToggleBtn(getActiveSession());
@@ -17886,30 +17914,26 @@ function applyTimelineClipDrag(event = null) {
       const currentEndMs = Math.max(0, Number(current.startMs || 0) + getOnScreenTextClipEffectiveDurationMs(current));
       const sourceDurationMs = Math.max(minTrimLen, Number(drag.sourceDurationMs || current.sourceDurationMs || 0));
       const minTrimOut = Math.max(minTrimLen, Number(current.trimInMs || 0) + minTrimLen);
-      const requestedTrimOut = Math.max(minTrimOut, snapTimelineMsWithStep(Number(drag.initialTrimOutMs || 0) + deltaMsRaw, dragStepMs));
-      const nextSourceDurationMs = Math.max(sourceDurationMs, requestedTrimOut, hardMaxSec * 1000);
-      const nextTrimOut = Math.max(minTrimOut, Math.min(nextSourceDurationMs, requestedTrimOut));
-      const trimOutDeltaMs = nextTrimOut - Math.max(0, Number(current.trimOutMs || 0));
+      const nextTrimOut = Math.max(minTrimOut, Math.min(sourceDurationMs, snapTimelineMsWithStep(Number(drag.initialTrimOutMs || 0) + deltaMsRaw, dragStepMs)));
+      const rippleDeltaMs = nextTrimOut - Number(drag.initialTrimOutMs || 0);
       const nextClips = { ...clipStore };
       const updatedCurrent = normalizeOnScreenTextClipItem({
         ...current,
-        sourceDurationMs: nextSourceDurationMs,
+        sourceDurationMs: sourceDurationMs,
         trimOutMs: nextTrimOut
       }, drag.rowId);
       if (!updatedCurrent) return;
       nextClips[drag.rowId] = updatedCurrent;
-      if (trimOutDeltaMs !== 0) {
+      if (rippleDeltaMs !== 0) {
         sameLane
           .filter((item) => String(item?.rowId || "").trim() !== String(drag.rowId || "").trim() && Number(item.startMs || 0) >= currentEndMs - 1)
           .forEach((item) => {
             const itemRowId = String(item?.rowId || "").trim();
             if (!itemRowId) return;
-            const shifted = normalizeOnScreenTextClipItem({
+            nextClips[itemRowId] = normalizeOnScreenTextClipItem({
               ...item,
-              startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + trimOutDeltaMs, dragStepMs))
+              startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + rippleDeltaMs, dragStepMs))
             }, itemRowId);
-            if (!shifted) return;
-            nextClips[itemRowId] = shifted;
           });
       }
       upsertPodcastVideoConfig((cfg) => ({
@@ -18173,32 +18197,49 @@ function applyTimelineClipDrag(event = null) {
       const idx = sameTrack.findIndex((item) => String(item?.rowId || "").trim() === String(drag.rowId || "").trim());
       const prev = idx > 0 ? sameTrack[idx - 1] : null;
       const minStartMs = prev ? getTimelineClipEndMs(prev) : 0;
-      const oldStartMs = Math.max(0, Number(current.startMs || 0));
-      const oldTrimInMs = Math.max(0, Number(current.trimInMs || 0));
+      
+      const initialStartMs = Math.max(0, Number(drag.initialStartMs || 0));
+      const initialTrimInMs = Math.max(0, Number(drag.initialTrimInMs || 0));
       const maxTrimIn = Math.max(0, Number(current.trimOutMs || 0) - minTrimLen);
-      const desiredTrimIn = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(Number(drag.initialTrimInMs || 0) + deltaMsRaw, dragStepMs)));
-      const desiredStartMs = oldStartMs + (desiredTrimIn - oldTrimInMs);
-      const constrainedStartMs = Math.max(minStartMs, snapTimelineMsWithStep(desiredStartMs, dragStepMs));
-      const actualTrimIn = Math.max(
-        0,
-        Math.min(maxTrimIn, oldTrimInMs + (constrainedStartMs - oldStartMs))
-      );
+      
+      const nextTrimInRaw = Math.max(0, Math.min(maxTrimIn, snapTimelineMsWithStep(initialTrimInMs + deltaMsRaw, dragStepMs)));
+      const trimDeltaMs = nextTrimInRaw - initialTrimInMs;
+      
+      const nextStartMs = Math.max(minStartMs, snapTimelineMsWithStep(initialStartMs + trimDeltaMs, dragStepMs));
+      const actualTrimIn = Math.max(0, Math.min(maxTrimIn, initialTrimInMs + (nextStartMs - initialStartMs)));
+      
+      const oldEndMs = initialStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - initialTrimInMs);
+      const newEndMs = nextStartMs + (Math.max(0, Number(current.trimOutMs || 0)) - actualTrimIn);
+      const rippleDeltaMs = newEndMs - oldEndMs;
+
+      const nextClips = { ...clips };
       const updated = normalizeTimelineClipItem({
         ...current,
-        startMs: constrainedStartMs,
+        startMs: nextStartMs,
         trimInMs: actualTrimIn
       }, drag.rowId);
+      
       if (!updated) return cfg;
+      nextClips[drag.rowId] = updated;
+
+      if (rippleDeltaMs !== 0) {
+        sameTrack.slice(idx + 1).forEach((item) => {
+          const itemRowId = String(item?.rowId || "").trim();
+          if (!itemRowId) return;
+          nextClips[itemRowId] = normalizeTimelineClipItem({
+            ...item,
+            startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + rippleDeltaMs, dragStepMs))
+          }, itemRowId);
+        });
+      }
+
       const existingTextClipMap = normalizeOnScreenTextClipsByRowId(cfg?.timelineOnScreenTextClipsByRowId || {});
       const currentTextClip = existingTextClipMap[drag.rowId] || null;
       const constrainedTextClip = constrainOnScreenTextClipToScene(currentTextClip, updated, drag.rowId);
       return {
         ...cfg,
         timelineVersion: STUDIO_TIMELINE_VERSION,
-        timelineClipsByRowId: {
-          ...clips,
-          [drag.rowId]: updated
-        },
+        timelineClipsByRowId: nextClips,
         ...(constrainedTextClip
           ? buildManualOnScreenTextTrackConfig(cfg, {
             ...constrainedTextClip,
@@ -18235,7 +18276,7 @@ function applyTimelineClipDrag(event = null) {
       const sourceDurationMs = Math.max(minTrimLen, Number(drag.sourceDurationMs || current.sourceDurationMs || 0));
       const minTrimOut = Math.max(minTrimLen, Number(current.trimInMs || 0) + minTrimLen);
       const nextTrimOut = Math.max(minTrimOut, Math.min(sourceDurationMs, snapTimelineMsWithStep(Number(drag.initialTrimOutMs || 0) + deltaMsRaw, dragStepMs)));
-      const trimOutDeltaMs = nextTrimOut - Math.max(0, Number(current.trimOutMs || 0));
+      const rippleDeltaMs = nextTrimOut - Number(drag.initialTrimOutMs || 0);
       const currentEndMs = getTimelineClipEndMs(current);
       const trackId = String(current.trackId || "").trim();
       const nextClips = { ...clips };
@@ -18248,7 +18289,7 @@ function applyTimelineClipDrag(event = null) {
       const currentTextClip = existingTextClipMap[drag.rowId] || null;
       const constrainedTextClip = constrainOnScreenTextClipToScene(currentTextClip, updatedCurrent, drag.rowId);
       nextClips[drag.rowId] = updatedCurrent;
-      if (trimOutDeltaMs !== 0) {
+      if (rippleDeltaMs !== 0) {
         Object.values(clips)
           .filter((item) => (
             String(item?.trackId || "").trim() === trackId
@@ -18262,12 +18303,10 @@ function applyTimelineClipDrag(event = null) {
           .forEach((item) => {
             const rowId = String(item?.rowId || "").trim();
             if (!rowId) return;
-            const shifted = normalizeTimelineClipItem({
+            nextClips[rowId] = normalizeTimelineClipItem({
               ...item,
-              startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + trimOutDeltaMs, dragStepMs))
+              startMs: Math.max(0, snapTimelineMsWithStep(Number(item.startMs || 0) + rippleDeltaMs, dragStepMs))
             }, rowId);
-            if (!shifted) return;
-            nextClips[rowId] = shifted;
           });
       }
       return {

@@ -1,5 +1,5 @@
 {
-  "version": "2026-1.0.1.35",
+  "version": "2026-1.0.1.36",
   "title": "Estabilización de Reproducción",
   "message": "Actualización disponible. Se ha corregido el desfase del playhead y el stop del audio. Si algo falla, haz hard refresh.",
   "forceClearCache": true,
