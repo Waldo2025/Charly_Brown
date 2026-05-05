@@ -6190,7 +6190,7 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || {});
     const notes = clampText(req.body?.notes || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
-    const educationalAudio = req.body?.videoMode === true || contentMode === "educational";
+    const educationalAudio = req.body?.videoMode === true || contentMode === "educational" || contentMode === "creative";
     const regenerate = req.body?.regenerate === true;
     const previousStoragePath = clampText(req.body?.previousStoragePath || "", 700);
     const model = normalizeModel(req.body?.model || "gemini-3.1-flash-tts-preview");
@@ -9221,7 +9221,19 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
 
-    const upstream = await fetchCompat(normalizedUrl, { method: "GET" });
+    let finalRequestUrl = normalizedUrl;
+    if (req.query.token && !finalRequestUrl.includes("token=")) {
+      const separator = finalRequestUrl.includes("?") ? "&" : "?";
+      finalRequestUrl += `${separator}token=${req.query.token}`;
+      if (req.query.alt && !finalRequestUrl.includes("alt=")) {
+        finalRequestUrl += `&alt=${req.query.alt}`;
+      }
+    }
+
+    const upstream = await fetchCompat(finalRequestUrl, { 
+      method: "GET",
+      headers: { "User-Agent": "CharlyBrown-Backend/1.0" }
+    });
     if (!upstream.ok) {
       const body = await safeJson(upstream);
       return res.status(upstream.status).json(body);
@@ -9410,9 +9422,30 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     if (!allowedHost) {
       return res.status(403).json({ error: "Host no permitido para proxy." });
     }
-    const upstream = await fetchCompat(normalizedUrl, {
+    let finalRequestUrl = normalizedUrl;
+    // Reconstruct URL if query parameters were split (e.g. &token= was not encoded)
+    if (req.query.token && !finalRequestUrl.includes("token=")) {
+      const separator = finalRequestUrl.includes("?") ? "&" : "?";
+      finalRequestUrl += `${separator}token=${req.query.token}`;
+      if (req.query.alt && !finalRequestUrl.includes("alt=")) {
+        finalRequestUrl += `&alt=${req.query.alt}`;
+      }
+    }
+
+    const proxyHeaders = {
+      "User-Agent": "CharlyBrown-Backend/1.0",
+      ...(rangeHeader ? { Range: rangeHeader } : {})
+    };
+
+    console.info("[backend][proxy-media] fetching upstream", { 
+      host, 
+      hasToken: finalRequestUrl.includes("token="),
+      hasRange: !!rangeHeader
+    });
+
+    const upstream = await fetchCompat(finalRequestUrl, {
       method: "GET",
-      headers: rangeHeader ? { Range: rangeHeader } : undefined
+      headers: proxyHeaders
     });
     if (!upstream.ok && upstream.status !== 206) {
       // Si un link de Firebase Storage (token) expiró o devuelve 403/404,
@@ -9420,10 +9453,16 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       try {
         const shouldTryAdminFallback = upstream.status === 403 || upstream.status === 404;
         if (shouldTryAdminFallback) {
-          const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(normalizedUrl);
+          const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(finalRequestUrl);
           const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
           const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
           const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
+          console.info("[backend][proxy-media] upstream failed, trying admin fallback", { 
+            status: upstream.status, 
+            objectPath, 
+            isPodcasterAsset,
+            bucketFromUrl 
+          });
           if (isPodcasterAsset && objectPath) {
             const candidates = (() => {
               const buckets = getStorageBucketCandidates();

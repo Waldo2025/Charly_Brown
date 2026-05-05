@@ -43,6 +43,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.audioCache = {};
     this.blobCache = new Map();
     this.fetchPromises = new Map();
+    this.mediaCacheName = 'podcaster-media-cache-v1';
+
 
     this.backgroundAudio = null;
     this.backgroundSource = null;
@@ -76,55 +78,70 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
   getBlobUrlSync(url) {
     if (!url) return "";
+    if (url.startsWith('blob:')) return url;
     if (this.blobCache.has(url)) return this.blobCache.get(url);
     return null;
   }
 
+  async invalidateBlobUrl(url) {
+    if (!url) return;
+    const blobUrl = this.blobCache.get(url);
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+      this.blobCache.delete(url);
+    }
+    try {
+      const cache = await caches.open(this.mediaCacheName);
+      await cache.delete(url);
+    } catch (e) { }
+  }
+
+
   async getBlobUrl(url) {
     if (!url) return "";
+    // 1. Check in-memory cache
     const cached = this.getBlobUrlSync(url);
     if (cached) return cached;
 
     if (this.fetchPromises.has(url)) return this.fetchPromises.get(url);
-    
-    // console.log("[PlaybackController] Fetching Blob URL:", url);
 
     const p = (async () => {
       try {
-        let finalUrl = url;
+        // 2. Check persistent Cache Storage
+        try {
+          const mediaCache = await caches.open(this.mediaCacheName);
+          const cachedResp = await mediaCache.match(url);
+          if (cachedResp) {
+            const blob = await cachedResp.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            this.blobCache.set(url, objectUrl);
+            return objectUrl;
+          }
+        } catch (e) { }
 
-        // "Obtain from firebase" - if we see a proxy URL, try to extract storagePath 
-        // and resolve it directly via Firebase for maximum stability.
-        // Detection for direct Firebase Storage URLs to force proxy if needed
+        let finalUrl = url;
         const isDirectFirebaseUrl = url.includes('firebasestorage.googleapis.com');
-        
+
         if (url.includes('/api/assets/proxy-media') || url.includes('/api/assets/proxy-image') || isDirectFirebaseUrl) {
           try {
             const parsedUrl = new URL(url, window.location.origin);
             let storagePath = parsedUrl.searchParams.get('storagePath');
             const originalUrl = parsedUrl.searchParams.get('url');
 
-            // If it's a direct Firebase URL, try to extract the path from the URL itself
             if (isDirectFirebaseUrl && !storagePath) {
               const pathPart = url.split('/o/')[1]?.split('?')[0];
               if (pathPart) storagePath = decodeURIComponent(pathPart);
             }
 
             if (storagePath && this.deps?.resolveFirebaseStorageUrl) {
-              // FOR STUDIO ASSETS: skip direct resolution in the Studio to avoid 403 Forbidden console errors
-              // and go straight to the authenticated proxy. In the Dashboard, always resolve
-              // as it typically points to our own proxy anyway.
               const isStudioAsset = storagePath.includes('podcaster/sessions') || storagePath.includes('podcaster/library');
-
               if (!isStudioAsset || this.deps?.isDashboard) {
                 const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || 'charly-brown.firebasestorage.app';
                 const gsPath = storagePath.startsWith('gs://') ? storagePath : `gs://${bucket}/${storagePath}`;
-
                 const directUrl = await this.deps.resolveFirebaseStorageUrl(gsPath);
                 if (directUrl && directUrl.startsWith('http') && !directUrl.includes('/api/assets/proxy')) {
                   finalUrl = directUrl;
                 } else if (directUrl && directUrl.includes('/api/assets/proxy')) {
-                  // If it's a proxy URL, use it directly as the final URL
                   finalUrl = directUrl;
                 }
               }
@@ -134,66 +151,47 @@ export class PodcasterPlaybackController extends EventEmitter {
           } catch (e) { }
         }
 
-        // Handle Firebase Storage paths (gs://)
         if (finalUrl.startsWith("gs://")) {
-          // console.log('[PlaybackController] Detected gs:// path, resolving...');
           if (this.deps?.resolveFirebaseStorageUrl) {
             finalUrl = await this.deps.resolveFirebaseStorageUrl(finalUrl);
-            // console.log('[PlaybackController] Resolved to:', finalUrl);
-          } else {
-            console.warn('[PlaybackController] No resolveFirebaseStorageUrl dependency found for:', finalUrl);
-            return "";
           }
         }
 
-        // Try to fetch the direct URL if we resolved one
-        if (finalUrl !== url && finalUrl.startsWith('http')) {
-          try {
-            // console.log('[PlaybackController] Attempting direct fetch:', finalUrl);
-            const resp = await fetch(finalUrl);
-            if (resp.ok) {
-              const blob = await resp.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              this.blobCache.set(url, objectUrl);
-              return objectUrl;
-            }
-            console.warn('[PlaybackController] Direct fetch failed (status:', resp.status, '), falling back to proxy:', url);
-          } catch (e) {
-            console.warn('[PlaybackController] Direct fetch failed (CORS or Network error), falling back to proxy:', url, e);
-          }
-          // Reset to proxy URL for the final attempt
-          finalUrl = url;
-        }
-
-        // Final attempt (using proxy URL or original URL)
         const fetchOptions = {};
         if (finalUrl.includes('/api/') && this.deps?.getAuthHeaders) {
-          try {
-            fetchOptions.headers = await this.deps.getAuthHeaders();
-          } catch (e) {
-            console.warn('[PlaybackController] Failed to get auth headers for fetch:', e.message);
-          }
+          try { fetchOptions.headers = await this.deps.getAuthHeaders(); } catch (e) { }
         }
 
-        // console.log('[PlaybackController] Fetching blob from:', finalUrl);
         const resp = await fetch(finalUrl, fetchOptions);
         if (!resp.ok) {
-          console.error('[PlaybackController] Fetch failed:', resp.status, finalUrl);
           if (resp.status === 404 && this.deps?.markStaleProxyMediaUrl) {
             this.deps.markStaleProxyMediaUrl(url, 'proxy-media-404-from-controller');
           }
           throw new Error(`Fetch failed with status ${resp.status}`);
         }
+
+        try {
+          const mediaCache = await caches.open(this.mediaCacheName);
+          await mediaCache.put(url, resp.clone());
+        } catch (e) { }
+
         const blob = await resp.blob();
         const objectUrl = URL.createObjectURL(blob);
-        // console.log('[PlaybackController] Blob created for:', url, 'Size:', blob.size);
         this.blobCache.set(url, objectUrl);
         return objectUrl;
       } catch (e) {
-        // Silent failure if we have a proxy fallback, or minimal log if it's the final failure
+        // Cache the fact that it failed to avoid spamming the backend/storage.
+        // If it was a 404, we mark it specially so we can potentially skip it in the UI.
+        const msg = String(e?.message || "").toLowerCase();
+        if (msg.includes("status 404")) {
+          this.blobCache.set(url, "404");
+        } else {
+          this.blobCache.set(url, url); 
+        }
         return url;
+      } finally {
+        this.fetchPromises.delete(url);
       }
-      finally { this.fetchPromises.delete(url); }
     })();
     this.fetchPromises.set(url, p);
     return p;
@@ -217,7 +215,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.state.session = session || this.deps?.getActiveSession?.();
     this.state.config = config || this.deps?.getPodcastVideoConfig?.(this.state.session);
     this.state.useMse = this.state.config?.useMse === true;
-    this.state.totalDurationMs = this.deps?.getTimelineTotalDurationMs?.(this.state.session) || 0;
+    const totalMs = this.deps?.getTimelineTotalDurationMs?.(this.state.session) || 0;
+    this.state.totalDurationMs = Number.isFinite(totalMs) ? Math.max(0, totalMs) : 0;
+
   }
 
   /**
@@ -388,7 +388,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         // No await here: let the playhead move even if media sync is slow
         this.tick(nextMs);
 
-        if (this.state.currentMs >= this.state.totalDurationMs) {
+        if (this.state.totalDurationMs > 100 && this.state.currentMs >= this.state.totalDurationMs) {
           this.stop();
         } else if (this.state.isPlaying && loopId === this.activeLoopId) {
           this.clockId = requestAnimationFrame(tickLoop);
