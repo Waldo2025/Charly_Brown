@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.33";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.34";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -16800,37 +16800,29 @@ function seekStudioTimelineByClientX(clientX = 0, options = {}) {
   if (!session || !els.podcastVideoTimeline) return;
   const canvas = els.podcastVideoTimeline.querySelector(".podcast-video-timeline-canvas");
   if (!canvas) return;
-  // Asegura que el offset del playhead coincida con el lane real.
+
   syncPodcastTimelineLaneOffsetFromDom(session);
   const rect = canvas.getBoundingClientRect();
   const offsetPx = Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
   const contentX = Math.max(0, Number(clientX || 0) - rect.left - offsetPx);
   const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
   const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX)));
-  podcastVideoState.montageCursorMs = nextMs;
-  syncPodcastTimelinePlayhead(session, {
-    lightweight: options.lightweightPlayhead === true
-  });
-  if (els.podcastStudioScrubber) {
-    const ratio = Math.max(0, Math.min(1, nextMs / totalMs));
-    els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
-  }
+
+  // Use the playback controller to seek, which handles state and UI sync
+  playbackController.seek(nextMs);
+
   if (options.stopMontage === true && podcastVideoState.montageActive) {
     playbackController.stop({ keepStatus: true, keepCursor: true });
   }
+
   if (options.deferPreview === true) {
     scheduleStudioTimelinePreviewSync(nextMs, null);
-  } else {
+  } else if (!options.noPreview) {
     const entries = buildTimelineRuntimeEntries(session);
     const previewOptions = options.autoplay === false ? { autoplay: false } : undefined;
     syncStudioTimelinePreview(nextMs, entries, null, previewOptions).catch(() => { });
   }
-  if (podcastVideoState.timelineSequenceActive === true && podcastVideoState.timelineSequencePaused !== true) {
-    try {
-      const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
-      playbackController.syncBackgroundMusic(nextMs, speed);
-    } catch (_) { }
-  }
+
   if (els.podcastStudioTime) {
     els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
   }
@@ -16846,7 +16838,6 @@ function seekStudioTimelineByRulerClientX(clientX = 0, options = {}) {
   const totalWidthPx = Math.max(1, Number(rulerInner?.offsetWidth || timelineMsToPx(totalMs, session)));
   const offsetPx = Math.max(0, Number(canvas?.dataset?.playheadOffset || 0));
 
-  // Use provided localX or calculate it
   const localX = options.localX !== undefined
     ? options.localX
     : Math.max(0, Math.min(rect.width, Number(clientX || 0) - rect.left));
@@ -16854,24 +16845,11 @@ function seekStudioTimelineByRulerClientX(clientX = 0, options = {}) {
   const contentX = Math.max(0, Math.min(totalWidthPx, localX + Number(els.podcastTimelineRuler.scrollLeft || 0) - offsetPx));
   const nextMs = Math.max(0, Math.min(totalMs, timelinePxToMs(contentX, session)));
 
-  podcastVideoState.montageCursorMs = nextMs;
-  syncPodcastTimelinePlayhead(session);
-
-  if (els.podcastStudioScrubber) {
-    const ratio = Math.max(0, Math.min(1, nextMs / totalMs));
-    els.podcastStudioScrubber.value = String(Math.round(ratio * 100));
-  }
+  // Use the playback controller to seek, which handles state and UI sync
+  playbackController.seek(nextMs);
 
   if (options.stopMontage === true && podcastVideoState.montageActive) {
     playbackController.stop({ keepStatus: true, keepCursor: true });
-  }
-
-  // Full recalculation of audio, video and overlays
-  const entries = buildTimelineRuntimeEntries(session);
-  syncStudioTimelinePreview(nextMs, entries, null, { autoplay: false }).catch(() => { });
-
-  if (els.podcastStudioTime) {
-    els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(totalMs / 1000)}`;
   }
 }
 
@@ -30603,15 +30581,12 @@ function attachEvents() {
       const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
       const ratio = Math.max(0, Math.min(1, Number(els.podcastStudioScrubber.value || 0) / 100));
       const nextMs = Math.max(0, Math.min(durationMs, ratio * durationMs));
-      podcastVideoState.montageCursorMs = nextMs;
-      syncPodcastTimelinePlayhead(session);
+
+      // Use the playback controller to seek
+      playbackController.seek(nextMs);
+
       if (podcastVideoState.montageActive) {
         playbackController.stop({ keepStatus: true, keepCursor: true });
-      }
-      const entries = buildTimelineRuntimeEntries(session);
-      syncStudioTimelinePreview(nextMs, entries).catch(() => { });
-      if (els.podcastStudioTime) {
-        els.podcastStudioTime.textContent = `${secondsToClock(nextMs / 1000)} / ${secondsToClock(durationMs / 1000)}`;
       }
     });
   }

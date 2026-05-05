@@ -259,13 +259,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
   // --- Transport ---
   play(fromMs = null) {
-    // console.log("[PlaybackController] Play at:", fromMs);
     this.sync();
-    if (fromMs !== null) this.state.currentMs = fromMs;
+    if (fromMs !== null) this.state.currentMs = Math.max(0, fromMs);
     this.state.isPlaying = true;
     this.initAudioContext();
 
-    // Stop any other timers/sequences
     if (this.deps?.cancelTimelineSequence) this.deps.cancelTimelineSequence();
 
     if (this.state.useMse) {
@@ -274,7 +272,6 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.startClock();
     }
     
-    // Sync UI state
     if (this.deps?.podcastVideoState) {
       this.deps.podcastVideoState.montageActive = true;
       this.deps.podcastVideoState.montagePaused = false;
@@ -294,10 +291,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
       if (v) try { v.pause(); } catch (_) { }
     });
-    if (this.backgroundAudio) { try { this.backgroundAudio.pause(); } catch (_) { } }
+    this.pauseBackgroundMusic();
     if (this.mse?.engine) this.mse.engine.pause();
     
-    // Sync UI state
     if (this.deps?.podcastVideoState) {
       this.deps.podcastVideoState.montagePaused = true;
     }
@@ -310,32 +306,46 @@ export class PodcasterPlaybackController extends EventEmitter {
   stop(opts = {}) {
     this.state.isPlaying = false;
     this.stopClock();
-    if (opts.keepCursor !== true) {
+    
+    const shouldReset = opts.keepCursor !== true;
+    if (shouldReset) {
       this.state.currentMs = 0;
     }
+    
     this.stopBackgroundMusic();
     if (this.deps?.stopPanelMusic) { try { this.deps.stopPanelMusic(); } catch (_) { } }
+    
     Object.values(this.dialoguePlayers).forEach(a => {
       try {
         a.pause();
-        if (opts.keepCursor !== true) this.seekTo(a, 0);
+        if (shouldReset) {
+          a.currentTime = 0;
+          a.dataset.initialized = "false";
+        }
       } catch (_) { }
     });
+
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach(v => {
-      if (v) try { v.pause(); if (opts.keepCursor !== true) this.seekTo(v, 0); v.style.opacity = 0; v.style.zIndex = 1; } catch (_) { }
+      if (v) try { 
+        v.pause(); 
+        if (shouldReset) {
+          v.currentTime = 0;
+          v.dataset.src = ""; // Clear src to avoid flicker on next play
+        }
+        v.style.opacity = 0; 
+        v.style.zIndex = 1; 
+      } catch (_) { }
     });
 
-    // Sync UI state
     if (this.deps?.podcastVideoState) {
-      if (opts.keepCursor !== true) {
+      if (shouldReset) {
         this.deps.podcastVideoState.montageCursorMs = 0;
       }
       this.deps.podcastVideoState.montageActive = false;
       this.deps.podcastVideoState.montagePaused = false;
     }
 
-    // UI Updates
-    this.deps?.setPodcastVideoStatus?.(this.state.currentMs === 0 ? 'Detenido' : 'Pausado');
+    this.deps?.setPodcastVideoStatus?.(shouldReset ? 'Detenido' : 'Pausado');
     this.deps?.updatePodcastVideoTransportUi?.();
 
     this.state.isTickProcessing = false;
@@ -343,17 +353,12 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.emit('stop', opts);
   }
 
-  /**
-   * Helper seguro para cambiar el tiempo de reproducción
-   */
   seekTo(el, seconds) {
     if (!el || !Number.isFinite(seconds)) return;
     try {
-      // Solo buscar si el elemento tiene metadatos cargados
       if (el.readyState >= 1) {
         el.currentTime = seconds;
       } else {
-        // Si no está listo, guardar para cuando cargue o intentar forzar
         el.dataset.pendingSeek = seconds;
         const onLoaded = () => {
           el.currentTime = seconds;
@@ -374,9 +379,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     let lastTime = performance.now();
 
     const tickLoop = async (now) => {
-      if (!this.state.isPlaying || loopId !== this.activeLoopId) {
-        return;
-      }
+      if (!this.state.isPlaying || loopId !== this.activeLoopId) return;
       try {
         const delta = now - lastTime;
         lastTime = now;
@@ -384,15 +387,16 @@ export class PodcasterPlaybackController extends EventEmitter {
         const clampedDelta = Math.min(delta, 100);
         const nextMs = this.state.currentMs + (clampedDelta * speed);
 
-        this.state.currentMs = nextMs;
-        // No await here: let the playhead move even if media sync is slow
-        this.tick(nextMs);
-
-        if (this.state.totalDurationMs > 100 && this.state.currentMs >= this.state.totalDurationMs) {
+        if (this.state.totalDurationMs > 100 && nextMs >= this.state.totalDurationMs) {
+          this.state.currentMs = this.state.totalDurationMs;
+          this.tick(this.state.totalDurationMs);
           this.stop();
-        } else if (this.state.isPlaying && loopId === this.activeLoopId) {
-          this.clockId = requestAnimationFrame(tickLoop);
+          return;
         }
+
+        this.state.currentMs = nextMs;
+        this.tick(nextMs);
+        this.clockId = requestAnimationFrame(tickLoop);
       } catch (error) {
         console.error("[PlaybackController] Error in tickLoop:", error);
         this.pause(); 
@@ -408,19 +412,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     if (!entries.length) return;
-
     const markers = [...new Set(entries.map(e => Math.round(Number(e.startMs || 0))))].sort((a, b) => a - b);
-    const current = Math.max(0, Number(this.deps?.podcastVideoState?.montageCursorMs ?? this.state.currentMs ?? 0));
-
-    // Find previous marker (with 500ms threshold: if we are >500ms into a scene, go to start of scene, else go to prev scene)
+    const current = this.state.currentMs;
     const targetMs = [...markers].reverse().find(ms => ms < current - 500) ?? 0;
-
-    // console.log('[PlaybackController] Prev: current=', current, 'markers=', markers, 'target=', targetMs);
-    this.stop({ keepStatus: true, keepCursor: true });
-    this.state.currentMs = targetMs;
-    await this.tick(targetMs);
-    this.emit('seek', { currentMs: targetMs });
-    this.deps?.updatePodcastVideoTransportUi?.();
+    await this.seek(targetMs);
   }
 
   async next() {
@@ -428,33 +423,23 @@ export class PodcasterPlaybackController extends EventEmitter {
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entries = this.deps?.buildTimelineRuntimeEntries?.(session) || [];
     if (!entries.length) return;
-
     const markers = [...new Set(entries.map(e => Math.round(Number(e.startMs || 0))))].sort((a, b) => a - b);
-    const current = Math.max(0, Number(this.deps?.podcastVideoState?.montageCursorMs ?? this.state.currentMs ?? 0));
-
+    const current = this.state.currentMs;
     const targetMs = markers.find(ms => ms > current + 120) ?? markers[markers.length - 1];
-
-    // console.log('[PlaybackController] Next: current=', current, 'markers=', markers, 'target=', targetMs);
-    this.stop({ keepStatus: true, keepCursor: true });
-    this.state.currentMs = targetMs;
-    await this.tick(targetMs);
-    this.emit('seek', { currentMs: targetMs });
-    this.deps?.updatePodcastVideoTransportUi?.();
+    await this.seek(targetMs);
   }
 
   async seek(targetMs) {
     const ms = Math.max(0, Math.min(this.state.totalDurationMs || 9999999, Number(targetMs) || 0));
-    // console.log('[PlaybackController] Seeking to:', ms);
     this.state.currentMs = ms;
     await this.tick(ms);
     this.emit('seek', { currentMs: ms });
   }
 
   async tick(currentMs) {
-    const ms = Number.isFinite(Number(currentMs)) ? Number(currentMs) : (this.state.currentMs || 0);
+    const ms = Number.isFinite(Number(currentMs)) ? Number(currentMs) : this.state.currentMs;
     this.state.currentMs = ms;
 
-    // 1. HIGH-PRIORITY UI UPDATES (Non-blocking, move the playhead)
     if (this.deps?.podcastVideoState) {
       this.deps.podcastVideoState.montageCursorMs = ms;
     }
@@ -466,30 +451,27 @@ export class PodcasterPlaybackController extends EventEmitter {
       });
     }
 
-    // 2. THROTTLED STRUCTURE UPDATES (Avoid churn)
     if (this.pendingTimelineRender && this.deps?.renderPodcastVideoTimeline) {
       this.pendingTimelineRender = false;
       this.deps.renderPodcastVideoTimeline(this.state.session, { force: true, reason: "throttled-metadata-sync" });
     }
 
-    // 3. MEDIA SYNC (Throttled/Non-blocking)
     if (this.state.isTickProcessing) return;
     this.state.isTickProcessing = true;
     try {
       if (this.deps?.updatePodcastVideoTransportUi) this.deps.updatePodcastVideoTransportUi();
       const speed = this.deps?.getPlaybackSpeed?.() || 1;
       
-      // Perform media sync without awaiting (non-blocking for the clock)
-      Promise.all([
+      await Promise.all([
         this.syncAudio(ms, speed),
         this.syncVideo(ms),
         this.syncOverlay ? this.syncOverlay(ms) : null
-      ]).finally(() => {
-        this.state.isTickProcessing = false;
-      });
-
+      ]);
+      
       this.emit('timeupdate', { currentMs: ms });
     } catch (e) {
+      console.warn("[PlaybackController] Tick error:", e);
+    } finally {
       this.state.isTickProcessing = false;
     }
   }
@@ -503,8 +485,8 @@ export class PodcasterPlaybackController extends EventEmitter {
     const activeSegments = segments.filter(s => currentMs >= s.startMs && currentMs < (s.startMs + s.durationMs));
     const activeRowIds = new Set(activeSegments.map(s => s.rowId));
 
-    // Pro-active pre-loading of upcoming audio
-    const upcoming = segments.filter(s => s.startMs > currentMs && (s.startMs - currentMs) < 5000);
+    // Upcoming pre-load
+    const upcoming = segments.filter(s => s.startMs > currentMs && (s.startMs - currentMs) < 3000);
     upcoming.forEach(s => {
       const clip = this.deps?.resolveDialogueAudioForRow?.(session, s.rowId);
       const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
@@ -525,19 +507,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       const rowId = segment.rowId;
       const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
       const rawAudioSrc = this.deps?.resolveStorageAudioUrl?.(audioClip?.downloadUrl, audioClip?.storagePath);
-      if (!rawAudioSrc) {
-        console.warn('[PlaybackController] No audio src for row:', rowId);
-        continue;
-      }
+      if (!rawAudioSrc) continue;
 
       let audioSrc = this.getBlobUrlSync(rawAudioSrc);
-      if (!audioSrc) {
-        audioSrc = await this.getBlobUrl(rawAudioSrc);
-      }
+      if (!audioSrc) audioSrc = await this.getBlobUrl(rawAudioSrc);
+      
       hasVoice = true;
       let audio = this.dialoguePlayers[rowId];
       if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
-        // console.log('[PlaybackController] Creating new Audio for row:', rowId, audioSrc);
         if (audio) try { audio.pause(); } catch (_) { }
         audio = new Audio();
         audio.crossOrigin = 'anonymous';
@@ -546,25 +523,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         audio.dataset.initialized = "false";
         this.dialoguePlayers[rowId] = audio;
         this.audioCache[rowId] = audio;
-        // Capture real duration once metadata is available and update chips
         audio.addEventListener("loadedmetadata", () => {
-          const measuredSec = audio.duration;
-          if (Number.isFinite(measuredSec) && measuredSec > 0) {
-            const pvs = this.deps?.podcastVideoState;
-            if (pvs) {
-              if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
-              const prevMs = pvs.montageAudioActualDurationsMs[rowId] || 0;
-              const nextMs = Math.round(measuredSec * 1000);
-              // Only re-render if duration changed significantly (>100ms)
-              if (Math.abs(nextMs - prevMs) > 100) {
-                pvs.montageAudioActualDurationsMs[rowId] = nextMs;
-                // Avoid re-rendering while playing if possible, or throttle it
-                if (this.state.isPlaying) {
-                  this.pendingTimelineRender = true;
-                } else if (this.deps?.renderPodcastVideoTimeline && this.deps?.getActiveSession) {
-                  this.deps.renderPodcastVideoTimeline(this.deps.getActiveSession(), { force: true, reason: "audio-duration-measured" });
-                }
-              }
+          const nextMs = Math.round(audio.duration * 1000);
+          const pvs = this.deps?.podcastVideoState;
+          if (pvs && Number.isFinite(nextMs)) {
+            if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
+            if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
+              pvs.montageAudioActualDurationsMs[rowId] = nextMs;
+              this.pendingTimelineRender = true;
             }
           }
         }, { once: true });
@@ -579,17 +545,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       const offsetMs = currentMs - segment.startMs;
       const offsetSec = (trimInMs + offsetMs) / 1000;
 
-      // Precision sync: if just started or drift > 0.2s
       const drift = Math.abs(audio.currentTime - offsetSec);
-      if (audio.dataset.initialized === "false" || drift > 0.2) {
-        // console.log('[PlaybackController] Syncing audio currentTime:', rowId, offsetSec);
+      if (audio.dataset.initialized === "false" || drift > 0.15) {
         this.seekTo(audio, offsetSec);
         audio.dataset.initialized = "true";
       }
 
       if (this.state.isPlaying && audio.paused) {
-        // console.log('[PlaybackController] Playing audio:', rowId);
-        audio.play().catch(e => console.warn('[PlaybackController] Audio play failed:', rowId, e));
+        audio.play().catch(() => { });
       }
     }
     await this.syncBackgroundMusic(currentMs, speed, hasVoice);
@@ -600,23 +563,13 @@ export class PodcasterPlaybackController extends EventEmitter {
     const panelCfg = this.deps?.getPanelMontageMusicConfig?.(session);
     if (!panelCfg || panelCfg.sourceType === "none") { this.stopBackgroundMusic(); return; }
 
-    // Support for multiple segments (chips) in timeline
     const sourceItems = Array.isArray(panelCfg.sourceItems) ? panelCfg.sourceItems : [];
-    let activeSegment = null;
-    if (sourceItems.length > 0) {
-      activeSegment = sourceItems.find(s => currentMs >= s.startOffsetMs && currentMs < s.endOffsetMs);
-    }
-
+    const activeSegment = sourceItems.length > 0 ? sourceItems.find(s => currentMs >= s.startOffsetMs && currentMs < s.endOffsetMs) : null;
     const rawSrc = activeSegment ? activeSegment.sourceUrl : panelCfg.sourceUrl;
-    // console.log('[PlaybackController] syncBackgroundMusic rawSrc:', rawSrc);
-    if (!rawSrc) {
-      // if (this.backgroundAudio) console.log('[PlaybackController] No background src for background music, stopping.');
-      this.stopBackgroundMusic();
-      return;
-    }
+    
+    if (!rawSrc) { this.stopBackgroundMusic(); return; }
 
     if (this.backgroundSrc !== rawSrc) {
-      console.log('[PlaybackController] Switching background music to:', rawSrc);
       this.stopBackgroundMusic();
       this.backgroundSrc = rawSrc;
       try {
@@ -625,25 +578,19 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.backgroundAudio.crossOrigin = 'anonymous';
         this.backgroundAudio.src = blobSrc;
         this.backgroundAudio.dataset.initialized = "false";
-        this.backgroundAudio.addEventListener('error', (e) => {
-          console.warn('[PlaybackController] backgroundAudio error:', e, 'src:', blobSrc);
-        });
-        if (activeSegment ? activeSegment.loop : true) {
-          this.backgroundAudio.loop = true;
-        }
+        this.backgroundAudio.loop = activeSegment ? activeSegment.loop : true;
       } catch (e) {
-        console.error('[PlaybackController] Failed to initialize background music:', e);
         this.backgroundSrc = "";
         return;
       }
     }
 
+    if (!this.backgroundAudio) return;
+
     const entry = this.getEntryAtMs(currentMs);
-    const rowId = entry?.rowId;
-    const mix = rowId ? this.deps?.resolveTimelineClipMix?.(session, rowId) : null;
+    const mix = entry?.rowId ? this.deps?.resolveTimelineClipMix?.(session, entry.rowId) : null;
     const sceneBackgroundFactor = mix ? (mix.backgroundVolume ?? 1.0) : 1.0;
 
-    // Use property names consistent with backend and panelMusicState
     const baseVolume = activeSegment && activeSegment.volume !== undefined ? activeSegment.volume : this.toFiniteNumber(panelCfg.volume, 100);
     const duckPct = activeSegment && (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct) !== undefined
       ? (activeSegment.duckingWhenGeminiPct ?? activeSegment.duckingPct)
@@ -652,34 +599,28 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
     const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor;
 
-    if (this.backgroundAudio) {
-      if (this.audioCtx) {
-        this.ensureBackgroundChain();
-        if (this.backgroundGain) {
-          // Use a very small time constant for "instant" feel but avoid clicks
-          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume), this.audioCtx.currentTime, 0.04);
-        } else {
-          this.backgroundAudio.volume = this.clamp01(finalVolume);
-        }
+    if (this.audioCtx) {
+      this.ensureBackgroundChain();
+      if (this.backgroundGain) {
+        this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume), this.audioCtx.currentTime, 0.05);
       } else {
         this.backgroundAudio.volume = this.clamp01(finalVolume);
       }
+    } else {
+      this.backgroundAudio.volume = this.clamp01(finalVolume);
     }
 
     if (activeSegment) {
-      if (!this.backgroundAudio) return;
       const trimInMs = Math.max(0, Number(activeSegment.trimInMs || 0));
       const offsetMs = currentMs - activeSegment.startOffsetMs;
       const offsetSec = (trimInMs + offsetMs) / 1000;
-      const bgDrift = Math.abs(this.backgroundAudio.currentTime - offsetSec);
-
-      if (this.backgroundAudio.dataset.initialized === "false" || bgDrift > 0.3) {
+      if (this.backgroundAudio.dataset.initialized === "false" || Math.abs(this.backgroundAudio.currentTime - offsetSec) > 0.3) {
         this.seekTo(this.backgroundAudio, offsetSec);
         this.backgroundAudio.dataset.initialized = "true";
       }
     }
 
-    if (this.state.isPlaying && this.backgroundAudio && this.backgroundAudio.paused) {
+    if (this.state.isPlaying && this.backgroundAudio.paused) {
       this.backgroundAudio.play().catch(() => { });
     }
   }
@@ -688,58 +629,57 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!this.audioCtx || this.backgroundGain || !this.backgroundAudio) return;
     try {
       this.backgroundSource = this.audioCtx.createMediaElementSource(this.backgroundAudio);
-      this.backgroundCompressor = this.audioCtx.createDynamicsCompressor();
       this.backgroundGain = this.audioCtx.createGain();
-      this.backgroundSource.connect(this.backgroundCompressor);
-      this.backgroundCompressor.connect(this.backgroundGain);
+      this.backgroundSource.connect(this.backgroundGain);
       this.backgroundGain.connect(this.audioCtx.destination);
     } catch (e) { }
   }
 
+  pauseBackgroundMusic() {
+    if (this.backgroundAudio) try { this.backgroundAudio.pause(); } catch (_) { }
+  }
+
   stopBackgroundMusic() {
-    if (this.backgroundAudio) { try { this.backgroundAudio.pause(); } catch (_) { } this.backgroundAudio = null; }
+    if (this.backgroundAudio) { 
+      try { 
+        this.backgroundAudio.pause(); 
+        this.backgroundAudio.currentTime = 0;
+        this.backgroundAudio.src = "";
+      } catch (_) { } 
+      this.backgroundAudio = null; 
+    }
     this.backgroundSrc = "";
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
     this.backgroundSource = null;
     this.backgroundGain = null;
-    this.backgroundCompressor = null;
   }
 
   // --- Video ---
   async syncVideo(currentMs) {
     if (this.state.useMse) return;
-    const active = this.getEntryAtMs(currentMs);
+    const entry = this.getEntryAtMs(currentMs);
 
-    // Pro-active pre-loading of multiple upcoming scenes
+    // Pre-load upcoming
     const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
     const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 4000);
     upcoming.forEach(e => this.getBlobUrl(e.videoSrc));
 
-    if (active) {
-      await this.syncStageSwitching(active, currentMs);
-      
-      // Proactive loading of NEXT scene into inactive element
-      const nextIndex = entries.indexOf(active) + 1;
-      const nextEntry = (nextIndex > 0 && nextIndex < entries.length) ? entries[nextIndex] : null;
-      if (nextEntry && nextEntry.videoSrc) {
-        const activeSlot = Number(this.deps?.podcastVideoState?.stageVideoSlot || 0);
-        const inactiveEl = activeSlot === 1 ? this.els?.podcastActiveSpeakerVideo : this.els?.podcastActiveSpeakerVideoAlt;
-        
-        if (inactiveEl && inactiveEl.dataset.src !== nextEntry.videoSrc) {
-          const nextBlobUrl = this.getBlobUrlSync(nextEntry.videoSrc);
-          if (nextBlobUrl) {
-            // Load into inactiveEl now so it's ready for the swap
-            this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, nextBlobUrl, { keepHidden: true, noWait: true });
-            inactiveEl.dataset.src = nextEntry.videoSrc;
-            this.seekTo(inactiveEl, Math.max(0, Number(nextEntry.clip?.trimInMs || 0) / 1000));
-          }
-        }
-      }
+    if (entry) {
+      await this.syncStageSwitching(entry, currentMs);
     } else {
-      [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt].forEach(v => {
-        if (v) { v.style.opacity = 0; v.hidden = true; }
-      });
+      this.hideAllVideos();
     }
+  }
+
+  hideAllVideos() {
+    [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach(v => {
+      if (v) { 
+        v.style.opacity = 0; 
+        v.style.visibility = "hidden";
+        v.hidden = true; 
+        try { v.pause(); } catch (_) { }
+      }
+    });
   }
 
   async syncStageSwitching(entry, currentMs) {
@@ -754,99 +694,72 @@ export class PodcasterPlaybackController extends EventEmitter {
     const activeEl = activeSlot === 1 ? alt : primary;
     const inactiveEl = activeSlot === 1 ? primary : alt;
     
-    // console.log("[PlaybackController] syncStageSwitching. Entry RowId:", entry.rowId, "VideoSrc:", !!entry.videoSrc, "ActiveSlot:", activeSlot);
-
     if (!activeEl) return;
 
+    // Use current element if it matches source
     if (activeEl.dataset.src === entry.videoSrc) {
-      // Correct element is already active
       if (Math.abs(activeEl.currentTime - offsetSec) > 0.2) {
         this.seekTo(activeEl, offsetSec);
       }
       if (this.state.isPlaying && activeEl.paused) {
-        // console.log('[PlaybackController] Resuming activeEl', activeEl.id);
-        activeEl.play().catch(err => console.warn('[PlaybackController] Play error:', err));
+        activeEl.play().catch(() => { });
       }
       
-      // console.log('[PlaybackController] Showing activeEl:', activeEl.id, 'Opacity: 1, zIndex: 2');
       activeEl.style.zIndex = "2";
       activeEl.style.opacity = "1";
       activeEl.style.visibility = "visible";
       activeEl.hidden = false;
 
-      // Aplicar volumen del video (Veo)
       const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
       const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
       const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
       activeEl.volume = this.clamp01(masterClipVolume * (mix.videoVolume ?? 1.0));
       
-      if (inactiveEl) {
-        // console.log('[PlaybackController] Hiding inactiveEl:', inactiveEl.id, 'Opacity: 0');
-        inactiveEl.style.zIndex = "1";
+      if (inactiveEl && inactiveEl.dataset.src !== entry.videoSrc) {
         inactiveEl.style.opacity = "0";
-        if (inactiveEl.dataset.src !== entry.videoSrc) {
-          inactiveEl.pause();
-        }
+        inactiveEl.pause();
       }
     } else {
-      // We need to switch
+      // Switching needed
       if (!entry.videoSrc) {
-        // No video source for this scene (could be an audio-only chip or missing asset)
-        // Ensure activeEl is at least visible if it's the intended placeholder
-        activeEl.style.zIndex = "2";
         activeEl.style.opacity = "1";
-        activeEl.style.visibility = "visible";
         activeEl.hidden = false;
         return;
       }
 
-      if (this.stageMachine.loadingSrc === entry.videoSrc) {
-        return; // Already switching to this one
-      }
-
-      // console.log('[PlaybackController] Switching scene to:', entry.videoSrc, 'at', offsetSec);
+      if (this.stageMachine.loadingSrc === entry.videoSrc) return;
       this.stageMachine.loadingSrc = entry.videoSrc;
 
       try {
         let blobUrl = this.getBlobUrlSync(entry.videoSrc);
-        if (!blobUrl) {
-          blobUrl = await this.getBlobUrl(entry.videoSrc);
-        }
+        if (!blobUrl) blobUrl = await this.getBlobUrl(entry.videoSrc);
 
-        // If we don't have an inactive element (Single Video Mode, like in Export Preview),
-        // we just update the active element directly.
         if (!inactiveEl) {
           if (activeEl.dataset.src !== entry.videoSrc) {
             await this.deps?.setPodcastStageVideoSourceForElement?.(activeEl, blobUrl);
             activeEl.dataset.src = entry.videoSrc;
           }
           this.seekTo(activeEl, offsetSec);
-          if (this.state.isPlaying) {
-            activeEl.play().catch(() => { });
-          }
-          this.stageMachine.loadingSrc = null;
+          if (this.state.isPlaying) activeEl.play().catch(() => { });
           return;
         }
 
-        // Seamless swap mode (requires both active and inactive elements)
+        // Seamless swap
         if (inactiveEl.dataset.src !== entry.videoSrc) {
-          // console.log('[PlaybackController] Loading new source into inactiveEl');
-          // Non-blocking load if we are in the middle of a switch
           await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, blobUrl, { noWait: true });
           inactiveEl.dataset.src = entry.videoSrc;
         }
 
         this.seekTo(inactiveEl, offsetSec);
-
-        // SWAP VISIBILITY
+        
+        // Final Swap
         inactiveEl.style.zIndex = "2";
         inactiveEl.style.opacity = "1";
         inactiveEl.style.visibility = "visible";
         inactiveEl.hidden = false;
 
         if (this.state.isPlaying) {
-          // No await here to avoid blocking the tick
-          inactiveEl.play().catch(err => console.warn('[PlaybackController] Inactive play failed:', err));
+          inactiveEl.play().catch(() => { });
         }
 
         activeEl.style.zIndex = "1";
@@ -855,17 +768,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         activeEl.hidden = true;
         activeEl.pause();
 
-        // Aplicar volumen al nuevo elemento activo
         const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
         const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
         const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
         inactiveEl.volume = this.clamp01(masterClipVolume * (mix.videoVolume ?? 1.0));
 
-        // Swap slot globally
-        const nextSlot = activeSlot === 1 ? 0 : 1;
-        this.deps?.setActiveStageVideoSlot?.(nextSlot);
+        this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
       } catch (e) {
-        console.error('[PlaybackController] Scene switch failed:', e);
+        console.warn('[PlaybackController] Switch error:', e);
       } finally {
         this.stageMachine.loadingSrc = '';
       }

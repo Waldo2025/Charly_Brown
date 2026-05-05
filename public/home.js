@@ -16,7 +16,7 @@ import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./secu
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { authFetchJson } from "./api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.33";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.34";
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 void bootstrapFirebaseAppCheck(app);

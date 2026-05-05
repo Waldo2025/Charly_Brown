@@ -1,13 +1,13 @@
 {
-  "version": "2026-1.0.1.29",
-  "title": "Nuevas actualizaciones",
-  "message": "Actualización disponible. Si algo se ve viejo, haz hard refresh (Ctrl/Cmd+Shift+R).",
-  "forceClearCache": false,
-  "forceClearCacheReason": "",
+  "version": "2026-1.0.1.34",
+  "title": "Estabilización de Reproducción",
+  "message": "Actualización disponible. Se ha corregido el desfase del playhead y el stop del audio. Si algo falla, haz hard refresh.",
+  "forceClearCache": true,
+  "forceClearCacheReason": "Unified playback synchronization engine update",
   "updates": [
-    "Mejora: Carga ultrarrápida de sesiones (Arquitectura Shallow) en Podcaster Studio.",
-    "Mejora: Guardado automático en Firebase al descargar documentos Word (Generar Unidad).",
-    "Fix: Persistencia de modo Podcast/Video vinculada a la sesión de Firebase.",
-    "Fix: Corrección de error de sintaxis en el guardado de unidades."
+    "Fix: Estabilización total del playhead y sincronización de tiempo determinística.",
+    "Fix: Corrección de la parada de música de fondo al hacer Stop.",
+    "Mejora: Simplificación del motor de transporte para evitar desfasamientos.",
+    "Mejora: Sincronización inmediata entre la regla del timeline y el controlador de audio."
   ]
 }
