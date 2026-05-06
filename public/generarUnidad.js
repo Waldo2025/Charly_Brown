@@ -26,6 +26,16 @@ import {
   setSelectedUnidadActivityStyles
 } from "./unidadActivityStyleSelector.js";
 import { downloadDocxFromTemplate } from "./word-export.js";
+import { resolveProyectoMainHtml } from "./unidadProyectoHtmlGuard.js";
+import { buildProyectoSeparatedResourcePlan } from "./unidadProyectoResourceSections.js";
+import { shouldSkipProyectoResourceNode } from "./unidadProyectoResourceDetection.js";
+import { buildProyectoResourceFallbackHtml, buildUnidadVideoPedagogicGuide } from "./unidadProyectoResourceFallback.js";
+import {
+  buildUnidadLengthGuidance,
+  buildUnidadActivityStructureContract,
+  buildUnidadPrimerIconographyPrompt,
+  buildUnidadResourceExtraBlocks
+} from "./unidadPromptContracts.js";
 
 // Configuración Firebase
 const firebaseConfig = assertFirebaseWebConfig(firebaseWebConfig);
@@ -18438,24 +18448,31 @@ function _unidadSepararBloquesRecursosDeHtml(html = "") {
       if (!(node instanceof Element)) return "";
       const explicit = normalizeType(node.getAttribute("data-resource-type") || "");
       if (explicit) return explicit;
-      
+
       const sectionValue = node.getAttribute("data-resource-section");
       if (sectionValue === "true" || sectionValue === "ficha") {
-         // Si es un wrapper genérico, intentamos inferir el tipo por el contenido o clases
-         if (node.classList.contains("resource-ficha") || node.querySelector(".unidad-ficha-heading")) return "ficha";
-         if (node.classList.contains("resource-anexo") || node.querySelector(".unidad-anexo-heading")) return "anexo";
-         if (node.classList.contains("resource-recortable") || node.querySelector(".unidad-recortable-heading")) return "recortable";
-         if (node.classList.contains("resource-video") || node.querySelector(".unidad-video-heading")) return "video";
+        // Si es un wrapper genérico, intentamos inferir el tipo por el contenido o clases
+        if (node.classList.contains("resource-ficha") || node.querySelector(".unidad-ficha-heading")) return "ficha";
+        if (node.classList.contains("resource-anexo") || node.querySelector(".unidad-anexo-heading")) return "anexo";
+        if (node.classList.contains("resource-recortable") || node.querySelector(".unidad-recortable-heading")) return "recortable";
+        if (node.classList.contains("resource-video") || node.querySelector(".unidad-video-heading")) return "video";
       }
 
       if (node.matches('.activity[data-ficha="true"], .activity-fichas')) return "ficha";
-      
+
       const heading = node.querySelector('.unidad-ficha-heading, .unidad-anexo-heading, .unidad-recortable-heading, .unidad-video-heading');
       if (heading) {
         if (heading.classList.contains("unidad-ficha-heading")) return "ficha";
         if (heading.classList.contains("unidad-anexo-heading")) return "anexo";
         if (heading.classList.contains("unidad-recortable-heading")) return "recortable";
         if (heading.classList.contains("unidad-video-heading")) return "video";
+      }
+
+      if (shouldSkipProyectoResourceNode({
+        className: node.className || "",
+        innerHtml: String(node.innerHTML || "")
+      })) {
+        return "";
       }
 
       const titleNode = node.querySelector("strong, h1, h2, h3, h4, h5, h6");
@@ -18470,10 +18487,14 @@ function _unidadSepararBloquesRecursosDeHtml(html = "") {
     };
     const resourceNodes = Array.from(root.children).filter((node) => {
       if (!(node instanceof Element)) return false;
-      return !!detectResourceType(node)
+      const detectedType = detectResourceType(node);
+      return !!detectedType
         || String(node.dataset?.resourceSection || "").trim() === "true"
         || String(node.dataset?.resourceType || "").trim() !== ""
-        || node.classList.contains("bloque-recursos-subtema");
+        || (
+          node.classList.contains("bloque-recursos-subtema")
+          && !!detectedType
+        );
     });
 
     const _unidadLimpiaMetadatosFichaSeparada = (html = "") => {
@@ -23063,7 +23084,7 @@ window.construirPromptProyecto = function (
   if (generarFichasFinal) recursosOrdenados.push(`la ${claveFichaActual}`);
   if (generarAnexosFinal) recursosOrdenados.push(`el ${claveAnexo}`);
   if (tieneRecortableFinal) recursosOrdenados.push(`el ${claveRecortable}`);
-  if (generarVideosFinal) recursosOrdenados.push(`el ${claveVideo} "${tituloVideoGenerado}"`);
+  if (generarVideosFinal) recursosOrdenados.push(`el video "${tituloVideoGenerado}"`);
 
   const instruccionRecursos = recursosOrdenados.length
     ? (separarSeccionesRecursos
@@ -23075,90 +23096,37 @@ window.construirPromptProyecto = function (
   No generes bloques independientes para estos recursos.`)
     : "";
 
-  // Bloques a generar al FINAL del proyecto (como en otras categorías)
-  let extraBloquesFinales = "";
-
-  if (separarSeccionesRecursos && generarFichasFinal) {
+  const recursosProyecto = {
+    fichas: { generado: !!generarFichasFinal, clave: claveFichaActual },
+    anexos: { generado: !!generarAnexosFinal, clave: claveAnexo },
+    recortables: { generado: !!tieneRecortableFinal, clave: claveRecortable },
+    videos: { generado: !!generarVideosFinal, clave: tituloVideoGenerado }
+  };
+  if (generarFichasFinal) {
     window.claveFichaActualGlobal = claveFichaActual;
     window.chkFichaActivo = true;
-    extraBloquesFinales += `
-    <!-- ===== FICHA DE REFUERZO ===== -->
-    <h3 style="margin-top:24px;">${claveFichaActual}</h3>
-    <p style="margin:6px 0 12px;">La ficha debe conservar el mismo tono, la misma secuencia y la misma estructura que las notas de las subcategorías. Solo cambia el contenido didáctico según el subtema.</p>
-    <p style="margin:6px 0 12px;">REGLA CRÍTICA: Las actividades de la ficha deben ser DIFERENTES y COMPLEMENTARIAS a las del proyecto principal. No repitas las mismas consignas.</p>
-    `;
   }
-
-  if (separarSeccionesRecursos && generarAnexosFinal) {
-    extraBloquesFinales += `
-<!-- ===== ANEXO VISUAL ===== -->
-<div class="activity" style="margin-top:30px;">
-  <strong>${claveAnexo} - [Tema del anexo]</strong>
-  <div style="margin-top:10px; padding:10px; background:#f9f9f9; border-left:4px solid #6c63ff;">
-    <p><em>Descripción visual detallada:</em> tablas/esquemas/mapa conceptual que sintetiza el contenido clave del proyecto.</p>
-    <p>El anexo es material de CONSULTA. PROHIBIDO incluir actividades, preguntas, ejercicios o tareas para el alumno dentro de este bloque.</p>
-    <p style="margin-top:8px;">Este anexo sirve como <strong>referencia visual</strong> para apoyar la comprensión.</p>
-  </div>
-</div>
-`;
-  }
-
-  if (separarSeccionesRecursos && tieneRecortableFinal) {
-    extraBloquesFinales += `
-<!-- ===== RECORTABLE ===== -->
-<div class="activity" style="margin-top:30px;">
-  <strong>${claveRecortable}</strong>
-  <div style="margin-top:10px;">
-    <p>Describe con precisión las piezas del recortable (tarjetas, colores, texto, tamaño) y cómo se usa en la actividad donde se mencionó. Añade espacio para pegarlo.</p>
-    <p>El recortable es material FÍSICO. PROHIBIDO incluir actividades, preguntas o tareas dentro de la descripción del recortable.</p>
-  </div>
-</div>
-`;
-  }
-
-  if (separarSeccionesRecursos && generarVideosFinal) {
-    extraBloquesFinales += `
-<!-- ===== GUION DE VIDEO ===== -->
-<div class="activity" style="margin-top:30px;">
-  <strong>${claveVideo} - Guion de video educativo basado en el subtema: "${subtema}"</strong>
-  <p style="margin:0; font-size:13px; color:#555;">
-    Integrado con T/AE/C/P: ${_unidadGetSyAValueForSubtema(subtema, "T") || ""}
-  </p>
-  <table border="1" cellpadding="6" style="width:100%; margin-top:10px;">
-    <tr style="background:#eaeaea;">
-      <th>Tiempo</th><th>Guion</th><th>Transición</th><th>Elemento visual</th>
-    </tr>
-    <tr><td>0-6s</td><td>[Pregunta detonante o anclaje PNL del tema]</td><td>[Zoom/sonido]</td><td>[Animación/ícono central]</td></tr>
-    <tr><td>6-12s</td><td>[Idea 1]</td><td>[Corte suave]</td><td>[Ilustración del concepto]</td></tr>
-    <tr><td>12-18s</td><td>[Idea 2]</td><td>[Efecto/sonido]</td><td>[Escena breve]</td></tr>
-    <tr><td>18-24s</td><td>[Aplicación]</td><td>[Transición]</td><td>[Recurso visual]</td></tr>
-    <tr><td>24-30s</td><td>[Cierre con call to action claro]</td><td>[Fade out]</td><td>[Personaje invita a actuar]</td></tr>
-  </table>
-  <p style="margin-top:10px;"><em>Duración total 50–60s. Lenguaje dinámico y cercano. NO usar saludos repetitivos.</em></p>
-  <p><strong>REGLA DE PUREZA: El guion de video es una herramienta de exposición. PROHIBIDO incluir actividades, preguntas o ejercicios dentro del guion.</strong></p>
-</div>
-`;
-  }
+  const extraBloquesFinales = buildUnidadResourceExtraBlocks({
+    recursos: recursosProyecto,
+    separarSeccionesRecursos
+  });
 
   // ⛳ Lista de criterios para PISA (si viene de tu flujo). Fallback incluido.
   const criteriosCadena = (typeof listaCriterios !== "undefined" && listaCriterios)
     ? listaCriterios
     : "Localización, Interpretación, Integración, Evaluación, Reflexión/Transferencia";
 
-  // 🆕 INSTRUCCIÓN DE LONGITUD PARA PROYECTOS
-  const instruccionLongitudProyecto = `
-    Para ${grado}° grado de ${nivel}, ajusta las actividades del proyecto:
-    ${grado === "Primero" || grado === "Segundo" ?
-      "- Instrucciones MUY claras y breves, lenguaje simple, mantener formato de actividades" :
-      grado === "Tercero" || grado === "Cuarto" ?
-        "- Instrucciones claras pero con más detalle,  mantener formato de actividades" :
-        "- Instrucciones completas y detalladas,  mantener formato de actividades"
-    }
-    ${grado === "Primero" ?
-      "- Actividades más guiadas, con pasos muy específicos" :
-      "- Actividades que permitan mayor autonomía según el grado"
-    }
-  `;
+  const instruccionLongitudProyecto = buildUnidadLengthGuidance({
+    grado,
+    nivel,
+    instruccionesAdicionales,
+    isTrazosDeLetras: false
+  });
+  const estructuraBaseActividadProyecto = buildUnidadActivityStructureContract({
+    isTrazosDeLetras: false,
+    hasExplicitFormatContract: /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""))
+  });
+  const iconografiaPrimeroProyecto = buildUnidadPrimerIconographyPrompt(grado);
 
   // Agrega las instrucciones al prompt del proyecto
   const instruccionesAdicionalesHTML = instruccionesAdicionales
@@ -23256,23 +23224,9 @@ window.construirPromptProyecto = function (
   🎯 Reglas estrictas para **cada actividad**:
   - Cada actividad va en **<div class="activity">**.
   - Si las instrucciones específicas del usuario traen un contrato alternativo de formato, síguelo literalmente.
-  - Si NO traen un contrato alternativo, usa la estructura ASC original:
-    <div class="activity">
-      <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
-      <ol type="a" class="steps">
-        <li>[Subactividad 1]</li>
-        <li>[Subactividad 2 opcional]</li>
-        <li>[Subactividad 3 opcional]</li>
-        <li>[Subactividad 4 opcional]</li>
-      </ol>
-      <div class="answer">
-        <span style="color:mediumvioletred;">Respuesta: [ejemplo concreto y verificable]</span>
-      </div>
-    </div>
-  - Si el formato rector NO es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con "Respuesta:" final.
-  - Si el formato rector sí es ASC, conserva exactamente la estructura anterior.
-
-     ${estructuraActividades}
+  - Si NO traen un contrato alternativo, usa el mismo contrato base de actividades que el resto de categorías.
+  ${estructuraBaseActividadProyecto}
+  ${estructuraActividades}
 
 
   - Lenguaje claro; reto cognitivo alto (Bloom: analizar, evaluar, crear).
@@ -23282,6 +23236,8 @@ window.construirPromptProyecto = function (
   - Mínimo **2 actividades por fase**; máximo 3.
 
   ${instruccionRecursos}
+
+  ${iconografiaPrimeroProyecto}
 
   📦 Metadatos de FASE (al final de sus actividades):
   <div class="phase-meta">
@@ -23681,105 +23637,12 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   const shouldUseTrazosFichaFormat = isTrazosDeLetras || hasTrazosStyle;
 
   // 4. BLOQUES FINALES UNIFICADOS
-  let extraBloquesFinales = "";
-
-  // Fichas - solo si está activo y se separan recursos
-  if (separarSeccionesRecursos && recursos.fichas.generado) {
-    extraBloquesFinales += `
-      🚨 OBLIGATORIO: genera EXACTAMENTE 1 sección de ficha de refuerzo con clave <strong>${recursos.fichas.clave}</strong>.
-      - La ficha debe ser una sección independiente, no una actividad mezclada con el subtema principal.
-      - Usa un bloque HTML completo y marcado con data-resource-section="true" data-resource-type="ficha".
-      - La ficha debe mantener coherencia pedagógica y contener 4 actividades internas si corresponde.
-      - REGLA CRÍTICA: Las actividades de la ficha deben ser DIFERENTES y COMPLEMENTARIAS a las del subtema principal. No repitas las mismas consignas.
-      - PROHIBIDO incluir actividades normales del subtema fuera de este bloque de ficha.
-      ${shouldUseTrazosFichaFormat ? `- Como este bloque usa formato Trazos y letras, cada actividad de ficha debe incluir SOLO:
-        1) instrucción principal en negritas,
-        2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-        3) bloque <div class="answer"> con el modelo exacto a trazar o copiar.
-      - NO uses subactividades, listas <ol>/<ul>, pasos internos ni viñetas.
-      - Deben ser exactamente 4 instrucciones simples con su answer correspondiente.` : `- Cada actividad de ficha debe incluir:
-        1) instrucción principal en negritas,
-        2) de 1 a 4 subactividades útiles,
-        3) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-        4) respuesta esperada concreta en magenta.`}
-      `;
-  }
-
-  // Anexos - solo si está activo
-  if (recursos.anexos.generado) {
-    extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de anexo visual:
-      - Clave: <strong>${recursos.anexos.clave}</strong>
-      - Formato: bloque independiente con data-resource-section="true" data-resource-type="anexo"
-      - Descripción visual detallada para reforzar el conocimiento del subtema.
-      - El anexo es material de CONSULTA. PROHIBIDO incluir actividades, preguntas, ejercicios o tareas para el alumno dentro de este bloque.
-      - Puede ser tablas comparativas, esquemas, mapas conceptuales, etc.
-      - NO OMITIR ESTO BAJO NINGUNA CIRCUNSTANCIA
-      - No insertes bloques con la clase "activity" ni respuestas en color magenta dentro de esta sección.
-
-      Ejemplo de estructura:
-      <div style="margin-top:30px; border:1px solid #ddd; padding:15px; border-radius:8px;">
-        <strong>${recursos.anexos.clave} - [tema del anexo]</strong>
-        <div style="margin-top:10px; padding:10px; background:#f9f9f9; border-left:4px solid #6c63ff;">
-          <p><em>Descripción detallada del material visual:</em></p>
-          [Aquí va el contenido detallado del anexo]
-          <p style="margin-top:8px;">Este anexo sirve como <strong>referencia visual</strong> para apoyar la comprensión.</p>
-        </div>
-      </div>
-    `;
-  }
-
-  // Videos - solo si está activo
-  if (recursos.videos.generado) {
-    extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar **exactamente UNA sección de guion de video al final del subtema**.
-      - El video "${recursos.videos.clave}" no debe quedar dentro de una actividad normal.
-      - Debe presentarse como una sección independiente con data-resource-section="true" data-resource-type="video".
-      - El guion del video nace de una pregunta generadora y se mantiene separado del bloque principal.
-      - El guion de video es una herramienta de exposición. PROHIBIDO incluir actividades, preguntas o ejercicios dentro del guion.
-      - No insertes bloques con la clase "activity" ni respuestas en color magenta dentro de esta sección.
-
-      GUION PROFESIONAL DE VIDEO:
-      - El guion debe ser divertido, entretenido y captar la atención del alumno.
-      - ESTRUCTURA OBLIGATORIA:
-        1) Inicio: pregunta detonante o anclaje PNL (NO saludo genérico).
-        2) Desarrollo: contenido del video en secuencia clara.
-        3) Cierre: call to action concreto (qué hará el alumno después del video).
-      - Usa lenguaje dinámico, preguntas curiosas y narrativas que sorprendan.
-      - PROHIBIDO iniciar con frases repetitivas como "Hola pequeños exploradores", "Hola chicos", "Hola niños", o variantes.
-      - Estructura el guion en una tabla HTML con columnas: Tiempo, Guion, Transición, Elemento visual.
-      - Total entre 50 y 60 segundos (escenas de 4, 6 u 8 segundos).
-      - Finaliza con una frase motivacional + call to action medible.
-
-      Ejemplo de estructura:
-      <div style="margin-top:30px; border:1px solid #eee; padding:15px; border-radius:8px;">
-        <strong>Guion de video: "${recursos.videos.clave}"</strong>
-        <table border="1" cellpadding="6" style="width:100%; margin-top:10px; border-collapse:collapse;">
-          <tr style="background:#eaeaea;">
-            <th>Tiempo</th>
-            <th>Guion</th>
-            <th>Transición</th>
-            <th>Elemento visual</th>
-          </tr>
-          <!-- filas del guion -->
-        </table>
-      </div>
-    `;
-  }
-
-  // Recortables - solo si está activo
-  if (recursos.recortables.generado) {
-    extraBloquesFinales += `
-      🚨 OBLIGATORIO: DEBES generar EXACTAMENTE 1 sección de recortable:
-      - Clave: <strong>${recursos.recortables.clave}</strong>
-      - Formato: bloque independiente con data-resource-section="true" data-resource-type="recortable"
-      - Descripción visual completa de la sección recortable.
-      - El recortable es material FÍSICO. PROHIBIDO incluir actividades, preguntas o tareas dentro de la descripción del recortable.
-      - Describe detalladamente cada tarjeta, imagen, pieza, color, texto, forma y tamaño.
-      - Si hay categorías, grupos o instrucciones de uso, descríbelos con claridad.
-      - Considera tamaño reducido para poder pegarlo en el libro de actividades.
-    `;
-  }
+  const extraBloquesFinales = buildUnidadResourceExtraBlocks({
+    recursos,
+    separarSeccionesRecursos,
+    isTrazosDeLetras,
+    hasTrazosStyle
+  });
 
   const seccionesExtra = `
   ✅ Si el subtema lo amerita, agrega **una sola sección extra** al final de las actividades (pero no ambas), siguiendo una de estas opciones, siempre en formato profesional y adecuado:
@@ -23919,42 +23782,12 @@ function generarBloqueHabilidad(habilidadClave) {
   `;
 
   // 🆕 INSTRUCCIÓN ESPECÍFICA PARA LONGITUD SEGÚN GRADO
-  const instruccionLongitud = `
-    ${instruccionesAdicionales ? `📌 INSTRUCCIÓN ESPECÍFICA DEL USUARIO (OBLIGATORIA):
-    ${instruccionesAdicionales}
-    
-    IMPORTANTE: Esta instrucción tiene PRIORIDAD sobre cualquier otra regla del prompt.
-    ` : ''}
-    
-    IMPORTANTE: Para ${grado}° grado de ${nivel}, ajusta la longitud de las actividades:
-    ${grado === "Primero" ?
-      "- Instrucciones MUY cortas y simples (máximo 40-60 palabras por actividad)" :
-      grado === "Segundo" ?
-        "- Instrucciones cortas (máximo 40-50 palabras por actividad)" :
-        grado === "Tercero" ?
-          "- Instrucciones moderadas (máximo 50-60 palabras por actividad)" :
-          grado === "Cuarto" ?
-            "- Instrucciones más desarrolladas (máximo 60-70 palabras por actividad)" :
-            grado === "Quinto" ?
-              "- Instrucciones completas (máximo 70-80 palabras por actividad)" :
-              "- Instrucciones detalladas (máximo 80-90 palabras por actividad)"
-    }
-    ${grado === "Primero" || grado === "Segundo" ?
-      "- Usa lenguaje simple, concreto y familiar para niños pequeños" :
-      "- Puedes usar vocabulario progresivamente más complejo"
-    }
-    ${grado === "Primero" || grado === "Segundo" || grado === "Tercero" ? "- Cada subinstrucción debe ser breve: una sola idea y pocas palabras." : ""}
-    ${grado === "Primero" ? "- En Primero, prioriza subinstrucciones de 4 a 8 palabras." : grado === "Segundo" ? "- En Segundo, prioriza subinstrucciones de 5 a 9 palabras." : grado === "Tercero" ? "- En Tercero, prioriza subinstrucciones de 6 a 10 palabras." : ""}
-    ${isTrazosDeLetras
-      ? "- Para Trazos de letras no uses subactividades ni pasos internos; usa solo una instrucción directa con modelo o espacio de escritura."
-      : `- En formato ASC, cada actividad debe incluir normalmente entre 3 y 4 subactividades útiles.
-    - Solo permite 2 subactividades si la actividad es realmente muy simple y sigue siendo pedagógicamente suficiente.
-    - Evita actividades con una sola subinstrucción salvo casos excepcionales.`}
-    
-    ${instruccionesAdicionales ? `⚡ RECORDATORIO CRÍTICO: DEBES SEGUIR LA INSTRUCCIÓN ESPECÍFICA DEL USUARIO:
-    "${instruccionesAdicionales}"
-    Esta instrucción anula cualquier conflicto con otras reglas.` : ''}
-  `;
+  const instruccionLongitud = buildUnidadLengthGuidance({
+    grado,
+    nivel,
+    instruccionesAdicionales,
+    isTrazosDeLetras
+  });
 
   const anclasCurriculares = _unidadExtraerAnclasCurriculares(T, AE, C, P);
   const anclaPrincipal = anclasCurriculares[0] || "";
@@ -24015,39 +23848,10 @@ function generarBloqueHabilidad(habilidadClave) {
   ` : "";
 
   const hasExplicitFormatContract = /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""));
-  const estructuraBaseActividad = isTrazosDeLetras
-    ? `
-    ESTRUCTURA OBLIGATORIA PARA TRAZOS DE LETRAS:
-    <div class="activity">
-      <p>1. <strong>[Instrucción breve de trazo o copia].</strong> [IC T. IND]</p>
-      <div class="answer"><span style="color:mediumvioletred;">Respuesta: [modelo de letra, sílaba o frase para trazar]</span></div>
-    </div>
-    - NO uses listas internas, subinstrucciones ni pasos numerados dentro de la actividad.
-    - Cada actividad debe mostrar directamente el modelo de escritura en la respuesta esperada.
-    `
-    : hasExplicitFormatContract
-    ? `
-    ESTRUCTURA BASE OBLIGATORIA POR ACTIVIDAD NORMAL:
-    - Cada actividad debe ir dentro de <div class="activity">.
-    - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
-    - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
-    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3...
-    - Si el contrato alternativo sí es ASC, genera normalmente 3 o 4 subinstrucciones por actividad. No reduzcas todo a una sola.
-    - En formato ASC, cada subinstrucción debe llevar inmediatamente debajo su propia respuesta o evidencia esperada dentro de <div class="answer">...</div>. No coloques una sola respuesta global al final si existen varias subinstrucciones.
-    `
-    : `
-    ESTRUCTURA OBLIGATORIA POR ACTIVIDAD NORMAL:
-    <div class="activity">
-      <p>1. <strong>[Instrucción principal clara y exigente].</strong> [IC T. IND]</p>
-      <ol class="steps steps-numbered">
-        <li>[Subactividad 1]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 1]</span></div></li>
-        <li>[Subactividad 2 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 2]</span></div></li>
-        <li>[Subactividad 3 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 3]</span></div></li>
-        <li>[Subactividad 4 opcional]<div class="answer"><span style="color:mediumvioletred;">Respuesta: [respuesta de la subactividad 4]</span></div></li>
-      </ol>
-    </div>
-    - Regla obligatoria: genera normalmente 3 o 4 subinstrucciones por actividad; evita dejar una sola salvo que el usuario lo haya pedido explícitamente.
-    `;
+  const estructuraBaseActividad = buildUnidadActivityStructureContract({
+    isTrazosDeLetras,
+    hasExplicitFormatContract
+  });
 
   const prompt = `
     <h1><strong>${subtemaFormateado}</strong></h1>
@@ -24083,13 +23887,7 @@ function generarBloqueHabilidad(habilidadClave) {
 
     REGLAS DE LONGITUD Y CLARIDAD:
     ${instruccionLongitud}
-    ${grado === "Primero" ? `
-    ICONOGRAFÍA TEXTUAL PARA PRIMERO:
-    - Solo para Primero, sustituye dentro de la instrucción la palabra de acción correspondiente por su clave textual de iconografía nivel 1 cuando exista coincidencia exacta.
-    - Ejemplos válidos: [IC OBSERVA], [IC ESCRIBE], [IC ENCUENTRA], [IC LEE], [IC COLOREA GENERICO].
-    - Usa la clave textual en lugar de la palabra, no insertes imágenes ni expliques la sustitución.
-    - No inventes claves; usa únicamente claves estándar de nivel 1.
-    ` : ""}
+    ${buildUnidadPrimerIconographyPrompt(grado)}
 
     RELACIÓN CON LECTURA:
     ${relacionadaLecturaEstricta
@@ -26174,7 +25972,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       }
 
       if (generarVideos) {
-        recursos.videos.clave = obtenerClaveProyectoVideo();
+        recursos.videos.clave = formatearSubtema(subtema);
         recursos.videos.generado = true;
       }
       if (generarImagenApoyo) {
@@ -26252,6 +26050,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       );
 
         const { prompt: promptProyecto, T_global, AE_global, C_global, P_global, metodologia } = packProyecto;
+        if (generarVideos && String(packProyecto?.tituloVideoGenerado || "").trim()) {
+          recursos.videos.clave = String(packProyecto.tituloVideoGenerado).trim();
+        }
 
         let proyectoGeneradoOK = false;
         try {
@@ -26319,9 +26120,78 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const wantsActivityGraphic = usoGrafico === "actividades" || usoGrafico === "ambos" || !usoGrafico;
         // Si el usuario eligió Lectura+Actividades, siempre debe haber ilustración en lectura (no depender del switch de actividades).
         const hayImagenLectura = wantsReadingGraphic;
+        let separarRecursosProyecto = _unidadSeccionesRecursosSeparadas();
+        let splitProy = {
+          mainHtml: htmlProyecto,
+          resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
+        };
+        let proyectoVideoContext = { activityTitle: "", activityText: "" };
+        const lecturaVideoContext = _unidadBuildLecturaSummaryForVideo(
+          debeUsarLecturaProyecto ? contenidoLecturaSeguro : "",
+          debeUsarLecturaProyecto ? tituloLecturaRelacionada : ""
+        );
 
-        // Insertar ilustración/imagen de lectura (si aplica) DENTRO del HTML del proyecto, justo después del encabezado de lectura.
+        // ✅ PROCESAMIENTO FINAL DE PROYECTOS (Iconografía + Recursos)
+        try {
+          // 1. Asegurar menciones de recursos (Fichas, Anexos...)
+          htmlProyecto = _unidadEnsureResourceMentionsInActivities(htmlProyecto, recursos, {
+            subtema,
+            categoria,
+            objetivoT: _unidadGetSyAValueForSubtema(subtema, "T"),
+            objetivoAE: _unidadGetSyAValueForSubtema(subtema, "AE"),
+            objetivoP: _unidadGetSyAValueForSubtema(subtema, "P"),
+            readingTitle: lecturaVideoContext.readingTitle,
+            readingSummary: lecturaVideoContext.readingSummary
+          });
+          proyectoVideoContext = _unidadInferProyectoVideoActivityContext(htmlProyecto);
+
+          // 2. Inyectar iconografía (modalidades y recursos)
+          htmlProyecto = _unidadInjectResourceIconsInActivities(htmlProyecto, { subtema, categoria, grado: gradoTexto });
+          
+          // 3. Aplicar iconografía de primero (Verbo a Icono) si aplica
+          htmlProyecto = _unidadApplyPrimerGradoInstructionIconKeys(htmlProyecto, gradoTexto, subtema);
+
+          // 4. En proyectos no inferimos wrappers finales desde menciones dentro de fases,
+          // porque eso puede secuestrar fases completas como si fueran recursos separados.
+          // Solo respetamos bloques reales que ya lleguen marcados por el modelo.
+
+          // 5. Separar bloques de recursos del contenido principal si está activado
+          separarRecursosProyecto = _unidadSeccionesRecursosSeparadas();
+          splitProy = separarRecursosProyecto
+            ? _unidadSepararBloquesRecursosDeHtml(htmlProyecto)
+            : { 
+                mainHtml: htmlProyecto, 
+                resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" } 
+              };
+
+          // 6. Registrar recursos en el sistema global
+          if (!window.recursosGeneradosSubtemas) window.recursosGeneradosSubtemas = {};
+          if (!window.recursosGeneradosSubtemas[subtema]) window.recursosGeneradosSubtemas[subtema] = {};
+          Object.keys(recursos).forEach(key => {
+            if (recursos[key].generado) {
+               const typeKey = key.replace(/s$/, ""); 
+               const resourceHtml = splitProy.resourcesByType[typeKey] || "";
+               window.recursosGeneradosSubtemas[subtema][key] = {
+                  html: resourceHtml,
+                  clave: recursos[key].clave,
+                  metadata: {}
+               };
+            }
+          });
+
+          // 7. El HTML final conserva el contenido principal del proyecto; si la separación
+          // dejó solo la lectura o vació demasiado las fases/preguntas, usamos el original.
+          htmlProyecto = resolveProyectoMainHtml({
+            originalHtml: htmlProyecto,
+            candidateHtml: splitProy.mainHtml,
+            resourcesByType: splitProy.resourcesByType
+          });
+        } catch (procErr) {
+          console.error("Error en post-procesamiento de Proyecto:", procErr);
+        }
+
         let htmlProyectoRender = htmlProyecto;
+
         if (wantsReadingGraphic && hayImagenLectura) {
           const apoyoLecturaHTML = await _unidadGenerarGraficoDesdeLecturaHTML({ categoria, lecturaResuelta, statusId }).catch(() => "");
           if (apoyoLecturaHTML) {
@@ -26497,6 +26367,178 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           () => window.cancelarProyectos || tokenProy !== window.cancelTokenProyectos
         );
         assertProyectosActivo(tokenProy);
+
+        if (separarRecursosProyecto) {
+          const resourceSectionTitles = {
+            ficha: String(
+              recursos?.fichas?.clave
+              || window.claveFichaActualGlobal
+              || claveFichaActualGlobal
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "fichas" })
+              || `Ficha ${formatearSubtema(subtema)}`
+            ).trim(),
+            anexo: String(
+              recursos?.anexos?.clave
+              || window.claveAnexoActualGlobal
+              || (typeof claveAnexoActualGlobal !== "undefined" ? claveAnexoActualGlobal : "")
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "anexos" })
+              || `Anexo visual ${formatearSubtema(subtema)}`
+            ).trim(),
+            recortable: String(
+              recursos?.recortables?.clave
+              || window.claveRecortableActualGlobal
+              || _unidadEtiquetaEditorialRecurso({ subtema, categoria, tipoRecurso: "recortables" })
+              || `Recortable ${formatearSubtema(subtema)}`
+            ).trim(),
+            video: String(
+              recursos?.videos?.clave
+              || `Guion de video: "${formatearSubtema(subtema)}"`
+            ).trim()
+          };
+          const resourceTypeLabels = {
+            recortable: "Recortable",
+            anexo: "Anexo",
+            ficha: "Ficha",
+            video: "Video"
+          };
+          const resourcePlan = buildProyectoSeparatedResourcePlan({
+            splitResourcesByType: splitProy.resourcesByType,
+            requestedResources: recursos,
+            videoContext: {
+              activityTitle: proyectoVideoContext.activityTitle,
+              activityText: proyectoVideoContext.activityText,
+              readingTitle: lecturaVideoContext.readingTitle,
+              readingSummary: lecturaVideoContext.readingSummary
+            },
+            fallbackHtmlByType: {
+              recortable: buildProyectoResourceFallbackHtml({
+                type: "recortable",
+                clave: recursos?.recortables?.clave || "",
+                subtema,
+                categoria,
+                grado: gradoTexto,
+                objetivoT: _unidadGetSyAValueForSubtema(subtema, "T"),
+                objetivoAE: _unidadGetSyAValueForSubtema(subtema, "AE"),
+                objetivoC: _unidadGetSyAValueForSubtema(subtema, "C"),
+                objetivoP: _unidadGetSyAValueForSubtema(subtema, "P")
+              }),
+              anexo: buildProyectoResourceFallbackHtml({
+                type: "anexo",
+                clave: recursos?.anexos?.clave || "",
+                subtema,
+                categoria,
+                grado: gradoTexto,
+                objetivoT: _unidadGetSyAValueForSubtema(subtema, "T"),
+                objetivoAE: _unidadGetSyAValueForSubtema(subtema, "AE"),
+                objetivoC: _unidadGetSyAValueForSubtema(subtema, "C"),
+                objetivoP: _unidadGetSyAValueForSubtema(subtema, "P")
+              }),
+              ficha: buildProyectoResourceFallbackHtml({
+                type: "ficha",
+                clave: recursos?.fichas?.clave || "",
+                subtema,
+                categoria,
+                grado: gradoTexto,
+                objetivoT: _unidadGetSyAValueForSubtema(subtema, "T"),
+                objetivoAE: _unidadGetSyAValueForSubtema(subtema, "AE"),
+                objetivoC: _unidadGetSyAValueForSubtema(subtema, "C"),
+                objetivoP: _unidadGetSyAValueForSubtema(subtema, "P")
+              }),
+              video: buildProyectoResourceFallbackHtml({
+                type: "video",
+                clave: recursos?.videos?.clave || "",
+                subtema,
+                categoria,
+                grado: gradoTexto,
+                objetivoT: _unidadGetSyAValueForSubtema(subtema, "T"),
+                objetivoAE: _unidadGetSyAValueForSubtema(subtema, "AE"),
+                objetivoC: _unidadGetSyAValueForSubtema(subtema, "C"),
+                objetivoP: _unidadGetSyAValueForSubtema(subtema, "P"),
+                activityTitle: proyectoVideoContext.activityTitle,
+                activityText: proyectoVideoContext.activityText,
+                readingTitle: lecturaVideoContext.readingTitle,
+                readingSummary: lecturaVideoContext.readingSummary
+              })
+            }
+          });
+
+          for (const item of resourcePlan) {
+            assertProyectosActivo(tokenProy);
+            const type = String(item?.type || "").trim();
+            if (!type) continue;
+            const resourceTitle = String(resourceSectionTitles[type] || item?.clave || resourceTypeLabels[type] || "Recurso").trim();
+            const resourceBlockId = `${bloqueId}-recurso-${type}`;
+            const htmlAlumnoRecurso = String(item?.htmlAlumno || "").trim() || `<p style="color:#64748b;">Sin contenido para el alumno.</p>`;
+
+            if (item?.missing) {
+              logVisual(`⚠️ Proyecto ${subtema}: faltó bloque separado para ${type} (${resourceTitle}).`);
+            }
+
+            const resourceShellHTML = `
+              <div id="${resourceBlockId}" class="bloque-subtema bloque-recursos-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:32px; flex-wrap:wrap;" data-resource-block="true" data-resource-section="true" data-resource-type="${type}">
+                  <div class="col-alumno" style="flex:1; min-width:300px;">
+                      ${_unidadBuildResourceMetadataHtml({
+                        subtema, categoria, tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                        columna: "alumno", etiquetaTitulo: resourceTitle
+                      })}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                          <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de ${resourceTypeLabels[type].toLowerCase()} del alumno</span>
+                      </div>
+                      <div id="${resourceBlockId}-alumno-contenido">
+                        ${htmlAlumnoRecurso}
+                      </div>
+                  </div>
+                  <div class="col-maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                      ${_unidadBuildResourceMetadataHtml({
+                        subtema, categoria, tipoRecurso: type === "ficha" ? "fichas" : `${type}s`,
+                        columna: "maestro", etiquetaTitulo: resourceTitle
+                      })}
+                      <div class="unidad-metadatos-etiquetas" style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin-bottom:16px;">
+                          <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid #d1d5db;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">Sección de notas de ${resourceTypeLabels[type].toLowerCase()}</span>
+                      </div>
+                      <div id="${resourceBlockId}-maestro-contenido">
+                        <p style="color:#64748b;"><i class="fas fa-spinner fa-spin"></i> Generando notas del maestro...</p>
+                      </div>
+                  </div>
+              </div>
+            `;
+
+            const bloqueContenedorRecursos = document.getElementById(bloqueId);
+            if (bloqueContenedorRecursos) {
+              bloqueContenedorRecursos.insertAdjacentHTML("beforeend", resourceShellHTML);
+            }
+
+            const notasMaestroRaw = await _unidadGenerarNotasMaestroSeccion({
+              promptContenidoActividades: htmlAlumnoRecurso,
+              fallbackContenidoActividades: htmlAlumnoRecurso,
+              categoria,
+              subtema,
+              tituloCreativo: tituloCreativoProyecto,
+              tituloSeccion: resourceTitle,
+              grado: gradoTexto,
+              nivel,
+              expectedActivityCount: 1,
+              esFicha: type === "ficha",
+              fichaClave: type === "ficha" ? resourceTitle : "",
+              headingHtml: `
+                <div class="unidad-resource-notes-heading" style="margin:0 0 18px 0;">
+                  <h4 style="margin:0; color:#0f172a; font-size:1.18rem; font-weight:800;">${_escapeHtmlUnidad(resourceTitle)}</h4>
+                </div>
+              `
+            });
+
+            const htmlMaestroRecurso = _unidadCleanTeacherNotesHtml(notasMaestroRaw);
+            const targetMaestro = document.getElementById(`${resourceBlockId}-maestro-contenido`);
+            if (targetMaestro) {
+              await renderContenidoEnTiempoReal(
+                targetMaestro,
+                htmlMaestroRecurso,
+                () => window.cancelarProyectos || tokenProy !== window.cancelTokenProyectos
+              );
+            }
+          }
+        }
+
         proyectoGeneradoOK = true;
 
       } catch (err) {
@@ -27832,7 +27874,7 @@ function _unidadDetectFichaClaveFromActivities(activities = []) {
   return "";
 }
 
-function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
+function _unidadBuildMissingResourceMentionsConfig(recursos = {}, context = {}) {
   const out = [];
   if (recursos?.fichas?.generado && recursos.fichas.clave) {
     out.push({
@@ -27862,15 +27904,83 @@ function _unidadBuildMissingResourceMentionsConfig(recursos = {}) {
     });
   }
   if (recursos?.videos?.generado && recursos.videos.clave) {
+    const videoGuide = buildUnidadVideoPedagogicGuide({
+      clave: String(recursos.videos.clave).trim(),
+      subtema: String(context?.subtema || "").trim(),
+      objetivoT: String(context?.objetivoT || "").trim(),
+      objetivoAE: String(context?.objetivoAE || "").trim(),
+      objetivoP: String(context?.objetivoP || "").trim(),
+      activityTitle: String(context?.activityTitle || "").trim(),
+      activityText: String(context?.activityText || "").trim(),
+      readingTitle: String(context?.readingTitle || "").trim(),
+      readingSummary: String(context?.readingSummary || "").trim()
+    });
     out.push({
       key: "video",
       clave: String(recursos.videos.clave).trim(),
       match: new RegExp(_unidadEscapeRegExp(recursos.videos.clave), "i"),
-      sentence: `observa el video "${recursos.videos.clave}" y usa una evidencia del contenido para responder`,
-      substep: `Mira el video "${recursos.videos.clave}", registra una evidencia puntual (frase o idea clave) y relaciónala con tu respuesta.`
+      sentence: videoGuide.sentence,
+      substep: videoGuide.substepIntro,
+      guide: videoGuide
     });
   }
   return out;
+}
+
+function _unidadInferProyectoVideoActivityContext(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") {
+    return { activityTitle: "", activityText: "" };
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild || doc.body;
+    if (!(root instanceof Element)) return { activityTitle: "", activityText: "" };
+
+    const normalizeLead = (text = "") => String(text || "")
+      .replace(/\s+/g, " ")
+      .replace(/^\d+\.\s*/g, "")
+      .replace(/\bAdemás\b.*$/i, "")
+      .replace(/\bAdemas\b.*$/i, "")
+      .replace(/\bObserva el video\b.*$/i, "")
+      .replace(/\bMira el video\b.*$/i, "")
+      .replace(/\bUsa el video\b.*$/i, "")
+      .trim();
+
+    const activities = Array.from(root.querySelectorAll(".project-phases .activity, .activity"));
+    const scored = activities.map((activity) => {
+      const strongText = String(activity.querySelector("strong")?.textContent || "").replace(/\s+/g, " ").trim();
+      const lead = normalizeLead(strongText || activity.textContent || "");
+      const text = String(activity.textContent || "").replace(/\s+/g, " ").trim();
+      let score = 0;
+      if (/\bvideo\b/i.test(text)) score += 6;
+      if (/\bclasifica\b|\bcompara\b|\bexplica\b|\bpresenta\b|\bidentifica\b|\bobserva\b/i.test(lead)) score += 3;
+      if (lead.length >= 10) score += 2;
+      return { lead, text, score };
+    }).sort((a, b) => b.score - a.score);
+
+    const best = scored.find((item) => item.lead) || { lead: "", text: "" };
+    return {
+      activityTitle: best.lead,
+      activityText: best.text
+    };
+  } catch (_) {
+    return { activityTitle: "", activityText: "" };
+  }
+}
+
+function _unidadBuildLecturaSummaryForVideo(contenidoLectura = "", tituloLectura = "") {
+  const plain = String(contenidoLectura || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const summary = plain.split(/[.?!]/).map((part) => part.trim()).find(Boolean) || plain;
+  return {
+    readingTitle: String(tituloLectura || "").trim(),
+    readingSummary: summary.split(/\s+/).slice(0, 18).join(" ").trim()
+  };
 }
 
 function _unidadGetNormalActivityNodes(root = null) {
@@ -28398,9 +28508,6 @@ function _unidadMergeRecursosInferidosYEsperados({
 function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, context = {}) {
   const source = String(html || "");
   if (!source.trim() || typeof DOMParser === "undefined") return source;
-  const resources = _unidadBuildMissingResourceMentionsConfig(recursos);
-  if (!resources.length) return source;
-
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
   const root = doc.body.firstElementChild || doc.body;
@@ -28408,11 +28515,21 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, con
   if (!blocks.length) return source;
   const ctxSubtema = String(context?.subtema || "").trim();
   const ctxCategoria = String(context?.categoria || "").trim();
+  const resources = _unidadBuildMissingResourceMentionsConfig(recursos, context);
+  if (!resources.length) return source;
+
+  const getActivityLead = (block) => {
+    if (!(block instanceof Element)) return "";
+    const leadNode = block.querySelector("strong") || block.querySelector("p, li");
+    return _unidadStripIcTokens(String(leadNode?.textContent || block.textContent || ""))
+      .replace(/\s+/g, " ")
+      .trim();
+  };
 
   const ensureRecortableSubstep = (block, clave = "") => {
     if (!(block instanceof Element)) return false;
     const safeClave = String(clave || "").trim();
-    const actionRegex = /\brecort(a|ar|e)\b|\bpega(r|lo)?\b|\bordena(r|lo)?\b/i;
+    const actionRegex = /\brecort(a|ar|e)\b|\bpega(r|lo)?\b|\bordena(r|lo)?\b|\busa(r|lo)?\b|\butiliza(r|lo)?\b|\bemplea(r|lo)?\b/i;
     const claveRegex = safeClave ? new RegExp(_unidadEscapeRegExp(safeClave), "i") : /\brecortable\b/i;
     const stepNodes = Array.from(block.querySelectorAll("ol li, ul li, li")).filter((li) => {
       const text = String(li.textContent || "").replace(/\s+/g, " ").trim();
@@ -28450,58 +28567,40 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, con
       const safeRec = String(clave || "recortable").trim();
       const templates = [
         {
-          purpose: `Crea un collage narrativo con el ${safeRec} para contar una idea central del subtema.`,
+          purpose: `Utiliza el ${safeRec} para profundizar en el tema mediante una actividad práctica de organización visual.`,
           steps: [
-            `Recorta 4 piezas del ${safeRec} que representen personajes, lugares o conceptos clave.`,
-            "Ordénalas para construir una secuencia con inicio, desarrollo y cierre.",
-            "Pégalas en el área y agrega un título creativo a tu composición."
+            `Recorta los elementos del ${safeRec} que mejor representen los conceptos analizados.`,
+            "Clasifica y organiza los recortes sobre el área de trabajo según su importancia o relación.",
+            "Pégalos con cuidado y añade una breve nota o etiqueta debajo de cada uno para explicar tu elección."
           ],
-          product: "Producto esperado: mini-historieta visual coherente con el tema."
+          product: "Producto esperado: composición visual organizada que demuestre comprensión de las relaciones entre conceptos."
         },
         {
-          purpose: `Transforma el ${safeRec} en un mapa simbólico para explicar relaciones entre ideas.`,
+          purpose: `Crea un mapa de conceptos clave utilizando el ${safeRec} para conectar las ideas principales de la actividad.`,
           steps: [
-            `Recorta 4 elementos del ${safeRec} y clasifícalos por función o significado.`,
-            "Conecta cada recorte con flechas o etiquetas que indiquen relación.",
-            "Pégalos en el área formando una red visual ordenada."
+            `Identifica y recorta 4 piezas del ${safeRec} que funcionen como núcleos de información.`,
+            "Distribúyelas en el área y traza líneas para mostrar cómo se conectan entre sí.",
+            "Pega los elementos y escribe una palabra de enlace en cada conexión que realices."
           ],
-          product: "Producto esperado: mapa visual con conexiones claras."
+          product: "Producto esperado: esquema conceptual interactivo con conexiones lógicas."
         },
         {
-          purpose: `Diseña una comparación creativa usando el ${safeRec} para contrastar dos perspectivas.`,
+          purpose: `Diseña una secuencia narrativa o de proceso con el ${safeRec} para mostrar la evolución del tema.`,
           steps: [
-            `Recorta piezas del ${safeRec} y sepáralas en dos grupos comparables.`,
-            "Organiza los grupos en paralelo (izquierda/derecha) según el criterio elegido.",
-            "Pégalos en el área y escribe una frase de contraste por grupo."
+            `Selecciona y recorta las piezas del ${safeRec} que representen los pasos o momentos clave.`,
+            "Ordénalas cronológicamente o por etapas para formar una línea de tiempo o proceso.",
+            "Pégalos en orden y numera cada paso para que la secuencia sea fácil de seguir."
           ],
-          product: "Producto esperado: comparación visual balanceada y argumentada."
+          product: "Producto esperado: línea de proceso o tiempo visualmente clara y ordenada."
         },
         {
-          purpose: `Usa el ${safeRec} para construir una secuencia de causa-efecto en formato visual.`,
+          purpose: `Transforma el ${safeRec} en una composición creativa que resuma tu aprendizaje sobre el subtema.`,
           steps: [
-            `Recorta 4 piezas del ${safeRec} que puedan ordenarse como proceso.`,
-            "Ordénalas de la causa principal al efecto final.",
-            "Pégalas en el área y marca cada paso con un verbo de acción."
+            `Recorta las formas o imágenes del ${safeRec} y agrúpalas de manera que cuenten una historia.`,
+            "Experimenta con diferentes acomodos antes de pegar, buscando equilibrio y claridad.",
+            "Pega tu producción final y añade un título que capture la idea principal de tu trabajo."
           ],
-          product: "Producto esperado: línea visual de proceso con orden lógico."
-        },
-        {
-          purpose: `Convierte el ${safeRec} en una propuesta artística para resolver un reto del subtema.`,
-          steps: [
-            `Recorta 4 piezas del ${safeRec} y reacomódalas para crear una propuesta original.`,
-            "Define un criterio creativo (color, función, emoción o mensaje).",
-            "Pégalas en el área y añade una frase que explique tu decisión de diseño."
-          ],
-          product: "Producto esperado: composición creativa con intención explícita."
-        },
-        {
-          purpose: `Construye un storyboard breve con el ${safeRec} para representar una situación del tema.`,
-          steps: [
-            `Recorta 4 piezas del ${safeRec} y asígnales el rol de escena 1, 2, 3 y 4.`,
-            "Ordénalas como secuencia temporal (antes, durante, después, cierre).",
-            "Pégalas en el área y añade una oración corta por escena."
-          ],
-          product: "Producto esperado: storyboard visual secuenciado."
+          product: "Producto esperado: síntesis creativa visual que integre los elementos del recortable con intención pedagógica."
         }
       ];
       const template = templates[hash % templates.length];
@@ -28587,12 +28686,45 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, con
 
     const li = doc.createElement("li");
     li.setAttribute("data-resource-mention", `${key}-step`);
-    li.innerHTML = `
-      ${_escapeHtmlUnidad(safeSubstep || safeSentence)}
-      <div class="answer"><span style="color:mediumvioletred;">Respuesta: Se espera evidencia concreta del ${_escapeHtmlUnidad(safeClave || key)} aplicada directamente en esta subactividad.</span></div>
-    `;
+    if (key === "video") {
+      const activityLead = getActivityLead(block);
+      const guide = buildUnidadVideoPedagogicGuide({
+        clave: safeClave,
+        subtema: ctxSubtema,
+        objetivoT: String(context?.objetivoT || "").trim(),
+        objetivoAE: String(context?.objetivoAE || "").trim(),
+        objetivoP: String(context?.objetivoP || "").trim(),
+        activityTitle: activityLead || String(context?.activityTitle || "").trim(),
+        activityText: String(block.textContent || "").replace(/\s+/g, " ").trim(),
+        readingTitle: String(context?.readingTitle || "").trim(),
+        readingSummary: String(context?.readingSummary || "").trim()
+      });
+      li.innerHTML = `
+        ${_escapeHtmlUnidad(guide.substepIntro)}
+        <ul style="margin:8px 0 0 0; padding-left:18px;">
+          <li>${_escapeHtmlUnidad(guide.substepPoints?.[0] || "Identifica una idea central del video.")}</li>
+          <li>${_escapeHtmlUnidad(guide.substepPoints?.[1] || "Recupera una evidencia puntual del contenido.")}</li>
+          <li>${_escapeHtmlUnidad(guide.substepPoints?.[2] || "Aplica la idea del video a tu propia actividad.")}</li>
+        </ul>
+        <div class="answer"><span style="color:mediumvioletred;">Respuesta: ${_escapeHtmlUnidad(guide.answer || `Se espera evidencia concreta del ${safeClave || "video"} aplicada directamente en esta subactividad.`)}</span></div>
+      `;
+    } else {
+      li.innerHTML = `
+        ${_escapeHtmlUnidad(safeSubstep || safeSentence)}
+        <div class="answer"><span style="color:mediumvioletred;">Respuesta: Se espera evidencia concreta del ${_escapeHtmlUnidad(safeClave || key)} aplicada directamente en esta subactividad.</span></div>
+      `;
+    }
     list.appendChild(li);
     return true;
+  };
+
+  const scoreBlockForVideo = (block) => {
+    const text = _unidadStripIcTokens(String(block?.textContent || "")).toLowerCase();
+    let score = 0;
+    if (/\bvideo\b|\bguion\b|\bgraba\b|\bpresenta\b|\bexplica\b|\bcomparte\b|\bsocializa\b/.test(text)) score += 5;
+    if (/\bproducto\b|\bmensaje\b|\bexposici[oó]n\b|\bcartel\b|\bfinal\b/.test(text)) score += 3;
+    if (/\bnombre\b|\bidea\b|\bejemplo\b|\baprend/i.test(text)) score += 1;
+    return score;
   };
 
   let nextBlockIndex = 0;
@@ -28605,6 +28737,13 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, con
       const targetForStep = blocks.find((block) => resource.match.test(String(block.textContent || "")))
         || blocks[nextBlockIndex % blocks.length];
       if (ensureRecortableSubstep(targetForStep, resource.clave || "")) {
+        changed = true;
+      }
+    } else if (resource.key === "video") {
+      const targetForStep = blocks.find((block) => resource.match.test(String(block.textContent || "")))
+        || [...blocks].sort((a, b) => scoreBlockForVideo(b) - scoreBlockForVideo(a))[0]
+        || blocks[nextBlockIndex % blocks.length];
+      if (ensureGenericResourceSubstep(targetForStep, resource)) {
         changed = true;
       }
     } else {
@@ -28634,7 +28773,7 @@ function _unidadEnsureResourceMentionsInActivities(html = "", recursos = {}, con
   });
 
   if (!changed) return source;
-  return root.innerHTML;
+  return _unidadNormalizeMalformedIcTokens(root.innerHTML);
 }
 
 function _unidadEnsureFichaBlocksHaveActivityClass(html = "") {
@@ -28685,7 +28824,7 @@ function _unidadEnsureFichaBlocksHaveActivityClass(html = "") {
     });
   });
 
-  return root.innerHTML;
+  return _unidadNormalizeMalformedIcTokens(root.innerHTML);
 }
 
 function _unidadNormalizeActivityLeadStrong(html = "") {
@@ -28747,51 +28886,25 @@ function _unidadNormalizeAscNumberedSteps(html = "") {
 
 const PRIMER_GRADO_VERB_MAPPINGS = [
   ["Observa video", "[IC OBSERVA VIDEO]"],
-  ["Pintura digital multicolor", "[IC PINTURA DIGITAL MULTICOLOR]"],
-  ["Huellas pintura digital", "[IC HUELLAS PINTURA DIGITAL]"],
-  ["Señala multicolor", "[IC SEÑALA MULTICOLOR]"],
-  ["Ordena/clasifica", "[IC ORDENA/CLASIFICA]"],
-  ["Escribe número", "[IC ESCRIBE NUMERO]"],
-  ["Une los puntos", "[IC UNE LOS PUNTOS]"],
-  ["Producción personal", "[IC PRODUCCION PERSONAL]"],
-  ["Relaciona multicolor", "[IC RELACIONA MULTICOLOR]"],
-  ["Colorea multicolor", "[IC COLOREA MULTICOLOR]"],
-  ["Colorea genérico", "[IC COLOREA GENERICO]"],
-  ["Colorea rojo", "[IC COLOREA ROJO]"],
-  ["Colorea azul", "[IC COLOREA AZUL]"],
-  ["Circula multicolor", "[IC CIRCULA MULTICOLOR]"],
-  ["Circula genérico", "[IC CIRCULA GENERICO]"],
-  ["Circula rojo", "[IC CIRCULA ROJO]"],
-  ["Circula azul", "[IC CIRCULA AZUL]"],
-  ["Circula lápiz", "[IC CIRCULA LAPIZ]"],
-  ["Traza multicolor", "[IC TRAZA MULTICOLOR]"],
-  ["Traza genérico", "[IC TRAZA GENERICO]"],
-  ["Traza rojo", "[IC TRAZA ROJO]"],
-  ["Traza azul", "[IC TRAZA AZUL]"],
-  ["Traza verde", "[IC TRAZA VERDE]"],
-  ["Traza lápiz", "[IC TRAZA LAPIZ]"],
-  ["En rectángulo lápiz", "[IC EN RECTANGULO LAPIZ]"],
-  ["En rectángulo genérico", "[IC EN RECTANGULO GENERICO]"],
-  ["En rectángulo azul", "[IC EN RECTANGULO AZUL]"],
-  ["En rectángulo rojo", "[IC EN RECTANGULO ROJO]"],
-  ["Subraya lápiz", "[IC SUBRAYA LAPIZ]"],
-  ["Subraya genérico", "[IC SUBRAYA GENERICO]"],
-  ["Subraya rojo", "[IC SUBRAYA ROJO]"],
-  ["Subraya azul", "[IC SUBRAYA AZUL]"],
-  ["Bloques lógicos", "[IC BLOQUES LOGICOS]"],
-  ["Regletas", "[IC REGLETAS]"],
-  ["Rekenrek", "[IC REKENREK]"],
   ["Identifica", "[IC IDENTIFICA]"],
   ["Piensa", "[IC PIENSA]"],
   ["Ubica", "[IC UBICA]"],
   ["Explica", "[IC EXPLICA]"],
   ["Analiza", "[IC ANALIZA]"],
   ["Completa", "[IC COMPLETA]"],
+  ["Lee", "[IC LEE]"],
+  ["Mira", "[IC OBSERVA]"],
+  ["Fíjate", "[IC OBSERVA]"],
   ["Observa", "[IC OBSERVA]"],
+  ["Dibuja", "[IC DIBUJA]"],
+  ["Pinta", "[IC DIBUJA]"],
   ["Encuentra", "[IC ENCUENTRA]"],
   ["Escribe", "[IC ESCRIBE]"],
-  ["Lee", "[IC LEE]"],
+  ["Crea", "[IC PRODUCCION PERSONAL]"],
   ["Describe", "[IC DESCRIBE]"],
+  ["Colorea", "[IC COLOREA GENERICO]"],
+  ["Une", "[IC UNE LOS PUNTOS]"],
+  ["Circula", "[IC CIRCULA GENERICO]"],
   ["Comenta", "[IC COMENTA]"],
   ["Canta", "[IC CANTA]"],
   ["Indaga", "[IC INDAGA]"],
@@ -28809,8 +28922,7 @@ const PRIMER_GRADO_VERB_MAPPINGS = [
   ["Corta", "[IC CORTA]"],
   ["Construye", "[IC CONSTRUYE]"],
   ["Relaciona", "[IC RELACIONA]"],
-  ["Tacha", "[IC TACHA]"],
-  ["Dibuja", "[IC DIBUJA]"]
+  ["Tacha", "[IC TACHA]"]
 ];
 
 function _unidadReplaceActionWordsWithPrimerKeysInText(text = "") {
@@ -28857,76 +28969,81 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
   const root = doc.body.firstElementChild;
   if (!root) return source;
 
-  const targets = Array.from(root.querySelectorAll(".activity p, .activity li, .activity-fichas p, .activity-fichas li"));
-  targets.forEach((node) => {
-    if (node.closest(".answer")) return;
-    const nodeText = String(node.textContent || "");
-    if (!nodeText.trim()) return;
-
+  const cleanNodeTextContent = (node, { stripOnly = false } = {}) => {
+    if (!(node instanceof Element)) return;
     const walker = doc.createTreeWalker(node, NodeFilter.SHOW_TEXT);
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);
-
     textNodes.forEach((textNode) => {
-      const current = String(textNode.nodeValue || "");
-      if (!current.trim()) return;
-      if (/\[(?:IC\.?|IC)\s*[^\]]+\]/i.test(current)) {
-        textNode.nodeValue = _unidadNormalizeMalformedIcTokens(current);
+      const parent = textNode.parentElement;
+      if (parent && (
+        parent.closest(".unidad-ic-resource-badges, .unidad-actividad-badge, .modalidad-individual, .modalidad-parejas, .modalidad-equipo, .modalidad-plenaria")
+      )) {
         return;
       }
-      const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(current);
-      if (replaced !== current) {
-        textNode.nodeValue = replaced;
-      }
+      const current = String(textNode.nodeValue || "");
+      if (!current.trim()) return;
+      const next = stripOnly
+        ? _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(current))
+        : _unidadNormalizeMalformedIcTokens(current);
+      textNode.nodeValue = next;
+    });
+  };
+
+  const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas"));
+  activities.forEach((activity) => {
+    if (!(activity instanceof Element)) return;
+
+    activity.querySelectorAll(".answer").forEach((answer) => cleanNodeTextContent(answer, { stripOnly: true }));
+
+    activity.querySelectorAll("ol.steps li, ol.steps-numbered li, ol li, ul li").forEach((li) => {
+      if (li.closest(".answer")) return;
+      cleanNodeTextContent(li, { stripOnly: true });
     });
 
-    const currentReplacedText = String(node.textContent || "");
-    const hasIcToken = /\[IC[^\]]+\]/i.test(currentReplacedText);
+    const mainParagraph = Array.from(activity.children).find((child) => child instanceof Element && child.tagName === "P");
+    if (!(mainParagraph instanceof Element)) return;
 
-    if (!hasIcToken) {
+    const strong = mainParagraph.querySelector("strong");
+    if (strong instanceof Element) {
+      const strongTextRaw = String(strong.textContent || "");
+      const strongTextClean = _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(strongTextRaw)).replace(/\s+/g, " ").trim();
       let fallbackToken = "";
-      for (const [phrase, token] of PRIMER_GRADO_VERB_MAPPINGS) {
-        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        if (new RegExp(`\\b${escaped}\\b`, "i").test(nodeText)) {
-          fallbackToken = token;
-          break;
-        }
+
+      const directTokenMatch = _unidadNormalizeMalformedIcTokens(strongTextRaw).match(/\[(?:IC\.?|IC)\s*[^\]]+\]/i);
+      if (directTokenMatch) {
+        fallbackToken = String(directTokenMatch[0] || "").replace(/\s+/g, " ").trim();
       }
 
       if (!fallbackToken) {
-        const cleanForInfer = nodeText.replace(/\s+/g, " ").trim();
-        fallbackToken = _unidadInferPrimerGradoInstructionFallbackToken(cleanForInfer);
+        const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(strongTextClean);
+        const replacedMatch = String(replaced || "").match(/\[(?:IC\.?|IC)\s*[^\]]+\]/i);
+        if (replacedMatch) fallbackToken = String(replacedMatch[0] || "").trim();
       }
 
-      if (fallbackToken) {
-        let targetTextNode = null;
-        for (const textNode of textNodes) {
-           const parent = textNode.parentElement;
-           if (parent && (
-               parent.closest('.modalidad-individual, .modalidad-parejas, .modalidad-equipo, .modalidad-plenaria, .unidad-ic-resource-badges, .unidad-actividad-badge') ||
-               parent.classList.contains('modalidad-individual') || parent.classList.contains('modalidad-parejas') || parent.classList.contains('modalidad-equipo') || parent.classList.contains('modalidad-plenaria')
-           )) {
-             continue;
-           }
-           if (String(textNode.nodeValue || "").trim()) {
-             targetTextNode = textNode;
-             break;
-           }
-        }
-
-        if (!targetTextNode && textNodes.length) {
-          targetTextNode = textNodes[0];
-        }
-
-        if (targetTextNode) {
-          const original = String(targetTextNode.nodeValue || "");
-          const numberedMatch = original.match(/^(\s*\d+\.\s*)?(.*)$/s);
-          const numberPrefix = String(numberedMatch?.[1] || "");
-          const rest = String(numberedMatch?.[2] || original);
-          targetTextNode.nodeValue = `${numberPrefix}${fallbackToken} ${rest}`.replace(/\s{2,}/g, " ");
-        }
+      if (!fallbackToken) {
+        fallbackToken = _unidadInferPrimerGradoInstructionFallbackToken(strongTextClean);
       }
+
+      strong.textContent = [fallbackToken, strongTextClean].filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
     }
+
+    const walker = doc.createTreeWalker(mainParagraph, NodeFilter.SHOW_TEXT);
+    const paragraphTextNodes = [];
+    while (walker.nextNode()) paragraphTextNodes.push(walker.currentNode);
+    paragraphTextNodes.forEach((textNode) => {
+      const parent = textNode.parentElement;
+      if (!parent) return;
+      if (
+        parent.closest("strong")
+        || parent.closest(".unidad-ic-resource-badges, .unidad-actividad-badge, .modalidad-individual, .modalidad-parejas, .modalidad-equipo, .modalidad-plenaria")
+      ) {
+        return;
+      }
+      const current = String(textNode.nodeValue || "");
+      if (!current.trim()) return;
+      textNode.nodeValue = _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(current));
+    });
   });
 
   return root.innerHTML;

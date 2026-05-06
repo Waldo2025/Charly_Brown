@@ -181,7 +181,7 @@ service cloud.firestore {
     }
 
     function isPodcasterSessionShape(data, sessionId) {
-      return data.ownerId == request.auth.uid &&
+      return (data.ownerId is string) &&
         isStringField(data, "title", 0, 240) &&
         isOptionalBool(data, "archived") &&
         isStringField(data, "sessionUpdatedAt", 0, 80) &&
@@ -236,17 +236,20 @@ service cloud.firestore {
       allow update, delete: if isEditor() || isDocOwner(resource.data);
     }
 
-    // Sesiones de Podcaster: owner o compartidos por UID.
     match /podcaster_sessions/{sessionId} {
       allow read: if isEditor();
       allow read: if isSignedIn() && (resource.data.publicar == true || resource.data.published == true);
       allow read: if isSignedIn() && (isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data));
-      allow create: if isSignedIn() && isPodcasterSessionShape(request.resource.data, sessionId);
-      allow update, delete: if isAdmin() || (
+      allow create: if isSignedIn() && (isOwner(request.resource.data.ownerId) || isEditor()) && isPodcasterSessionShape(request.resource.data, sessionId);
+      allow update: if isEditor() || (
         isSignedIn() &&
         isOwner(resource.data.ownerId) &&
         request.resource.data.ownerId == resource.data.ownerId &&
         isPodcasterSessionShape(request.resource.data, sessionId)
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId)
       );
     }
 

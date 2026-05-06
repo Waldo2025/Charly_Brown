@@ -2677,6 +2677,7 @@ const multimediaPlaybackDeps = {
             if (row?.visualNotesProposal) {
               activeProposalGroup.style.display = "block";
               activeProposalEl.textContent = row.visualNotesProposal;
+              activeProposalEl.classList.toggle("is-resolved", isDashboardProposalResolved(row, row.visualNotesProposal));
               
               const btnApply = document.getElementById("btnApplyActiveProposal");
               const btnDelete = document.getElementById("btnDeleteActiveProposal");
@@ -2688,13 +2689,12 @@ const multimediaPlaybackDeps = {
               }
               if (btnDelete) {
                  btnDelete.onclick = async () => {
-                    if (confirm("¿Eliminar definitivamente esta propuesta pendiente?")) {
-                       await eliminarPropuestaDesdeDashboard(row.visualNotesProposal);
-                    }
+                    await eliminarPropuestaDesdeDashboard(row.visualNotesProposal);
                  };
               }
             } else {
               activeProposalGroup.style.display = "none";
+              activeProposalEl.classList.remove("is-resolved");
             }
           }
           
@@ -2708,12 +2708,12 @@ const multimediaPlaybackDeps = {
              if (proposals.length > 0) {
                 if (proposalsGroup) proposalsGroup.style.display = "block";
                 proposalsList.innerHTML = proposals.map((p, pIdx) => `
-                   <div style="font-size: 11px; background: rgba(251, 191, 36, 0.05); border-left: 2px solid #fbbf24; padding: 4px 8px; color: #fde68a; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                   <div class="proposal-item-dashboard${isDashboardProposalResolved(row, p) ? " is-resolved" : ""}" style="font-size: 11px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                       <span style="flex: 1;">${p}</span>
                       <button class="btn-apply-proposal-dashboard" data-proposal-text="${p.replace(/"/g, '&quot;')}" style="background: none; border: none; color: #10b981; cursor: pointer; padding: 2px;" title="Aplicar esta propuesta">
                          <i class="fas fa-check-circle"></i>
                       </button>
-                      <button class="btn-delete-proposal-dashboard" data-proposal-text="${p.replace(/"/g, '&quot;')}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px;" title="Eliminar esta propuesta">
+                      <button class="btn-delete-proposal-dashboard" data-proposal-text="${p.replace(/"/g, '&quot;')}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px;" title="Marcar propuesta como realizada">
                          <i class="fas fa-trash"></i>
                       </button>
                    </div>
@@ -2730,9 +2730,7 @@ const multimediaPlaybackDeps = {
                 proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(btn => {
                    btn.onclick = async (e) => {
                       const text = e.currentTarget.dataset.proposalText;
-                      if (confirm("¿Eliminar definitivamente esta propuesta del historial?")) {
-                         await eliminarPropuestaDesdeDashboard(text);
-                      }
+                      await eliminarPropuestaDesdeDashboard(text);
                    };
                 });
              } else {
@@ -2990,16 +2988,20 @@ async function abrirReproductorMultimedia(session) {
         // Historial de propuestas
         const proposalsList = document.getElementById("infoSceneProposalsList");
         const proposalsGroup = document.getElementById("infoSceneProposalsGroup");
+        const activeProposalEl = document.getElementById("infoSceneActiveProposal");
         if (proposalsList) {
           const proposals = Array.isArray(first.visualNotesProposals) ? first.visualNotesProposals : (first.visualNotesProposal ? [first.visualNotesProposal] : []);
           if (proposals.length > 0) {
             if (proposalsGroup) proposalsGroup.style.display = "block";
             proposalsList.innerHTML = proposals.map(p => `
-              <div style="font-size: 11px; background: rgba(251, 191, 36, 0.1); border-left: 2px solid #fbbf24; padding: 4px 8px; color: #fde68a;">${p}</div>
+              <div class="proposal-item-dashboard${isDashboardProposalResolved(first, p) ? " is-resolved" : ""}" style="font-size: 11px; padding: 4px 8px;">${p}</div>
             `).join("");
           } else {
             if (proposalsGroup) proposalsGroup.style.display = "none";
           }
+        }
+        if (activeProposalEl) {
+          activeProposalEl.classList.toggle("is-resolved", isDashboardProposalResolved(first, proposal));
         }
       }
       if (document.getElementById("infoSceneProposalText")) {
@@ -3210,6 +3212,20 @@ async function abrirReproductorMultimedia(session) {
 
 // Cableado de controles del reproductor (Eliminado - movido a initMultimediaPlayer)
 
+function normalizeDashboardProposalState(list = []) {
+   return Array.from(new Set(
+      (Array.isArray(list) ? list : [])
+         .map((entry) => String(entry || "").trim())
+         .filter(Boolean)
+   ));
+}
+
+function isDashboardProposalResolved(row = null, proposalText = "") {
+   const proposal = String(proposalText || "").trim();
+   if (!proposal || !row || typeof row !== "object") return false;
+   return normalizeDashboardProposalState(row.visualNotesResolvedProposals).includes(proposal);
+}
+
 async function eliminarPropuestaDesdeDashboard(proposalText) {
    if (!currentMultimediaSession || !window._currentActiveRowId) return;
    
@@ -3237,14 +3253,11 @@ async function eliminarPropuestaDesdeDashboard(proposalText) {
          }
 
          if (rowIndex !== -1 && rows[rowIndex]) {
-            // Eliminar del array de propuestas
-            if (Array.isArray(rows[rowIndex].visualNotesProposals)) {
-               rows[rowIndex].visualNotesProposals = rows[rowIndex].visualNotesProposals.filter(p => p !== proposalText);
+            const resolved = normalizeDashboardProposalState(rows[rowIndex].visualNotesResolvedProposals);
+            if (!resolved.includes(proposalText)) {
+               resolved.push(proposalText);
             }
-            // Si era la propuesta individual
-            if (rows[rowIndex].visualNotesProposal === proposalText) {
-               delete rows[rowIndex].visualNotesProposal;
-            }
+            rows[rowIndex].visualNotesResolvedProposals = resolved;
 
             // Detectar campo para guardar
             let foundKey = "rows";
@@ -3259,7 +3272,7 @@ async function eliminarPropuestaDesdeDashboard(proposalText) {
             await updateDoc(sessionRef, updateData);
             
             // Notificar actividad al Studio
-            await notifyActivity("ha eliminado una propuesta", rowIndex);
+            await notifyActivity("ha marcado una propuesta como realizada", rowIndex);
             
             // Actualizar objeto local de forma redundante para asegurar el renderizado
             if (currentMultimediaSession.script?.rows) {
@@ -3275,12 +3288,12 @@ async function eliminarPropuestaDesdeDashboard(proposalText) {
             // Forzar refresco inmediato de la UI
             multimediaPlaybackDeps.updatePodcastVideoTransportUi();
 
-            console.log("[Dashboard] Propuesta eliminada con éxito");
+            console.log("[Dashboard] Propuesta marcada como realizada");
          }
       }
    } catch (error) {
-      console.error("[Dashboard] Error al eliminar propuesta:", error);
-      alert("No se pudo eliminar la propuesta. Intenta de nuevo.");
+      console.error("[Dashboard] Error al marcar propuesta como realizada:", error);
+      alert("No se pudo actualizar la propuesta. Intenta de nuevo.");
    }
 }
 
@@ -3323,6 +3336,9 @@ async function aplicarPropuestaDesdeDashboard(proposalText) {
             }
             if (!targetRow.visualNotesProposals.includes(proposalText)) {
                targetRow.visualNotesProposals.push(proposalText);
+            }
+            if (Array.isArray(targetRow.visualNotesResolvedProposals)) {
+               targetRow.visualNotesResolvedProposals = targetRow.visualNotesResolvedProposals.filter(p => p !== proposalText);
             }
 
             // Detectar campo para guardar

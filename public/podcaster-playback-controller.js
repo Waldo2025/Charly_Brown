@@ -330,7 +330,9 @@ export class PodcasterPlaybackController extends EventEmitter {
         v.pause(); 
         if (shouldReset) {
           v.currentTime = 0;
-          v.dataset.src = ""; // Clear src to avoid flicker on next play
+          v.dataset.src = ""; // Clear tracker
+          v.removeAttribute("src"); // Clear actual source to avoid stale preview
+          v.load(); // Force clear media pipeline
         }
         v.style.opacity = 0; 
         v.style.zIndex = 1; 
@@ -722,9 +724,15 @@ export class PodcasterPlaybackController extends EventEmitter {
     } else {
       // Switching needed
       if (!entry.videoSrc) {
-        activeEl.style.opacity = "1";
-        activeEl.hidden = false;
+        this.hideAllVideos();
+        if (this.deps?.setPodcastVideoPortraitFallback) {
+          this.deps.setPodcastVideoPortraitFallback(true);
+        }
         return;
+      }
+
+      if (this.deps?.setPodcastVideoPortraitFallback) {
+        this.deps.setPodcastVideoPortraitFallback(false);
       }
 
       if (this.stageMachine.loadingSrc === entry.videoSrc) return;

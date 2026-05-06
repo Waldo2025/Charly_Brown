@@ -292,6 +292,7 @@ const els = {
   globalTtsAccentPrompt: document.getElementById("globalTtsAccentPrompt"),
   globalTtsScenePrompt: document.getElementById("globalTtsScenePrompt"),
   globalTtsAudioTags: document.getElementById("globalTtsAudioTags"),
+  globalCheapVideoMode: document.getElementById("globalCheapVideoMode"),
   applyGlobalConfigBtn: document.getElementById("applyGlobalConfigBtn"),
   podcastPlayBtn: document.getElementById("podcastPlayBtn"),
   podcastPauseBtn: document.getElementById("podcastPauseBtn"),
@@ -4053,9 +4054,7 @@ async function readOptimizedImageReferenceDataUrl(file = null) {
     maxChars: MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS * 12,
     errorMessage: "No se pudo leer la imagen de referencia."
   });
-  if (rawDataUrl.length <= MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS) {
-    return rawDataUrl;
-  }
+  // Forzamos procesamiento para asegurar formato JPEG y limpieza de metadatos/alpha
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await new Promise((resolve, reject) => {
@@ -5407,11 +5406,20 @@ function isPodcastMode(session = null) {
 
 function getPanelModeCopy(session = null) {
   const activeSession = session || getActiveSession();
-  const videoContentType = resolveVideoContentType(activeSession);
+  const persistedVideoContentType = normalizeVideoContentType(
+    activeSession?.script?.videoContentType
+    || activeSession?.videoContentType
+  );
+  const composerVideoMode = isCurrentModeVideo();
+  const videoContentType = composerVideoMode
+    ? "creative"
+    : (persistedVideoContentType !== "none"
+      ? persistedVideoContentType
+      : resolveVideoContentType(activeSession));
   const hasRows = Array.isArray(activeSession?.script?.rows) && activeSession.script.rows.length > 0;
   const videoMode = hasRows
     ? (videoContentType === "creative")
-    : isCurrentModeVideo();
+    : composerVideoMode;
   return {
     videoContentType,
     videoMode,
@@ -5495,6 +5503,20 @@ function resolveEffectiveVisualNotes(row = null) {
     if (edited) return edited;
   }
   return String(row?.visualNotes || row?.visualNotesOriginalText || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeVisualProposalState(list = []) {
+  return Array.from(new Set(
+    (Array.isArray(list) ? list : [])
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+  ));
+}
+
+function isVisualProposalResolved(row = null, proposalText = "") {
+  const proposal = String(proposalText || "").trim();
+  if (!proposal || !row || typeof row !== "object") return false;
+  return normalizeVisualProposalState(row.visualNotesResolvedProposals).includes(proposal);
 }
 
 function normalizeCreativeRow(row = {}, index = 0, options = {}) {
@@ -5699,6 +5721,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
     visualNotes,
     visualNotesProposal: row?.visualNotesProposal || "",
     visualNotesProposals: Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : [],
+    visualNotesResolvedProposals: normalizeVisualProposalState(row?.visualNotesResolvedProposals),
     text: strictValidation ? voiceOverText : fallbackVoiceOver,
     notes: visualNotes || transition,
     scenePrompt,
@@ -13701,6 +13724,14 @@ function syncGlobalConfigPanel(session = null) {
   if (els.globalTtsAudioTags) {
     els.globalTtsAudioTags.value = ttsCfg.audioTags;
   }
+  try {
+    const videoCfg = getPodcastVideoConfig(session);
+    if (els.globalCheapVideoMode) {
+      els.globalCheapVideoMode.value = String(videoCfg.cheapVideoMode !== false);
+    }
+  } catch (e) {
+    console.warn("[podcaster] Error syncing video quality setting:", e);
+  }
   renderGlobalSpeakerSettings(hosts, session);
 }
 
@@ -19569,6 +19600,49 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
             if (status === 413 && String(error?.detail?.code || error?.message || "").trim() === "payload_too_large") {
               throw new Error("La escena tiene demasiadas referencias cargadas para procesarla de forma estable.");
             }
+
+            // Smart Fallback: si el modelo completó pero no devolvió video (posible conflicto de referencias o filtro)
+            if (error.message.includes("sin URI de video") && attempt < maxAttempts) {
+              const hasContinuity = Boolean(requestBody.relateWithPreviousScene);
+              const hasPortrait = Boolean(requestBody.strictIdentity);
+              const hasReferences = (requestBody.referenceImageDataUrls || []).length > 0 || Boolean(requestBody.referenceVideoDataUrl);
+              const isUsingFastModel = requestBody.model === "veo-3.1-fast-generate-preview";
+
+              console.warn(`[podcaster] Generation failed (attempt ${attempt}/${maxAttempts}). Applying technical fallback...`, { 
+                rowId: key, 
+                model: requestBody.model,
+                hasContinuity, 
+                hasPortrait, 
+                hasReferences 
+              });
+
+              // ESTRATEGIA: Primero intentamos subir de nivel al modelo PRO antes de quitar referencias
+              if (isUsingFastModel) {
+                console.info(`[podcaster] Retrying with PRO model to preserve references for scene ${resolveSceneNumberByRowId(key, session)}...`);
+                requestBody.model = "veo-3.1-generate-preview";
+                nextDialogueVideoRequestAt = Date.now();
+                continue;
+              }
+
+              // Si ya estamos en PRO y sigue fallando, entonces sí tenemos que ser agresivos (o fallar)
+              if (hasContinuity) {
+                requestBody.relateWithPreviousScene = false;
+                requestBody.continuityReferenceImageDataUrl = "";
+                requestBody.forceImmediateSceneChange = false;
+              } else if (hasPortrait || hasReferences) {
+                requestBody.strictIdentity = false;
+                requestBody.portraitUrl = "";
+                requestBody.portraitStoragePath = "";
+                requestBody.referenceImageDataUrls = [];
+                requestBody.referenceImageDataUrl = "";
+                requestBody.referenceVideoDataUrl = "";
+                requestBody.referenceVideoName = "";
+              }
+              
+              nextDialogueVideoRequestAt = Date.now();
+              continue;
+            }
+
             if (status !== 429 || attempt >= maxAttempts) {
               throw error;
             }
@@ -19648,14 +19722,6 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       if (previousStoragePath && playbackController.invalidateBlobUrl) {
         playbackController.invalidateBlobUrl(previousStoragePath);
       }
-      // Invalida cache de media anterior para evitar enlaces rotos o contenido viejo
-      if (previousStoragePath && playbackController.invalidateBlobUrl) {
-        playbackController.invalidateBlobUrl(previousStoragePath);
-      }
-      // Invalida cache de media anterior para evitar enlaces rotos o contenido viejo
-      if (previousStoragePath && playbackController.invalidateBlobUrl) {
-        playbackController.invalidateBlobUrl(previousStoragePath);
-      }
       brokenDialogueVideoRows.delete(`${sessionId}:${key}`);
 
       const refreshed = state.sessions.find((item) => String(item?.id || "").trim() === sessionId) || null;
@@ -19675,7 +19741,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     } catch (error) {
       const normalizedMessage = buildPodcasterApiErrorMessage(error, error?.message || "error desconocido");
       try {
-        console.error("[podcaster] generateDialogueVideoForRow failed", {
+        console.error(`[podcaster] generateDialogueVideoForRow failed: ${normalizedMessage}`, {
           sessionId,
           rowId: key,
           sceneNumber: resolveSceneNumberByRowId(key, session),
@@ -19686,7 +19752,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           educationalMode,
           status: Number(error?.status || 0),
           message: normalizedMessage,
-          detail: error?.detail || null
+          detail: error?.detail || null,
+          stack: error?.stack || null
         });
       } catch (_) {
         // no-op
@@ -20044,7 +20111,8 @@ playbackController.init(els, {
   renderPodcastVideoTimeline,
   resolveTimelineClipMix,
   getAuthHeaders,
-  stopPanelMusic
+  stopPanelMusic,
+  setPodcastVideoPortraitFallback
 });
 
 // Inicialización del controlador de preview de exportación
@@ -20151,7 +20219,8 @@ exportPreviewController.init(exportPreviewEls, {
   renderPodcastVideoTimeline: () => { },
   resolveTimelineClipMix,
   getAuthHeaders,
-  stopPanelMusic
+  stopPanelMusic,
+  setPodcastVideoPortraitFallback: () => { } // No portrait fallback for export preview for now
 });
 
 // Eventos del preview de exportación
@@ -22612,14 +22681,14 @@ function renderCreativeInspector(session = null) {
       
       <!-- PROPUESTA ACTIVA EN INSPECTOR -->
       ${activeRow?.visualNotesProposal ? `
-        <div class="row-active-proposal" style="margin-top: 8px; background: rgba(251, 191, 36, 0.1); border: 1px solid #fbbf24; border-radius: 6px; padding: 8px;">
+        <div class="row-active-proposal${isVisualProposalResolved(activeRow, activeRow.visualNotesProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-            <span style="font-size: 10px; color: #fbbf24; font-weight: 800; text-transform: uppercase;">Propuesta Activa</span>
-            <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(activeRow.id)}" data-proposal-text="${escapeHtml(activeRow.visualNotesProposal)}" title="Desactivar esta propuesta" style="color: #fbbf24; padding: 2px;">
+            <span class="row-active-proposal-label" style="font-size: 10px; font-weight: 800; text-transform: uppercase;">Propuesta Activa</span>
+            <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(activeRow.id)}" data-proposal-text="${escapeHtml(activeRow.visualNotesProposal)}" title="Marcar propuesta como realizada" style="color: #fbbf24; padding: 2px;">
               <i class="fas fa-times-circle"></i>
             </button>
           </div>
-          <div style="font-size: 11px; color: #fde68a; line-height: 1.4;">${escapeHtml(activeRow.visualNotesProposal)}</div>
+          <div class="row-active-proposal-text" style="font-size: 11px; line-height: 1.4;">${escapeHtml(activeRow.visualNotesProposal)}</div>
         </div>
       ` : ""}
     </label>
@@ -23654,6 +23723,20 @@ async function applyGlobalConfig() {
     ttsDirectionDefaults: normalizeTtsDirectionConfig(globalTtsDirectionConfig),
     script: nextScript
   }));
+
+  // Guardamos la configuración de video por separado para no interferir con el script
+  try {
+    const isLite = String(els.globalCheapVideoMode?.value || "true") === "true";
+    upsertActiveSession((current) => ({
+      ...current,
+      podcastVideoConfig: {
+        ...getPodcastVideoConfig(current),
+        cheapVideoMode: isLite
+      }
+    }), { render: false });
+  } catch (e) {
+    console.error("[podcaster] Error persisting video quality setting:", e);
+  }
 }
 
 function sanitizeChatHtml(input = "") {
@@ -24037,14 +24120,14 @@ function buildScriptRowEditorMarkup(session, row) {
 
           <!-- PROPUESTA ACTIVA (SELECCIONADA) -->
           ${creativeRow.visualNotesProposal ? `
-            <div class="row-active-proposal" style="margin-top: 8px; background: rgba(251, 191, 36, 0.1); border: 1px solid #fbbf24; border-radius: 6px; padding: 8px;">
+            <div class="row-active-proposal${isVisualProposalResolved(creativeRow, creativeRow.visualNotesProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                <span style="font-size: 10px; color: #fbbf24; font-weight: 800; text-transform: uppercase;">Propuesta Activa (Se usará para generar el vídeo)</span>
-                <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(creativeRow.visualNotesProposal)}" title="Desactivar esta propuesta" style="color: #fbbf24; padding: 2px;">
+                <span class="row-active-proposal-label" style="font-size: 10px; font-weight: 800; text-transform: uppercase;">Propuesta Activa (Se usará para generar el vídeo)</span>
+                <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(creativeRow.visualNotesProposal)}" title="Marcar propuesta como realizada" style="color: #fbbf24; padding: 2px;">
                   <i class="fas fa-times-circle"></i>
                 </button>
               </div>
-              <div style="font-size: 12px; color: #fde68a; line-height: 1.4;">${escapeHtml(creativeRow.visualNotesProposal)}</div>
+              <div class="row-active-proposal-text" style="font-size: 12px; line-height: 1.4;">${escapeHtml(creativeRow.visualNotesProposal)}</div>
             </div>
           ` : ""}
           
@@ -24059,13 +24142,13 @@ function buildScriptRowEditorMarkup(session, row) {
               <div class="row-proposals-list" style="margin-top: 12px; border-top: 1px dashed #334155; padding-top: 8px;">
                 <span style="font-size: 10px; color: #94a3b8; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 6px;">Otras propuestas disponibles</span>
                 ${filteredProposals.map((text, idx) => `
-                  <div class="proposal-item" style="margin-bottom: 6px; display: flex; gap: 4px; align-items: flex-start;">
+                  <div class="proposal-item${isVisualProposalResolved(creativeRow, text) ? " is-resolved" : ""}" style="margin-bottom: 6px; display: flex; gap: 4px; align-items: flex-start;">
                     <textarea readonly rows="2" style="flex: 1; font-size: 11px; background: #1e293b; border-color: #334155; opacity: 0.8; color: #cbd5e1; resize: none; padding: 4px;">${escapeHtml(text)}</textarea>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                       <button class="row-icon-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta" style="color: #10b981; padding: 4px; background: rgba(16, 185, 129, 0.1); border-radius: 4px;">
                         <i class="fas fa-check-circle" style="font-size: 16px;"></i>
                       </button>
-                      <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Eliminar esta propuesta" style="color: #ef4444; padding: 4px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
+                      <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada" style="color: #ef4444; padding: 4px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
                         <i class="fas fa-trash" style="font-size: 14px;"></i>
                       </button>
                     </div>
@@ -24134,8 +24217,60 @@ function buildScriptRowEditorMarkup(session, row) {
         </select>
       </label>
       <label class="row-field wide">
-        <span>Notas</span>
+        <span class="row-field-head">
+          <span style="display: flex; align-items: center;">
+            Notas
+            ${(row?.visualNotesProposals?.length > 0 || row?.visualNotesProposal) ? `<span class="row-chip" style="background: #fbbf24; color: #000; font-size: 8px; margin-left: 6px; padding: 1px 4px; border: none; font-weight: 800; line-height: 1;">PROPUESTA</span>` : ""}
+          </span>
+          ${row?.visualNotesProposal ? `
+            <span class="row-field-inline-actions">
+              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(row.visualNotesProposal)}" title="Aceptar y aplicar propuesta de cambio visual" style="color: #10b981;">
+                <i class="fas fa-check-circle"></i>
+              </button>
+            </span>
+          ` : ""}
+        </span>
         <textarea rows="2" data-field="notes" data-row-id="${escapeHtml(row.id)}">${escapeHtml(row.notes || "")}</textarea>
+
+        <!-- PROPUESTA ACTIVA (SELECCIONADA) -->
+        ${row.visualNotesProposal ? `
+          <div class="row-active-proposal${isVisualProposalResolved(row, row.visualNotesProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <span class="row-active-proposal-label" style="font-size: 10px; font-weight: 800; text-transform: uppercase;">Propuesta Activa</span>
+              <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(row.visualNotesProposal)}" title="Marcar propuesta como realizada" style="color: #fbbf24; padding: 2px;">
+                <i class="fas fa-times-circle"></i>
+              </button>
+            </div>
+            <div class="row-active-proposal-text" style="font-size: 12px; line-height: 1.4;">${escapeHtml(row.visualNotesProposal)}</div>
+          </div>
+        ` : ""}
+        
+        <!-- SECCIÓN DE PROPUESTAS MULTIPLES (HISTORIAL) -->
+        ${(() => {
+          const proposals = [...(row.visualNotesProposals || [])];
+          // No duplicar la propuesta activa en la lista de abajo si ya se muestra arriba
+          const filteredProposals = proposals.filter(p => p !== row.visualNotesProposal);
+          
+          if (filteredProposals.length === 0) return "";
+          return `
+            <div class="row-proposals-list" style="margin-top: 12px; border-top: 1px dashed #334155; padding-top: 8px;">
+              <span style="font-size: 10px; color: #94a3b8; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 6px;">Otras propuestas disponibles</span>
+              ${filteredProposals.map((text, idx) => `
+                <div class="proposal-item${isVisualProposalResolved(row, text) ? " is-resolved" : ""}" style="margin-bottom: 6px; display: flex; gap: 4px; align-items: flex-start;">
+                  <textarea readonly rows="2" style="flex: 1; font-size: 11px; background: #1e293b; border-color: #334155; opacity: 0.8; color: #cbd5e1; resize: none; padding: 4px;">${escapeHtml(text)}</textarea>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <button class="row-icon-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta" style="color: #10b981; padding: 4px; background: rgba(16, 185, 129, 0.1); border-radius: 4px;">
+                      <i class="fas fa-check-circle" style="font-size: 16px;"></i>
+                    </button>
+                    <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada" style="color: #ef4444; padding: 4px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
+                      <i class="fas fa-trash" style="font-size: 14px;"></i>
+                    </button>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          `;
+        })()}
       </label>
     </div>
   `;
@@ -28932,6 +29067,9 @@ function applyVisualProposalForRow(rowId = "", forcedText = null) {
       if (!targetRow.visualNotesProposals.includes(proposal)) {
         targetRow.visualNotesProposals.push(proposal);
       }
+      if (Array.isArray(targetRow.visualNotesResolvedProposals)) {
+        targetRow.visualNotesResolvedProposals = targetRow.visualNotesResolvedProposals.filter((entry) => entry !== proposal);
+      }
     }
     return current;
   });
@@ -28944,22 +29082,22 @@ function applyVisualProposalForRow(rowId = "", forcedText = null) {
 function deleteVisualProposalForRow(rowId = "", proposalText = "") {
   if (!rowId || !proposalText) return;
   const session = getActiveSession();
+  const normalizedProposalText = String(proposalText || "").trim();
 
   upsertActiveSession((current) => {
     const rows = current.script?.rows || [];
     const targetRow = rows.find(r => r.id === rowId);
     if (targetRow) {
-      if (Array.isArray(targetRow.visualNotesProposals)) {
-        targetRow.visualNotesProposals = targetRow.visualNotesProposals.filter(p => p !== proposalText);
+      const resolved = normalizeVisualProposalState(targetRow.visualNotesResolvedProposals);
+      if (!resolved.includes(normalizedProposalText)) {
+        resolved.push(normalizedProposalText);
       }
-      if (targetRow.visualNotesProposal === proposalText) {
-        delete targetRow.visualNotesProposal;
-      }
+      targetRow.visualNotesResolvedProposals = resolved;
     }
     return current;
   });
 
-  addChatMessage("system", `Propuesta eliminada de la escena ${resolveSceneNumberByRowId(rowId, session)}.`);
+  addChatMessage("system", `Propuesta marcada como realizada en la escena ${resolveSceneNumberByRowId(rowId, session)}.`);
   scheduleCloudAutosave("content");
   render();
 }
@@ -32880,9 +33018,7 @@ function attachEvents() {
     if (actionBtn.dataset.action === "delete-visual-proposal-text") {
       if (!rowId) return;
       const proposalText = actionBtn.dataset.proposalText;
-      if (confirm("¿Eliminar definitivamente esta propuesta del historial?")) {
-        deleteVisualProposalForRow(rowId, proposalText);
-      }
+      deleteVisualProposalForRow(rowId, proposalText);
       return;
     }
     if (actionBtn.dataset.action === "restore-visual-notes") {
@@ -33132,6 +33268,14 @@ window.addEventListener("keydown", (event) => {
 const podcastThumbnailBlobCache = new Map();
 async function resolveThumbnailBlob(url) {
   if (!url || !url.startsWith("http")) return url;
+
+  // Si es Firebase Storage y estamos en desarrollo local, evitamos el fetch para no disparar el CORS
+  // Esto permite que la imagen cargue directo en el <img> sin errores.
+  const isExternalStorage = url.includes("firebasestorage.googleapis.com") || url.includes("googleusercontent.com");
+  if (isExternalStorage && (location.hostname === "127.0.0.1" || location.hostname === "localhost")) {
+    return url;
+  }
+
   if (podcastThumbnailBlobCache.has(url)) return podcastThumbnailBlobCache.get(url);
   
   if (typeof playbackController?.getBlobUrl === "function") {
