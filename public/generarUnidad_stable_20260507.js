@@ -36,8 +36,7 @@ import {
   buildUnidadActivityStructureContract,
   buildUnidadPrimerIconographyPrompt,
   buildUnidadResourceExtraBlocks,
-  buildUnidadResourceGenerationStepPrompt,
-  normalize
+  buildUnidadResourceGenerationStepPrompt
 } from "./unidadPromptContracts.js";
 
 // Configuración Firebase
@@ -669,10 +668,10 @@ function logVisual(msg) {
   }
 }
 
-function contieneSintaxisStemRenderizableUnidad(value = "") {
-  const safeValue = String(value || "").trim();
-  if (!safeValue) return false;
-  return /(\${1,2}[\s\S]+?\${1,2}|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\\ce\{[\s\S]+?\}|\\pu\{[\s\S]+?\}|\\frac\{[\s\S]*?\}\{[\s\S]*?\}|\\[a-zA-Z]+\{)/m.test(safeValue);
+function contieneSintaxisStemRenderizableUnidad(texto = "") {
+  const value = String(texto || "");
+  if (!value) return false;
+  return /(\${1,2}[\s\S]+?\${1,2}|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\\ce\{[\s\S]+?\}|\\pu\{[\s\S]+?\}|\\frac\{[\s\S]+?\}\{[\s\S]+?\}|\\[a-zA-Z]+(?:\{|\s))/m.test(value);
 }
 
 function renderizarStemEnElementoUnidad(root) {
@@ -686,9 +685,7 @@ function renderizarStemEnElementoUnidad(root) {
         { left: "$$", right: "$$", display: true },
         { left: "\\[", right: "\\]", display: true },
         { left: "$", right: "$", display: false },
-        { left: "\\(", right: "\\)", display: false },
-        { left: "\\ce{", right: "}", display: false },
-        { left: "\\pu{", right: "}", display: false }
+        { left: "\\(", right: "\\)", display: false }
       ],
       throwOnError: false,
       strict: "ignore",
@@ -1582,24 +1579,10 @@ function _obtenerTextoCompletoLectura(lectura = {}) {
       || lectura?.campos?.contenidoHTML
       || lectura?.contenidoHTML
       || lectura?.lecturaHtml
+      || lectura?.contenidoPlano
+      || lectura?.rawData?.contenidoPlano
       || lectura?.campos?.contenidoPlano
       || lectura?.contenidoCompleto
-      || lectura?.contenido
-      || lectura?.texto
-      || lectura?.descripcion
-      || lectura?.sinopsis
-      || lectura?.content
-      || lectura?.text
-      || lectura?.body
-      || lectura?.lectura
-      || lectura?.rawData?.contenido
-      || lectura?.rawData?.texto
-      || lectura?.rawData?.descripcion
-      || lectura?.rawData?.sinopsis
-      || lectura?.campos?.contenido
-      || lectura?.campos?.texto
-      || lectura?.campos?.descripcion
-      || lectura?.campos?.sinopsis
       || lectura?.textoLectura
       || lectura?.rawData?.textoLectura
       || lectura?.campos?.textoLectura
@@ -1914,23 +1897,10 @@ function _hidratarLecturasUnidadDesdeCacheLocal() {
 async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop = null) {
   if (!targetEl) return;
   const texto = _htmlAPlainText(htmlFinal);
-  // ✅ CORRECCIÓN: Si la pestaña está oculta, omitir el efecto typewriter.
-  // Los navegadores ralentizan agresivamente los timers (setTimeout) en pestañas inactivas.
-  if (!texto || document.hidden) {
+  if (!texto) {
     targetEl.innerHTML = htmlFinal || "";
     renderizarStemPendienteUnidad(targetEl);
     _unidadScrollResultadoAlFinal(true, targetEl);
-    
-    // Trigger KaTeX rendering if available for hidden rendering
-    if (typeof renderMathInElement === "function") {
-        renderMathInElement(targetEl, {
-          delimiters: [
-            { left: "$$", right: "$$", display: true },
-            { left: "$", right: "$", display: false }
-          ],
-          throwOnError: false
-        });
-    }
     return;
   }
 
@@ -1959,23 +1929,18 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   targetEl.style.whiteSpace = "";
   targetEl.style.wordBreak = "";
   targetEl.innerHTML = htmlFinal || "";
-  
+  renderizarStemPendienteUnidad(targetEl);
+
   // Trigger KaTeX rendering if available
   if (typeof renderMathInElement === "function") {
     renderMathInElement(targetEl, {
       delimiters: [
         { left: "$$", right: "$$", display: true },
-        { left: "\\[", right: "\\]", display: true },
-        { left: "$", right: "$", display: false },
-        { left: "\\(", right: "\\)", display: false }
+        { left: "$", right: "$", display: false }
       ],
-      throwOnError: false,
-      trust: true
+      throwOnError: false
     });
   }
-
-  // Llamada de respaldo con reintentos
-  renderizarStemPendienteUnidad(targetEl);
 
   _unidadScrollResultadoAlFinal(true, targetEl);
 }
@@ -2053,18 +2018,15 @@ function normalizarCategoriaId(categoria = "") {
 const UNIDAD_CATEGORIA_RESULTADO_ORDEN = [
   "Proyectos",
   "Lenguaje y comunicación",
+  "Matemáticas",
   "Ciencias experimentales",
   "Ciencias sociales",
   "Formación socioemocional",
-  "Artes",
-  "Matemáticas"
+  "Artes"
 ];
 
 function _ordenCategoriaResultadoUnidad(categoria = "") {
-  const normalizedInput = _normalizarTexto(categoria);
-  const index = UNIDAD_CATEGORIA_RESULTADO_ORDEN.findIndex((cat) => 
-    _normalizarTexto(cat) === normalizedInput
-  );
+  const index = UNIDAD_CATEGORIA_RESULTADO_ORDEN.indexOf(String(categoria || "").trim());
   return index >= 0 ? index : UNIDAD_CATEGORIA_RESULTADO_ORDEN.length;
 }
 
@@ -2780,13 +2742,8 @@ function _contenidoLecturaUnidad(lectura = {}) {
     || lectura?.lectura
     || lectura?.texto
     || lectura?.contenido
-    || lectura?.descripcion
-    || lectura?.sinopsis
-    || lectura?.content
-    || lectura?.text
     || lectura?.body
-    || lectura?.lectura
-    || (lectura?.campos && typeof lectura.campos === "object" ? (lectura.campos.contenidoHTML || lectura.campos.textoLectura || lectura.campos.contenido || lectura.campos.descripcion || lectura.campos.sinopsis || "") : "")
+    || (lectura?.campos && typeof lectura.campos === "object" ? (lectura.campos.contenidoHTML || lectura.campos.textoLectura || lectura.campos.contenido || "") : "")
     || ""
   ).trim();
 
@@ -3620,7 +3577,7 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
       lecturas: [lectura],
       lecturaDisponible: true,
       titulo: _tituloLecturaUnidad(lectura),
-      contenido: _contenidoLecturaUnidad(lectura) || contenidoHTMLRaw,
+      contenido: _contenidoLecturaUnidad(lectura),
       preguntas: _preguntasLecturaUnidad(lectura),
       lecturaId,
       lecturaIds: lecturaId ? [lecturaId] : [],
@@ -3662,23 +3619,13 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
 }
 
 async function _resolverLecturaUnidadActual(ctx = {}) {
-  // ✅ Antes de resolver, forzar restauración/carga desde Firebase si la UI quedó desincronizada.
-  await _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh: false });
-
+  // ✅ CORRECCIÓN: Revisar ambos elementos (el oculto y el visible de búsqueda)
   const lecturaPrincipalId = String(selectTema?.value || document.getElementById("unidadTemaTexto")?.value || "").trim();
   const lecturaAlternaId = String(selectTemaASC?.value || "").trim();
 
-  // ✅ Fallback para lecturas generadas por IA (prompt) o desde el chat
-  const hasIASelection = !!(window.__unidadLecturaGeneradaPorModal === true && window.lecturaNuevaCoincidenteGlobal);
-  const onlyIA = !lecturaPrincipalId && !lecturaAlternaId;
-  const isChatIA = lecturaPrincipalId === "lectura_chat_ia";
-
-  if (hasIASelection && (onlyIA || isChatIA)) {
+  // ✅ NUEVO: Fallback a lectura generada por prompt si no hay IDs seleccionados
+  if (!lecturaPrincipalId && !lecturaAlternaId && window.lecturaNuevaCoincidenteGlobal) {
       return _normalizarLecturaResueltaUnidad([window.lecturaNuevaCoincidenteGlobal], "lectura_prompt");
-  }
-
-  if (!lecturaPrincipalId && !lecturaAlternaId) {
-    return _normalizarLecturaResueltaUnidad([], "sin_lectura");
   }
 
   const lecturasSeleccionadas = [];
@@ -18106,8 +18053,6 @@ function abrirModalResultadoUnidad() {
   adaptarTablasResultadoResponsive();
   if (modalResultadoUnidad) {
     modalResultadoUnidad.style.display = "block";
-    const resEl = document.getElementById("resultadoUnidadGenerada");
-    if (resEl) renderizarStemPendienteUnidad(resEl);
   }
   _unidadResultadoAplicarColumnaActiva();
   _inicializarFullscreenResultadoUnidad();
@@ -18122,55 +18067,6 @@ function _unidadSetResultLoadingOverlay(visible = false, text = "Preparando unid
   if (progresoTextoResultadoUnidad) {
     progresoTextoResultadoUnidad.textContent = String(text || "Preparando unidad…").trim() || "Preparando unidad…";
   }
-}
-
-function _unidadIsGenerationNavigationLocked() {
-  return !!(
-    window.generandoCategoria
-    || window.categoriaEnProceso
-    || window.stopRequestedUnidad === false && spinnerResultadoUnidadProceso?.style?.display === "flex"
-  );
-}
-
-function _unidadSetupNavigationGuard() {
-  if (window.__unidadNavigationGuardBound) return;
-  window.__unidadNavigationGuardBound = true;
-
-  const warningMessage = "Hay una generación de unidad en curso. Si sales o recargas, podrías perder el progreso actual.";
-
-  const shouldBlock = () => _unidadIsGenerationNavigationLocked();
-
-  window.addEventListener("beforeunload", (event) => {
-    if (!shouldBlock()) return;
-    event.preventDefault();
-    event.returnValue = warningMessage;
-    return warningMessage;
-  });
-
-  window.addEventListener("keydown", (event) => {
-    if (!shouldBlock()) return;
-    const key = String(event.key || "").toLowerCase();
-    const reloadShortcut = key === "f5" || ((event.ctrlKey || event.metaKey) && key === "r");
-    const backShortcut = key === "browserback" || (event.altKey && key === "arrowleft") || (key === "backspace" && !/input|textarea/i.test(document.activeElement?.tagName || ""));
-    if (!reloadShortcut && !backShortcut) return;
-    event.preventDefault();
-    alert("⚠️ Espera a que termine la generación antes de recargar o salir de la página.");
-  }, true);
-
-  if (!window.__unidadNavigationGuardHistoryPrimed) {
-    try {
-      window.history.pushState({ unidadGuard: true }, "", window.location.href);
-      window.__unidadNavigationGuardHistoryPrimed = true;
-    } catch (_) { }
-  }
-
-  window.addEventListener("popstate", () => {
-    if (!shouldBlock()) return;
-    try {
-      window.history.pushState({ unidadGuard: true }, "", window.location.href);
-    } catch (_) { }
-    alert("⚠️ La generación sigue en curso. Usa \"Detener\" o espera a que termine antes de salir.");
-  });
 }
 
 /**
@@ -18527,7 +18423,6 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
   htmlAlumnoLimpio = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoLimpio, cantidad);
   htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados, { subtema: safeSubtema, categoria: safeCategoria });
   htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema: safeSubtema, categoria: safeCategoria, grado: gradoTexto });
-  htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, safeSubtema);
 
   const previewAlumno = document.getElementById(`${bloqueId}-alumno-contenido`);
   if (previewAlumno) {
@@ -19006,9 +18901,7 @@ function _restaurarUltimaLecturaSeleccionadaUnidad() {
   const pool = _poolLecturasBusqueda();
   const lecturaDesdePool = pool.find((l) => String(l?.id || "").trim() === saved.id) || null;
   const lecturaCache = _leerLecturaCache();
-  const lectura = (saved.id === "lectura_chat_ia" && window.lecturaNuevaCoincidenteGlobal)
-    ? window.lecturaNuevaCoincidenteGlobal
-    : (lecturaDesdePool
+  const lectura = lecturaDesdePool
     || (String(lecturaCache?.id || "").trim() === saved.id
       ? {
           id: saved.id,
@@ -19022,7 +18915,7 @@ function _restaurarUltimaLecturaSeleccionadaUnidad() {
           sourceCollection: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
           coleccion: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas")
         }
-      : null));
+      : null);
 
   if (inputTemaTexto) {
     if (!Array.from(inputTemaTexto.options || []).some((o) => String(o.value) === saved.id)) {
@@ -19068,14 +18961,6 @@ async function _restaurarUltimaLecturaSeleccionadaPostCarga() {
 function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   if (!lectura || !lectura.id) return false;
   if (!selectTema) return false;
-  
-  // ✅ CORRECCIÓN: Si es una lectura de IA (chat o prompt), mantenemos el flag activo
-  const esIA = (lectura.id === "lectura_chat_ia" || lectura.id === "lectura_prompt");
-  window.__unidadLecturaGeneradaPorModal = esIA;
-  if (esIA) {
-    window.lecturaNuevaCoincidenteGlobal = lectura;
-  }
-
   _guardarLecturaCache(lectura);
   selectTema.innerHTML = `<option value="${lectura.id}">${_labelLecturaPrincipal(lectura)}</option>`;
   selectTema.value = lectura.id;
@@ -19084,27 +18969,10 @@ function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   try {
     localStorage.setItem("unidad_unidadTemaTexto", String(lectura.id || ""));
     localStorage.setItem("unidad_unidadTemaTexto_label", String(lectura.titulo || lectura.tema || ""));
-    localStorage.setItem("lecturaSeleccionadaDesdeModal", "true");
-    localStorage.setItem("ultimaLecturaSeleccionada", String(lectura.id || ""));
   } catch (_) {
     // noop
   }
   guardarSelectsUnidad();
-  return true;
-}
-
-function _unidadTieneLecturaSeleccionadaReal() {
-  const principalId = String(selectTema?.value || document.getElementById("unidadTemaTexto")?.value || "").trim();
-  const ascId = String(selectTemaASC?.value || "").trim();
-  const persistida = _obtenerLecturaPersistidaUnidad();
-  const tieneGeneradaIA = !!(window.__unidadLecturaGeneradaPorModal && window.lecturaNuevaCoincidenteGlobal);
-  return !!(principalId || ascId || String(persistida?.id || "").trim() || tieneGeneradaIA);
-}
-
-function _unidadShouldAbortMissingResolvedReading({ hasRealSelection = false, lecturaResuelta = null } = {}) {
-  if (!hasRealSelection) return false;
-  if (lecturaResuelta?.lecturaDisponible) return false;
-  if (lecturaResuelta?.lectura) return false;
   return true;
 }
 
@@ -19163,69 +19031,6 @@ async function _aplicarBusquedaManualTema(raw = "") {
   const ok = await aplicarLecturaPrincipalPorVoz(texto);
   if (ok) _sincronizarInputTemaConSelect();
   return !!ok;
-}
-
-async function _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh = false } = {}) {
-  _hidratarLecturasUnidadDesdeCacheLocal();
-
-  const temaTextoId = String(document.getElementById("unidadTemaTexto")?.value || "").trim();
-  const principalId = String(selectTema?.value || temaTextoId || "").trim();
-  const ascId = String(selectTemaASC?.value || "").trim();
-  const persistida = _obtenerLecturaPersistidaUnidad();
-  const lecturaPrompt = window.__unidadLecturaGeneradaPorModal === true
-    ? (window.lecturaNuevaCoincidenteGlobal || null)
-    : null;
-
-  const resolverActual = async () => {
-    let principal = null;
-    let asc = null;
-
-    if (principalId) {
-      principal = await _resolverLecturaPorId(principalId).catch(() => null);
-    }
-    if (!principal && persistida?.id) {
-      principal = await _resolverLecturaPorId(String(persistida.id || "").trim()).catch(() => null);
-    }
-    if (ascId) {
-      asc = await _resolverLecturaPorId(ascId).catch(() => null);
-    }
-
-    return { principal, asc };
-  };
-
-  let resolved = await resolverActual();
-
-  if ((!resolved.principal && (principalId || persistida?.id)) || (!resolved.asc && ascId)) {
-    try {
-      await cargarTodasLasLecturas({ forceRefresh: true });
-      resolved = await resolverActual();
-    } catch (_) { }
-  }
-
-  if (resolved.principal?.id) {
-    _aplicarLecturaPrincipalSeleccionada(resolved.principal);
-  } else if (!principalId && persistida?.id) {
-    _restaurarUltimaLecturaSeleccionadaUnidad();
-  }
-
-  if (resolved.asc?.id && selectTemaASC) {
-    const ascValue = String(selectTemaASC.value || "").trim();
-    if (ascValue !== String(resolved.asc.id || "").trim()) {
-      if (!Array.from(selectTemaASC.options || []).some((o) => String(o.value) === String(resolved.asc.id || "").trim())) {
-        const opt = document.createElement("option");
-        opt.value = String(resolved.asc.id || "");
-        opt.textContent = String(resolved.asc.titulo || resolved.asc.tema || "Lectura ASC");
-        selectTemaASC.appendChild(opt);
-      }
-      selectTemaASC.value = String(resolved.asc.id || "");
-    }
-  }
-
-  return {
-    principal: resolved.principal,
-    asc: resolved.asc,
-    hasSelection: !!(resolved.principal?.id || resolved.asc?.id || lecturaPrompt)
-  };
 }
 
 function _extraerConsultaLecturaSimple(texto = "") {
@@ -19306,153 +19111,77 @@ function _obtenerMateriaSeleccionadaUnidad() {
   return lecturaSel?.materia || "";
 }
 
-async function _resolverLecturaPorId(idOrTitle = "") {
-  if (!idOrTitle) return null;
-  const queryText = String(idOrTitle).trim();
-  const queryLower = queryText.toLowerCase();
-
-  // 1. Asegurar que los pools locales estén hidratados
-  _hidratarLecturasUnidadDesdeCacheLocal();
-
-  // 2. Verificar cache de la lectura "en mano" (muy común al seleccionar)
+async function _resolverLecturaPorId(idLectura = "") {
+  if (!idLectura) return null;
   const lecturaCache = _leerLecturaCache();
-  if (lecturaCache) {
-    const cid = String(lecturaCache.id || "").trim();
-    const ctitle = String(lecturaCache.titulo || lecturaCache.tema || "").trim().toLowerCase();
-    const tieneContenido = !!(lecturaCache.contenidoCompleto || lecturaCache.contenidoPlano || lecturaCache.texto || lecturaCache.content || lecturaCache.contenidoHTML);
-    if ((cid === queryText || ctitle === queryLower) && tieneContenido) {
-      return {
-        id: lecturaCache.id,
-        titulo: lecturaCache.titulo,
-        tema: lecturaCache.tema || lecturaCache.sinopsis || lecturaCache.titulo,
-        nivel: lecturaCache.nivel,
-        grado: lecturaCache.grado,
-        trimestre: lecturaCache.trimestre,
-        unidad: lecturaCache.unidad,
-        tipo: lecturaCache.tipo || "principal",
-        autorReferencia: lecturaCache.autor || "",
-        tipoTexto: lecturaCache.tipoTexto || "",
-        ejeArticulador: lecturaCache.ejeArticulador || "",
-        preguntas: Array.isArray(lecturaCache.preguntas) ? lecturaCache.preguntas : [],
-        preguntasComprension: Array.isArray(lecturaCache.preguntasComprension) ? lecturaCache.preguntasComprension : [],
-        contenidoPlano: lecturaCache.contenidoCompleto || lecturaCache.contenidoPlano || "",
-        contenidoCompleto: lecturaCache.contenidoCompleto || "",
-        contenidoHTML: lecturaCache.contenidoHTML || lecturaCache.lecturaHtml || "",
-        lecturaHtml: lecturaCache.lecturaHtml || lecturaCache.contenidoHTML || "",
-        textoLectura: lecturaCache.textoLectura || "",
-        sourceCollection: lecturaCache.sourceCollection || lecturaCache.coleccion || (lecturaCache.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
-        coleccion: lecturaCache.coleccion || lecturaCache.sourceCollection || (lecturaCache.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
-        rawData: lecturaCache.rawData || lecturaCache,
-        campos: lecturaCache.campos || lecturaCache.rawData || {}
-      };
-    }
+  if (lecturaCache?.id === idLectura) {
+    return {
+      id: lecturaCache.id,
+      titulo: lecturaCache.titulo,
+      tema: lecturaCache.tema || lecturaCache.sinopsis || lecturaCache.titulo,
+      nivel: lecturaCache.nivel,
+      grado: lecturaCache.grado,
+      trimestre: lecturaCache.trimestre,
+      unidad: lecturaCache.unidad,
+      tipo: lecturaCache.tipo || "principal",
+      autorReferencia: lecturaCache.autor || "",
+      tipoTexto: lecturaCache.tipoTexto || "",
+      ejeArticulador: lecturaCache.ejeArticulador || "",
+      preguntas: Array.isArray(lecturaCache.preguntas) ? lecturaCache.preguntas : [],
+      contenidoPlano: lecturaCache.contenidoCompleto || "",
+      campos: lecturaCache.campos || {}
+    };
   }
-
-  // 3. Buscar en pools globales (nuevas, filtradas, todas)
   const pool = [
     ...(Array.isArray(window.lecturasNuevas) ? window.lecturasNuevas : []),
     ...(Array.isArray(window.lecturasASC) ? window.lecturasASC : []),
     ...(Array.isArray(window.lecturasFiltradas) ? window.lecturasFiltradas : []),
     ...(Array.isArray(window.todasLasLecturas) ? window.todasLasLecturas : [])
   ];
-
-  let lectura = pool.find(l => {
-    const id = String(l.id || "").trim();
-    const title = String(l.titulo || l.tema || "").trim().toLowerCase();
-    return id === queryText || title === queryLower;
-  });
-
+  let lectura = pool.find(l => l.id === idLectura) || null;
   if (lectura) return lectura;
 
-  // 4. Fallback: Firestore (solo si parece un ID de Firebase y no se ha encontrado localmente)
-  if (queryText.length > 5 && !queryText.includes(" ")) {
-    const colecciones = ["lecturas", "lecturasNuevas", "lecturasASC"];
-    for (const colName of colecciones) {
-      try {
-        const snap = await getDoc(doc(db, colName, queryText));
-        if (snap.exists()) {
-        const data = snap.data();
-          return {
-            id: snap.id,
-            sourceCollection: colName,
-            coleccion: colName,
-            ...data,
-            tipo: colName === "lecturasASC" ? "asc" : "principal"
-          };
-        }
-      } catch (_) { }
+  // Fallback: leer documento directo por ID en colecciones principales y ASC.
+  try {
+    const refLegacy = doc(db, "lecturas", idLectura);
+    const snapLegacy = await getDoc(refLegacy);
+    if (snapLegacy.exists()) {
+      return {
+        id: snapLegacy.id,
+        sourceCollection: "lecturas",
+        coleccion: "lecturas",
+        ...snapLegacy.data(),
+        tipo: "principal"
+      };
     }
-  }
-
+  } catch (_) { }
+  try {
+    const refNueva = doc(db, "lecturasNuevas", idLectura);
+    const snapNueva = await getDoc(refNueva);
+    if (snapNueva.exists()) {
+      return {
+        id: snapNueva.id,
+        sourceCollection: "lecturasNuevas",
+        coleccion: "lecturasNuevas",
+        ...snapNueva.data(),
+        tipo: "principal"
+      };
+    }
+  } catch (_) { }
+  try {
+    const refASC = doc(db, "lecturasASC", idLectura);
+    const snapASC = await getDoc(refASC);
+    if (snapASC.exists()) {
+      return {
+        id: snapASC.id,
+        sourceCollection: "lecturasASC",
+        coleccion: "lecturasASC",
+        ...snapASC.data(),
+        tipo: "asc"
+      };
+    }
+  } catch (_) { }
   return null;
-}
-
-/**
- * Normaliza un objeto de lectura a la estructura esperada por el generador.
- */
-function _normalizarEstructuraLectura(l = {}) {
-  if (!l) return null;
-  const fields = l.campos || l.rawData || l;
-  const rawData = (l.rawData && typeof l.rawData === "object")
-    ? l.rawData
-    : ((fields && typeof fields === "object") ? { ...fields } : {});
-  const preguntasComprension = Array.isArray(l.preguntasComprension)
-    ? l.preguntasComprension
-    : (Array.isArray(fields.preguntasComprension) ? fields.preguntasComprension : []);
-  const preguntas = Array.isArray(l.preguntas)
-    ? l.preguntas
-    : preguntasComprension;
-  const contenidoHTML = String(
-    l.contenidoHTML
-    || l.contenidoHTMLRaw
-    || l.lecturaHtml
-    || l.contenidoCompleto
-    || l.textoLectura
-    || l.texto
-    || l.contenido
-    || rawData.contenidoHTML
-    || rawData.contenidoHTMLRaw
-    || rawData.lecturaHtml
-    || rawData.contenidoCompleto
-    || rawData.textoLectura
-    || rawData.texto
-    || rawData.contenido
-    || fields.contenidoHTML
-    || fields.contenidoHTMLRaw
-    || fields.lecturaHtml
-    || fields.contenidoCompleto
-    || fields.textoLectura
-    || fields.texto
-    || fields.contenido
-    || ""
-  );
-  return {
-    id: l.id || fields.id,
-    titulo: l.titulo || fields.titulo || l.tema || fields.tema || "Sin título",
-    tema: l.tema || fields.tema || l.titulo || fields.titulo || "",
-    nivel: l.nivel || fields.nivel || "",
-    grado: l.grado || fields.grado || "",
-    trimestre: l.trimestre || fields.trimestre || "",
-    unidad: l.unidad || fields.unidad || "",
-    tipo: l.tipo || fields.tipo || "principal",
-    autorReferencia: l.autorReferencia || fields.autorReferencia || l.autor || fields.autor || "",
-    tipoTexto: l.tipoTexto || fields.tipoTexto || "",
-    ejeArticulador: l.ejeArticulador || fields.ejeArticulador || "",
-    sourceCollection: l.sourceCollection || fields.sourceCollection || l.coleccion || fields.coleccion || "",
-    coleccion: l.coleccion || fields.coleccion || l.sourceCollection || fields.sourceCollection || "",
-    preguntas,
-    preguntasComprension,
-    contenidoHTMLRaw: contenidoHTML,
-    contenidoHTML,
-    lecturaHtml: l.lecturaHtml || rawData.lecturaHtml || fields.lecturaHtml || "",
-    textoLectura: l.textoLectura || rawData.textoLectura || fields.textoLectura || "",
-    contenidoCompleto: l.contenidoCompleto || rawData.contenidoCompleto || fields.contenidoCompleto || contenidoHTML,
-    contenidoPlano: l.contenidoPlano || rawData.contenidoPlano || fields.contenidoPlano || contenidoHTML,
-    contenido: l.contenido || rawData.contenido || fields.contenido || contenidoHTML,
-    texto: l.texto || rawData.texto || fields.texto || contenidoHTML,
-    rawData,
-    campos: fields
-  };
 }
 
 function _puntuarSecuenciaDoc(docData = {}, categorias = {}, materiaObjetivo = "") {
@@ -19515,28 +19244,25 @@ async function actualizarTemasLecturas() {
 
   if (seleccionModal && ultimaLectura) {
     const pool = _poolLecturasBusqueda();
-    let lecturaBloqueada = (ultimaLectura === "lectura_chat_ia" && window.lecturaNuevaCoincidenteGlobal) 
-      ? window.lecturaNuevaCoincidenteGlobal 
-      : (pool.find((l) => String(l?.id || "") === String(ultimaLectura)) || null);
-    
-    if (!lecturaBloqueada && ultimaLectura !== "lectura_chat_ia") {
+    let lecturaBloqueada = pool.find((l) => String(l?.id || "") === String(ultimaLectura)) || null;
+    if (!lecturaBloqueada) {
       try {
         lecturaBloqueada = await _resolverLecturaPorId(ultimaLectura);
       } catch (_) {
         lecturaBloqueada = null;
       }
     }
-    // 🔥 Relaxed check for manual selections: only clear if Nivel or Grado changes.
-    const coincideNivelGrado = (
-      String(lecturaBloqueada?.nivel || "").trim().toLowerCase() === String(nivel || "").trim().toLowerCase() &&
-      _normalizarGradoComparable(lecturaBloqueada?.grado) === _normalizarGradoComparable(gradoNumero || gradoTexto)
-    );
-
-    if (coincideNivelGrado || ultimaLectura === "lectura_chat_ia") {
+    const coincide = _lecturaCoincideConContexto(lecturaBloqueada, {
+      nivel,
+      grado: gradoNumero || gradoTexto,
+      trimestre: selectTrimestre?.value || "",
+      unidad: selectUnidad?.value || ""
+    });
+    if (coincide) {
       if (!String(selectTema?.value || "").trim()) {
         _restaurarUltimaLecturaSeleccionadaUnidad();
       }
-      return; 
+      return; // Mantener selección manual solo si coincide con el contexto actual
     }
     // Si cambió el contexto, liberar bloqueo y limpiar lectura obsoleta.
     localStorage.removeItem('lecturaSeleccionadaDesdeModal');
@@ -19707,11 +19433,11 @@ function conectarBotonGenerarTodo() {
       const ordenCategorias = [
         'Proyectos',
         'Lenguaje y comunicación',
+        'Matemáticas',
         'Ciencias experimentales',
         'Ciencias sociales',
         'Formación socioemocional',
-        'Artes',
-        'Matemáticas'
+        'Artes'
       ];
 
       const categoriasOrdenadas = Array.from(categoriasDisponibles)
@@ -19721,9 +19447,6 @@ function conectarBotonGenerarTodo() {
           const indexB = ordenCategorias.indexOf(b);
           return indexA - indexB;
         });
-
-      console.log("Categorías detectadas para generación completa:", Array.from(categoriasDisponibles));
-      console.log("Categorías filtradas y ordenadas:", categoriasOrdenadas);
 
       if (categoriasOrdenadas.length === 0) {
         alert("⚠️ No se encontraron categorías para generar.");
@@ -19763,12 +19486,10 @@ function conectarBotonGenerarTodo() {
           }
 
           if (!botonGenerar) {
-            console.warn(`No se encontró el botón de generación para la categoría: ${categoria}`);
             continue;
           }
 
           if (botonGenerar.disabled) {
-            console.warn(`El botón de generación para la categoría ${categoria} está deshabilitado.`);
             continue;
           }
 
@@ -23309,8 +23030,7 @@ window.construirPromptProyecto = function (
 
   const nivel = selectNivel.value || "Primaria";
 
-  const gradoRaw = selectGrado.value || "Primero";
-  const grado = normalize(gradoRaw);
+  const grado = selectGrado.value || "Primero";
   const trimestre = (selectTrimestre.value || "1").toString();
 
   // 🧭 Metodología por trimestre
@@ -23441,7 +23161,7 @@ window.construirPromptProyecto = function (
       ? `IMPORTANTE: Distribuye estos recursos a lo largo del proyecto. Usa cada uno **una sola vez** y en **fases distintas**:
   ${recursosOrdenados.map((r, i) => `- Fase ${i + 1}: integra la mención de ${r} en una de sus actividades.`).join("\n")}
   ${instruccionNoGenerarRecursosFull}
-  🚨 REGLA CRÍTICA DE SEPARACIÓN: Cada recurso debe ir en una actividad distinta de una fase distinta. No menciones más de un recurso en el mismo bloque <div class="activity">.`
+  No menciones más de un recurso en la misma actividad.`
       : `IMPORTANTE: Integra estos recursos de forma distribuida dentro de las fases.
   ${recursosOrdenados.map((r, i) => `- Fase ${i + 1}: integra ${r} de forma natural`).join("\n")}
   ${instruccionNoGenerarRecursosFull}
@@ -23476,7 +23196,6 @@ window.construirPromptProyecto = function (
     isTrazosDeLetras: false
   });
   const estructuraBaseActividadProyecto = buildUnidadActivityStructureContract({
-    grado,
     isTrazosDeLetras: false,
     hasExplicitFormatContract: /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""))
   });
@@ -23498,6 +23217,8 @@ window.construirPromptProyecto = function (
         ${instruccionesAdicionalesHTML}
   Eres un pedagogo especialista en diseño curricular neurodidáctico.
   Importante: devuelve SOLO HTML final, sin comentarios extra ni marcas de código.
+  
+  ${iconografiaPrimeroProyecto}
 
   Genera un **proyecto trimestral** para primaria, basado en los **T/AE/C/P globales** del mismo grado y trimestre, aplicando **${metodologia}**.
   
@@ -23518,7 +23239,6 @@ window.construirPromptProyecto = function (
   📊 Datos base:
 
   ${instruccionLongitudProyecto}
-  ${iconografiaPrimeroProyecto}
 
   - Nivel: ${nivel}
   - Grado: ${grado}
@@ -23821,8 +23541,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
 
   const nivel = selectNivel.value;
-  const gradoRaw = selectGrado.value || "Primero";
-  const grado = normalize(gradoRaw);
+  const grado = selectGrado.value;
   const subtemaClave = nombresSubtemas[0];
   const tituloFinal = tituloCreativo || formatearSubtema(subtemaClave);
   const subtemaFormateado = formatearSubtema(subtemaClave);
@@ -24003,8 +23722,7 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
       : `IMPORTANTE: Estos recursos deben integrarse dentro del mismo subtema, sin bloques separados al final.
   Las fichas, anexos, recortables y guion de video deben aparecer mezclados de forma natural dentro de las actividades normales o de sus explicaciones.
   ${instruccionNoGenerarRecursosFull}
-  No generes secciones independientes para estos recursos.
-  🚨 REGLA CRÍTICA DE SEPARACIÓN: Distribuye estos recursos a lo largo de las actividades normales. No menciones más de un recurso en el mismo bloque <div class="activity">. Cada actividad debe contener como máximo la mención a UN solo recurso (ej: Actividad 1 menciona la Ficha, Actividad 2 menciona el Anexo, etc). Prohibido agrupar todos los recursos al final o en una sola actividad.`)
+  No generes secciones independientes para estos recursos.`)
     : "";
 
   const hasTrazosStyle = /ESTILOS PEDAG[ÓO]GICOS ACTIVOS:[\s\S]*Trazos y letras|FORMATO RECTOR INNEGOCIABLE:\s*Trazos y letras|CONTRATO DE FORMATO OBLIGATORIO:\s*usa Trazos y letras/i.test(String(instruccionesAdicionales || ""));
@@ -24020,21 +23738,15 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   });
 
   const seccionesExtra = `
-  ✅ Si el subtema lo amerita, agrega **una sola sección extra** al final de las actividades (pero no ambas), siguiendo una de estas opciones, siempre envuelta en <div class="pedagogical-extra-block"> para asegurar el aislamiento visual:
+  ✅ Si el subtema lo amerita, agrega **una sola sección extra** al final de las actividades (pero no ambas), siguiendo una de estas opciones, siempre en formato profesional y adecuado:
 
-  1. <div class="pedagogical-extra-block">
+  1. <div class="activity" style="margin-top:30px;">
      <strong>Para saber más.</strong>
-     <p>Si hay un término o concepto importante que convenga reforzar, explica brevemente su origen, un dato curioso o un tip de aprendizaje útil para el estudiante de forma motivadora.</p>
-  </div>
-
-  2. <div class="pedagogical-extra-block">
-     <strong>El poder de la palabra.</strong>
-     <p>Usa una cita real y famosa de un autor reconocido que conecte con el subtema. No inventes autores, no uses frases genéricas y no pongas la etiqueta "Autor:".</p>
+     <p>Si hay un término o concepto importante que convenga reforzar, usa una cita real y famosa de un autor reconocido que conecte con el subtema. No inventes autores, no uses frases genéricas y no pongas la etiqueta "Autor:".</p>
      <p>La cita debe ir en lenguaje sencillo, ser breve y estar acompañada por el nombre del autor en la misma línea o al final, sin etiqueta adicional.</p>
   </div>
 
-  ⚠️ IMPORTANTE: Solo una de estas secciones y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
-  - Usa siempre la clase "pedagogical-extra-block".
+  ⚠️ IMPORTANTE: Solo esta sección y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
   - Si incluyes una frase, cita o ejemplo textual, usa una frase real y famosa de un autor reconocido, y escribe solo el nombre del autor sin la etiqueta "Autor:".
   - No incluyas frases religiosas, controversiales, violentas o anónimas.
   - No incluir emojis
@@ -24231,7 +23943,6 @@ function generarBloqueHabilidad(habilidadClave) {
 
   const hasExplicitFormatContract = /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""));
   const estructuraBaseActividad = buildUnidadActivityStructureContract({
-    grado,
     isTrazosDeLetras,
     hasExplicitFormatContract
   });
@@ -24875,8 +24586,7 @@ function _unidadInferTeacherEvidence(lead = "", recursos = [], grado = "") {
   const text = String(lead || "").toLowerCase();
   const resourceHint = (Array.isArray(recursos) && recursos.length) ? ` con apoyo de ${recursos[0]}` : "";
   let evidence = "";
-  if (contieneSintaxisStemRenderizableUnidad(lead)) evidence = "Resultado y procedimiento matemático correcto.";
-  else if (/\bletra\b/.test(text) && /\b(traza|copia|escribe|repasa)\b/.test(text)) evidence = "Trazo correcto de la letra indicada.";
+  if (/\bletra\b/.test(text) && /\b(traza|copia|escribe|repasa)\b/.test(text)) evidence = "Trazo correcto de la letra indicada.";
   else if (/\bfrase\b/.test(text) && /\b(lee|copia|escribe|traza)\b/.test(text)) evidence = "Copia o lectura correcta de la frase.";
   else if (/\bpalabra\b/.test(text)) evidence = "Escritura o lectura correcta de la palabra indicada.";
   else if (/\bsonid[oa]s?\b/.test(text)) evidence = "Identificación del sonido principal.";
@@ -26024,7 +25734,6 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     const viejoContenedor = document.getElementById(contenedorCategoriaId);
     const tableId = `tabla-secuencia-${categoria.replace(/\s+/g, '-')}`;
     const tabla = document.getElementById(tableId);
-    const habiaLecturaSeleccionada = _unidadTieneLecturaSeleccionadaReal();
 
     // === Categorías que SÍ requieren lectura obligatoria ===
     const categoriasQueRequierenLectura = []; // añade más si lo necesitas
@@ -26045,18 +25754,9 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       statusId: statusCategoriaId
     });
     const lectura = lecturaResuelta.lectura;
-    const lecturaActiva = lectura || (window.__unidadLecturaGeneradaPorModal === true ? window.lecturaNuevaCoincidenteGlobal : null) || null;
     
     // ✅ CORRECCIÓN: Actualizar window.lecturaNuevaCoincidenteGlobal INMEDIATAMENTE tras resolver
-    window.lecturaNuevaCoincidenteGlobal = lecturaActiva || null;
-
-    if (_unidadShouldAbortMissingResolvedReading({
-      hasRealSelection: habiaLecturaSeleccionada,
-      lecturaResuelta
-    })) {
-      alert("⚠️ Había una lectura seleccionada, pero no se pudo resolver desde Firebase. La generación se detuvo para evitar que la IA invente una lectura.");
-      return;
-    }
+    window.lecturaNuevaCoincidenteGlobal = lectura || null;
 
     // Si la categoría LA REQUIERE y no hay lectura → se avisa y se detiene.
     if (categoriaRequiereLectura && !lectura) {
@@ -26102,7 +25802,7 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       return chkRelacion ? chkRelacion.checked : false;
     });
 
-    // Limpiar subtemas existentes de esta categoría y la lectura previa si existe
+    // Limpiar subtemas existentes de esta categoría
     subtemasDeCategoria.forEach(subtema => {
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const bloqueExistente = document.getElementById(bloqueId);
@@ -26110,11 +25810,6 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
         bloqueExistente.remove();
       }
     });
-    const readingBlockPreviaId = `bloque-${categoria}-LecturaPrevia`;
-    const readingPreviaExistente = document.getElementById(readingBlockPreviaId);
-    if (readingPreviaExistente) {
-      readingPreviaExistente.remove();
-    }
 
     // === Objetivos T/AE/C/P por subtema ===
     const objetivos = [];
@@ -26192,38 +25887,80 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     `;
 
     // Insertar título de categoría al inicio del contenedor.
+    // La lectura de Lenguaje debe vivir dentro del primer col-alumno, no en el encabezado de categoría.
+    let lecturaGlobalInyectada = "";
+    const lenguajeConLecturaRelacionada =
+      categoria === "Lenguaje y comunicación" ||
+      subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
+    if (window.lecturaNuevaCoincidenteGlobal && !window.lecturaGlobalMostrada && !lenguajeConLecturaRelacionada) {
+       lecturaGlobalInyectada = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, { 
+           categoria, 
+           statusId: statusCategoriaId,
+           contenido: contenidoLecturaSeguro,
+           preguntas: preguntasComprensionSeguras
+       });
+       window.lecturaGlobalMostrada = true;
+    }
     let categoriaHeader = contenedor.querySelector(":scope > .bloque-categoria-header");
     if (!categoriaHeader) {
       categoriaHeader = document.createElement("div");
       categoriaHeader.className = "bloque-categoria-header";
-      categoriaHeader.innerHTML = tituloCategoriaHTML;
+      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
       if (contenedor.firstChild) {
         contenedor.insertBefore(categoriaHeader, contenedor.firstChild);
       } else {
         contenedor.appendChild(categoriaHeader);
       }
     } else {
-      categoriaHeader.innerHTML = tituloCategoriaHTML;
+      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
     }
-    contenedor.style.position = "relative"; 
+    contenedor.style.position = "relative"; // Asegurar que el badge se posicione respecto al contenedor
+    // Llevar la vista al bloque de la categoría que se está generando.
     contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // ✅ CORRECCIÓN: INYECCIÓN DE LECTURA REDUNDANTE ELIMINADA.
-    // La lectura se inyecta ahora de forma contextual dentro de los prompts de categoría
-    // o mediante los flujos de Lenguaje y Comunicación, evitando duplicidad.
-    _unidadSetResultLoadingOverlay(false);
+    // ✅ CORRECCIÓN MEJORADA: BÚSQUEDA DE LECTURA PARA TODAS LAS CATEGORÍAS
+    const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
+    const gradoSeleccionado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
+    const trimestreSeleccionado = document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "";
+    const unidadSeleccionada = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "";
+    // Verificar si ALGUNA categoría necesita lectura
+    const algunaCategoriaNecesitaLectura =
+      categoria === "Lenguaje y comunicación" ||
+      subtemasDeCategoria.some(sub => {
+        const chkRelacion = document.querySelector(`input[name='relacion_${sub}']`);
+        return chkRelacion ? chkRelacion.checked : false;
+      });
+    // (Ya actualizado arriba de forma segura)
 
-    // ✅ PARA LENGUAJE Y COMUNICACIÓN: asegurar que el estado sea correcto
+    // ✅ PARA LENGUAJE Y COMUNICACIÓN: la lectura ya se inserta en col-alumno, no duplicar bloque global
     if (categoria === "Lenguaje y comunicación") {
-      if (lecturaActiva) {
-        window.bloqueLecturaGlobalParaLenguaje = window.bloqueLecturaGlobalParaLenguaje || await _generarBloqueLecturaGlobalHTML(lecturaActiva, {
+      const algunSubtemaRelacionado = subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
+      // ✅ CORRECCIÓN: Para Lenguaje, siempre que haya lectura, forzamos su inserción (es el eje central)
+      if (window.lecturaNuevaCoincidenteGlobal) {
+        window.bloqueLecturaGlobalParaLenguaje = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, {
           categoria,
           statusId: statusCategoriaId,
           contenido: contenidoLecturaSeguro,
           preguntas: preguntasComprensionSeguras
         });
-        window.debeInsertarLecturaLenguaje = !window.lecturaGlobalMostrada; 
+        window.debeInsertarLecturaLenguaje = true;
         window.lecturaGlobalMostrada = true;
+
+        // ✅ INYECCIÓN INMEDIATA: Antes de empezar con los subtemas, insertamos la lectura
+        if (window.bloqueLecturaGlobalParaLenguaje) {
+          const readingBlockId = `bloque-${categoria}-LecturaPrevia`;
+          contenedor.insertAdjacentHTML("beforeend", `
+              <div id="${readingBlockId}" class="bloque-subtema bloque-lectura-lenguaje" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:28px; flex-wrap:wrap;" data-categoria="${categoria}" data-subtema="ComprensionLectora">
+                  <div class="col-alumno" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="alumno" style="flex:1; min-width:300px;">
+                      ${window.bloqueLecturaGlobalParaLenguaje}
+                  </div>
+                  <div class="col-maestro" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
+                      ${_bloqueMaestroLecturaSoporteUnidad(window.lecturaNuevaCoincidenteGlobal)}
+                  </div>
+              </div>
+          `);
+          window.debeInsertarLecturaLenguaje = false; // Marcar como ya insertada
+        }
       } else {
         window.debeInsertarLecturaLenguaje = false;
         window.bloqueLecturaGlobalParaLenguaje = "";
@@ -27439,7 +27176,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         htmlAlumnoSoloMain = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoSoloMain, cantidad);
         htmlAlumnoSoloMain = _unidadEnsureResourceMentionsInActivities(htmlAlumnoSoloMain, recursosGenerados, { subtema, categoria });
         htmlAlumnoSoloMain = _unidadInjectResourceIconsInActivities(htmlAlumnoSoloMain, { subtema, categoria, grado: gradoTexto });
-        htmlAlumnoSoloMain = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoSoloMain, gradoTexto, subtema);
 
         const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtema}']`)?.value;
         const etiquetaInterdisc = subtemaRelacionado
@@ -29427,9 +29163,6 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
   if (!source.trim() || !_unidadIsPrimerGrado(grado) || typeof DOMParser === "undefined") return source;
   if (_unidadNormalizarSubtemaKey(subtema) === "TrazosDeLetras") return source;
 
-  const MODALITY_TOKEN_CAPTURE_REGEX = /\[(?:IC\.?\s*T\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?)|IC\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?))\]/gi;
-  const PLECA_TOKEN_CAPTURE_REGEX = /\[(?:\d+\s+PLECA(?:S)?)\]/gi;
-
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
   const root = doc.body.firstElementChild;
@@ -29454,16 +29187,6 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
         : _unidadNormalizeMalformedIcTokens(current);
       textNode.nodeValue = next;
     });
-  };
-
-  const preservePrimaryInstructionSupportTokens = (text = "") => {
-    const normalized = _unidadNormalizeMalformedIcTokens(text);
-    const preserved = [
-      ...(normalized.match(MODALITY_TOKEN_CAPTURE_REGEX) || []),
-      ...(normalized.match(PLECA_TOKEN_CAPTURE_REGEX) || [])
-    ].map((token) => String(token || "").replace(/\s+/g, " ").trim()).filter(Boolean);
-    const cleaned = _unidadStripIcTokens(normalized).replace(/\s+/g, " ").trim();
-    return [cleaned, ...preserved].filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
   };
 
   const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas, .phase .activity"));
@@ -29518,7 +29241,7 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
       }
       const current = String(textNode.nodeValue || "");
       if (!current.trim()) return;
-      textNode.nodeValue = preservePrimaryInstructionSupportTokens(current);
+      textNode.nodeValue = _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(current));
     });
   });
 
@@ -32015,7 +31738,6 @@ function mostrarNotificacion(mensaje, tipo) {
 
 // Inicializar
 document.addEventListener('DOMContentLoaded', function () {
-  _unidadSetupNavigationGuard();
   // Cargar instrucciones guardadas
   cargarInstruccionesGuardadas();
 
@@ -33189,7 +32911,7 @@ async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", sta
   
   const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(rawContenido, sinonimosLecturaBase);
   const tituloLecturaBase = lecturaObj.titulo || lecturaObj.tema || lecturaObj.nombre || "Sin título";
-  const encabezadoLecturaBase = "Lectura generadora";
+  const encabezadoLecturaBase = "Lectura Principal";
 
   // Verificar gráfico
   const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
@@ -33237,34 +32959,14 @@ async function _asegurarLecturaAntesDeGenerar() {
   const selectTema = document.getElementById("unidadTema");
   const selectTemaASC = document.getElementById("unidadTemaASC");
   const selectTemaTexto = document.getElementById("unidadTemaTexto");
+  
+  const principalId = String(selectTema?.value || selectTemaTexto?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
 
-  const resolved = await _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh: false }).catch(() => ({
-    principal: null,
-    asc: null,
-    hasSelection: false
-  }));
+  // Si ya hay alguna lectura seleccionada (base de datos o prompt), no hacemos nada
+  if (principalId || ascId || window.lecturaNuevaCoincidenteGlobal) return true;
 
-  const principalId = String(selectTema?.value || selectTemaTexto?.value || resolved?.principal?.id || "").trim();
-  const ascId = String(selectTemaASC?.value || resolved?.asc?.id || "").trim();
-  const hasRealSelection = _unidadTieneLecturaSeleccionadaReal();
-  const hasIASelection = !!(window.__unidadLecturaGeneradaPorModal && window.lecturaNuevaCoincidenteGlobal);
-
-  // Si ya hay alguna lectura seleccionada en Firebase/UI o generada por IA, no hacemos nada.
-  if (hasRealSelection || principalId || ascId || hasIASelection) {
-    // Solo marcamos como "no generada por modal" si realmente hay una selección de base de datos
-    if (principalId || ascId || hasRealSelection) {
-      if (!hasIASelection) {
-        window.__unidadLecturaGeneradaPorModal = false;
-      }
-    }
-    return true;
-  }
-
-  // Si no hay selección real ni IA válida, limpiamos estados para forzar nueva decisión.
-  window.__unidadLecturaGeneradaPorModal = false;
-  window.lecturaNuevaCoincidenteGlobal = null;
-
-  // Si no hay lectura, abrimos un modal para decidir qué hacer.
+  // Si no hay lectura, abrimos el modal
   const modal = document.getElementById("modalCrearLecturaPrompt");
   if (!modal) return true; // Fallback por si no existe
   
@@ -33276,34 +32978,15 @@ async function _asegurarLecturaAntesDeGenerar() {
     const cerrarX = document.getElementById("cerrarModalCrearLecturaPrompt");
     const input = document.getElementById("promptNuevaLecturaUnidad");
     const status = document.getElementById("statusCrearLecturaPrompt");
-    const helpText = modal.querySelector("p");
-    const prevHelp = helpText ? helpText.innerHTML : "";
-    const prevAccept = btnAceptar?.textContent || "";
-    const prevCancel = btnCancelar?.textContent || "";
 
     const cleanup = () => {
       modal.style.display = "none";
       btnAceptar.onclick = null;
       btnCancelar.onclick = null;
       cerrarX.onclick = null;
-      if (helpText) {
-        helpText.innerHTML = prevHelp;
-      }
-      if (btnAceptar) btnAceptar.textContent = prevAccept;
-      if (btnCancelar) btnCancelar.textContent = prevCancel;
     };
 
-    if (helpText) {
-      helpText.innerHTML = "No hay ninguna lectura seleccionada. Puedes buscar una lectura existente o crear una nueva con IA.";
-    }
-    if (btnAceptar) btnAceptar.textContent = "Crear con IA";
-    if (btnCancelar) btnCancelar.textContent = "Buscar lectura";
-
-    btnCancelar.onclick = async () => {
-      cleanup();
-      try { await abrirModalLecturas(); } catch (_) { }
-      resolve(false);
-    };
+    btnCancelar.onclick = () => { cleanup(); resolve(false); };
     cerrarX.onclick = () => { cleanup(); resolve(false); };
 
     btnAceptar.onclick = async () => {
@@ -33319,7 +33002,6 @@ async function _asegurarLecturaAntesDeGenerar() {
       try {
         const result = await _generarLecturaIAConPrompt(promptDesc);
         if (result) {
-          window.__unidadLecturaGeneradaPorModal = true;
           window.lecturaNuevaCoincidenteGlobal = result;
           cleanup();
           resolve(true); // Continuar

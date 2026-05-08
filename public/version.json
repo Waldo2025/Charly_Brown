@@ -1,13 +1,13 @@
 {
-  "version": "2026-1.0.1.38",
-  "title": "Optimización de Secuencia Pedagógica",
-  "message": "Mejoras en iconografía de Primero, distribución de recursos y orden de categorías. Haz hard refresh si no ves los cambios.",
-  "forceClearCache": true,
-  "forceClearCacheReason": "Pedagogical pipeline synchronization and iconography normalization",
-  "updates": [
-    "Mejora: Normalización de iconografía 'Verbo a Icono' para Primero.",
-    "Mejora: Distribución pedagógica de recursos (un recurso por actividad).",
-    "Fix: Orden de categorías en el resultado (Matemáticas al final).",
-    "Fix: Corrección de bloques 'Para saber más' y 'El poder de la palabra'."
-  ]
+  "version": "1.0.2",
+  "build": "2026-1.0.2.39",
+  "branch": "codex-bootstrap",
+  "releaseNotes": [
+    "Mejora crítica en el renderizado de fórmulas matemáticas (LaTeX/KaTeX) en todas las secciones.",
+    "Corrección en el orden de las categorías: Matemáticas ahora se ubica correctamente al final.",
+    "Normalización robusta de nombres de categorías (acentos y mayúsculas).",
+    "Mejora en la inferencia de evidencias pedagógicas para actividades matemáticas.",
+    "Sincronización de disparadores de renderizado tras la inyección dinámica de contenido."
+  ],
+  "cache_version": "1.0.2.39"
 }
