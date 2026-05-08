@@ -1,13 +1,12 @@
 {
-  "version": "1.0.4",
-  "build": "2026-1.0.4.42",
+  "version": "1.0.5",
+  "build": "2026-1.0.5.43",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Corrección definitiva: Reinicio de numeración en Word para listas de primer nivel dentro de actividades.",
-    "Corrección: Eliminación de mangling de LaTeX (Ifrac, Itimes, etc.) en exportación a Word mediante limpieza heurística.",
-    "Mejora: Sincronización de delimitadores de KaTeX en el renderizado en tiempo real.",
-    "Refuerzo de Prompts: Prohibición estricta de numeración manual en subactividades para evitar duplicidad.",
-    "Refuerzo de Prompts: Instrucciones explícitas para el uso de LaTeX estándar y barras invertidas."
+    "Mejorado: Bloque de Estrategia Matemática ahora es contextual y variado.",
+    "Añadido: 6 categorías visuales (SVG) diferentes para Matemáticas: Aritmética, Geometría, Fracciones, Medición, Estadística y Álgebra.",
+    "Añadido: Pasos pedagógicos específicos para cada categoría de Matemáticas.",
+    "Arreglado: Eliminación de gráficos genéricos repetitivos en el subtema de Matemáticas."
   ],
-  "cache_version": "1.0.4.42"
+  "cache_version": "1.0.5.43"
 }

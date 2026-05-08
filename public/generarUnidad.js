@@ -25622,6 +25622,8 @@ function _unidadBuildMathStrategyMeta(subtema = "", categoria = "Matemáticas") 
     ? getDominantUnidadActivityStyle(categoria)
     : "asc";
   const safeSubtema = String(subtema || "Matemáticas").trim() || "Matemáticas";
+  const lowerSubtema = safeSubtema.toLowerCase();
+
   const chips = activeStyles.map((styleId) => `
     <span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:#e8eefc;color:#2c5aa0;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;">
       ${styleLabels[styleId] || styleId}
@@ -25786,7 +25788,8 @@ function _unidadGetMathRigorInstruction(grado = "") {
 }
 
 window.generarEstrategiaMatematica = function (subtema) {
-  const { chips, strategy } = _unidadBuildMathStrategyMeta(subtema, "Matemáticas");
+  const { chips, strategy, visual } = _unidadBuildMathStrategyMeta(subtema, "Matemáticas");
+  
   const personajeSvg = encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
       <rect width="120" height="120" rx="16" fill="#e2e8f0"/>
@@ -25795,20 +25798,9 @@ window.generarEstrategiaMatematica = function (subtema) {
       <text x="60" y="112" text-anchor="middle" font-size="10" fill="#334155">Estrategia</text>
     </svg>
   `);
-  const graficoSvg = encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280">
-      <rect width="640" height="280" fill="#f8fafc"/>
-      <line x1="70" y1="230" x2="590" y2="230" stroke="#94a3b8" stroke-width="2"/>
-      <line x1="70" y1="40" x2="70" y2="230" stroke="#94a3b8" stroke-width="2"/>
-      <rect x="120" y="170" width="70" height="60" fill="#60a5fa"/>
-      <rect x="250" y="120" width="70" height="110" fill="#34d399"/>
-      <rect x="380" y="90" width="70" height="140" fill="#f59e0b"/>
-      <rect x="510" y="140" width="70" height="90" fill="#f87171"/>
-      <text x="320" y="24" text-anchor="middle" font-size="18" fill="#1e293b">Gráfico de ${String(subtema || "Matemáticas")}</text>
-    </svg>
-  `);
+  
+  const visualSrc = `data:image/svg+xml;utf8,${encodeURIComponent(visual)}`;
   const personajeSrc = `data:image/svg+xml;utf8,${personajeSvg}`;
-  const graficoSrc = `data:image/svg+xml;utf8,${graficoSvg}`;
 
   return `
     <div class="estrategia-box" style="border:2px solid #cce4ff; padding:20px; margin:20px 0; border-radius:10px; background:#f9fcff;">
@@ -25820,22 +25812,22 @@ window.generarEstrategiaMatematica = function (subtema) {
         <div style="display:flex; gap:8px; flex-wrap:wrap;">${chips}</div>
       </div>
 
-      <p style="font-weight:bold; margin-bottom:10px;">${strategy.title}</p>
+      <p style="font-weight:bold; margin-bottom:10px; color:#1e40af;">${strategy.title}</p>
       
-      <div style="text-align:center; margin-bottom:15px;">
-        <img src="${graficoSrc}" alt="Gráfico explicativo" style="width:100%; max-width:500px;">
+      <div style="text-align:center; margin-bottom:15px; background:#fff; border-radius:12px; padding:10px; border:1px solid #e2e8f0;">
+        <img src="${visualSrc}" alt="Visualización de estrategia" style="width:100%; max-width:580px; height:auto; border-radius:8px;">
       </div>
 
-      <p>${strategy.lead}</p>
+      <p style="color:#334155; line-height:1.5;">${strategy.lead}</p>
       <div style="display:grid; gap:10px; margin-top:14px;">
         ${strategy.blocks.map((block) => `
           <div style="padding:12px 14px; border-radius:12px; background:#ffffff; border:1px solid #d9e8fb;">
             <strong style="display:block; color:#2c5aa0; margin-bottom:4px;">${block.label}</strong>
-            <span>${block.text}</span>
+            <span style="color:#475569;">${block.text}</span>
           </div>
         `).join("")}
       </div>
-      <p style="margin-top:14px;">${strategy.close}</p>
+      <p style="margin-top:14px; font-style:italic; font-size:0.95rem; color:#64748b;">${strategy.close}</p>
     </div>
   `;
 };
