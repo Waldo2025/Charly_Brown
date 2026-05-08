@@ -595,6 +595,13 @@ function blockNodeToXml(node, ctx = {}) {
   if (tag === "table") return tableXml(node, ctx);
 
   if (tag === "div" || tag === "blockquote") {
+    // Detectar inicio de actividad para reiniciar numeración
+    if (node.classList?.contains("activity") || /activity/i.test(node.className || "")) {
+      if (!ctx.activityCounter) ctx.activityCounter = 0;
+      ctx.activityCounter++;
+      ctx.activityGroupKey = `ACT_${ctx.activityCounter}`;
+    }
+
     const blockTags = new Set(["p","div","h1","h2","h3","h4","h5","ul","ol","table","hr","blockquote"]);
     const hasBlockChildren = Array.from(node.children || []).some((child) => blockTags.has(String(child?.tagName || "").toLowerCase()));
     if (hasBlockChildren) {
@@ -603,13 +610,6 @@ function blockNodeToXml(node, ctx = {}) {
     const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
     const forced = String(ctx?.forceStyle || "").trim();
     
-    // Detectar inicio de actividad para reiniciar numeración
-    if (node.classList?.contains("activity") || /activity/i.test(node.className || "")) {
-      if (!ctx.activityCounter) ctx.activityCounter = 0;
-      ctx.activityCounter++;
-      ctx.activityGroupKey = `ACT_${ctx.activityCounter}`;
-    }
-
     const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
     const spacing = spacingPprFromAttrs(node);
     return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId, spacing);

@@ -1,11 +1,12 @@
 {
-  "version": "1.0.6",
-  "build": "2026-1.0.6.44",
+  "version": "1.0.7",
+  "build": "2026-1.0.7.45",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Arreglado: Renderizado de KaTeX (fórmulas matemáticas) en complementos como Fichas, Anexos, Recortables y Guiones de Video.",
-    "Corregido: Los recursos del alumno ahora activan el escaneo de KaTeX inmediatamente después de su inyección.",
-    "Mejorado: Sincronización completa de delimitadores LaTeX (incluyendo \\ce y \\pu) en todas las áreas de renderizado en tiempo real."
+    "Arreglado: Reinicio de numeración de subinstrucciones en exportaciones Word (ahora se detectan correctamente los bloques de actividad).",
+    "Mejorado: Legibilidad de fórmulas matemáticas en Word mediante conversión automática de LaTeX a texto legible (ej. fracciones, símbolos ×, √, etc.).",
+    "Mejorado: Bloque de Estrategia Matemática con descripciones visuales detalladas y compatibilidad total con exportación a Word.",
+    "Añadido: Soporte de visuales específicos para 6 categorías matemáticas (Aritmética, Geometría, Fracciones, Medición, Estadística, Álgebra)."
   ],
-  "cache_version": "1.0.6.44"
+  "cache_version": "1.0.7.45"
 }

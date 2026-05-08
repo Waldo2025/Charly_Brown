@@ -25633,132 +25633,106 @@ function _unidadBuildMathStrategyMeta(subtema = "", categoria = "Matemáticas") 
     </span>
   `).join("");
 
-  const strategies = {
-    asc: {
-      title: `Ruta visual guiada para ${safeSubtema}`,
-      lead: `Esta estrategia trabaja ${safeSubtema} con secuencia editorial clara, pasos visibles y una respuesta verificable al final.`,
-      blocks: [
-        { label: "Observa", text: `Reconoce la representación, ejemplo o problema base antes de iniciar.` },
-        { label: "Resuelve paso a paso", text: `Avanza con una instrucción principal y subpasos breves que ordenen el procedimiento.` },
-        { label: "Comprueba", text: `Cierra con una respuesta exacta o criterio verificable para revisar si el resultado es correcto.` }
-      ],
-      close: `El estilo ASC funciona mejor cuando la ruta de trabajo está claramente guiada y el alumno puede revisar cada paso.`
+  // Determinar categoría matemática
+  let mathCat = "ARITMETICA";
+  if (/geometr|forma|figura|angulo|triangulo|rectangulo|circulo|poligono|area|perimetro/i.test(lowerSubtema)) mathCat = "GEOMETRIA";
+  else if (/fraccion|decimal|parte|reparto/i.test(lowerSubtema)) mathCat = "FRACCIONES";
+  else if (/medida|longitud|peso|masa|capacidad|tiempo|reloj|calendario|dinero|moneda/i.test(lowerSubtema)) mathCat = "MEDICION";
+  else if (/datos|grafica|tabla|probabilidad|azar|encuesta|frecuencia/i.test(lowerSubtema)) mathCat = "ESTADISTICA";
+  else if (/patron|serie|sucesion|ecuacion|incognita|algebra/i.test(lowerSubtema)) mathCat = "ALGEBRA";
+
+  const visuals = {
+    ARITMETICA: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#f8fafc" rx="8"/><line x1="50" y1="100" x2="590" y2="100" stroke="#1e293b" stroke-width="3"/><circle cx="320" cy="100" r="8" fill="#3b82f6"/><text x="320" y="60" text-anchor="middle" font-size="14" fill="#1e40af" font-weight="bold">Recta Numérica: Visualiza el salto entre números</text></svg>',
+      description: "Una recta numérica horizontal extendida del 0 al 100, con marcas de graduación claras cada 10 unidades. Un marcador destacado indica el valor central, permitiendo visualizar la distancia entre números y los saltos necesarios para operaciones de suma y resta."
     },
-    competencial: {
-      title: `Aplicación real de ${safeSubtema}`,
-      lead: `La estrategia competencial convierte ${safeSubtema} en una situación auténtica donde el alumno decide, aplica y justifica.`,
-      blocks: [
-        { label: "Situación", text: `Presenta un reto cercano a la vida real donde el subtema sea útil para resolver algo concreto.` },
-        { label: "Decisión", text: `El alumno elige procedimiento, herramienta o camino de solución y explica su elección.` },
-        { label: "Evidencia", text: `La respuesta debe mostrar aplicación correcta, razonamiento y criterio de logro.` }
-      ],
-      close: `No basta con calcular: el alumno debe demostrar que sabe transferir el aprendizaje a otra situación.`
+    GEOMETRIA: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#f0fdf4" rx="8"/><rect x="100" y="40" width="80" height="80" fill="#86efac" stroke="#166534" stroke-width="2"/><circle cx="320" cy="80" r="45" fill="#93c5fd" stroke="#1e40af" stroke-width="2"/><path d="M480 125 L580 125 L530 45 Z" fill="#fde047" stroke="#854d0e" stroke-width="2"/><text x="320" y="150" text-anchor="middle" font-size="14" fill="#14532d" font-weight="bold">Exploración de Formas: Atributos y Propiedades</text></svg>',
+      description: "Un conjunto de figuras geométricas fundamentales (un cuadrado verde, un círculo azul y un triángulo amarillo) dispuestas de forma comparativa. Cada figura muestra sus aristas y centros resaltados para facilitar el análisis de sus atributos como lados, vértices, simetría y proporciones espaciales."
     },
-    indagacion: {
-      title: `Indagación matemática en ${safeSubtema}`,
-      lead: `La estrategia de indagación usa ${safeSubtema} como una pregunta investigable que exige hipótesis, evidencia y conclusión.`,
-      blocks: [
-        { label: "Pregunta guía", text: `Empieza con una duda matemática que pueda comprobarse con ejemplos, datos o representaciones.` },
-        { label: "Hipótesis", text: `El alumno anticipa qué cree que ocurrirá y por qué.` },
-        { label: "Conclusión", text: `Después de revisar evidencias, contrasta su hipótesis y redacta una explicación sustentada.` }
-      ],
-      close: `El foco está en descubrir patrones y justificar conclusiones, no solo en repetir un algoritmo.`
+    FRACCIONES: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#fff7ed" rx="8"/><circle cx="160" cy="80" r="50" fill="none" stroke="#ea580c" stroke-width="2"/><path d="M160 80 L160 30 A50 50 0 0 1 210 80 Z" fill="#fb923c"/><text x="320" y="145" text-anchor="middle" font-size="14" fill="#9a3412" font-weight="bold">Partes del Todo: Modelos de Área</text></svg>',
+      description: "Representaciones clásicas de fracciones: un modelo circular ('pastel') dividido en cuatro partes iguales con una sección sombreada en naranja, junto a una barra rectangular dividida proporcionalmente para mostrar la equivalencia entre diferentes representaciones de una misma fracción."
     },
-    dinamico: {
-      title: `Práctica dinámica de ${safeSubtema}`,
-      lead: `La estrategia dinámica trabaja ${safeSubtema} con ejercicios ágiles, cambios de formato y ritmo alto para sostener atención y práctica.`,
-      blocks: [
-        { label: "Activa", text: `Empieza con un mini reto de entrada que se resuelva rápido.` },
-        { label: "Varía", text: `Cambia el tipo de ejercicio: completar, elegir, relacionar, corregir o resolver contrarreloj.` },
-        { label: "Cierra", text: `Termina con una comprobación breve para confirmar aciertos y errores clave.` }
-      ],
-      close: `La clave es variedad con foco: mucho movimiento intelectual, pero siempre alineado al mismo concepto matemático.`
+    MEDICION: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#fdf2f8" rx="8"/><rect x="50" y="60" width="540" height="40" fill="#fce7f3" stroke="#be185d" stroke-width="2"/><text x="320" y="145" text-anchor="middle" font-size="14" fill="#9d174d" font-weight="bold">Unidades y Magnitudes: Comparación Directa</text></svg>',
+      description: "Herramientas de medición de precisión: una regla graduada en centímetros y milímetros que ocupa la base del gráfico, junto a un reloj analógico que muestra la relación entre el tiempo y la medida lineal, ideal para estudiar magnitudes de longitud, tiempo y escala."
     },
-    quiz: {
-      title: `Quiz matemático sobre ${safeSubtema}`,
-      lead: `Esta estrategia presenta ${safeSubtema} como batería de preguntas cortas, opciones claras y retroalimentación rápida.`,
-      blocks: [
-        { label: "Pregunta", text: `Formula reactivos breves que obliguen a elegir, detectar o completar.` },
-        { label: "Respuesta", text: `El alumno marca opción, relaciona columnas o corrige un error puntual.` },
-        { label: "Retro", text: `Se valida la clave y se explica en una frase por qué esa respuesta funciona.` }
-      ],
-      close: `Es útil para repaso rápido, chequeo de comprensión y práctica con muchas preguntas en poco tiempo.`
+    ESTADISTICA: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#eff6ff" rx="8"/><rect x="100" y="90" width="40" height="40" fill="#60a5fa" rx="4"/><rect x="160" y="50" width="40" height="80" fill="#34d399" rx="4"/><text x="320" y="145" text-anchor="middle" font-size="14" fill="#1e3a8a" font-weight="bold">Organización de Datos: Gráficos de Frecuencia</text></svg>',
+      description: "Visualización de datos estadísticos: una gráfica de barras de diferentes alturas que representan frecuencias relativas, complementada con un gráfico de sectores (pie chart) para mostrar cómo se distribuye el total de una muestra en diferentes categorías."
     },
-    diagnostico: {
-      title: `Diagnóstico inicial de ${safeSubtema}`,
-      lead: `La estrategia diagnóstica presenta ${safeSubtema} como una evaluación de entrada para medir qué conocimientos previos traen los estudiantes antes de desarrollar el tema.`,
-      blocks: [
-        { label: "Reactivos", text: `Usa preguntas tipo examen breve, completar, opción múltiple, clasificación o respuesta corta para revelar saberes previos.` },
-        { label: "Evidencia", text: `Cada respuesta debe permitir detectar si el alumno domina, confunde o apenas reconoce el contenido.` },
-        { label: "Decisión docente", text: `La información obtenida sirve para ajustar el arranque: repaso, modelado inicial o avance más retador.` }
-      ],
-      close: `No es examen final ni castigo: es una evaluación diagnóstica de entrada para medir el punto real de partida.`
-    },
-    evaluacion: {
-      title: `Evaluación de logro en ${safeSubtema}`,
-      lead: `La estrategia de evaluación usa ${safeSubtema} para comprobar si el alumno ya domina el contenido con evidencia clara y criterios de corrección.`,
-      blocks: [
-        { label: "Demuestra", text: `El alumno resuelve un reactivo que exige aplicar correctamente el contenido trabajado.` },
-        { label: "Justifica", text: `Debe explicar o mostrar procedimiento, no solo escribir el resultado.` },
-        { label: "Valora", text: `La respuesta se compara con un criterio visible de logro, error parcial o dominio completo.` }
-      ],
-      close: `Aquí importa medir con claridad qué tanto se aprendió y qué parte todavía requiere refuerzo.`
-    },
-    proyecto: {
-      title: `Proyecto matemático para ${safeSubtema}`,
-      lead: `La estrategia de proyecto organiza ${safeSubtema} alrededor de un reto con fases, producto y evidencias visibles.`,
-      blocks: [
-        { label: "Reto", text: `Define una meta concreta que exija usar el subtema para diseñar, construir, medir o resolver.` },
-        { label: "Fases", text: `Divide el trabajo en planeación, desarrollo y presentación con tareas claras.` },
-        { label: "Producto", text: `Cierra con un entregable observable: esquema, tablero, maqueta, cartel, registro o explicación pública.` }
-      ],
-      close: `La matemática se convierte en herramienta para producir algo con sentido, no en una actividad aislada.`
-    },
-    sel: {
-      title: `Confianza matemática y SEL en ${safeSubtema}`,
-      lead: `Esta estrategia integra ${safeSubtema} con regulación emocional, diálogo académico y reflexión sobre la propia forma de aprender.`,
-      blocks: [
-        { label: "Reconoce", text: `El alumno identifica qué siente al resolver: seguridad, duda, frustración o curiosidad.` },
-        { label: "Dialoga", text: `Comparte estrategias, escucha otras respuestas y acuerda mejoras sin descalificar.` },
-        { label: "Reflexiona", text: `Explica qué le ayudó a perseverar y qué cambiará para aprender mejor.` }
-      ],
-      close: `Aquí la meta es resolver y, al mismo tiempo, fortalecer confianza, escucha y convivencia académica.`
-    },
-    estructurado: {
-      title: `Fundamento y precisión para ${safeSubtema}`,
-      lead: `La estrategia estructurada prioriza modelado, práctica guiada, práctica autónoma y verificación para consolidar ${safeSubtema}.`,
-      blocks: [
-        { label: "Modela", text: `Primero observa un ejemplo claro donde el procedimiento esté completamente ordenado.` },
-        { label: "Practica", text: `Luego resuelve con apoyo y después de manera autónoma.` },
-        { label: "Verifica", text: `Comprueba el resultado, corrige errores típicos y compara procedimientos.` }
-      ],
-      close: `Es la mejor ruta cuando el objetivo es dominio técnico, precisión conceptual y control del procedimiento.`
-    },
-    hibrido: {
-      title: `Comprensión multimodal de ${safeSubtema}`,
-      lead: `La estrategia híbrida conecta lectura, imagen, video y anexo para que ${safeSubtema} se entienda desde varios soportes coordinados.`,
-      blocks: [
-        { label: "Observa", text: `Relaciona una representación visual con la explicación escrita o lectura vinculada.` },
-        { label: "Cruza", text: `Compara lo que muestra el video o anexo con el procedimiento matemático trabajado.` },
-        { label: "Sintetiza", text: `Produce una conclusión breve que una información visual, verbal y numérica.` }
-      ],
-      close: `Cada recurso debe aportar una función específica: representar, explicar, ejemplificar o sintetizar.`
-    },
-    ia_critica: {
-      title: `Pensamiento crítico con IA en ${safeSubtema}`,
-      lead: `Esta estrategia usa ${safeSubtema} para revisar una propuesta de IA, verificarla con criterio humano y mejorarla.`,
-      blocks: [
-        { label: "Revisa", text: `Parte de una explicación o solución inicial generada por IA sobre el subtema.` },
-        { label: "Verifica", text: `El alumno detecta errores, pasos incompletos o afirmaciones dudosas.` },
-        { label: "Mejora", text: `Corrige la solución y explica por qué su versión final es más confiable.` }
-      ],
-      close: `La IA no sustituye el razonamiento matemático: solo sirve como borrador para analizar y corregir.`
+    ALGEBRA: {
+      svg: '<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="160" fill="#f5f3ff" rx="8"/><text x="320" y="90" font-size="40" fill="#7c3aed" font-weight="bold" text-anchor="middle">X + O = □</text><text x="320" y="145" text-anchor="middle" font-size="14" fill="#4c1d95" font-weight="bold">Patrones y Relaciones Simbólicas</text></svg>',
+      description: "Una representación de equilibrio algebraico mediante una balanza lógica. Muestra una ecuación simbólica donde una incógnita (X) debe equilibrarse con valores conocidos, introduciendo visualmente los conceptos de igualdad, despeje y pensamiento relacional abstracto."
     }
   };
 
+  const pedagogicalTemplates = {
+    GEOMETRIA: {
+      title: `Estrategia de Visualización Espacial para ${safeSubtema}`,
+      blocks: [
+        { label: "Identifica", text: "Busca las propiedades de la figura (lados, vértices, ángulos) en el entorno." },
+        { label: "Modela", text: "Dibuja o construye la figura para entender su estructura interna." },
+        { label: "Aplica", text: "Usa fórmulas o comparaciones para resolver problemas de espacio y forma." }
+      ]
+    },
+    FRACCIONES: {
+      title: `Estrategia de Partición y Reparto para ${safeSubtema}`,
+      blocks: [
+        { label: "Representa", text: "Usa dibujos de círculos o barras para visualizar la fracción como parte de un todo." },
+        { label: "Compara", text: "Observa el tamaño de las partes para entender la relación entre numerador y denominador." },
+        { label: "Opera", text: "Realiza el cálculo usando el modelo visual como guía de verificación." }
+      ]
+    },
+    MEDICION: {
+      title: `Estrategia de Estimación y Medida para ${safeSubtema}`,
+      blocks: [
+        { label: "Estima", text: "Anticipa el valor aproximado antes de usar el instrumento de medida." },
+        { label: "Mide", text: "Utiliza la herramienta correcta (regla, báscula, reloj) con precisión." },
+        { label: "Convierte", text: "Relaciona la medida con otras unidades para dar contexto al resultado." }
+      ]
+    },
+    ESTADISTICA: {
+      title: `Estrategia de Análisis de Datos para ${safeSubtema}`,
+      blocks: [
+        { label: "Recolecta", text: "Organiza la información en tablas de frecuencia o listas claras." },
+        { label: "Grafica", text: "Crea una representación visual para identificar tendencias rápidamente." },
+        { label: "Interpreta", text: "Extrae conclusiones basadas en lo que muestran los datos recolectados." }
+      ]
+    },
+    ALGEBRA: {
+      title: `Estrategia de Pensamiento Relacional para ${safeSubtema}`,
+      blocks: [
+        { label: "Encuentra", text: "Busca el patrón o la regla que se repite en la secuencia matemática." },
+        { label: "Sustituye", text: "Usa símbolos o letras para representar valores desconocidos." },
+        { label: "Generaliza", text: "Crea una regla que funcione para cualquier caso similar al estudiado." }
+      ]
+    },
+    ARITMETICA: {
+      title: `Estrategia de Razonamiento Numérico para ${safeSubtema}`,
+      blocks: [
+        { label: "Observa", text: "Reconoce los números y la operación necesaria antes de calcular." },
+        { label: "Descompone", text: "Divide números grandes en partes más simples (decenas, unidades) para facilitar el cálculo." },
+        { label: "Verifica", text: "Realiza la operación inversa para comprobar que el resultado es lógico." }
+      ]
+    }
+  };
+
+  const selectedTemplate = pedagogicalTemplates[mathCat] || pedagogicalTemplates.ARITMETICA;
+  let lead = `Esta estrategia utiliza razonamiento de ${mathCat.toLowerCase()} para profundizar en ${safeSubtema}.`;
+  if (dominantStyle === "competencial") lead = `Aplica ${safeSubtema} en situaciones reales usando ${mathCat.toLowerCase()}.`;
+
   return {
     chips,
-    strategy: strategies[dominantStyle] || strategies.asc
+    strategy: {
+      title: selectedTemplate.title,
+      lead: lead,
+      blocks: selectedTemplate.blocks,
+      close: `El dominio de ${mathCat.toLowerCase()} es clave para resolver ${safeSubtema} con éxito.`
+    },
+    visual: (visuals[mathCat] || visuals.ARITMETICA).svg,
+    visualDescription: (visuals[mathCat] || visuals.ARITMETICA).description
   };
 }
 
@@ -25817,8 +25791,13 @@ window.generarEstrategiaMatematica = function (subtema) {
 
       <p style="font-weight:bold; margin-bottom:10px; color:#1e40af;">${strategy.title}</p>
       
-      <div style="text-align:center; margin-bottom:15px; background:#fff; border-radius:12px; padding:10px; border:1px solid #e2e8f0;">
+      <div class="no-export" style="text-align:center; margin-bottom:15px; background:#fff; border-radius:12px; padding:10px; border:1px solid #e2e8f0;">
         <img src="${visualSrc}" alt="Visualización de estrategia" style="width:100%; max-width:580px; height:auto; border-radius:8px;">
+      </div>
+
+      <div style="padding:10px; background:#eff6ff; border-radius:8px; margin-bottom:15px; border:1px dashed #3b82f6;">
+        <p style="font-size:0.9rem; color:#1e40af; margin-bottom:4px;"><strong>💡 Representación Visual Recomendada:</strong></p>
+        <p style="font-size:0.9rem; color:#475569;">${visualDescription}</p>
       </div>
 
       <p style="color:#334155; line-height:1.5;">${strategy.lead}</p>
@@ -31001,15 +30980,30 @@ function limpiarHTML(html = "") {
     }
   });
 
-  // Arreglo de mangling común (Ifrac, |times, etc.)
+  // Arreglo de mangling común (Ifrac, |times, etc.) y normalización para Word
   tmp.innerHTML = tmp.innerHTML
     .replace(/Ifrac\b/g, "\\frac")
     .replace(/Itext\b/g, "\\text")
     .replace(/Itimes\b/g, "\\times")
     .replace(/\|times\b/g, "\\times")
-    .replace(/\\frac\{([^}]+)X([^}]+)\}/g, "\\frac{$1}{$2}")
-    .replace(/\\frac\{([^}]+)y([^}]+)\}/g, "\\frac{$1}{$2}")
-    .replace(/\\frac\{([^}]+)K([^}]+)\}/g, "\\frac{$1}{$2}");
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, " ($1/$2) ") // Convertir \frac{a}{b} a (a/b) para Word
+    .replace(/\\text\{([^{}]+)\}/g, " $1 ")
+    .replace(/\\times/g, " × ")
+    .replace(/\\cdot/g, " · ")
+    .replace(/\\pm/g, " ± ")
+    .replace(/\\neq/g, " ≠ ")
+    .replace(/\\approx/g, " ≈ ")
+    .replace(/\\le/g, " ≤ ")
+    .replace(/\\ge/g, " ≥ ")
+    .replace(/\\infty/g, " ∞ ")
+    .replace(/\\alpha/g, "α")
+    .replace(/\\beta/g, "β")
+    .replace(/\\gamma/g, "γ")
+    .replace(/\\pi/g, "π")
+    .replace(/\\sqrt\{([^{}]+)\}/g, " √($1) ")
+    .replace(/\\left\(|\\right\)/g, " ")
+    .replace(/\\left\[|\\right\]/g, " ")
+    .replace(/\$/g, ""); // Quitar símbolos de dólar para limpieza final
 
   // 0) Normalizar etiquetas visuales para exportación Word
   tmp.querySelectorAll(".unidad-metadatos-etiquetas").forEach((group) => {
