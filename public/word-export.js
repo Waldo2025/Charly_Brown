@@ -48,7 +48,9 @@ const TEN_ED_STYLE_MAP = Object.freeze({
   tableTitleLeft: "030102TABLASTITULOIZQUIERDA",
   answerAlumno: "080400RESPUESTAALUMNO",
   answerChar: "ARESPUESTAALUMNO",
-  teacherNote: "1002SPEC"
+  teacherNote: "1002SPEC",
+  activity: "0105TITULOSECCIONYCOMPETENCIA",
+  subactivity: "0103SUBTITULONIVEL2"
 });
 
 const TEN_ED_SECTPR = Object.freeze(
@@ -410,8 +412,8 @@ function mapParagraphStyle(el, ctx = {}) {
     if (/^eje articulador\b/i.test(text)) return styleMap.ejeArticulador || TEN_ED_STYLE_MAP.ejeArticulador;
     if (/^habilidad cognitiva\b/i.test(text) || /^habilidades\b/i.test(text)) return styleMap.habilidades || TEN_ED_STYLE_MAP.habilidades;
     if (/^t[ií]tulo secci[oó]n/i.test(text)) return styleMap.sectionTitle || TEN_ED_STYLE_MAP.sectionTitle;
-    if (/^actividad\b/i.test(text)) return styleMap.sectionTitle || TEN_ED_STYLE_MAP.sectionTitle;
-    if (/^subactividad\b/i.test(text)) return styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subtitleLevel2;
+    if (/^actividad\b/i.test(text) || /^consigna\b/i.test(text)) return styleMap.activity || styleMap.sectionTitle || TEN_ED_STYLE_MAP.activity;
+    if (/^subactividad\b/i.test(text)) return styleMap.subactivity || styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subactivity;
     if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return styleMap.instructions || TEN_ED_STYLE_MAP.instructions;
     if (/^sugerencia de respuesta\b/i.test(text) || /^respuesta\b/i.test(text) || /^respuesta esperada\b/i.test(text)) {
       return styleMap.answerAlumno || TEN_ED_STYLE_MAP.answerAlumno;
@@ -430,10 +432,11 @@ function mapParagraphStyle(el, ctx = {}) {
   if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return "CBInstructions";
   if (/^subinstrucci[oó]n/i.test(text)) return "CBSubinstructions";
   if (/^actividad\b/i.test(text) || /^consigna\b/i.test(text)) return "CBActivity";
+  if (/^subactividad\b/i.test(text)) return "CBSubinstructions";
   if (/^nota\b/i.test(text) || /^orientaci[oó]n docente/i.test(text)) return "CBTeacherNote";
   if (/col-maestro/i.test(cls) || el?.closest?.(".col-maestro")) return "CBTeacherNote";
   if (/^subtema\b/i.test(ownText)) return "CBSubtopic";
-  if (/activity/i.test(cls)) return "CBActivity";
+  if (/activity/i.test(cls) || el?.classList?.contains("activity")) return "CBActivity";
   if (/maestro|teacher/i.test(cls)) return "CBTeacherNote";
   return "CBBody";
 }
@@ -599,6 +602,14 @@ function blockNodeToXml(node, ctx = {}) {
     }
     const runs = Array.from(node.childNodes).map((child) => inlineRuns(child, {}, ctx)).join("");
     const forced = String(ctx?.forceStyle || "").trim();
+    
+    // Detectar inicio de actividad para reiniciar numeración
+    if (node.classList?.contains("activity") || /activity/i.test(node.className || "")) {
+      if (!ctx.activityCounter) ctx.activityCounter = 0;
+      ctx.activityCounter++;
+      ctx.activityGroupKey = `ACT_${ctx.activityCounter}`;
+    }
+
     const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
     const spacing = spacingPprFromAttrs(node);
     return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId, spacing);

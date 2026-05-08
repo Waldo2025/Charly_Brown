@@ -1,14 +1,13 @@
 {
-  "version": "1.0.2",
-  "build": "2026-1.0.2.40",
+  "version": "1.0.3",
+  "build": "2026-1.0.3.41",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Mejora crítica en el renderizado de fórmulas matemáticas (LaTeX/KaTeX) en todas las secciones.",
-    "Corrección en el orden de las categorías: Matemáticas ahora se ubica correctamente al final.",
-    "Normalización robusta de nombres de categorías en el flujo 'Generar Todo'.",
-    "Refuerzo de reglas disciplinares para Matemáticas en los contratos de prompt.",
-    "Mejora en la inferencia de evidencias pedagógicas para actividades matemáticas.",
-    "Sincronización de disparadores de renderizado tras la inyección dinámica de contenido."
+    "Arreglado: Mangling de fórmulas matemáticas (LaTeX) en las exportaciones a Word.",
+    "Arreglado: Reinicio de numeración de sub-actividades en el Word.",
+    "Mejorado: Espaciado y márgenes en el documento Word exportado.",
+    "Añadido: Mapeo de estilos específicos para actividades y sub-actividades en Word.",
+    "Mejora en los prompts para asegurar la coherencia de la numeración ASC."
   ],
-  "cache_version": "1.0.2.40"
+  "cache_version": "1.0.3.41"
 }

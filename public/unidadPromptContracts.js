@@ -88,7 +88,7 @@ export function buildUnidadActivityStructureContract({
     - Cada actividad debe ir dentro de <div class="activity">.
     - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
     - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
-    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3...
+    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3... (Reinicia siempre la numeración en 1 para cada nueva actividad).
     - Si el contrato alternativo sí es ASC, genera normalmente 3 o 4 subinstrucciones por actividad. No reduzcas todo a una sola.
     - En formato ASC, cada subinstrucción debe llevar inmediatamente debajo su propia respuesta o evidencia esperada dentro de <div class="answer">...</div>. No coloques una sola respuesta global al final si existen varias subinstrucciones.
     `;

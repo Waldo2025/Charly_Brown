@@ -30985,6 +30985,19 @@ document.getElementById("btnGuardarUnidad")?.addEventListener("click", async (e)
 function limpiarHTML(html = "") {
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
+  
+  // Pre-limpieza de KaTeX para evitar basura en Word
+  tmp.querySelectorAll(".katex").forEach((kt) => {
+    // Buscamos el origen LaTeX (preferiblemente en el annotation o aria-label)
+    const source = kt.querySelector("annotation")?.textContent || kt.getAttribute("aria-label");
+    if (source) {
+      kt.replaceWith(document.createTextNode(source));
+    } else {
+      // Fallback: si no hay origen claro, intentamos limpiar la parte visual
+      const htmlPart = kt.querySelector(".katex-html");
+      if (htmlPart) htmlPart.remove();
+    }
+  });
 
   // 0) Normalizar etiquetas visuales para exportación Word
   tmp.querySelectorAll(".unidad-metadatos-etiquetas").forEach((group) => {
@@ -31122,6 +31135,7 @@ function annotateWordExportHtml(html = "", mode = "alumno") {
   // Preservar señales antes de que `limpiarHTML()` elimine las clases
   tmp.querySelectorAll(".answer, .respuesta, .respuesta-alumno").forEach((el) => {
     el.setAttribute("data-word-style", "080400RESPUESTAALUMNO");
+    el.setAttribute("data-word-spacing-after", "140");
   });
 
   tmp.querySelectorAll(".instrucciones, .instructions").forEach((el) => {
@@ -31136,6 +31150,16 @@ function annotateWordExportHtml(html = "", mode = "alumno") {
       el.setAttribute("data-word-style", "1002SPEC");
     });
   }
+
+  tmp.querySelectorAll(".activity, .actividad-item").forEach((el) => {
+    el.setAttribute("data-word-spacing-after", "280");
+    el.setAttribute("data-word-spacing-before", "80");
+  });
+
+  tmp.querySelectorAll("h1, h2, h3, h4, h5").forEach((el) => {
+    el.setAttribute("data-word-spacing-after", "180");
+    el.setAttribute("data-word-spacing-before", "220");
+  });
 
   const subtemas = tmp.querySelectorAll(".subtema-completo");
   if (subtemas.length) subtemas.forEach((el) => dedupeCreativeTitleIn(el));
