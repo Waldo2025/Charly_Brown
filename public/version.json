@@ -1,13 +1,14 @@
 {
   "version": "1.0.2",
-  "build": "2026-1.0.2.39",
+  "build": "2026-1.0.2.40",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Mejora crítica en el renderizado de fórmulas matemáticas (LaTeX/KaTeX) en todas las secciones.",
     "Corrección en el orden de las categorías: Matemáticas ahora se ubica correctamente al final.",
-    "Normalización robusta de nombres de categorías (acentos y mayúsculas).",
+    "Normalización robusta de nombres de categorías en el flujo 'Generar Todo'.",
+    "Refuerzo de reglas disciplinares para Matemáticas en los contratos de prompt.",
     "Mejora en la inferencia de evidencias pedagógicas para actividades matemáticas.",
     "Sincronización de disparadores de renderizado tras la inyección dinámica de contenido."
   ],
-  "cache_version": "1.0.2.39"
+  "cache_version": "1.0.2.40"
 }

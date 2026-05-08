@@ -266,6 +266,7 @@ export function buildUnidadResourceGenerationStepPrompt({
     - Usa la clave exacta proporcionada.
     - El contenido debe ser profundo, útil y alineado al grado.
     - No inventes actividades para el alumno dentro de anexos, recortables o videos; son recursos de apoyo.
+    - 🚨 REGLA CRÍTICA PARA MATEMÁTICAS: Todas las fórmulas, ecuaciones, operaciones y expresiones matemáticas DEBEN escribirse usando sintaxis LaTeX entre símbolos de dólar (ej: $x^2 + y^2 = r^2$ para inline o $$ \frac{a}{b} $$ para bloques).
     - 🚨 REGLA CRÍTICA PARA VIDEOS: DEBES generar **exactamente UNA sección de guion de video**.
       - Debe presentarse como una sección independiente con data-resource-section="true" data-resource-type="video".
       - El guion NO puede ser genérico ni hablar sobre "el proyecto" o "las fases del proyecto" de forma abstracta.

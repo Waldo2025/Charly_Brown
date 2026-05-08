@@ -19703,23 +19703,13 @@ function conectarBotonGenerarTodo() {
         }
       });
 
-      // Ordenar categorías
-      const ordenCategorias = [
-        'Proyectos',
-        'Lenguaje y comunicación',
-        'Ciencias experimentales',
-        'Ciencias sociales',
-        'Formación socioemocional',
-        'Artes',
-        'Matemáticas'
-      ];
-
       const categoriasOrdenadas = Array.from(categoriasDisponibles)
-        .filter(cat => ordenCategorias.includes(cat))
+        .filter(cat => {
+          const normCat = _normalizarTexto(cat);
+          return UNIDAD_CATEGORIA_RESULTADO_ORDEN.some(c => _normalizarTexto(c) === normCat);
+        })
         .sort((a, b) => {
-          const indexA = ordenCategorias.indexOf(a);
-          const indexB = ordenCategorias.indexOf(b);
-          return indexA - indexB;
+          return _ordenCategoriaResultadoUnidad(a) - _ordenCategoriaResultadoUnidad(b);
         });
 
       console.log("Categorías detectadas para generación completa:", Array.from(categoriasDisponibles));
