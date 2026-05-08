@@ -6330,3 +6330,21 @@ figure.cb-apoyo-lectura.is-loading img {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(99, 102, 241, 0.12));
   border-color: rgba(37, 99, 235, 0.45);
 }
+
+/* --- Aislamiento de Bloques Pedagógicos Extra --- */
+.pedagogical-extra-block {
+    clear: both !important;
+    display: block !important;
+    width: 100% !important;
+    margin-top: 40px !important;
+    margin-bottom: 20px !important;
+    border-top: 1px solid #f0f0f0;
+    padding-top: 20px;
+}
+
+.pedagogical-extra-block strong {
+    color: #000 !important;
+    font-size: 1.1em;
+    display: block;
+    margin-bottom: 8px;
+}

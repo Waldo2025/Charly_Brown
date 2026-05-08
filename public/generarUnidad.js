@@ -32,9 +32,12 @@ import { shouldSkipProyectoResourceNode } from "./unidadProyectoResourceDetectio
 import { buildProyectoResourceFallbackHtml, buildUnidadVideoPedagogicGuide } from "./unidadProyectoResourceFallback.js";
 import {
   buildUnidadLengthGuidance,
+  buildUnidadReadingContract,
   buildUnidadActivityStructureContract,
   buildUnidadPrimerIconographyPrompt,
-  buildUnidadResourceExtraBlocks
+  buildUnidadResourceExtraBlocks,
+  buildUnidadResourceGenerationStepPrompt,
+  normalize
 } from "./unidadPromptContracts.js";
 
 // Configuración Firebase
@@ -1572,12 +1575,29 @@ function _obtenerTextoCompletoLectura(lectura = {}) {
       || ""
     )
     : (
-      lectura?.contenidoPlano
-      || lectura?.rawData?.contenidoPlano
-      || lectura?.campos?.contenidoPlano
-      || lectura?.contenidoHTML
+      lectura?.contenidoHTMLRaw
       || lectura?.rawData?.contenidoHTML
       || lectura?.campos?.contenidoHTML
+      || lectura?.contenidoHTML
+      || lectura?.lecturaHtml
+      || lectura?.campos?.contenidoPlano
+      || lectura?.contenidoCompleto
+      || lectura?.contenido
+      || lectura?.texto
+      || lectura?.descripcion
+      || lectura?.sinopsis
+      || lectura?.content
+      || lectura?.text
+      || lectura?.body
+      || lectura?.lectura
+      || lectura?.rawData?.contenido
+      || lectura?.rawData?.texto
+      || lectura?.rawData?.descripcion
+      || lectura?.rawData?.sinopsis
+      || lectura?.campos?.contenido
+      || lectura?.campos?.texto
+      || lectura?.campos?.descripcion
+      || lectura?.campos?.sinopsis
       || lectura?.textoLectura
       || lectura?.rawData?.textoLectura
       || lectura?.campos?.textoLectura
@@ -1892,10 +1912,23 @@ function _hidratarLecturasUnidadDesdeCacheLocal() {
 async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop = null) {
   if (!targetEl) return;
   const texto = _htmlAPlainText(htmlFinal);
-  if (!texto) {
+  // ✅ CORRECCIÓN: Si la pestaña está oculta, omitir el efecto typewriter.
+  // Los navegadores ralentizan agresivamente los timers (setTimeout) en pestañas inactivas.
+  if (!texto || document.hidden) {
     targetEl.innerHTML = htmlFinal || "";
     renderizarStemPendienteUnidad(targetEl);
     _unidadScrollResultadoAlFinal(true, targetEl);
+    
+    // Trigger KaTeX rendering if available for hidden rendering
+    if (typeof renderMathInElement === "function") {
+        renderMathInElement(targetEl, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false }
+          ],
+          throwOnError: false
+        });
+    }
     return;
   }
 
@@ -1925,6 +1958,18 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
   targetEl.style.wordBreak = "";
   targetEl.innerHTML = htmlFinal || "";
   renderizarStemPendienteUnidad(targetEl);
+
+  // Trigger KaTeX rendering if available
+  if (typeof renderMathInElement === "function") {
+    renderMathInElement(targetEl, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false }
+      ],
+      throwOnError: false
+    });
+  }
+
   _unidadScrollResultadoAlFinal(true, targetEl);
 }
 
@@ -2001,11 +2046,11 @@ function normalizarCategoriaId(categoria = "") {
 const UNIDAD_CATEGORIA_RESULTADO_ORDEN = [
   "Proyectos",
   "Lenguaje y comunicación",
-  "Matemáticas",
   "Ciencias experimentales",
   "Ciencias sociales",
   "Formación socioemocional",
-  "Artes"
+  "Artes",
+  "Matemáticas"
 ];
 
 function _ordenCategoriaResultadoUnidad(categoria = "") {
@@ -2708,29 +2753,64 @@ function _bloqueMaestroLecturaSoporteUnidad(lectura = null) {
 }
 
 function _contenidoLecturaUnidad(lectura = {}) {
+  // 1) Intentar extraer HTML o texto base
   const contenidoHtml = String(
     lectura?.contenidoHTMLRaw
     || lectura?.rawData?.contenidoHTML
+    || lectura?.campos?.contenidoHTML
     || lectura?.contenidoHTML
+    || lectura?.lecturaHtml
+    || lectura?.contenidoCompleto
+    || lectura?.contenidoPlano
+    || lectura?.rawData?.contenidoPlano
+    || lectura?.campos?.contenidoPlano
+    || lectura?.textoLectura
+    || lectura?.rawData?.textoLectura
+    || lectura?.campos?.textoLectura
+    || lectura?.lectura
+    || lectura?.texto
+    || lectura?.contenido
+    || lectura?.descripcion
+    || lectura?.sinopsis
+    || lectura?.content
+    || lectura?.text
+    || lectura?.body
+    || lectura?.lectura
+    || (lectura?.campos && typeof lectura.campos === "object" ? (lectura.campos.contenidoHTML || lectura.campos.textoLectura || lectura.campos.contenido || lectura.campos.descripcion || lectura.campos.sinopsis || "") : "")
     || ""
   ).trim();
+
   if (contenidoHtml) {
+    // 2) Intentar obtener versión narrable (limpia de tablas de sinónimos, etc.)
     const narrable = _obtenerTextoCompletoLectura({
       ...lectura,
       contenidoHTML: contenidoHtml
     });
-    return _normalizarContenidoLecturaHTMLUnidad(narrable || contenidoHtml);
+    
+    // ✅ CORRECCIÓN: Si el narrable queda vacío o demasiado corto por error de limpieza, usar el HTML original
+    const contenidoFinal = (narrable && narrable.trim().length > 20) ? narrable : contenidoHtml;
+    return _normalizarContenidoLecturaHTMLUnidad(contenidoFinal);
   }
+
+  // 3) Fallback desesperado a campos planos si contenidoHtml falló
   const contenido = String(
     lectura?.contenidoPlano
+    || lectura?.rawData?.contenidoPlano
+    || lectura?.campos?.contenidoPlano
     || lectura?.textoLectura
+    || lectura?.rawData?.textoLectura
+    || lectura?.campos?.textoLectura
     || lectura?.lectura
     || lectura?.contenido
     || lectura?.texto
     || ""
   ).trim();
+
+  if (!contenido) return "";
+
   const limpio = _limpiarSeccionesLecturaNoNarrables(_htmlAPlainText(contenido));
-  return _normalizarContenidoLecturaHTMLUnidad(limpio || contenido);
+  const finalFallback = (limpio && limpio.trim().length > 20) ? limpio : contenido;
+  return _normalizarContenidoLecturaHTMLUnidad(finalFallback);
 }
 
 function _preguntasLecturaUnidad(lectura = {}) {
@@ -3502,6 +3582,18 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
       lectura?.contenidoHTML
       || lectura?.rawData?.contenidoHTML
       || lectura?.campos?.contenidoHTML
+      || lectura?.textoLectura
+      || lectura?.rawData?.textoLectura
+      || lectura?.campos?.textoLectura
+      || lectura?.contenidoCompleto
+      || lectura?.contenidoPlano
+      || lectura?.rawData?.contenidoPlano
+      || lectura?.campos?.contenidoPlano
+      || lectura?.texto
+      || lectura?.contenido
+      || lectura?.body
+      || lectura?.lectura
+      || (lectura?.campos && typeof lectura.campos === "object" ? (lectura.campos.contenidoHTML || lectura.campos.textoLectura || lectura.campos.contenido || "") : "")
       || ""
     ).trim();
     return {
@@ -3518,7 +3610,7 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
       lecturas: [lectura],
       lecturaDisponible: true,
       titulo: _tituloLecturaUnidad(lectura),
-      contenido: _contenidoLecturaUnidad(lectura),
+      contenido: _contenidoLecturaUnidad(lectura) || contenidoHTMLRaw,
       preguntas: _preguntasLecturaUnidad(lectura),
       lecturaId,
       lecturaIds: lecturaId ? [lecturaId] : [],
@@ -3560,12 +3652,23 @@ function _normalizarLecturaResueltaUnidad(lecturas = [], modo = "sin_lectura") {
 }
 
 async function _resolverLecturaUnidadActual(ctx = {}) {
-  const lecturaPrincipalId = String(selectTema?.value || "").trim();
+  // ✅ Antes de resolver, forzar restauración/carga desde Firebase si la UI quedó desincronizada.
+  await _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh: false });
+
+  const lecturaPrincipalId = String(selectTema?.value || document.getElementById("unidadTemaTexto")?.value || "").trim();
   const lecturaAlternaId = String(selectTemaASC?.value || "").trim();
 
-  // ✅ NUEVO: Fallback a lectura generada por prompt si no hay IDs seleccionados
-  if (!lecturaPrincipalId && !lecturaAlternaId && window.lecturaNuevaCoincidenteGlobal) {
+  // ✅ Fallback para lecturas generadas por IA (prompt) o desde el chat
+  const hasIASelection = !!(window.__unidadLecturaGeneradaPorModal === true && window.lecturaNuevaCoincidenteGlobal);
+  const onlyIA = !lecturaPrincipalId && !lecturaAlternaId;
+  const isChatIA = lecturaPrincipalId === "lectura_chat_ia";
+
+  if (hasIASelection && (onlyIA || isChatIA)) {
       return _normalizarLecturaResueltaUnidad([window.lecturaNuevaCoincidenteGlobal], "lectura_prompt");
+  }
+
+  if (!lecturaPrincipalId && !lecturaAlternaId) {
+    return _normalizarLecturaResueltaUnidad([], "sin_lectura");
   }
 
   const lecturasSeleccionadas = [];
@@ -3585,7 +3688,8 @@ async function _resolverLecturaUnidadActual(ctx = {}) {
       const strategy = String(ctx?.lecturaStrategy || window.__unidadLecturaDecision?.mode || "").trim();
       if (strategy === "split" || strategy === "split-reverse") {
         const categoriaActual = String(ctx?.categoria || "").trim();
-        if (!categoriaActual) {
+        // ✅ CORRECCIÓN: Para Lenguaje (y para la resolución inicial sin categoría), usamos ambas lecturas
+        if (!categoriaActual || categoriaActual === "Lenguaje y comunicación") {
           const lecturaIds = lecturasSeleccionadas.map((lectura) => String(lectura?.id || "").trim()).filter(Boolean);
           const lecturaOrigenes = Array.from(new Set(lecturasSeleccionadas.map(_origenLecturaUnidad).filter(Boolean)));
           const titulo = `Lecturas separadas: ${lecturasSeleccionadas.map(_tituloLecturaUnidad).filter(Boolean).join(" + ")}`;
@@ -3599,13 +3703,14 @@ async function _resolverLecturaUnidadActual(ctx = {}) {
               preguntasComprension: [],
               tipo: "split",
               sourceCollection: "split",
-              coleccion: "split"
+              coleccion: "split",
+              lecturas: lecturasSeleccionadas
             },
             lecturas: lecturasSeleccionadas,
             lecturaDisponible: true,
             titulo,
-            contenido: "",
-            preguntas: [],
+            contenido: lecturasSeleccionadas.map(l => _contenidoLecturaUnidad(l)).join("\n\n"),
+            preguntas: lecturasSeleccionadas.flatMap(l => (l.preguntasComprension || l.preguntas || [])),
             lecturaId: lecturaIds.join("|"),
             lecturaIds,
             lecturaOrigen: "split",
@@ -18007,6 +18112,55 @@ function _unidadSetResultLoadingOverlay(visible = false, text = "Preparando unid
   }
 }
 
+function _unidadIsGenerationNavigationLocked() {
+  return !!(
+    window.generandoCategoria
+    || window.categoriaEnProceso
+    || window.stopRequestedUnidad === false && spinnerResultadoUnidadProceso?.style?.display === "flex"
+  );
+}
+
+function _unidadSetupNavigationGuard() {
+  if (window.__unidadNavigationGuardBound) return;
+  window.__unidadNavigationGuardBound = true;
+
+  const warningMessage = "Hay una generación de unidad en curso. Si sales o recargas, podrías perder el progreso actual.";
+
+  const shouldBlock = () => _unidadIsGenerationNavigationLocked();
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!shouldBlock()) return;
+    event.preventDefault();
+    event.returnValue = warningMessage;
+    return warningMessage;
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (!shouldBlock()) return;
+    const key = String(event.key || "").toLowerCase();
+    const reloadShortcut = key === "f5" || ((event.ctrlKey || event.metaKey) && key === "r");
+    const backShortcut = key === "browserback" || (event.altKey && key === "arrowleft") || (key === "backspace" && !/input|textarea/i.test(document.activeElement?.tagName || ""));
+    if (!reloadShortcut && !backShortcut) return;
+    event.preventDefault();
+    alert("⚠️ Espera a que termine la generación antes de recargar o salir de la página.");
+  }, true);
+
+  if (!window.__unidadNavigationGuardHistoryPrimed) {
+    try {
+      window.history.pushState({ unidadGuard: true }, "", window.location.href);
+      window.__unidadNavigationGuardHistoryPrimed = true;
+    } catch (_) { }
+  }
+
+  window.addEventListener("popstate", () => {
+    if (!shouldBlock()) return;
+    try {
+      window.history.pushState({ unidadGuard: true }, "", window.location.href);
+    } catch (_) { }
+    alert("⚠️ La generación sigue en curso. Usa \"Detener\" o espera a que termine antes de salir.");
+  });
+}
+
 /**
  * Toggle the visibility of the SyA panel in the result modal.
  * Safe to call even if the panel does not exist in the DOM.
@@ -18288,7 +18442,8 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
     tituloCreativoLimpioBase,
     "",
     relacionadaFinal,
-    instruccionesAdicionales
+    instruccionesAdicionales,
+    { isContextualStep: true }
   );
 
   const respuestaAlumno = await _unidadSolicitarHtmlAlumnoConConteoExacto({
@@ -18314,6 +18469,19 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
     objetivoT: _unidadGetSyAValueForSubtema(safeSubtema, "T"),
     objetivoAE: _unidadGetSyAValueForSubtema(safeSubtema, "AE")
   });
+
+  // ETAPA 2: Generar recursos basados en el contexto del HTML previo
+  const htmlRecursosStep2 = await _unidadGenerarComplementosContextuales({
+    categoria: safeCategoria,
+    subtema: safeSubtema,
+    subtemaHtml: htmlAlumnoLimpio,
+    recursosEsperados
+  });
+
+  if (htmlRecursosStep2) {
+    htmlAlumnoLimpio += "\n" + htmlRecursosStep2;
+  }
+
   let recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
     recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio),
     recursosEsperados,
@@ -18347,6 +18515,7 @@ async function _unidadRegenerarSoloAlumnoSubtemaEnSitio({ categoria = "", subtem
   htmlAlumnoLimpio = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoLimpio, cantidad);
   htmlAlumnoLimpio = _unidadEnsureResourceMentionsInActivities(htmlAlumnoLimpio, recursosGenerados, { subtema: safeSubtema, categoria: safeCategoria });
   htmlAlumnoLimpio = _unidadInjectResourceIconsInActivities(htmlAlumnoLimpio, { subtema: safeSubtema, categoria: safeCategoria, grado: gradoTexto });
+  htmlAlumnoLimpio = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoLimpio, gradoTexto, safeSubtema);
 
   const previewAlumno = document.getElementById(`${bloqueId}-alumno-contenido`);
   if (previewAlumno) {
@@ -18485,17 +18654,7 @@ function _unidadSepararBloquesRecursosDeHtml(html = "") {
       
       return "";
     };
-    const resourceNodes = Array.from(root.children).filter((node) => {
-      if (!(node instanceof Element)) return false;
-      const detectedType = detectResourceType(node);
-      return !!detectedType
-        || String(node.dataset?.resourceSection || "").trim() === "true"
-        || String(node.dataset?.resourceType || "").trim() !== ""
-        || (
-          node.classList.contains("bloque-recursos-subtema")
-          && !!detectedType
-        );
-    });
+    const resourceNodes = Array.from(root.querySelectorAll('[data-resource-section="true"], [data-resource-type], .resource-video, .resource-ficha, .resource-anexo, .resource-recortable'));
 
     const _unidadLimpiaMetadatosFichaSeparada = (html = "") => {
       const sourceHtml = String(html || "").trim();
@@ -18510,34 +18669,23 @@ function _unidadSepararBloquesRecursosDeHtml(html = "") {
 
     resourceNodes.forEach((node) => {
       const resourceType = detectResourceType(node);
-      const htmlNode = resourceType === "ficha"
-        ? _unidadLimpiaMetadatosFichaSeparada(String(node.outerHTML || ""))
-        : String(node.outerHTML || "").trim();
-      if (resourceType && htmlNode) {
+      if (resourceType && resourceParts[resourceType]) {
+        const htmlNode = resourceType === "ficha"
+          ? _unidadLimpiaMetadatosFichaSeparada(node.outerHTML)
+          : node.outerHTML;
         resourceParts[resourceType].push(htmlNode);
-      }
-      const nodeText = String(node.textContent || "").replace(/\s+/g, " ").trim();
-      if (resourceType && !htmlNode && nodeText) {
-        resourceParts[resourceType].push(_escapeHtmlUnidad(nodeText));
+        node.remove();
       }
     });
-
-    resourceNodes.forEach((node) => {
-      const cloneNode = Array.from(mainRoot.children).find((candidate) => {
-        if (!(candidate instanceof Element)) return false;
-        return String(candidate.outerHTML || "").trim() === String(node.outerHTML || "").trim();
-      });
-      if (cloneNode) cloneNode.remove();
-    });
-
-    const selector = '[data-resource-section="true"], [data-resource-type]';
-    Array.from(mainRoot.querySelectorAll(selector)).forEach((node) => node.remove());
 
     return {
-      mainHtml: mainRoot.innerHTML.trim(),
-      resourcesByType: Object.fromEntries(
-        Object.entries(resourceParts).map(([key, value]) => [key, value.join("")])
-      )
+      mainHtml: root.innerHTML.trim(),
+      resourcesByType: {
+        ficha: resourceParts.ficha.join("\n"),
+        anexo: resourceParts.anexo.join("\n"),
+        recortable: resourceParts.recortable.join("\n"),
+        video: resourceParts.video.join("\n")
+      }
     };
   } catch (_) {
     return {
@@ -18846,7 +18994,9 @@ function _restaurarUltimaLecturaSeleccionadaUnidad() {
   const pool = _poolLecturasBusqueda();
   const lecturaDesdePool = pool.find((l) => String(l?.id || "").trim() === saved.id) || null;
   const lecturaCache = _leerLecturaCache();
-  const lectura = lecturaDesdePool
+  const lectura = (saved.id === "lectura_chat_ia" && window.lecturaNuevaCoincidenteGlobal)
+    ? window.lecturaNuevaCoincidenteGlobal
+    : (lecturaDesdePool
     || (String(lecturaCache?.id || "").trim() === saved.id
       ? {
           id: saved.id,
@@ -18860,7 +19010,7 @@ function _restaurarUltimaLecturaSeleccionadaUnidad() {
           sourceCollection: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
           coleccion: lecturaCache?.coleccion || (lecturaCache?.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas")
         }
-      : null);
+      : null));
 
   if (inputTemaTexto) {
     if (!Array.from(inputTemaTexto.options || []).some((o) => String(o.value) === saved.id)) {
@@ -18906,6 +19056,14 @@ async function _restaurarUltimaLecturaSeleccionadaPostCarga() {
 function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   if (!lectura || !lectura.id) return false;
   if (!selectTema) return false;
+  
+  // ✅ CORRECCIÓN: Si es una lectura de IA (chat o prompt), mantenemos el flag activo
+  const esIA = (lectura.id === "lectura_chat_ia" || lectura.id === "lectura_prompt");
+  window.__unidadLecturaGeneradaPorModal = esIA;
+  if (esIA) {
+    window.lecturaNuevaCoincidenteGlobal = lectura;
+  }
+
   _guardarLecturaCache(lectura);
   selectTema.innerHTML = `<option value="${lectura.id}">${_labelLecturaPrincipal(lectura)}</option>`;
   selectTema.value = lectura.id;
@@ -18914,10 +19072,27 @@ function _aplicarLecturaPrincipalSeleccionada(lectura = null) {
   try {
     localStorage.setItem("unidad_unidadTemaTexto", String(lectura.id || ""));
     localStorage.setItem("unidad_unidadTemaTexto_label", String(lectura.titulo || lectura.tema || ""));
+    localStorage.setItem("lecturaSeleccionadaDesdeModal", "true");
+    localStorage.setItem("ultimaLecturaSeleccionada", String(lectura.id || ""));
   } catch (_) {
     // noop
   }
   guardarSelectsUnidad();
+  return true;
+}
+
+function _unidadTieneLecturaSeleccionadaReal() {
+  const principalId = String(selectTema?.value || document.getElementById("unidadTemaTexto")?.value || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  const persistida = _obtenerLecturaPersistidaUnidad();
+  const tieneGeneradaIA = !!(window.__unidadLecturaGeneradaPorModal && window.lecturaNuevaCoincidenteGlobal);
+  return !!(principalId || ascId || String(persistida?.id || "").trim() || tieneGeneradaIA);
+}
+
+function _unidadShouldAbortMissingResolvedReading({ hasRealSelection = false, lecturaResuelta = null } = {}) {
+  if (!hasRealSelection) return false;
+  if (lecturaResuelta?.lecturaDisponible) return false;
+  if (lecturaResuelta?.lectura) return false;
   return true;
 }
 
@@ -18976,6 +19151,69 @@ async function _aplicarBusquedaManualTema(raw = "") {
   const ok = await aplicarLecturaPrincipalPorVoz(texto);
   if (ok) _sincronizarInputTemaConSelect();
   return !!ok;
+}
+
+async function _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh = false } = {}) {
+  _hidratarLecturasUnidadDesdeCacheLocal();
+
+  const temaTextoId = String(document.getElementById("unidadTemaTexto")?.value || "").trim();
+  const principalId = String(selectTema?.value || temaTextoId || "").trim();
+  const ascId = String(selectTemaASC?.value || "").trim();
+  const persistida = _obtenerLecturaPersistidaUnidad();
+  const lecturaPrompt = window.__unidadLecturaGeneradaPorModal === true
+    ? (window.lecturaNuevaCoincidenteGlobal || null)
+    : null;
+
+  const resolverActual = async () => {
+    let principal = null;
+    let asc = null;
+
+    if (principalId) {
+      principal = await _resolverLecturaPorId(principalId).catch(() => null);
+    }
+    if (!principal && persistida?.id) {
+      principal = await _resolverLecturaPorId(String(persistida.id || "").trim()).catch(() => null);
+    }
+    if (ascId) {
+      asc = await _resolverLecturaPorId(ascId).catch(() => null);
+    }
+
+    return { principal, asc };
+  };
+
+  let resolved = await resolverActual();
+
+  if ((!resolved.principal && (principalId || persistida?.id)) || (!resolved.asc && ascId)) {
+    try {
+      await cargarTodasLasLecturas({ forceRefresh: true });
+      resolved = await resolverActual();
+    } catch (_) { }
+  }
+
+  if (resolved.principal?.id) {
+    _aplicarLecturaPrincipalSeleccionada(resolved.principal);
+  } else if (!principalId && persistida?.id) {
+    _restaurarUltimaLecturaSeleccionadaUnidad();
+  }
+
+  if (resolved.asc?.id && selectTemaASC) {
+    const ascValue = String(selectTemaASC.value || "").trim();
+    if (ascValue !== String(resolved.asc.id || "").trim()) {
+      if (!Array.from(selectTemaASC.options || []).some((o) => String(o.value) === String(resolved.asc.id || "").trim())) {
+        const opt = document.createElement("option");
+        opt.value = String(resolved.asc.id || "");
+        opt.textContent = String(resolved.asc.titulo || resolved.asc.tema || "Lectura ASC");
+        selectTemaASC.appendChild(opt);
+      }
+      selectTemaASC.value = String(resolved.asc.id || "");
+    }
+  }
+
+  return {
+    principal: resolved.principal,
+    asc: resolved.asc,
+    hasSelection: !!(resolved.principal?.id || resolved.asc?.id || lecturaPrompt)
+  };
 }
 
 function _extraerConsultaLecturaSimple(texto = "") {
@@ -19056,77 +19294,153 @@ function _obtenerMateriaSeleccionadaUnidad() {
   return lecturaSel?.materia || "";
 }
 
-async function _resolverLecturaPorId(idLectura = "") {
-  if (!idLectura) return null;
+async function _resolverLecturaPorId(idOrTitle = "") {
+  if (!idOrTitle) return null;
+  const queryText = String(idOrTitle).trim();
+  const queryLower = queryText.toLowerCase();
+
+  // 1. Asegurar que los pools locales estén hidratados
+  _hidratarLecturasUnidadDesdeCacheLocal();
+
+  // 2. Verificar cache de la lectura "en mano" (muy común al seleccionar)
   const lecturaCache = _leerLecturaCache();
-  if (lecturaCache?.id === idLectura) {
-    return {
-      id: lecturaCache.id,
-      titulo: lecturaCache.titulo,
-      tema: lecturaCache.tema || lecturaCache.sinopsis || lecturaCache.titulo,
-      nivel: lecturaCache.nivel,
-      grado: lecturaCache.grado,
-      trimestre: lecturaCache.trimestre,
-      unidad: lecturaCache.unidad,
-      tipo: lecturaCache.tipo || "principal",
-      autorReferencia: lecturaCache.autor || "",
-      tipoTexto: lecturaCache.tipoTexto || "",
-      ejeArticulador: lecturaCache.ejeArticulador || "",
-      preguntas: Array.isArray(lecturaCache.preguntas) ? lecturaCache.preguntas : [],
-      contenidoPlano: lecturaCache.contenidoCompleto || "",
-      campos: lecturaCache.campos || {}
-    };
+  if (lecturaCache) {
+    const cid = String(lecturaCache.id || "").trim();
+    const ctitle = String(lecturaCache.titulo || lecturaCache.tema || "").trim().toLowerCase();
+    const tieneContenido = !!(lecturaCache.contenidoCompleto || lecturaCache.contenidoPlano || lecturaCache.texto || lecturaCache.content || lecturaCache.contenidoHTML);
+    if ((cid === queryText || ctitle === queryLower) && tieneContenido) {
+      return {
+        id: lecturaCache.id,
+        titulo: lecturaCache.titulo,
+        tema: lecturaCache.tema || lecturaCache.sinopsis || lecturaCache.titulo,
+        nivel: lecturaCache.nivel,
+        grado: lecturaCache.grado,
+        trimestre: lecturaCache.trimestre,
+        unidad: lecturaCache.unidad,
+        tipo: lecturaCache.tipo || "principal",
+        autorReferencia: lecturaCache.autor || "",
+        tipoTexto: lecturaCache.tipoTexto || "",
+        ejeArticulador: lecturaCache.ejeArticulador || "",
+        preguntas: Array.isArray(lecturaCache.preguntas) ? lecturaCache.preguntas : [],
+        preguntasComprension: Array.isArray(lecturaCache.preguntasComprension) ? lecturaCache.preguntasComprension : [],
+        contenidoPlano: lecturaCache.contenidoCompleto || lecturaCache.contenidoPlano || "",
+        contenidoCompleto: lecturaCache.contenidoCompleto || "",
+        contenidoHTML: lecturaCache.contenidoHTML || lecturaCache.lecturaHtml || "",
+        lecturaHtml: lecturaCache.lecturaHtml || lecturaCache.contenidoHTML || "",
+        textoLectura: lecturaCache.textoLectura || "",
+        sourceCollection: lecturaCache.sourceCollection || lecturaCache.coleccion || (lecturaCache.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
+        coleccion: lecturaCache.coleccion || lecturaCache.sourceCollection || (lecturaCache.esLecturaHistoricaASC ? "lecturasASC" : "lecturasNuevas"),
+        rawData: lecturaCache.rawData || lecturaCache,
+        campos: lecturaCache.campos || lecturaCache.rawData || {}
+      };
+    }
   }
+
+  // 3. Buscar en pools globales (nuevas, filtradas, todas)
   const pool = [
     ...(Array.isArray(window.lecturasNuevas) ? window.lecturasNuevas : []),
     ...(Array.isArray(window.lecturasASC) ? window.lecturasASC : []),
     ...(Array.isArray(window.lecturasFiltradas) ? window.lecturasFiltradas : []),
     ...(Array.isArray(window.todasLasLecturas) ? window.todasLasLecturas : [])
   ];
-  let lectura = pool.find(l => l.id === idLectura) || null;
+
+  let lectura = pool.find(l => {
+    const id = String(l.id || "").trim();
+    const title = String(l.titulo || l.tema || "").trim().toLowerCase();
+    return id === queryText || title === queryLower;
+  });
+
   if (lectura) return lectura;
 
-  // Fallback: leer documento directo por ID en colecciones principales y ASC.
-  try {
-    const refLegacy = doc(db, "lecturas", idLectura);
-    const snapLegacy = await getDoc(refLegacy);
-    if (snapLegacy.exists()) {
-      return {
-        id: snapLegacy.id,
-        sourceCollection: "lecturas",
-        coleccion: "lecturas",
-        ...snapLegacy.data(),
-        tipo: "principal"
-      };
+  // 4. Fallback: Firestore (solo si parece un ID de Firebase y no se ha encontrado localmente)
+  if (queryText.length > 5 && !queryText.includes(" ")) {
+    const colecciones = ["lecturas", "lecturasNuevas", "lecturasASC"];
+    for (const colName of colecciones) {
+      try {
+        const snap = await getDoc(doc(db, colName, queryText));
+        if (snap.exists()) {
+        const data = snap.data();
+          return {
+            id: snap.id,
+            sourceCollection: colName,
+            coleccion: colName,
+            ...data,
+            tipo: colName === "lecturasASC" ? "asc" : "principal"
+          };
+        }
+      } catch (_) { }
     }
-  } catch (_) { }
-  try {
-    const refNueva = doc(db, "lecturasNuevas", idLectura);
-    const snapNueva = await getDoc(refNueva);
-    if (snapNueva.exists()) {
-      return {
-        id: snapNueva.id,
-        sourceCollection: "lecturasNuevas",
-        coleccion: "lecturasNuevas",
-        ...snapNueva.data(),
-        tipo: "principal"
-      };
-    }
-  } catch (_) { }
-  try {
-    const refASC = doc(db, "lecturasASC", idLectura);
-    const snapASC = await getDoc(refASC);
-    if (snapASC.exists()) {
-      return {
-        id: snapASC.id,
-        sourceCollection: "lecturasASC",
-        coleccion: "lecturasASC",
-        ...snapASC.data(),
-        tipo: "asc"
-      };
-    }
-  } catch (_) { }
+  }
+
   return null;
+}
+
+/**
+ * Normaliza un objeto de lectura a la estructura esperada por el generador.
+ */
+function _normalizarEstructuraLectura(l = {}) {
+  if (!l) return null;
+  const fields = l.campos || l.rawData || l;
+  const rawData = (l.rawData && typeof l.rawData === "object")
+    ? l.rawData
+    : ((fields && typeof fields === "object") ? { ...fields } : {});
+  const preguntasComprension = Array.isArray(l.preguntasComprension)
+    ? l.preguntasComprension
+    : (Array.isArray(fields.preguntasComprension) ? fields.preguntasComprension : []);
+  const preguntas = Array.isArray(l.preguntas)
+    ? l.preguntas
+    : preguntasComprension;
+  const contenidoHTML = String(
+    l.contenidoHTML
+    || l.contenidoHTMLRaw
+    || l.lecturaHtml
+    || l.contenidoCompleto
+    || l.textoLectura
+    || l.texto
+    || l.contenido
+    || rawData.contenidoHTML
+    || rawData.contenidoHTMLRaw
+    || rawData.lecturaHtml
+    || rawData.contenidoCompleto
+    || rawData.textoLectura
+    || rawData.texto
+    || rawData.contenido
+    || fields.contenidoHTML
+    || fields.contenidoHTMLRaw
+    || fields.lecturaHtml
+    || fields.contenidoCompleto
+    || fields.textoLectura
+    || fields.texto
+    || fields.contenido
+    || ""
+  );
+  return {
+    id: l.id || fields.id,
+    titulo: l.titulo || fields.titulo || l.tema || fields.tema || "Sin título",
+    tema: l.tema || fields.tema || l.titulo || fields.titulo || "",
+    nivel: l.nivel || fields.nivel || "",
+    grado: l.grado || fields.grado || "",
+    trimestre: l.trimestre || fields.trimestre || "",
+    unidad: l.unidad || fields.unidad || "",
+    tipo: l.tipo || fields.tipo || "principal",
+    autorReferencia: l.autorReferencia || fields.autorReferencia || l.autor || fields.autor || "",
+    tipoTexto: l.tipoTexto || fields.tipoTexto || "",
+    ejeArticulador: l.ejeArticulador || fields.ejeArticulador || "",
+    sourceCollection: l.sourceCollection || fields.sourceCollection || l.coleccion || fields.coleccion || "",
+    coleccion: l.coleccion || fields.coleccion || l.sourceCollection || fields.sourceCollection || "",
+    preguntas,
+    preguntasComprension,
+    contenidoHTMLRaw: contenidoHTML,
+    contenidoHTML,
+    lecturaHtml: l.lecturaHtml || rawData.lecturaHtml || fields.lecturaHtml || "",
+    textoLectura: l.textoLectura || rawData.textoLectura || fields.textoLectura || "",
+    contenidoCompleto: l.contenidoCompleto || rawData.contenidoCompleto || fields.contenidoCompleto || contenidoHTML,
+    contenidoPlano: l.contenidoPlano || rawData.contenidoPlano || fields.contenidoPlano || contenidoHTML,
+    contenido: l.contenido || rawData.contenido || fields.contenido || contenidoHTML,
+    texto: l.texto || rawData.texto || fields.texto || contenidoHTML,
+    rawData,
+    campos: fields
+  };
 }
 
 function _puntuarSecuenciaDoc(docData = {}, categorias = {}, materiaObjetivo = "") {
@@ -19189,25 +19503,28 @@ async function actualizarTemasLecturas() {
 
   if (seleccionModal && ultimaLectura) {
     const pool = _poolLecturasBusqueda();
-    let lecturaBloqueada = pool.find((l) => String(l?.id || "") === String(ultimaLectura)) || null;
-    if (!lecturaBloqueada) {
+    let lecturaBloqueada = (ultimaLectura === "lectura_chat_ia" && window.lecturaNuevaCoincidenteGlobal) 
+      ? window.lecturaNuevaCoincidenteGlobal 
+      : (pool.find((l) => String(l?.id || "") === String(ultimaLectura)) || null);
+    
+    if (!lecturaBloqueada && ultimaLectura !== "lectura_chat_ia") {
       try {
         lecturaBloqueada = await _resolverLecturaPorId(ultimaLectura);
       } catch (_) {
         lecturaBloqueada = null;
       }
     }
-    const coincide = _lecturaCoincideConContexto(lecturaBloqueada, {
-      nivel,
-      grado: gradoNumero || gradoTexto,
-      trimestre: selectTrimestre?.value || "",
-      unidad: selectUnidad?.value || ""
-    });
-    if (coincide) {
+    // 🔥 Relaxed check for manual selections: only clear if Nivel or Grado changes.
+    const coincideNivelGrado = (
+      String(lecturaBloqueada?.nivel || "").trim().toLowerCase() === String(nivel || "").trim().toLowerCase() &&
+      _normalizarGradoComparable(lecturaBloqueada?.grado) === _normalizarGradoComparable(gradoNumero || gradoTexto)
+    );
+
+    if (coincideNivelGrado || ultimaLectura === "lectura_chat_ia") {
       if (!String(selectTema?.value || "").trim()) {
         _restaurarUltimaLecturaSeleccionadaUnidad();
       }
-      return; // Mantener selección manual solo si coincide con el contexto actual
+      return; 
     }
     // Si cambió el contexto, liberar bloqueo y limpiar lectura obsoleta.
     localStorage.removeItem('lecturaSeleccionadaDesdeModal');
@@ -19378,11 +19695,11 @@ function conectarBotonGenerarTodo() {
       const ordenCategorias = [
         'Proyectos',
         'Lenguaje y comunicación',
-        'Matemáticas',
         'Ciencias experimentales',
         'Ciencias sociales',
         'Formación socioemocional',
-        'Artes'
+        'Artes',
+        'Matemáticas'
       ];
 
       const categoriasOrdenadas = Array.from(categoriasDisponibles)
@@ -19392,6 +19709,9 @@ function conectarBotonGenerarTodo() {
           const indexB = ordenCategorias.indexOf(b);
           return indexA - indexB;
         });
+
+      console.log("Categorías detectadas para generación completa:", Array.from(categoriasDisponibles));
+      console.log("Categorías filtradas y ordenadas:", categoriasOrdenadas);
 
       if (categoriasOrdenadas.length === 0) {
         alert("⚠️ No se encontraron categorías para generar.");
@@ -19431,10 +19751,12 @@ function conectarBotonGenerarTodo() {
           }
 
           if (!botonGenerar) {
+            console.warn(`No se encontró el botón de generación para la categoría: ${categoria}`);
             continue;
           }
 
           if (botonGenerar.disabled) {
+            console.warn(`El botón de generación para la categoría ${categoria} está deshabilitado.`);
             continue;
           }
 
@@ -22926,25 +23248,33 @@ function _unidadWrapLooseTopLevelActivities(html = "") {
     return /^\d+\.\s+/.test(text);
   };
 
-  let changed = false;
-  for (let i = 0; i < directChildren.length; i += 1) {
-    const node = directChildren[i];
-    if (!isLooseMainInstruction(node)) continue;
-
-    const wrapper = doc.createElement("div");
-    wrapper.className = "activity";
-    root.insertBefore(wrapper, node);
-
-    let current = node;
-    while (current) {
-      const next = current.nextElementSibling;
-      wrapper.appendChild(current);
-      changed = true;
-      if (!next || startsNewTopLevel(next)) break;
-      current = next;
+  const processContainer = (container) => {
+    let changed = false;
+    const children = Array.from(container.children);
+    for (let i = 0; i < children.length; i += 1) {
+      const node = children[i];
+      if (node.classList.contains("project-phases") || node.classList.contains("phase") || node.classList.contains("project-phases-container")) {
+        if (processContainer(node)) changed = true;
+        continue;
+      }
+      if (isLooseMainInstruction(node)) {
+        const wrapper = doc.createElement("div");
+        wrapper.className = "activity";
+        container.insertBefore(wrapper, node);
+        let current = node;
+        while (current) {
+          const next = current.nextElementSibling;
+          wrapper.appendChild(current);
+          changed = true;
+          if (!next || startsNewTopLevel(next)) break;
+          current = next;
+        }
+      }
     }
-  }
+    return changed;
+  };
 
+  const changed = processContainer(root);
   return changed ? root.innerHTML : source;
 }
 
@@ -22956,8 +23286,10 @@ window.construirPromptProyecto = function (
   subtema,
   tituloCreativo,
   instruccionesAdicionales = "",
-  tituloLecturaRelacionada = ""
+  tituloLecturaRelacionada = "",
+  options = {}
 ) {
+  const isContextualStep = !!options.isContextualStep;
 
 
   // ✅ CORRECCIÓN: Obtener unidadActual de forma segura
@@ -22965,7 +23297,8 @@ window.construirPromptProyecto = function (
 
   const nivel = selectNivel.value || "Primaria";
 
-  const grado = selectGrado.value || "Primero";
+  const gradoRaw = selectGrado.value || "Primero";
+  const grado = normalize(gradoRaw);
   const trimestre = (selectTrimestre.value || "1").toString();
 
   // 🧭 Metodología por trimestre
@@ -23057,26 +23390,24 @@ window.construirPromptProyecto = function (
   const claveAnexo = generarAnexosFinal ? obtenerClaveAnexoSafe(unidadActual) : "";
   const claveVideo = generarVideosFinal ? obtenerClaveVideoSafe(unidadActual) : "";
   // Generación dinámica del título del video según subtema + T/AE/C/P
-  function generarTituloVideo(subtema) {
-    const T = _unidadGetSyAValueForSubtema(subtema, "T");
-    const AE = _unidadGetSyAValueForSubtema(subtema, "AE");
-    const C = _unidadGetSyAValueForSubtema(subtema, "C");
-    const P = _unidadGetSyAValueForSubtema(subtema, "P");
+  function generarTituloVideo(subtema, tituloCreativo) {
+    // Si es Proyecto, el subtema es "Proyectos", usar mejor el título creativo
+    let base = (subtema === "Proyectos" && tituloCreativo) ? tituloCreativo : subtema;
 
-    // Construcción dinámica del título
-    let base = subtema;
+    // Buscar rasgos del resumen curricular si subtema es genérico
+    const T = (subtema === "Proyectos") ? (T_global?.[0] || "") : _unidadGetSyAValueForSubtema(subtema, "T");
+    const AE = (subtema === "Proyectos") ? (AE_global?.[0] || "") : _unidadGetSyAValueForSubtema(subtema, "AE");
 
     // Añadir rasgos curriculares compactos
     if (T) base += " — " + T.split(".")[0];
     else if (AE) base += " — " + AE.split(".")[0];
-    else if (C) base += " — " + C.split(".")[0];
 
     return base;
   }
 
   // Sustituye el hardcodeado
   const tituloVideoGenerado = generarVideosFinal
-    ? generarTituloVideo(subtema)
+    ? generarTituloVideo(subtema, tituloCreativo)
     : "";
 
   // Instrucción para USO ÚNICO de recursos dentro de actividades del proyecto
@@ -23086,13 +23417,22 @@ window.construirPromptProyecto = function (
   if (tieneRecortableFinal) recursosOrdenados.push(`el ${claveRecortable}`);
   if (generarVideosFinal) recursosOrdenados.push(`el video "${tituloVideoGenerado}"`);
 
+  const instruccionNoGenerarRecursosFull = isContextualStep ? `
+  🚨 REGLA DE RECURSOS PARA ESTA GENERACIÓN:
+  - DISTRIBUCIÓN OBLIGATORIA: No agrupes los recursos. Debes mencionar cada uno en una FASE DIFERENTE (ej: Anexo en Fase 1, Ficha en Fase 2, Recortable en Fase 3, Video en Fase 4).
+  - PROHIBIDO generar el contenido completo de estos recursos aquí (no generes la tabla del guion de video, ni el contenido de la ficha). 
+  - Solo haz la mención pedagógica natural dentro de la instrucción de la actividad.
+  ` : "";
+
   const instruccionRecursos = recursosOrdenados.length
     ? (separarSeccionesRecursos
-      ? `IMPORTANTE: Usa cada uno de estos recursos **una sola vez** dentro de las actividades del proyecto (en fases distintas, si es posible). 
-  ${recursosOrdenados.map((r, i) => `- Actividad ${i + 1}: usa ${r}`).join("\n")}
-  No vuelvas a mencionar estos recursos en otras actividades.`
-      : `IMPORTANTE: Integra estos recursos dentro de las fases y actividades del proyecto, sin separarlos al final.
-  ${recursosOrdenados.map((r, i) => `- Actividad ${i + 1}: integra ${r} de forma natural`).join("\n")}
+      ? `IMPORTANTE: Distribuye estos recursos a lo largo del proyecto. Usa cada uno **una sola vez** y en **fases distintas**:
+  ${recursosOrdenados.map((r, i) => `- Fase ${i + 1}: integra la mención de ${r} en una de sus actividades.`).join("\n")}
+  ${instruccionNoGenerarRecursosFull}
+  🚨 REGLA CRÍTICA DE SEPARACIÓN: Cada recurso debe ir en una actividad distinta de una fase distinta. No menciones más de un recurso en el mismo bloque <div class="activity">.`
+      : `IMPORTANTE: Integra estos recursos de forma distribuida dentro de las fases.
+  ${recursosOrdenados.map((r, i) => `- Fase ${i + 1}: integra ${r} de forma natural`).join("\n")}
+  ${instruccionNoGenerarRecursosFull}
   No generes bloques independientes para estos recursos.`)
     : "";
 
@@ -23106,9 +23446,10 @@ window.construirPromptProyecto = function (
     window.claveFichaActualGlobal = claveFichaActual;
     window.chkFichaActivo = true;
   }
-  const extraBloquesFinales = buildUnidadResourceExtraBlocks({
+  const extraBloquesFinales = isContextualStep ? "" : buildUnidadResourceExtraBlocks({
     recursos: recursosProyecto,
-    separarSeccionesRecursos
+    separarSeccionesRecursos,
+    categoria: "Proyectos"
   });
 
   // ⛳ Lista de criterios para PISA (si viene de tu flujo). Fallback incluido.
@@ -23123,6 +23464,7 @@ window.construirPromptProyecto = function (
     isTrazosDeLetras: false
   });
   const estructuraBaseActividadProyecto = buildUnidadActivityStructureContract({
+    grado,
     isTrazosDeLetras: false,
     hasExplicitFormatContract: /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""))
   });
@@ -23146,6 +23488,16 @@ window.construirPromptProyecto = function (
   Importante: devuelve SOLO HTML final, sin comentarios extra ni marcas de código.
 
   Genera un **proyecto trimestral** para primaria, basado en los **T/AE/C/P globales** del mismo grado y trimestre, aplicando **${metodologia}**.
+  
+  🎯 FOCO TEMÁTICO OBLIGATORIO:
+  - El proyecto debe girar ÍNTEGRAMENTE en torno a: **${subtema}**.
+  - No generes un proyecto genérico. Todo el contenido, desde la fase 1 hasta el video, debe tratar sobre ${subtema}.
+  ${instruccionesAdicionales ? `- INSTRUCCIÓN PRIORITARIA: "${instruccionesAdicionales}"` : ""}
+
+  PROHIBIDO:
+  - No inventes temas paralelos.
+  - No uses lenguaje administrativo para el alumno.
+  - El guion de video DEBE ser una escena narrativa o de modelado sobre ${subtema}, NO una explicación de cómo hacer el proyecto.
   CONTRATO OBLIGATORIO:
   - Usa SIEMPRE la secuencia curricular efectiva como fuente disciplinar principal.
   - Si existe lectura detonante o lectura relacionada, usa SIEMPRE Lectura + Secuencia al mismo tiempo.
@@ -23154,6 +23506,7 @@ window.construirPromptProyecto = function (
   📊 Datos base:
 
   ${instruccionLongitudProyecto}
+  ${iconografiaPrimeroProyecto}
 
   - Nivel: ${nivel}
   - Grado: ${grado}
@@ -23414,7 +23767,8 @@ function limpiarDuplicadosArtes() {
 
 
 
-window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLectura, preguntasComprension, nombresSubtemas = [], cantidad = 4, generarFichas = false, generarAnexos = false, generarVideos = false, tieneRecortable = false, tituloCreativo = "", promptTitulo = "", relacionadaConLectura = false, instruccionesAdicionales = "") {
+window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLectura, preguntasComprension, nombresSubtemas = [], cantidad = 4, generarFichas = false, generarAnexos = false, generarVideos = false, tieneRecortable = false, tituloCreativo = "", promptTitulo = "", relacionadaConLectura = false, instruccionesAdicionales = "", options = {}) {
+  const isContextualStep = !!options.isContextualStep;
   const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
 
   // La lectura base ya se inyecta en el render (col-alumno). No repetir en el HTML generado por IA.
@@ -23455,14 +23809,16 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
 
   const nivel = selectNivel.value;
-  const grado = selectGrado.value;
+  const gradoRaw = selectGrado.value || "Primero";
+  const grado = normalize(gradoRaw);
   const subtemaClave = nombresSubtemas[0];
   const tituloFinal = tituloCreativo || formatearSubtema(subtemaClave);
   const subtemaFormateado = formatearSubtema(subtemaClave);
 
   const objetivosAgrupados = {};
   const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtemaClave);
-  const isTrazosDeLetras = _unidadNormalizarSubtemaKey(subtemaClave) === "TrazosDeLetras";
+  const subtemaKeyNormalizada = _unidadNormalizarSubtemaKey(subtemaClave).toLowerCase();
+  const isTrazosDeLetras = subtemaKeyNormalizada === "trazosdeletras";
   const isComprensionLectora = _unidadNormalizarSubtemaKey(subtemaClave) === "ComprensionLectora";
   const relacionadaLecturaEstricta = relacionadaConLectura && !isComprensionLectora;
 
@@ -23528,27 +23884,22 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
 
   if (categoria === "Matemáticas") {
     extraDificultadCategoria = `
-    Para Matemáticas, eleva la dificultad con actividades que impliquen comparación de métodos, resolución de problemas no rutinarios, análisis de errores y explicación detallada del razonamiento paso a paso. Incluye preguntas que fomenten la transferencia del conocimiento a situaciones reales y el uso de estrategias de resolución múltiples.  
+    - REGLA DISCIPLINAR: Todas las fórmulas, ecuaciones, operaciones y expresiones matemáticas DEBEN escribirse usando sintaxis LaTeX entre símbolos de dólar (ej: $x^2 + y^2 = r^2$ para inline o $$ \\frac{a}{b} $$ para bloques). 
+    - No uses texto plano para fracciones o raíces cuadradas. 
+    - Plantea actividades que impliquen comparación de métodos, resolución de problemas no rutinarios, análisis de errores y explicación detallada del razonamiento paso a paso. 
+    - Incluye preguntas que fomenten la transferencia del conocimiento a situaciones reales y el uso de estrategias de resolución múltiples.  
     `;
   } else if (categoria === "Lenguaje y comunicación") {
     extraDificultadCategoria = `
-    Para Lenguaje y comunicación, eleva la dificultad añadiendo análisis comparativo de textos, deducción de significados implícitos, formulación de hipótesis sobre el texto, y redacción de argumentos críticos que exijan justificar opiniones con ejemplos.  
-    `;
-  } else if (categoria === "Artes") {
-    extraDificultadCategoria = `
-    Para Artes, plantea actividades que vayan más allá de la reproducción...  
+    - REGLA DISCIPLINAR: Eleva la dificultad añadiendo análisis comparativo de textos, deducción de significados implícitos, formulación de hipótesis sobre el texto, y redacción de argumentos críticos que exijan justificar opiniones con ejemplos reales o textuales.  
     `;
   } else if (categoria === "Ciencias experimentales") {
     extraDificultadCategoria = `
-    Para Ciencias experimentales, incrementa la complejidad proponiendo experimentos de análisis de variables, formulación de hipótesis, interpretación de resultados en gráficos o tablas, y relación de conceptos científicos con problemas ambientales o de salud reales.  
+    - REGLA DISCIPLINAR: Incrementa la complejidad proponiendo experimentos de análisis de variables, formulación de hipótesis científicas, interpretación de resultados en gráficos o tablas, y relación de conceptos científicos con problemas ambientales o de salud reales.  
     `;
   } else if (categoria === "Ciencias sociales") {
     extraDificultadCategoria = `
-    Para Ciencias sociales, sube la dificultad solicitando comparación entre contextos históricos, análisis crítico de causas y consecuencias, debates argumentados sobre dilemas éticos o sociales, y elaboración de propuestas de mejora para la comunidad.  
-    `;
-  } else if (categoria === "Formación socioemocional") {
-    extraDificultadCategoria = `
-    Para Formación socioemocional, aumenta la dificultad con análisis de casos reales, toma de decisiones justificadas en situaciones complejas, reflexión profunda sobre emociones y valores, y diseño de estrategias grupales para la resolución de conflictos o mejora de la convivencia.  
+    - REGLA DISCIPLINAR: Sube la dificultad solicitando comparación entre contextos históricos, análisis crítico de causas y consecuencias sociales, debates argumentados sobre dilemas éticos, y elaboración de propuestas de mejora para la comunidad basadas en evidencia.  
     `;
   } else {
     extraDificultadCategoria = "";
@@ -23622,38 +23973,56 @@ window.construirPromptDeCategoria = function (categoria, objetivos, contenidoLec
   if (recursos.recortables.generado) recursosOrdenados.push(`el ${recursos.recortables.clave}`);
   if (recursos.videos.generado) recursosOrdenados.push(`el video "${recursos.videos.clave}"`);
 
+  const instruccionNoGenerarRecursosFull = isContextualStep ? `
+  🚨 REGLA DE ORO DE NO DUPLICACIÓN:
+  - PROHIBIDO generar bloques de recursos (fichas, anexos, recortables o videos) en esta etapa.
+  - No uses etiquetas como <section data-resource-section="true"> ni clases como "resource-ficha" o "guion-video".
+  - Solo menciona pedagógicamente su uso: "1. Usa la ficha P1-L1 para...".
+  - El contenido de estos recursos se generará en el siguiente paso.
+  ` : "";
+
   const instruccionRecursos = recursosOrdenados.length > 0
     ? (separarSeccionesRecursos
       ? `IMPORTANTE: Estos recursos NO deben mezclarse dentro de las actividades normales.
   Deben aparecer como secciones independientes al final del subtema, cada una con su propio bloque.
   Mantén las actividades normales libres de fichas, anexos, recortables y guion de video.
+  ${instruccionNoGenerarRecursosFull}
   Si un recurso está activo, crea su sección aparte con contenido completo y coherente.`
       : `IMPORTANTE: Estos recursos deben integrarse dentro del mismo subtema, sin bloques separados al final.
   Las fichas, anexos, recortables y guion de video deben aparecer mezclados de forma natural dentro de las actividades normales o de sus explicaciones.
-  No generes secciones independientes para estos recursos.`)
+  ${instruccionNoGenerarRecursosFull}
+  No generes secciones independientes para estos recursos.
+  🚨 REGLA CRÍTICA DE SEPARACIÓN: Distribuye estos recursos a lo largo de las actividades normales. No menciones más de un recurso en el mismo bloque <div class="activity">. Cada actividad debe contener como máximo la mención a UN solo recurso (ej: Actividad 1 menciona la Ficha, Actividad 2 menciona el Anexo, etc). Prohibido agrupar todos los recursos al final o en una sola actividad.`)
     : "";
 
   const hasTrazosStyle = /ESTILOS PEDAG[ÓO]GICOS ACTIVOS:[\s\S]*Trazos y letras|FORMATO RECTOR INNEGOCIABLE:\s*Trazos y letras|CONTRATO DE FORMATO OBLIGATORIO:\s*usa Trazos y letras/i.test(String(instruccionesAdicionales || ""));
   const shouldUseTrazosFichaFormat = isTrazosDeLetras || hasTrazosStyle;
 
   // 4. BLOQUES FINALES UNIFICADOS
-  const extraBloquesFinales = buildUnidadResourceExtraBlocks({
+  const extraBloquesFinales = isContextualStep ? "" : buildUnidadResourceExtraBlocks({
     recursos,
     separarSeccionesRecursos,
     isTrazosDeLetras,
-    hasTrazosStyle
+    hasTrazosStyle,
+    categoria: categoria
   });
 
   const seccionesExtra = `
-  ✅ Si el subtema lo amerita, agrega **una sola sección extra** al final de las actividades (pero no ambas), siguiendo una de estas opciones, siempre en formato profesional y adecuado:
+  ✅ Si el subtema lo amerita, agrega **una sola sección extra** al final de las actividades (pero no ambas), siguiendo una de estas opciones, siempre envuelta en <div class="pedagogical-extra-block"> para asegurar el aislamiento visual:
 
-  1. <div class="activity" style="margin-top:30px;">
+  1. <div class="pedagogical-extra-block">
      <strong>Para saber más.</strong>
-     <p>Si hay un término o concepto importante que convenga reforzar, usa una cita real y famosa de un autor reconocido que conecte con el subtema. No inventes autores, no uses frases genéricas y no pongas la etiqueta "Autor:".</p>
+     <p>Si hay un término o concepto importante que convenga reforzar, explica brevemente su origen, un dato curioso o un tip de aprendizaje útil para el estudiante de forma motivadora.</p>
+  </div>
+
+  2. <div class="pedagogical-extra-block">
+     <strong>El poder de la palabra.</strong>
+     <p>Usa una cita real y famosa de un autor reconocido que conecte con el subtema. No inventes autores, no uses frases genéricas y no pongas la etiqueta "Autor:".</p>
      <p>La cita debe ir en lenguaje sencillo, ser breve y estar acompañada por el nombre del autor en la misma línea o al final, sin etiqueta adicional.</p>
   </div>
 
-  ⚠️ IMPORTANTE: Solo esta sección y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
+  ⚠️ IMPORTANTE: Solo una de estas secciones y solo si verdaderamente aporta al subtema. Si no aplica, omite esta sección.
+  - Usa siempre la clase "pedagogical-extra-block".
   - Si incluyes una frase, cita o ejemplo textual, usa una frase real y famosa de un autor reconocido, y escribe solo el nombre del autor sin la etiqueta "Autor:".
   - No incluyas frases religiosas, controversiales, violentas o anónimas.
   - No incluir emojis
@@ -23811,9 +24180,10 @@ function generarBloqueHabilidad(habilidadClave) {
     REGLAS ESTRICTAS PARA MATEMÁTICAS:
     - Las actividades deben ser matemáticas reales, no preguntas genéricas de comprensión lectora disfrazadas.
     - Cada actividad debe exigir cálculo, representación, comparación de procedimientos, estimación, comprobación o argumentación matemática.
+    - OBLIGATORIO: Usa sintaxis LaTeX ($...$) para CUALQUIER expresión matemática. Si no usas $, la fórmula no se verá bien.
     ${anclaPrincipal ? `- El concepto matemático "${anclaPrincipal}" es obligatorio y debe aparecer explícitamente en casi todas las actividades.` : ""}
     ${anclasCurriculares.includes("raíz cuadrada") ? `
-    - Si aparece "raíz cuadrada" en T/AE/C/P, las actividades deben trabajar explícitamente con √, raíces cuadradas exactas o aproximadas, relación con cuadrados perfectos, estimación en recta numérica, descomposición o verificación.
+    - Si aparece "raíz cuadrada" en T/AE/C/P, las actividades deben trabajar explícitamente con $\sqrt{x}$, raíces cuadradas exactas o aproximadas, relación con cuadrados perfectos, estimación en recta numérica, descomposición o verificación.
     - No sustituyas "raíz cuadrada" por temas vagos como mapas, patrimonio, fronteras, naturaleza o descripciones generales.
     - La lectura relacionada solo puede servir como contexto para problemas con raíz cuadrada; no como tema central de las respuestas.
     ` : ""}
@@ -23849,6 +24219,7 @@ function generarBloqueHabilidad(habilidadClave) {
 
   const hasExplicitFormatContract = /CONTRATO DE FORMATO|FORMATO RECTOR|ESTILO EDUCATIVO/i.test(String(instruccionesAdicionales || ""));
   const estructuraBaseActividad = buildUnidadActivityStructureContract({
+    grado,
     isTrazosDeLetras,
     hasExplicitFormatContract
   });
@@ -25381,6 +25752,34 @@ function _unidadBuildMathStrategyMeta(subtema = "", categoria = "Matemáticas") 
   };
 }
 
+/**
+ * Devuelve instrucciones de rigor pedagógico escaladas por grado para Matemáticas.
+ * @param {string} grado - Primero, Segundo, Tercero, Cuarto, Quinto, Sexto.
+ */
+function _unidadGetMathRigorInstruction(grado = "") {
+  const g = String(grado).toLowerCase();
+  if (g.includes("primero") || g.includes("segundo")) {
+    return `
+    - NIVEL INICIAL: Foco en sentido numérico, conteo avanzado (hasta 100 o 1000), problemas aditivos simples (suma y resta) vinculados a objetos reales y situaciones cotidianas. 
+    - Usa representaciones gráficas simples y lenguaje matemático básico.
+    `;
+  }
+  if (g.includes("tercero") || g.includes("cuarto")) {
+    return `
+    - NIVEL INTERMEDIO: Foco en pensamiento multiplicativo (tablas, multiplicaciones por 2-3 cifras), introducción formal a fracciones (representación y suma simple), geometría descriptiva (caras, aristas, vértices) y uso de unidades de medida estándar. 
+    - Exige estimación y verificación de resultados.
+    `;
+  }
+  if (g.includes("quinto") || g.includes("sexto")) {
+    return `
+    - NIVEL AVANZADO (ALTO RIGOR): Foco en abstracción y modelación. Problemas de DOK 3 y 4. 
+    - Incluye razonamiento proporcional, porcentajes, números decimales complejos, operaciones con fracciones de distinto denominador, modelación algebraica básica y análisis de volumen/superficie. 
+    - OBLIGATORIO: Pide que el alumno justifique su proceso por escrito y proponga más de un camino de resolución.
+    `;
+  }
+  return "- Nivel estándar: Asegura que el reto matemático sea acorde al grado escolar.";
+}
+
 window.generarEstrategiaMatematica = function (subtema) {
   const { chips, strategy } = _unidadBuildMathStrategyMeta(subtema, "Matemáticas");
   const personajeSvg = encodeURIComponent(`
@@ -25612,6 +26011,7 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     const viejoContenedor = document.getElementById(contenedorCategoriaId);
     const tableId = `tabla-secuencia-${categoria.replace(/\s+/g, '-')}`;
     const tabla = document.getElementById(tableId);
+    const habiaLecturaSeleccionada = _unidadTieneLecturaSeleccionadaReal();
 
     // === Categorías que SÍ requieren lectura obligatoria ===
     const categoriasQueRequierenLectura = []; // añade más si lo necesitas
@@ -25632,6 +26032,18 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       statusId: statusCategoriaId
     });
     const lectura = lecturaResuelta.lectura;
+    const lecturaActiva = lectura || (window.__unidadLecturaGeneradaPorModal === true ? window.lecturaNuevaCoincidenteGlobal : null) || null;
+    
+    // ✅ CORRECCIÓN: Actualizar window.lecturaNuevaCoincidenteGlobal INMEDIATAMENTE tras resolver
+    window.lecturaNuevaCoincidenteGlobal = lecturaActiva || null;
+
+    if (_unidadShouldAbortMissingResolvedReading({
+      hasRealSelection: habiaLecturaSeleccionada,
+      lecturaResuelta
+    })) {
+      alert("⚠️ Había una lectura seleccionada, pero no se pudo resolver desde Firebase. La generación se detuvo para evitar que la IA invente una lectura.");
+      return;
+    }
 
     // Si la categoría LA REQUIERE y no hay lectura → se avisa y se detiene.
     if (categoriaRequiereLectura && !lectura) {
@@ -25677,7 +26089,7 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       return chkRelacion ? chkRelacion.checked : false;
     });
 
-    // Limpiar subtemas existentes de esta categoría
+    // Limpiar subtemas existentes de esta categoría y la lectura previa si existe
     subtemasDeCategoria.forEach(subtema => {
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const bloqueExistente = document.getElementById(bloqueId);
@@ -25685,6 +26097,11 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
         bloqueExistente.remove();
       }
     });
+    const readingBlockPreviaId = `bloque-${categoria}-LecturaPrevia`;
+    const readingPreviaExistente = document.getElementById(readingBlockPreviaId);
+    if (readingPreviaExistente) {
+      readingPreviaExistente.remove();
+    }
 
     // === Objetivos T/AE/C/P por subtema ===
     const objetivos = [];
@@ -25762,55 +26179,37 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     `;
 
     // Insertar título de categoría al inicio del contenedor.
-    // La lectura de Lenguaje debe vivir dentro del primer col-alumno, no en el encabezado de categoría.
-    let lecturaGlobalInyectada = "";
-    const lenguajeConLecturaRelacionada =
-      categoria === "Lenguaje y comunicación" &&
-      subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
-    if (window.lecturaNuevaCoincidenteGlobal && !window.lecturaGlobalMostrada && !lenguajeConLecturaRelacionada) {
-       lecturaGlobalInyectada = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, { categoria, statusId: statusCategoriaId });
-       window.lecturaGlobalMostrada = true;
-    }
     let categoriaHeader = contenedor.querySelector(":scope > .bloque-categoria-header");
     if (!categoriaHeader) {
       categoriaHeader = document.createElement("div");
       categoriaHeader.className = "bloque-categoria-header";
-      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+      categoriaHeader.innerHTML = tituloCategoriaHTML;
       if (contenedor.firstChild) {
         contenedor.insertBefore(categoriaHeader, contenedor.firstChild);
       } else {
         contenedor.appendChild(categoriaHeader);
       }
     } else {
-      categoriaHeader.innerHTML = lecturaGlobalInyectada + tituloCategoriaHTML;
+      categoriaHeader.innerHTML = tituloCategoriaHTML;
     }
-    contenedor.style.position = "relative"; // Asegurar que el badge se posicione respecto al contenedor
-    // Llevar la vista al bloque de la categoría que se está generando.
+    contenedor.style.position = "relative"; 
     contenedor.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // ✅ CORRECCIÓN MEJORADA: BÚSQUEDA DE LECTURA PARA TODAS LAS CATEGORÍAS
-    const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "";
-    const gradoSeleccionado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "";
-    const trimestreSeleccionado = document.getElementById("unidadTrimestre")?.value || selectTrimestre?.value || "";
-    const unidadSeleccionada = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "";
-    // Verificar si ALGUNA categoría necesita lectura
-    const algunaCategoriaNecesitaLectura =
-      categoria === "Lenguaje y comunicación" ||
-      subtemasDeCategoria.some(sub => {
-        const chkRelacion = document.querySelector(`input[name='relacion_${sub}']`);
-        return chkRelacion ? chkRelacion.checked : false;
-      });
-    window.lecturaNuevaCoincidenteGlobal = lectura || lecturaResuelta?.lectura || null;
+    // ✅ CORRECCIÓN: INYECCIÓN DE LECTURA REDUNDANTE ELIMINADA.
+    // La lectura se inyecta ahora de forma contextual dentro de los prompts de categoría
+    // o mediante los flujos de Lenguaje y Comunicación, evitando duplicidad.
+    _unidadSetResultLoadingOverlay(false);
 
-    // ✅ PARA LENGUAJE Y COMUNICACIÓN: la lectura ya se inserta en col-alumno, no duplicar bloque global
+    // ✅ PARA LENGUAJE Y COMUNICACIÓN: asegurar que el estado sea correcto
     if (categoria === "Lenguaje y comunicación") {
-      const algunSubtemaRelacionado = subtemasDeCategoria.some(sub => debeRelacionarConLectura(sub));
-      if (algunSubtemaRelacionado && window.lecturaNuevaCoincidenteGlobal) {
-        window.bloqueLecturaGlobalParaLenguaje = await _generarBloqueLecturaGlobalHTML(window.lecturaNuevaCoincidenteGlobal, {
+      if (lecturaActiva) {
+        window.bloqueLecturaGlobalParaLenguaje = window.bloqueLecturaGlobalParaLenguaje || await _generarBloqueLecturaGlobalHTML(lecturaActiva, {
           categoria,
-          statusId: statusCategoriaId
+          statusId: statusCategoriaId,
+          contenido: contenidoLecturaSeguro,
+          preguntas: preguntasComprensionSeguras
         });
-        window.debeInsertarLecturaLenguaje = true;
+        window.debeInsertarLecturaLenguaje = !window.lecturaGlobalMostrada; 
         window.lecturaGlobalMostrada = true;
       } else {
         window.debeInsertarLecturaLenguaje = false;
@@ -26046,7 +26445,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             subtema,
         tituloCreativoProyecto,
         instruccionesProyecto,
-        debeUsarLecturaProyecto ? tituloLecturaRelacionada : ""
+        debeUsarLecturaProyecto ? tituloLecturaRelacionada : "",
+        { isContextualStep: true }
       );
 
         const { prompt: promptProyecto, T_global, AE_global, C_global, P_global, metodologia } = packProyecto;
@@ -26104,6 +26504,36 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                   tituloLecturaRelacionada
                 );
               }
+            }
+
+            // Step 2 for Projects: Generate contextual resources
+            const recursosPermitidosPorTablaProy = {
+              fichas: generarFichas,
+              anexos: generarAnexos,
+              videos: generarVideos,
+              recortables: tieneRecortable,
+              imagenes: generarImagenApoyo
+            };
+
+            const recursosEsperadosProy = _unidadBuildRecursosEsperadosPorChecks({
+              subtema,
+              unidadActual: unidadActual,
+              recursosPermitidosPorTabla: recursosPermitidosPorTablaProy,
+              recursosBase: recursos,
+              objetivoT: T_global?.join("; ") || "",
+              objetivoAE: AE_global?.join("; ") || ""
+            });
+
+            const htmlRecursosStep2Proy = await _unidadGenerarComplementosContextuales({
+              categoria,
+              subtema,
+              subtemaHtml: htmlProyecto,
+              recursosEsperados: recursosEsperadosProy
+            });
+
+            if (htmlRecursosStep2Proy) {
+              htmlProyecto += "\n" + htmlRecursosStep2Proy;
+              logVisual(`✅ Complementos contextuales generados y unidos al proyecto`);
             }
 
         // 1) Mostrar primero SOLO col-alumno; col-maestro se agrega al terminar alumno.
@@ -26543,6 +26973,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
       } catch (err) {
         _unidadReleasePromptLock(`contenido:${categoria}:${subtema}`);
+        console.error("Error en generación de Proyectos:", err);
         if (err?.message === "CANCELADO_PROYECTOS") {
           document.getElementById(bloqueId).innerHTML = `<p style="color:#b45309;">⏹ Generación cancelada por el usuario.</p>`;
           actualizarSpinnerProceso(statusId, "⏹ Generación cancelada");
@@ -26616,6 +27047,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const generarVideos = !!scope.querySelector(`input[name="video_${subtema}"]`)?.checked;
       const generarImagenApoyo = !!scope.querySelector(`input[name="imagen_${subtema}"]`)?.checked;
       const tieneRecortable = !!scope.querySelector(`input[name="recortable_${subtema}"]`)?.checked;
+      
+      const recursosPermitidosPorTabla = {
+        fichas: generarFichas,
+        anexos: generarAnexos,
+        recortables: tieneRecortable,
+        videos: generarVideos
+      };
 
       // Si existe, reemplazarlo (regeneración en sitio)
       const bloqueExistente = document.getElementById(bloqueId);
@@ -26775,7 +27213,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             tituloCreativoLimpioBase,
             "", // promptTitulo
             relacionadaFinal, // ✅ Indicar explícitamente si está relacionada
-            instruccionesAdicionales
+            instruccionesAdicionales,
+            { isContextualStep: true }
           );
 
         actualizarSpinnerProceso(
@@ -26898,12 +27337,6 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
         const cleanHTML = html => html.replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
         let htmlAlumnoLimpio = cleanHTML(htmlAlumno);
-        const recursosPermitidosPorTabla = {
-          fichas: !!generarFichas,
-          anexos: !!generarAnexos,
-          recortables: !!tieneRecortable,
-          videos: !!generarVideos
-        };
 
         // 1. Identificar y marcar recursos OBLIGATORIAMENTE antes de cualquier limpieza
         const recursosEsperados = _unidadBuildRecursosEsperadosPorChecks({
@@ -26913,9 +27346,20 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           objetivoT: T,
           objetivoAE: AE
         });
+
+        // ETAPA 2: Generar recursos basados en el contexto del HTML previo
+        const htmlRecursosStep2Raw = await _unidadGenerarComplementosContextuales({
+          categoria,
+          subtema,
+          subtemaHtml: htmlAlumnoLimpio,
+          recursosEsperados
+        });
+
+        // ✅ REFACTORIZACIÓN: Extraer recursos del Paso 2 de forma aislada (sin mezclarlos con el main)
+        const recursosPaso2 = _unidadSepararBloquesRecursosDeHtml(htmlRecursosStep2Raw);
         
         let recursosGenerados = _unidadMergeRecursosInferidosYEsperados({
-          recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlAlumnoLimpio),
+          recursosInferidos: _unidadInferGeneratedResourcesFromHtml(htmlRecursosStep2Raw),
           recursosEsperados,
           recursosPermitidosPorTabla
         });
@@ -26968,31 +27412,21 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         if (apoyoHTML) {
           htmlAlumnoConApoyoVisual = apoyoHTML + htmlAlumnoLimpio;
         }
-        const separarRecursosPorSeccion = Object.values(recursosGenerados).some((item) => Boolean(item?.generado));
-        if (!separarRecursosPorSeccion) {
-          htmlAlumnoConApoyoVisual = _unidadEnsureResourceMentionsInActivities(htmlAlumnoConApoyoVisual, recursosGenerados, { subtema, categoria });
-          htmlAlumnoConApoyoVisual = _unidadInjectResourceIconsInActivities(htmlAlumnoConApoyoVisual, { subtema, categoria, grado: gradoTexto });
-        }
         const separarSeccionesRecursos = _unidadSeccionesRecursosSeparadas();
-        const splitAlumnoRecursosRaw = separarSeccionesRecursos
-          ? _unidadSepararBloquesRecursosDeHtml(htmlAlumnoConApoyoVisual)
-          : {
-            mainHtml: htmlAlumnoConApoyoVisual,
-            resourcesByType: { ficha: "", anexo: "", recortable: "", video: "" }
-          };
         const splitAlumnoRecursos = {
-          mainHtml: splitAlumnoRecursosRaw.mainHtml || htmlAlumnoConApoyoVisual,
+          mainHtml: htmlAlumnoConApoyoVisual, // Actividades + Apoyo Visual (Paso 1)
           resourcesByType: {
-            ficha: recursosPermitidosPorTabla.fichas ? String(splitAlumnoRecursosRaw.resourcesByType?.ficha || "") : "",
-            anexo: recursosPermitidosPorTabla.anexos ? String(splitAlumnoRecursosRaw.resourcesByType?.anexo || "") : "",
-            recortable: recursosPermitidosPorTabla.recortables ? String(splitAlumnoRecursosRaw.resourcesByType?.recortable || "") : "",
-            video: recursosPermitidosPorTabla.videos ? String(splitAlumnoRecursosRaw.resourcesByType?.video || "") : ""
+            ficha: recursosPermitidosPorTabla.fichas ? String(recursosPaso2.resourcesByType?.ficha || "") : "",
+            anexo: recursosPermitidosPorTabla.anexos ? String(recursosPaso2.resourcesByType?.anexo || "") : "",
+            recortable: recursosPermitidosPorTabla.recortables ? String(recursosPaso2.resourcesByType?.recortable || "") : "",
+            video: recursosPermitidosPorTabla.videos ? String(recursosPaso2.resourcesByType?.video || "") : ""
           }
         };
         let htmlAlumnoSoloMain = splitAlumnoRecursos.mainHtml || htmlAlumnoConApoyoVisual;
         htmlAlumnoSoloMain = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoSoloMain, cantidad);
         htmlAlumnoSoloMain = _unidadEnsureResourceMentionsInActivities(htmlAlumnoSoloMain, recursosGenerados, { subtema, categoria });
         htmlAlumnoSoloMain = _unidadInjectResourceIconsInActivities(htmlAlumnoSoloMain, { subtema, categoria, grado: gradoTexto });
+        htmlAlumnoSoloMain = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoSoloMain, gradoTexto, subtema);
 
         const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtema}']`)?.value;
         const etiquetaInterdisc = subtemaRelacionado
@@ -27017,44 +27451,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           window.tablaInicialInsertada = true;
         }
 
-        // ✅ CORRECCIÓN MEJORADA: NO INSERTAR LECTURA EN CADA SUBTEMA
-        // La lectura ya se insertó UNA SOLA VEZ al inicio de la categoría para Lenguaje
-        // Para otras categorías, la lectura se usa internamente en el prompt pero no se muestra visualmente
-
-        const esPrimerSubtemaLenguaje = (
-          categoria === "Lenguaje y comunicación" &&
-          subtema === subtemasDeCategoria[0] &&
-          window.debeInsertarLecturaLenguaje
-        );
-
-        if (esPrimerSubtemaLenguaje) {
-          htmlAlumnoConApoyoVisual = _unidadStripDuplicatedLectureBlocksFromHtml(htmlAlumnoConApoyoVisual);
-        }
-        const lecturaFuenteLenguaje = lectura || lecturaResuelta?.lectura || window.lecturaNuevaCoincidenteGlobal || null;
-        const bloqueLecturaLenguajeSeparadoHTML = (!importedUsesOwnHeading && esPrimerSubtemaLenguaje && window.bloqueLecturaGlobalParaLenguaje && lecturaFuenteLenguaje)
-          ? `
-              <div class="bloque-subtema bloque-lectura-lenguaje" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:28px; flex-wrap:wrap;" data-categoria="${categoria}" data-subtema="ComprensionLectora">
-                  <div class="col-alumno" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="alumno" style="flex:1; min-width:300px;">
-                      ${window.bloqueLecturaGlobalParaLenguaje}
-                  </div>
-                  <div class="col-maestro" data-categoria="${categoria}" data-subtema="ComprensionLectora" data-target-col="maestro" style="flex:1; min-width:300px; border-left:2px solid #eee; padding-left:12px;">
-                      ${_bloqueMaestroLecturaSoporteUnidad(lecturaFuenteLenguaje)}
-                  </div>
-              </div>
-          `
-          : "";
-
-        // Una vez insertada, marcar como ya insertada
-        if (esPrimerSubtemaLenguaje) {
-          window.debeInsertarLecturaLenguaje = false; // Prevenir duplicados
-        }
+        // La lectura ya se insertó al inicio de la categoría para Lenguaje
 
         // Render parcial en tiempo real: primero columna alumno.
         const colAlumnoId = `${bloqueId}-alumno`;
         const colMaestroId = `${bloqueId}-maestro`;
         const colAlumnoContenidoId = `${bloqueId}-alumno-contenido`;
         document.getElementById(bloqueId).innerHTML = `
-            ${bloqueLecturaLenguajeSeparadoHTML}
             <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                 <div id="${colAlumnoId}" class="col-alumno" data-categoria="${categoria}" data-subtema="${subtema}" data-target-col="alumno" style="flex:1; min-width:300px;">
                     ${importedUsesOwnHeading ? "" : tablaInicialHTML}
@@ -28025,7 +28428,44 @@ function _unidadBuildConteoCorrectionPrompt({
     html
   ].join("\n");
 }
-// This is correct
+
+async function _unidadGenerarComplementosContextuales({
+  categoria = "",
+  subtema = "",
+  subtemaHtml = "",
+  recursosEsperados = {}
+} = {}) {
+  const grado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "Primero";
+  const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "Primaria";
+  
+  // Si no hay recursos activos, no hacemos nada
+  const hayRecursos = Object.values(recursosEsperados).some(r => r && r.generado);
+  if (!hayRecursos) return "";
+
+  const subtemaKey = _unidadNormalizarSubtemaKey(subtema).toLowerCase();
+  const isTrazos = subtemaKey === "trazosdeletras";
+
+  const promptStep2 = buildUnidadResourceGenerationStepPrompt({
+    categoria,
+    subtema,
+    grado,
+    nivel,
+    subtemaHtml,
+    recursos: recursosEsperados,
+    isTrazosDeLetras: isTrazos
+  });
+
+  try {
+    if (typeof actualizarSpinnerProceso === "function") {
+      actualizarSpinnerProceso("", `Generando complementos contextuales para <strong>${formatearSubtema(subtema)}</strong>...`);
+    }
+    const respuestaStep2 = await enviarPrompt([{ role: "user", text: promptStep2 }]);
+    return String(respuestaStep2 || "").replace(/```html|```/g, "").trim();
+  } catch (err) {
+    console.error("Error en generación de complementos contextuales:", err);
+    return ""; // Fallback silencioso (se usará el fallback estático después si es necesario)
+  }
+}
 async function _unidadSolicitarHtmlAlumnoConConteoExacto({
   promptCategoria = "",
   categoria = "",
@@ -28202,6 +28642,16 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
 
   const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas"));
   if (!activities.length) return source;
+
+  // 🏷️ Inyectar data-categoria para estilos centralizados
+  const categoriaActual = String(options.categoria || "").trim();
+  if (categoriaActual) {
+    activities.forEach(act => {
+      if (!act.getAttribute("data-categoria")) {
+        act.setAttribute("data-categoria", categoriaActual);
+      }
+    });
+  }
 
   const appendPlecaBadge = (node) => {
     if (!(node instanceof Element)) return;
@@ -28964,6 +29414,9 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
   if (!source.trim() || !_unidadIsPrimerGrado(grado) || typeof DOMParser === "undefined") return source;
   if (_unidadNormalizarSubtemaKey(subtema) === "TrazosDeLetras") return source;
 
+  const MODALITY_TOKEN_CAPTURE_REGEX = /\[(?:IC\.?\s*T\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?)|IC\.?\s*(?:IND(?:IVIDUAL)?|PAR(?:ES)?|EQUI(?:PO)?))\]/gi;
+  const PLECA_TOKEN_CAPTURE_REGEX = /\[(?:\d+\s+PLECA(?:S)?)\]/gi;
+
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
   const root = doc.body.firstElementChild;
@@ -28990,7 +29443,17 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
     });
   };
 
-  const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas"));
+  const preservePrimaryInstructionSupportTokens = (text = "") => {
+    const normalized = _unidadNormalizeMalformedIcTokens(text);
+    const preserved = [
+      ...(normalized.match(MODALITY_TOKEN_CAPTURE_REGEX) || []),
+      ...(normalized.match(PLECA_TOKEN_CAPTURE_REGEX) || [])
+    ].map((token) => String(token || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const cleaned = _unidadStripIcTokens(normalized).replace(/\s+/g, " ").trim();
+    return [cleaned, ...preserved].filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
+  };
+
+  const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas, .phase .activity"));
   activities.forEach((activity) => {
     if (!(activity instanceof Element)) return;
 
@@ -29042,7 +29505,7 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
       }
       const current = String(textNode.nodeValue || "");
       if (!current.trim()) return;
-      textNode.nodeValue = _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(current));
+      textNode.nodeValue = preservePrimaryInstructionSupportTokens(current);
     });
   });
 
@@ -31280,6 +31743,15 @@ Texto modificado:`;
 
     // Mostrar resultado
     previewDiv.innerHTML = textoLimpio;
+    if (typeof renderMathInElement === "function") {
+      renderMathInElement(previewDiv, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false }
+        ],
+        throwOnError: false
+      });
+    }
     resultadoDiv.style.display = 'block';
     btnAplicar.style.display = 'block';
 
@@ -31338,10 +31810,16 @@ function insertarHTMLEnRango(range, html) {
     // Fallback simple: usar innerHTML en el contenedor más cercano
     try {
       const container = range.commonAncestorContainer;
-      if (container.nodeType === Node.TEXT_NODE) {
-        container.parentNode.innerHTML = html;
-      } else {
-        container.innerHTML = html;
+      const target = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+      target.innerHTML = html;
+      if (typeof renderMathInElement === "function") {
+        renderMathInElement(target, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false }
+          ],
+          throwOnError: false
+        });
       }
     } catch (fallbackError) {
       throw new Error('No se pudo insertar el HTML');
@@ -31524,6 +32002,7 @@ function mostrarNotificacion(mensaje, tipo) {
 
 // Inicializar
 document.addEventListener('DOMContentLoaded', function () {
+  _unidadSetupNavigationGuard();
   // Cargar instrucciones guardadas
   cargarInstruccionesGuardadas();
 
@@ -32671,14 +33150,33 @@ window.cbVoiceWorkflowBridge.stopPlaybackAudio = () => {
 /**
  * Genera el HTML para el bloque de lectura global (usado en Lenguaje o como cabecera de unidad)
  */
-async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", statusId = "" } = {}) {
+async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", statusId = "", contenido = "", preguntas = [] } = {}) {
   if (!lecturaObj) return "";
+
+  // ✅ SOPORTE PARA MÚLTIPLES LECTURAS (Modo Split)
+  // Si es un objeto contenedor con array de lecturas, procesar todas individualmente para generar bloques separados
+  const arrayLecturas = Array.isArray(lecturaObj.lecturas) ? lecturaObj.lecturas : [];
+  if (arrayLecturas.length > 1 && (lecturaObj.tipo === "split" || !contenido)) {
+      let htmlTotal = "";
+      for (const l of lecturaObj.lecturas) {
+          htmlTotal += await _generarBloqueLecturaGlobalHTML(l, { categoria, statusId });
+      }
+      return htmlTotal;
+  }
   
-  const preguntasLectura = lecturaObj.preguntasComprension || lecturaObj.preguntas || [];
+  const preguntasLectura = (Array.isArray(preguntas) && preguntas.length) ? preguntas : (lecturaObj.preguntasComprension || lecturaObj.preguntas || []);
   const sinonimosLecturaBase = _extraerSinonimosLecturaUnidad(lecturaObj);
-  const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(_contenidoLecturaUnidad(lecturaObj), sinonimosLecturaBase);
-  const tituloLecturaBase = lecturaObj.titulo || lecturaObj.tema || "Sin título";
-  const encabezadoLecturaBase = "Lectura Principal";
+  let rawContenido = contenido || _contenidoLecturaUnidad(lecturaObj);
+  
+  // ✅ DOBLE CHEQUEO: Si el contenido sigue vacío, intentar buscarlo en campos anidados del objeto original
+  if (!rawContenido || rawContenido.trim().length < 10) {
+      const rawLectura = lecturaObj.rawData || lecturaObj;
+      rawContenido = _contenidoLecturaUnidad(rawLectura);
+  }
+  
+  const contenidoLecturaBase = _resaltarSinonimosEnLecturaUnidad(rawContenido, sinonimosLecturaBase);
+  const tituloLecturaBase = lecturaObj.titulo || lecturaObj.tema || lecturaObj.nombre || "Sin título";
+  const encabezadoLecturaBase = "Lectura generadora";
 
   // Verificar gráfico
   const usoGrafico = String(window.__unidadGraficoUsoSeleccionadoPorCategoria?.[String(categoria || "").trim()] || "").trim().toLowerCase();
@@ -32725,14 +33223,35 @@ async function _generarBloqueLecturaGlobalHTML(lecturaObj, { categoria = "", sta
 async function _asegurarLecturaAntesDeGenerar() {
   const selectTema = document.getElementById("unidadTema");
   const selectTemaASC = document.getElementById("unidadTemaASC");
-  
-  const principalId = String(selectTema?.value || "").trim();
-  const ascId = String(selectTemaASC?.value || "").trim();
+  const selectTemaTexto = document.getElementById("unidadTemaTexto");
 
-  // Si ya hay alguna lectura seleccionada (base de datos o prompt), no hacemos nada
-  if (principalId || ascId || window.lecturaNuevaCoincidenteGlobal) return true;
+  const resolved = await _unidadIntentarResolverLecturasSeleccionadas({ forceRefresh: false }).catch(() => ({
+    principal: null,
+    asc: null,
+    hasSelection: false
+  }));
 
-  // Si no hay lectura, abrimos el modal
+  const principalId = String(selectTema?.value || selectTemaTexto?.value || resolved?.principal?.id || "").trim();
+  const ascId = String(selectTemaASC?.value || resolved?.asc?.id || "").trim();
+  const hasRealSelection = _unidadTieneLecturaSeleccionadaReal();
+  const hasIASelection = !!(window.__unidadLecturaGeneradaPorModal && window.lecturaNuevaCoincidenteGlobal);
+
+  // Si ya hay alguna lectura seleccionada en Firebase/UI o generada por IA, no hacemos nada.
+  if (hasRealSelection || principalId || ascId || hasIASelection) {
+    // Solo marcamos como "no generada por modal" si realmente hay una selección de base de datos
+    if (principalId || ascId || hasRealSelection) {
+      if (!hasIASelection) {
+        window.__unidadLecturaGeneradaPorModal = false;
+      }
+    }
+    return true;
+  }
+
+  // Si no hay selección real ni IA válida, limpiamos estados para forzar nueva decisión.
+  window.__unidadLecturaGeneradaPorModal = false;
+  window.lecturaNuevaCoincidenteGlobal = null;
+
+  // Si no hay lectura, abrimos un modal para decidir qué hacer.
   const modal = document.getElementById("modalCrearLecturaPrompt");
   if (!modal) return true; // Fallback por si no existe
   
@@ -32744,15 +33263,34 @@ async function _asegurarLecturaAntesDeGenerar() {
     const cerrarX = document.getElementById("cerrarModalCrearLecturaPrompt");
     const input = document.getElementById("promptNuevaLecturaUnidad");
     const status = document.getElementById("statusCrearLecturaPrompt");
+    const helpText = modal.querySelector("p");
+    const prevHelp = helpText ? helpText.innerHTML : "";
+    const prevAccept = btnAceptar?.textContent || "";
+    const prevCancel = btnCancelar?.textContent || "";
 
     const cleanup = () => {
       modal.style.display = "none";
       btnAceptar.onclick = null;
       btnCancelar.onclick = null;
       cerrarX.onclick = null;
+      if (helpText) {
+        helpText.innerHTML = prevHelp;
+      }
+      if (btnAceptar) btnAceptar.textContent = prevAccept;
+      if (btnCancelar) btnCancelar.textContent = prevCancel;
     };
 
-    btnCancelar.onclick = () => { cleanup(); resolve(false); };
+    if (helpText) {
+      helpText.innerHTML = "No hay ninguna lectura seleccionada. Puedes buscar una lectura existente o crear una nueva con IA.";
+    }
+    if (btnAceptar) btnAceptar.textContent = "Crear con IA";
+    if (btnCancelar) btnCancelar.textContent = "Buscar lectura";
+
+    btnCancelar.onclick = async () => {
+      cleanup();
+      try { await abrirModalLecturas(); } catch (_) { }
+      resolve(false);
+    };
     cerrarX.onclick = () => { cleanup(); resolve(false); };
 
     btnAceptar.onclick = async () => {
@@ -32768,6 +33306,7 @@ async function _asegurarLecturaAntesDeGenerar() {
       try {
         const result = await _generarLecturaIAConPrompt(promptDesc);
         if (result) {
+          window.__unidadLecturaGeneradaPorModal = true;
           window.lecturaNuevaCoincidenteGlobal = result;
           cleanup();
           resolve(true); // Continuar
@@ -32789,10 +33328,14 @@ async function _generarLecturaIAConPrompt(promptUsuario) {
   const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value || "Primaria";
   const grado = document.getElementById("unidadGrado")?.value || selectGrado?.value || "Primero";
 
+  const contract = typeof buildUnidadReadingContract === "function" 
+    ? buildUnidadReadingContract({ grado, nivel })
+    : "";
+
   const promptFinal = `Genera una lectura educativa basada en la siguiente descripción: "${promptUsuario}".
 Nivel: ${nivel}, Grado: ${grado}.
 
-REQUISITOS DE FORMATO:
+${contract || `REQUISITOS DE FORMATO:
 1. Responde ÚNICAMENTE con un objeto JSON válido.
 2. Asegúrate de que no haya saltos de línea literales dentro de las cadenas de texto (usa \\n para saltos de línea).
 3. Escapa correctamente las comillas dobles internas si usas diálogos.
@@ -32807,7 +33350,7 @@ REQUISITOS DE FORMATO:
     {"pregunta": "Pregunta 4", "respuesta": "Respuesta 4"},
     {"pregunta": "Pregunta 5", "respuesta": "Respuesta 5"}
   ]
-}`;
+}`} `;
 
   try {
     const res = await enviarPrompt([{ role: "user", text: promptFinal }], { jsonMode: true });
@@ -32835,4 +33378,36 @@ REQUISITOS DE FORMATO:
     console.warn("Error enviando prompt de lectura:", err);
     return null;
   }
+}
+
+/**
+ * Elimina cualquier bloque de recurso (ficha, video, anexo, recortable) del HTML
+ * para evitar duplicados si la IA los generó en una fase previa.
+ */
+function _unidadStripResourceBlocksFromHtml(html = "") {
+  const source = String(html || "");
+  if (!source.trim() || typeof DOMParser === "undefined") return source;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return source;
+
+  // Selectores de bloques de recursos conocidos
+  const resourceSelectors = [
+    '.resource-ficha',
+    '.resource-anexo',
+    '.resource-recortable',
+    '.resource-video',
+    '.guion-video',
+    '[data-resource-section="true"]',
+    'section[data-resource-type]',
+    '.bloque-recursos-subtema'
+  ];
+
+  resourceSelectors.forEach(selector => {
+    root.querySelectorAll(selector).forEach(el => el.remove());
+  });
+
+  return root.innerHTML;
 }

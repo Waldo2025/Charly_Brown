@@ -1539,6 +1539,79 @@ function seleccionarRespuestaSeguimiento(texto, icono) {
   respuestaSeleccionada = texto;
   if (icono) icono.classList.add("is-selected");
   actualizarPlaceholderSeguimiento();
+
+  // ✅ Sincronizar con el motor de Generar Unidad
+  try {
+    const lecturaObj = _extraerLecturaDesdeHtmlChat(texto);
+    if (lecturaObj && lecturaObj.texto) {
+      window.lecturaNuevaCoincidenteGlobal = lecturaObj;
+      window.__unidadLecturaGeneradaPorModal = true;
+      
+      // Persistir para que el motor reconozca la lectura y la encuentre en caché
+      try {
+        const payload = {
+           id: lecturaObj.id,
+           titulo: lecturaObj.titulo,
+           tema: lecturaObj.tema,
+           texto: lecturaObj.texto,
+           contenidoCompleto: lecturaObj.texto,
+           preguntasComprension: lecturaObj.preguntasComprension || [],
+           sourceCollection: "lectura_prompt",
+           updatedAt: Date.now()
+        };
+        localStorage.setItem("cb_lectura_cache_v1", JSON.stringify(payload));
+      } catch (e) {
+        console.error("Error guardando lectura en cache:", e);
+      }
+
+      localStorage.setItem("lecturaSeleccionadaDesdeModal", "true");
+      localStorage.setItem("ultimaLecturaSeleccionada", "lectura_chat_ia");
+      localStorage.setItem("unidad_unidadTemaTexto", "lectura_chat_ia");
+      localStorage.setItem("unidad_unidadTemaTexto_label", lecturaObj.titulo || "Lectura del chat");
+    }
+  } catch (err) {
+    console.error("Error sincronizando lectura del chat con unidad:", err);
+  }
+}
+
+/**
+ * Intenta extraer título, texto y preguntas de un bloque HTML del chat
+ */
+function _extraerLecturaDesdeHtmlChat(html = "") {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  
+  // Limpiar etiquetas de fuente (source tag)
+  const sourceTag = div.querySelector(".text-xs.opacity-50");
+  if (sourceTag) sourceTag.remove();
+
+  const titulo = div.querySelector("h3, h4, strong")?.textContent?.trim() || "Lectura del chat";
+  
+  // Extraer preguntas si existen (suelen estar en una lista al final o marcadas con "Preguntas")
+  const preguntas = [];
+  const itemsPreguntas = div.querySelectorAll("li");
+  if (itemsPreguntas.length > 0) {
+    itemsPreguntas.forEach(li => {
+      const t = li.textContent.trim();
+      if (t.includes("?") || t.toLowerCase().includes("respuesta")) {
+         const parts = t.split(/Respuesta:|\?|:/i);
+         preguntas.push({
+           pregunta: parts[0] ? parts[0].trim() + "?" : "Pregunta",
+           respuesta: parts[1] ? parts[1].trim() : "Respuesta"
+         });
+      }
+    });
+  }
+
+  return {
+    id: "lectura_chat_ia",
+    titulo: titulo,
+    tema: titulo,
+    texto: html,
+    preguntasComprension: preguntas,
+    sourceCollection: "lectura_prompt",
+    tipo: "principal"
+  };
 }
 
 function crearBloqueRespuestaIA(textoHTML) {
