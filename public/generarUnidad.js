@@ -1969,9 +1969,12 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
         { left: "$$", right: "$$", display: true },
         { left: "\\[", right: "\\]", display: true },
         { left: "$", right: "$", display: false },
-        { left: "\\(", right: "\\)", display: false }
+        { left: "\\(", right: "\\)", display: false },
+        { left: "\\ce{", right: "}", display: false },
+        { left: "\\pu{", right: "}", display: false }
       ],
       throwOnError: false,
+      strict: "ignore",
       trust: true
     });
   }
@@ -27621,6 +27624,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             
             if (bloqueContenedorRecursos) {
               bloqueContenedorRecursos.insertAdjacentHTML("beforeend", resourceShellHTML);
+              // Trigger KaTeX rendering for the student content just injected
+              const targetAlumnoRecurso = document.getElementById(`${resourceBlockId}-alumno-contenido`);
+              if (targetAlumnoRecurso) {
+                renderizarStemPendienteUnidad(targetAlumnoRecurso);
+              }
             }
 
             const notasMaestroRaw = await _unidadGenerarNotasMaestroSeccion({

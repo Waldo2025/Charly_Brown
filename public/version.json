@@ -1,12 +1,11 @@
 {
-  "version": "1.0.5",
-  "build": "2026-1.0.5.43",
+  "version": "1.0.6",
+  "build": "2026-1.0.6.44",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Mejorado: Bloque de Estrategia Matemática ahora es contextual y variado.",
-    "Añadido: 6 categorías visuales (SVG) diferentes para Matemáticas: Aritmética, Geometría, Fracciones, Medición, Estadística y Álgebra.",
-    "Añadido: Pasos pedagógicos específicos para cada categoría de Matemáticas.",
-    "Arreglado: Eliminación de gráficos genéricos repetitivos en el subtema de Matemáticas."
+    "Arreglado: Renderizado de KaTeX (fórmulas matemáticas) en complementos como Fichas, Anexos, Recortables y Guiones de Video.",
+    "Corregido: Los recursos del alumno ahora activan el escaneo de KaTeX inmediatamente después de su inyección.",
+    "Mejorado: Sincronización completa de delimitadores LaTeX (incluyendo \\ce y \\pu) en todas las áreas de renderizado en tiempo real."
   ],
-  "cache_version": "1.0.5.43"
+  "cache_version": "1.0.6.44"
 }
