@@ -1,10 +1,11 @@
 {
-  "version": "1.0.8",
-  "build": "2026-1.0.8.46",
+  "version": "1.0.9",
+  "build": "2026-1.0.9.47",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Urgente: Corregido error de referencia 'visualDescription is not defined' en el generador de estrategias matemáticas.",
-    "Estabilizado: Sincronización de variables en la desestructuración del generador de contenido de Matemáticas."
+    "Corregido: Reinicio exhaustivo de numeración en exportaciones Word (ahora aplica para todos los niveles de anidación 0-8).",
+    "Arreglado: Errores de sintaxis regex que impedían la detección correcta de IDs de numeración en el motor de exportación.",
+    "Mejorado: Sincronización de niveles de indentación (ilvl) en el XML de Word para subinstrucciones."
   ],
-  "cache_version": "1.0.8.46"
+  "cache_version": "1.0.9.47"
 }

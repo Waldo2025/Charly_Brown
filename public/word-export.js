@@ -145,7 +145,7 @@ class TemplateNumberingAllocator {
   }
 
   _computeNextNumId() {
-    const ids = Array.from(this.numberingXml.matchAll(/<w:num\\b[^>]*w:numId="(\\d+)"/g))
+    const ids = Array.from(this.numberingXml.matchAll(/<w:num\b[^>]*w:numId="(\d+)"/g))
       .map((m) => Number(m[1] || 0))
       .filter((n) => Number.isFinite(n));
     return (ids.length ? Math.max(...ids) : 0) + 1;
@@ -176,14 +176,18 @@ class TemplateNumberingAllocator {
       `w:numId="${newNumId}"`
     );
 
-    if (!/<w:lvlOverride\\b/i.test(cloned)) {
+    if (!/<w:lvlOverride\b/i.test(cloned)) {
+      let overrides = "";
+      for (let i = 0; i <= 8; i++) {
+        overrides += `<w:lvlOverride w:ilvl="${i}"><w:startOverride w:val="1"/></w:lvlOverride>`;
+      }
       cloned = cloned.replace(
         new RegExp("</w:num>\\s*$", "i"),
-        '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>'
+        `${overrides}</w:num>`
       );
-    } else if (!/<w:startOverride\\b/i.test(cloned)) {
+    } else if (!/<w:startOverride\b/i.test(cloned)) {
       cloned = cloned.replace(
-        /<w:lvlOverride\\b([^>]*)>/i,
+        /<w:lvlOverride\b([^>]*)>/gi,
         '<w:lvlOverride$1><w:startOverride w:val="1"/>'
       );
     }
@@ -560,7 +564,7 @@ function listXml(listEl, ctx = {}, level = 0) {
       });
     }
     if (numIdToUse) {
-      extra = `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numIdToUse}"/></w:numPr>`;
+      extra = `<w:numPr><w:ilvl w:val="${normalizedLevel}"/><w:numId w:val="${numIdToUse}"/></w:numPr>`;
     }
   }
 
