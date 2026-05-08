@@ -1,13 +1,13 @@
 {
-  "version": "2026-1.0.1.37",
-  "title": "Estabilización de Reproducción",
-  "message": "Actualización disponible. Se ha corregido el desfase del playhead y el stop del audio. Si algo falla, haz hard refresh.",
+  "version": "2026-1.0.1.38",
+  "title": "Optimización de Secuencia Pedagógica",
+  "message": "Mejoras en iconografía de Primero, distribución de recursos y orden de categorías. Haz hard refresh si no ves los cambios.",
   "forceClearCache": true,
-  "forceClearCacheReason": "Unified playback synchronization engine update",
+  "forceClearCacheReason": "Pedagogical pipeline synchronization and iconography normalization",
   "updates": [
-    "Fix: Estabilización total del playhead y sincronización de tiempo determinística.",
-    "Fix: Corrección de la parada de música de fondo al hacer Stop.",
-    "Mejora: Simplificación del motor de transporte para evitar desfasamientos.",
-    "Mejora: Sincronización inmediata entre la regla del timeline y el controlador de audio."
+    "Mejora: Normalización de iconografía 'Verbo a Icono' para Primero.",
+    "Mejora: Distribución pedagógica de recursos (un recurso por actividad).",
+    "Fix: Orden de categorías en el resultado (Matemáticas al final).",
+    "Fix: Corrección de bloques 'Para saber más' y 'El poder de la palabra'."
   ]
 }
