@@ -552,7 +552,7 @@ function listXml(listEl, ctx = {}, level = 0) {
   if (ctx?.useTemplateStyles && ctx?.template?.stylesXml) {
     const baseNumId = extractStyleNumId(ctx.template.stylesXml, listStyleId);
     let numIdToUse = baseNumId;
-    const shouldRestart = tag === "ol" && normalizedLevel >= 1 && ctx?.activityGroupKey && ctx?.template?.numberingAllocator;
+    const shouldRestart = tag === "ol" && normalizedLevel >= 0 && ctx?.activityGroupKey && ctx?.template?.numberingAllocator;
     if (shouldRestart && baseNumId) {
       numIdToUse = ctx.template.numberingAllocator.ensureRestartedNumId({
         groupKey: `${ctx.activityGroupKey}:L${normalizedLevel}`,

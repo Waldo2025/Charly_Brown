@@ -1926,7 +1926,9 @@ async function renderContenidoEnTiempoReal(targetEl, htmlFinal = "", shouldStop 
         renderMathInElement(targetEl, {
           delimiters: [
             { left: "$$", right: "$$", display: true },
-            { left: "$", right: "$", display: false }
+            { left: "\\[", right: "\\]", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false }
           ],
           throwOnError: false
         });
@@ -30998,6 +31000,16 @@ function limpiarHTML(html = "") {
       if (htmlPart) htmlPart.remove();
     }
   });
+
+  // Arreglo de mangling común (Ifrac, |times, etc.)
+  tmp.innerHTML = tmp.innerHTML
+    .replace(/Ifrac\b/g, "\\frac")
+    .replace(/Itext\b/g, "\\text")
+    .replace(/Itimes\b/g, "\\times")
+    .replace(/\|times\b/g, "\\times")
+    .replace(/\\frac\{([^}]+)X([^}]+)\}/g, "\\frac{$1}{$2}")
+    .replace(/\\frac\{([^}]+)y([^}]+)\}/g, "\\frac{$1}{$2}")
+    .replace(/\\frac\{([^}]+)K([^}]+)\}/g, "\\frac{$1}{$2}");
 
   // 0) Normalizar etiquetas visuales para exportación Word
   tmp.querySelectorAll(".unidad-metadatos-etiquetas").forEach((group) => {

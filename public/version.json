@@ -1,13 +1,13 @@
 {
-  "version": "1.0.3",
-  "build": "2026-1.0.3.41",
+  "version": "1.0.4",
+  "build": "2026-1.0.4.42",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Arreglado: Mangling de fórmulas matemáticas (LaTeX) en las exportaciones a Word.",
-    "Arreglado: Reinicio de numeración de sub-actividades en el Word.",
-    "Mejorado: Espaciado y márgenes en el documento Word exportado.",
-    "Añadido: Mapeo de estilos específicos para actividades y sub-actividades en Word.",
-    "Mejora en los prompts para asegurar la coherencia de la numeración ASC."
+    "Corrección definitiva: Reinicio de numeración en Word para listas de primer nivel dentro de actividades.",
+    "Corrección: Eliminación de mangling de LaTeX (Ifrac, Itimes, etc.) en exportación a Word mediante limpieza heurística.",
+    "Mejora: Sincronización de delimitadores de KaTeX en el renderizado en tiempo real.",
+    "Refuerzo de Prompts: Prohibición estricta de numeración manual en subactividades para evitar duplicidad.",
+    "Refuerzo de Prompts: Instrucciones explícitas para el uso de LaTeX estándar y barras invertidas."
   ],
-  "cache_version": "1.0.3.41"
+  "cache_version": "1.0.4.42"
 }

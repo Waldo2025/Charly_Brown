@@ -88,7 +88,9 @@ export function buildUnidadActivityStructureContract({
     - Cada actividad debe ir dentro de <div class="activity">.
     - La estructura interna de cada actividad debe seguir el CONTRATO DE FORMATO indicado en las instrucciones específicas del usuario.
     - Si el contrato alternativo no es ASC, evita el molde clásico de subinstrucciones a), b), c), d) con bloque final "Respuesta:".
-    - Si el contrato alternativo sí es ASC, conserva exactamente la secuencia original: instrucción principal + subinstrucciones NUMERADAS 1, 2, 3... (Reinicia siempre la numeración en 1 para cada nueva actividad).
+    - Si el contrato alternativo sí es ASC, conserva la secuencia original: instrucción principal + subinstrucciones.
+    - REGLA DE NUMERACIÓN ASC: NUNCA escribas los números manualmente (ej: No escribas "1.", "2."). Usa exclusivamente etiquetas <li> dentro de un <ol>.
+    - REGLA DE REINICIO: Cada nueva actividad <div class="activity"> DEBE reiniciar su lista <ol> para que comience siempre en 1.
     - Si el contrato alternativo sí es ASC, genera normalmente 3 o 4 subinstrucciones por actividad. No reduzcas todo a una sola.
     - En formato ASC, cada subinstrucción debe llevar inmediatamente debajo su propia respuesta o evidencia esperada dentro de <div class="answer">...</div>. No coloques una sola respuesta global al final si existen varias subinstrucciones.
     `;
@@ -266,7 +268,11 @@ export function buildUnidadResourceGenerationStepPrompt({
     - Usa la clave exacta proporcionada.
     - El contenido debe ser profundo, útil y alineado al grado.
     - No inventes actividades para el alumno dentro de anexos, recortables o videos; son recursos de apoyo.
-    - 🚨 REGLA CRÍTICA PARA MATEMÁTICAS: Todas las fórmulas, ecuaciones, operaciones y expresiones matemáticas DEBEN escribirse usando sintaxis LaTeX entre símbolos de dólar (ej: $x^2 + y^2 = r^2$ para inline o $$ \frac{a}{b} $$ para bloques).
+    - 🚨 REGLA CRÍTICA PARA MATEMÁTICAS: Todas las fórmulas, ecuaciones, operaciones y expresiones matemáticas DEBEN escribirse usando sintaxis LaTeX ESTÁNDAR entre símbolos de dólar (ej: $x^2 + y^2 = r^2$ para inline o $$ \frac{a}{b} $$ para bloques).
+      - NUNCA uses variaciones como "Ifrac", "Itext", "Itimes" o reemplaces llaves {} con otros caracteres. Usa exclusivamente la barra invertida "\" para comandos LaTeX.
+    - 🚨 REGLA CRÍTICA PARA NUMERACIÓN: NUNCA escribas los números de las subactividades manualmente dentro del texto (ej: No escribas "25. Pregunta..."). 
+      - Las subactividades deben ir dentro de elementos <li> de una lista <ol> y el sistema se encargará de la numeración automática.
+      - Asegúrate de que cada nueva actividad reinicie su lista interna para que comience siempre en 1.
     - 🚨 REGLA CRÍTICA PARA VIDEOS: DEBES generar **exactamente UNA sección de guion de video**.
       - Debe presentarse como una sección independiente con data-resource-section="true" data-resource-type="video".
       - El guion NO puede ser genérico ni hablar sobre "el proyecto" o "las fases del proyecto" de forma abstracta.
