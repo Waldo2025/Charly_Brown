@@ -1,12 +1,10 @@
 {
-  "version": "1.0.7",
-  "build": "2026-1.0.7.45",
+  "version": "1.0.8",
+  "build": "2026-1.0.8.46",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Arreglado: Reinicio de numeración de subinstrucciones en exportaciones Word (ahora se detectan correctamente los bloques de actividad).",
-    "Mejorado: Legibilidad de fórmulas matemáticas en Word mediante conversión automática de LaTeX a texto legible (ej. fracciones, símbolos ×, √, etc.).",
-    "Mejorado: Bloque de Estrategia Matemática con descripciones visuales detalladas y compatibilidad total con exportación a Word.",
-    "Añadido: Soporte de visuales específicos para 6 categorías matemáticas (Aritmética, Geometría, Fracciones, Medición, Estadística, Álgebra)."
+    "Urgente: Corregido error de referencia 'visualDescription is not defined' en el generador de estrategias matemáticas.",
+    "Estabilizado: Sincronización de variables en la desestructuración del generador de contenido de Matemáticas."
   ],
-  "cache_version": "1.0.7.45"
+  "cache_version": "1.0.8.46"
 }
