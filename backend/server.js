@@ -33,6 +33,9 @@ const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "on-screen-text-render-spec.js"));
+const {
+  extractFeaturedSourceTextFromHtml
+} = require("./featured-source-extractor.js");
 
 let admin = null;
 let GoogleGenAI = null;
@@ -207,6 +210,19 @@ function clamp01(value, fallback = 0) {
 
 function clampPct01(value, fallback = 0.5) {
   return clamp01(value, fallback);
+}
+
+function isPrivateHostname(hostname = "") {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".local")) return true;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+    if (host.startsWith("10.")) return true;
+    if (host.startsWith("127.")) return true;
+    if (host.startsWith("192.168.")) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
+  }
+  return false;
 }
 
 function parseHexColor(value = "", fallback = "F8FAFC") {
@@ -1673,41 +1689,35 @@ function sanitizePodcasterSession(raw = {}) {
     stutterEnabled: input?.stutterEnabled === true,
     stutterLevel: Math.max(0, Math.min(disfluencyMax.stutterLevel, Number(input?.stutterLevel ?? disfluencyDefaults.stutterLevel) || disfluencyDefaults.stutterLevel))
   });
+  const normalizeProposalList = (list = []) => Array.from(new Set(
+    (Array.isArray(list) ? list : [])
+      .map((entry) => clampText(entry || "", 5000))
+      .filter(Boolean)
+  )).slice(0, 80);
   const rowsInput = Array.isArray(raw?.script?.rows) ? raw.script.rows : [];
-  const rows = rowsInput.slice(0, 400).map((row, index) => ({
-    id: clampText(row?.id || `row_${index + 1}`, 80) || `row_${index + 1}`,
-    speaker: clampText(row?.speaker || "Host A", 80) || "Host A",
-    expression: clampText(row?.expression || "Neutral", 80) || "Neutral",
-    durationSec: Math.max(6, Math.min(180, Number(row?.durationSec) || 18)),
-    mediaCue: clampText(row?.mediaCue || "Sin media", 80) || "Sin media",
-    text: clampText(row?.text || "", 12000),
-    notes: clampText(row?.notes || "", 5000),
-    voiceOverText: clampText(row?.voiceOverText || "", 12000),
-    voiceOverOriginalText: clampText(row?.voiceOverOriginalText || "", 12000),
-    sceneDescription: clampText(row?.sceneDescription || "", 5000),
-    onScreenText: clampText(row?.onScreenText || "", 1600),
-    onScreenTextNoSummarize: row?.onScreenTextNoSummarize === true,
-    transition: clampText(row?.transition || "", 1200),
-    visualNotes: clampText(row?.visualNotes || "", 5000),
-    visualNotesOriginalText: clampText(row?.visualNotesOriginalText || "", 5000),
-    visualNotesOriginalStored: row?.visualNotesOriginalStored === true,
-    videoDirective: clampText(row?.videoDirective || "", 1400),
-    scenePrompt: clampText(row?.scenePrompt || "", 1200),
-    imagePrompts: Array.isArray(row?.imagePrompts)
-      ? row.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
-      : String(row?.imagePrompts || "")
-        .split(/\n+/)
-        .map((prompt) => clampText(prompt || "", 1200))
-        .filter(Boolean)
-        .slice(0, 3),
-    publicSceneLibraryId: clampText(row?.publicSceneLibraryId || "", 140),
-    publicScenePublishedAt: clampText(row?.publicScenePublishedAt || "", 64),
-    publicSceneTitle: clampText(row?.publicSceneTitle || "", 220),
-    publicSceneThumbUrl: clampText(row?.publicSceneThumbUrl || "", 3000),
-    publicSceneVideoUrl: clampText(row?.publicSceneVideoUrl || "", 3000),
-    sourcePublicSceneLibraryId: clampText(row?.sourcePublicSceneLibraryId || "", 140),
-    disfluencyConfig: normalizeDisfluency(row?.disfluencyConfig || {})
-  }));
+  const rows = rowsInput.slice(0, 400).map((row, index) => {
+    const nextRow = { ...row };
+    
+    // Asegurar campos canónicos con sanitización y fallbacks
+    nextRow.id = clampText(row?.id || `row_${index + 1}`, 80) || `row_${index + 1}`;
+    nextRow.speaker = clampText(row?.speaker || "Host A", 80) || "Host A";
+    nextRow.expression = clampText(row?.expression || "Neutral", 80) || "Neutral";
+    nextRow.durationSec = Math.max(6, Math.min(180, Number(row?.durationSec) || 18));
+    nextRow.mediaCue = clampText(row?.mediaCue || "Sin media", 80) || "Sin media";
+    nextRow.text = clampText(row?.text || row?.Guion || row?.guion || row?.guión || row?.voiceOverText || "", 12000);
+    nextRow.voiceOverText = clampText(row?.voiceOverText || row?.text || row?.Guion || row?.guion || row?.guión || "", 12000);
+    nextRow.sceneDescription = clampText(row?.sceneDescription || row?.description || row?.Descripción || row?.scenePrompt || "", 5000);
+    nextRow.onScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 1600);
+    nextRow.visualNotes = clampText(row?.visualNotes || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "", 5000);
+    
+    // Sanitizar otros campos conocidos si existen
+    if (nextRow.notes) nextRow.notes = clampText(nextRow.notes, 5000);
+    if (nextRow.transition) nextRow.transition = clampText(nextRow.transition, 1200);
+    if (nextRow.videoDirective) nextRow.videoDirective = clampText(nextRow.videoDirective, 1400);
+    if (nextRow.scenePrompt) nextRow.scenePrompt = clampText(nextRow.scenePrompt, 1200);
+
+    return nextRow;
+  });
   const hosts = Array.isArray(raw?.script?.hosts)
     ? raw.script.hosts.slice(0, 10).map((host) => clampText(host, 80)).filter(Boolean)
     : [];
@@ -2721,6 +2731,101 @@ function pcm16ToWavBuffer(pcmBuffer = Buffer.alloc(0), sampleRate = 24000) {
   header.write("data", 36);
   header.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([header, pcm]);
+}
+
+function buildFfmpegAtempoFilterChain(speedRatio = 1) {
+  const target = Math.max(0.25, Math.min(4, Number(speedRatio) || 1));
+  const filters = [];
+  let remaining = target;
+  while (remaining > 2.0001) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  while (remaining < 0.4999) {
+    filters.push("atempo=0.5");
+    remaining /= 0.5;
+  }
+  filters.push(`atempo=${remaining.toFixed(5)}`);
+  return filters.join(",");
+}
+
+async function retimeDialogueAudioBufferToTargetDuration(buffer = Buffer.alloc(0), {
+  targetDurationSec = 0,
+  measuredDurationSec = 0,
+  mimeType = "audio/wav"
+} = {}) {
+  const source = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  const target = Math.max(0, Number(targetDurationSec || 0) || 0);
+  const measured = Math.max(0, Number(measuredDurationSec || 0) || 0);
+  if (!source.length || target <= 0.05 || measured <= 0.05) {
+    return {
+      buffer: source,
+      mimeType: String(mimeType || "audio/wav").trim() || "audio/wav",
+      durationSec: measured,
+      applied: false,
+      appliedSpeedRatio: 1
+    };
+  }
+  const desiredSpeedRatio = Math.max(0.25, Math.min(4, measured / target));
+  if (Math.abs(desiredSpeedRatio - 1) < 0.035 || !isFfmpegAvailable()) {
+    return {
+      buffer: source,
+      mimeType: String(mimeType || "audio/wav").trim() || "audio/wav",
+      durationSec: measured,
+      applied: false,
+      appliedSpeedRatio: desiredSpeedRatio
+    };
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const inputPath = path.join(os.tmpdir(), `cb-dialogue-audio-${token}.wav`);
+  const outputPath = path.join(os.tmpdir(), `cb-dialogue-audio-${token}-retimed.wav`);
+  try {
+    await fs.promises.writeFile(inputPath, source);
+    await runFfmpegCommand([
+      "-hide_banner",
+      "-y",
+      "-i",
+      inputPath,
+      "-vn",
+      "-filter:a",
+      buildFfmpegAtempoFilterChain(desiredSpeedRatio),
+      "-ar",
+      "24000",
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      outputPath
+    ], {
+      stage: "dialogue_audio_retime",
+      timeoutMs: 20000,
+      timeoutCode: "dialogue_audio_retime_timeout"
+    });
+    const retimedBuffer = await fs.promises.readFile(outputPath);
+    const retimedDurationSec = clampNumber(parseWavDurationSeconds(retimedBuffer), 0, 180, 0);
+    if (!retimedBuffer.length || retimedDurationSec <= 0.05) {
+      return {
+        buffer: source,
+        mimeType: String(mimeType || "audio/wav").trim() || "audio/wav",
+        durationSec: measured,
+        applied: false,
+        appliedSpeedRatio: desiredSpeedRatio
+      };
+    }
+    return {
+      buffer: retimedBuffer,
+      mimeType: "audio/wav",
+      durationSec: retimedDurationSec,
+      applied: true,
+      appliedSpeedRatio: desiredSpeedRatio
+    };
+  } finally {
+    await Promise.allSettled([
+      fs.promises.unlink(inputPath),
+      fs.promises.unlink(outputPath)
+    ]);
+  }
 }
 
 function getVideoExtension(mimeType = "video/mp4") {
@@ -4041,6 +4146,75 @@ app.post("/api/moodle/instruction-images/import", async (req, res) => {
     });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo importar la imagen remota del módulo.") });
+  }
+});
+
+app.post("/api/moodle/extract-featured-source", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    if (!uid) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+
+    const sourceUrl = clampText(String(req.body?.url || "").trim(), 2400);
+    if (!sourceUrl) {
+      return res.status(400).json({ error: "Falta la URL de la fuente destacada." });
+    }
+
+    let parsed = null;
+    try {
+      parsed = new URL(sourceUrl);
+    } catch (_) {
+      return res.status(400).json({ error: "La URL de la fuente destacada no es válida." });
+    }
+
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol !== "https:" && protocol !== "http:") {
+      return res.status(400).json({ error: "Solo se permiten URLs http o https." });
+    }
+    if (isPrivateHostname(parsed.hostname)) {
+      return res.status(403).json({ error: "No se permiten hosts privados o locales para esta extracción." });
+    }
+
+    const upstream = await fetchCompat(parsed.toString(), {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "CharlyBrown-FeaturedSource/1.0",
+        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
+      }
+    });
+
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `No se pudo leer la fuente web (${upstream.status}).` });
+    }
+
+    const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.includes("text/html") && !contentType.includes("text/plain")) {
+      return res.status(415).json({ error: "La fuente web no devolvió contenido textual legible." });
+    }
+
+    const html = String(await upstream.text()).trim();
+    if (!html) {
+      return res.status(422).json({ error: "La fuente web respondió vacía." });
+    }
+
+    const extraction = extractFeaturedSourceTextFromHtml(html, String(upstream.url || parsed.toString()).trim());
+    const extractedText = String(extraction?.extractedText || "").trim();
+    if (!extractedText || extractedText.length < 120) {
+      return res.status(422).json({ error: "No se pudo extraer suficiente contenido legible de la fuente web." });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      source: {
+        finalUrl: String(extraction?.finalUrl || upstream.url || parsed.toString()).trim(),
+        title: String(extraction?.title || "").trim(),
+        extractedText: extractedText.slice(0, 120000)
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo extraer la fuente destacada.") });
   }
 });
 
@@ -6132,6 +6306,8 @@ function buildGeminiTtsPrompt({
   voiceName = "",
   expression = "Neutral",
   targetSpeechLine = "",
+  targetDurationSec = 0,
+  speechRateHint = 1,
   originalText = "",
   disfluencyInstruction = "",
   notes = "",
@@ -6144,6 +6320,8 @@ function buildGeminiTtsPrompt({
   const styleLine = [buildGeminiTtsBaseStyle(expression), direction.stylePrompt].filter(Boolean).join(" ");
   const pacingLine = direction.pacingPrompt || "Conversacional, fluido y con pausas naturales.";
   const accentLine = direction.accentPrompt || "Español latino neutro, dicción clara.";
+  const cleanTargetDurationSec = Math.max(0, Number(targetDurationSec || 0) || 0);
+  const cleanSpeechRateHint = Math.max(0.5, Math.min(1.85, Number(speechRateHint || 1) || 1));
   const sceneLine = direction.scenePrompt || (String(contentMode || "").trim().toLowerCase() === "educational"
     ? "Explicación cercana de estudio, clara y humana."
     : "Conversación de podcast en estudio, cercana y natural.");
@@ -6162,6 +6340,8 @@ function buildGeminiTtsPrompt({
     "### DIRECTOR'S NOTES",
     `Style: ${styleLine}`,
     `Pacing: ${pacingLine}`,
+    cleanTargetDurationSec > 0 ? `Target duration: approximately ${cleanTargetDurationSec.toFixed(2)} seconds.` : "",
+    `Speech rate hint: ${cleanSpeechRateHint.toFixed(2)}x relative pace. If the transcript is short for the target duration, slow down naturally; if it is long, tighten phrasing without sounding rushed.`,
     `Accent: ${accentLine}`,
     `Delivery guardrails: ${clampText(disfluencyInstruction || "Natural, clean articulation.", 1800)}`,
     notes ? `Additional notes: ${clampText(notes, 1200)}` : "",
@@ -6185,6 +6365,8 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
     const text = clampText(req.body?.text || "", 2000);
     const targetSpeechLine = clampText(req.body?.targetSpeechLine || text, 2200) || text;
+    const targetDurationSec = Math.max(0, Number(req.body?.targetDurationSec || 0) || 0);
+    const speechRateHint = Math.max(0.5, Math.min(1.85, Number(req.body?.speechRateHint || 1) || 1));
     const originalText = clampText(req.body?.originalText || "", 2000);
     const disfluencyInstruction = clampText(req.body?.disfluencyInstruction || "", 1800);
     const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || {});
@@ -6214,6 +6396,8 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
       voiceName,
       expression,
       targetSpeechLine,
+      targetDurationSec,
+      speechRateHint,
       originalText,
       disfluencyInstruction,
       notes,
@@ -6265,11 +6449,22 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     }
     const sampleRateMatch = firstMime.match(/rate=(\d+)/i);
     const sampleRate = sampleRateMatch ? Number(sampleRateMatch[1]) : 24000;
-    const finalBuffer = pcmLike ? pcm16ToWavBuffer(merged, sampleRate) : merged;
-    const finalMime = pcmLike ? "audio/wav" : (firstMime.startsWith("audio/") ? firstMime.split(";")[0] : "audio/wav");
-    const durationSec = pcmLike
+    const baseBuffer = pcmLike ? pcm16ToWavBuffer(merged, sampleRate) : merged;
+    const baseMime = pcmLike ? "audio/wav" : (firstMime.startsWith("audio/") ? firstMime.split(";")[0] : "audio/wav");
+    const naturalDurationSec = pcmLike
       ? clampNumber(merged.length / Math.max(1, sampleRate * 2), 0, 180, 0)
-      : clampNumber(parseWavDurationSeconds(finalBuffer), 0, 180, 0);
+      : clampNumber(parseWavDurationSeconds(baseBuffer), 0, 180, 0);
+    const retimedAudio = await retimeDialogueAudioBufferToTargetDuration(baseBuffer, {
+      targetDurationSec,
+      measuredDurationSec: naturalDurationSec,
+      mimeType: baseMime
+    });
+    const finalBuffer = retimedAudio?.buffer?.length ? retimedAudio.buffer : baseBuffer;
+    const finalMime = String(retimedAudio?.mimeType || baseMime).trim() || baseMime;
+    const durationSec = Math.max(
+      0,
+      Number(retimedAudio?.durationSec || 0) || clampNumber(parseWavDurationSeconds(finalBuffer), 0, 180, 0)
+    );
 
     const ext = getAudioExtension(finalMime);
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
@@ -6288,6 +6483,10 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
         speakerName,
         voiceName: voiceName || null,
         model,
+        targetDurationSec: targetDurationSec > 0 ? String(targetDurationSec) : null,
+        naturalDurationSec: naturalDurationSec > 0 ? String(naturalDurationSec) : null,
+        appliedSpeedRatio: Number(retimedAudio?.appliedSpeedRatio || 1).toFixed(5),
+        tempoAdjusted: retimedAudio?.applied ? "true" : "false",
         kind: "dialogue_audio"
       }
     });
@@ -6304,6 +6503,10 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
         model,
         promptVersion: "podcaster_live_audio_v1",
         durationSec,
+        targetDurationSec,
+        naturalDurationSec,
+        tempoAdjusted: retimedAudio?.applied === true,
+        appliedSpeedRatio: Number(retimedAudio?.appliedSpeedRatio || 1) || 1,
         targetSpeechLine,
         updatedAt: new Date().toISOString(),
         storagePath: asset.path,

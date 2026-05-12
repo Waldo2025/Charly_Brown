@@ -146,15 +146,18 @@ export function buildUnidadResourceExtraBlocks({
       - REGLA CRÍTICA: Las actividades de la ficha deben ser DIFERENTES y COMPLEMENTARIAS a las del proyecto o subtema principal. No repitas las mismas consignas.
       - PROHIBIDO incluir actividades normales del subtema fuera de este bloque de ficha.
       ${shouldUseTrazosFichaFormat ? `- Como este bloque usa formato Trazos y letras, cada actividad de ficha debe incluir SOLO:
-        1) instrucción principal en negritas,
-        2) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-        3) bloque <div class="answer"> con el modelo exacto a trazar o copiar.
-      - NO uses subactividades, listas <ol>/<ul>, pasos internos ni viñetas.
-      - Deben ser exactamente 4 instrucciones simples con su answer correspondiente.` : `- Cada actividad de ficha debe incluir:
-        1) instrucción principal en negritas,
-        2) de 1 a 4 subactividades útiles,
+        1) Envuelta en <div class="activity">.
+        2) instrucción principal en negritas,
         3) modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI],
-        4) respuesta esperada concreta en magenta.`}
+        4) bloque <div class="answer"> con el modelo exacto a trazar o copiar.
+      - NO uses subactividades, listas <ol>/<ul>, pasos internos ni viñetas.
+      - Deben ser exactamente 4 instrucciones simples con su answer correspondiente.` : `- Cada actividad de la ficha DEBE seguir rigurosamente el formato de actividad estándar:
+        1) Envuelta en <div class="activity">.
+        2) Instrucción principal en negritas (puedes incluir iconos [IC...] si es Primero).
+        3) Subinstrucciones dentro de <ol class="steps steps-numbered"> (etiquetas <li>).
+        4) Respuesta esperada en <div class="answer"> debajo de cada <li>.
+        5) Modalidad [IC T. IND] / [IC T. PAR] / [IC T. EQUI].
+      - Genera normalmente 4 actividades independientes dentro de la sección de ficha.`}
       `;
   }
 
@@ -283,7 +286,7 @@ export function buildUnidadResourceGenerationStepPrompt({
       - REGLA ESTRICTA PARA LA COLUMNA "Guion": cada escena debe escribirse como UNA frase completa, natural y cerrada.
       - Cada frase de la columna "Guion" debe tener entre 14 y 17 palabras máximo.
       - NO cortes frases a la mitad, NO uses fragmentos telegráficos y NO metas dos oraciones en la misma celda.
-    - 🚨 REGLA CRÍTICA PARA ANEXOS/RECORTABLES/FICHAS: Sigue los estándares de profundidad y formato (data-resource-section="true").
+    ${buildUnidadResourceExtraBlocks({ recursos, separarSeccionesRecursos: true, isTrazosDeLetras, hasTrazosStyle: isTrazosDeLetras })}
     - Responde solo con el HTML.
   `;
 }

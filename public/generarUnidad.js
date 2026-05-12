@@ -23089,7 +23089,7 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
 
   const pushCurrent = () => {
     if (!current) return;
-    if (current.lead || current.steps.length || current.paragraphs.length) {
+    if (current.lead || current.blocks.length) {
       activities.push(current);
     }
     current = null;
@@ -23097,8 +23097,7 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
 
   const createActivity = (lead = "") => ({
     lead: String(lead || "").trim(),
-    steps: [],
-    paragraphs: []
+    blocks: [] // { type: 'paragraph'|'list', text: string, steps: [] }
   });
 
   const isNumberedLine = (line = "") => /^\d+\.\s+/.test(String(line || "").trim());
@@ -23130,25 +23129,34 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
     if (isNumberedLine(line)) {
       const cleanedStep = line.replace(/^\d+\.\s*/, "").trim();
       const { text, answer } = _unidadSplitInlineRespuestaEnLinea(cleanedStep);
-      current.steps.push({
+      
+      let lastBlock = current.blocks[current.blocks.length - 1];
+      if (!lastBlock || lastBlock.type !== "list") {
+        lastBlock = { type: "list", steps: [] };
+        current.blocks.push(lastBlock);
+      }
+      
+      lastBlock.steps.push({
         text: text || cleanedStep,
         answer
       });
       return;
     }
 
-    if (current.steps.length) {
-      const nextStepWithoutAnswer = current.steps.find((step) => !step.answer);
-      if (nextStepWithoutAnswer) {
-        nextStepWithoutAnswer.answer = line;
-      } else {
-        const lastStep = current.steps[current.steps.length - 1];
-        lastStep.answer = `${lastStep.answer || ""} ${line}`.trim();
+    // Si hay una lista activa, intentamos ver si esta línea es una respuesta para el último paso
+    if (current.blocks.length > 0) {
+      const lastBlock = current.blocks[current.blocks.length - 1];
+      if (lastBlock.type === "list" && lastBlock.steps.length > 0) {
+        const nextStepWithoutAnswer = lastBlock.steps.find((step) => !step.answer);
+        if (nextStepWithoutAnswer) {
+          nextStepWithoutAnswer.answer = line;
+          return;
+        }
       }
-      return;
     }
 
-    current.paragraphs.push(line);
+    // Si no es respuesta, es un párrafo nuevo (que rompe la lista anterior si existía)
+    current.blocks.push({ type: "paragraph", text: line });
   });
 
   pushCurrent();
@@ -23168,20 +23176,27 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
     const leadHtml = leadSplit.text
       ? `<p><strong>${_escapeHtmlUnidad(leadSplit.text)}</strong></p>`
       : "";
-    const paragraphsHtml = activity.paragraphs.map((item) => `<p>${_escapeHtmlUnidad(item)}</p>`).join("");
-    const stepsHtml = activity.steps.length
-      ? `<ol class="steps" type="a">${activity.steps.map((step) => `
-            <li>
-              ${_escapeHtmlUnidad(step.text || "")}
-              ${step.answer ? `<div class="answer"><span style="color:mediumvioletred;">${_escapeHtmlUnidad(step.answer)}</span></div>` : ""}
-            </li>
-          `).join("")}</ol>`
-      : "";
-    const leadAnswerHtml = !activity.steps.length && leadSplit.answer
+    
+    const contentHtml = activity.blocks.map((block) => {
+      if (block.type === "paragraph") {
+        return `<p>${_escapeHtmlUnidad(block.text)}</p>`;
+      }
+      if (block.type === "list") {
+        return `<ol class="steps" type="a">${block.steps.map((step) => `
+          <li>
+            ${_escapeHtmlUnidad(step.text || "")}
+            ${step.answer ? `<div class="answer"><span style="color:mediumvioletred;">${_escapeHtmlUnidad(step.answer)}</span></div>` : ""}
+          </li>
+        `).join("")}</ol>`;
+      }
+      return "";
+    }).join("");
+
+    const leadAnswerHtml = !activity.blocks.some(b => b.type === "list") && leadSplit.answer
       ? `<div class="answer"><span style="color:mediumvioletred;">${_escapeHtmlUnidad(leadSplit.answer)}</span></div>`
       : "";
 
-    return `<div class="activity">${leadHtml}${paragraphsHtml}${stepsHtml}${leadAnswerHtml}</div>`;
+    return `<div class="activity">${leadHtml}${contentHtml}${leadAnswerHtml}</div>`;
   }).join("");
 
   return `
@@ -29428,13 +29443,7 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
   };
 
   const preservePrimaryInstructionSupportTokens = (text = "") => {
-    const normalized = _unidadNormalizeMalformedIcTokens(text);
-    const preserved = [
-      ...(normalized.match(MODALITY_TOKEN_CAPTURE_REGEX) || []),
-      ...(normalized.match(PLECA_TOKEN_CAPTURE_REGEX) || [])
-    ].map((token) => String(token || "").replace(/\s+/g, " ").trim()).filter(Boolean);
-    const cleaned = _unidadStripIcTokens(normalized).replace(/\s+/g, " ").trim();
-    return [cleaned, ...preserved].filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
+    return _unidadNormalizeMalformedIcTokens(text).replace(/\s{2,}/g, " ").trim();
   };
 
   const activities = Array.from(root.querySelectorAll(".activity, .activity-fichas, .phase .activity"));
@@ -29445,7 +29454,7 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
 
     activity.querySelectorAll("ol.steps li, ol.steps-numbered li, ol li, ul li").forEach((li) => {
       if (li.closest(".answer")) return;
-      cleanNodeTextContent(li, { stripOnly: true });
+      cleanNodeTextContent(li, { stripOnly: false });
     });
 
     const mainParagraph = Array.from(activity.children).find((child) => child instanceof Element && child.tagName === "P");
@@ -29453,26 +29462,21 @@ function _unidadApplyPrimerGradoInstructionIconKeys(html = "", grado = "", subte
 
     const strong = mainParagraph.querySelector("strong");
     if (strong instanceof Element) {
-      const strongTextRaw = String(strong.textContent || "");
-      const strongTextClean = _unidadStripIcTokens(_unidadNormalizeMalformedIcTokens(strongTextRaw)).replace(/\s+/g, " ").trim();
-      let fallbackToken = "";
-
-      const directTokenMatch = _unidadNormalizeMalformedIcTokens(strongTextRaw).match(/\[(?:IC\.?|IC)\s*[^\]]+\]/i);
-      if (directTokenMatch) {
-        fallbackToken = String(directTokenMatch[0] || "").replace(/\s+/g, " ").trim();
+      let strongTextRaw = String(strong.textContent || "");
+      strongTextRaw = _unidadNormalizeMalformedIcTokens(strongTextRaw);
+      
+      if (!/\[(?:IC\.?|IC)\s*[^\]]+\]/i.test(strongTextRaw)) {
+        let replaced = _unidadReplaceActionWordsWithPrimerKeysInText(strongTextRaw);
+        if (replaced === strongTextRaw) {
+          const fallback = _unidadInferPrimerGradoInstructionFallbackToken(strongTextRaw);
+          if (fallback) {
+            replaced = `${fallback} ${strongTextRaw}`;
+          }
+        }
+        strong.textContent = replaced.replace(/\s{2,}/g, " ").trim();
+      } else {
+        strong.textContent = strongTextRaw.replace(/\s{2,}/g, " ").trim();
       }
-
-      if (!fallbackToken) {
-        const replaced = _unidadReplaceActionWordsWithPrimerKeysInText(strongTextClean);
-        const replacedMatch = String(replaced || "").match(/\[(?:IC\.?|IC)\s*[^\]]+\]/i);
-        if (replacedMatch) fallbackToken = String(replacedMatch[0] || "").trim();
-      }
-
-      if (!fallbackToken) {
-        fallbackToken = _unidadInferPrimerGradoInstructionFallbackToken(strongTextClean);
-      }
-
-      strong.textContent = [fallbackToken, strongTextClean].filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
     }
 
     const walker = doc.createTreeWalker(mainParagraph, NodeFilter.SHOW_TEXT);
@@ -31040,8 +31044,10 @@ function limpiarHTML(html = "") {
     el.removeAttribute("contenteditable");
   });
 
-  // 4) Quitar TODAS las clases (para que no se apliquen estilos por CSS)
+  // 4) Quitar TODAS las clases excepto las esenciales para el motor de Word
   tmp.querySelectorAll("*").forEach(el => {
+    const cls = String(el.className || "");
+    if (/activity|actividad|steps|answer|respuesta/i.test(cls)) return;
     el.removeAttribute("class");
   });
 

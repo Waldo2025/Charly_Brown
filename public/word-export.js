@@ -416,7 +416,8 @@ function mapParagraphStyle(el, ctx = {}) {
     if (/^eje articulador\b/i.test(text)) return styleMap.ejeArticulador || TEN_ED_STYLE_MAP.ejeArticulador;
     if (/^habilidad cognitiva\b/i.test(text) || /^habilidades\b/i.test(text)) return styleMap.habilidades || TEN_ED_STYLE_MAP.habilidades;
     if (/^t[ií]tulo secci[oó]n/i.test(text)) return styleMap.sectionTitle || TEN_ED_STYLE_MAP.sectionTitle;
-    if (/^actividad\b/i.test(text) || /^consigna\b/i.test(text)) return styleMap.activity || styleMap.sectionTitle || TEN_ED_STYLE_MAP.activity;
+    const isActivityTitle = /^actividad\b/i.test(text) || /^consigna\b/i.test(text) || (/^\d+[\.:]\s+/.test(text) && el.querySelector("strong"));
+    if (isActivityTitle) return styleMap.activity || styleMap.sectionTitle || TEN_ED_STYLE_MAP.activity;
     if (/^subactividad\b/i.test(text)) return styleMap.subactivity || styleMap.subtitleLevel2 || TEN_ED_STYLE_MAP.subactivity;
     if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return styleMap.instructions || TEN_ED_STYLE_MAP.instructions;
     if (/^sugerencia de respuesta\b/i.test(text) || /^respuesta\b/i.test(text) || /^respuesta esperada\b/i.test(text)) {
@@ -435,7 +436,8 @@ function mapParagraphStyle(el, ctx = {}) {
   if (/^respuesta/i.test(text) || /respuesta esperada/i.test(text)) return "CBAnswer";
   if (/^instrucciones\b/i.test(text) || /instrucci[oó]n\b/i.test(text)) return "CBInstructions";
   if (/^subinstrucci[oó]n/i.test(text)) return "CBSubinstructions";
-  if (/^actividad\b/i.test(text) || /^consigna\b/i.test(text)) return "CBActivity";
+  const isActivityTitleDefault = /^actividad\b/i.test(text) || /^consigna\b/i.test(text) || (/^\d+[\.:]\s+/.test(text) && el.querySelector("strong"));
+  if (isActivityTitleDefault) return "CBActivity";
   if (/^subactividad\b/i.test(text)) return "CBSubinstructions";
   if (/^nota\b/i.test(text) || /^orientaci[oó]n docente/i.test(text)) return "CBTeacherNote";
   if (/col-maestro/i.test(cls) || el?.closest?.(".col-maestro")) return "CBTeacherNote";
@@ -549,6 +551,9 @@ function listXml(listEl, ctx = {}, level = 0) {
       : (styleMap.listBullet || TEN_ED_STYLE_MAP.listBullet);
   };
 
+  ctx.listCounter = (ctx.listCounter || 0) + 1;
+  const currentListId = ctx.listCounter;
+
   const listStyleId = pickListStyleId();
   const baseStyle = ctx?.forceStyle || (ctx.inTable ? (styleMap?.tableText || "CBTableText") : listStyleId);
 
@@ -559,7 +564,7 @@ function listXml(listEl, ctx = {}, level = 0) {
     const shouldRestart = tag === "ol" && normalizedLevel >= 0 && ctx?.activityGroupKey && ctx?.template?.numberingAllocator;
     if (shouldRestart && baseNumId) {
       numIdToUse = ctx.template.numberingAllocator.ensureRestartedNumId({
-        groupKey: `${ctx.activityGroupKey}:L${normalizedLevel}`,
+        groupKey: `${ctx.activityGroupKey}:L${normalizedLevel}:G${currentListId}`,
         baseNumId
       });
     }
@@ -571,9 +576,7 @@ function listXml(listEl, ctx = {}, level = 0) {
   return Array.from(listEl.children)
     .filter((li) => li?.tagName?.toLowerCase?.() === "li")
     .map((li, idx) => {
-      const nextCtx = (ctx?.useTemplateStyles && tag === "ol" && normalizedLevel === 0)
-        ? { ...ctx, activityGroupKey: ctx.activityGroupKey || `ACT_${idx + 1}` }
-        : ctx;
+      const nextCtx = ctx;
       const nestedLists = Array.from(li.children || []).filter((child) => /^(ul|ol)$/i.test(child.tagName));
       const runs = Array.from(li.childNodes).map((child) => {
         if (child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)) return "";
@@ -604,6 +607,7 @@ function blockNodeToXml(node, ctx = {}) {
       if (!ctx.activityCounter) ctx.activityCounter = 0;
       ctx.activityCounter++;
       ctx.activityGroupKey = `ACT_${ctx.activityCounter}`;
+      ctx.listCounter = 0; // Reset list counter for every new activity block
     }
 
     const blockTags = new Set(["p","div","h1","h2","h3","h4","h5","ul","ol","table","hr","blockquote"]);
@@ -615,6 +619,20 @@ function blockNodeToXml(node, ctx = {}) {
     const forced = String(ctx?.forceStyle || "").trim();
     
     const styleId = forced || (ctx.inTable ? (ctx?.styleMap?.tableText || "CBTableText") : mapParagraphStyle(node, ctx));
+
+    // Reiniciar contadores si detectamos estilo de actividad o subactividad
+    const isAct = styleId === (ctx?.styleMap?.activity || TEN_ED_STYLE_MAP.activity);
+    const isSub = styleId === (ctx?.styleMap?.subactivity || TEN_ED_STYLE_MAP.subactivity);
+
+    if (isAct) {
+      if (!ctx.activityCounter) ctx.activityCounter = 0;
+      ctx.activityCounter++;
+      ctx.activityGroupKey = `ACT_${ctx.activityCounter}`;
+      ctx.listCounter = 0;
+    } else if (isSub) {
+      ctx.listCounter = 0;
+    }
+
     const spacing = spacingPprFromAttrs(node);
     return paragraphXml(runs || makeTextRun(node.textContent || ""), styleId, spacing);
   }

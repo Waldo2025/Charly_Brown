@@ -4226,12 +4226,39 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   white-space: nowrap;
   text-overflow: ellipsis;
   cursor: pointer;
+  padding-right: 38px;
 }
 
 .podcast-montage-audio-chip > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.podcast-montage-audio-chip-speed-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, rgba(15, 23, 42, 0.12) 78%, transparent 22%);
+  color: currentColor;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.podcast-montage-audio-chip-speed-btn:hover {
+  background: color-mix(in srgb, rgba(15, 23, 42, 0.2) 82%, transparent 18%);
+}
+
+.podcast-montage-audio-chip-speed-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, #60a5fa 80%, transparent 20%);
+  outline-offset: 1px;
 }
 
 .podcast-montage-audio-chip.is-stored {
@@ -4270,6 +4297,14 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-montage-audio-chip:focus-visible {
   outline: 2px solid color-mix(in srgb, #60a5fa 80%, transparent 20%);
   outline-offset: 2px;
+}
+
+.gemini-audio-speed-panel {
+  max-width: 420px;
+}
+
+#geminiAudioSpeedModal.floating-panel-modal {
+  z-index: 2147483647;
 }
 
 .podcast-audio-timeline-chip {
@@ -4556,6 +4591,26 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-video-timeline-clip.is-active .podcast-video-clip-body {
   background: color-mix(in srgb, var(--pod-accent) 10%, transparent 90%);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pod-accent) 26%, transparent 74%);
+}
+
+/* Colores de Propuestas en Timeline */
+.podcast-video-clip-body.has-pending-proposals {
+  background: color-mix(in srgb, #f59e0b 22%, transparent 78%) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 35%, transparent 65%);
+}
+.podcast-video-clip-body.has-all-proposals-realized {
+  background: color-mix(in srgb, #22c55e 25%, transparent 75%) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #22c55e 40%, transparent 60%);
+}
+
+.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-pending-proposals {
+  background: color-mix(in srgb, #f59e0b 40%, var(--pod-accent) 20%) !important;
+  box-shadow: inset 0 0 0 2px #f59e0b;
+}
+
+.podcast-video-timeline-clip.is-active .podcast-video-clip-body.has-all-proposals-realized {
+  background: color-mix(in srgb, #22c55e 45%, var(--pod-accent) 20%) !important;
+  box-shadow: inset 0 0 0 2px #22c55e;
 }
 
 .podcast-video-timeline-clip.is-active .podcast-video-clip-meta strong,
@@ -6787,12 +6842,135 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   gap: 8px;
 }
 
+/* Floating Menu Styles */
+.row-menu-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.row-floating-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--pod-border);
+  border-radius: var(--pod-radius-md);
+  box-shadow: var(--pod-shadow-lg);
+  min-width: 210px;
+  padding: 8px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1000;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  opacity: 0;
+}
+
+.row-menu-container.is-open .row-floating-menu {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--pod-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  border-radius: var(--pod-radius-sm);
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+  width: 100%;
+}
+
+.row-menu-item:hover {
+  background: var(--pod-surface-3);
+  color: var(--pod-accent);
+}
+
+.row-menu-item i {
+  width: 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--pod-muted);
+}
+
+.row-menu-item:hover i {
+  color: var(--pod-accent);
+}
+
+.row-menu-item.is-active {
+  color: var(--pod-accent);
+  background: var(--pod-accent-soft);
+}
+
+.row-menu-item.is-active i {
+  color: var(--pod-accent);
+}
+
+.row-menu-divider {
+  height: 1px;
+  background: var(--pod-border);
+  margin: 6px 4px;
+}
+
+.row-menu-item-danger {
+  color: #dc2626;
+}
+
+.row-menu-item-danger:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.row-menu-item-danger i {
+  color: #f87171;
+}
+
+.row-menu-item-danger:hover i {
+  color: #ef4444;
+}
+
 .row-chip {
   border-radius: 999px;
   padding: 6px 10px;
   background: var(--pod-surface-3);
   color: var(--pod-muted);
   font-size: 12px;
+}
+
+/* Badge de Propuestas */
+.proposal-badge {
+  font-size: 9px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+}
+
+.proposal-badge.is-pending {
+  background: #fbbf24;
+  color: #78350f;
+}
+
+.proposal-badge.is-realized {
+  background: #10b981;
+  color: #ffffff;
 }
 
 .row-chip-warning {
@@ -6948,13 +7126,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 }
 
 .row-active-proposal.is-resolved {
-  background: rgba(226, 232, 240, 0.08);
-  border-color: rgba(226, 232, 240, 0.38);
+  background: rgba(34, 197, 94, 0.12);
+  border-color: #22c55e;
 }
 
 .row-active-proposal.is-resolved .row-active-proposal-label,
 .row-active-proposal.is-resolved .row-active-proposal-text {
-  color: #cbd5e1;
+  color: #bbf7d0;
 }
 
 .row-active-proposal.is-resolved .row-active-proposal-text {

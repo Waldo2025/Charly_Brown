@@ -2,6 +2,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth
 
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
+const DEFAULT_RENDER_API_BASE = "https://charly-brown-gemini-backend.onrender.com/api";
 
 function getAlternateLocalApiUrl(url = "") {
   const finalUrl = String(url || "").trim();
@@ -14,8 +15,30 @@ function getAlternateLocalApiUrl(url = "") {
   return "";
 }
 
+function getRemoteFallbackUrl(url = "") {
+  const finalUrl = String(url || "").trim();
+  if (!isLoopbackApiBase(finalUrl)) return "";
+  const remoteBase = getRemoteApiBase();
+  if (!remoteBase) return "";
+  try {
+    const parsed = new URL(finalUrl);
+    const pathWithQuery = `${parsed.pathname || ""}${parsed.search || ""}`;
+    return buildApiUrlFromBase(remoteBase, pathWithQuery);
+  } catch (_) {
+    return "";
+  }
+}
+
 function getConfiguredApiBase() {
   return String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim();
+}
+
+export function getRemoteApiBase() {
+  return String(window.__CHARLY_CONFIG__?.remoteApiBaseUrl || DEFAULT_RENDER_API_BASE).trim().replace(/\/+$/, "");
+}
+
+export function isLoopbackApiBase(url = "") {
+  return /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i.test(String(url || "").trim());
 }
 
 function isLocalHostRuntime() {
@@ -65,6 +88,19 @@ export function buildApiUrl(path = "") {
   }
   if (input.startsWith("/")) return `${base}${input}`;
   return `${base}/${input.replace(/^\/+/, "")}`;
+}
+
+export function buildApiUrlFromBase(base, path = "") {
+  const root = String(base || "").trim().replace(/\/+$/, "");
+  const input = String(path || "").trim();
+  if (!root) return "";
+  if (!input) return root;
+  if (/^https?:\/\//i.test(input)) return input;
+  if (input.startsWith("/api/")) {
+    return root.endsWith("/api") ? `${root}${input.slice(4)}` : `${root}${input}`;
+  }
+  if (input.startsWith("/")) return `${root}${input}`;
+  return `${root}/${input.replace(/^\/+/, "")}`;
 }
 
 export async function getAuthHeaders(extra = {}) {
@@ -129,9 +165,15 @@ export async function authFetchJson(url, options = {}) {
   } catch (err) {
     const fallbackUrl = getAlternateLocalApiUrl(finalUrl);
     if (fallbackUrl) {
-      response = await fetch(fallbackUrl, requestInit);
-    } else {
-      throw err;
+      response = await fetch(fallbackUrl, requestInit).catch(() => null);
+    }
+    if (!response) {
+      const remoteFallbackUrl = getRemoteFallbackUrl(finalUrl);
+      if (remoteFallbackUrl) {
+        response = await fetch(remoteFallbackUrl, requestInit);
+      } else {
+        throw err;
+      }
     }
   }
   if (!response.ok && response.status === 404) {
@@ -142,6 +184,15 @@ export async function authFetchJson(url, options = {}) {
         response = fallbackResponse;
       } else if (fallbackResponse && fallbackResponse.status !== 404) {
         response = fallbackResponse;
+      }
+    }
+    if ((!response || response.status === 404) && getRemoteFallbackUrl(finalUrl)) {
+      const remoteFallbackUrl = getRemoteFallbackUrl(finalUrl);
+      const remoteFallbackResponse = await fetch(remoteFallbackUrl, requestInit).catch(() => null);
+      if (remoteFallbackResponse && remoteFallbackResponse.ok) {
+        response = remoteFallbackResponse;
+      } else if (remoteFallbackResponse && remoteFallbackResponse.status !== 404) {
+        response = remoteFallbackResponse;
       }
     }
   }

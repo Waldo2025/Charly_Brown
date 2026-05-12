@@ -3200,3 +3200,72 @@ body:not(.sidebar-collapsed) .home-wrapper {
 .aprende-preview-content-html table th {
   border: 1px solid #e2e8f0 !important;
 }
+/* Estilos de Propuestas en Dashboard */
+.proposal-badge {
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.proposal-badge.is-pending {
+  background: #fbbf24;
+  color: #78350f;
+}
+
+.proposal-badge.is-realized {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.proposal-item-dashboard {
+  border-radius: 10px;
+  margin-bottom: 8px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.proposal-item-dashboard.is-pending {
+  border-left: 4px solid #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.proposal-item-dashboard.is-resolved {
+  border-left: 4px solid #10b981;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.proposal-item-dashboard:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateX(4px);
+}
+
+#infoSceneActiveProposal {
+    padding: 10px 14px;
+    border-radius: 10px;
+    /* font-weight: 600; */
+    margin-top: 8px;
+    display: block;
+    line-height: 1.5;
+    /* font-size: 0.95rem; */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    color: white !important;
+}
+
+#infoSceneActiveProposal:not(.is-resolved) {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #ffffff;
+}
+
+#infoSceneActiveProposal.is-resolved {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+}

@@ -492,32 +492,29 @@ function sanitizePodcasterSession(raw = {}) {
     audioTags: normalizeInlineAudioTags(input?.audioTags || ttsDirectionDefaults.audioTags),
   });
   const rowsInput = Array.isArray(raw?.script?.rows) ? raw.script.rows : [];
-  const rows = rowsInput.slice(0, 400).map((row, index) => ({
-    id: clampText(row?.id || `row_${index + 1}`, 80) || `row_${index + 1}`,
-    speaker: clampText(row?.speaker || "Host A", 80) || "Host A",
-    expression: clampText(row?.expression || "Neutral", 80) || "Neutral",
-    durationSec: Math.max(6, Math.min(180, Number(row?.durationSec) || 18)),
-    mediaCue: clampText(row?.mediaCue || "Sin media", 80) || "Sin media",
-    text: clampText(row?.text || "", 12000),
-    notes: clampText(row?.notes || "", 5000),
-    videoDirective: clampText(row?.videoDirective || "", 1400),
-    scenePrompt: clampText(row?.scenePrompt || "", 1200),
-    imagePrompts: Array.isArray(row?.imagePrompts)
-      ? row.imagePrompts.slice(0, 3).map((prompt) => clampText(prompt || "", 1200)).filter(Boolean)
-      : String(row?.imagePrompts || "")
-        .split(/\n+/)
-        .map((prompt) => clampText(prompt || "", 1200))
-        .filter(Boolean)
-        .slice(0, 3),
-    publicSceneLibraryId: clampText(row?.publicSceneLibraryId || "", 140),
-    publicScenePublishedAt: clampText(row?.publicScenePublishedAt || "", 64),
-    publicSceneTitle: clampText(row?.publicSceneTitle || "", 220),
-    publicSceneThumbUrl: clampText(row?.publicSceneThumbUrl || "", 3000),
-    publicSceneVideoUrl: clampText(row?.publicSceneVideoUrl || "", 3000),
-    sourcePublicSceneLibraryId: clampText(row?.sourcePublicSceneLibraryId || "", 140),
-    disfluencyConfig: normalizeDisfluency(row?.disfluencyConfig || {}),
-    ttsDirectionConfig: normalizeTtsDirection(row?.ttsDirectionConfig || {}),
-  }));
+  const rows = rowsInput.slice(0, 400).map((row, index) => {
+    const nextRow = { ...row };
+    
+    // Asegurar campos canónicos con sanitización y fallbacks
+    nextRow.id = clampText(row?.id || `row_${index + 1}`, 80) || `row_${index + 1}`;
+    nextRow.speaker = clampText(row?.speaker || "Host A", 80) || "Host A";
+    nextRow.expression = clampText(row?.expression || "Neutral", 80) || "Neutral";
+    nextRow.durationSec = Math.max(6, Math.min(180, Number(row?.durationSec) || 18));
+    nextRow.mediaCue = clampText(row?.mediaCue || "Sin media", 80) || "Sin media";
+    nextRow.text = clampText(row?.text || row?.Guion || row?.guion || row?.guión || row?.voiceOverText || "", 12000);
+    nextRow.voiceOverText = clampText(row?.voiceOverText || row?.text || row?.Guion || row?.guion || row?.guión || "", 12000);
+    nextRow.sceneDescription = clampText(row?.sceneDescription || row?.description || row?.Descripción || row?.scenePrompt || "", 5000);
+    nextRow.onScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 1600);
+    nextRow.visualNotes = clampText(row?.visualNotes || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "", 5000);
+    
+    // Sanitizar otros campos conocidos si existen
+    if (nextRow.notes) nextRow.notes = clampText(nextRow.notes, 5000);
+    if (nextRow.transition) nextRow.transition = clampText(nextRow.transition, 1200);
+    if (nextRow.videoDirective) nextRow.videoDirective = clampText(nextRow.videoDirective, 1400);
+    if (nextRow.scenePrompt) nextRow.scenePrompt = clampText(nextRow.scenePrompt, 1200);
+
+    return nextRow;
+  });
   const hosts = Array.isArray(raw?.script?.hosts) ?
     raw.script.hosts.slice(0, 10).map((host) => clampText(host, 80)).filter(Boolean) :
     [];

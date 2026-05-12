@@ -1,5 +1,19 @@
-import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.1.14";
-import { buildApiUrl, getAuthHeaders, authFetchJson } from "./api-client.js?v=2026-1.0.1.14";
+import { obtenerModulo, guardarModulo, sincronizarModuloLocal } from "./moodleCourse.js?v=2026-1.0.10.52";
+import {
+  authFetchJson,
+  buildApiUrl,
+  buildApiUrlFromBase,
+  getAuthHeaders,
+  getRemoteApiBase,
+  isLoopbackApiBase
+} from "./api-client.js?v=2026-1.0.1.15";
+import {
+  FEATURED_SOURCE_MODULE_TYPE_NORMALIZED,
+  construirPromptFuentesDestacadas,
+  extraerConsignaFuentesDestacadasDesdeInstrucciones,
+  normalizarSalidaFuentesDestacadasMarkdown,
+  validarFuentesDestacadas
+} from "./moodleCourse-featuredSources.js?v=2026-1.0.1.24";
 
 function getGeminiEndpoint() {
   return buildApiUrl("/api/gemini/generate");
@@ -21,6 +35,66 @@ function isGeminiRegionUnsupportedMessage(message = "") {
   return String(message || "").toLowerCase().includes("user location is not supported for the api use");
 }
 
+async function extraerFuenteDestacadaStricta(modulo = {}) {
+  const validation = validarFuentesDestacadas(modulo);
+  if (!validation.ok) {
+    throw new Error(String(validation.error || "Faltan datos de la fuente destacada."));
+  }
+  const endpointPath = "/api/moodle/extract-featured-source";
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" }).catch(() => ({
+    "Content-Type": "application/json"
+  }));
+  const requestInit = {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ url: validation.url })
+  };
+  const primaryUrl = buildApiUrl(endpointPath);
+  const remoteUrl = isLoopbackApiBase(primaryUrl)
+    ? buildApiUrlFromBase(getRemoteApiBase(), endpointPath)
+    : "";
+  const candidates = [primaryUrl].filter(Boolean);
+  if (remoteUrl && remoteUrl !== primaryUrl) candidates.push(remoteUrl);
+
+  let lastError = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const requestUrl = candidates[index];
+    const isFallbackAttempt = index > 0;
+    try {
+      const response = await fetch(requestUrl, requestInit);
+      const data = await response.json().catch(() => ({}));
+      const extractedText = String(data?.source?.extractedText || "").trim();
+      if (!response.ok) {
+        const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
+        const shouldRetryRemote =
+          !isFallbackAttempt &&
+          remoteUrl &&
+          remoteUrl !== primaryUrl &&
+          [404, 502, 503, 504].includes(Number(response.status || 0));
+        if (shouldRetryRemote) {
+          continue;
+        }
+        throw new Error(String(detail));
+      }
+      if (!extractedText) {
+        throw new Error("La fuente destacada no devolvió contenido legible.");
+      }
+      return {
+        finalUrl: String(data?.source?.finalUrl || validation.url).trim(),
+        title: String(data?.source?.title || "").trim(),
+        extractedText
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isFallbackAttempt && remoteUrl && remoteUrl !== primaryUrl) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error("No se pudo extraer la fuente destacada.");
+}
+
 async function geminiGenerateRequest(payload = {}, options = {}) {
   const model = String(options?.model || getSelectedGeminiModel())
     .replace(/^models\//i, "")
@@ -29,7 +103,7 @@ async function geminiGenerateRequest(payload = {}, options = {}) {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" }).catch(() => ({
     "Content-Type": "application/json"
   }));
-  const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+  const requestInit = {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -37,9 +111,50 @@ async function geminiGenerateRequest(payload = {}, options = {}) {
       payload: payload && typeof payload === "object" ? payload : {}
     }),
     ...(options?.signal ? { signal: options.signal } : {})
-  });
-  const data = await response.json().catch(() => ({}));
-  return { response, data };
+  };
+  const endpointPath = "/api/gemini/generate";
+  const primaryUrl = buildApiUrl(endpointPath);
+  const remoteUrl = isLoopbackApiBase(primaryUrl)
+    ? buildApiUrlFromBase(getRemoteApiBase(), endpointPath)
+    : "";
+  const candidates = [primaryUrl].filter(Boolean);
+  if (remoteUrl && remoteUrl !== primaryUrl) candidates.push(remoteUrl);
+
+  let lastError = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const url = candidates[index];
+    const isFallbackAttempt = index > 0;
+    try {
+      const response = await fetch(url, requestInit);
+      const data = await response.json().catch(() => ({}));
+      const shouldRetryRemote =
+        !isFallbackAttempt &&
+        remoteUrl &&
+        remoteUrl !== primaryUrl &&
+        [404, 502, 503, 504].includes(Number(response.status || 0));
+      if (shouldRetryRemote) {
+        console.warn("[Gemini] Backend local no disponible para generate, reintentando en remoto.", {
+          status: Number(response.status || 0),
+          primaryUrl,
+          remoteUrl
+        });
+        continue;
+      }
+      return { response, data };
+    } catch (error) {
+      lastError = error;
+      if (!isFallbackAttempt && remoteUrl && remoteUrl !== primaryUrl) {
+        console.warn("[Gemini] Error de red en backend local, reintentando en remoto.", {
+          primaryUrl,
+          remoteUrl,
+          error: error?.message || String(error || "")
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error("No se pudo completar la solicitud a Gemini.");
 }
 
 function obtenerImagenesGeminiPorModulo(moduloId = "") {
@@ -243,6 +358,62 @@ function truncateText(value = "", maxChars = 2000) {
     const limit = Math.max(0, Number(maxChars) || 0);
     if (!clean || clean.length <= limit) return clean;
     return `${clean.slice(0, Math.max(0, limit - 24)).trim()}\n...[recortado]`;
+}
+
+const MODULO_GENERACION_RELATION_CONFIG = {
+    none: "none",
+    anterior: "anterior",
+    siguiente: "siguiente"
+};
+
+function inferirRelacionGeneracionModuloModo(modulo = {}) {
+    const raw = String(modulo?.relacionGeneracionModuloModo || "").trim().toLowerCase();
+    if (raw === MODULO_GENERACION_RELATION_CONFIG.anterior || raw === MODULO_GENERACION_RELATION_CONFIG.siguiente) {
+        return raw;
+    }
+    return MODULO_GENERACION_RELATION_CONFIG.none;
+}
+
+function usaContextoOtrosModulosGeneracionModulo(modulo = {}) {
+    if (modulo?.ignorarContextoOtrosModulos === true) return false;
+    return modulo?.usarContextoOtrosModulosGeneracionModulo !== false;
+}
+
+function obtenerIndiceModuloEnSubtema(subtema = null, moduloId = "") {
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    const moduloIdSafe = String(moduloId || "").trim();
+    const moduloIdShort = moduloIdSafe.split("_").pop();
+    return ids.findIndex((id) => {
+        const cleanId = String(id || "").trim();
+        return cleanId === moduloIdSafe || cleanId === moduloIdShort || cleanId.split("_").pop() === moduloIdShort;
+    });
+}
+
+async function obtenerModuloVecinoGeneracion(modulo = {}, subtema = null, cursoId = null, relationMode = MODULO_GENERACION_RELATION_CONFIG.none) {
+    if (!modulo?.id || relationMode === MODULO_GENERACION_RELATION_CONFIG.none) return null;
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    const currentIndex = obtenerIndiceModuloEnSubtema(subtema, modulo.id);
+    if (currentIndex < 0) return null;
+    const neighborIndex = relationMode === MODULO_GENERACION_RELATION_CONFIG.anterior ? currentIndex - 1 : currentIndex + 1;
+    if (neighborIndex < 0 || neighborIndex >= ids.length) return null;
+    return obtenerModulo(ids[neighborIndex], cursoId, { forceRefresh: true });
+}
+
+function resumirModuloParaContextoGeneracion(modulo = {}) {
+    const nombre = truncateText(modulo?.nombre || "Sin nombre", 180);
+    const tipo = truncateText(modulo?.tipo || "Sin tipo", 60);
+    const instrucciones = truncateText(stripHtmlToText(modulo?.instrucciones || ""), 900);
+    const propuesta = truncateText(stripHtmlToText(modulo?.contenido || ""), 1800);
+    const bloques = [
+        `Nombre: ${nombre}`,
+        `Tipo: ${tipo}`
+    ];
+    if (propuesta) {
+        bloques.push(`Propuesta generada existente:\n${propuesta}`);
+    } else if (instrucciones) {
+        bloques.push(`Actividad original / instrucciones:\n${instrucciones}`);
+    }
+    return bloques.join("\n");
 }
 
 function estimatePayloadBytes(payload = {}) {
@@ -992,6 +1163,31 @@ function inferirCantidadSolicitadaParaQuizz(texto = "") {
     return null;
 }
 
+function extraerPreguntasEnumeradasDelAutor(texto = "") {
+    const raw = String(texto || "");
+    if (!raw.trim()) return [];
+
+    const lines = raw
+        .split(/\r?\n/)
+        .map((line) => String(line || "").trim())
+        .filter(Boolean);
+
+    const preguntas = [];
+    for (const line of lines) {
+        const match = line.match(/^(?:pregunta\s*)?(\d{1,2})\s*[\.\-:)\]]+\s*(.+)$/i);
+        if (!match) continue;
+        const contenido = String(match[2] || "").trim();
+        if (!contenido) continue;
+        if (contenido.length < 8) continue;
+        preguntas.push({
+            numero: Number(match[1]),
+            texto: contenido
+        });
+    }
+
+    return preguntas;
+}
+
 function inferirCantidadActividadesBase(texto = "") {
     const raw = String(texto || "");
     if (!raw.trim()) return 0;
@@ -1010,6 +1206,51 @@ function normalizarTextoPlano(value = "") {
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
+}
+
+function detectarPerfilAutorQuizz(texto = "") {
+    const raw = String(texto || "");
+    const normalized = normalizarTextoPlano(raw);
+    const preguntasOriginales = extraerPreguntasEnumeradasDelAutor(raw);
+
+    const pidioTranscripcionLiteral =
+        /\b(no tocar|no toques|no modifiques|no modificar|sin modificar|transcrib|transcribir|transcribe|copia exacta|copiar exact|tal como estan|tal como estan|tal cual|exactamente como estan)\b/i.test(normalized);
+
+    const pidioPreguntasAbiertas =
+        /\b(preguntas abiertas|pregunta abierta|respuesta abierta|preguntas de desarrollo|desarrollo)\b/i.test(normalized);
+
+    const pidioNoAgregar =
+        /\b(no agregues|no anadas|no inventes|solo estas preguntas|solo estas|unicamente estas preguntas)\b/i.test(normalized);
+
+    const preservarPreguntasLiteralmente = pidioTranscripcionLiteral && preguntasOriginales.length > 0;
+    const cantidadObjetivo = preguntasOriginales.length || inferirCantidadSolicitadaParaQuizz(raw) || null;
+
+    return {
+        preguntasOriginales,
+        cantidadObjetivo,
+        preservarPreguntasLiteralmente,
+        pidioPreguntasAbiertas,
+        prohibirOpciones: pidioPreguntasAbiertas || preservarPreguntasLiteralmente,
+        prohibirRetroalimentacion: pidioPreguntasAbiertas || preservarPreguntasLiteralmente,
+        prohibirRespuestas: pidioPreguntasAbiertas || preservarPreguntasLiteralmente,
+        noAgregarReactivos: preservarPreguntasLiteralmente || pidioNoAgregar
+    };
+}
+
+function reforzarPerfilQuizzConModoEstructurado(perfil = {}, modoActivo = false) {
+    const base = perfil && typeof perfil === "object" ? perfil : {};
+    if (!modoActivo) return base;
+    const preguntasOriginales = Array.isArray(base.preguntasOriginales) ? base.preguntasOriginales : [];
+    return {
+        ...base,
+        cantidadObjetivo: preguntasOriginales.length || base.cantidadObjetivo || null,
+        preservarPreguntasLiteralmente: preguntasOriginales.length > 0 ? true : base.preservarPreguntasLiteralmente === true,
+        pidioPreguntasAbiertas: preguntasOriginales.length > 0 ? true : base.pidioPreguntasAbiertas === true,
+        prohibirOpciones: true,
+        prohibirRetroalimentacion: true,
+        prohibirRespuestas: true,
+        noAgregarReactivos: true
+    };
 }
 
 function detectarPreferenciasQuizz(texto = "", imageCount = 0) {
@@ -1562,7 +1803,7 @@ export async function generarModuloGemini(moduloId) {
     const cursoIdModulo = String(window.curso?.id || "").trim() || null;
 
     // 3. Traer módulo
-    let modulo = await obtenerModulo(moduloIdNormalizado, cursoIdModulo);
+    let modulo = await obtenerModulo(moduloIdNormalizado, cursoIdModulo, { forceRefresh: true });
     if (!modulo) {
         alert("No se encontró el módulo en Firebase.");
         moduleGenerationInFlight.delete(moduloIdNormalizado);
@@ -1570,8 +1811,20 @@ export async function generarModuloGemini(moduloId) {
         return;
     }
 
+    const tipoModuloNormalizado = typeof window.normalizarTipoModulo === "function"
+        ? window.normalizarTipoModulo(modulo?.tipo || "")
+        : String(modulo?.tipo || "").trim().toLowerCase();
+
+    if (tipoModuloNormalizado === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+        const moduloRefrescado = await obtenerModulo(moduloIdNormalizado, cursoIdModulo, { forceRefresh: true });
+        if (moduloRefrescado) {
+            modulo = moduloRefrescado;
+            sincronizarModuloLocal(moduloIdNormalizado, cursoIdModulo, moduloRefrescado);
+        }
+    }
+
     // 4. Validar instrucciones
-    if (!modulo.instrucciones || modulo.instrucciones.trim() === "") {
+    if (tipoModuloNormalizado !== FEATURED_SOURCE_MODULE_TYPE_NORMALIZED && (!modulo.instrucciones || modulo.instrucciones.trim() === "")) {
         const moduloRefrescado = await obtenerModulo(moduloIdNormalizado, cursoIdModulo, { forceRefresh: true });
         if (moduloRefrescado && String(moduloRefrescado.instrucciones || "").trim() !== "") {
             modulo = moduloRefrescado;
@@ -1591,10 +1844,84 @@ export async function generarModuloGemini(moduloId) {
     try {
         const instruccionesRaw = modulo.instrucciones || "";
         const cursoIdPersistencia = String(modulo.cursoId || cursoIdModulo || "").trim() || null;
+
+        if (tipoModuloNormalizado === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+            const validation = validarFuentesDestacadas(modulo);
+            if (!validation.ok) {
+                throw new Error(String(validation.error || "Faltan datos de la fuente destacada."));
+            }
+            const fuenteUrl = validation.url;
+            const fuenteReferencia = validation.referencia;
+            const usarContextoOtrosModulosGeneracion = usaContextoOtrosModulosGeneracionModulo(modulo);
+            const ignorarContextoOtrosModulos = !usarContextoOtrosModulosGeneracion;
+            const contextoCursoCompacto = ignorarContextoOtrosModulos ? "" : obtenerContextoCompactoDelCurso(window.curso, 12000);
+            const contextoSubtemaCompacto = ignorarContextoOtrosModulos ? "" : obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
+
+            setEstadoGeneracionModulo(moduloIdNormalizado, "Extrayendo el contenido real de la fuente web...", "info", true);
+            const extraction = await extraerFuenteDestacadaStricta({
+                ...modulo,
+                fuenteDestacadaUrl: fuenteUrl,
+                fuenteDestacadaReferencia: fuenteReferencia
+            });
+            const promptFuente = construirPromptFuentesDestacadas({
+                nombreModulo: modulo?.nombre || "Fuentes destacadas",
+                fuenteDestacadaUrl: extraction.finalUrl || fuenteUrl,
+                fuenteDestacadaReferencia: fuenteReferencia,
+                extractedText: extraction.extractedText,
+                extractedTitle: extraction.title || modulo?.nombre || "",
+                instruccionesAutor: extraerConsignaFuentesDestacadasDesdeInstrucciones(modulo?.instrucciones || ""),
+                contextoCurso: contextoCursoCompacto,
+                contextoSubtema: contextoSubtemaCompacto
+            });
+            setEstadoGeneracionModulo(moduloIdNormalizado, "Generando ficha completa de la fuente...", "info", true);
+            const { response: featuredRes, data: featuredData } = await geminiGenerateRequest({
+                contents: [{ parts: [{ text: promptFuente }] }]
+            });
+
+            if (!featuredRes.ok) {
+                const detalle = featuredData?.error?.message || featuredData?.error || featuredRes.statusText || `HTTP ${featuredRes.status}`;
+                throw new Error(`Gemini HTTP ${featuredRes.status}: ${detalle}`);
+            }
+            let textoFuente = featuredData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            textoFuente = limpiarBloquesCode(textoFuente);
+            textoFuente = limpiarRespuestaGemini(textoFuente);
+            textoFuente = normalizarSalidaFuentesDestacadasMarkdown(textoFuente);
+            const contenidoFuente = typeof window.normalizarContenidoModuloPersistible === "function"
+                ? window.normalizarContenidoModuloPersistible(textoFuente)
+                : typeof window.renderizarContenidoModulo === "function"
+                    ? window.renderizarContenidoModulo(textoFuente, modulo?.tipo || "")
+                    : textoFuente;
+
+            await guardarModulo(moduloIdNormalizado, {
+                contenido: contenidoFuente,
+                fuenteDestacadaUrl: fuenteUrl,
+                fuenteDestacadaReferencia: fuenteReferencia
+            }, cursoIdPersistencia);
+            const moduloGuardado = await obtenerModulo(moduloIdNormalizado, cursoIdPersistencia, { forceRefresh: true });
+            const contenidoPersistido = String(moduloGuardado?.contenido || "").trim();
+            if (!contenidoPersistido) {
+                throw new Error("La ficha generada de la fuente destacada no quedó persistida.");
+            }
+            const cont = document.getElementById(`contenido-${moduloIdNormalizado}`);
+            if (cont) {
+                cont.innerHTML = typeof window.renderizarContenidoModulo === "function"
+                    ? window.renderizarContenidoModulo(contenidoPersistido, moduloGuardado?.tipo || modulo?.tipo || "")
+                    : contenidoPersistido;
+            }
+            syncModuloGeneradoEnEstadoLocal(moduloGuardado, cursoIdPersistencia);
+            setEstadoGeneracionModulo(moduloIdNormalizado, "Ficha de fuente destacada generada.", "success", false);
+            return;
+        }
+
         const incluirInstruccionOriginalEnPropuesta = modulo.incluirInstruccionOriginalEnPropuesta === true;
         const incluirImagenOriginalEnPropuesta = modulo.incluirImagenOriginalEnPropuesta === true;
         const generarGrafico = modulo.generarGrafico === true;
-        const ignorarContextoOtrosModulos = modulo.ignorarContextoOtrosModulos === true;
+        const transcribirEstructurarMismoTipoActividad = modulo.transcribirEstructurarMismoTipoActividad === true;
+        const distractoresRetadoresQuiz = modulo.distractoresRetadoresQuiz === true;
+        const relacionGeneracionModuloModo = inferirRelacionGeneracionModuloModo(modulo);
+        const relacionGeneracionModuloActiva = relacionGeneracionModuloModo !== MODULO_GENERACION_RELATION_CONFIG.none;
+        const usarContextoOtrosModulosGeneracion = usaContextoOtrosModulosGeneracionModulo(modulo);
+        const ignorarContextoOtrosModulos = relacionGeneracionModuloActiva ? true : !usarContextoOtrosModulosGeneracion;
         const { textOnly: instruccionesSoloTexto, richText: instruccionesRichText, images: imagenesInstrucciones } =
             await extraerPartesMultimodalesDesdeInstrucciones(
                 instruccionesRaw,
@@ -1608,12 +1935,19 @@ export async function generarModuloGemini(moduloId) {
         const idiomaDetectadoModulo = detectarIdiomaPrincipal(
             `${modulo?.nombre || ""}\n${instruccionesParaPrompt || ""}`
         );
-        const cantidadSolicitadaQuizz = inferirCantidadSolicitadaParaQuizz(instruccionesParaPrompt);
+        const perfilAutorQuizz = reforzarPerfilQuizzConModoEstructurado(
+            detectarPerfilAutorQuizz(instruccionesParaPrompt),
+            transcribirEstructurarMismoTipoActividad && String(modulo?.tipo || "").trim().toLowerCase() === "quizz"
+        );
+        const cantidadSolicitadaQuizz = perfilAutorQuizz.cantidadObjetivo || inferirCantidadSolicitadaParaQuizz(instruccionesParaPrompt);
         const cantidadActividadesBase = inferirCantidadActividadesBase(instruccionesParaPrompt);
         const preferenciasQuizz = detectarPreferenciasQuizz(
             instruccionesParaPrompt,
             imagenesParaAnalisis.length
         );
+        if (distractoresRetadoresQuiz) {
+            preferenciasQuizz.exigirMayorDificultad = true;
+        }
         const dominioActividad = inferirDominioActividad(
             instruccionesParaPrompt,
             imagenesParaAnalisis.length
@@ -1671,6 +2005,46 @@ export async function generarModuloGemini(moduloId) {
         =========================================================
         ` : "";
 
+        const bloqueQuizzProtegido = String(modulo?.tipo || "").trim().toLowerCase() === "quizz" && perfilAutorQuizz.preguntasOriginales.length > 0 ? `
+        ===== QUIZZ: RESPETO ESTRICTO A PREGUNTAS DEL AUTOR =====
+        - El autor ya proporcionó ${perfilAutorQuizz.preguntasOriginales.length} pregunta(s) concretas.
+        - Debes respetar EXACTAMENTE esa cantidad.
+        - NO agregues preguntas nuevas.
+        - NO unas dos preguntas en una sola ni dividas una en varias.
+        - ${perfilAutorQuizz.preservarPreguntasLiteralmente ? "Debes transcribir cada pregunta literalmente, sin cambiar palabras, orden, signos ni sentido." : "Debes conservar cada pregunta lo más fiel posible al texto del autor."}
+        - ${perfilAutorQuizz.pidioPreguntasAbiertas ? "Estas preguntas son abiertas: NO agregues opciones, verdadero/falso, emparejamiento, respuesta correcta ni retroalimentaciones." : "Solo usa formatos cerrados si el autor los pidió explícitamente."}
+        - Si agregas encabezados para ordenar, el texto de la pregunta debe quedar debajo tal como lo escribió el autor.
+        - No reemplaces estas preguntas por otras “mejores”, “equivalentes” o “más didácticas”.
+        PREGUNTAS DEL AUTOR A RESPETAR:
+        ${perfilAutorQuizz.preguntasOriginales.map((item) => `${item.numero}.- ${item.texto}`).join("\n")}
+        ======================================
+        ` : "";
+
+        const bloqueModoEstructuradoMismoTipo = transcribirEstructurarMismoTipoActividad ? `
+        ===== MODO ACTIVO: TRANSCRIBIR Y ESTRUCTURAR SIN CAMBIAR TIPO =====
+        - Este modo fue activado explícitamente por el autor en la interfaz.
+        - Tu prioridad NO es reinterpretar ni reinventar la actividad, sino reestructurarla mejor respetando su tipo original.
+        - Conserva el mismo tipo de actividad del autor.
+        - NO conviertas preguntas abiertas en verdadero/falso, opción múltiple, emparejamiento, completar, selección ni otros formatos cerrados.
+        - NO agregues respuestas correctas, opciones, distractores ni retroalimentaciones salvo que el autor las haya escrito explícitamente.
+        - Si el autor ya redactó preguntas o consignas, transcríbelas tal como están y ordénalas con mejor presentación.
+        - Puedes mejorar encabezados, espaciado, separación visual y estructura editorial, pero NO cambies el fondo pedagógico ni el formato cognitivo del ejercicio.
+        - Si detectas varias preguntas del autor, debes mantener EXACTAMENTE esa misma cantidad.
+        ======================================
+        ` : "";
+
+        const bloqueDistractoresRetadoresQuiz = distractoresRetadoresQuiz ? `
+        ===== MODO ACTIVO: DISTRACTORES MÁS RETADORES =====
+        - Este modo fue activado explícitamente por el autor en la interfaz.
+        - En verdadero/falso y opción múltiple, evita respuestas obvias o absurdas.
+        - Los distractores deben ser plausibles, cercanos al contenido y basados en confusiones frecuentes del tema.
+        - La respuesta correcta no debe destacar por longitud, precisión extrema o vocabulario demasiado distinto al resto.
+        - En opción múltiple, al menos dos opciones deben parecer defendibles a primera vista para un estudiante que no domina bien el contenido.
+        - En verdadero/falso, usa matices, generalizaciones, causalidades parciales o mezclas de idea correcta con conclusión incorrecta para evitar trivialidad.
+        - No hagas distractores ridículos, caricaturescos ni fácilmente descartables.
+        ======================================
+        ` : "";
+
         const bloqueInstruccionOriginalEnSalida = incluirInstruccionOriginalEnPropuesta ? `
         ===== ACTIVIDAD ORIGINAL GESTIONADA POR LA PLATAFORMA =====
         - Usa la actividad original solo como referencia pedagógica interna.
@@ -1696,6 +2070,26 @@ export async function generarModuloGemini(moduloId) {
         // **🔵 AQUÍ YA ESTÁ CORREGIDO — Usa window.curso**
         const contextoCursoCompacto = ignorarContextoOtrosModulos ? "" : obtenerContextoCompactoDelCurso(window.curso, 12000);
         const contextoSubtemaCompacto = ignorarContextoOtrosModulos ? "" : obtenerContextoCompactoDelSubtema(window.subtemaActivo, 9000);
+        const moduloVecinoRelacionado = relacionGeneracionModuloActiva
+            ? await obtenerModuloVecinoGeneracion(modulo, subtema, cursoIdPersistencia, relacionGeneracionModuloModo)
+            : null;
+        const bloqueRelacionModulo = relacionGeneracionModuloActiva
+            ? `
+        # RELACIÓN DIRIGIDA ENTRE MÓDULOS
+        - La relación con módulo vecino está ACTIVADA.
+        - Debes usar exclusivamente el módulo actual y el módulo ${relacionGeneracionModuloModo}.
+        - Omite cualquier otro módulo del curso o del subtema, aunque exista contexto general disponible.
+        - Ajusta la propuesta del módulo actual en función de esa continuidad pedagógica.
+        ${moduloVecinoRelacionado ? `
+        ## MÓDULO ${relacionGeneracionModuloModo.toUpperCase()} RELACIONADO
+        ${resumirModuloParaContextoGeneracion(moduloVecinoRelacionado)}
+        ` : `
+        ## MÓDULO ${relacionGeneracionModuloModo.toUpperCase()} RELACIONADO
+        - No existe un módulo ${relacionGeneracionModuloModo} disponible.
+        - Trabaja solamente con el módulo actual sin inventar continuidad.
+        `}
+        `
+            : "";
         const imagenesLimitadas = [];
         let totalInlineChars = 0;
         imagenesParaAnalisis.slice(0, 2).forEach((img) => {
@@ -1715,7 +2109,12 @@ export async function generarModuloGemini(moduloId) {
         );
 
         const prompt = `
-        ${ignorarContextoOtrosModulos ? `
+        ${relacionGeneracionModuloActiva ? `
+        # CONTEXTO RESTRINGIDO
+        - El autor activó una relación dirigida con módulo vecino.
+        - Usa solo el módulo actual y el módulo ${relacionGeneracionModuloModo}.
+        ${bloqueRelacionModulo}
+        ` : ignorarContextoOtrosModulos ? `
         # CONTEXTO RESTRINGIDO
         - El autor pidió que NO uses otros módulos del curso como referencia.
         - Trabaja únicamente con las instrucciones y recursos del módulo actual.
@@ -1807,6 +2206,9 @@ export async function generarModuloGemini(moduloId) {
 
         ${permisoTablas}
         ${bloqueContenidoProtegido}
+        ${bloqueModoEstructuradoMismoTipo}
+        ${bloqueDistractoresRetadoresQuiz}
+        ${bloqueQuizzProtegido}
         ${bloqueInstruccionOriginalEnSalida}
         ${bloqueGraficoComplementario}
 
@@ -1817,7 +2219,10 @@ export async function generarModuloGemini(moduloId) {
             incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
             usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
             exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
-            idioma: idiomaDetectadoModulo
+            distractoresRetadoresQuiz,
+            idioma: idiomaDetectadoModulo,
+            quizProfile: perfilAutorQuizz,
+            transcribirEstructurarMismoTipoActividad
         })}
 
         ===== FORMATO DE SALIDA =====
@@ -1892,7 +2297,10 @@ export async function generarModuloGemini(moduloId) {
                 incluirRetroalimentacion: preferenciasQuizz.incluirRetroalimentacion,
                 usarImagenComoPatron: preferenciasQuizz.usarImagenComoPatron,
                 exigirMayorDificultad: preferenciasQuizz.exigirMayorDificultad,
-                idioma: idiomaDetectadoModulo
+                distractoresRetadoresQuiz,
+                idioma: idiomaDetectadoModulo,
+                quizProfile: perfilAutorQuizz,
+                transcribirEstructurarMismoTipoActividad
             })}
 
             ${incluirInstruccionOriginalEnPropuesta ? `
@@ -2154,6 +2562,9 @@ ${textoOriginal}
 function promptExtraPorTipo(tipo, options = {}) {
     const cantidadSolicitada = Number(options?.cantidadSolicitadaQuizz || 0) || null;
     const isEnglish = esIdiomaIngles(options?.idioma);
+    const quizProfile = options?.quizProfile && typeof options.quizProfile === "object" ? options.quizProfile : {};
+    const modoTranscribirEstructurar = options?.transcribirEstructurarMismoTipoActividad === true;
+    const distractoresRetadoresQuiz = options?.distractoresRetadoresQuiz === true;
     switch (tipo) {
 case "Quizz": return isEnglish ? `
 Generate a Moodle QUIZ in structured markdown.
@@ -2164,6 +2575,10 @@ RULES:
 - ${cantidadSolicitada
     ? `For this module, you must generate EXACTLY ${cantidadSolicitada} questions because the author specified that amount.`
     : `If the author did NOT specify an exact amount, do not invent extra questions. Generate only the minimum reasonable number required by the instruction.`}
+- ${quizProfile.noAgregarReactivos ? "Do NOT add extra questions or split one author question into several new ones." : "Do not increase the total number of items without a real reason."}
+- ${quizProfile.preservarPreguntasLiteralmente ? "The author already wrote specific questions: transcribe them literally in the output, without rewriting or summarizing them." : "If the author provides model questions, keep their wording and intent as closely as possible."}
+- ${quizProfile.pidioPreguntasAbiertas ? "These are OPEN questions: do not convert them into multiple choice, true/false, or matching." : "Change the question type only if the author explicitly asks for it."}
+- ${modoTranscribirEstructurar ? "Structured transcription mode is ACTIVE: improve layout only, while preserving the original activity type and intent." : "You may reorganize the activity only when that does not alter the original type requested by the author."}
 - Mix question types only if the author asks for it or if it helps faithfully convert the original activities, without increasing the total count.
 - If there is a reference image, ANALYZE it first for visual pattern and pedagogy.
 - If the image contains sample exercises, create NEW exercises inspired by that same style, without copying numbers, options, or wording literally.
@@ -2173,8 +2588,19 @@ RULES:
 - Do not escalate to broader topics such as limits, advanced rational functions, or calculus unless the original material explicitly asks for them.
 - "More difficult" means slightly more demanding within the SAME exercise family, not a new topic.
 - Keep the same thematic level as the visual reference, but ${options?.exigirMayorDificultad ? "make the difficulty clearly higher and avoid obvious answers." : "keep a difficulty level consistent with the author's request."}
+- ${distractoresRetadoresQuiz ? "Generate plausible distractors based on common misconceptions, not easy throwaway options." : "Use distractors that stay coherent with the content when closed questions are required."}
+- ${distractoresRetadoresQuiz ? "In multiple choice, at least two options should seem initially defensible to a partially prepared student." : "Avoid distractors that are absurd or immediately discardable."}
+- ${distractoresRetadoresQuiz ? "In true/false, avoid trivial statements; use nuance, partial causality, overgeneralization, or concept mixing." : "True/false statements should still require thinking."}
+- ${distractoresRetadoresQuiz ? "The correct answer must not stand out by length, copied wording, tone, or excessive precision." : "Do not make the correct answer visually obvious."}
 - ${options?.usarImagenComoPatron ? "The reference image has priority to infer exercise type, structure, and abstraction level." : "Use the image only if it provides real context for the requested activity."}
-- Each question must contain:
+- ${quizProfile.prohibirOpciones ? "Do NOT add an Options block." : "Closed questions must include options when applicable."}
+- ${quizProfile.prohibirRespuestas ? "Do NOT add a Correct answer block because the author did not request it." : "Include a Correct answer block when the question type or author request requires it."}
+- ${quizProfile.prohibirRetroalimentacion ? "Do NOT add feedback blocks unless the author explicitly asked for them." : "Include feedback blocks when the question type or author request requires them."}
+- ${quizProfile.preservarPreguntasLiteralmente ? "After each heading, place the exact author question on its own line with no extra label, quotes, or punctuation changes." : 'Use the "Question:" line when you are writing a new or reformulated question.'}
+- ${quizProfile.pidioPreguntasAbiertas ? "For open questions, keep only the prompt itself and, if needed, a brief response instruction without inventing evaluation content." : "For open questions, avoid forcing a closed-question structure."}
+- ${modoTranscribirEstructurar ? "If the author already wrote the exercise, do not replace it with a different exercise. Only present it more clearly." : "If you rewrite, preserve the same cognitive demand as the original exercise."}
+- ${quizProfile.prohibirOpciones && quizProfile.prohibirRetroalimentacion && quizProfile.prohibirRespuestas ? "In this case, do NOT apply the rigid multiple-choice template." : "Each question must contain:"}
+${quizProfile.prohibirOpciones && quizProfile.prohibirRetroalimentacion && quizProfile.prohibirRespuestas ? "" : `
   - **Question**
   - **Options** (if applicable)
   - **Correct answer**
@@ -2200,6 +2626,7 @@ RULES:
   - The table MUST include a header, separator row, and one row per relation.
   - Keep each expression or result within the SAME row.
   - Use inline math within cells, not display math.
+`}
 - Do not use HTML.
 - Do not use plain unstructured text.
 - If the module includes "Original Activity N" and "Proposed Activity N", the proposal heading must be:
@@ -2213,6 +2640,10 @@ REGLAS:
 - ${cantidadSolicitada
     ? `En este módulo, debes generar EXACTAMENTE ${cantidadSolicitada} preguntas porque el autor sí indicó esa cantidad.`
     : `Si el autor NO indicó una cantidad exacta, no inventes más preguntas de las necesarias. Genera solo las mínimas y razonables según la instrucción.`}
+- ${quizProfile.noAgregarReactivos ? "NO agregues reactivos extra ni subdividas una pregunta del autor en varias preguntas nuevas." : "No aumentes la cantidad total de reactivos sin justificación pedagógica real."}
+- ${quizProfile.preservarPreguntasLiteralmente ? "El autor ya redactó preguntas específicas: transcríbelas literalmente en la salida, sin reformularlas ni resumirlas." : "Si el autor aporta preguntas modelo, conserva su intención y redacción lo más fiel posible."}
+- ${quizProfile.pidioPreguntasAbiertas ? "Estas preguntas son ABIERTAS: no las conviertas a opción múltiple, verdadero/falso ni emparejamiento." : "Solo cambia el tipo de reactivo si el autor lo pide explícitamente."}
+- ${modoTranscribirEstructurar ? "El modo transcribir y estructurar está ACTIVO: mejora solo la presentación, no cambies el tipo de actividad." : "Puedes reorganizar la actividad solo si eso no cambia el tipo original solicitado por el autor."}
 - Solo mezcla tipos si el autor lo pide o si eso ayuda a convertir fielmente las actividades originales, sin aumentar la cantidad total.
 - Si existe imagen de referencia, primero ANALIZA su contenido visual y su patrón pedagógico.
 - Si la imagen contiene ejercicios de ejemplo, crea ejercicios NUEVOS inspirados en ese mismo estilo, sin copiar literalmente números, opciones ni enunciados.
@@ -2222,8 +2653,19 @@ REGLAS:
 - No escales a otros temas matemáticos más amplios como asíntotas, funciones racionales avanzadas, límites o cálculo, salvo que la actividad original los mencione explícitamente.
 - "Más difícil" no significa cambiar de unidad ni introducir técnicas nuevas; significa hacer variantes un poco más retadoras dentro de la misma estructura del ejemplo base.
 - Mantén el mismo nivel temático de la referencia visual, pero ${options?.exigirMayorDificultad ? "aumenta claramente la dificultad y evita respuestas obvias." : "conserva una dificultad coherente con la instrucción del autor."}
+- ${distractoresRetadoresQuiz ? "Genera distractores plausibles basados en errores frecuentes o confusiones comunes del tema, no opciones de relleno fáciles." : "Si hay preguntas cerradas, usa distractores coherentes con el contenido."}
+- ${distractoresRetadoresQuiz ? "En opción múltiple, al menos dos opciones deben parecer defendibles a primera vista para un estudiante parcialmente preparado." : "Evita distractores absurdos o descartables de inmediato."}
+- ${distractoresRetadoresQuiz ? "En verdadero/falso, evita enunciados triviales; usa matices, causalidad parcial, generalizaciones o mezcla de idea correcta con conclusión incorrecta." : "Las afirmaciones de verdadero/falso deben exigir pensar."}
+- ${distractoresRetadoresQuiz ? "La respuesta correcta no debe delatarse por longitud, por repetir el enunciado ni por ser excesivamente precisa frente a las demás." : "No vuelvas obvia la respuesta correcta por forma o estilo."}
 - ${options?.usarImagenComoPatron ? "La imagen de referencia tiene prioridad para inferir el tipo de ejercicio, la estructura y el nivel de abstracción." : "Usa la imagen solo si aporta contexto real al tipo de ejercicio solicitado."}
-- Cada pregunta debe tener:
+- ${quizProfile.prohibirOpciones ? "NO agregues bloque de Opciones." : "Cada pregunta cerrada debe incluir opciones si aplica."}
+- ${quizProfile.prohibirRespuestas ? "NO agregues 'Respuesta correcta' porque el autor no la pidió." : "Incluye 'Respuesta correcta' si la pregunta es cerrada o si el autor la pidió."}
+- ${quizProfile.prohibirRetroalimentacion ? "NO agregues retroalimentaciones correcta, incorrecta ni global si el autor no las pidió." : "Incluye retroalimentaciones cuando el tipo de pregunta lo requiera o el autor lo pida."}
+- ${quizProfile.preservarPreguntasLiteralmente ? 'Después de cada encabezado, coloca la pregunta EXACTA del autor en una línea aparte, sin prefijos extra, sin comillas y sin alterar puntuación.' : "Usa la línea 'Pregunta:' cuando estés redactando una pregunta nueva o reformulada."}
+- ${quizProfile.pidioPreguntasAbiertas ? "Para preguntas abiertas, deja solo el enunciado y, si hace falta, una línea breve de instrucción de respuesta sin inventar contenido evaluativo." : "Para preguntas abiertas, evita convertirlas a formato cerrado."}
+- ${modoTranscribirEstructurar ? "Si el autor ya escribió el ejercicio, no lo reemplaces por otro ejercicio distinto. Solo ordénalo mejor." : "Si reformulas, conserva la misma demanda cognitiva que la actividad original."}
+- ${quizProfile.prohibirOpciones && quizProfile.prohibirRetroalimentacion && quizProfile.prohibirRespuestas ? "En este caso NO apliques la plantilla rígida de opción múltiple." : "Cada pregunta debe tener:"}
+${quizProfile.prohibirOpciones && quizProfile.prohibirRetroalimentacion && quizProfile.prohibirRespuestas ? "" : `
   - **Pregunta**
   - **Opciones** (si aplica)
   - **Respuesta correcta**
@@ -2252,11 +2694,12 @@ REGLAS:
   - Ejemplo válido:
     | Expresión original | Forma simplificada |
     |---|---|
-    | $\\frac{x^2-9}{x^2-6x+9}$ | $\\frac{x+3}{x-3}$ |
-    | $\\frac{2x-4}{3x-6}$ | $\\frac{2}{3}$ |
+  | $\\frac{x^2-9}{x^2-6x+9}$ | $\\frac{x+3}{x-3}$ |
+  | $\\frac{2x-4}{3x-6}$ | $\\frac{2}{3}$ |
 - No pongas guiones, bullets, asteriscos ni numeración delante de A), B), C), D).
 - Si usas "Verdadero" y "Falso", escríbelos en líneas simples, sin bullets.
 - Si usas emparejamiento, presenta dos columnas claras en tabla markdown o lista equivalente.
+`}
 - No uses HTML.
 - No uses texto plano corrido; usa listas y encabezados.
 - Si el módulo incluye "Actividad N original" y "Propuesta Actividad N", el encabezado de propuesta debe salir como:

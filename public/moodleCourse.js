@@ -27,22 +27,27 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js';
 
 
-import { 
-    generarContenidoGemini, 
+import {
+    generarContenidoGemini,
     geminiGenerateRequest,
     generarModuloGemini,
     getGeminiEndpoint,
     reformularParrafoConIA,
-} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.14';
+} from './moodlecourse-geminiOperations.js?v=2026-1.0.1.18';
 
-import { 
+import {
     activarEdicionModuloCompleto,
     desactivarEdicionModuloCompleto,
     guardarContenidoModulo,
 } from './moodleClurse-extraFunctions.js?v=2026-1.0.1.14';
 import { sanitizeHtml, sanitizeRichText, sanitizeTextInput } from './security-utils.js?v=2026-1.0.1.14';
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.1.14";
-import { authFetchJson, buildApiUrl } from "./api-client.js?v=2026-1.0.1.14";
+import {
+    authFetchJson,
+    buildApiUrl,
+    buildApiUrlFromBase,
+    getRemoteApiBase
+} from "./api-client.js?v=2026-1.0.1.15";
 import {
     applySimplePreviewStateFromLayers,
     cleanupModuleGraphicInlinePreview,
@@ -54,7 +59,26 @@ import {
     renderSimplePreviewFooter,
     renderSimplePreviewText,
     upsertSelectedPreviewText
-} from "./moodleCourse-graphicPreview.js?v=2026-1.0.1.14";
+} from "./moodleCourse-graphicPreview.js?v=2026-1.0.1.15";
+import {
+    actualizarEstadoActividadOriginal,
+    aplicarVisibilidadActividadOriginalEnContenido,
+    construirActividadOriginalHtmlModulo,
+    contenidoModuloYaIncluyeActividadOriginal,
+    prepararRenderActividadOriginal,
+    registrarToggleOriginalActivity,
+    quitarActividadOriginalDelContenido,
+    sincronizarSnapshotActividadOriginal
+} from "./moodleCourse-originalActivityToggle.js?v=2026-1.0.1.14";
+import { sanitizeFilename } from "./word-export.js?v=2026-1.0.1.14";
+import {
+    FEATURED_SOURCE_MODULE_TYPE,
+    FEATURED_SOURCE_MODULE_TYPE_NORMALIZED,
+    construirPromptFuentesDestacadas,
+    crearDefaultsFuentesDestacadas,
+    extraerCamposFuentesDestacadasDesdeInstrucciones,
+    validarFuentesDestacadas
+} from "./moodleCourse-featuredSources.js?v=2026-1.0.1.24";
 
 
 /* CONFIGURACIÓN FIREBASE */
@@ -71,6 +95,7 @@ export let currentUserId = null;
 
 const listaCursos = document.getElementById("listaCursos");
 let cursosUsuario = [];
+let mostrarCursosArchivados = localStorage.getItem("cb_mostrar_cursos_archivados") === "1";
 /* ============================================================
    CONFIGURACIÓN GEMINI
 ============================================================ */
@@ -98,28 +123,111 @@ let seleccionOriginalParaReformular = null;
 const USE_SORTABLE_SIDEBAR = typeof window !== 'undefined' && !!window.Sortable;
 let sortableTemasInstance = null;
 let sortableSubtemasInstances = [];
+let sortableModulosInstances = [];
 
 // --- GESTIÓN DE GUARDADO GLOBAL ---
-let savesInProgressCount = 0;
+const activeGlobalSaveTokens = new Set();
+let globalSaveTokenSeq = 0;
 const moduloAutosaveTimers = new Map();
+let saveSessionInFlight = null;
+let manualSessionSaveActive = false;
+const SAVE_SESSION_TIMEOUT_MS = 20000;
+const CURSO_LOCAL_SNAPSHOT_KEY = "cb_curso_activo_snapshot";
 
-window.updateGlobalSaveStatus = function(isSaving) {
+function refrescarVisibilidadGlobalSaveStatus() {
     const statusEl = document.getElementById("globalSaveStatus");
     if (!statusEl) return;
 
-    if (isSaving) {
-        savesInProgressCount++;
+    if (manualSessionSaveActive) {
+        statusEl.classList.add("opacity-0", "pointer-events-none");
+        return;
+    }
+
+    if (activeGlobalSaveTokens.size > 0) {
         statusEl.classList.remove("opacity-0", "pointer-events-none");
     } else {
-        savesInProgressCount = Math.max(0, savesInProgressCount - 1);
-        if (savesInProgressCount === 0) {
-            statusEl.classList.add("opacity-0", "pointer-events-none");
-        }
+        statusEl.classList.add("opacity-0", "pointer-events-none");
+    }
+}
+
+function ejecutarConTimeout(promise, timeoutMs = SAVE_SESSION_TIMEOUT_MS, label = "operación") {
+    const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : SAVE_SESSION_TIMEOUT_MS;
+    return Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => {
+            window.setTimeout(() => {
+                reject(new Error(`Tiempo de espera agotado al guardar ${label}.`));
+            }, ms);
+        })
+    ]);
+}
+
+function construirSnapshotCursoLocal(source = curso) {
+    const raw = source && typeof source === "object" ? source : {};
+    const cursoId = String(raw?.id || raw?.cursoId || cursoDocId || "").trim();
+    if (!cursoId) return null;
+
+    return {
+        id: cursoId,
+        cursoId,
+        nombre: raw?.nombre || "",
+        actualizadoLocalmente: Date.now(),
+        temas: Array.isArray(raw?.temas) ? raw.temas : []
+    };
+}
+
+function persistirCursoActivoEnLocalStorage(source = curso) {
+    try {
+        const snapshot = construirSnapshotCursoLocal(source);
+        if (!snapshot) return false;
+        localStorage.setItem(CURSO_LOCAL_SNAPSHOT_KEY, JSON.stringify(snapshot));
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function sincronizarCursoActivoEnCursosUsuario() {
+    const cursoId = String(curso?.id || curso?.cursoId || cursoDocId || "").trim();
+    if (!cursoId) return false;
+    const idx = cursosUsuario.findIndex((item) => String(item?.id || item?.cursoId || "").trim() === cursoId);
+    if (idx === -1) return false;
+    cursosUsuario[idx] = {
+        ...cursosUsuario[idx],
+        ...curso,
+        temas: Array.isArray(curso?.temas) ? curso.temas : []
+    };
+    return true;
+}
+
+window.beginGlobalSaveStatus = function () {
+    const token = `save-${Date.now()}-${++globalSaveTokenSeq}`;
+    activeGlobalSaveTokens.add(token);
+    refrescarVisibilidadGlobalSaveStatus();
+
+    let released = false;
+    return function releaseGlobalSaveStatus() {
+        if (released) return;
+        released = true;
+        activeGlobalSaveTokens.delete(token);
+        refrescarVisibilidadGlobalSaveStatus();
+    };
+};
+
+window.updateGlobalSaveStatus = function (isSaving) {
+    if (isSaving) {
+        const release = window.beginGlobalSaveStatus();
+        window.__legacyGlobalSaveStatusReleases = window.__legacyGlobalSaveStatusReleases || [];
+        window.__legacyGlobalSaveStatusReleases.push(release);
+    } else {
+        const release = window.__legacyGlobalSaveStatusReleases?.pop();
+        if (typeof release === "function") release();
+        else refrescarVisibilidadGlobalSaveStatus();
     }
 }
 
 window.addEventListener('beforeunload', (e) => {
-    if (savesInProgressCount > 0 || moduloAutosaveTimers.size > 0) {
+    if (activeGlobalSaveTokens.size > 0 || moduloAutosaveTimers.size > 0) {
         e.preventDefault();
         e.returnValue = 'Tienes cambios sin guardar. ¿Estás seguro de que quieres salir?';
         return e.returnValue;
@@ -146,6 +254,17 @@ function isMoodleCourseSharedWithUser(data = {}, uid = "") {
     if (sharedIds.includes(safeUid)) return true;
     const details = Array.isArray(data?.compartidoConDetalles) ? data.compartidoConDetalles : [];
     return details.some((item) => String(item?.userId || "").trim() === safeUid);
+}
+
+function esDocumentoCursoRaiz(docId, data = {}) {
+    const cleanDocId = String(docId || "").trim();
+    const cleanCursoId = String(data?.cursoId || "").trim();
+    const docType = String(data?.docType || "").trim().toLowerCase();
+    if (docType === "module") return false;
+    if (docType === "course") return true;
+    if (cleanCursoId && cleanCursoId !== cleanDocId) return false;
+    if (cleanDocId.includes("_")) return false;
+    return Array.isArray(data?.temas);
 }
 
 function normalizeGeminiModelName(model = "") {
@@ -263,12 +382,14 @@ let tourAccionesModuloActivo = false;
 let tourAccionesModuloPaso = 0;
 let tourAccionesModuloTarget = null;
 let tourAccionesModuloMostradoEnSesion = false;
-const escapeHtml = (value = "") => String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const escapeHtml = (value = "") => {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+};
 
 const MODULE_GRAPHIC_LIGHTBOX_ID = "cbModuleGraphicLightbox";
 let moduleGraphicLightboxLastFocus = null;
@@ -1465,10 +1586,10 @@ function renderGraphicExportPanel(modal, layers = {}) {
             <p>Cada elemento vive en su propia capa de imagen. La composición final solo se exporta cuando todas las capas válidas ya fueron colocadas manualmente.</p>
             <div class="cb-module-graphic-lightbox__export-summary ${(invalid.length || unplaced.length) ? "is-warning" : "is-ready"}">
                 ${invalid.length
-                    ? `${invalid.length} elemento(s) deben regenerarse antes de exportar la composición.`
-                    : unplaced.length
-                        ? `${unplaced.length} capa(s) siguen sin colocar manualmente en el canvas.`
-                        : "La composición está lista para exportación SVG."}
+            ? `${invalid.length} elemento(s) deben regenerarse antes de exportar la composición.`
+            : unplaced.length
+                ? `${unplaced.length} capa(s) siguen sin colocar manualmente en el canvas.`
+                : "La composición está lista para exportación SVG."}
             </div>
         </section>
     `;
@@ -2422,7 +2543,7 @@ function ensureGraphicLightboxDrag(modal) {
     modal.addEventListener("pointercancel", release);
 }
 
-window.abrirGaleriaGraficoModulo = function(sourceOrSrc = "", alt = "", layersRaw = "") {
+window.abrirGaleriaGraficoModulo = function (sourceOrSrc = "", alt = "", layersRaw = "") {
     const sourceEl = sourceOrSrc && typeof sourceOrSrc === "object" && sourceOrSrc.nodeType === 1 ? sourceOrSrc : null;
     const figureEl = sourceEl?.closest?.(".cb-module-generated-graphic") || null;
     const fallbackImg = sourceEl?.matches?.("img") ? sourceEl : figureEl?.querySelector?.("img");
@@ -2532,7 +2653,7 @@ function renderEditableGraphicLayers(modal, layers = {}) {
     requestAnimationFrame(() => updateGraphicConnectorLayout(modal));
 }
 
-window.cerrarGaleriaGraficoModulo = function() {
+window.cerrarGaleriaGraficoModulo = function () {
     const modal = document.getElementById(MODULE_GRAPHIC_LIGHTBOX_ID);
     if (!modal) return;
     const activeElement = document.activeElement;
@@ -2567,6 +2688,9 @@ document.addEventListener("click", (event) => {
 
     const action = String(actionEl.dataset.mcAction || "").trim();
     if (!action) return;
+    const shouldCloseFloatingModuleActionsMenu =
+        !!actionEl.closest(".cb-module-actions-menu__floating-panel")
+        && action !== "toggle-menu-acciones-modulo";
 
     const directHandlers = {
         "insert-table": () => insertTable(),
@@ -2586,8 +2710,12 @@ document.addEventListener("click", (event) => {
         "regenerar-notas-maestro": () => window.regenerarNotasMaestro?.(),
         "aplicar-notas-maestro": () => window.aplicarNotasMaestro?.(),
         "guardar-notas-maestro": () => window.guardarNotasMaestro?.(),
-        "cerrar-modal-instrucciones-subtema": () => document.getElementById("modalInstruccionesSubtema")?.classList.add("hidden"),
         "abrir-modal-notas-maestro": () => window.abrirModalNotasMaestro?.(actionEl.dataset.mcModuloId || ""),
+        "seleccionar-tab-notas-maestro": () => window.seleccionarTabNotasMaestro?.(actionEl.dataset.mcSource || ""),
+        "seleccionar-fuente-notas-maestro": () => window.seleccionarFuenteNotasMaestro?.(actionEl.dataset.mcSource || ""),
+        "cerrar-modal-instrucciones-subtema": () => document.getElementById("modalInstruccionesSubtema")?.classList.add("hidden"),
+        "toggle-notas-maestro-inline": () => window.inyectarNotasMaestroAlModulo?.(actionEl.dataset.mcModuloId || "", actionEl),
+        "toggle-propuesta-modulo": () => window.togglePropuestaModulo?.(actionEl.dataset.mcModuloId || ""),
         "analizar-modulo": () => window.analizarModulo?.(actionEl.dataset.mcModuloId || ""),
         "abrir-instrucciones-gemini": () => window.abrirInstruccionesGemini?.(actionEl.dataset.mcModuloId || ""),
         "ejecutar-generacion-modulo-gemini": () => window.ejecutarGeneracionModuloGemini?.(actionEl.dataset.mcModuloId || ""),
@@ -2614,9 +2742,20 @@ document.addEventListener("click", (event) => {
     if (action === "eliminar-modulo") {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation();
         const moduloId = actionEl.dataset.mcModuloId || "";
+        if (actionEl.dataset.deleting === "1") {
+            return;
+        }
         if (moduloId && window.confirm("¿Eliminar módulo?")) {
+            actionEl.dataset.deleting = "1";
             window.eliminarModulo?.(moduloId);
+            if (shouldCloseFloatingModuleActionsMenu) {
+                cerrarMenuAccionesModuloFlotante();
+            }
+            setTimeout(() => {
+                delete actionEl.dataset.deleting;
+            }, 1500);
         }
         return;
     }
@@ -2632,12 +2771,58 @@ document.addEventListener("click", (event) => {
 
     event.preventDefault();
     handler();
+    if (shouldCloseFloatingModuleActionsMenu) {
+        cerrarMenuAccionesModuloFlotante();
+    }
 });
 
 document.addEventListener("change", (event) => {
     const actionEl = event.target.closest("[data-mc-action='toggle-archivo-modulo']");
-    if (!actionEl) return;
-    window.toggleArchivoModulo?.(actionEl.dataset.mcModuloId || "", !!actionEl.checked);
+    if (actionEl) {
+        window.toggleArchivoModulo?.(actionEl.dataset.mcModuloId || "", !!actionEl.checked);
+        return;
+    }
+
+    const fuenteSwitch = event.target.closest("[data-mc-action='toggle-fuente-notas-maestro']");
+    if (fuenteSwitch) {
+        window.toggleFuenteNotasMaestro?.(fuenteSwitch);
+        return;
+    }
+
+    const relacionActivaSwitch = event.target.closest("[data-mc-action='toggle-relacion-notas-maestro-activo']");
+    if (relacionActivaSwitch) {
+        window.toggleRelacionNotasMaestroActivo?.(relacionActivaSwitch);
+        return;
+    }
+
+    const relacionDireccionSwitch = event.target.closest("[data-mc-action='toggle-direccion-relacion-notas-maestro']");
+    if (relacionDireccionSwitch) {
+        window.toggleDireccionRelacionNotasMaestro?.(relacionDireccionSwitch);
+        return;
+    }
+
+    const contextoOtrosSwitch = event.target.closest("[data-mc-action='toggle-contexto-otros-modulos-notas-maestro']");
+    if (contextoOtrosSwitch) {
+        window.toggleContextoOtrosModulosNotasMaestro?.(contextoOtrosSwitch);
+        return;
+    }
+
+    const relacionGeneracionActivaSwitch = event.target.closest("[data-mc-action='toggle-relacion-generacion-modulo-activo']");
+    if (relacionGeneracionActivaSwitch) {
+        window.toggleRelacionGeneracionModuloActivo?.(relacionGeneracionActivaSwitch);
+        return;
+    }
+
+    const relacionGeneracionDireccionSwitch = event.target.closest("[data-mc-action='toggle-direccion-relacion-generacion-modulo']");
+    if (relacionGeneracionDireccionSwitch) {
+        window.toggleDireccionRelacionGeneracionModulo?.(relacionGeneracionDireccionSwitch);
+        return;
+    }
+
+    const contextoGeneracionSwitch = event.target.closest("[data-mc-action='toggle-contexto-generacion-modulo']");
+    if (contextoGeneracionSwitch) {
+        window.toggleContextoGeneracionModulo?.(contextoGeneracionSwitch);
+    }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -2645,6 +2830,22 @@ document.addEventListener("keydown", (event) => {
         window.cerrarGaleriaGraficoModulo?.();
     }
 });
+
+document.addEventListener("pointerdown", (event) => {
+    const actionEl = event.target.closest("[data-mc-action]");
+    if (!actionEl) return;
+
+    const action = String(actionEl.dataset.mcAction || "").trim();
+    if (!["toggle-notas-maestro-inline", "agregar-actividad-original-modulo", "toggle-propuesta-modulo"].includes(action)) return;
+
+    const moduloId = String(actionEl.dataset.mcModuloId || "").trim();
+    if (!moduloId) return;
+
+    const contenidoDiv = document.getElementById(`contenido-${moduloId}`);
+    if (contenidoDiv) {
+        contenidoDiv.dataset.skipNextBlurSave = "1";
+    }
+}, true);
 
 function withTimeout(promise, ms = 30000, message = "La operación tardó demasiado.") {
     let timerId = null;
@@ -2657,6 +2858,88 @@ function withTimeout(promise, ms = 30000, message = "La operación tardó demasi
         if (timerId != null) window.clearTimeout(timerId);
     });
 }
+
+function actualizarEstadoBotonPropuesta(card, visible) {
+    if (!card) return;
+    card.classList.toggle("modulo-propuesta-oculta", !visible);
+
+    const botones = card.querySelectorAll('[data-mc-action="toggle-propuesta-modulo"]');
+    botones.forEach((btn) => {
+        btn.title = visible ? "Ocultar propuesta de actividad" : "Mostrar propuesta de actividad";
+        btn.setAttribute("aria-label", visible ? "Ocultar propuesta de actividad" : "Mostrar propuesta de actividad");
+
+        const icon = btn.querySelector("i");
+        if (icon) {
+            icon.classList.toggle("fa-file-circle-check", visible);
+            icon.classList.toggle("fa-file-circle-xmark", !visible);
+        }
+
+        const textSpan = btn.querySelector("span");
+        if (textSpan) {
+            textSpan.textContent = visible ? "Ocultar propuesta" : "Mostrar propuesta";
+        }
+    });
+}
+
+window.togglePropuestaModulo = async function (moduloId) {
+    const moduloIdSafe = String(moduloId || "").trim();
+    if (!moduloIdSafe) return;
+
+    window.__togglePropuestaBusy = window.__togglePropuestaBusy || new Set();
+    if (window.__togglePropuestaBusy.has(moduloIdSafe)) return;
+    window.__togglePropuestaBusy.add(moduloIdSafe);
+
+    const botones = Array.from(document.querySelectorAll('[data-mc-action="toggle-propuesta-modulo"]'))
+        .filter((button) => String(button?.dataset?.mcModuloId || "").trim() === moduloIdSafe);
+    botones.forEach((button) => {
+        button.disabled = true;
+        button.setAttribute("aria-disabled", "true");
+        button.style.opacity = "0.55";
+        button.style.pointerEvents = "none";
+    });
+
+    try {
+        const cursoIdModulo = String(curso?.id || "").trim() || null;
+        const modulo = await obtenerModulo(moduloIdSafe, cursoIdModulo);
+        if (!modulo) return;
+
+        const visibleActual = modulo.mostrarPropuestaActividad !== false;
+        const nuevaVisibilidad = !visibleActual;
+        const payloadLocal = { mostrarPropuestaActividad: nuevaVisibilidad };
+
+        window.__suppressModuloUpdatedToast = window.__suppressModuloUpdatedToast || {};
+        window.__suppressModuloUpdatedToast[moduloIdSafe] = Date.now() + 4000;
+
+        sincronizarModuloLocal(moduloIdSafe, cursoIdModulo, payloadLocal);
+        actualizarEstadoBotonPropuesta(document.getElementById(`modulo-${moduloIdSafe}`), nuevaVisibilidad);
+
+        await guardarModulo(moduloIdSafe, payloadLocal, cursoIdModulo);
+
+        if (typeof modulosCache?.set === "function") {
+            const docId = construirDocIdModulo(moduloIdSafe, cursoIdModulo);
+            if (docId) {
+                const current = modulosCache.get(docId) || {};
+                modulosCache.set(docId, { ...current, ...payloadLocal });
+            }
+        }
+
+        mostrarNotificacion(
+            nuevaVisibilidad ? "Propuesta de actividad mostrada." : "Propuesta de actividad oculta.",
+            "success"
+        );
+    } catch (error) {
+        console.error("Error al alternar propuesta:", error);
+        mostrarNotificacion("Error al alternar la propuesta de actividad.", "error");
+    } finally {
+        botones.forEach((button) => {
+            button.disabled = false;
+            button.setAttribute("aria-disabled", "false");
+            button.style.opacity = "";
+            button.style.pointerEvents = "";
+        });
+        window.__togglePropuestaBusy.delete(moduloIdSafe);
+    }
+};
 
 function sanitizarHtmlEditorial(value = "") {
     return sanitizeHtml(String(value || "")).trim();
@@ -2721,20 +3004,11 @@ function inicializarBotonExportCursoWord() {
             alert("Selecciona un curso para exportar.");
             return;
         }
-
-        btn.disabled = true;
-        btn.classList.add("opacity-50", "cursor-wait");
-
-        try {
-            await exportarCursoCompletoWord(curso, { incluirArchivados: mostrarModulosArchivados });
-        } catch (_) {
-            alert("Error exportando el curso a Word");
-        } finally {
-            btn.classList.remove("cursor-wait");
-            btn.classList.toggle("opacity-50", !curso);
-            btn.classList.toggle("cursor-not-allowed", !curso);
-            btn.disabled = !curso;
-        }
+        await solicitarExportacionWord({
+            scope: "curso",
+            cursoActual: curso,
+            triggerButton: btn
+        });
     });
 
     btn.dataset.cbBound = "1";
@@ -2743,83 +3017,83 @@ function inicializarBotonExportCursoWord() {
 
 
 function inicializarPublicarCursoUI() {
-  const checkPublicar = document.getElementById("checkPublicarCurso");
-  if (!checkPublicar) {
-      console.warn("[Aprende] Elemento 'checkPublicarCurso' no encontrado.");
-      return;
-  }
-  if (checkPublicar.dataset.cbBound) return;
-  checkPublicar.dataset.cbBound = "true";
-
-  console.log("[Aprende] Inicializando UI de publicación...");
-
-  checkPublicar.addEventListener("change", async (e) => {
-    if (!cursoDocId) {
-        console.error("[Aprende] Error: cursoDocId es nulo al intentar publicar.");
-        mostrarNotificacion("Error: No hay un curso seleccionado", "error");
+    const checkPublicar = document.getElementById("checkPublicarCurso");
+    if (!checkPublicar) {
+        console.warn("[Aprende] Elemento 'checkPublicarCurso' no encontrado.");
         return;
     }
-    const valor = e.target.checked;
-    console.log(`[Aprende] Cambiando estado de publicación para ${cursoDocId} a ${valor}`);
-    try {
-      await updateDoc(doc(db, "moodleCourses", cursoDocId), {
-        publicar: valor
-      });
-      // Actualizar objeto local
-      if (curso) curso.publicar = valor;
-      // Actualizar en cursosUsuario
-      const cIdx = cursosUsuario.findIndex(c => c.id === cursoDocId);
-      if (cIdx !== -1) {
-        cursosUsuario[cIdx].publicar = valor;
-      }
-      
-      mostrarNotificacion(valor ? "Sesión publicada en Dashboard" : "Sesión ocultada en Dashboard", "success");
-      console.log("[Aprende] Publicación actualizada correctamente.");
-    } catch (err) {
-      console.error("[Aprende] Error al publicar curso:", err);
-      mostrarNotificacion("Error al cambiar estado de publicación", "error");
-      // Revertir switch
-      e.target.checked = !valor;
-    }
-  });
+    if (checkPublicar.dataset.cbBound) return;
+    checkPublicar.dataset.cbBound = "true";
+
+    console.log("[Aprende] Inicializando UI de publicación...");
+
+    checkPublicar.addEventListener("change", async (e) => {
+        if (!cursoDocId) {
+            console.error("[Aprende] Error: cursoDocId es nulo al intentar publicar.");
+            mostrarNotificacion("Error: No hay un curso seleccionado", "error");
+            return;
+        }
+        const valor = e.target.checked;
+        console.log(`[Aprende] Cambiando estado de publicación para ${cursoDocId} a ${valor}`);
+        try {
+            await updateDoc(doc(db, "moodleCourses", cursoDocId), {
+                publicar: valor
+            });
+            // Actualizar objeto local
+            if (curso) curso.publicar = valor;
+            // Actualizar en cursosUsuario
+            const cIdx = cursosUsuario.findIndex(c => c.id === cursoDocId);
+            if (cIdx !== -1) {
+                cursosUsuario[cIdx].publicar = valor;
+            }
+
+            mostrarNotificacion(valor ? "Sesión publicada en Dashboard" : "Sesión ocultada en Dashboard", "success");
+            console.log("[Aprende] Publicación actualizada correctamente.");
+        } catch (err) {
+            console.error("[Aprende] Error al publicar curso:", err);
+            mostrarNotificacion("Error al cambiar estado de publicación", "error");
+            // Revertir switch
+            e.target.checked = !valor;
+        }
+    });
 }
 
 /* ESPERAR A QUE EL USUARIO INICIE SESIÓN */
 onAuthStateChanged(auth, async (user) => {
-  if (!user) {
-    alert("Debes iniciar sesión.");
-    return;
-  }
-
-  currentUserId = user.uid;
-  window.currentUserId = user.uid;
-  currentUserRole = "user";
-
-  await syncGeminiModelOptionsForMoodle();
-  await cargarCursosUsuario();
-
-  const urlParams = new URLSearchParams(window.location.search);
-  const cursoIdUrl = urlParams.get("cursoId");
-  const cursoIdGuardado = cursoIdUrl || localStorage.getItem("cursoSeleccionado");
-  
-  if (cursoIdGuardado) {
-    const cursoGuardadoExiste = cursosUsuario.some(c => c.id === cursoIdGuardado);
-    if (cursoGuardadoExiste) {
-      await seleccionarCurso(cursoIdGuardado);
-    } else if (cursoIdUrl) {
-      // Si viene por URL pero no está en la lista local, intentar cargar igual (podría ser compartido)
-      await seleccionarCurso(cursoIdUrl);
-    } else {
-      localStorage.removeItem("cursoSeleccionado");
-      localStorage.removeItem("temaAbierto");
-      localStorage.removeItem("subtemaAbierto");
-      localStorage.removeItem("moduloActivo");
+    if (!user) {
+        alert("Debes iniciar sesión.");
+        return;
     }
-  }
-  
-  // 🔥 CORRECCIÓN: NO abrir automáticamente el modal
-  if (cursosUsuario.length === 0) {
-    listaCursos.innerHTML = `
+
+    currentUserId = user.uid;
+    window.currentUserId = user.uid;
+    currentUserRole = "user";
+
+    void syncGeminiModelOptionsForMoodle();
+    await cargarCursosUsuario();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const cursoIdUrl = urlParams.get("cursoId");
+    const cursoIdGuardado = cursoIdUrl || localStorage.getItem("cursoSeleccionado");
+
+    if (cursoIdGuardado) {
+        const cursoGuardadoExiste = cursosUsuario.some(c => c.id === cursoIdGuardado);
+        if (cursoGuardadoExiste) {
+            await seleccionarCurso(cursoIdGuardado);
+        } else if (cursoIdUrl) {
+            // Si viene por URL pero no está en la lista local, intentar cargar igual (podría ser compartido)
+            await seleccionarCurso(cursoIdUrl);
+        } else {
+            localStorage.removeItem("cursoSeleccionado");
+            localStorage.removeItem("temaAbierto");
+            localStorage.removeItem("subtemaAbierto");
+            localStorage.removeItem("moduloActivo");
+        }
+    }
+
+    // 🔥 CORRECCIÓN: NO abrir automáticamente el modal
+    if (cursosUsuario.length === 0) {
+        listaCursos.innerHTML = `
       <li class="p-4 text-center">
         <p class="text-sm text-gray-600 mb-3">No tienes cursos aún</p>
         <button id="btnPrimerCurso" 
@@ -2828,67 +3102,56 @@ onAuthStateChanged(auth, async (user) => {
         </button>
       </li>
     `;
-    
-    document.getElementById("btnPrimerCurso")?.addEventListener("click", () => {
-      document.getElementById("btnNuevoCurso").click();
-    });
-  }
 
-  // Finalización de carga - Ocultar splash screen
-  const loader = document.getElementById("appLoadingScreen");
-  if (loader) {
-    setTimeout(() => loader.classList.add("is-hidden"), 300);
-  }
+        document.getElementById("btnPrimerCurso")?.addEventListener("click", () => {
+            document.getElementById("btnNuevoCurso").click();
+        });
+    }
+
+    // Finalización de carga - Ocultar splash screen
+    const loader = document.getElementById("appLoadingScreen");
+    if (loader) {
+        setTimeout(() => loader.classList.add("is-hidden"), 300);
+    }
 });
 
 // Safety timeout para quitar el loader si algo falla
 setTimeout(() => {
-  const loader = document.getElementById("appLoadingScreen");
-  if (loader && !loader.classList.contains("is-hidden")) {
-    loader.classList.add("is-hidden");
-  }
+    const loader = document.getElementById("appLoadingScreen");
+    if (loader && !loader.classList.contains("is-hidden")) {
+        loader.classList.add("is-hidden");
+    }
 }, 5000);
 
 
 async function cargarCursosUsuario() {
     try {
-        
+
         if (!currentUserId) {
             cursosUsuario = [];
             renderListaCursos();
             return;
         }
-        
+
         // 🔥 SOLUCIÓN: Buscar cursos propios y compartidos en PARALELO pero con filtro correcto
         const qPropios = query(
             collection(db, "moodleCourses"),
             where("userId", "==", currentUserId)
         );
-        
+
         const qCompartidos = query(
             collection(db, "moodleCourses"),
             where("compartidoCon", "array-contains", currentUserId)
         );
-        
+
         // Ejecutar ambas consultas en paralelo
         const [snapPropios, snapCompartidos] = await Promise.all([
             getDocs(qPropios),
             getDocs(qCompartidos)
         ]);
-        
+
         // 🔥 USAR MAP PARA EVITAR DUPLICADOS
         const cursosMap = new Map();
-        
-        const esDocumentoCursoRaiz = (docId, data = {}) => {
-            const cleanDocId = String(docId || "").trim();
-            const cleanCursoId = String(data?.cursoId || "").trim();
-            const docType = String(data?.docType || "").trim().toLowerCase();
-            if (docType === "module") return false;
-            if (docType === "course") return true;
-            if (cleanCursoId && cleanCursoId !== cleanDocId) return false;
-            if (cleanDocId.includes("_")) return false;
-            return Array.isArray(data?.temas);
-        };
 
         // 1. Procesar cursos propios (userId === currentUserId)
         snapPropios.docs.forEach(d => {
@@ -2897,7 +3160,7 @@ async function cargarCursosUsuario() {
             if (!esDocumentoCursoRaiz(cursoId, data)) {
                 return;
             }
-            
+
             const curso = {
                 id: cursoId,
                 nombre: data.nombre || "Sin nombre",
@@ -2915,12 +3178,13 @@ async function cargarCursosUsuario() {
                 tipo: "propio",
                 compartidoCon: data.compartidoCon || [],
                 compartidoConDetalles: data.compartidoConDetalles || [],
-                publicar: data.publicar || false
+                publicar: data.publicar || false,
+                archivado: data.archivado === true
             };
-            
+
             cursosMap.set(cursoId, curso);
         });
-        
+
         // 2. Procesar cursos compartidos donde el usuario NO es propietario
         snapCompartidos.docs.forEach(d => {
             const data = d.data();
@@ -2928,22 +3192,22 @@ async function cargarCursosUsuario() {
             if (!esDocumentoCursoRaiz(cursoId, data)) {
                 return;
             }
-            
+
             // 🔥 VERIFICACIÓN CRÍTICA: Si ya está en el mapa (es curso propio), IGNORAR
             if (cursosMap.has(cursoId)) {
                 return;
             }
-            
+
             // Verificar que el usuario NO sea el propietario
             if (data.userId === currentUserId) {
                 return;
             }
-            
+
             // Obtener permisos específicos para este usuario
             let permisosUsuario = { editar: false, compartir: false, eliminar: false };
             let propietarioNombre = "Usuario Desconocido";
             let propietarioId = data.userId;
-            
+
             if (data.compartidoConDetalles && Array.isArray(data.compartidoConDetalles)) {
                 permisosUsuario = resolveMoodleCollabPermissions(data, currentUserId);
 
@@ -2955,7 +3219,7 @@ async function cargarCursosUsuario() {
                     propietarioNombre = propietarioDetalle.userName;
                 }
             }
-            
+
             const curso = {
                 id: cursoId,
                 nombre: data.nombre || "Curso compartido",
@@ -2973,30 +3237,31 @@ async function cargarCursosUsuario() {
                 acceso: permisosUsuario.editar ? "editable" : "lectura",
                 compartidoCon: data.compartidoCon || [],
                 compartidoConDetalles: data.compartidoConDetalles || [],
-                publicar: data.publicar || false
+                publicar: data.publicar || false,
+                archivado: data.archivado === true
             };
-            
+
             cursosMap.set(cursoId, curso);
         });
-        
+
         // Convertir Map a array
         cursosUsuario = Array.from(cursosMap.values());
-        
-        
+
+
         // Ordenar: primero propios, luego compartidos, luego por fecha
         cursosUsuario.sort((a, b) => {
             // Primero propios vs compartidos
             if (a.esPropio && !b.esPropio) return -1;
             if (!a.esPropio && b.esPropio) return 1;
-            
+
             // Luego por fecha (más reciente primero)
             const fechaA = a.creado?.toDate ? a.creado.toDate() : new Date(a.creado || Date.now());
             const fechaB = b.creado?.toDate ? b.creado.toDate() : new Date(b.creado || Date.now());
             return fechaB - fechaA;
         });
-        
+
         renderListaCursos();
-        
+
     } catch (err) {
         mostrarNotificacion("Error al cargar los cursos", 'error');
         cursosUsuario = [];
@@ -3008,7 +3273,9 @@ async function cargarCursosUsuario() {
 function renderListaCursos() {
     // Limpiar completamente la lista antes de renderizar
     listaCursos.innerHTML = "";
-    
+
+    actualizarBotonCursosArchivados();
+
     // Verificar si hay cursos para mostrar
     if (!cursosUsuario || cursosUsuario.length === 0) {
         listaCursos.innerHTML = `
@@ -3018,45 +3285,47 @@ function renderListaCursos() {
         `;
         return;
     }
-    
+
+    const cursosVisibles = cursosUsuario.filter((cursoItem) => mostrarCursosArchivados || cursoItem.archivado !== true);
+
     // Separar cursos propios y compartidos
-    const cursosPropios = cursosUsuario.filter(c => c.esPropio);
-    const cursosCompartidos = cursosUsuario.filter(c => !c.esPropio);
-    
+    const cursosPropios = cursosVisibles.filter(c => c.esPropio);
+    const cursosCompartidos = cursosVisibles.filter(c => !c.esPropio);
+
     // Ordenar por fecha (más recientes primero)
     const ordenarPorFecha = (a, b) => {
         const fechaA = a.creado?.toDate ? a.creado.toDate() : new Date(a.creado || Date.now());
         const fechaB = b.creado?.toDate ? b.creado.toDate() : new Date(b.creado || Date.now());
         return fechaB - fechaA;
     };
-    
+
     cursosPropios.sort(ordenarPorFecha);
     cursosCompartidos.sort(ordenarPorFecha);
-    
+
     // Renderizar cursos propios
     if (cursosPropios.length > 0) {
         const tituloPropios = document.createElement("div");
         tituloPropios.className = "px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mt-1";
         tituloPropios.textContent = "Mis Cursos";
         listaCursos.appendChild(tituloPropios);
-        
+
         cursosPropios.forEach(cursoItem => {
             renderCursoItem(cursoItem);
         });
     }
-    
+
     // Renderizar cursos compartidos
     if (cursosCompartidos.length > 0) {
         const tituloCompartidos = document.createElement("div");
         tituloCompartidos.className = "px-2 py-1 mt-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide border-t border-border";
         tituloCompartidos.textContent = "Compartidos Conmigo";
         listaCursos.appendChild(tituloCompartidos);
-        
+
         cursosCompartidos.forEach(cursoItem => {
             renderCursoItem(cursoItem);
         });
     }
-    
+
     // Si no hay cursos de ningún tipo
     if (cursosPropios.length === 0 && cursosCompartidos.length === 0) {
         listaCursos.innerHTML = `
@@ -3067,58 +3336,42 @@ function renderListaCursos() {
     }
 }
 
+function actualizarBotonCursosArchivados() {
+    const btn = document.getElementById("btnToggleCursosArchivados");
+    if (!btn) return;
+    btn.classList.toggle("archivados-visibles", !!mostrarCursosArchivados);
+    btn.classList.toggle("archivados-ocultos", !mostrarCursosArchivados);
+    btn.title = mostrarCursosArchivados ? "Ocultar cursos archivados" : "Mostrar cursos archivados";
+    btn.setAttribute("aria-label", btn.title);
+}
+
 function renderCursoItem(cursoItem) {
     const esActivo = cursoDocId === cursoItem.id;
-    
+
     const li = document.createElement("li");
-    li.className = `curso-item flex items-center justify-between gap-2 p-2 text-xs rounded cursor-pointer transition-colors duration-200 ${
-        esActivo ? 'active highlight-pulse' : ''
-    }`;
+    li.className = `curso-item flex items-center justify-between gap-2 p-2 text-xs rounded cursor-pointer transition-colors duration-200 ${esActivo ? 'active highlight-pulse' : ''
+        }`;
     li.dataset.id = cursoItem.id;
     li.dataset.tipo = cursoItem.esPropio
         ? "propio"
         : cursoItem.esOtro
-        ? "otro"
-        : "compartido";
+            ? "otro"
+            : "compartido";
 
-    
+
     // Determinar ícono y color basado en el tipo de curso
     const icono = cursoItem.esPropio
         ? 'fa-book'
         : cursoItem.esOtro
-        ? 'fa-layer-group'
-        : 'fa-share-from-square';
+            ? 'fa-layer-group'
+            : 'fa-share-from-square';
 
     const colorIcono = 'curso-item-icon';
 
-    
-    // Determinar qué botones mostrar según permisos
-    const botonesPropios = `
-        <i class="fas fa-share-alt cursor-pointer cb-action-icon btn-share-curso" 
-           title="Compartir curso"></i>
-        <i class="fas fa-clone cursor-pointer cb-action-icon btn-duplicate-curso" 
-           title="Duplicar curso"></i>
-        <i class="fas fa-pen cursor-pointer cb-action-icon btn-edit-curso" 
-           title="Editar nombre del curso"></i>
-        <i class="fas fa-trash cursor-pointer cb-action-icon btn-delete-curso" 
-           title="Eliminar curso"></i>
-    `;
-    
-    const botonesCompartidos = `
-        ${cursoItem.permisos?.compartir ? 
-        `<i class="fas fa-share-alt cursor-pointer cb-action-icon btn-share-curso" 
-            title="Compartir curso"></i>` : ''
-        }
-        ${cursoItem.permisos?.editar ? 
-            `<i class="fas fa-pen cursor-pointer cb-action-icon btn-edit-curso" 
-               title="Editar nombre del curso"></i>` : 
-            `<i class="fas fa-eye curso-readonly-icon cb-action-icon" title="Solo lectura"></i>`
-        }
 
-        <i class="fas fa-clone cursor-pointer cb-action-icon btn-duplicate-curso" 
-           title="Duplicar curso"></i>
-    `;
-    
+    const puedeEditarCurso = cursoItem.esPropio || cursoItem.permisos?.editar;
+    const puedeCompartirCurso = cursoItem.esPropio || cursoItem.permisos?.compartir;
+
     li.innerHTML = `
         <div class="flex items-center gap-2 flex-1 min-w-0">
             <i class="fas ${icono} ${colorIcono} cb-node-icon flex-shrink-0"></i>
@@ -3131,32 +3384,76 @@ function renderCursoItem(cursoItem) {
                         <span class="text-[10px] curso-owner-label truncate" title="Compartido por ${cursoItem.propietarioNombre || 'Usuario'}">
                             <i class="fas fa-user-friends mr-1 cb-node-icon"></i>${cursoItem.propietarioNombre || 'Usuario'}
                         </span>
-                        ${cursoItem.permisos?.editar ? 
-                            `<span class="text-[9px] curso-pill px-1 rounded">Editable</span>` : 
-                            `<span class="text-[9px] curso-pill curso-pill-muted px-1 rounded">Solo lectura</span>`
-                        }
+                        ${cursoItem.permisos?.editar ?
+                `<span class="text-[9px] curso-pill px-1 rounded">Editable</span>` :
+                `<span class="text-[9px] curso-pill curso-pill-muted px-1 rounded">Solo lectura</span>`
+            }
                     </div>
                 ` : ''}
             </div>
         </div>
         
         <div class="flex items-center gap-1 ml-2 curso-actions flex-shrink-0">
-            ${cursoItem.esPropio ? botonesPropios : botonesCompartidos}
+            <div class="curso-actions-menu">
+                <button type="button" class="icon-btn curso-actions-menu__trigger btn-curso-menu" title="Más acciones" aria-label="Más acciones del curso">
+                    <i class="fas fa-ellipsis-v"></i>
+                </button>
+                <div class="curso-actions-menu__panel hidden">
+                    ${puedeCompartirCurso ? `
+                    <button type="button" class="curso-actions-menu__item btn-share-curso">
+                        <i class="fas fa-share-alt"></i><span>Compartir</span>
+                    </button>
+                    ` : ""}
+                    <button type="button" class="curso-actions-menu__item btn-duplicate-curso">
+                        <i class="fas fa-clone"></i><span>Duplicar</span>
+                    </button>
+                    ${puedeEditarCurso ? `
+                    <button type="button" class="curso-actions-menu__item btn-edit-curso">
+                        <i class="fas fa-pen"></i><span>Editar nombre</span>
+                    </button>
+                    ` : `
+                    <button type="button" class="curso-actions-menu__item" disabled>
+                        <i class="fas fa-eye"></i><span>Solo lectura</span>
+                    </button>
+                    `}
+                    ${cursoItem.esPropio ? `
+                    <button type="button" class="curso-actions-menu__item btn-delete-curso">
+                        <i class="fas fa-trash"></i><span>Eliminar</span>
+                    </button>
+                    ` : ""}
+                    <div class="curso-actions-menu__divider"></div>
+                    <div class="curso-actions-menu__archive-row">
+                        <span class="curso-actions-menu__archive-label">
+                            <i class="fas fa-box-archive"></i>
+                            <span>Archivar</span>
+                        </span>
+                        <label class="curso-archive-switch">
+                            <input type="checkbox" class="btn-archive-curso" ${cursoItem.archivado ? "checked" : ""} ${puedeEditarCurso ? "" : "disabled"}>
+                            <span class="curso-archive-switch__track" aria-hidden="true">
+                                <span class="curso-archive-switch__thumb"></span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
-    
+
     // Función para manejar clics en el curso (excepto en los botones de acción)
     li.addEventListener("click", (e) => {
         // Si el clic fue en un botón de acción, no hacer nada
-        if (e.target.closest(".btn-edit-curso") || 
-            e.target.closest(".btn-delete-curso") || 
+        if (e.target.closest(".btn-edit-curso") ||
+            e.target.closest(".btn-delete-curso") ||
             e.target.closest(".btn-duplicate-curso") ||
-            e.target.closest(".btn-share-curso")) {
+            e.target.closest(".btn-share-curso") ||
+            e.target.closest(".btn-archive-curso") ||
+            e.target.closest(".btn-curso-menu") ||
+            e.target.closest(".curso-actions-menu__panel")) {
             return;
         }
-        
+
         const sidebarTemas = document.getElementById("sidebarTemas");
-        
+
         // Si ya está seleccionado → colapsar sidebarTemas
         if (cursoDocId === cursoItem.id && !sidebarTemas.classList.contains("hidden")) {
             sidebarTemas.classList.add("hidden");
@@ -3165,53 +3462,67 @@ function renderCursoItem(cursoItem) {
             localStorage.removeItem("subtemaAbierto");
             localStorage.removeItem("moduloActivo");
             cursoDocId = null;
-            
+
             // Actualizar clases activas
             document.querySelectorAll('.curso-item').forEach(item => {
                 item.classList.remove('active', 'highlight-pulse');
             });
             return;
         }
-        
+
         // Para cursos compartidos sin permisos de edición, mostrar advertencia
         if (!cursoItem.esPropio && !cursoItem.permisos?.editar) {
             if (!confirm("Este curso está en modo solo lectura. ¿Deseas abrirlo para ver el contenido?")) {
                 return;
             }
         }
-        
+
         // Seleccionar curso normalmente
         seleccionarCurso(cursoItem.id);
     });
-    
+
     // Botón compartir (solo para cursos propios)
+    const btnMenu = li.querySelector(".btn-curso-menu");
+    const panelMenu = li.querySelector(".curso-actions-menu__panel");
+    if (btnMenu && panelMenu) {
+        btnMenu.addEventListener("click", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            document.querySelectorAll(".curso-actions-menu__panel").forEach((panel) => {
+                if (panel !== panelMenu) panel.classList.add("hidden");
+            });
+            panelMenu.classList.toggle("hidden");
+        });
+    }
+
     const btnShare = li.querySelector(".btn-share-curso");
     if (btnShare) {
         btnShare.addEventListener("click", (e) => {
             e.stopPropagation();
             e.preventDefault();
-            
+            panelMenu?.classList.add("hidden");
+
             // Almacenar referencia al curso que se quiere compartir
             window.cursoCompartiendo = cursosUsuario.find(c => c.id === cursoItem.id);
             if (!window.cursoCompartiendo) return;
-            
+
             // Actualizar el nombre del curso en el modal
             const cursoCompartirNombre = document.getElementById("cursoCompartirNombre");
             if (cursoCompartirNombre) {
                 cursoCompartirNombre.textContent = window.cursoCompartiendo.nombre;
             }
-            
+
             // Cargar usuarios para compartir
             if (typeof cargarUsuariosParaCompartirCurso === 'function') {
                 cargarUsuariosParaCompartirCurso();
             }
-            
+
             // Resetear checkboxes de permisos
             const checkEditar = document.getElementById("checkPermisoEditar");
             const checkCompartir = document.getElementById("checkPermisoCompartir");
             if (checkEditar) checkEditar.checked = true;
             if (checkCompartir) checkCompartir.checked = true;
-            
+
             // Mostrar el modal
             const modalCompartir = document.getElementById("modalCompartirCurso");
             if (modalCompartir) {
@@ -3220,14 +3531,15 @@ function renderCursoItem(cursoItem) {
             }
         });
     }
-    
+
     // Botón editar curso
     const btnEdit = li.querySelector(".btn-edit-curso");
     if (btnEdit) {
         btnEdit.addEventListener("click", (e) => {
             e.stopPropagation();
             e.preventDefault();
-            
+            panelMenu?.classList.add("hidden");
+
             // Guardar referencia al curso que se está editando
             cursoEditando = {
                 id: cursoItem.id,
@@ -3235,56 +3547,57 @@ function renderCursoItem(cursoItem) {
                 esPropio: cursoItem.esPropio,
                 permisos: cursoItem.permisos
             };
-            
+
             // Para cursos compartidos sin permisos, mostrar mensaje
             if (!cursoItem.esPropio && !cursoItem.permisos?.editar) {
                 alert("No tienes permisos para editar este curso. Solo puedes verlo en modo lectura.");
                 return;
             }
-            
+
             inputEditarNombreCurso.value = cursoEditando.nombre;
             inputEditarNombreCurso.focus();
-            
+
             modalEditarCurso.classList.remove("hidden");
             modalEditarCurso.classList.add("flex");
         });
     }
-    
+
     // Botón duplicar curso
     const btnDuplicate = li.querySelector(".btn-duplicate-curso");
     if (btnDuplicate) {
         btnDuplicate.addEventListener("click", async (e) => {
             e.stopPropagation();
             e.preventDefault();
-            
+            panelMenu?.classList.add("hidden");
+
             // Verificar que el usuario esté autenticado
             if (!currentUserId) {
                 alert("Debes iniciar sesión para duplicar cursos.");
                 return;
             }
-            
+
             // Buscar el curso a duplicar
             const cursoADuplicar = cursosUsuario.find(c => c.id === cursoItem.id);
             if (!cursoADuplicar) return;
-            
+
             const nombreCurso = cursoADuplicar.nombre || "Curso";
             if (!confirm(`¿Duplicar el curso "${nombreCurso}" completo?`)) return;
-            
+
             try {
                 // 1️⃣ Obtener datos COMPLETOS del curso original desde Firebase
                 const cursoRef = doc(db, "moodleCourses", cursoItem.id);
                 const cursoSnap = await getDoc(cursoRef);
-                
+
                 if (!cursoSnap.exists()) {
                     alert("El curso original no existe.");
                     return;
                 }
-                
+
                 const cursoOriginalData = cursoSnap.data();
-                
+
                 // 2️⃣ Generar nuevo ID de curso
                 const nuevoId = crypto.randomUUID();
-                
+
                 // 3️⃣ Crear copia profunda con nuevos IDs
                 const nuevoCurso = {
                     ...cursoOriginalData,
@@ -3305,46 +3618,46 @@ function renderCursoItem(cursoItem) {
                         eliminar: true
                     }
                 };
-                
+
                 // 4️⃣ Regenerar IDs internos (temas y subtemas)
                 if (Array.isArray(nuevoCurso.temas)) {
                     const idMap = new Map(); // Para mapear IDs viejos a nuevos
-                    
+
                     nuevoCurso.temas = nuevoCurso.temas.map(t => {
                         const nuevoTemaId = crypto.randomUUID();
                         const temaViejoId = t.id;
-                        
+
                         idMap.set(temaViejoId, nuevoTemaId);
-                        
-                        const nuevoTema = { 
-                            ...t, 
+
+                        const nuevoTema = {
+                            ...t,
                             id: nuevoTemaId,
                             subtemas: []
                         };
-                        
+
                         // Regenerar IDs de subtemas
                         if (Array.isArray(t.subtemas)) {
                             nuevoTema.subtemas = t.subtemas.map(st => {
                                 const nuevoSubtemaId = crypto.randomUUID();
                                 const subtemaViejoId = st.id;
-                                
+
                                 idMap.set(subtemaViejoId, nuevoSubtemaId);
-                                
+
                                 // Mantener referencia a los módulos
                                 const nuevosModulosIds = [...(st.modulosIds || [])];
-                                
-                                return { 
-                                    ...st, 
+
+                                return {
+                                    ...st,
                                     id: nuevoSubtemaId,
                                     modulosIds: nuevosModulosIds
                                 };
                             });
                         }
-                        
+
                         return nuevoTema;
                     });
                 }
-                
+
                 // 5️⃣ Duplicar TODOS los módulos individualmente con nuevos IDs
                 if (nuevoCurso.temas) {
                     for (const tema of nuevoCurso.temas) {
@@ -3352,20 +3665,20 @@ function renderCursoItem(cursoItem) {
                             for (const subtema of tema.subtemas) {
                                 if (subtema.modulosIds && Array.isArray(subtema.modulosIds)) {
                                     const nuevosModulosIds = [];
-                                    
+
                                     for (const moduloId of subtema.modulosIds) {
                                         try {
                                             // Construir ID compuesto para buscar el módulo original
-                                            const idParaBuscar = moduloId.includes('_') ? 
+                                            const idParaBuscar = moduloId.includes('_') ?
                                                 moduloId : `${cursoItem.id}_${moduloId}`;
-                                            
+
                                             const moduloOriginal = await obtenerModulo(idParaBuscar, cursoItem.id);
-                                            
+
                                             if (moduloOriginal) {
                                                 // Generar nuevo ID para el módulo
                                                 const nuevoModuloId = crypto.randomUUID();
                                                 const idFirestore = `${nuevoId}_${nuevoModuloId}`;
-                                                
+
                                                 // Crear copia del módulo con nuevo ID
                                                 const nuevoModulo = {
                                                     ...moduloOriginal,
@@ -3379,10 +3692,10 @@ function renderCursoItem(cursoItem) {
                                                     // 🔥 Limpiar cualquier referencia de solo lectura
                                                     modoLectura: false
                                                 };
-                                                
+
                                                 // Guardar el nuevo módulo
                                                 await setDoc(doc(db, "moodleCourses", idFirestore), nuevoModulo);
-                                                
+
                                                 // Reemplazar ID viejo por nuevo en el subtema
                                                 nuevosModulosIds.push(nuevoModuloId);
                                             } else {
@@ -3393,7 +3706,7 @@ function renderCursoItem(cursoItem) {
                                             nuevosModulosIds.push(moduloId); // Mantener ID original como fallback
                                         }
                                     }
-                                    
+
                                     // Actualizar el array de módulos en el subtema
                                     subtema.modulosIds = nuevosModulosIds;
                                 }
@@ -3401,20 +3714,20 @@ function renderCursoItem(cursoItem) {
                         }
                     }
                 }
-                
+
                 // 6️⃣ Guardar el curso duplicado en Firebase
                 await setDoc(doc(db, "moodleCourses", nuevoId), nuevoCurso);
-                
+
                 // 7️⃣ Recargar la lista completa desde Firebase
                 await cargarCursosUsuario();
-                
+
                 // 8️⃣ Seleccionar el curso duplicado
                 setTimeout(() => {
                     seleccionarCurso(nuevoId);
                 }, 500);
-                
+
                 alert("✅ Curso duplicado exitosamente. Todos los elementos son editables.");
-                
+
             } catch (err) {
                 alert("❌ Error al duplicar el curso: " + err.message);
             }
@@ -3428,21 +3741,22 @@ function renderCursoItem(cursoItem) {
         btnDelete.addEventListener("click", async (e) => {
             e.stopPropagation();
             e.preventDefault();
-            
+            panelMenu?.classList.add("hidden");
+
             // Para cursos compartidos, no mostrar botón de eliminar
             if (!cursoItem.esPropio) return;
-            
+
             if (!confirm(`¿Eliminar el curso "${cursoItem.nombre}" completo? Esta acción no se puede deshacer.`)) return;
-            
+
             try {
                 await authFetchJson("/api/moodle/delete-course", {
                     method: "POST",
                     body: { courseId: cursoItem.id }
                 });
-                
+
                 // 2. Recargar lista desde Firebase
                 await cargarCursosUsuario();
-                
+
                 // 3. Si el curso eliminado es el que está seleccionado, limpiar completamente
                 if (cursoDocId === cursoItem.id) {
                     // Limpiar todas las variables globales
@@ -3450,17 +3764,17 @@ function renderCursoItem(cursoItem) {
                     curso = null;
                     temaActivo = null;
                     subtemaActivo = null;
-                    
+
                     // Limpiar localStorage relacionado con el curso
                     localStorage.removeItem("cursoSeleccionado");
                     localStorage.removeItem("temaAbierto");
                     localStorage.removeItem("subtemaAbierto");
                     localStorage.removeItem("moduloActivo");
-                    
+
                     // Ocultar sidebar de temas
                     const sidebarTemas = document.getElementById("sidebarTemas");
                     if (sidebarTemas) sidebarTemas.classList.add("hidden");
-                    
+
                     // Limpiar editor
                     const contenidoEditor = document.getElementById("contenidoEditor");
                     if (contenidoEditor) {
@@ -3471,13 +3785,13 @@ function renderCursoItem(cursoItem) {
                             </div>
                         `;
                     }
-                    
+
                     // Limpiar nombre del curso seleccionado
                     const cursoSeleccionadoNombre = document.getElementById("cursoSeleccionadoNombre");
                     if (cursoSeleccionadoNombre) {
                         cursoSeleccionadoNombre.innerText = "Selecciona un curso";
                     }
-                    
+
                     // Deshabilitar botón de añadir tema
                     const btnAddTema = document.getElementById("btnAddTema");
                     if (btnAddTema) {
@@ -3490,12 +3804,12 @@ function renderCursoItem(cursoItem) {
                         btnExportCursoWord.classList.add("opacity-50", "cursor-not-allowed");
                     }
                 }
-                
+
                 // 4. Si el curso eliminado era el que se estaba editando, limpiar esa referencia
                 if (cursoEditando && cursoEditando.id === cursoItem.id) {
                     cursoEditando = null;
                 }
-                
+
                 // 5. Si quedan cursos, seleccionar el primero automáticamente
                 if (cursosUsuario.length > 0) {
                     setTimeout(() => {
@@ -3505,19 +3819,50 @@ function renderCursoItem(cursoItem) {
                         }
                     }, 300);
                 }
-                
+
                 alert("✅ Curso eliminado exitosamente.");
-                
+
             } catch (err) {
                 alert("❌ Error al eliminar el curso: " + err.message);
-                
+
                 // Si hay error, recargar los cursos desde Firebase
                 await cargarCursosUsuario();
             }
         });
     }
-    
+
+    const btnArchive = li.querySelector(".btn-archive-curso");
+    if (btnArchive) {
+        btnArchive.addEventListener("change", async (e) => {
+            e.stopPropagation();
+            await toggleArchivoCurso(cursoItem.id, !!btnArchive.checked);
+            panelMenu?.classList.add("hidden");
+        });
+        btnArchive.addEventListener("click", (e) => e.stopPropagation());
+    }
+
     listaCursos.appendChild(li);
+}
+
+async function toggleArchivoCurso(cursoId, archivado) {
+    const cursoIdSafe = String(cursoId || "").trim();
+    if (!cursoIdSafe) return;
+    try {
+        await updateDoc(doc(db, "moodleCourses", cursoIdSafe), {
+            archivado: !!archivado,
+            actualizado: new Date()
+        });
+
+        const cursoIndex = cursosUsuario.findIndex((item) => item.id === cursoIdSafe);
+        if (cursoIndex !== -1) {
+            cursosUsuario[cursoIndex].archivado = !!archivado;
+        }
+
+        renderListaCursos();
+    } catch (error) {
+        mostrarNotificacion("No se pudo actualizar el archivo del curso.", "error");
+        await cargarCursosUsuario();
+    }
 }
 
 function limpiarEstadosActivos() {
@@ -3525,15 +3870,15 @@ function limpiarEstadosActivos() {
     document.querySelectorAll('.curso-item.active').forEach(item => {
         item.classList.remove('active');
     });
-    
+
     document.querySelectorAll('.subtema-activo').forEach(item => {
         item.classList.remove('subtema-activo');
     });
-    
+
     document.querySelectorAll('.modulo-activo').forEach(item => {
         item.classList.remove('modulo-activo');
     });
-    
+
     // Limpiar localStorage
     localStorage.removeItem("temaAbierto");
     localStorage.removeItem("subtemaAbierto");
@@ -3553,7 +3898,7 @@ const btnCancelarCrearCurso = document.getElementById("btnCancelarCrearCurso");
 function togglePermisosSegunModo() {
     const modoCopia = document.getElementById('radioCopia').checked;
     const permisosDiv = document.getElementById('permisosColaboracion');
-    
+
     if (modoCopia) {
         permisosDiv.classList.add('hidden');
     } else {
@@ -3562,7 +3907,7 @@ function togglePermisosSegunModo() {
 }
 
 // Conectar eventos a los radios
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const radios = document.querySelectorAll('input[name="modoCompartir"]');
     radios.forEach(radio => {
         radio.addEventListener('change', togglePermisosSegunModo);
@@ -3571,7 +3916,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Función principal para compartir curso
 // Busca esta función (aproximadamente línea 490):
-document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', async function() {
+document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', async function () {
     const curso = window.cursoCompartiendo;
     if (!curso || !window.currentUserId) {
         mostrarNotificacion("Error: Datos incompletos", "error");
@@ -3581,7 +3926,7 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
     // Obtener modo de compartir seleccionado
     const modoCopia = document.getElementById('radioCopia').checked;
     const modoColaboracion = document.getElementById('radioColaboracion').checked;
-    
+
     if (!modoCopia && !modoColaboracion) {
         mostrarNotificacion("Selecciona un modo de compartir", "error");
         return;
@@ -3590,7 +3935,7 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
     // 🔥 CORRECCIÓN: Obtener TODOS los usuarios (nuevos y ya compartidos)
     // 1. Usuarios ya compartidos (vienen del array compartidoConDetalles)
     const usuariosYaCompartidos = curso.compartidoConDetalles || [];
-    
+
     // 2. Usuarios seleccionados en checkboxes
     const usuariosNuevosSeleccionados = Array.from(
         document.querySelectorAll('#listaUsuariosCompartirCurso input[type="checkbox"]:checked')
@@ -3605,12 +3950,12 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
     if (usuariosNuevosSeleccionados.length === 0) {
         // Verificar si hay usuarios en la sección "Ya compartido con:"
         const hayUsuariosEnEdicion = document.querySelectorAll('.btn-editar-permisos').length > 0;
-        
+
         if (!hayUsuariosEnEdicion) {
             mostrarNotificacion("Selecciona al menos un usuario nuevo para compartir", "error");
             return;
         }
-        
+
         // Si solo hay usuarios ya compartidos, mostrar mensaje diferente
         if (usuariosYaCompartidos.length > 0) {
             mostrarNotificacion("Solo hay usuarios ya compartidos. Selecciona nuevos usuarios.", "info");
@@ -3621,13 +3966,13 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
     // Obtener permisos si es modo colaboración
     let permisosEditar = false;
     let permisosCompartir = false;
-    
+
     if (modoColaboracion) {
         permisosEditar = document.getElementById('checkPermisoEditar').checked;
         permisosCompartir = document.getElementById('checkPermisoCompartir').checked;
     }
 
-       const btn = this;
+    const btn = this;
     const originalText = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Compartiendo...';
@@ -3636,16 +3981,16 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
     try {
         let usuariosProcesados = 0;
         let errores = [];
-        
+
         // 🔥 CORRECCIÓN: Filtrar usuarios ya compartidos de los nuevos
         // Para evitar duplicar operaciones con usuarios ya compartidos
         const usuariosParaCompartir = usuariosNuevosSeleccionados.filter(nuevo => {
             // Verificar si ya está compartido
-            return !usuariosYaCompartidos.some(existente => 
+            return !usuariosYaCompartidos.some(existente =>
                 existente.userId === nuevo.userId
             );
         });
-        
+
         // 🔥 CORRECCIÓN: Si no hay usuarios nuevos después de filtrar
         if (usuariosParaCompartir.length === 0 && usuariosYaCompartidos.length > 0) {
             mostrarNotificacion("Los usuarios seleccionados ya tienen acceso al curso", "info");
@@ -3679,13 +4024,13 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
                 `✅ Curso compartido exitosamente con ${usuariosProcesados} usuario(s)`,
                 'success'
             );
-            
+
             // Cerrar modal
             document.getElementById('modalCompartirCurso').classList.add('hidden');
-            
+
             // Recargar cursos
             await cargarCursosUsuario();
-            
+
             // Limpiar selección
             window.cursoCompartiendo = null;
         } else if (errores.length > 0) {
@@ -3693,7 +4038,7 @@ document.getElementById('btnConfirmarCompartirCurso').addEventListener('click', 
             const mensajeErrores = errores.slice(0, 3).join(', ');
             mostrarNotificacion(`❌ Errores al compartir: ${mensajeErrores}${errores.length > 3 ? '...' : ''}`, 'error');
         }
-        
+
     } catch (error) {
         mostrarNotificacion(`❌ Error: ${error.message}`, 'error');
     } finally {
@@ -3770,7 +4115,7 @@ async function cargarUsuariosParaCompartirCurso() {
         // Obtener información de usuarios con los que YA está compartido
         const cursoCompartiendo = window.cursoCompartiendo;
         let usuariosYaCompartidos = [];
-        
+
         if (cursoCompartiendo && cursoCompartiendo.compartidoConDetalles) {
             usuariosYaCompartidos = cursoCompartiendo.compartidoConDetalles.map(d => ({
                 userId: d.userId,
@@ -3796,11 +4141,11 @@ async function cargarUsuariosParaCompartirCurso() {
 
         // Renderizar lista
         let html = '';
-        
+
         // Primero mostrar usuarios con los que YA está compartido
         const usuariosCompartidos = usuarios.filter(u => u.yaCompartido);
         const usuariosNoCompartidos = usuarios.filter(u => !u.yaCompartido);
-        
+
         if (usuariosCompartidos.length > 0) {
             html += `
                 <div class="mb-3">
@@ -3810,12 +4155,12 @@ async function cargarUsuariosParaCompartirCurso() {
                     </p>
                     <div class="space-y-1">
             `;
-            
+
             usuariosCompartidos.forEach(user => {
-                const permisosTexto = user.permisos ? 
-                    (user.permisos.editar ? 'Editable' : 'Solo lectura') : 
+                const permisosTexto = user.permisos ?
+                    (user.permisos.editar ? 'Editable' : 'Solo lectura') :
                     'Solo lectura';
-                
+
                 html += `
                     <div class="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded">
                         <div class="flex-1">
@@ -3842,14 +4187,14 @@ async function cargarUsuariosParaCompartirCurso() {
                     </div>
                 `;
             });
-            
+
             html += `</div></div>`;
-            
+
             if (usuariosNoCompartidos.length > 0) {
                 html += `<div class="border-t pt-3 mt-3"></div>`;
             }
         }
-        
+
         // Luego mostrar usuarios disponibles para compartir
         if (usuariosNoCompartidos.length > 0) {
             html += `
@@ -3858,7 +4203,7 @@ async function cargarUsuariosParaCompartirCurso() {
                     Selecciona uno o varios usuarios para compartir:
                 </p>
             `;
-            
+
             usuariosNoCompartidos.forEach(user => {
                 html += `
                     <label class="flex items-center gap-2 p-2 hover:bg-accent rounded cursor-pointer">
@@ -3893,7 +4238,7 @@ async function cargarUsuariosParaCompartirCurso() {
                 e.stopPropagation();
                 const userId = e.currentTarget.dataset.userid;
                 const userName = e.currentTarget.dataset.username;
-                
+
                 if (confirm(`¿Dejar de compartir el curso con ${userName}?`)) {
                     await dejarDeCompartirCurso(userId);
                 }
@@ -3905,7 +4250,7 @@ async function cargarUsuariosParaCompartirCurso() {
                 e.stopPropagation();
                 const userId = e.currentTarget.dataset.userid;
                 const userName = e.currentTarget.dataset.username;
-                
+
                 await mostrarModalEditarPermisos(userId, userName);
             });
         });
@@ -3924,19 +4269,19 @@ async function cargarUsuariosParaCompartirCurso() {
 function actualizarContadorSeleccion() {
     const checkboxes = document.querySelectorAll('#listaUsuariosCompartirCurso input[type="checkbox"]:checked');
     const contadorElement = document.getElementById('contadorSeleccion');
-    
+
     if (!contadorElement) {
         // Crear elemento si no existe
         const nuevoContador = document.createElement('div');
         nuevoContador.id = 'contadorSeleccion';
         nuevoContador.className = 'text-xs text-blue-600 mt-2 mb-3';
-        
+
         const modalFooter = document.querySelector('#modalCompartirCurso .modal-footer');
         if (modalFooter) {
             modalFooter.insertBefore(nuevoContador, modalFooter.firstChild);
         }
     }
-    
+
     const contador = document.getElementById('contadorSeleccion');
     if (contador) {
         if (checkboxes.length > 0) {
@@ -3966,11 +4311,11 @@ setTimeout(() => {
 async function mostrarModalEditarPermisos(userId, userName) {
     const curso = window.cursoCompartiendo;
     if (!curso) return;
-    
+
     // Obtener permisos actuales
     const detalleUsuario = curso.compartidoConDetalles?.find(d => d.userId === userId);
     const permisosActuales = detalleUsuario?.permisos || { editar: false, compartir: false };
-    
+
     // Crear modal de edición de permisos
     const modalHTML = `
         <div id="modalEditarPermisos" class="modal fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10000]">
@@ -4018,23 +4363,23 @@ async function mostrarModalEditarPermisos(userId, userName) {
             </div>
         </div>
     `;
-    
+
     // Eliminar modal anterior si existe
     const modalAnterior = document.getElementById('modalEditarPermisos');
     if (modalAnterior) modalAnterior.remove();
-    
+
     // Agregar nuevo modal
     document.body.insertAdjacentHTML('beforeend', modalHTML);
-    
+
     // Configurar eventos
     document.getElementById('btnCancelarEditarPermisos').onclick = () => {
         document.getElementById('modalEditarPermisos').remove();
     };
-    
+
     document.getElementById('btnGuardarEditarPermisos').onclick = async () => {
         const editar = document.getElementById('checkEditarPermisos').checked;
         const compartir = document.getElementById('checkCompartirPermisos').checked;
-        
+
         await actualizarPermisosUsuario(userId, editar, compartir);
         document.getElementById('modalEditarPermisos').remove();
     };
@@ -4051,15 +4396,15 @@ async function actualizarPermisosUsuario(userId, puedeEditar, puedeCompartir) {
     try {
         const cursoRef = doc(db, "moodleCourses", curso.id);
         const cursoSnap = await getDoc(cursoRef);
-        
+
         if (!cursoSnap.exists()) {
             mostrarNotificacion("El curso no existe", "error");
             return;
         }
-        
+
         const cursoData = cursoSnap.data();
         const compartidoConDetalles = cursoData.compartidoConDetalles || [];
-        
+
         // Actualizar los permisos del usuario
         const nuevosDetalles = compartidoConDetalles.map(detalle => {
             if (detalle.userId === userId) {
@@ -4075,30 +4420,30 @@ async function actualizarPermisosUsuario(userId, puedeEditar, puedeCompartir) {
             }
             return detalle;
         });
-        
+
         // Actualizar en Firestore
         await updateDoc(cursoRef, {
             compartidoConDetalles: nuevosDetalles,
             actualizado: new Date()
         });
-        
+
         // Actualizar en la lista local
         const cursoIndex = cursosUsuario.findIndex(c => c.id === curso.id);
         if (cursoIndex !== -1) {
             cursosUsuario[cursoIndex].compartidoConDetalles = nuevosDetalles;
         }
-        
+
         // Si el usuario actual está viendo el curso y perdió permisos, refrescar
         if (cursoDocId === curso.id && currentUserId === userId && !puedeEditar) {
             // Recargar el curso para reflejar los nuevos permisos
             await seleccionarCurso(curso.id);
         }
-        
+
         mostrarNotificacion("✅ Permisos actualizados correctamente", 'success');
-        
+
         // Recargar la lista de usuarios en el modal
         await cargarUsuariosParaCompartirCurso();
-        
+
     } catch (error) {
         mostrarNotificacion(`❌ Error: ${error.message}`, 'error');
     }
@@ -4116,59 +4461,59 @@ async function dejarDeCompartirCurso(userId) {
     try {
         const cursoRef = doc(db, "moodleCourses", curso.id);
         const cursoSnap = await getDoc(cursoRef);
-        
+
         if (!cursoSnap.exists()) {
             mostrarNotificacion("El curso no existe", "error");
             return;
         }
-        
+
         const cursoData = cursoSnap.data();
-        
+
         // Filtrar el usuario de los arrays de compartir
         const nuevoCompartidoCon = (cursoData.compartidoCon || []).filter(uid => uid !== userId);
         const nuevoCompartidoConDetalles = (cursoData.compartidoConDetalles || []).filter(
             detalle => detalle.userId !== userId
         );
-        
+
         // Actualizar en Firestore
         await updateDoc(cursoRef, {
             compartidoCon: nuevoCompartidoCon,
             compartidoConDetalles: nuevoCompartidoConDetalles,
             actualizado: new Date()
         });
-        
+
         // Actualizar en la lista local
         const cursoIndex = cursosUsuario.findIndex(c => c.id === curso.id);
         if (cursoIndex !== -1) {
             cursosUsuario[cursoIndex].compartidoCon = nuevoCompartidoCon;
             cursosUsuario[cursoIndex].compartidoConDetalles = nuevoCompartidoConDetalles;
         }
-        
+
         mostrarNotificacion("✅ Se dejó de compartir el curso", 'success');
-        
+
         // Recargar la lista de usuarios en el modal
         await cargarUsuariosParaCompartirCurso();
-        
+
     } catch (error) {
         mostrarNotificacion(`❌ Error: ${error.message}`, 'error');
     }
 }
 
 // Función para actualizar permisos de un usuario
-window.actualizarPermisoUsuario = async function(userId, tipoPermiso, valor) {
+window.actualizarPermisoUsuario = async function (userId, tipoPermiso, valor) {
     const curso = window.cursoCompartiendo;
-    
+
     if (!curso || !userId) return;
-    
+
     try {
         const cursoRef = doc(db, "moodleCourses", curso.id);
         const cursoSnap = await getDoc(cursoRef);
-        
+
         if (!cursoSnap.exists()) return;
-        
+
         const cursoData = cursoSnap.data();
         const compartidoConDetalles = cursoData.compartidoConDetalles || [];
-        
+
         // Buscar y actualizar los permisos del usuario
         const nuevosDetalles = compartidoConDetalles.map(detalle => {
             if (detalle.userId === userId) {
@@ -4183,20 +4528,20 @@ window.actualizarPermisoUsuario = async function(userId, tipoPermiso, valor) {
             }
             return detalle;
         });
-        
+
         await updateDoc(cursoRef, {
             compartidoConDetalles: nuevosDetalles,
             actualizado: new Date()
         });
-        
+
         // Mostrar notificación
         const tipoTexto = tipoPermiso === 'editar' ? 'editar' : 'compartir';
         const accion = valor ? 'concedido' : 'revocado';
         mostrarNotificacion(`✅ Permiso para ${tipoTexto} ${accion}`, 'success');
-        
+
     } catch (error) {
         mostrarNotificacion(`❌ Error actualizando permiso`, 'error');
-        
+
         // Revertir el checkbox en la UI
         const checkbox = document.querySelector(`.permiso-${tipoPermiso}[data-userid="${userId}"]`);
         if (checkbox) {
@@ -4214,6 +4559,17 @@ document.getElementById("btnNuevoCurso").addEventListener("click", () => {
     modalCrearCurso.classList.add("flex");
 
     setTimeout(() => inputNombreCurso.focus(), 100);
+});
+
+document.getElementById("btnToggleCursosArchivados")?.addEventListener("click", () => {
+    mostrarCursosArchivados = !mostrarCursosArchivados;
+    localStorage.setItem("cb_mostrar_cursos_archivados", mostrarCursosArchivados ? "1" : "0");
+    renderListaCursos();
+});
+
+document.addEventListener("click", (event) => {
+    if (event.target.closest(".curso-actions-menu")) return;
+    document.querySelectorAll(".curso-actions-menu__panel").forEach((panel) => panel.classList.add("hidden"));
 });
 
 // Cancelar
@@ -4237,14 +4593,14 @@ btnCrearCurso.addEventListener("click", async () => {
     if (creandoCurso) {
         return;
     }
-    
+
     if (btnCrearCurso.disabled) {
         return;
     }
-    
+
     // Guardar el estado original
     const originalBtnText = btnCrearCurso.innerHTML;
-    
+
     // Bloquear
     creandoCurso = true;
     btnCrearCurso.disabled = true;
@@ -4253,17 +4609,17 @@ btnCrearCurso.addEventListener("click", async () => {
 
     try {
         // 🔥 VERIFICACIÓN ADICIONAL: Revisar si ya existe curso con mismo nombre para este usuario
-        const cursoExistente = cursosUsuario.find(c => 
-            c.nombre.toLowerCase() === nombre.toLowerCase() && 
+        const cursoExistente = cursosUsuario.find(c =>
+            c.nombre.toLowerCase() === nombre.toLowerCase() &&
             c.userId === currentUserId
         );
-        
+
         if (cursoExistente) {
             throw new Error(`Ya tienes un curso llamado "${nombre}". Usa un nombre diferente.`);
         }
 
         const nuevoId = crypto.randomUUID();
-        
+
 
         const temaInicialId = crypto.randomUUID();
         const subtemaInicialId = crypto.randomUUID();
@@ -4271,6 +4627,7 @@ btnCrearCurso.addEventListener("click", async () => {
         const moduloLecturaInicialId = crypto.randomUUID();
 
         const nuevoCurso = {
+            docType: "course",
             cursoId: nuevoId,
             id: nuevoId,
             nombre: nombre,
@@ -4298,7 +4655,7 @@ btnCrearCurso.addEventListener("click", async () => {
         // 🔥 Verificar que el curso no exista ya (doble verificación)
         const cursoRef = doc(db, "moodleCourses", nuevoId);
         const cursoSnap = await getDoc(cursoRef);
-        
+
         if (cursoSnap.exists()) {
             throw new Error("Error inesperado: El ID del curso ya existe. Intenta nuevamente.");
         }
@@ -4317,6 +4674,8 @@ btnCrearCurso.addEventListener("click", async () => {
             incluirImagenOriginalEnPropuesta: false,
             generarGrafico: false,
             ignorarContextoOtrosModulos: false,
+            transcribirEstructurarMismoTipoActividad: false,
+            distractoresRetadoresQuiz: false,
             traducciones: [],
             creado: Date.now(),
             actualizado: Date.now()
@@ -4333,6 +4692,8 @@ btnCrearCurso.addEventListener("click", async () => {
             incluirImagenOriginalEnPropuesta: false,
             generarGrafico: false,
             ignorarContextoOtrosModulos: false,
+            transcribirEstructurarMismoTipoActividad: false,
+            distractoresRetadoresQuiz: false,
             traducciones: [],
             creado: Date.now(),
             actualizado: Date.now()
@@ -4340,27 +4701,27 @@ btnCrearCurso.addEventListener("click", async () => {
         localStorage.setItem("temaAbierto", temaInicialId);
         localStorage.setItem("subtemaAbierto", subtemaInicialId);
         localStorage.setItem("moduloActivo", moduloTemarioInicialId);
-        
+
         // 2. Cerrar modal inmediatamente
         modalCrearCurso.classList.add("hidden");
         modalCrearCurso.classList.remove("flex");
-        
+
         // 3. Limpiar el input
         inputNombreCurso.value = "";
-        
+
         // 4. Recargar la lista
         await cargarCursosUsuario();
-        
+
         // 5. Esperar un momento y seleccionar el curso creado
         setTimeout(() => {
             seleccionarCurso(nuevoId);
         }, 500);
-        
+
         // 6. Mostrar notificación de éxito
         mostrarNotificacion(`Curso "${nombre}" creado exitosamente`, 'success');
-        
+
     } catch (err) {
-        
+
         // 🔥 Mensajes de error específicos
         let errorMessage = "Error al crear el curso";
         if (err.code === 'permission-denied') {
@@ -4372,15 +4733,15 @@ btnCrearCurso.addEventListener("click", async () => {
         } else {
             errorMessage = `Error: ${err.message}`;
         }
-        
+
         mostrarNotificacion(errorMessage, 'error', true);
-        
+
         // 🔥 Mantener el modal abierto si hay error de nombre duplicado
         if (!err.message.includes("ya tienes")) {
             modalCrearCurso.classList.add("hidden");
             modalCrearCurso.classList.remove("flex");
         }
-        
+
     } finally {
         // 🔥 Re-habilitar el botón después de un tiempo
         setTimeout(() => {
@@ -4400,7 +4761,7 @@ function limpiarTodasSuscripciones() {
         window.cursoSnapshotUnsubscribe();
         window.cursoSnapshotUnsubscribe = null;
     }
-    
+
     // Suscripciones de módulos
     if (window.suscripcionesModulos) {
         Object.values(window.suscripcionesModulos).forEach(unsubscribe => {
@@ -4410,7 +4771,7 @@ function limpiarTodasSuscripciones() {
         });
         window.suscripcionesModulos = {};
     }
-    
+
     // Limpiar otros listeners si existen
     if (window.cursoSeleccionadoListener) {
         window.cursoSeleccionadoListener.remove();
@@ -4428,19 +4789,19 @@ async function seleccionarCurso(id) {
     if (!id || typeof id !== 'string' || id.trim() === '') {
         return;
     }
-    
+
     // 🔥 EVITAR EJECUCIÓN MÚLTIPLE
     if (seleccionandoCurso) {
         return;
     }
-    
+
     // 🔥 Si ya es el curso activo, solo salir si el editor ya quedó cargado
     const editorActual = document.getElementById('contenidoEditor');
     const editorSigueVacio = !!editorActual?.querySelector('.empty-state');
     if (cursoDocId === id && !editorSigueVacio) {
         return;
     }
-    
+
     seleccionandoCurso = true;
 
     // 🔥 ESTABLECER IDENTIDAD INMEDIATAMENTE PARA EVITAR CARRERAS
@@ -4453,45 +4814,45 @@ async function seleccionarCurso(id) {
             window.cursoSnapshotUnsubscribe();
             window.cursoSnapshotUnsubscribe = null;
         }
-        
+
         // Limpiar suscripciones de módulos
         limpiarSuscripcionesModulos();
 
-        
+
         // Buscar el curso en la lista local
         let cursoLocal = cursosUsuario.find(c => c.id === id);
-        
+
         if (!cursoLocal) {
             // Intentar cargar desde Firebase
             try {
                 const cursoRef = doc(db, "moodleCourses", id);
                 const cursoSnap = await getDoc(cursoRef);
-                
+
                 if (!cursoSnap.exists()) {
                     mostrarNotificacion("El curso no existe o ha sido eliminado", "error");
-                    
+
                     // Recargar cursos y salir
                     await cargarCursosUsuario();
                     return;
                 }
-                
+
                 const cursoData = cursoSnap.data();
-                
+
                 // Verificar acceso
                 const esPropietario = cursoData.userId === currentUserId;
                 const estaCompartido = isMoodleCourseSharedWithUser(cursoData, currentUserId);
-                
+
                 if (!esPropietario && !estaCompartido) {
                     mostrarNotificacion("No tienes acceso a este curso", "error");
                     return;
                 }
-                
+
                 // Determinar permisos
                 let permisosUsuario = { editar: false, compartir: false };
                 if (!esPropietario) {
                     permisosUsuario = resolveMoodleCollabPermissions(cursoData, currentUserId);
                 }
-                
+
                 // Crear objeto curso
                 cursoLocal = {
                     id: id,
@@ -4506,85 +4867,86 @@ async function seleccionarCurso(id) {
                     tipo: esPropietario ? "propio" : "compartido",
                     publicar: cursoData.publicar || false
                 };
-                
+
                 // Agregar a la lista local
                 const existe = cursosUsuario.some(c => c.id === id);
                 if (!existe) {
                     cursosUsuario.push(cursoLocal);
                     renderListaCursos();
                 }
-                
+
             } catch (firebaseError) {
                 mostrarNotificacion("Error al cargar el curso desde la base de datos", "error");
                 return;
             }
         }
-        
+
         if (!cursoLocal) {
             mostrarNotificacion("No se pudo cargar el curso", "error");
             return;
         }
-        
+
         // 🔥 VERIFICACIÓN DE PERMISOS
         const esCursoPropio = cursoLocal.esPropio;
         const tienePermisoEditar = esCursoPropio || cursoLocal.permisos?.editar === true;
-        
+
         // 🔥 CORRECCIÓN: Solo mostrar advertencia una vez al abrir (no confirm)
         if (!tienePermisoEditar) {
         }
-        
+
         // Limpiar estados activos
         limpiarEstadosActivos();
-        
+
         // Asignar curso a variables globales
         curso = { ...cursoLocal };
         window.curso = curso;
-        
+        persistirCursoActivoEnLocalStorage(curso);
+
         // Asegurar estructura válida
         curso.temas = Array.isArray(curso.temas) ? curso.temas : [];
-        
+
         // Actualizar UI de lista de cursos
         document.querySelectorAll('.curso-item').forEach(item => {
             item.classList.remove('active', 'highlight-pulse');
         });
-        
+
         const cursoItemElement = document.querySelector(`.curso-item[data-id="${id}"]`);
         if (cursoItemElement) {
             cursoItemElement.classList.add('active', 'highlight-pulse');
-            
+
             setTimeout(() => {
-                cursoItemElement.scrollIntoView({ 
-                    behavior: 'smooth', 
+                cursoItemElement.scrollIntoView({
+                    behavior: 'smooth',
                     block: 'nearest'
                 });
             }, 100);
         }
-        
+
         // Actualizar información del curso en la UI
         const cursoNombreElement = document.getElementById("cursoSeleccionadoNombre");
         if (cursoNombreElement) {
             cursoNombreElement.innerText = curso.nombre;
-            
+
             // Añadir indicador de modo solo si es de solo lectura
             if (!tienePermisoEditar) {
                 const modoElement = document.createElement("span");
                 modoElement.className = "ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full";
                 modoElement.textContent = "Solo lectura";
                 modoElement.id = "modoLecturaIndicator";
-                
+
                 // Remover indicador anterior si existe
                 const indicadorAnterior = document.getElementById("modoLecturaIndicator");
                 if (indicadorAnterior) indicadorAnterior.remove();
-                
+
                 cursoNombreElement.appendChild(modoElement);
             }
         }
-        
+
         // Mostrar sidebar de temas
         const sidebarTemas = document.getElementById("sidebarTemas");
         if (sidebarTemas) {
             sidebarTemas.classList.remove("hidden");
-            
+
             // Aplicar clase de modo lectura si corresponde
             if (!tienePermisoEditar) {
                 sidebarTemas.classList.add('readonly-mode');
@@ -4592,13 +4954,13 @@ async function seleccionarCurso(id) {
                 sidebarTemas.classList.remove('readonly-mode');
             }
         }
-        
+
         // Configurar botón de añadir tema según permisos
         const btnAddTema = document.getElementById("btnAddTema");
         if (btnAddTema) {
             btnAddTema.disabled = !tienePermisoEditar;
             btnAddTema.title = tienePermisoEditar ? "Añadir nuevo tema" : "No tienes permisos para añadir temas";
-            
+
             if (!tienePermisoEditar) {
                 btnAddTema.classList.add('opacity-50', 'cursor-not-allowed');
             } else {
@@ -4622,10 +4984,10 @@ async function seleccionarCurso(id) {
             btnExportCursoWord.setAttribute("aria-label", btnExportCursoWord.title);
             btnExportCursoWord.classList.remove("opacity-50", "cursor-not-allowed");
         }
-        
+
         // Renderizar temas
         renderTemas();
-        
+
         // Configurar editor según permisos
         const contenidoEditor = document.getElementById('contenidoEditor');
         let seleccionRestaurada = false;
@@ -4653,7 +5015,7 @@ async function seleccionarCurso(id) {
                         </p>
                     </div>
                 `;
-                
+
                 // 🔥 CORRECCIÓN: Permitir contenido pero deshabilitar edición
                 contenidoEditor.classList.add('readonly-mode');
             } else {
@@ -4667,20 +5029,20 @@ async function seleccionarCurso(id) {
                 contenidoEditor.classList.remove('readonly-mode');
             }
         }
-        
+
         // 🔥 SUSCRIPCIÓN A CAMBIOS PARA TODOS LOS CURSOS (Propio o Compartido)
         // Esto permite sincronizar entre pestañas o con otros colaboradores
-        
+
         // Cancelar suscripción anterior si existe
         if (window.cursoSnapshotUnsubscribe && typeof window.cursoSnapshotUnsubscribe === 'function') {
             console.log("[Aprende] Cancelando suscripción anterior:", window.suscripcionCursoId);
             window.cursoSnapshotUnsubscribe();
         }
-        
+
         // Suscribirse a cambios en este curso
         console.log("[Aprende] Suscribiéndose a cambios del curso:", id);
         const unsubscribe = suscribirACambiosCurso(id);
-        
+
         if (unsubscribe) {
             window.cursoSnapshotUnsubscribe = unsubscribe;
             window.suscripcionCursoId = id;
@@ -4690,13 +5052,13 @@ async function seleccionarCurso(id) {
         setTimeout(() => {
             renderListaCursos();
         }, 300);
-        
-        
+
+
     } catch (error) {
-        
+
         // 🔥 MEJOR MANEJO DE ERRORES
         let errorMessage = "Error al seleccionar el curso";
-        
+
         if (error.code === 'permission-denied') {
             errorMessage = "No tienes permiso para acceder a este curso";
         } else if (error.code === 'not-found') {
@@ -4704,12 +5066,12 @@ async function seleccionarCurso(id) {
             // Recargar lista de cursos
             await cargarCursosUsuario();
         }
-        
+
         mostrarNotificacion(errorMessage, "error");
-        
+
         // 🔥 Limpiar UI solo en caso de error
         limpiarUIError();
-        
+
     } finally {
         // 🔥 DESBLOQUEAR siempre
         seleccionandoCurso = false;
@@ -4719,15 +5081,15 @@ async function seleccionarCurso(id) {
 
 function mostrarNotificacion(mensaje, tipo = 'info', esPersistente = false) {
     // 🔥 Evitar notificaciones duplicadas en ventana de 1 segundo
-    if (window.ultimaNotificacion && 
-        Date.now() - window.ultimaNotificacion < 1000 && 
+    if (window.ultimaNotificacion &&
+        Date.now() - window.ultimaNotificacion < 1000 &&
         window.ultimoMensajeNotificacion === mensaje) {
         return;
     }
-    
+
     window.ultimaNotificacion = Date.now();
     window.ultimoMensajeNotificacion = mensaje;
-    
+
     const tipos = {
         success: {
             clase: 'bg-green-100 border-green-400 text-green-700',
@@ -4746,26 +5108,27 @@ function mostrarNotificacion(mensaje, tipo = 'info', esPersistente = false) {
             icono: 'fa-exclamation-triangle'
         }
     };
-    
+
     const config = tipos[tipo] || tipos.info;
-    
+
     const notificacion = document.createElement('div');
-    notificacion.className = `fixed top-4 right-4 p-4 rounded-lg border ${config.clase} shadow-lg z-[1000] transform transition-all duration-300 translate-x-full max-w-sm`;
+    notificacion.className = `fixed top-4 right-4 p-4 rounded-lg border ${config.clase} shadow-lg transform transition-all duration-300 translate-x-full max-w-sm`;
+    notificacion.style.setProperty("z-index", "2147483647", "important");
     notificacion.innerHTML = `
         <div class="flex items-center gap-3">
             <i class="fas ${config.icono}"></i>
             <p class="text-sm font-medium">${mensaje}</p>
         </div>
     `;
-    
+
     document.body.appendChild(notificacion);
-    
+
     // Animación de entrada
     setTimeout(() => {
         notificacion.classList.remove('translate-x-full');
         notificacion.classList.add('translate-x-0');
     }, 10);
-    
+
     // Auto-eliminar
     const tiempo = esPersistente ? 5000 : 3000;
     setTimeout(() => {
@@ -4783,13 +5146,13 @@ function mostrarNotificacion(mensaje, tipo = 'info', esPersistente = false) {
 
 // Función auxiliar para limpiar UI en caso de error
 function limpiarUIError() {
-    
+
     const sidebarTemas = document.getElementById("sidebarTemas");
     if (sidebarTemas) {
         sidebarTemas.classList.add("hidden");
         sidebarTemas.classList.remove('readonly-mode');
     }
-    
+
     const contenidoEditor = document.getElementById('contenidoEditor');
     if (contenidoEditor) {
         contenidoEditor.innerHTML = `
@@ -4801,25 +5164,25 @@ function limpiarUIError() {
         `;
         contenidoEditor.classList.remove('readonly-mode');
     }
-    
+
     const btnAddTema = document.getElementById("btnAddTema");
     if (btnAddTema) {
         btnAddTema.disabled = true;
         btnAddTema.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     // btnDescargarCursoWord removido del UI
-    
+
     // Limpiar variables globales
     cursoDocId = null;
     curso = null;
     temaActivo = null;
     subtemaActivo = null;
-    
+
     // Limpiar localStorage relacionado
     localStorage.removeItem("temaAbierto");
     localStorage.removeItem("subtemaAbierto");
     localStorage.removeItem("moduloActivo");
-    
+
     // Actualizar nombre del curso en UI
     const cursoNombreElement = document.getElementById("cursoSeleccionadoNombre");
     if (cursoNombreElement) {
@@ -4856,7 +5219,7 @@ async function restaurarSeleccionEditorDesdeStorage({ puedeEditar = true } = {})
     const moduloId = localStorage.getItem("moduloActivo");
     const moduloPerteneceASubtema = moduloId && Array.isArray(subtemaEncontrado.modulosIds)
         ? subtemaEncontrado.modulosIds.includes(moduloId)
-            || subtemaEncontrado.modulosIds.includes(String(moduloId).split('_').pop())
+        || subtemaEncontrado.modulosIds.includes(String(moduloId).split('_').pop())
         : false;
 
     await cargarSubtema(
@@ -4873,21 +5236,21 @@ function suscribirACambiosCurso(cursoId) {
     if (!cursoId || !db) {
         return null;
     }
-    
+
     try {
         const cursoRef = doc(db, "moodleCourses", cursoId);
-        
-        
-        const unsubscribe = onSnapshot(cursoRef, 
+
+
+        const unsubscribe = onSnapshot(cursoRef,
             async (snapshot) => {
                 // 🔥 CORRECCIÓN: Verificar que el curso aún esté seleccionado
                 if (cursoDocId !== cursoId) {
                     return;
                 }
-                
+
                 if (!snapshot.exists()) {
                     mostrarNotificacion("El curso ha sido eliminado", "warning");
-                    
+
                     // Cerrar el curso
                     if (cursoDocId === cursoId) {
                         limpiarUIError();
@@ -4895,53 +5258,53 @@ function suscribirACambiosCurso(cursoId) {
                     }
                     return;
                 }
-                
+
                 const data = snapshot.data();
-                
+
                 // 🔥 CORRECCIÓN IMPORTANTE: Evitar loops cuando se pierden permisos
                 // Si el usuario actual NO es el propietario
                 const esPropietario = data.userId === currentUserId;
-                
+
                 if (!esPropietario && data.compartidoConDetalles) {
                     const detalleUsuario = data.compartidoConDetalles.find(
                         detalle => detalle.userId === currentUserId
                     );
-                    
+
                     // Si el usuario ya no está en la lista compartida
                     if (!detalleUsuario) {
                         mostrarNotificacion("Se ha revocado tu acceso a este curso", "warning", true);
-                        
+
                         // Limpiar UI sin volver a llamar seleccionarCurso
                         limpiarUIError();
                         await cargarCursosUsuario();
                         return;
                     }
-                    
+
                     // Si tiene permisos actualizados
                     const nuevosPermisos = {
                         editar: detalleUsuario.permisos?.editar || false,
                         compartir: detalleUsuario.permisos?.compartir || false
                     };
-                    
+
                     // Actualizar permisos en la lista local
                     const cursoIndex = cursosUsuario.findIndex(c => c.id === cursoId);
                     if (cursoIndex !== -1) {
                         cursosUsuario[cursoIndex].permisos = nuevosPermisos;
                     }
-                    
+
                     // 🔥 CORRECCIÓN: Solo refrescar si realmente cambió el estado de edición
                     const cursoActual = cursosUsuario.find(c => c.id === cursoId);
                     if (cursoActual) {
                         const teniaEdicionAnterior = curso.permisos?.editar === true;
                         const tieneEdicionAhora = nuevosPermisos.editar === true;
-                        
+
                         if (teniaEdicionAnterior && !tieneEdicionAhora) {
                             // Actualizar UI sin recargar completamente
                             actualizarUIParaModoLectura();
                         } else if (!teniaEdicionAnterior && tieneEdicionAhora) {
                             actualizarUIParaModoEdicion();
                         }
-                        
+
                         // Actualizar permisos en el objeto curso global
                         if (curso.permisos) {
                             curso.permisos.editar = nuevosPermisos.editar;
@@ -4949,7 +5312,7 @@ function suscribirACambiosCurso(cursoId) {
                         }
                     }
                 }
-                
+
                 // 🔥 ACTUALIZACIÓN EN TIEMPO REAL DEL ESTADO DE PUBLICACIÓN
                 if (cursoDocId === cursoId && data) {
                     const checkPublicar = document.getElementById("checkPublicarCurso");
@@ -4961,29 +5324,29 @@ function suscribirACambiosCurso(cursoId) {
                             checkPublicar.checked = nuevoEstado;
                         }
                     }
-                    
+
                     // Actualizar objetos globales para consistencia
                     if (curso && curso.id === cursoId) {
                         curso.publicar = !!data.publicar;
                     }
-                    
+
                     const cIdx = cursosUsuario.findIndex(c => c.id === cursoId);
                     if (cIdx !== -1) {
                         cursosUsuario[cIdx].publicar = !!data.publicar;
                     }
                 }
-            }, 
+            },
             (error) => {
-                
+
                 // Manejar errores específicos
                 if (error.code === 'permission-denied') {
                     mostrarNotificacion("No tienes permiso para ver cambios en tiempo real", "warning", true);
                 }
             }
         );
-        
+
         return unsubscribe;
-        
+
     } catch (error) {
         return null;
     }
@@ -4991,7 +5354,7 @@ function suscribirACambiosCurso(cursoId) {
 
 // Función para actualizar UI a modo lectura sin recargar completamente
 function actualizarUIParaModoLectura() {
-    
+
     // Actualizar botón de añadir tema
     const btnAddTema = document.getElementById("btnAddTema");
     if (btnAddTema) {
@@ -4999,32 +5362,32 @@ function actualizarUIParaModoLectura() {
         btnAddTema.classList.add('opacity-50', 'cursor-not-allowed');
         btnAddTema.title = "No tienes permisos para añadir temas";
     }
-    
+
     // Actualizar sidebar
     const sidebarTemas = document.getElementById("sidebarTemas");
     if (sidebarTemas) {
         sidebarTemas.classList.add('readonly-mode');
     }
-    
+
     // Actualizar editor
     const contenidoEditor = document.getElementById('contenidoEditor');
     if (contenidoEditor) {
         contenidoEditor.classList.add('readonly-mode');
-        
+
         // Deshabilitar todos los botones de edición
         contenidoEditor.querySelectorAll('button, .icon-btn').forEach(btn => {
             btn.disabled = true;
             btn.classList.add('opacity-50', 'cursor-not-allowed');
         });
     }
-    
+
     // Mostrar notificación una sola vez
     mostrarNotificacion("Se han revocado tus permisos de edición. Ahora estás en modo solo lectura.", "warning", true);
 }
 
 // Función para actualizar UI a modo edición
 function actualizarUIParaModoEdicion() {
-    
+
     // Actualizar botón de añadir tema
     const btnAddTema = document.getElementById("btnAddTema");
     if (btnAddTema) {
@@ -5034,25 +5397,25 @@ function actualizarUIParaModoEdicion() {
     }
 
     // btnDescargarCursoWord removido del UI
-    
+
     // Actualizar sidebar
     const sidebarTemas = document.getElementById("sidebarTemas");
     if (sidebarTemas) {
         sidebarTemas.classList.remove('readonly-mode');
     }
-    
+
     // Actualizar editor
     const contenidoEditor = document.getElementById('contenidoEditor');
     if (contenidoEditor) {
         contenidoEditor.classList.remove('readonly-mode');
-        
+
         // Habilitar todos los botones de edición
         contenidoEditor.querySelectorAll('button, .icon-btn').forEach(btn => {
             btn.disabled = false;
             btn.classList.remove('opacity-50', 'cursor-not-allowed');
         });
     }
-    
+
     mostrarNotificacion("Tienes permisos de edición para este curso.", "success", true);
 }
 
@@ -5060,17 +5423,17 @@ let suscripcionesModulos = {};
 
 function suscribirCambiosModulo(moduloId) {
     if (!moduloId || !curso || !curso.id) return;
-    
+
     // Ya tenemos suscripción para este módulo
     if (suscripcionesModulos[moduloId]) return;
-    
+
     // Crear ID compuesto para Firestore
     const moduloDocId = moduloId.includes('_') ? moduloId : `${curso.id}_${moduloId}`;
     const moduloRef = doc(db, "moodleCourses", moduloDocId);
-    
-    
+
+
     const unsubscribe = onSnapshot(moduloRef,
-        (snapshot) => {
+        async (snapshot) => {
             if (!snapshot.exists()) {
                 // Eliminar suscripción
                 if (suscripcionesModulos[moduloId]) {
@@ -5079,33 +5442,74 @@ function suscribirCambiosModulo(moduloId) {
                 }
                 return;
             }
-            
+
             const data = snapshot.data();
             if (!data) return;
-            
-            // 🔥 ACTUALIZAR CONTENIDO EN TIEMPO REAL
-            const contenidoDiv = document.getElementById(`contenido-${moduloId}`);
-            if (contenidoDiv) {
-                const contenidoRenderizado = renderizarContenidoModulo(data.contenido || "", data.tipo || "");
-                if (contenidoDiv.innerHTML === contenidoRenderizado) return;
+            const visibilidadNotasMaestro = resolverVisibilidadNotasMaestroSnapshot(moduloId, data);
 
-                contenidoDiv.innerHTML = contenidoRenderizado;
-                
+            actualizarEstadoBotonPropuesta(
+                document.getElementById(`modulo-${moduloId}`),
+                data.mostrarPropuestaActividad !== false
+            );
+            sincronizarBloqueNotasMaestroDerivado(moduloId, {
+                ...data,
+                mostrarNotasMaestroInline: visibilidadNotasMaestro
+            });
+            actualizarVisibilidadNotasMaestroEnCard(
+                document.getElementById(`modulo-${moduloId}`),
+                visibilidadNotasMaestro
+            );
+
+            // 🔥 ACTUALIZAR CONTENIDO EN TIEMPO REAL
+            const contenidoActualizado = await sincronizarSnapshotActividadOriginal({
+                moduloId,
+                data,
+                renderizarContenidoModulo,
+                normalizarContenidoModuloPersistible,
+                sanitizeRichText,
+                helpers: {
+                    renderizarContenidoModulo,
+                    normalizarContenidoModuloPersistible,
+                    construirActividadOriginalHtmlModulo,
+                    contenidoModuloYaIncluyeActividadOriginal,
+                    quitarActividadOriginalDelContenido,
+                    hidratarHtmlInstruccionesGemini,
+                    sanitizarHtmlEditorial,
+                    escapeHtml,
+                    esEncabezadoOriginalWord
+                }
+            });
+
+            if (contenidoActualizado) {
+                sincronizarBloqueNotasMaestroDerivado(moduloId, {
+                    ...data,
+                    mostrarNotasMaestroInline: visibilidadNotasMaestro
+                });
+                actualizarVisibilidadNotasMaestroEnCard(
+                    document.getElementById(`modulo-${moduloId}`),
+                    visibilidadNotasMaestro
+                );
                 // Reactivar menú contextual
                 setTimeout(() => {
                     if (typeof activarAccionesEnParrafos === 'function') {
                         activarAccionesEnParrafos();
                     }
                 }, 100);
-                
-                // Mostrar notificación
-                mostrarNotificacion(`Módulo "${data.nombre || 'sin nombre'}" actualizado`, 'info');
+
+                const suppressMap = window.__suppressModuloUpdatedToast || {};
+                const moduloIdSafe = String(moduloId || "").trim();
+                const suppressUntil = Number(suppressMap[moduloIdSafe] || 0);
+                if (suppressUntil > Date.now()) {
+                    delete suppressMap[moduloIdSafe];
+                } else {
+                    mostrarNotificacion(`Módulo "${data.nombre || 'sin nombre'}" actualizado`, 'info');
+                }
             }
         },
         (error) => {
         }
     );
-    
+
     suscripcionesModulos[moduloId] = unsubscribe;
 }
 
@@ -5124,12 +5528,12 @@ function limpiarSuscripcionesModulos() {
 function verificarPermisosAccion(accion, cursoId) {
     const curso = cursosUsuario.find(c => c.id === cursoId);
     if (!curso) return false;
-    
+
     // Si es propio, tiene todos los permisos
     if (curso.esPropio) return true;
-    
+
     // Verificar permisos específicos
-    switch(accion) {
+    switch (accion) {
         case 'editar':
             return curso.permisos?.editar === true;
         case 'compartir':
@@ -5162,10 +5566,10 @@ document.getElementById("btnConfirmarEditarCurso").onclick = async () => {
         // 1. Verificar que el documento existe antes de actualizar
         const cursoRef = doc(db, "moodleCourses", cursoEditando.id);
         const cursoSnap = await getDoc(cursoRef);
-        
+
         if (!cursoSnap.exists()) {
             alert("Error: El curso no existe en la base de datos.");
-            
+
             // Recargar lista de cursos
             await cargarCursosUsuario();
             modalEditarCurso.classList.add("hidden");
@@ -5197,7 +5601,7 @@ document.getElementById("btnConfirmarEditarCurso").onclick = async () => {
         alert("Curso editado exitosamente.");
 
     } catch (err) {
-        
+
         if (err.code === 'not-found') {
             alert("Error: El curso no existe. Se ha eliminado o no se pudo encontrar.");
             // Recargar lista de cursos
@@ -5207,7 +5611,7 @@ document.getElementById("btnConfirmarEditarCurso").onclick = async () => {
         } else {
             alert("Error al editar el curso: " + err.message);
         }
-        
+
         modalEditarCurso.classList.add("hidden");
         modalEditarCurso.classList.remove("flex");
     }
@@ -5234,60 +5638,118 @@ window.guardarCursoFirebase = async function () {
         mostrarNotificacion("Error de sincronización: El curso en memoria no coincide con el seleccionado. Por favor, refresca la página.", "error", true);
         return false;
     }
-    
+
     try {
+        const saveStartedAt = (typeof performance !== "undefined" && typeof performance.now === "function")
+            ? performance.now()
+            : Date.now();
+        const logSaveStep = (step, extra = {}) => {
+            const now = (typeof performance !== "undefined" && typeof performance.now === "function")
+                ? performance.now()
+                : Date.now();
+            const elapsedMs = Math.round(now - saveStartedAt);
+            console.log(`[Aprende] guardarCursoFirebase :: ${step}`, {
+                cursoDocId,
+                elapsedMs,
+                ...extra
+            });
+        };
+
         // Verificar permisos para cursos compartidos
-        const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
+        const cursoActual = cursosUsuario.find(c => c.id === cursoDocId) || curso;
         if (!cursoActual) {
+            mostrarNotificacion("No se encontró el curso activo para guardar.", "error", true);
             return false;
         }
-        
+
         // Verificar permisos
         if (!cursoActual.esPropio && !cursoActual.permisos?.editar) {
             mostrarNotificacion("No tienes permisos para editar este curso", "error");
             return false;
         }
 
-        
+
         // Guardar un índice liviano del curso. Los módulos pesados viven en docs separados.
         const cursoParaGuardar = construirCursoLigeroParaFirestore(curso);
-        
-        
-        // Obtener datos existentes para mantener información de compartir
+        logSaveStep("payload-construido", {
+            temas: Array.isArray(cursoParaGuardar.temas) ? cursoParaGuardar.temas.length : 0
+        });
+
         const cursoRef = doc(db, "moodleCourses", cursoDocId);
-        const cursoSnap = await getDoc(cursoRef);
-        
-        if (cursoSnap.exists()) {
-            const datosExistentes = cursoSnap.data();
-            if (datosExistentes.userId) {
-                cursoParaGuardar.userId = datosExistentes.userId;
-            }
-            if (datosExistentes.uid && !cursoParaGuardar.uid) {
-                cursoParaGuardar.uid = datosExistentes.uid;
-            }
-            if (datosExistentes.ownerUid && !cursoParaGuardar.ownerUid) {
-                cursoParaGuardar.ownerUid = datosExistentes.ownerUid;
-            }
-            
-            // Mantener datos de colaboración si existen
-            if (datosExistentes.compartidoCon) {
-                cursoParaGuardar.compartidoCon = datosExistentes.compartidoCon;
-            }
-            
-            if (datosExistentes.compartidoConDetalles) {
-                cursoParaGuardar.compartidoConDetalles = datosExistentes.compartidoConDetalles;
-            }
-            
-            if (datosExistentes.propietarioNombre) {
-                cursoParaGuardar.propietarioNombre = datosExistentes.propietarioNombre;
-            }
+        const metadatosLocales = cursoActual && typeof cursoActual === "object" ? cursoActual : curso;
+        const tieneMetadatosCompartidosLocales =
+            !!String(metadatosLocales?.userId || "").trim() &&
+            (Array.isArray(metadatosLocales?.compartidoCon) || Array.isArray(metadatosLocales?.compartidoConDetalles));
+
+        if (String(metadatosLocales?.userId || "").trim()) {
+            cursoParaGuardar.userId = metadatosLocales.userId;
         }
-        
-        // Usar setDoc para reemplazar todo el documento
-        await setDoc(doc(db, "moodleCourses", cursoDocId), cursoParaGuardar, { merge: true });
-        
+        if (String(metadatosLocales?.uid || "").trim() && !cursoParaGuardar.uid) {
+            cursoParaGuardar.uid = metadatosLocales.uid;
+        }
+        if (String(metadatosLocales?.ownerUid || "").trim() && !cursoParaGuardar.ownerUid) {
+            cursoParaGuardar.ownerUid = metadatosLocales.ownerUid;
+        }
+        if (Array.isArray(metadatosLocales?.compartidoCon)) {
+            cursoParaGuardar.compartidoCon = metadatosLocales.compartidoCon;
+        }
+        if (Array.isArray(metadatosLocales?.compartidoConDetalles)) {
+            cursoParaGuardar.compartidoConDetalles = metadatosLocales.compartidoConDetalles;
+        }
+        if (String(metadatosLocales?.propietarioNombre || "").trim()) {
+            cursoParaGuardar.propietarioNombre = metadatosLocales.propietarioNombre;
+        }
+
+        if (!tieneMetadatosCompartidosLocales) {
+            logSaveStep("getDoc-inicio");
+            const cursoSnap = await getDoc(cursoRef);
+            logSaveStep("getDoc-fin", { exists: cursoSnap.exists() });
+
+            if (cursoSnap.exists()) {
+                const datosExistentes = cursoSnap.data();
+                if (datosExistentes.userId) {
+                    cursoParaGuardar.userId = datosExistentes.userId;
+                }
+                if (datosExistentes.uid && !cursoParaGuardar.uid) {
+                    cursoParaGuardar.uid = datosExistentes.uid;
+                }
+                if (datosExistentes.ownerUid && !cursoParaGuardar.ownerUid) {
+                    cursoParaGuardar.ownerUid = datosExistentes.ownerUid;
+                }
+                if (datosExistentes.compartidoCon) {
+                    cursoParaGuardar.compartidoCon = datosExistentes.compartidoCon;
+                }
+                if (datosExistentes.compartidoConDetalles) {
+                    cursoParaGuardar.compartidoConDetalles = datosExistentes.compartidoConDetalles;
+                }
+                if (datosExistentes.propietarioNombre) {
+                    cursoParaGuardar.propietarioNombre = datosExistentes.propietarioNombre;
+                }
+            }
+        } else {
+            logSaveStep("getDoc-omitido", {
+                motivo: "metadatos-locales-disponibles"
+            });
+        }
+
+        logSaveStep("setDoc-inicio");
+        await setDoc(cursoRef, cursoParaGuardar, { merge: true });
+        logSaveStep("setDoc-fin");
+        if (curso && String(curso.id || curso.cursoId || "").trim() === String(cursoDocId).trim()) {
+            curso.actualizado = cursoParaGuardar.actualizado;
+            sincronizarCursoActivoEnCursosUsuario();
+            persistirCursoActivoEnLocalStorage(curso);
+        }
+
+        logSaveStep("completado");
         return true;
     } catch (error) {
+        console.error("[Aprende] guardarCursoFirebase fallo", {
+            cursoDocId,
+            code: error?.code || null,
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        });
         alert("Error al guardar el curso: " + error.message);
         return false;
     }
@@ -5297,6 +5759,8 @@ function construirCursoLigeroParaFirestore(source = {}) {
     const raw = source && typeof source === "object" ? source : {};
     const temas = Array.isArray(raw.temas) ? raw.temas : [];
     return {
+        docType: "course",
+        id: raw.id || raw.cursoId || cursoDocId,
         cursoId: raw.cursoId || cursoDocId,
         nombre: raw.nombre || "Curso sin nombre",
         descripcion: raw.descripcion || "",
@@ -5309,9 +5773,16 @@ function construirCursoLigeroParaFirestore(source = {}) {
                 ...tema,
                 subtemas: subtemas.map((subtema) => {
                     const { modulos, ...subtemaLigero } = subtema || {};
+                    const modulosIdsNormalizados = Array.isArray(subtemaLigero.modulosIds) && subtemaLigero.modulosIds.length
+                        ? subtemaLigero.modulosIds
+                        : Array.isArray(modulos)
+                            ? modulos
+                                .map((modulo) => String(modulo?.id || "").trim())
+                                .filter(Boolean)
+                            : [];
                     return {
                         ...subtemaLigero,
-                        modulosIds: Array.isArray(subtemaLigero.modulosIds) ? subtemaLigero.modulosIds : []
+                        modulosIds: modulosIdsNormalizados
                     };
                 })
             };
@@ -5493,11 +5964,11 @@ btnAddTema.addEventListener("click", async () => {
 
     // Actualizar nombre del curso en el modal
     modal.querySelector("p").textContent = `Curso: ${cursoActivo.nombre}`;
-    
+
     input.value = "";
     modal.classList.remove("hidden");
     modal.classList.add("flex");
-    
+
     setTimeout(() => input.focus(), 100);
 
     // Esperar confirmación
@@ -5526,7 +5997,7 @@ btnAddTema.addEventListener("click", async () => {
         input.onkeypress = (e) => {
             if (e.key === 'Enter') btnConfirmar.click();
         };
-        
+
         // Escape para cancelar
         modal.onkeydown = (e) => {
             if (e.key === 'Escape') btnCancelar.click();
@@ -5571,6 +6042,8 @@ btnAddTema.addEventListener("click", async () => {
         incluirImagenOriginalEnPropuesta: false,
         generarGrafico: false,
         ignorarContextoOtrosModulos: false,
+        transcribirEstructurarMismoTipoActividad: false,
+        distractoresRetadoresQuiz: false,
         traducciones: [],
         creado: Date.now(),
         actualizado: Date.now()
@@ -5588,6 +6061,8 @@ btnAddTema.addEventListener("click", async () => {
         incluirImagenOriginalEnPropuesta: false,
         generarGrafico: false,
         ignorarContextoOtrosModulos: false,
+        transcribirEstructurarMismoTipoActividad: false,
+        distractoresRetadoresQuiz: false,
         traducciones: [],
         creado: Date.now(),
         actualizado: Date.now()
@@ -5606,6 +6081,8 @@ function getModuloIcon(tipo) {
         "Página": "fa-file-lines",
         "Temario": "fa-list-check",
         "Lectura": "fa-book-open-reader",
+        "Fuentes destacadas": "fa-book-bookmark",
+        "Fuentes destacadas. Extracción de contenido de fuentes externas": "fa-book-bookmark",
         "Archivo": "fa-file-arrow-down",
         "Libro": "fa-book",
         "Lección": "fa-person-chalkboard",
@@ -5627,6 +6104,11 @@ function destruirSortablesSidebar() {
         if (inst?.destroy) inst.destroy();
     });
     sortableSubtemasInstances = [];
+
+    sortableModulosInstances.forEach((inst) => {
+        if (inst?.destroy) inst.destroy();
+    });
+    sortableModulosInstances = [];
 }
 
 function inicializarSidebarSortable() {
@@ -5686,6 +6168,58 @@ function inicializarSidebarSortable() {
         });
         sortableSubtemasInstances.push(instancia);
     });
+
+    document.querySelectorAll(".modulos-container-dnd").forEach((container) => {
+        const instancia = window.Sortable.create(container, {
+            group: "modulos-sidebar",
+            animation: 160,
+            draggable: ".module-draggable",
+            handle: ".handle-drag",
+            ghostClass: "cb-sortable-ghost",
+            chosenClass: "cb-sortable-chosen",
+            dragClass: "cb-sortable-drag",
+            filter: ".btn-duplicate-modulo, .btn-duplicate-modulo *, .btn-edit-modulo, .btn-edit-modulo *, .btn-delete-modulo, .btn-delete-modulo *",
+            preventOnFilter: false,
+            onEnd: async (evt) => {
+                const moduloId = String(evt.item?.dataset?.moduloId || "").trim();
+                const subtemaIdOrigen = String(evt.from?.dataset?.subtemaId || "").trim();
+                const subtemaIdDestino = String(evt.to?.dataset?.subtemaId || "").trim();
+                if (!moduloId || !subtemaIdOrigen || !subtemaIdDestino) return;
+                if (evt.oldIndex == null || evt.newIndex == null) return;
+
+                if (subtemaIdOrigen === subtemaIdDestino) {
+                    if (evt.oldIndex === evt.newIndex) return;
+                    const visibleOrder = Array.from(evt.to?.querySelectorAll?.(".module-draggable[data-modulo-id]") || [])
+                        .map((node) => String(node?.dataset?.moduloId || "").trim())
+                        .filter(Boolean);
+                    const persisted = await reordenarModuloSegunOrdenVisible(subtemaIdDestino, visibleOrder);
+                    if (!persisted) {
+                        await reordenarModulo(subtemaIdDestino, evt.oldIndex, evt.newIndex);
+                    }
+                    return;
+                }
+
+                const visibleOrderOrigen = Array.from(evt.from?.querySelectorAll?.(".module-draggable[data-modulo-id]") || [])
+                    .map((node) => String(node?.dataset?.moduloId || "").trim())
+                    .filter(Boolean);
+                const visibleOrderDestino = Array.from(evt.to?.querySelectorAll?.(".module-draggable[data-modulo-id]") || [])
+                    .map((node) => String(node?.dataset?.moduloId || "").trim())
+                    .filter(Boolean);
+
+                const persisted = await moverModuloSegunOrdenVisible(
+                    subtemaIdOrigen,
+                    subtemaIdDestino,
+                    moduloId,
+                    visibleOrderOrigen,
+                    visibleOrderDestino
+                );
+                if (!persisted) {
+                    await moverModuloAPosicion(subtemaIdOrigen, subtemaIdDestino, moduloId, evt.newIndex);
+                }
+            }
+        });
+        sortableModulosInstances.push(instancia);
+    });
 }
 
 
@@ -5712,7 +6246,7 @@ function renderTemas() {
                     }
                 });
             });
-            
+
             if (!moduloActivoExiste) {
                 localStorage.removeItem("moduloActivo");
             }
@@ -5736,7 +6270,6 @@ function renderTemas() {
                     </div>
 
                     <div class="flex items-center gap-3">
-                        <i class="fas fa-file-word cursor-pointer cb-action-icon btn-export-tema" title="Descargar TODOS los subtemas en Word"></i>
                         <i class="fas fa-plus cursor-pointer cb-action-icon btn-add-subtema"></i>
                         <i class="fas fa-clone cursor-pointer cb-action-icon btn-duplicate-tema"></i>
                         <i class="fas fa-pen cursor-pointer cb-action-icon btn-edit-tema"></i>
@@ -5750,10 +6283,6 @@ function renderTemas() {
                 </div>
             `;
 
-            temaWrapper.querySelector(".btn-export-tema").onclick = async e => {
-                e.stopPropagation();
-                exportarTemaWord(tema);
-            };
 
             const triggerTema = temaWrapper.querySelector('.accordion-trigger');
             const contentTema = temaWrapper.querySelector('.accordion-content');
@@ -5833,54 +6362,54 @@ function renderTemas() {
                         </div>
                     </div>
                 `;
-                
+
                 const existingModal = document.getElementById("modalEditTema");
                 if (existingModal) existingModal.remove();
-                
+
                 document.body.insertAdjacentHTML('beforeend', modalHTML);
-                
+
                 const modal = document.getElementById("modalEditTema");
                 const input = document.getElementById("inputEditTema");
                 const btnCancelar = document.getElementById("btnCancelarEditTema");
                 const btnConfirmar = document.getElementById("btnConfirmarEditTema");
-                
+
                 modal.classList.remove("hidden");
                 modal.classList.add("flex");
                 setTimeout(() => {
                     input.focus();
                     input.select();
                 }, 100);
-                
+
                 const nuevoNombre = await new Promise((resolve) => {
                     const limpiar = () => {
                         btnConfirmar.onclick = null;
                         btnCancelar.onclick = null;
                     };
-                    
+
                     btnConfirmar.onclick = () => {
                         const valor = input.value.trim();
                         limpiar();
                         modal.classList.add("hidden");
                         resolve(valor);
                     };
-                    
+
                     btnCancelar.onclick = () => {
                         limpiar();
                         modal.classList.add("hidden");
                         resolve(null);
                     };
-                    
+
                     input.onkeypress = (e) => {
                         if (e.key === 'Enter') btnConfirmar.click();
                     };
-                    
+
                     modal.onkeydown = (e) => {
                         if (e.key === 'Escape') btnCancelar.click();
                     };
                 });
-                
+
                 setTimeout(() => modal.remove(), 300);
-                
+
                 if (!nuevoNombre) return;
                 tema.nombre = nuevoNombre.trim();
                 guardarCursoFirebase();
@@ -5967,120 +6496,52 @@ function renderTemas() {
                 const subTrigger = subAcc.querySelector(".accordion-trigger");
                 const subContent = subAcc.querySelector(".accordion-content");
                 const subBody = subAcc.querySelector(".modulos-container");
+                subBody.dataset.subtemaId = sub.id;
+                subBody.dataset.temaId = tema.id;
 
+                if (!USE_SORTABLE_SIDEBAR) {
+                    /* =====================================================
+                          DROPZONE — SOLO PARA MÓDULOS (fallback nativo)
+                    ===================================================== */
+                    subBody.addEventListener("dragover", (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        subBody.classList.add("drop-target");
+                    });
 
-                    const modulosContainer = subAcc.querySelector(".modulos-container");
-    
-                    if (modulosContainer) {
-                        modulosContainer.addEventListener("dragover", (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            modulosContainer.classList.add("drop-target");
-                        });
+                    subBody.addEventListener("dragleave", (e) => {
+                        e.stopPropagation();
+                        subBody.classList.remove("drop-target");
+                    });
 
-                        modulosContainer.addEventListener("dragleave", (e) => {
-                            e.stopPropagation();
-                            modulosContainer.classList.remove("drop-target");
-                        });
+                    subBody.addEventListener("drop", async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        subBody.classList.remove("drop-target");
 
-                        modulosContainer.addEventListener("drop", async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            modulosContainer.classList.remove("drop-target");
+                        const moduloId = e.dataTransfer.getData("moduloId");
+                        const subtemaIdOrigen = e.dataTransfer.getData("subtemaIdOrigen");
+                        const subtemaIdDestino = sub.id;
+                        const isReorder = e.dataTransfer.getData("isReorder") === "true";
 
-                            const moduloId = e.dataTransfer.getData("moduloId");
-                            const subtemaIdOrigen = e.dataTransfer.getData("subtemaIdOrigen");
-                            const subtemaIdDestino = sub.id;
-                            const isReorder = e.dataTransfer.getData("isReorder") === "true";
+                        if (!moduloId) return;
 
-                            if (!moduloId) return;
+                        if (isReorder && subtemaIdOrigen === subtemaIdDestino) {
+                            const originalIndex = parseInt(e.dataTransfer.getData("originalIndex"));
+                            const targetIndex = calcularIndiceDestinoModuloEnSubtema(e, subBody, sub);
 
-
-                            // ================================================
-                            // 1. REORDENAR MÓDULO EN EL MISMO SUBTEMA
-                            // ================================================
-                            if (isReorder && subtemaIdOrigen === subtemaIdDestino) {
-                                const originalIndex = Number(e.dataTransfer.getData("originalIndex"));
-                                
-                                // El elemento exacto donde cayó el drop
-                                const targetItem = e.target.closest(".module-draggable");
-                                
-                                // Si no hay destino válido, poner al final
-                                const targetIndex = targetItem 
-                                    ? [...modulosContainer.querySelectorAll(".module-draggable")].indexOf(targetItem)
-                                    : modulosContainer.querySelectorAll(".module-draggable").length;
-                                
-                                // Validar rango
-                                if (targetIndex >= 0 && originalIndex >= 0 && originalIndex !== targetIndex) {
-                                    await reordenarModulo(subtemaIdDestino, originalIndex, targetIndex);
-                                    return;
-                                }
+                            if (originalIndex >= 0 && targetIndex >= 0 && originalIndex !== targetIndex) {
+                                await reordenarModulo(subtemaIdDestino, originalIndex, targetIndex);
                             }
-
-                            // ================================================
-                            // 2. MOVER ENTRE SUBTEMAS DISTINTOS
-                            // ================================================
-                            if (subtemaIdOrigen !== subtemaIdDestino) {
-                                await moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId);
-                                return;
-                            }
-                        });
-                    }
-
-
-                /* =====================================================
-                      DROPZONE — SOLO PARA MÓDULOS (MEJORADO)
-                ===================================================== */
-                subBody.addEventListener("dragover", (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    subBody.classList.add("drop-target");
-                });
-
-                subBody.addEventListener("dragleave", (e) => {
-                    e.stopPropagation();
-                    subBody.classList.remove("drop-target");
-                });
-
-                subBody.addEventListener("drop", async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    subBody.classList.remove("drop-target");
-
-                    const moduloId = e.dataTransfer.getData("moduloId");
-                    const subtemaIdOrigen = e.dataTransfer.getData("subtemaIdOrigen");
-                    const subtemaIdDestino = sub.id;
-                    const isReorder = e.dataTransfer.getData("isReorder") === "true";
-
-                    if (!moduloId) return;
-
-
-                    // REORDENAR EN EL MISMO SUBTEMA
-                    if (isReorder && subtemaIdOrigen === subtemaIdDestino) {
-                        const originalIndex = parseInt(e.dataTransfer.getData("originalIndex"));
-                        const targetItem = e.target.closest(".module-draggable");
-                        
-                        // Calcular nueva posición
-                        let targetIndex = sub.modulosIds.length - 1; // Por defecto al final
-                        if (targetItem) {
-                            const targetModId = targetItem.dataset.moduloId;
-                            targetIndex = sub.modulosIds.indexOf(targetModId);
-                            if (targetIndex === -1) targetIndex = sub.modulosIds.length - 1;
+                            return;
                         }
-                        
-                        // Validar índices
-                        if (originalIndex >= 0 && targetIndex >= 0 && originalIndex !== targetIndex) {
-                            await reordenarModulo(subtemaIdDestino, originalIndex, targetIndex);
-                        }
-                        return;
-                    }
 
-                    // MOVER A OTRO SUBTEMA
-                    if (subtemaIdOrigen !== subtemaIdDestino) {
-                        await moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId);
-                        return;
-                    }
-                });
+                        if (subtemaIdOrigen !== subtemaIdDestino) {
+                            await moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId);
+                            return;
+                        }
+                    });
+                }
 
 
 
@@ -6116,41 +6577,41 @@ function renderTemas() {
 
                 /* TOGGLE SUBTEMA */
                 subTrigger.addEventListener("click", e => {
-                if (e.target.closest(".btn-add-modulo-subtema")) return;
-                if (e.target.closest(".btn-duplicate-subtema") ||
-                    e.target.closest(".btn-edit-subtema") ||
-                    e.target.closest(".btn-delete-subtema")) return;
+                    if (e.target.closest(".btn-add-modulo-subtema")) return;
+                    if (e.target.closest(".btn-duplicate-subtema") ||
+                        e.target.closest(".btn-edit-subtema") ||
+                        e.target.closest(".btn-delete-subtema")) return;
 
-                const isOpen = subAcc.classList.contains("open");
+                    const isOpen = subAcc.classList.contains("open");
 
-                if (!isOpen) {
-                    subAcc.classList.add("open");
-                    subContent.style.height = subBody.scrollHeight + "px";
+                    if (!isOpen) {
+                        subAcc.classList.add("open");
+                        subContent.style.height = subBody.scrollHeight + "px";
 
-                    // ➕ AGREGAR a lista de subtemas abiertos
-                    let abiertos = JSON.parse(localStorage.getItem("subtemasAbiertos") || "[]");
-                    if (!abiertos.includes(sub.id)) abiertos.push(sub.id);
-                    localStorage.setItem("subtemasAbiertos", JSON.stringify(abiertos));
+                        // ➕ AGREGAR a lista de subtemas abiertos
+                        let abiertos = JSON.parse(localStorage.getItem("subtemasAbiertos") || "[]");
+                        if (!abiertos.includes(sub.id)) abiertos.push(sub.id);
+                        localStorage.setItem("subtemasAbiertos", JSON.stringify(abiertos));
 
-                } else {
-                    subAcc.classList.remove("open");
-                    subContent.style.height = "0px";
+                    } else {
+                        subAcc.classList.remove("open");
+                        subContent.style.height = "0px";
 
-                    // ➖ QUITAR de lista de subtemas abiertos
-                    let abiertos = JSON.parse(localStorage.getItem("subtemasAbiertos") || "[]");
-                    abiertos = abiertos.filter(x => x !== sub.id);
-                    localStorage.setItem("subtemasAbiertos", JSON.stringify(abiertos));
-                }
+                        // ➖ QUITAR de lista de subtemas abiertos
+                        let abiertos = JSON.parse(localStorage.getItem("subtemasAbiertos") || "[]");
+                        abiertos = abiertos.filter(x => x !== sub.id);
+                        localStorage.setItem("subtemasAbiertos", JSON.stringify(abiertos));
+                    }
 
-                subtemaActivo = sub;
-                temaActivo = tema;
-                
-                // 🔥 CORRECCIÓN: Verificar permisos antes de cargar
-                const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
-                const puedeEditar = cursoActual?.esPropio || cursoActual?.permisos?.editar === true;
-                
-                // Cargar subtema siempre, pero en modo lectura si no tiene permisos
-                cargarSubtema(sub, null, !puedeEditar);
+                    subtemaActivo = sub;
+                    temaActivo = tema;
+
+                    // 🔥 CORRECCIÓN: Verificar permisos antes de cargar
+                    const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
+                    const puedeEditar = cursoActual?.esPropio || cursoActual?.permisos?.editar === true;
+
+                    // Cargar subtema siempre, pero en modo lectura si no tiene permisos
+                    cargarSubtema(sub, null, !puedeEditar);
                 });
 
                 const btnAddModuloSubtema = subAcc.querySelector(".btn-add-modulo-subtema");
@@ -6163,12 +6624,13 @@ function renderTemas() {
                 }
 
 
+
                 /* ---------
                     CRUD SUBTEMA
                 --------- */
                 subAcc.querySelector(".btn-edit-subtema").onclick = async e => {
                     e.stopPropagation();
-                    
+
                     const modalHTML = `
                         <div id="modalEditSubtema" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
                             <div class="bg-white rounded-lg p-6 w-full max-w-md">
@@ -6197,54 +6659,54 @@ function renderTemas() {
                             </div>
                         </div>
                     `;
-                    
+
                     const existingModal = document.getElementById("modalEditSubtema");
                     if (existingModal) existingModal.remove();
-                    
+
                     document.body.insertAdjacentHTML('beforeend', modalHTML);
-                    
+
                     const modal = document.getElementById("modalEditSubtema");
                     const input = document.getElementById("inputEditSubtema");
                     const btnCancelar = document.getElementById("btnCancelarEditSubtema");
                     const btnConfirmar = document.getElementById("btnConfirmarEditSubtema");
-                    
+
                     modal.classList.remove("hidden");
                     modal.classList.add("flex");
                     setTimeout(() => {
                         input.focus();
                         input.select();
                     }, 100);
-                    
+
                     const nuevoNombre = await new Promise((resolve) => {
                         const limpiar = () => {
                             btnConfirmar.onclick = null;
                             btnCancelar.onclick = null;
                         };
-                        
+
                         btnConfirmar.onclick = () => {
                             const valor = input.value.trim();
                             limpiar();
                             modal.classList.add("hidden");
                             resolve(valor);
                         };
-                        
+
                         btnCancelar.onclick = () => {
                             limpiar();
                             modal.classList.add("hidden");
                             resolve(null);
                         };
-                        
+
                         input.onkeypress = (e) => {
                             if (e.key === 'Enter') btnConfirmar.click();
                         };
-                        
+
                         modal.onkeydown = (e) => {
                             if (e.key === 'Escape') btnCancelar.click();
                         };
                     });
-                    
+
                     setTimeout(() => modal.remove(), 300);
-                    
+
                     if (!nuevoNombre) return;
                     sub.nombre = nuevoNombre.trim();
                     guardarCursoFirebase();
@@ -6267,51 +6729,50 @@ function renderTemas() {
                 /* =====================================================
                         MÓDULOS (MEJORADO)
                 ===================================================== */
-/* =====================================================
-                        MÓDULOS (MEJORADO)
-==================================================== */
-        if (!sub.modulosIds || sub.modulosIds.length === 0) {
-            subBody.innerHTML = `<p class="text-gray-400 text-xs">— No hay módulos —</p>`;
-            } else {
-                // Crear contenedor con clase especial para drag and drop
-                subBody.classList.add('modulos-container-dnd');
-                
-                // Usar Promise.all para cargar módulos en paralelo
-                const promesasModulos = sub.modulosIds.map(async (modId, index) => {
-                    try {
-                        // IMPORTANTE: Construir el ID compuesto para buscar el módulo
-                        let idParaBuscar = modId;
-                        
-                        // Si el ID NO contiene guión bajo, significa que es solo el ID interno
-                        // y necesitamos construir el ID compuesto: curso.id_modId
-                        if (!modId.includes('_')) {
-                            idParaBuscar = `${curso.id}_${modId}`;
-                        }
-                        
-                        const mod = await obtenerModulo(idParaBuscar);
-                        if (!mod) {
-                            // Intentar con el ID original también, por compatibilidad
-                            const modAlt = await obtenerModulo(modId);
-                            if (!modAlt) {
-                                return null;
+                /* =====================================================
+                                        MÓDULOS (MEJORADO)
+                ==================================================== */
+                if (!sub.modulosIds || sub.modulosIds.length === 0) {
+                    subBody.innerHTML = `<p class="text-gray-400 text-xs">— No hay módulos —</p>`;
+                } else {
+                    // Crear contenedor con clase especial para drag and drop
+                    subBody.classList.add('modulos-container-dnd');
+
+                    // Usar Promise.all para cargar módulos en paralelo
+                    const promesasModulos = sub.modulosIds.map(async (modId, index) => {
+                        try {
+                            // IMPORTANTE: Construir el ID compuesto para buscar el módulo
+                            let idParaBuscar = modId;
+
+                            // Si el ID NO contiene guión bajo, significa que es solo el ID interno
+                            // y necesitamos construir el ID compuesto: curso.id_modId
+                            if (!modId.includes('_')) {
+                                idParaBuscar = `${curso.id}_${modId}`;
                             }
-                            if (modAlt.archivado && !mostrarModulosArchivados) return null;
-                            return modAlt;
-                        }
 
-                        if (mod.archivado && !mostrarModulosArchivados) return null;
+                            const mod = await obtenerModulo(idParaBuscar);
+                            if (!mod) {
+                                // Intentar con el ID original también, por compatibilidad
+                                const modAlt = await obtenerModulo(modId);
+                                if (!modAlt) {
+                                    return null;
+                                }
+                                if (modAlt.archivado && !mostrarModulosArchivados) return null;
+                                return modAlt;
+                            }
 
-                        const esModuloActivo = moduloActivoExiste && modId === moduloActivo;
+                            if (mod.archivado && !mostrarModulosArchivados) return null;
 
-                        const li = document.createElement("div");
-                        li.className = `py-1 text-xs hover:bg-gray-50 flex items-center justify-between cursor-pointer draggable-modulo module-draggable ${
-                            esModuloActivo ? 'modulo-activo highlight-pulse' : ''
-                        }`;
-                        li.dataset.moduloId = modId;
-                        li.dataset.index = index; // Añadir índice para referencia
-                        li.draggable = true;
+                            const esModuloActivo = moduloActivoExiste && modId === moduloActivo;
 
-                        li.innerHTML = `
+                            const li = document.createElement("div");
+                            li.className = `py-1 text-xs hover:bg-gray-50 flex items-center justify-between cursor-pointer draggable-modulo module-draggable ${esModuloActivo ? 'modulo-activo highlight-pulse' : ''
+                                }`;
+                            li.dataset.moduloId = modId;
+                            li.dataset.index = index; // Añadir índice para referencia
+                            li.draggable = !USE_SORTABLE_SIDEBAR;
+
+                            li.innerHTML = `
                             <div class="flex items-center gap-2 flex-1 modulo-select">
                                 <i class="fas fa-grip-vertical cb-node-icon cb-module-grip mr-1 cursor-grab handle-drag" title="Arrastrar para reordenar"></i>
                                 <i class="fas ${getModuloIcon(mod?.tipo)} cb-node-icon cb-module-kind-icon ${esModuloActivo ? 'is-active' : ''}"></i>
@@ -6338,131 +6799,129 @@ function renderTemas() {
                             </div>
                         `;
 
-                        /* =====================================================
-                            DRAG & DROP PARA REORDENAR (DENTRO DEL MISMO SUBTEMA)
-                        ===================================================== */
-                        li.addEventListener("dragstart", e => {
-                            // Usar el ID normalizado
-                            const idNormalizado = normalizarIdModulo(modId, false);
-                            
-                            e.dataTransfer.setData("moduloId", idNormalizado);
-                            e.dataTransfer.setData("subtemaIdOrigen", sub.id);
-                            e.dataTransfer.setData("isReorder", "true");
-                            e.dataTransfer.setData("originalIndex", index.toString());
-                            e.dataTransfer.effectAllowed = "move";
-                            
-                            li.classList.add("modulo-arrastrando");
-                        });
+                            /* =====================================================
+                                DRAG & DROP PARA REORDENAR (DENTRO DEL MISMO SUBTEMA)
+                            ===================================================== */
+                            if (!USE_SORTABLE_SIDEBAR) {
+                                li.addEventListener("dragstart", e => {
+                                    const idNormalizado = normalizarIdModulo(modId, false);
+
+                                    e.dataTransfer.setData("moduloId", idNormalizado);
+                                    e.dataTransfer.setData("subtemaIdOrigen", sub.id);
+                                    e.dataTransfer.setData("isReorder", "true");
+                                    e.dataTransfer.setData("originalIndex", index.toString());
+                                    e.dataTransfer.effectAllowed = "move";
+
+                                    li.classList.add("modulo-arrastrando");
+                                });
 
 
-                        li.addEventListener("dragover", e => {
-                            e.preventDefault();
-                            // Solo mostrar efecto si es del mismo subtema
-                            if (e.dataTransfer.getData("subtemaIdOrigen") === sub.id) {
-                                li.classList.add("drag-over");
+                                li.addEventListener("dragover", e => {
+                                    e.preventDefault();
+                                    if (e.dataTransfer.getData("subtemaIdOrigen") === sub.id) {
+                                        li.classList.add("drag-over");
+                                    }
+                                });
+
+                                li.addEventListener("dragleave", () => {
+                                    li.classList.remove("drag-over");
+                                });
+
+                                li.addEventListener("dragend", () => {
+                                    li.classList.remove("modulo-arrastrando", "drag-over");
+                                    subBody.querySelectorAll('.drag-over').forEach(el => {
+                                        el.classList.remove('drag-over');
+                                    });
+                                });
+
+                                li.addEventListener("drop", async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+
+                                    const moduloId = e.dataTransfer.getData("moduloId");
+                                    const subtemaIdOrigen = e.dataTransfer.getData("subtemaIdOrigen");
+                                    const isReorder = e.dataTransfer.getData("isReorder") === "true";
+
+                                    if (isReorder && subtemaIdOrigen === sub.id) {
+                                        const originalIndex = parseInt(e.dataTransfer.getData("originalIndex"));
+                                        const targetIndex = parseInt(li.dataset.index);
+
+                                        if (originalIndex !== targetIndex) {
+                                            await reordenarModulo(sub.id, originalIndex, targetIndex);
+                                        }
+                                    }
+
+                                    li.classList.remove("drag-over");
+                                });
                             }
-                        });
 
-                        li.addEventListener("dragleave", () => {
-                            li.classList.remove("drag-over");
-                        });
+                            // SELECT MODULO (resto del código igual...)
+                            li.querySelector(".modulo-select").onclick = e => {
+                                e.stopPropagation();
 
-                        li.addEventListener("dragend", () => {
-                            li.classList.remove("modulo-arrastrando", "drag-over");
-                            // Limpiar todas las clases drag-over
-                            subBody.querySelectorAll('.drag-over').forEach(el => {
-                                el.classList.remove('drag-over');
-                            });
-                        });
+                                // limpiar anteriores
+                                document.querySelectorAll("[data-modulo-id]").forEach(m => {
+                                    m.classList.remove("modulo-activo", "highlight-pulse");
+                                });
 
-                        li.addEventListener("drop", async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            
-                            const moduloId = e.dataTransfer.getData("moduloId");
-                            const subtemaIdOrigen = e.dataTransfer.getData("subtemaIdOrigen");
-                            const isReorder = e.dataTransfer.getData("isReorder") === "true";
-                            
-                            // Si es reordenamiento dentro del mismo subtema
-                            if (isReorder && subtemaIdOrigen === sub.id) {
-                                const originalIndex = parseInt(e.dataTransfer.getData("originalIndex"));
-                                const targetIndex = parseInt(li.dataset.index);
-                                
-                                if (originalIndex !== targetIndex) {
-                                    await reordenarModulo(sub.id, originalIndex, targetIndex);
+                                // marcar visualmente
+                                li.classList.add("modulo-activo", "highlight-pulse");
+
+                                // GUARDAR EL ID REAL DEL MÓDULO
+                                localStorage.setItem("moduloActivo", modId);
+
+                                // actualizar globales
+                                subtemaActivo = sub;
+                                temaActivo = tema;
+
+                                // cargar en editor
+                                cargarSubtema(sub, modId);
+                            };
+
+                            /* DUPLICAR MODULO */
+                            li.querySelector(".btn-duplicate-modulo").onclick = async e => {
+                                e.stopPropagation();
+
+                                // Construir ID compuesto para buscar
+                                let idParaBuscarOriginal = modId;
+                                if (!modId.includes('_')) {
+                                    idParaBuscarOriginal = `${curso.id}_${modId}`;
                                 }
-                            }
-                            
-                            li.classList.remove("drag-over");
-                        });
 
-                        // SELECT MODULO (resto del código igual...)
-                        li.querySelector(".modulo-select").onclick = e => {
-                            e.stopPropagation();
+                                const original = await obtenerModulo(idParaBuscarOriginal);
+                                if (!original) {
+                                    alert("Error: módulo original no encontrado.");
+                                    return;
+                                }
 
-                            // limpiar anteriores
-                            document.querySelectorAll("[data-modulo-id]").forEach(m => {
-                                m.classList.remove("modulo-activo", "highlight-pulse");
-                            });
+                                const nuevoId = crypto.randomUUID();
 
-                            // marcar visualmente
-                            li.classList.add("modulo-activo", "highlight-pulse");
+                                const nuevoModulo = JSON.parse(JSON.stringify(original));
+                                nuevoModulo.id = nuevoId;
+                                nuevoModulo.nombre = original.nombre + " (copia)";
+                                nuevoModulo.creado = Date.now();
+                                nuevoModulo.actualizado = Date.now();
 
-                            // GUARDAR EL ID REAL DEL MÓDULO
-                            localStorage.setItem("moduloActivo", modId);
+                                // IMPORTANTE: Guardar con ID compuesto
+                                await guardarModulo(nuevoId, nuevoModulo, curso.id);
 
-                            // actualizar globales
-                            subtemaActivo = sub;
-                            temaActivo = tema;
+                                if (!sub.modulosIds) sub.modulosIds = [];
+                                // Guardar solo el ID interno en el array
+                                sub.modulosIds.push(nuevoId);
 
-                            // cargar en editor
-                            cargarSubtema(sub, modId);
-                        };
-
-                        /* DUPLICAR MODULO */
-                        li.querySelector(".btn-duplicate-modulo").onclick = async e => {
-                            e.stopPropagation();
-
-                            // Construir ID compuesto para buscar
-                            let idParaBuscarOriginal = modId;
-                            if (!modId.includes('_')) {
-                                idParaBuscarOriginal = `${curso.id}_${modId}`;
-                            }
-                            
-                            const original = await obtenerModulo(idParaBuscarOriginal);
-                            if (!original) {
-                                alert("Error: módulo original no encontrado.");
-                                return;
-                            }
-
-                            const nuevoId = crypto.randomUUID();
-
-                            const nuevoModulo = JSON.parse(JSON.stringify(original));
-                            nuevoModulo.id = nuevoId;
-                            nuevoModulo.nombre = original.nombre + " (copia)";
-                            nuevoModulo.creado = Date.now();
-                            nuevoModulo.actualizado = Date.now();
-
-                            // IMPORTANTE: Guardar con ID compuesto
-                            await guardarModulo(nuevoId, nuevoModulo, curso.id);
-
-                            if (!sub.modulosIds) sub.modulosIds = [];
-                            // Guardar solo el ID interno en el array
-                            sub.modulosIds.push(nuevoId);
-
-                            await guardarCursoFirebase();
-                            localStorage.setItem("moduloActivo", nuevoId);
-                            renderTemas();
-                            const subtemaActual = obtenerSubtemaActualDesdeCurso(sub.id) || sub;
-                            await cargarSubtema(subtemaActual, nuevoId);
-                        };
+                                await guardarCursoFirebase();
+                                localStorage.setItem("moduloActivo", nuevoId);
+                                renderTemas();
+                                const subtemaActual = obtenerSubtemaActualDesdeCurso(sub.id) || sub;
+                                await cargarSubtema(subtemaActual, nuevoId);
+                            };
 
 
-                        /* EDITAR MODULO */
-                        li.querySelector(".btn-edit-modulo").onclick = async e => {
-                            e.stopPropagation();
+                            /* EDITAR MODULO */
+                            li.querySelector(".btn-edit-modulo").onclick = async e => {
+                                e.stopPropagation();
 
-                            const modalHTML = `
+                                const modalHTML = `
                                 <div id="modalEditModulo" class="modal fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
                                     <div class="bg-white rounded-lg p-6 w-full max-w-md">
                                         <h3 class="text-lg font-semibold mb-4">Editar Módulo</h3>
@@ -6491,75 +6950,75 @@ function renderTemas() {
                                 </div>
                             `;
 
-                            const existingModal = document.getElementById("modalEditModulo");
-                            if (existingModal) existingModal.remove();
-                            document.body.insertAdjacentHTML('beforeend', modalHTML);
+                                const existingModal = document.getElementById("modalEditModulo");
+                                if (existingModal) existingModal.remove();
+                                document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-                            const modal = document.getElementById("modalEditModulo");
-                            const input = document.getElementById("inputEditModulo");
-                            const btnCancelar = document.getElementById("btnCancelarEditModulo");
-                            const btnConfirmar = document.getElementById("btnConfirmarEditModulo");
+                                const modal = document.getElementById("modalEditModulo");
+                                const input = document.getElementById("inputEditModulo");
+                                const btnCancelar = document.getElementById("btnCancelarEditModulo");
+                                const btnConfirmar = document.getElementById("btnConfirmarEditModulo");
 
-                            modal.classList.remove("hidden");
-                            modal.classList.add("flex");
-                            setTimeout(() => {
-                                input.focus();
-                                input.select();
-                            }, 100);
+                                modal.classList.remove("hidden");
+                                modal.classList.add("flex");
+                                setTimeout(() => {
+                                    input.focus();
+                                    input.select();
+                                }, 100);
 
-                            const nuevoNombre = await new Promise(resolve => {
-                                const limpiar = () => {
-                                    btnConfirmar.onclick = null;
-                                    btnCancelar.onclick = null;
-                                };
+                                const nuevoNombre = await new Promise(resolve => {
+                                    const limpiar = () => {
+                                        btnConfirmar.onclick = null;
+                                        btnCancelar.onclick = null;
+                                    };
 
-                                btnConfirmar.onclick = () => {
-                                    const valor = input.value.trim();
-                                    limpiar();
-                                    modal.classList.add("hidden");
-                                    resolve(valor);
-                                };
+                                    btnConfirmar.onclick = () => {
+                                        const valor = input.value.trim();
+                                        limpiar();
+                                        modal.classList.add("hidden");
+                                        resolve(valor);
+                                    };
 
-                                btnCancelar.onclick = () => {
-                                    limpiar();
-                                    modal.classList.add("hidden");
-                                    resolve(null);
-                                };
-                            });
+                                    btnCancelar.onclick = () => {
+                                        limpiar();
+                                        modal.classList.add("hidden");
+                                        resolve(null);
+                                    };
+                                });
 
-                            setTimeout(() => modal.remove(), 300);
+                                setTimeout(() => modal.remove(), 300);
 
-                            if (!nuevoNombre) return;
+                                if (!nuevoNombre) return;
 
-                            await guardarModulo(mod.id, { nombre: nuevoNombre.trim() });
-                            renderTemas();
-                        };
+                                await guardarModulo(mod.id, { nombre: nuevoNombre.trim() });
+                                renderTemas();
+                            };
 
-                        return li;
-                    } catch (error) {
-                        return null;
-                    }
-                });
-
-                // Esperar a que todos los módulos se carguen
-                Promise.all(promesasModulos).then(elementos => {
-                    let agregados = 0;
-                    elementos.forEach(li => {
-                        if (li) subBody.appendChild(li);
-                        if (li) agregados += 1;
+                            return li;
+                        } catch (error) {
+                            return null;
+                        }
                     });
-                    if (agregados === 0) {
-                        subBody.innerHTML = `<p class="text-gray-400 text-xs">— No hay módulos —</p>`;
-                    }
-                    
-                    // 🔥 Ajustar altura del accordion después de cargar módulos
-                    if (subAcc.classList.contains("open")) {
-                        setTimeout(() => {
-                            subContent.style.height = subBody.scrollHeight + "px";
-                        }, 50);
-                    }
-                });
-            }
+
+                    // Esperar a que todos los módulos se carguen
+                    Promise.all(promesasModulos).then(elementos => {
+                        let agregados = 0;
+                        elementos.forEach(li => {
+                            if (li) subBody.appendChild(li);
+                            if (li) agregados += 1;
+                        });
+                        if (agregados === 0) {
+                            subBody.innerHTML = `<p class="text-gray-400 text-xs">— No hay módulos —</p>`;
+                        }
+
+                        // 🔥 Ajustar altura del accordion después de cargar módulos
+                        if (subAcc.classList.contains("open")) {
+                            setTimeout(() => {
+                                subContent.style.height = subBody.scrollHeight + "px";
+                            }, 50);
+                        }
+                    });
+                }
 
                 bodyTema.appendChild(subAcc);
             });
@@ -6662,10 +7121,10 @@ document.querySelectorAll(".tema-dropzone").forEach(drop => {
 // Función principal para reordenar módulos dentro de un subtema
 async function reordenarModulo(subtemaId, indiceOrigen, indiceDestino) {
     try {
-        
+
         // Encontrar el subtema
         let subtemaEncontrado = null;
-        
+
         for (const t of curso.temas) {
             for (const s of t.subtemas) {
                 if (s.id === subtemaId) {
@@ -6675,39 +7134,159 @@ async function reordenarModulo(subtemaId, indiceOrigen, indiceDestino) {
             }
             if (subtemaEncontrado) break;
         }
-        
+
         if (!subtemaEncontrado) {
             return;
         }
-        
+
         // Asegurar array
         if (!Array.isArray(subtemaEncontrado.modulosIds)) {
             subtemaEncontrado.modulosIds = [];
         }
-        
+
         // Validar índices
         if (indiceOrigen < 0 || indiceOrigen >= subtemaEncontrado.modulosIds.length) {
             return;
         }
-        
+
         if (indiceDestino < 0) indiceDestino = 0;
         if (indiceDestino > subtemaEncontrado.modulosIds.length) {
             indiceDestino = subtemaEncontrado.modulosIds.length;
         }
-        
+
         // Reordenar
         const moduloMovido = subtemaEncontrado.modulosIds.splice(indiceOrigen, 1)[0];
         subtemaEncontrado.modulosIds.splice(indiceDestino, 0, moduloMovido);
-        
-        
+        sincronizarCursoActivoEnCursosUsuario();
+        persistirCursoActivoEnLocalStorage(curso);
+
+
         // Guardar
         await guardarCursoFirebase();
-        
+
         // Actualizar UI
         renderTemas();
-        
+
     } catch (error) {
         alert("Error al reordenar el módulo.");
+    }
+}
+
+function obtenerClaveComparacionModulo(moduloId) {
+    const raw = String(moduloId || "").trim();
+    if (!raw) return "";
+    return extraerIdInternoModulo(raw);
+}
+
+function aplicarOrdenVisibleAModulosIds(subtema = {}, visibleModuloIds = []) {
+    if (!subtema || !Array.isArray(subtema.modulosIds)) return false;
+
+    const visibleOrder = visibleModuloIds
+        .map((id) => obtenerClaveComparacionModulo(id))
+        .filter(Boolean);
+
+    if (!visibleOrder.length) return false;
+
+    const visibleSet = new Set(visibleOrder);
+    const visiblesActuales = subtema.modulosIds
+        .map((id) => obtenerClaveComparacionModulo(id))
+        .filter((id) => visibleSet.has(id));
+
+    if (!visiblesActuales.length || visiblesActuales.length !== visibleOrder.length) {
+        return false;
+    }
+
+    let changed = false;
+    let cursorVisible = 0;
+    const nuevoOrden = subtema.modulosIds.map((idActual) => {
+        const claveActual = obtenerClaveComparacionModulo(idActual);
+        if (!visibleSet.has(claveActual)) return idActual;
+
+        const siguienteVisibleClave = visibleOrder[cursorVisible++] || claveActual;
+        const siguienteReal = subtema.modulosIds.find((candidate) => obtenerClaveComparacionModulo(candidate) === siguienteVisibleClave) || idActual;
+        if (siguienteReal !== idActual) changed = true;
+        return siguienteReal;
+    });
+
+    if (!changed) return false;
+
+    subtema.modulosIds = nuevoOrden;
+    sincronizarCursoActivoEnCursosUsuario();
+    persistirCursoActivoEnLocalStorage(curso);
+    return true;
+}
+
+async function reordenarModuloSegunOrdenVisible(subtemaId, visibleModuloIds = []) {
+    try {
+        const subtemaEncontrado = curso.temas
+            .flatMap((tema) => Array.isArray(tema?.subtemas) ? tema.subtemas : [])
+            .find((subtema) => subtema?.id === subtemaId);
+
+        if (!subtemaEncontrado) return false;
+        if (!Array.isArray(subtemaEncontrado.modulosIds) || !subtemaEncontrado.modulosIds.length) return false;
+
+        const changed = aplicarOrdenVisibleAModulosIds(subtemaEncontrado, visibleModuloIds);
+        if (!changed) return false;
+
+        await guardarCursoFirebase();
+        renderTemas();
+        return true;
+    } catch (error) {
+        alert("Error al guardar el nuevo orden de los módulos.");
+        return false;
+    }
+}
+
+async function moverModuloSegunOrdenVisible(subtemaIdOrigen, subtemaIdDestino, moduloId, visibleOrderOrigen = [], visibleOrderDestino = []) {
+    try {
+        let subOrigen = null;
+        let subDestino = null;
+
+        curso.temas.forEach((tema) => {
+            (tema?.subtemas || []).forEach((subtema) => {
+                if (subtema?.id === subtemaIdOrigen) subOrigen = subtema;
+                if (subtema?.id === subtemaIdDestino) subDestino = subtema;
+            });
+        });
+
+        if (!subOrigen || !subDestino) return false;
+        if (!Array.isArray(subOrigen.modulosIds)) subOrigen.modulosIds = [];
+        if (!Array.isArray(subDestino.modulosIds)) subDestino.modulosIds = [];
+
+        const claveModulo = obtenerClaveComparacionModulo(moduloId);
+        const originIndex = subOrigen.modulosIds.findIndex((id) => obtenerClaveComparacionModulo(id) === claveModulo);
+        if (originIndex === -1) return false;
+
+        const [moduloMovidoReal] = subOrigen.modulosIds.splice(originIndex, 1);
+        if (!subDestino.modulosIds.some((id) => obtenerClaveComparacionModulo(id) === claveModulo)) {
+            subDestino.modulosIds.push(moduloMovidoReal);
+        }
+        sincronizarCursoActivoEnCursosUsuario();
+        persistirCursoActivoEnLocalStorage(curso);
+
+        aplicarOrdenVisibleAModulosIds(subOrigen, visibleOrderOrigen);
+        aplicarOrdenVisibleAModulosIds(subDestino, visibleOrderDestino);
+
+        await guardarModulo(moduloId, {
+            subtemaId: subtemaIdDestino,
+            cursoId: curso.id,
+            actualizado: Date.now()
+        });
+
+        await guardarCursoFirebase();
+        renderTemas();
+
+        const moduloActivoId = localStorage.getItem("moduloActivo");
+        if (moduloActivoId === moduloId) {
+            setTimeout(() => {
+                cargarSubtema(subDestino, moduloId);
+            }, 300);
+        }
+
+        return true;
+    } catch (error) {
+        alert("Error al guardar el nuevo orden de los módulos.");
+        return false;
     }
 }
 
@@ -6715,10 +7294,10 @@ async function reordenarModulo(subtemaId, indiceOrigen, indiceDestino) {
 // Función para mover un módulo a una posición específica
 async function moverModuloAPosicion(subtemaIdOrigen, subtemaIdDestino, moduloId, posicionDestino) {
     try {
-        
+
         let subOrigen = null;
         let subDestino = null;
-        
+
         // Buscar subtemas origen y destino
         curso.temas.forEach(t => {
             t.subtemas.forEach(s => {
@@ -6726,40 +7305,43 @@ async function moverModuloAPosicion(subtemaIdOrigen, subtemaIdDestino, moduloId,
                 if (s.id === subtemaIdDestino) subDestino = s;
             });
         });
-        
+
         if (!subOrigen || !subDestino) {
             return;
         }
-        
+
         // Asegurar arrays
         if (!Array.isArray(subOrigen.modulosIds)) subOrigen.modulosIds = [];
         if (!Array.isArray(subDestino.modulosIds)) subDestino.modulosIds = [];
-        
+
         // Remover del origen
-        const indexOrigen = subOrigen.modulosIds.indexOf(moduloId);
+        const claveModulo = obtenerClaveComparacionModulo(moduloId);
+        const indexOrigen = subOrigen.modulosIds.findIndex((id) => obtenerClaveComparacionModulo(id) === claveModulo);
         if (indexOrigen === -1) {
             return;
         }
-        
-        subOrigen.modulosIds.splice(indexOrigen, 1);
-        
+
+        const [moduloMovidoReal] = subOrigen.modulosIds.splice(indexOrigen, 1);
+
         // Insertar en destino en la posición especificada
         const posicionFinal = Math.min(posicionDestino, subDestino.modulosIds.length);
-        subDestino.modulosIds.splice(posicionFinal, 0, moduloId);
-        
+        subDestino.modulosIds.splice(posicionFinal, 0, moduloMovidoReal);
+        sincronizarCursoActivoEnCursosUsuario();
+        persistirCursoActivoEnLocalStorage(curso);
+
         // Actualizar referencia en Firestore
         await guardarModulo(moduloId, {
             subtemaId: subtemaIdDestino,
             cursoId: curso.id,
             actualizado: Date.now()
         });
-        
+
         // Guardar curso
         await guardarCursoFirebase();
-        
+
         // Actualizar UI
         renderTemas();
-        
+
         // Si el módulo movido era el activo, actualizar
         const moduloActivoId = localStorage.getItem("moduloActivo");
         if (moduloActivoId === moduloId) {
@@ -6767,8 +7349,8 @@ async function moverModuloAPosicion(subtemaIdOrigen, subtemaIdDestino, moduloId,
                 cargarSubtema(subDestino, moduloId);
             }, 300);
         }
-        
-        
+
+
     } catch (error) {
         alert("Error al mover el módulo.");
     }
@@ -6823,14 +7405,26 @@ function moverSubtemaConPosicion(temaIdOrigen, temaIdDestino, subtemaId, indiceD
     return true;
 }
 
+function calcularIndiceDestinoModuloEnSubtema(dropEvent, containerEl, subtema = {}) {
+    const targetItem = dropEvent?.target?.closest?.(".module-draggable");
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    if (!targetItem) return ids.length;
+
+    const targetModId = String(targetItem.dataset.moduloId || "").trim();
+    if (!targetModId) return ids.length;
+
+    const targetIndex = ids.findIndex((id) => String(id || "").trim() === targetModId);
+    return targetIndex >= 0 ? targetIndex : ids.length;
+}
+
 
 async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
     try {
-        
+
         // 1. BUSCAR SUBTEMAS ORIGEN Y DESTINO
         let subOrigen = null, subDestino = null;
         let temaOrigen = null, temaDestino = null;
-        
+
         for (const t of curso.temas) {
             for (const s of t.subtemas) {
                 if (s.id === subtemaIdOrigen) {
@@ -6843,30 +7437,30 @@ async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
                 }
             }
         }
-        
+
         if (!subOrigen || !subDestino) {
             alert("Error: No se encontraron los subtemas.");
             return;
         }
-        
+
         // 2. BUSCAR EL MÓDULO EN EL ARRAY (manejar ambos formatos de ID)
         let moduloIndex = -1;
         let idEnArray = null;
-        
+
         // Asegurar que exista el array de módulos
         if (!subOrigen.modulosIds) subOrigen.modulosIds = [];
-        
+
         // Buscar el módulo en el array
         for (let i = 0; i < subOrigen.modulosIds.length; i++) {
             const idActual = subOrigen.modulosIds[i];
-            
+
             // Comparación directa
             if (idActual === moduloId) {
                 moduloIndex = i;
                 idEnArray = idActual;
                 break;
             }
-            
+
             // Si moduloId es interno (sin guión) pero en array está compuesto
             if (!moduloId.includes('_') && idActual.includes('_')) {
                 const partes = idActual.split('_');
@@ -6876,7 +7470,7 @@ async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
                     break;
                 }
             }
-            
+
             // Si moduloId es compuesto pero en array está interno
             if (moduloId.includes('_') && !idActual.includes('_')) {
                 const partesModulo = moduloId.split('_');
@@ -6887,30 +7481,30 @@ async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
                 }
             }
         }
-        
+
         if (moduloIndex === -1) {
             return;
         }
-        
+
         // 3. REMOVER DEL ORIGEN
         const moduloMovido = subOrigen.modulosIds.splice(moduloIndex, 1)[0];
-        
+
         // 4. AGREGAR AL DESTINO
         if (!subDestino.modulosIds) subDestino.modulosIds = [];
         subDestino.modulosIds.push(moduloMovido);
-        
+
         // 5. ACTUALIZAR EL DOCUMENTO EN FIRESTORE
         try {
             // Obtener datos del módulo
             const moduloData = await obtenerModulo(moduloMovido, curso.id);
-            
+
             if (moduloData) {
                 // Determinar el ID correcto para Firestore
                 let idFirestore = moduloMovido;
                 if (!moduloMovido.includes('_')) {
                     idFirestore = `${curso.id}_${moduloMovido}`;
                 }
-                
+
                 // Actualizar el documento del módulo
                 await updateDoc(doc(db, "moodleCourses", idFirestore), {
                     subtemaId: subtemaIdDestino,
@@ -6921,21 +7515,21 @@ async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
         } catch (firestoreError) {
             // Continuar aunque falle la actualización individual, el curso se guardará completo
         }
-        
+
         // 6. GUARDAR CAMBIOS DEL CURSO
         await guardarCursoFirebase();
-        
+
         // 7. ACTUALIZAR UI COMPLETA
         renderTemas();
-        
+
         // 8. CARGAR EL SUBTEMA DESTINO (opcional)
         if (subtemaActivo && subtemaActivo.id === subtemaIdDestino) {
             setTimeout(() => {
                 cargarSubtema(subDestino);
             }, 300);
         }
-        
-        
+
+
     } catch (error) {
         alert("Error al mover el módulo: " + error.message);
     }
@@ -6946,23 +7540,23 @@ async function moverModulo(subtemaIdOrigen, subtemaIdDestino, moduloId) {
 
 // ✅ NUEVA FUNCIÓN: Actualizar UI optimizada después de mover módulo
 async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaIdDestino) {
-    
+
     // Guardar estados
     const temasAbiertos = JSON.parse(localStorage.getItem("temasAbiertos") || "[]");
     const subtemasAbiertos = JSON.parse(localStorage.getItem("subtemasAbiertos") || "[]");
     const moduloActivo = localStorage.getItem("moduloActivo");
-    
+
     // Si es movimiento entre diferentes subtemas, hacer render completo
     if (subtemaIdOrigen !== subtemaIdDestino) {
         renderTemas();
         // Restaurar selección si este módulo era el activo
-        if (moduloActivo && (moduloActivo === moduloId || 
+        if (moduloActivo && (moduloActivo === moduloId ||
             extraerIdInternoModulo(moduloId) === moduloActivo ||
             construirDocIdModulo(moduloId) === moduloActivo)) {
             setTimeout(() => {
                 document.querySelectorAll(`[data-modulo-id]`).forEach(el => {
                     const elId = el.dataset.moduloId;
-                    if (elId === moduloId || 
+                    if (elId === moduloId ||
                         extraerIdInternoModulo(elId) === extraerIdInternoModulo(moduloId) ||
                         construirDocIdModulo(elId) === construirDocIdModulo(moduloId)) {
                         el.classList.add('modulo-activo', 'highlight-pulse');
@@ -6972,7 +7566,7 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
         }
         return;
     }
-    
+
     // Si es reordenamiento en el mismo subtema
     try {
         // Encontrar el subtema en el DOM
@@ -6981,42 +7575,42 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
             renderTemas();
             return;
         }
-        
+
         // Obtener contenedor de módulos
         const modulosContainer = subtemaElement.querySelector('.modulos-container');
         if (!modulosContainer) {
             renderTemas();
             return;
         }
-        
+
         // Obtener todos los elementos de módulo
         const moduloElements = Array.from(modulosContainer.querySelectorAll('[data-modulo-id]'));
-        
+
         // Crear nuevo array en el orden correcto
         const nuevoOrden = [];
         moduloElements.forEach(el => {
             nuevoOrden.push(el.dataset.moduloId);
         });
-        
+
         // Actualizar el array en el curso
         const subtema = curso.temas.flatMap(t => t.subtemas).find(s => s.id === subtemaIdOrigen);
         if (subtema) {
             subtema.modulosIds = nuevoOrden;
-            
+
             // Hacer un render suave manteniendo el estado abierto
             const subtemaAbierto = subtemaElement.classList.contains('open');
             const contenidoHeight = subtemaElement.querySelector('.accordion-content').scrollHeight;
-            
+
             // Reconstruir solo los módulos de este subtema
             const nuevosModulosHTML = await generarHTMLModulos(subtema);
             modulosContainer.innerHTML = nuevosModulosHTML;
-            
+
             // Restaurar estado abierto
             if (subtemaAbierto) {
                 subtemaElement.classList.add('open');
                 subtemaElement.querySelector('.accordion-content').style.height = `${contenidoHeight}px`;
             }
-            
+
             // Restaurar selección
             if (moduloActivo) {
                 moduloElements.forEach(el => {
@@ -7028,11 +7622,11 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
                 });
             }
         }
-        
+
     } catch (error) {
         renderTemas();
     }
-    
+
     // Restaurar estados de acordeones
     setTimeout(() => {
         restaurarEstadosAcordeones(temasAbiertos, subtemasAbiertos);
@@ -7044,7 +7638,7 @@ async function actualizarUIAfterMoverModulo(moduloId, subtemaIdOrigen, subtemaId
 function actualizarContadoresSubtema(subtemaId) {
     const subtemaElement = document.querySelector(`[data-id="${subtemaId}"]`);
     if (!subtemaElement) return;
-    
+
     const contadorElement = subtemaElement.querySelector('.contador-modulos');
     if (contadorElement) {
         // Encontrar el subtema en la estructura del curso
@@ -7056,7 +7650,7 @@ function actualizarContadoresSubtema(subtemaId) {
                 }
             });
         });
-        
+
         if (subtema) {
             const count = subtema.modulosIds ? subtema.modulosIds.length : 0;
             contadorElement.textContent = `(${count})`;
@@ -7076,7 +7670,7 @@ function restaurarEstadosAcordeones(temasAbiertos, subtemasAbiertos) {
             }
         }
     });
-    
+
     subtemasAbiertos.forEach(subtemaId => {
         const subtemaElement = document.querySelector(`[data-id="${subtemaId}"]`);
         if (subtemaElement) {
@@ -7106,11 +7700,11 @@ async function addSubtema(tema) {
 
     // Resetear el input
     input.value = "";
-    
+
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
-    
+
     // Enfocar el input
     setTimeout(() => input.focus(), 100);
 
@@ -7140,7 +7734,7 @@ async function addSubtema(tema) {
                 instrucciones: "",
                 contenidoGenerado: "",
                 modulos: [],
-                traducciones: [] 
+                traducciones: []
             });
 
             await guardarCursoFirebase();
@@ -7163,7 +7757,7 @@ async function addSubtema(tema) {
         input.onkeypress = (e) => {
             if (e.key === 'Enter') confirmar();
         };
-        
+
         // Permitir Escape para cancelar
         modal.onkeydown = (e) => {
             if (e.key === 'Escape') cancelar();
@@ -7200,7 +7794,7 @@ function crearModalSubtema() {
             </div>
         </div>
     `;
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
@@ -7273,9 +7867,9 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
     window.subtemaActivo = subtema;
     // Guardar en localStorage
     localStorage.setItem("subtemaAbierto", subtema.id);
-    
+
     // Buscar el tema padre y guardarlo también
-    const temaPadre = curso.temas.find(t => 
+    const temaPadre = curso.temas.find(t =>
         t.subtemas?.some(s => s.id === subtema.id)
     );
 
@@ -7287,20 +7881,20 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
 
     // 🔥 CORRECCIÓN: Determinar si estamos en modo lectura
     const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
-    
+
     // 🔥 IMPORTANTE: Para cursos duplicados, siempre deberían ser editables
     let puedeEditar = true;
     if (cursoActual) {
         puedeEditar = cursoActual.esPropio || cursoActual.permisos?.editar === true;
-        
+
         // Verificar si es un curso duplicado (por el nombre o algún indicador)
         if (cursoActual.nombre && cursoActual.nombre.includes("(Copia)")) {
             puedeEditar = true; // Forzar modo edición para copias
         }
     }
-    
+
     const esModoLectura = modoLectura || !puedeEditar;
-    
+
     contenidoEditor.innerHTML = `
     <div class="flex items-center justify-between mb-6">
         <h2 class="text-sm font-semibold text-gray-900">${subtema.nombre}</h2>
@@ -7347,7 +7941,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 }
                 await guardarCursoFirebase();
             });
-            
+
             // También guardar al presionar Ctrl+Enter
             instruccionesDiv.addEventListener("keydown", async (e) => {
                 if (e.key === "Enter" && e.ctrlKey) {
@@ -7367,7 +7961,7 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                 subtema.contenidoGenerado = sanitizarHtmlEditorial(e.target.innerHTML);
                 await guardarCursoFirebase();
             });
-            
+
             resultadoDiv.addEventListener("keydown", async (e) => {
                 if (e.key === "Enter" && e.ctrlKey) {
                     e.preventDefault();
@@ -7404,10 +7998,10 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
             document.querySelectorAll('.contenido-editable').forEach(contenedor => {
                 // Doble clic para activar/desactivar edición completa del módulo
                 if (contenedor.dataset.moduloId) {
-                    contenedor.addEventListener('dblclick', function(e) {
+                    contenedor.addEventListener('dblclick', function (e) {
                         e.stopPropagation();
                         const moduloId = this.dataset.moduloId;
-                        
+
                         if (moduloEditandoCompleto === moduloId) {
                             desactivarEdicionModuloCompleto();
                         } else {
@@ -7416,14 +8010,14 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                     });
 
                     // Clic simple para seleccionar
-                    contenedor.addEventListener('click', function(e) {
+                    contenedor.addEventListener('click', function (e) {
                         const moduloId = this.dataset.moduloId;
-                        
+
                         if (moduloEditandoCompleto !== moduloId) {
                             document.querySelectorAll('.contenido-editable').forEach(el => {
                                 el.classList.remove('modulo-seleccionado');
                             });
-                            
+
                             this.classList.add('modulo-seleccionado');
                             localStorage.setItem("moduloActivo", moduloId);
                         }
@@ -7445,11 +8039,11 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                             const ultimo = contenedor.dataset.lastSavedHtml || "";
                             if (!forzar && html === ultimo) return;
 
+                            const releaseSaveStatus = window.beginGlobalSaveStatus?.();
                             try {
-                                updateGlobalSaveStatus(true);
                                 await guardarModulo(modId, { contenido: html });
                                 contenedor.dataset.lastSavedHtml = html;
-                                
+
                                 // Opcional: No reseteamos el innerHTML aquí para evitar perder el cursor
                                 // contenedor.innerHTML = html; 
 
@@ -7468,7 +8062,9 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                                     setTimeout(() => spinner.classList.add("hidden"), 1800);
                                 }
                             } finally {
-                                updateGlobalSaveStatus(false);
+                                if (typeof releaseSaveStatus === "function") {
+                                    releaseSaveStatus();
+                                }
                             }
                         };
 
@@ -7492,6 +8088,11 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
                             if (modId && moduloAutosaveTimers.has(modId)) {
                                 clearTimeout(moduloAutosaveTimers.get(modId));
                                 moduloAutosaveTimers.delete(modId);
+                            }
+
+                            if (contenedor.dataset.skipNextBlurSave === "1") {
+                                delete contenedor.dataset.skipNextBlurSave;
+                                return;
                             }
                             guardarModuloDesdeContenedor(true);
                         });
@@ -7568,41 +8169,41 @@ async function cargarSubtema(subtema, moduloIdToScroll = null, modoLectura = fal
     if (!esModoLectura) {
         // Generar contenido - CORREGIR EL ERROR AQUÍ
         const btnGenerar = document.getElementById("btnGenerar");
-if (btnGenerar) {
-    btnGenerar.addEventListener("click", async () => {
-        // Obtener los elementos necesarios del DOM
-        const instruccionesDiv = document.getElementById("instruccionesSubtema");
-        const resultadoDiv = document.getElementById("resultadoGenerado");
-        const subtemaActual = window.subtemaActivo;
-        
-        if (!instruccionesDiv || !resultadoDiv || !subtemaActual) {
-            alert("Error: No se pudo encontrar el contenido para generar. Asegúrate de tener un subtema seleccionado.");
-            return;
-        }
-        
-        // Obtener el curso actual para verificar permisos
-        const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
-        
-        // Verificar permisos
-        if (cursoActual && !cursoActual.esPropio && !cursoActual.permisos?.editar) {
-            alert("No tienes permisos para generar contenido en este curso.");
-            return;
-        }
-        
-        if (typeof generarContenidoGemini === 'function') {
-            // Pasar los elementos necesarios como parámetros
-            await generarContenidoGemini({
-                instruccionesDiv: instruccionesDiv,
-                resultadoDiv: resultadoDiv,
-                subtema: subtemaActual,
-                cursoId: cursoDocId,
-                userId: currentUserId
+        if (btnGenerar) {
+            btnGenerar.addEventListener("click", async () => {
+                // Obtener los elementos necesarios del DOM
+                const instruccionesDiv = document.getElementById("instruccionesSubtema");
+                const resultadoDiv = document.getElementById("resultadoGenerado");
+                const subtemaActual = window.subtemaActivo;
+
+                if (!instruccionesDiv || !resultadoDiv || !subtemaActual) {
+                    alert("Error: No se pudo encontrar el contenido para generar. Asegúrate de tener un subtema seleccionado.");
+                    return;
+                }
+
+                // Obtener el curso actual para verificar permisos
+                const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
+
+                // Verificar permisos
+                if (cursoActual && !cursoActual.esPropio && !cursoActual.permisos?.editar) {
+                    alert("No tienes permisos para generar contenido en este curso.");
+                    return;
+                }
+
+                if (typeof generarContenidoGemini === 'function') {
+                    // Pasar los elementos necesarios como parámetros
+                    await generarContenidoGemini({
+                        instruccionesDiv: instruccionesDiv,
+                        resultadoDiv: resultadoDiv,
+                        subtema: subtemaActual,
+                        cursoId: cursoDocId,
+                        userId: currentUserId
+                    });
+                } else {
+                    alert("Error: No se puede generar contenido en este momento.");
+                }
             });
-        } else {
-            alert("Error: No se puede generar contenido en este momento.");
         }
-    });
-}
 
 
         // Traducir subtema
@@ -7651,25 +8252,25 @@ async function abrirModalInstruccionesSubtema(subtema) {
     if (!document.getElementById("modalInstruccionesSubtema")) {
         crearModalInstruccionesSubtema();
     }
-    
+
     const modal = document.getElementById("modalInstruccionesSubtema");
     const tituloModal = document.getElementById("tituloInstruccionesSubtema");
     const instruccionesDiv = document.getElementById("instruccionesSubtema");
     const btnGuardar = document.getElementById("btnGuardarInstruccionesSubtema");
-    
+
     // Configurar el modal
     tituloModal.textContent = `Instrucciones: ${subtema.nombre}`;
-    
+
     // Cargar instrucciones actuales
     instruccionesDiv.innerHTML = sanitizarHtmlEditorialOMensajeVacio(
         subtema.instrucciones,
         '<p class="text-muted-foreground text-sm">Escribe las instrucciones para este subtema aquí...</p>'
     );
-    
+
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
-    
+
     // Enfocar el contenido editable
     setTimeout(() => {
         if (instruccionesDiv.textContent.includes("Escribe las instrucciones")) {
@@ -7682,41 +8283,41 @@ async function abrirModalInstruccionesSubtema(subtema) {
             sel.addRange(range);
         }
     }, 100);
-    
+
     // Configurar evento para guardar
     const guardarInstrucciones = async () => {
         const contenido = sanitizeRichText(instruccionesDiv.innerHTML);
-        
+
         // Evitar guardar si es el placeholder
         if (contenido.includes("Escribe las instrucciones")) {
             subtema.instrucciones = "";
         } else {
             subtema.instrucciones = sanitizarHtmlEditorial(contenido);
         }
-        
+
         await guardarCursoFirebase();
-        
+
         // Cerrar modal
         modal.classList.add("hidden");
         modal.classList.remove("flex");
-        
+
         // Notificar
         mostrarNotificacion("✅ Instrucciones guardadas correctamente", 'success');
     };
-    
+
     // Limpiar eventos previos
     btnGuardar.onclick = null;
-    
+
     // Asignar nuevo evento
     btnGuardar.onclick = guardarInstrucciones;
-    
+
     // También permitir Ctrl+Enter para guardar
     instruccionesDiv.onkeydown = (e) => {
         if (e.key === "Enter" && e.ctrlKey) {
             e.preventDefault();
             guardarInstrucciones();
         }
-        
+
         // Escape para cancelar
         if (e.key === "Escape") {
             modal.classList.add("hidden");
@@ -7762,7 +8363,7 @@ function crearModalInstruccionesSubtema() {
             </div>
         </div>
     `;
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
@@ -7825,7 +8426,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
     const esCursoDuplicado = curso?.nombre?.includes("(Copia)") || false;
     const forceRefreshModuloId = String(window.__forceRefreshModuloId || "").trim();
     const forceRefreshModuloIdShort = forceRefreshModuloId ? forceRefreshModuloId.split('_').pop() : "";
-    
+
     // Si es curso duplicado, forzar modo edición
     const esModoLecturaReal = modoLectura && !esCursoDuplicado;
 
@@ -7860,7 +8461,10 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         if (mod.archivado && !mostrarModulosArchivados) continue;
 
         const esActivo = modId === moduloActivoId || mod.id === moduloActivoId;
-        let contenidoModuloHtml = renderizarContenidoModulo(mod.contenido, mod.tipo || "");
+        const contenidoModuloNormalizado = quitarNotasMaestroDelContenido(
+            normalizarBloquesNotasMaestroInyectadas(mod.contenido || "")
+        );
+        let contenidoModuloHtml = renderizarContenidoModulo(contenidoModuloNormalizado, mod.tipo || "");
         if (mod.incluirImagenOriginalEnPropuesta && typeof window.insertarImagenOriginalEnPropuesta === "function") {
             contenidoModuloHtml = window.insertarImagenOriginalEnPropuesta(
                 contenidoModuloHtml,
@@ -7870,18 +8474,72 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
         } else if (typeof window.asegurarTituloPropuestaEnHtml === "function") {
             contenidoModuloHtml = window.asegurarTituloPropuestaEnHtml(contenidoModuloHtml, mod.tipo || "");
         }
-        const mostrarActividadOriginal = mod.mostrarActividadOriginal !== false;
-        const bloqueActividadOriginal = construirActividadOriginalHtmlModulo(mod);
-        const renderBloqueOriginal = bloqueActividadOriginal && !contenidoModuloYaIncluyeActividadOriginal(contenidoModuloHtml)
-            ? bloqueActividadOriginal
+        const {
+            mostrarActividadOriginal,
+            contenidoModuloHtml: contenidoModuloHtmlConActividadOriginal,
+            renderBloqueOriginal
+        } = prepararRenderActividadOriginal({
+            modulo: mod,
+            contenidoModuloHtml,
+            helpers: {
+                construirActividadOriginalHtmlModulo,
+                contenidoModuloYaIncluyeActividadOriginal,
+                quitarActividadOriginalDelContenido,
+                hidratarHtmlInstruccionesGemini,
+                sanitizarHtmlEditorial,
+                escapeHtml,
+                esEncabezadoOriginalWord
+            }
+        });
+        contenidoModuloHtml = contenidoModuloHtmlConActividadOriginal;
+        const mostrarPropuestaActividad = mod.mostrarPropuestaActividad !== false;
+        const mostrarNotasMaestroInline = mod.mostrarNotasMaestroInline !== false;
+        const relacionGeneracionModuloModo = inferirRelacionGeneracionModuloModo(mod);
+        const relacionGeneracionModuloActiva = relacionGeneracionModuloModo !== MODULO_GENERACION_RELATION_CONFIG.none;
+        const usarContextoOtrosGeneracionModulo = usaContextoOtrosModulosGeneracionModulo(mod);
+        const renderBloqueNotasMaestro = mostrarNotasMaestroInline
+            ? construirBloqueNotasMaestroInyectadasHtml(mod)
             : "";
 
         html += `
-<div class="p-4 border rounded-md bg-white shadow-sm hover:bg-gray-50 transition
+<div class="p-4 border rounded-md bg-white shadow-sm hover:bg-gray-50 transition cb-module-card
     ${esActivo ? 'modulo-activo highlight-pulse' : ''}
-    ${mostrarActividadOriginal ? '' : 'modulo-original-oculta'}" 
+    ${mostrarActividadOriginal ? '' : 'modulo-original-oculta'}
+    ${mostrarNotasMaestroInline ? '' : 'modulo-notas-maestro-ocultas'}
+    ${mostrarPropuestaActividad ? '' : 'modulo-propuesta-oculta'}" 
     id="modulo-${mod.id}"
     data-modulo-archivado="${mod.archivado ? "true" : "false"}">
+
+    ${!esModoLecturaReal ? `
+    <div class="cb-module-quick-toggles">
+        ${normalizarTipoModulo(mod.tipo || "") !== "notas_maestro" ? `
+        <button type="button" class="cb-module-quick-toggle"
+                id="btnToggleNotasMaestro-${escapeHtml(mod.id)}"
+                title="${mostrarNotasMaestroInline ? 'Ocultar Notas del Maestro' : 'Notas del Maestro'}"
+                aria-label="${mostrarNotasMaestroInline ? 'Ocultar Notas del Maestro' : 'Notas del Maestro'}"
+                data-mc-action="toggle-notas-maestro-inline"
+                data-mc-modulo-id="${escapeHtml(mod.id)}">
+            <i class="fas fa-chalkboard-teacher text-green-600"></i>
+        </button>
+        ` : ""}
+
+        <button type="button" class="cb-module-quick-toggle"
+                title="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                aria-label="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
+                data-mc-action="agregar-actividad-original-modulo"
+                data-mc-modulo-id="${escapeHtml(mod.id)}">
+            <i class="fas ${mostrarActividadOriginal ? 'fa-eye' : 'fa-eye-slash'} text-emerald-600"></i>
+        </button>
+
+        <button type="button" class="cb-module-quick-toggle"
+                title="${mostrarPropuestaActividad ? 'Ocultar propuesta de actividad' : 'Mostrar propuesta de actividad'}"
+                aria-label="${mostrarPropuestaActividad ? 'Ocultar propuesta de actividad' : 'Mostrar propuesta de actividad'}"
+                data-mc-action="toggle-propuesta-modulo"
+                data-mc-modulo-id="${escapeHtml(mod.id)}">
+            <i class="fas ${mostrarPropuestaActividad ? 'fa-file-circle-check' : 'fa-file-circle-xmark'} text-cyan-700"></i>
+        </button>
+    </div>
+    ` : ""}
 
     <div class="flex justify-between items-start">
     
@@ -7893,7 +8551,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
 
         <!-- 🔥 CORRECCIÓN: Mostrar íconos solo si no es modo lectura REAL -->
         ${!esModoLecturaReal ? `
-        <div class="flex items-center gap-3 text-sm">
+        <div class="flex items-center gap-3 text-sm cb-module-actions-row">
             <label class="modulo-archive-switch" title="Archivar módulo" aria-label="Archivar módulo" data-tour="archivar">
                 <input type="checkbox" class="cb-switch-archivar-modulo cb-switch-archivar-modulo-hidden"
                        ${mod.archivado ? "checked" : ""}
@@ -7925,14 +8583,50 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                 <i class="fas fa-magic text-blue-600"></i>
             </button>
 
-            <button type="button" class="icon-btn btn-modulo-accion"
-                    title="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
-                    aria-label="${mostrarActividadOriginal ? 'Ocultar actividad original' : 'Mostrar actividad original'}"
-                    data-mc-action="agregar-actividad-original-modulo"
-                    data-mc-modulo-id="${escapeHtml(mod.id)}">
-                <i class="fas ${mostrarActividadOriginal ? 'fa-eye' : 'fa-eye-slash'} text-emerald-600"></i>
-            </button>
+            <div class="cb-module-context-controls" aria-label="Controles de contexto para generación">
+                <label class="cb-module-context-mini-toggle" title="Activar relación con módulo vecino">
+                    <span class="cb-module-context-mini-toggle__label">Vecino</span>
+                    <span class="cb-module-context-mini-toggle__switch">
+                        <input type="checkbox"
+                               ${relacionGeneracionModuloActiva ? "checked" : ""}
+                               data-mc-action="toggle-relacion-generacion-modulo-activo"
+                               data-mc-modulo-id="${escapeHtml(mod.id)}">
+                        <span class="cb-module-context-mini-toggle__track" aria-hidden="true">
+                            <span class="cb-module-context-mini-toggle__thumb"></span>
+                        </span>
+                    </span>
+                </label>
 
+                <div class="cb-module-context-direction-switch" aria-label="Dirección de módulo vecino">
+                    <span class="cb-module-context-direction-switch__label">Ant</span>
+                    <label class="cb-module-context-direction-switch__control" title="Relacionar con anterior o siguiente">
+                        <input type="checkbox"
+                               ${relacionGeneracionModuloModo === MODULO_GENERACION_RELATION_CONFIG.siguiente ? "checked" : ""}
+                               ${relacionGeneracionModuloActiva ? "" : "disabled"}
+                               data-mc-action="toggle-direccion-relacion-generacion-modulo"
+                               data-mc-modulo-id="${escapeHtml(mod.id)}">
+                        <span class="cb-module-context-direction-switch__track" aria-hidden="true">
+                            <span class="cb-module-context-direction-switch__thumb"></span>
+                        </span>
+                    </label>
+                    <span class="cb-module-context-direction-switch__label">Sig</span>
+                </div>
+
+                <div class="cb-module-context-direction-switch" aria-label="Contexto de otros módulos">
+                    <span class="cb-module-context-direction-switch__label">Solo</span>
+                    <label class="cb-module-context-direction-switch__control" title="Usar contexto de otros módulos">
+                        <input type="checkbox"
+                               ${usarContextoOtrosGeneracionModulo ? "checked" : ""}
+                               ${relacionGeneracionModuloActiva ? "disabled" : ""}
+                               data-mc-action="toggle-contexto-generacion-modulo"
+                               data-mc-modulo-id="${escapeHtml(mod.id)}">
+                        <span class="cb-module-context-direction-switch__track" aria-hidden="true">
+                            <span class="cb-module-context-direction-switch__thumb"></span>
+                        </span>
+                    </label>
+                    <span class="cb-module-context-direction-switch__label">Ctx</span>
+                </div>
+            </div>
             <div class="cb-module-actions-menu">
                 <button type="button"
                         class="icon-btn btn-modulo-accion cb-module-actions-menu__trigger"
@@ -7945,7 +8639,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
                     <i class="fas fa-ellipsis-v text-slate-600"></i>
                 </button>
                 <div class="cb-module-actions-menu__panel hidden" data-mc-menu-panel="${escapeHtml(mod.id)}">
-                    <button type="button" data-mc-action="abrir-modal-notas-maestro" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-chalkboard-teacher text-green-600"></i><span>Notas del maestro</span></button>
+                    ${normalizarTipoModulo(mod.tipo || "") !== "notas_maestro" ? `<button type="button" id="btnAbrirModalNotasMaestro-${escapeHtml(mod.id)}" data-mc-action="abrir-modal-notas-maestro" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-chalkboard-teacher text-green-600"></i><span>Notas del maestro</span></button>` : ""}
                     <button type="button" data-mc-action="analizar-modulo" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-search text-orange-500"></i><span>Analizar módulo</span></button>
                     <button type="button" data-mc-action="abrir-modal-tono" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-adjust text-pink-600"></i><span>Cambiar tono</span></button>
                     <button type="button" data-mc-action="abrir-modal-crear-tabla" data-mc-modulo-id="${escapeHtml(mod.id)}"><i class="fas fa-table text-indigo-500"></i><span>Crear tabla</span></button>
@@ -7967,6 +8661,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
              id="contenido-${mod.id}"
              data-modulo-id="${mod.id}"
              contenteditable="${!esModoLecturaReal}">
+            ${renderBloqueNotasMaestro}
             ${contenidoModuloHtml}
         </div>
     </div>
@@ -7982,7 +8677,7 @@ async function renderModulosHTML(subtema, moduloActivoId = null, modoLectura = f
     return html;
 }
 
-window.toggleArchivoModulo = async function(moduloId, archivado) {
+window.toggleArchivoModulo = async function (moduloId, archivado) {
     try {
         await guardarModulo(moduloId, { archivado: !!archivado });
 
@@ -8214,98 +8909,131 @@ document.addEventListener("scroll", () => {
 
 // Variable global para almacenar el ID del módulo actual para notas del maestro
 let moduloNotasMaestroId = null;
+let notasMaestroModalState = null;
+
+const NOTAS_MAESTRO_SOURCE_CONFIG = {
+    actividad_original: {
+        key: "actividad_original",
+        label: "Actividad original",
+        field: "notasMaestroActividadOriginal",
+        timestampField: "notasMaestroActividadOriginalGenerado",
+        panelId: "panelNotasMaestroActividadOriginal",
+        contentId: "contenidoNotasMaestroActividadOriginal"
+    },
+    propuesta: {
+        key: "propuesta",
+        label: "Propuesta generada",
+        field: "notasMaestroPropuesta",
+        timestampField: "notasMaestroPropuestaGenerado",
+        panelId: "panelNotasMaestroPropuesta",
+        contentId: "contenidoNotasMaestroPropuesta"
+    }
+};
+
+const NOTAS_MAESTRO_RELATION_CONFIG = {
+    none: "none",
+    anterior: "anterior",
+    siguiente: "siguiente"
+};
+
+const MODULO_GENERACION_RELATION_CONFIG = {
+    none: "none",
+    anterior: "anterior",
+    siguiente: "siguiente"
+};
 
 const ORDINALES = [
-  "primera", "segunda", "tercera", "cuarta", "quinta", "sexta",
-  "séptima", "septima",
-  "octava", "novena", "décima", "decima",
-  "undécima", "onceava",
-  "duodécima", "doceava",
-  "decimotercera", "decimocuarta", "decimoquinta"
+    "primera", "segunda", "tercera", "cuarta", "quinta", "sexta",
+    "séptima", "septima",
+    "octava", "novena", "décima", "decima",
+    "undécima", "onceava",
+    "duodécima", "doceava",
+    "decimotercera", "decimocuarta", "decimoquinta"
 ];
 
 const REGEX_ORDINALES = new RegExp(`\\b(${ORDINALES.join("|")})\\b`, "i");
 
 
 function normalizarTipoModulo(tipo) {
-  if (!tipo) return "contenido";
+    if (!tipo) return "contenido";
 
-  const t = tipo.toLowerCase();
+    const t = tipo.toLowerCase();
 
-  if (t.includes("quiz")) return "quiz";
-  if (t.includes("notas del maestro")) return "notas_maestro";
-  if (t.includes("lección") || t.includes("leccion")) return "leccion";
-  if (t.includes("página") || t.includes("pagina")) return "pagina";
-  if (t.includes("temario")) return "temario";
-  if (t.includes("lectura")) return "lectura";
-  if (t.includes("libro")) return "libro";
+    if (t.includes("quiz")) return "quiz";
+    if (t.includes("fuentes destacadas") || t.includes("fuente destacada")) return FEATURED_SOURCE_MODULE_TYPE_NORMALIZED;
+    if (t.includes("notas del maestro")) return "notas_maestro";
+    if (t.includes("lección") || t.includes("leccion")) return "leccion";
+    if (t.includes("página") || t.includes("pagina")) return "pagina";
+    if (t.includes("temario")) return "temario";
+    if (t.includes("lectura")) return "lectura";
+    if (t.includes("libro")) return "libro";
 
-  return "contenido";
+    return "contenido";
 }
 
 const PERFILES_IDIOMA_NOTAS = [
-  {
-    code: "es",
-    label: "español",
-    words: [" el ", " la ", " los ", " las ", " para ", " con ", " que ", " una ", " del ", " actividad ", " estudiantes ", " aprendizaje ", " objetivo "]
-  },
-  {
-    code: "en",
-    label: "english",
-    words: [" the ", " and ", " for ", " with ", " this ", " should ", " students ", " learning ", " objective ", " activity ", " lesson ", " write ", " explain "]
-  },
-  {
-    code: "pt",
-    label: "português",
-    words: [" de ", " para ", " com ", " os ", " as ", " alunos ", " aprendizagem ", " objetivo ", " atividade ", " aula ", " texto "]
-  },
-  {
-    code: "fr",
-    label: "français",
-    words: [" le ", " la ", " les ", " des ", " pour ", " avec ", " et ", " eleves ", " apprentissage ", " objectif ", " activite ", " cours "]
-  }
+    {
+        code: "es",
+        label: "español",
+        words: [" el ", " la ", " los ", " las ", " para ", " con ", " que ", " una ", " del ", " actividad ", " estudiantes ", " aprendizaje ", " objetivo "]
+    },
+    {
+        code: "en",
+        label: "english",
+        words: [" the ", " and ", " for ", " with ", " this ", " should ", " students ", " learning ", " objective ", " activity ", " lesson ", " write ", " explain "]
+    },
+    {
+        code: "pt",
+        label: "português",
+        words: [" de ", " para ", " com ", " os ", " as ", " alunos ", " aprendizagem ", " objetivo ", " atividade ", " aula ", " texto "]
+    },
+    {
+        code: "fr",
+        label: "français",
+        words: [" le ", " la ", " les ", " des ", " pour ", " avec ", " et ", " eleves ", " apprentissage ", " objectif ", " activite ", " cours "]
+    }
 ];
 
 function normalizarTextoIdiomaNotas(texto = "") {
-  return ` ${String(texto)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()} `;
+    return ` ${String(texto)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()} `;
 }
 
 function detectarIdiomaParaNotas(texto = "") {
-  const normalizado = normalizarTextoIdiomaNotas(texto);
-  if (!normalizado.trim()) {
-    return { code: "es", label: "español", confidence: 0 };
-  }
-
-  const scores = PERFILES_IDIOMA_NOTAS.map((perfil) => {
-    let score = 0;
-    for (const token of perfil.words) {
-      if (normalizado.includes(token)) score += 1;
+    const normalizado = normalizarTextoIdiomaNotas(texto);
+    if (!normalizado.trim()) {
+        return { code: "es", label: "español", confidence: 0 };
     }
-    return { ...perfil, score };
-  }).sort((a, b) => b.score - a.score);
 
-  const mejor = scores[0];
-  const segundo = scores[1] || { score: 0 };
+    const scores = PERFILES_IDIOMA_NOTAS.map((perfil) => {
+        let score = 0;
+        for (const token of perfil.words) {
+            if (normalizado.includes(token)) score += 1;
+        }
+        return { ...perfil, score };
+    }).sort((a, b) => b.score - a.score);
 
-  if (!mejor || mejor.score === 0 || (mejor.score - segundo.score) < 1) {
-    return { code: "es", label: "español", confidence: 0.25 };
-  }
+    const mejor = scores[0];
+    const segundo = scores[1] || { score: 0 };
 
-  return {
-    code: mejor.code,
-    label: mejor.label,
-    confidence: Number((mejor.score / Math.max(1, mejor.score + segundo.score)).toFixed(2))
-  };
+    if (!mejor || mejor.score === 0 || (mejor.score - segundo.score) < 1) {
+        return { code: "es", label: "español", confidence: 0.25 };
+    }
+
+    return {
+        code: mejor.code,
+        label: mejor.label,
+        confidence: Number((mejor.score / Math.max(1, mejor.score + segundo.score)).toFixed(2))
+    };
 }
 
 function aplicarReglaIdiomaEnPromptNotas(promptBase, idiomaDetectado) {
-  return `
+    return `
 IDIOMA DE SALIDA (OBLIGATORIO):
 - Idioma detectado del módulo: ${idiomaDetectado.label} (${idiomaDetectado.code}).
 - Escribe TODA la respuesta final en ${idiomaDetectado.label}.
@@ -8317,18 +9045,16 @@ ${promptBase}
 }
 
 function obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado = { code: "es", label: "español" }) {
-  const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
+    const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
 
-  if (isEnglish) {
-    return {
-      sectionNames: {
-        opening: "Opening",
-        whileUsingBook: "While Using the book section",
-        closing: "Closing"
-      },
-      supportLabel: "Support activity",
-      extensionLabel: "Extension activity",
-      contract: `
+    if (isEnglish) {
+        return {
+            sectionNames: {
+                opening: "Opening",
+                whileUsingBook: "While Using the book section",
+                closing: "Closing"
+            },
+            contract: `
 MANDATORY OUTPUT STRUCTURE:
 - Use ONLY these exact section titles and in this exact order:
   1. Opening
@@ -8341,34 +9067,30 @@ TEMPLATE (keep the wording; only customize the word list and minor details to ma
 Choose some words from the text, such as: <word1>, <word2>, <word3>, <word4>, <word5>, etc. Use Fit for Teaching Vocabulary in your app to follow the processes and vary the techniques. Keep the words in sight for students to use in the following activity.
 
 ## While Using the book section
-Ask students to observe the picture and allow them to describe what they see with a partner. Give them a few minutes to write what they think the text will be about. Encourage them to use the words they learned. Monitor the activity and help if necessary. Use support and extension activities according to their needs.
-Support activity: Provide a few examples for students to write their predictions, for example “I think the text is going to be about… I think the text will explain…”, etc.
-Extension activity: Encourage students to use their previous knowledge to write their predictions.
+Ask students to observe the picture and allow them to describe what they see with a partner. Give them a few minutes to write what they think the text will be about. Encourage them to use the words they learned. Monitor the activity and help if necessary.
 
 ## Closing
 Ask students to compare what they wrote with a partner while you monitor and correct or validate their work. You can ask them to read to each other or swap books to read what their partners wrote.
 
 HARD RULES:
 - Do not add extra headings or sections.
-- Keep "Support activity:" and "Extension activity:" exactly as written (including the colon).
+- Before "Closing", include one final paragraph inside "While Using the book section" that explains how the teacher can support students who need additional educational support, such as ADHD, hyperactivity, visual or hearing disabilities, or other attention, self-regulation, access, communication, or instruction-following needs, in relation to the real task.
 - Return only the final teacher's notes content in markdown.
 `
-    };
-  }
+        };
+    }
 
-  return {
-    sectionNames: {
-      previousKnowledge: "Conocimientos previos",
-      objectives: "Objetivos",
-      opening: "Apertura",
-      whileUsingBook: "Durante el uso del libro",
-      closing: "Cierre"
-    },
-    abilitiesLabel: "Habilidades intelectuales",
-    supportLabel: "Actividad de apoyo",
-    extensionLabel: "Actividad de ampliación",
-    objectiveLead: "Para",
-    contract: `
+    return {
+        sectionNames: {
+            previousKnowledge: "Conocimientos previos",
+            objectives: "Objetivos",
+            opening: "Apertura",
+            whileUsingBook: "Durante el uso del libro",
+            closing: "Cierre"
+        },
+        abilitiesLabel: "Habilidades intelectuales",
+        objectiveLead: "Para",
+        contract: `
 ESTRUCTURA OBLIGATORIA DE SALIDA:
 - Usa estos títulos exactos y en este orden:
   1. Conocimientos previos
@@ -8377,13 +9099,15 @@ ESTRUCTURA OBLIGATORIA DE SALIDA:
   4. Durante el uso del libro
   5. Cierre
 - Dentro de "Objetivos", incluye:
-  - una oración de objetivo que empiece con "Para"
-  - una línea que empiece exactamente con "Habilidades intelectuales:"
+  - una lista de bullets
+  - el primer bullet debe empezar con "Para"
+  - otro bullet debe empezar exactamente con "Habilidades intelectuales:"
 - Dentro de "Durante el uso del libro", incluye:
   - la orientación principal para trabajar el contenido del libro o módulo
-  - un párrafo que empiece exactamente con "Actividad de apoyo:"
-  - un párrafo que empiece exactamente con "Actividad de ampliación:"
+  - un último párrafo, antes del cierre, que explique cómo debe apoyar el docente a estudiantes con necesidades específicas de apoyo educativo, por ejemplo TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones, siempre aplicado a la actividad real
+  - ese párrafo debe incluir ejemplos concretos tomados de la actividad analizada, indicando qué parte de la consigna se adapta, cómo la explicaría el docente y qué apoyo específico conviene dar en esa actividad
 - No omitas ninguna sección, aunque debas adaptarla brevemente.
+- Usa la expresión "pregunta detonadora" y no uses la frase "pregunta disparadora".
 - Devuelve la respuesta en markdown usando encabezados con este formato:
   ## Conocimientos previos
   ## Objetivos
@@ -8391,353 +9115,1070 @@ ESTRUCTURA OBLIGATORIA DE SALIDA:
   ## Durante el uso del libro
   ## Cierre
 `
-  };
+    };
 }
 
-// Función para abrir el modal de Notas para el Maestro
-window.abrirModalNotasMaestro = async function(moduloId) {
-    moduloNotasMaestroId = moduloId;
-    
-    const modal = document.getElementById("modalNotasMaestro");
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
-    const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
-    const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
-    const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    
-    // Ocultar botón de regenerar inicialmente
-    if (btnRegenerarNotas) {
-        btnRegenerarNotas.classList.add("hidden");
+function obtenerConfigFuenteNotasMaestro(source = "") {
+    return NOTAS_MAESTRO_SOURCE_CONFIG[String(source || "").trim()] || NOTAS_MAESTRO_SOURCE_CONFIG.actividad_original;
+}
+
+function inferirFuenteActivaNotasMaestro(modulo = {}) {
+    const raw = String(modulo?.fuenteNotasMaestroActiva || "").trim();
+    if (raw === "actividad_original" || raw === "propuesta") return raw;
+    return "actividad_original";
+}
+
+function inferirRelacionNotasMaestroModo(modulo = {}) {
+    const raw = String(modulo?.relacionNotasMaestroModo || "").trim().toLowerCase();
+    if (raw === NOTAS_MAESTRO_RELATION_CONFIG.anterior || raw === NOTAS_MAESTRO_RELATION_CONFIG.siguiente) {
+        return raw;
     }
-    
-    // Resetear botón de guardar
-    if (btnGuardarNotas) {
-        btnGuardarNotas.disabled = true;
-        btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Guardar Notas';
+    return NOTAS_MAESTRO_RELATION_CONFIG.none;
+}
+
+function usaContextoOtrosModulosNotasMaestro(modulo = {}) {
+    return modulo?.usarContextoOtrosModulosNotasMaestro !== false;
+}
+
+function inferirRelacionGeneracionModuloModo(modulo = {}) {
+    const raw = String(modulo?.relacionGeneracionModuloModo || "").trim().toLowerCase();
+    if (raw === MODULO_GENERACION_RELATION_CONFIG.anterior || raw === MODULO_GENERACION_RELATION_CONFIG.siguiente) {
+        return raw;
     }
-    if (btnAplicarNotas) {
-        btnAplicarNotas.disabled = true;
-        btnAplicarNotas.innerHTML = '<i class="fas fa-file-import mr-2"></i> Aplicar al módulo';
+    return MODULO_GENERACION_RELATION_CONFIG.none;
+}
+
+function usaContextoOtrosModulosGeneracionModulo(modulo = {}) {
+    if (modulo?.ignorarContextoOtrosModulos === true) return false;
+    return modulo?.usarContextoOtrosModulosGeneracionModulo !== false;
+}
+
+function obtenerNotasGuardadasPorFuente(modulo = {}, source = "") {
+    const config = obtenerConfigFuenteNotasMaestro(source);
+    const html = sanitizarHtmlEditorial(modulo?.[config.field] || "");
+    if (html) return html;
+    if (inferirFuenteActivaNotasMaestro(modulo) === config.key) {
+        return sanitizarHtmlEditorial(modulo?.notasMaestroInline || "");
     }
-    
-    // Mostrar loading
-    contenidoModal.innerHTML = `
+    return "";
+}
+
+function obtenerFechaNotasGuardadasPorFuente(modulo = {}, source = "") {
+    const config = obtenerConfigFuenteNotasMaestro(source);
+    return String(modulo?.[config.timestampField] || "").trim()
+        || (inferirFuenteActivaNotasMaestro(modulo) === config.key ? String(modulo?.notasMaestroInlineGenerado || "").trim() : "");
+}
+
+function obtenerNodoContenidoNotasMaestro(source = "") {
+    const config = obtenerConfigFuenteNotasMaestro(source);
+    return document.getElementById(config.contentId);
+}
+
+function obtenerEstadoModalNotasMaestro() {
+    if (!notasMaestroModalState) {
+        notasMaestroModalState = {
+            activeTab: "actividad_original",
+            selectedSource: "actividad_original",
+            relationEnabled: false,
+            relationMode: NOTAS_MAESTRO_RELATION_CONFIG.siguiente,
+            includeOtherModulesContext: true,
+            modulo: null,
+            generationState: {
+                actividad_original: { requestId: 0, inFlight: null },
+                propuesta: { requestId: 0, inFlight: null }
+            },
+            cache: {
+                actividad_original: { html: "", generatedAt: "", loaded: false },
+                propuesta: { html: "", generatedAt: "", loaded: false }
+            }
+        };
+    }
+    return notasMaestroModalState;
+}
+
+function construirNotasMaestroShellHtml({ modulo = {}, tituloTipo = "", contenidoNotasHTML = "" }) {
+    return `
+        <section class="notas-maestro-simple cb-notes-shell" data-cb-notes-shell="1">
+            <header class="cb-notes-shell__header">
+                <p class="cb-notes-shell__eyebrow">Guía docente</p>
+                <h3 class="cb-notes-shell__title">Notas del maestro</h3>
+                <p class="cb-notes-shell__meta">
+                    <span>${escapeHtml(modulo?.nombre || "Sin nombre")}</span>
+                    <span aria-hidden="true">•</span>
+                    <span class="capitalize">${escapeHtml(tituloTipo || modulo?.tipo || "Módulo")}</span>
+                </p>
+            </header>
+            <div class="cb-notes-shell__content">
+                ${contenidoNotasHTML}
+            </div>
+        </section>
+    `.trim();
+}
+
+function obtenerEtiquetaTipoNotasMaestro(tipoModulo = "", source = "") {
+    const tipoNormalizado = normalizarTipoModulo(tipoModulo);
+    const sourceLabel = obtenerConfigFuenteNotasMaestro(source).label;
+
+    if (tipoNormalizado === "quiz") {
+        return `Actividades · ${sourceLabel}`;
+    }
+
+    return `${tipoModulo || "Módulo"} · ${sourceLabel}`;
+}
+
+function renderizarPanelNotasMaestro(source = "") {
+    const state = obtenerEstadoModalNotasMaestro();
+    const nodo = obtenerNodoContenidoNotasMaestro(source);
+    if (!nodo) return;
+
+    const entry = state.cache?.[source] || { html: "", generatedAt: "", loaded: false };
+    nodo.innerHTML = entry.html ? sanitizarHtmlEditorial(entry.html) : `
         <div class="flex items-center justify-center p-8">
             <div class="text-center">
-                <i class="fas fa-spinner fa-spin text-blue-500 text-2xl mb-2"></i>
-                <p class="text-gray-600 text-sm">Cargando notas del maestro...</p>
+                <i class="fas fa-note-sticky text-slate-400 text-2xl mb-2"></i>
+                <p class="text-gray-600 text-sm">Todavía no hay notas generadas para esta pestaña.</p>
             </div>
         </div>
     `;
-    
-    // Mostrar modal
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
-    
-    // Verificar si ya hay notas guardadas
-    const modulo = await obtenerModulo(moduloId);
-    
-    if (modulo && modulo.notasMaestro) {
-        // Mostrar notas guardadas
-        mostrarNotasGuardadas(modulo);
-    } else {
-        // Generar nuevas notas
-        await generarNotasMaestroConIA(moduloId, modulo?.contenido || "");
-    }
-};
 
-// Función para mostrar notas guardadas
-function mostrarNotasGuardadas(modulo) {
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
-    const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
-    const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
-    const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    
-    if (!contenidoModal) return;
-    
-    // Mostrar las notas guardadas
-    contenidoModal.innerHTML = sanitizarHtmlEditorial(modulo.notasMaestro);
-    
-    // Mostrar fecha de generación si existe
-    if (modulo.notasMaestroGenerado) {
-        const fecha = new Date(modulo.notasMaestroGenerado).toLocaleString();
-        const fechaDiv = document.createElement('div');
+    if (entry.html && entry.generatedAt) {
+        nodo.querySelectorAll("[data-cb-notes-modal-stamp='1']").forEach((item) => item.remove());
+        const fechaDiv = document.createElement("div");
+        fechaDiv.setAttribute("data-cb-notes-modal-stamp", "1");
         fechaDiv.className = "text-xs text-gray-500 mt-4 text-center";
-        const icono = document.createElement("i");
-        icono.className = "fas fa-clock mr-1";
-        fechaDiv.appendChild(icono);
-        fechaDiv.appendChild(document.createTextNode(` Generado: ${fecha}`));
-        contenidoModal.appendChild(fechaDiv);
+        fechaDiv.innerHTML = `<i class="fas fa-clock mr-1"></i> Generado: ${new Date(entry.generatedAt).toLocaleString()}`;
+        nodo.appendChild(fechaDiv);
     }
-    
-    // Habilitar botón de guardar (para actualizar)
-    if (btnGuardarNotas) {
-        btnGuardarNotas.disabled = false;
-        btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Actualizar Notas';
-    }
-    if (btnAplicarNotas) {
-        btnAplicarNotas.disabled = false;
-    }
-    
-    // Mostrar botón de regenerar
-    if (btnRegenerarNotas) {
-        btnRegenerarNotas.classList.remove("hidden");
-    }
-    
-    // Aplicar estilos
+
     aplicarEstilosNotas();
 }
 
-// Función para regenerar las notas
-window.regenerarNotasMaestro = async function() {
-    if (!moduloNotasMaestroId) return;
-    
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
-    const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
-    const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
-    const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    
-    // Deshabilitar botones temporalmente
-    if (btnRegenerarNotas) btnRegenerarNotas.disabled = true;
-    if (btnGuardarNotas) btnGuardarNotas.disabled = true;
-    if (btnAplicarNotas) btnAplicarNotas.disabled = true;
-    
-    // Mostrar loading
-    contenidoModal.innerHTML = `
+function actualizarUiModalNotasMaestro() {
+    const state = obtenerEstadoModalNotasMaestro();
+    Object.keys(NOTAS_MAESTRO_SOURCE_CONFIG).forEach((source) => {
+        const config = obtenerConfigFuenteNotasMaestro(source);
+        const isActiveTab = state.activeTab === source;
+        const panel = document.getElementById(config.panelId);
+
+        panel?.classList.toggle("hidden", !isActiveTab);
+        panel?.classList.toggle("is-active", isActiveTab);
+    });
+
+    const switchFuente = document.getElementById("switchFuenteNotasMaestro");
+    if (switchFuente) {
+        switchFuente.checked = state.selectedSource === "propuesta";
+    }
+
+    const switchRelacionActivo = document.getElementById("switchRelacionNotasMaestroActivo");
+    if (switchRelacionActivo) {
+        switchRelacionActivo.checked = !!state.relationEnabled;
+    }
+
+    const switchRelacionDireccion = document.getElementById("switchDireccionRelacionNotasMaestro");
+    if (switchRelacionDireccion) {
+        switchRelacionDireccion.checked = state.relationMode === NOTAS_MAESTRO_RELATION_CONFIG.siguiente;
+        switchRelacionDireccion.disabled = !state.relationEnabled;
+    }
+
+    const switchContextoOtros = document.getElementById("switchContextoOtrosModulosNotasMaestro");
+    if (switchContextoOtros) {
+        switchContextoOtros.checked = !!state.includeOtherModulesContext;
+        switchContextoOtros.disabled = !!state.relationEnabled;
+    }
+
+    const relationControlGroup = document.getElementById("switchRelacionNotasMaestroActivo")?.closest(".cb-notes-modal-footer-control-group");
+    relationControlGroup?.classList.remove("is-disabled");
+
+    const contextControlGroup = document.getElementById("switchContextoOtrosModulosNotasMaestro")?.closest(".cb-notes-modal-footer-control-group");
+    contextControlGroup?.classList.toggle("is-disabled", !!state.relationEnabled);
+
+    const btnGuardar = document.getElementById("btnGuardarNotasMaestro");
+    const btnRegenerar = document.getElementById("btnRegenerarNotasMaestro");
+    const btnAplicar = document.getElementById("btnAplicarNotasMaestro");
+    const activeLabel = obtenerConfigFuenteNotasMaestro(state.activeTab).label;
+    if (btnGuardar) {
+        btnGuardar.innerHTML = `<i class="fas fa-save mr-2"></i> Guardar ${activeLabel}`;
+    }
+    if (btnRegenerar) {
+        btnRegenerar.classList.remove("hidden");
+        btnRegenerar.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        btnRegenerar.title = `Regenerar ${activeLabel}`;
+        btnRegenerar.setAttribute("aria-label", `Regenerar ${activeLabel}`);
+    }
+    if (btnAplicar) {
+        btnAplicar.innerHTML = '<i class="fas fa-file-import mr-2"></i> Aplicar al módulo';
+    }
+}
+
+function setEstadoBotonesModalNotasMaestro({ guardando = false, aplicando = false, regenerando = false } = {}) {
+    const btnGuardar = document.getElementById("btnGuardarNotasMaestro");
+    const btnRegenerar = document.getElementById("btnRegenerarNotasMaestro");
+    const btnAplicar = document.getElementById("btnAplicarNotasMaestro");
+    if (btnGuardar) btnGuardar.disabled = guardando || aplicando || regenerando;
+    if (btnRegenerar) btnRegenerar.disabled = guardando || aplicando || regenerando;
+    if (btnAplicar) btnAplicar.disabled = guardando || aplicando || regenerando;
+}
+
+function inicializarEstadoModalNotasMaestro(modulo = {}) {
+    const activeSource = inferirFuenteActivaNotasMaestro(modulo);
+    const relationMode = inferirRelacionNotasMaestroModo(modulo);
+    notasMaestroModalState = {
+        activeTab: activeSource,
+        selectedSource: activeSource,
+        relationEnabled: relationMode !== NOTAS_MAESTRO_RELATION_CONFIG.none,
+        relationMode: relationMode === NOTAS_MAESTRO_RELATION_CONFIG.none ? NOTAS_MAESTRO_RELATION_CONFIG.siguiente : relationMode,
+        includeOtherModulesContext: usaContextoOtrosModulosNotasMaestro(modulo),
+        modulo,
+        generationState: {
+            actividad_original: { requestId: 0, inFlight: null },
+            propuesta: { requestId: 0, inFlight: null }
+        },
+        cache: {
+            actividad_original: {
+                html: obtenerNotasGuardadasPorFuente(modulo, "actividad_original"),
+                generatedAt: obtenerFechaNotasGuardadasPorFuente(modulo, "actividad_original"),
+                loaded: true
+            },
+            propuesta: {
+                html: obtenerNotasGuardadasPorFuente(modulo, "propuesta"),
+                generatedAt: obtenerFechaNotasGuardadasPorFuente(modulo, "propuesta"),
+                loaded: true
+            }
+        }
+    };
+}
+
+function mostrarLoadingTabNotasMaestro(source = "", message = "Generando notas del maestro...") {
+    const nodo = obtenerNodoContenidoNotasMaestro(source);
+    if (!nodo) return;
+    nodo.innerHTML = `
         <div class="flex items-center justify-center p-8">
             <div class="text-center">
-                <i class="fas fa-sync-alt fa-spin text-blue-500 text-2xl mb-2"></i>
-                <p class="text-gray-600 text-sm">Regenerando notas del maestro...</p>
+                <i class="fas fa-spinner fa-spin text-blue-500 text-2xl mb-2"></i>
+                <p class="text-gray-600 text-sm">${escapeHtml(message)}</p>
             </div>
         </div>
     `;
-    
-    // Obtener contenido actual del módulo
-    const contElement = document.getElementById(`contenido-${moduloNotasMaestroId}`);
-    let contenidoModulo = "";
-    
-    if (contElement) {
-        contenidoModulo = contElement.innerHTML;
-    } else {
-        const modulo = await obtenerModulo(moduloNotasMaestroId);
-        contenidoModulo = modulo?.contenido || "";
+}
+
+async function convertirImagenNotasABase64(src = "") {
+    const value = String(src || "").trim();
+    if (!value) return null;
+    if (/^data:image\//i.test(value)) {
+        const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (match) return { inlineData: { mimeType: match[1], data: match[2] } };
+        return null;
     }
-    
-    // Generar nuevas notas
-    await generarNotasMaestroConIA(moduloNotasMaestroId, contenidoModulo);
-    
-    // Re-habilitar botones
-    if (btnRegenerarNotas) btnRegenerarNotas.disabled = false;
-};
+    if (!/^https?:\/\//i.test(value)) return null;
 
-// Función para generar notas académicas para el maestro (VERSIÓN SIMPLIFICADA)
-async function generarNotasMaestroConIA(moduloId, contenidoModulo) {
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
-    const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
-    const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
-    const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    
+    const requestCandidates = [];
     try {
-        // Obtener información del módulo
-        const modulo = await obtenerModulo(moduloId);
-        if (!modulo) {
-            throw new Error("No se encontró el módulo");
-        }
-        
-        // Obtener el contenido del módulo
-        let contenidoHTML = "";
-        const contElement = document.getElementById(`contenido-${moduloId}`);
-        
-        if (contElement) {
-            contenidoHTML = contElement.innerHTML;
+        const parsed = new URL(value, window.location.origin);
+        if (parsed.origin === window.location.origin) {
+            requestCandidates.push(parsed.toString());
         } else {
-            contenidoHTML = modulo.contenido || contenidoModulo || "";
+            const proxyPath = `/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`;
+            const localProxyUrl = buildApiUrl(proxyPath);
+            const remoteProxyUrl = buildApiUrlFromBase(getRemoteApiBase(), proxyPath);
+            if (localProxyUrl) requestCandidates.push(localProxyUrl);
+            if (remoteProxyUrl && remoteProxyUrl !== localProxyUrl) requestCandidates.push(remoteProxyUrl);
         }
-        
-        // Limpiar y extraer el texto para análisis
-        const contenidoLimpio = extraerTextoParaAnalisis(contenidoHTML);
-        const idiomaDetectado = detectarIdiomaParaNotas(
-            `${modulo?.nombre || ""}\n${modulo?.instrucciones || ""}\n${contenidoLimpio || ""}`
+    } catch (_) {
+        return null;
+    }
+
+    let response = null;
+    let lastError = null;
+    for (const requestUrl of requestCandidates) {
+        try {
+            const candidateResponse = await fetch(requestUrl, { method: "GET", mode: "cors" });
+            if (candidateResponse.ok) {
+                response = candidateResponse;
+                break;
+            }
+            lastError = new Error(`HTTP ${candidateResponse.status}`);
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    if (!response?.ok) {
+        if (lastError) {
+            console.warn("[NotasMaestro] No se pudo descargar una imagen de contexto; se omitirá.", {
+                src: value,
+                error: lastError?.message || String(lastError || "")
+            });
+        }
+        return null;
+    }
+
+    const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return {
+        inlineData: {
+            mimeType: String(blob.type || "image/png").trim() || "image/png",
+            data: btoa(binary)
+        }
+    };
+}
+
+async function extraerImagenesParaNotasDesdeHtml(html = "") {
+    const container = document.createElement("div");
+    container.innerHTML = String(html || "");
+    const imgs = Array.from(container.querySelectorAll("img"));
+    const parts = [];
+    for (const img of imgs) {
+        const src = String(img.getAttribute("src") || img.getAttribute("data-gemini-storage-url") || "").trim();
+        const part = await convertirImagenNotasABase64(src).catch(() => null);
+        if (part?.inlineData?.data) parts.push(part);
+    }
+    return parts;
+}
+
+function construirHtmlFuenteNotasMaestro(modulo = {}, source = "") {
+    if (source === "actividad_original") {
+        const instruccionesRaw = String(modulo?.instrucciones || "").trim();
+        if (!instruccionesRaw) return "";
+        if (instruccionesRaw.includes("<") && instruccionesRaw.includes(">")) {
+            return sanitizarHtmlEditorial(
+                hidratarHtmlInstruccionesGemini(instruccionesRaw, String(modulo?.id || "").trim(), modulo?.instruccionesImagenes || [])
+            );
+        }
+        return `<p>${escapeHtml(instruccionesRaw).replace(/\n/g, "<br>")}</p>`;
+    }
+
+    const contenidoBase = quitarNotasMaestroDelContenido(
+        quitarActividadOriginalDelContenido(String(modulo?.contenido || "").trim(), {
+            esEncabezadoOriginalWord
+        })
+    );
+    return renderizarContenidoModulo(contenidoBase, modulo?.tipo || "");
+}
+
+function construirPayloadPreferenciasNotasMaestro(state = obtenerEstadoModalNotasMaestro()) {
+    const relationMode = state.relationEnabled
+        ? (state.relationMode === NOTAS_MAESTRO_RELATION_CONFIG.anterior
+            ? NOTAS_MAESTRO_RELATION_CONFIG.anterior
+            : NOTAS_MAESTRO_RELATION_CONFIG.siguiente)
+        : NOTAS_MAESTRO_RELATION_CONFIG.none;
+
+    return {
+        fuenteNotasMaestroActiva: state.selectedSource,
+        relacionNotasMaestroModo: relationMode,
+        usarContextoOtrosModulosNotasMaestro: !!state.includeOtherModulesContext
+    };
+}
+
+async function persistirPreferenciasModalNotasMaestro() {
+    if (!moduloNotasMaestroId) return;
+    const state = obtenerEstadoModalNotasMaestro();
+    const payload = construirPayloadPreferenciasNotasMaestro(state);
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+
+    await guardarModulo(moduloNotasMaestroId, payload, cursoIdModulo);
+    sincronizarModuloLocal(moduloNotasMaestroId, cursoIdModulo, payload);
+    state.modulo = {
+        ...(state.modulo || {}),
+        ...payload
+    };
+}
+
+function limpiarTextoContextoNotasMaestro(texto = "", maxChars = 4200) {
+    const normalized = String(texto || "").replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxChars - 1)).trim()}…`;
+}
+
+function obtenerIndiceModuloEnSubtema(subtema = null, moduloId = "") {
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    const moduloIdSafe = String(moduloId || "").trim();
+    const moduloIdShort = moduloIdSafe.split("_").pop();
+    return ids.findIndex((id) => {
+        const cleanId = String(id || "").trim();
+        return cleanId === moduloIdSafe || cleanId === moduloIdShort || cleanId.split("_").pop() === moduloIdShort;
+    });
+}
+
+async function obtenerModuloVecinoNotasMaestro(modulo = {}, relationMode = NOTAS_MAESTRO_RELATION_CONFIG.none) {
+    if (!modulo?.id || relationMode === NOTAS_MAESTRO_RELATION_CONFIG.none) return null;
+    const subtema = resolverSubtemaParaModulo(modulo.id);
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    const currentIndex = obtenerIndiceModuloEnSubtema(subtema, modulo.id);
+    if (currentIndex < 0) return null;
+
+    const neighborIndex = relationMode === NOTAS_MAESTRO_RELATION_CONFIG.anterior ? currentIndex - 1 : currentIndex + 1;
+    if (neighborIndex < 0 || neighborIndex >= ids.length) return null;
+
+    return obtenerModulo(ids[neighborIndex], String(curso?.id || "").trim() || null, { forceRefresh: true });
+}
+
+async function obtenerContextoGeneralOtrosModulosNotasMaestro(modulo = {}) {
+    if (!modulo?.id) return [];
+    const subtema = resolverSubtemaParaModulo(modulo.id);
+    const ids = Array.isArray(subtema?.modulosIds) ? subtema.modulosIds : [];
+    const moduloIdSafe = String(modulo.id || "").trim();
+    const contexts = [];
+
+    for (const modId of ids) {
+        const currentId = String(modId || "").trim();
+        if (!currentId || currentId === moduloIdSafe || currentId.split("_").pop() === moduloIdSafe.split("_").pop()) continue;
+        const otherModulo = await obtenerModulo(currentId, String(curso?.id || "").trim() || null, { forceRefresh: true });
+        if (otherModulo) contexts.push(otherModulo);
+    }
+
+    return contexts;
+}
+
+async function construirResumenContextualModuloNotas(modulo = {}, source = "") {
+    const sourceConfig = obtenerConfigFuenteNotasMaestro(source);
+    const html = construirHtmlFuenteNotasMaestro(modulo, sourceConfig.key);
+    const text = limpiarTextoContextoNotasMaestro(extraerTextoParaAnalisis(html));
+    const imageParts = sourceConfig.key === "actividad_original"
+        ? await extraerImagenesParaNotasDesdeHtml(html)
+        : [];
+
+    return {
+        id: String(modulo?.id || "").trim(),
+        nombre: String(modulo?.nombre || "Sin nombre").trim(),
+        tipo: String(modulo?.tipo || "Módulo").trim(),
+        sourceLabel: sourceConfig.label,
+        html,
+        text,
+        imageParts,
+        hasContent: !!text
+    };
+}
+
+function construirResumenNotasGuardadasModulo(modulo = {}, source = "", maxChars = 2600) {
+    const sourceConfig = obtenerConfigFuenteNotasMaestro(source);
+    const html = obtenerNotasGuardadasPorFuente(modulo, sourceConfig.key);
+    const text = limpiarTextoContextoNotasMaestro(extraerTextoParaAnalisis(html), maxChars);
+
+    return {
+        key: sourceConfig.key,
+        label: sourceConfig.label,
+        html,
+        text,
+        hasContent: !!text
+    };
+}
+
+async function construirPaqueteContextoModuloNotas(modulo = {}, primarySource = "actividad_original") {
+    const primaryKey = obtenerConfigFuenteNotasMaestro(primarySource).key;
+    const complementaryKey = primaryKey === "actividad_original" ? "propuesta" : "actividad_original";
+    const primaryContext = await construirResumenContextualModuloNotas(modulo, primaryKey);
+    const complementaryContext = await construirResumenContextualModuloNotas(modulo, complementaryKey);
+    const selectedNotes = construirResumenNotasGuardadasModulo(modulo, primaryKey);
+    const complementaryNotes = construirResumenNotasGuardadasModulo(modulo, complementaryKey);
+
+    return {
+        moduloId: String(modulo?.id || "").trim(),
+        nombre: String(modulo?.nombre || "Sin nombre").trim(),
+        tipo: String(modulo?.tipo || "Módulo").trim(),
+        primarySource: primaryKey,
+        primaryContext,
+        complementaryContext,
+        selectedNotes,
+        complementaryNotes,
+        imageParts: [
+            ...(primaryContext?.imageParts || []),
+            ...(primaryKey !== "actividad_original" ? (complementaryContext?.imageParts || []) : [])
+        ]
+    };
+}
+
+function construirBloquesPromptModuloNotas(paquete = {}, options = {}) {
+    const {
+        heading = "MÓDULO ACTUAL",
+        includeComplementarySource = true,
+        includeNotes = true,
+        relationHint = ""
+    } = options;
+
+    const blocks = [
+        heading + ":",
+        `- Nombre: ${paquete?.nombre || "Sin nombre"}`,
+        `- Tipo: ${paquete?.tipo || "Módulo"}`,
+        `- Fuente principal para redactar: ${paquete?.primaryContext?.sourceLabel || obtenerConfigFuenteNotasMaestro(paquete?.primarySource).label}`
+    ];
+
+    if (paquete?.primaryContext?.hasContent) {
+        blocks.push(
+            "FUENTE PRINCIPAL:",
+            "================================",
+            paquete.primaryContext.text,
+            "================================"
         );
-        
-        // Determinar el tipo de contenido
-        const tipoModulo = modulo.tipo || "actividad";
+    } else {
+        blocks.push("FUENTE PRINCIPAL:", "- La fuente principal no tiene contenido suficiente.");
+    }
 
-        const { modo, preguntasDetectadas } = detectarModoNotasMaestro({
-            tipoModulo,
-            contenidoHTML,
-            contenidoLimpio
-        });
+    if (includeComplementarySource && paquete?.complementaryContext?.hasContent) {
+        blocks.push(
+            `FUENTE COMPLEMENTARIA (${paquete.complementaryContext.sourceLabel}):`,
+            "================================",
+            paquete.complementaryContext.text,
+            "================================",
+            "- Usa esta fuente complementaria solo para precisar el tipo real de actividad, el vocabulario, la secuencia y las evidencias esperadas del mismo módulo."
+        );
+    }
 
-                
-        // Construir prompt simple y directo
-        const endpoint = getGeminiEndpoint();
-        const totalPreguntas =
-            (contenidoLimpio.match(/\?/g) || []).length;
-        // Detectar número REAL de preguntas del quizz
-        
+    if (includeNotes) {
+        if (paquete?.selectedNotes?.hasContent) {
+            blocks.push(
+                `NOTAS DEL MAESTRO YA GUARDADAS PARA ${String(paquete.selectedNotes.label || "").toUpperCase()}:`,
+                "================================",
+                paquete.selectedNotes.text,
+                "================================",
+                "- Úsalas como referencia contextual del docente; mejora su especificidad si son genéricas y no las copies literalmente."
+            );
+        }
 
-        // Construcción del prompt CORREGIDO
-        let prompt = "";
+        if (paquete?.complementaryNotes?.hasContent) {
+            blocks.push(
+                `NOTAS DEL MAESTRO COMPLEMENTARIAS (${paquete.complementaryNotes.label}):`,
+                "================================",
+                paquete.complementaryNotes.text,
+                "================================",
+                "- Úsalas solo para detectar continuidad pedagógica, lenguaje recurrente o énfasis reales del módulo."
+            );
+        }
+    }
 
-        if (modo === "quiz") {
+    if (relationHint) {
+        blocks.push(relationHint);
+    }
+
+    return blocks;
+}
+
+async function construirContextoGeneracionNotasMaestro(modulo = {}, source = "") {
+    const state = obtenerEstadoModalNotasMaestro();
+    const sourceLabel = obtenerConfigFuenteNotasMaestro(source).label;
+    const sourcePackage = await construirPaqueteContextoModuloNotas(modulo, source);
+    const sourceContext = sourcePackage.primaryContext;
+    const complementaryContext = sourcePackage.complementaryContext;
+    const selectedNotesContext = sourcePackage.selectedNotes;
+    const complementaryNotesContext = sourcePackage.complementaryNotes;
+    const contenidoHTML = sourceContext.html;
+    const contenidoLimpio = sourceContext.text;
+    const complementaryText = complementaryContext?.text || "";
+    const selectedNotesText = selectedNotesContext?.text || "";
+    const complementaryNotesText = complementaryNotesContext?.text || "";
+    const idiomaDetectado = detectarIdiomaParaNotas(
+        `${modulo?.nombre || ""}\n${modulo?.instrucciones || ""}\n${contenidoLimpio || ""}\n${complementaryText || ""}\n${selectedNotesText || ""}\n${complementaryNotesText || ""}`
+    );
+    const tipoModulo = modulo.tipo || "actividad";
+    const { modo, preguntasDetectadas } = detectarModoNotasMaestro({
+        tipoModulo,
+        contenidoHTML,
+        contenidoLimpio
+    });
+
+    let prompt = "";
+    if (modo === "quiz") {
         prompt = construirPromptQuizz({
             preguntasDetectadas,
             tipoModulo,
-            nombreModulo: modulo.nombre || "Sin nombre",
+            nombreModulo: `${modulo.nombre || "Sin nombre"} — ${sourceLabel}`,
             contenidoLimpio,
-            idiomaDetectado
+            idiomaDetectado,
+            source
         });
-        } 
-        else if (modo === "leccion") {
+    } else if (modo === "leccion") {
         prompt = construirPromptLeccion({
             tipoModulo,
-            nombreModulo: modulo.nombre || "Sin nombre",
+            nombreModulo: `${modulo.nombre || "Sin nombre"} — ${sourceLabel}`,
             contenidoLimpio,
             preguntasDetectadas,
-            idiomaDetectado
+            idiomaDetectado,
+            source
         });
-        } 
-        else if (modo === "actividad_guiada") {
-        prompt = construirPromptActividadGuiada({
-            tipoModulo,
-            nombreModulo: modulo.nombre || "Sin nombre",
-            contenidoLimpio,
-            idiomaDetectado
-        });
-        }
-        else {
+    } else if (normalizarTipoModulo(tipoModulo) === "lectura") {
         prompt = construirPromptContenido({
             tipoModulo,
-            nombreModulo: modulo.nombre || "Sin nombre",
+            nombreModulo: `${modulo.nombre || "Sin nombre"} — ${sourceLabel}`,
             contenidoLimpio,
-            idiomaDetectado
+            idiomaDetectado,
+            source
+        }) + `\n\nINSTRUCCIÓN ADICIONAL:\nEstas notas fueron solicitadas específicamente a partir de la ${sourceLabel.toLowerCase()}. Si la fuente es una lectura, prepara al docente para antes, durante y después de leer, incluyendo la transición a preguntas de comprensión lectora sin responderlas por el alumno.`;
+    } else if (modo === "actividad_guiada") {
+        prompt = construirPromptActividadGuiada({
+            tipoModulo,
+            nombreModulo: `${modulo.nombre || "Sin nombre"} — ${sourceLabel}`,
+            contenidoLimpio,
+            idiomaDetectado,
+            source
         });
+    } else {
+        prompt = construirPromptContenido({
+            tipoModulo,
+            nombreModulo: `${modulo.nombre || "Sin nombre"} — ${sourceLabel}`,
+            contenidoLimpio,
+            idiomaDetectado,
+            source
+        });
+    }
+
+    prompt = aplicarReglaIdiomaEnPromptNotas(prompt, idiomaDetectado);
+    prompt += `\n\nFUENTE ANALIZADA Y CRITERIOS DE PRECISIÓN:\n- La ${sourceLabel.toLowerCase()} del módulo es la fuente principal y define la redacción final.\n- También debes analizar la otra fuente del mismo módulo y las notas del maestro ya guardadas, si existen, pero solo como contexto de precisión; no cambies el tipo real de actividad ni inventes contenido nuevo.\n- Antes de redactar las notas, analiza primero a fondo la fuente principal, luego contrástala con la fuente complementaria y con las notas existentes para detectar propósito, secuencia, vocabulario, consignas y evidencias reales del módulo.\n- Si la fuente contiene varias actividades, propuestas, bloques o momentos, explica cada uno por separado dentro de la estructura editorial.\n- En cada actividad o bloque debes precisar qué hacer, cómo hacerlo y qué resultados o evidencias se esperan.\n- Debes cubrir TODAS las actividades o bloques detectables de la fuente, desde la primera hasta la última, sin omitir ninguna por brevedad.\n- No cierres la guía ni redactes el cierre hasta haber incorporado orientación docente para todas las actividades reales del módulo.\n- Cada sección debe anclarse en evidencias concretas del material analizado: preguntas, consignas, lecturas, tablas, retroalimentaciones, productos, pasos, comparaciones o vocabulario reales.\n- Prohibido redactar frases genéricas reutilizables que podrían servir para cualquier módulo. Si una idea no se puede vincular a una evidencia concreta del material, no la incluyas.\n`;
+    if (source === "actividad_original") {
+        prompt += "- Si la actividad original incluye imágenes, incorpóralas en tu análisis pedagógico.\n";
+    }
+    if (source === "propuesta") {
+        prompt += "- Si la propuesta incluye preguntas, respuestas o retroalimentaciones, utilízalas para explicarle al docente qué comprensión se espera y cómo acompañarla.\n";
+    }
+    if (selectedNotesContext?.hasContent || complementaryNotesContext?.hasContent) {
+        prompt += "- Si las notas del maestro existentes son genéricas, reescríbelas con mayor precisión a partir del material real; no repitas fórmulas vacías.\n";
+    }
+
+    const relationMode = state.relationEnabled ? state.relationMode : NOTAS_MAESTRO_RELATION_CONFIG.none;
+    const useOtherModulesContext = !state.relationEnabled && !!state.includeOtherModulesContext;
+    const promptBlocks = construirBloquesPromptModuloNotas(sourcePackage, {
+        heading: "MÓDULO ACTUAL",
+        includeComplementarySource: true,
+        includeNotes: true
+    });
+    const imageParts = [...(sourcePackage.imageParts || [])];
+
+    if (relationMode !== NOTAS_MAESTRO_RELATION_CONFIG.none) {
+        const relatedModulo = await obtenerModuloVecinoNotasMaestro(modulo, relationMode);
+        const relationLabel = relationMode === NOTAS_MAESTRO_RELATION_CONFIG.anterior ? "anterior" : "siguiente";
+        promptBlocks.push(
+            "MODO DE CONTEXTO:",
+            `- Relación dirigida activada: usa exclusivamente el módulo actual y el módulo ${relationLabel}.`,
+            "- No tomes contexto de otros módulos distintos a esta pareja.",
+            "- Integra la guía docente del módulo actual en función de cómo se conecta con el módulo relacionado.",
+            `- Para el módulo ${relationLabel}, analiza también su actividad original, su propuesta y sus notas del maestro existentes si están disponibles, pero usa ese análisis solo para precisar continuidad, preparación o transferencia hacia el módulo actual.`
+        );
+
+        if (relatedModulo) {
+            const relatedPackage = await construirPaqueteContextoModuloNotas(relatedModulo, source);
+            if (relatedPackage.primaryContext.hasContent || relatedPackage.complementaryContext.hasContent || relatedPackage.selectedNotes.hasContent || relatedPackage.complementaryNotes.hasContent) {
+                promptBlocks.push(
+                    "",
+                    ...construirBloquesPromptModuloNotas(relatedPackage, {
+                        heading: `MÓDULO ${relationLabel.toUpperCase()} RELACIONADO`,
+                        includeComplementarySource: true,
+                        includeNotes: true,
+                        relationHint: "- Usa este módulo relacionado solo para ajustar la mediación del módulo actual: anticipa continuidad, preparación o transferencia de comprensión entre ambos."
+                    })
+                );
+                imageParts.push(...(relatedPackage.imageParts || []));
+            } else {
+                promptBlocks.push(
+                    "",
+                    `MÓDULO ${relationLabel.toUpperCase()} RELACIONADO:`,
+                    `- Existe un módulo ${relationLabel}, pero no tiene contenido suficiente ni notas disponibles para analizar. No inventes ese contenido; trabaja solo con el módulo actual y menciona la limitación si condiciona la secuencia.`
+                );
+            }
+        } else {
+            promptBlocks.push(
+                "",
+                `MÓDULO ${relationLabel.toUpperCase()} RELACIONADO:`,
+                `- No existe un módulo ${relationLabel} disponible. Trabaja únicamente con el módulo actual sin inventar continuidad.`
+            );
+        }
+    } else if (useOtherModulesContext) {
+        const relatedModules = await obtenerContextoGeneralOtrosModulosNotasMaestro(modulo);
+        const relatedSummaries = [];
+        for (const relatedModulo of relatedModules) {
+            const relatedPackage = await construirPaqueteContextoModuloNotas(relatedModulo, source);
+            const summaryParts = [];
+            if (relatedPackage.primaryContext.hasContent) {
+                summaryParts.push(`${relatedPackage.primaryContext.sourceLabel}: ${relatedPackage.primaryContext.text}`);
+            }
+            if (relatedPackage.complementaryContext.hasContent) {
+                summaryParts.push(`${relatedPackage.complementaryContext.sourceLabel}: ${relatedPackage.complementaryContext.text}`);
+            }
+            if (relatedPackage.selectedNotes.hasContent) {
+                summaryParts.push(`Notas ${relatedPackage.selectedNotes.label}: ${relatedPackage.selectedNotes.text}`);
+            }
+            if (!summaryParts.length) continue;
+            relatedSummaries.push(
+                `- ${relatedPackage.nombre} (${relatedPackage.tipo}): ${summaryParts.join(" | ")}`
+            );
+            imageParts.push(...(relatedPackage.imageParts || []));
         }
 
-        prompt = aplicarReglaIdiomaEnPromptNotas(prompt, idiomaDetectado);
+        if (relatedSummaries.length) {
+            promptBlocks.push(
+                "MODO DE CONTEXTO:",
+                "- Contexto libre de otros módulos activado.",
+                "- Usa el módulo actual como foco principal y los demás módulos solo como contexto complementario del mismo subtema.",
+                "- Cuando un módulo relacionado tenga propuesta, actividad original o notas del maestro útiles, úsalo solo para afinar continuidad temática, nivel de complejidad, vocabulario y transferencia, no para reemplazar el análisis del módulo actual.",
+                "",
+                "OTROS MÓDULOS DEL SUBTEMA PARA CONTEXTO:",
+                ...relatedSummaries
+            );
+        }
+    } else {
+        promptBlocks.push(
+            "MODO DE CONTEXTO:",
+            "- Contexto libre desactivado.",
+            "- Analiza exclusivamente este módulo y omite cualquier relación o inferencia apoyada en otros módulos."
+        );
+    }
 
-        const { response, data } = await geminiGenerateRequest({
-            contents: [{ parts: [{ text: prompt }] }]
+    if (promptBlocks.length) {
+        prompt += `\n\n${promptBlocks.join("\n")}`;
+    }
+
+    return { contenidoHTML, prompt, imageParts, tipoModulo };
+}
+
+window.seleccionarTabNotasMaestro = async function (source = "") {
+    const nextSource = obtenerConfigFuenteNotasMaestro(source).key;
+    const state = obtenerEstadoModalNotasMaestro();
+    state.activeTab = nextSource;
+    actualizarUiModalNotasMaestro();
+    renderizarPanelNotasMaestro(nextSource);
+    if (!state.cache?.[nextSource]?.html) {
+        await generarNotasMaestroConIA(moduloNotasMaestroId, nextSource);
+    }
+};
+
+window.seleccionarFuenteNotasMaestro = async function (source = "") {
+    const nextSource = obtenerConfigFuenteNotasMaestro(source).key;
+    const state = obtenerEstadoModalNotasMaestro();
+    state.selectedSource = nextSource;
+    state.activeTab = nextSource;
+    actualizarUiModalNotasMaestro();
+    renderizarPanelNotasMaestro(nextSource);
+
+    if (!moduloNotasMaestroId) return;
+
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloNotasMaestroId, cursoIdModulo);
+    if (!modulo) return;
+
+    const sourceConfig = obtenerConfigFuenteNotasMaestro(nextSource);
+    const entry = state.cache?.[nextSource] || { html: "", generatedAt: "" };
+    const htmlPersistible = sanitizarHtmlEditorial(entry.html || obtenerNotasGuardadasPorFuente(modulo, nextSource) || "");
+    const generatedAt = entry.generatedAt || obtenerFechaNotasGuardadasPorFuente(modulo, nextSource) || "";
+    const mostrarNotas = modulo?.mostrarNotasMaestroInline !== false;
+
+    const payload = {
+        ...construirPayloadPreferenciasNotasMaestro(state),
+        fuenteNotasMaestroActiva: nextSource
+    };
+
+    if (htmlPersistible) {
+        payload.notasMaestroInline = htmlPersistible;
+        if (generatedAt) payload.notasMaestroInlineGenerado = generatedAt;
+        payload[sourceConfig.field] = htmlPersistible;
+        if (generatedAt) payload[sourceConfig.timestampField] = generatedAt;
+    }
+
+    window.__suppressModuloUpdatedToast = window.__suppressModuloUpdatedToast || {};
+    window.__suppressModuloUpdatedToast[String(moduloNotasMaestroId || "").trim()] = Date.now() + 4000;
+
+    await guardarModulo(moduloNotasMaestroId, payload, cursoIdModulo);
+    sincronizarModuloLocal(moduloNotasMaestroId, cursoIdModulo, payload);
+
+    state.modulo = {
+        ...(state.modulo || {}),
+        ...payload
+    };
+
+    if (!state.cache?.[nextSource]?.html) {
+        await generarNotasMaestroConIA(moduloNotasMaestroId, nextSource);
+        return;
+    }
+
+    if (mostrarNotas) {
+        sincronizarBloqueNotasMaestroDerivado(moduloNotasMaestroId, {
+            ...modulo,
+            ...payload,
+            mostrarNotasMaestroInline: true
         });
+        actualizarVisibilidadNotasMaestroEnCard(document.getElementById(`modulo-${moduloNotasMaestroId}`), true);
+    }
+};
 
+window.toggleFuenteNotasMaestro = async function (inputEl) {
+    const checked = !!inputEl?.checked;
+    await window.seleccionarFuenteNotasMaestro?.(checked ? "propuesta" : "actividad_original");
+};
+
+window.toggleRelacionGeneracionModuloActivo = async function (inputEl) {
+    const moduloId = String(inputEl?.dataset?.mcModuloId || "").trim();
+    if (!moduloId) return;
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+    if (!modulo) return;
+
+    const enabled = !!inputEl?.checked;
+    const relationMode = inferirRelacionGeneracionModuloModo(modulo);
+    const nextMode = enabled
+        ? (relationMode === MODULO_GENERACION_RELATION_CONFIG.anterior
+            ? MODULO_GENERACION_RELATION_CONFIG.anterior
+            : MODULO_GENERACION_RELATION_CONFIG.siguiente)
+        : MODULO_GENERACION_RELATION_CONFIG.none;
+
+    const payload = {
+        relacionGeneracionModuloModo: nextMode
+    };
+    await guardarModulo(moduloId, payload, cursoIdModulo);
+    sincronizarModuloLocal(moduloId, cursoIdModulo, payload);
+    const card = document.getElementById(`modulo-${moduloId}`);
+    if (card) {
+        const directionSwitch = card.querySelector("[data-mc-action='toggle-direccion-relacion-generacion-modulo']");
+        if (directionSwitch) directionSwitch.disabled = !enabled;
+        const contextSwitch = card.querySelector("[data-mc-action='toggle-contexto-generacion-modulo']");
+        if (contextSwitch) contextSwitch.disabled = enabled;
+    }
+};
+
+window.toggleDireccionRelacionGeneracionModulo = async function (inputEl) {
+    const moduloId = String(inputEl?.dataset?.mcModuloId || "").trim();
+    if (!moduloId) return;
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+    if (!modulo) return;
+
+    const relationEnabled = inferirRelacionGeneracionModuloModo(modulo) !== MODULO_GENERACION_RELATION_CONFIG.none;
+    const nextMode = !!inputEl?.checked
+        ? MODULO_GENERACION_RELATION_CONFIG.siguiente
+        : MODULO_GENERACION_RELATION_CONFIG.anterior;
+
+    const payload = {
+        relacionGeneracionModuloModo: relationEnabled ? nextMode : inferirRelacionGeneracionModuloModo({ ...modulo, relacionGeneracionModuloModo: nextMode })
+    };
+    await guardarModulo(moduloId, payload, cursoIdModulo);
+    sincronizarModuloLocal(moduloId, cursoIdModulo, payload);
+};
+
+window.toggleContextoGeneracionModulo = async function (inputEl) {
+    const moduloId = String(inputEl?.dataset?.mcModuloId || "").trim();
+    if (!moduloId) return;
+    const cursoIdModulo = String(curso?.id || "").trim() || null;
+    const payload = {
+        usarContextoOtrosModulosGeneracionModulo: !!inputEl?.checked,
+        ignorarContextoOtrosModulos: !inputEl?.checked
+    };
+    await guardarModulo(moduloId, payload, cursoIdModulo);
+    sincronizarModuloLocal(moduloId, cursoIdModulo, payload);
+};
+
+window.toggleRelacionNotasMaestroActivo = async function (inputEl) {
+    const state = obtenerEstadoModalNotasMaestro();
+    state.relationEnabled = !!inputEl?.checked;
+    actualizarUiModalNotasMaestro();
+    await persistirPreferenciasModalNotasMaestro();
+};
+
+window.toggleDireccionRelacionNotasMaestro = async function (inputEl) {
+    const state = obtenerEstadoModalNotasMaestro();
+    state.relationMode = !!inputEl?.checked
+        ? NOTAS_MAESTRO_RELATION_CONFIG.siguiente
+        : NOTAS_MAESTRO_RELATION_CONFIG.anterior;
+    actualizarUiModalNotasMaestro();
+    await persistirPreferenciasModalNotasMaestro();
+};
+
+window.toggleContextoOtrosModulosNotasMaestro = async function (inputEl) {
+    const state = obtenerEstadoModalNotasMaestro();
+    state.includeOtherModulesContext = !!inputEl?.checked;
+    actualizarUiModalNotasMaestro();
+    await persistirPreferenciasModalNotasMaestro();
+};
+
+window.abrirModalNotasMaestro = async function (moduloId) {
+    moduloNotasMaestroId = moduloId;
+    const modal = document.getElementById("modalNotasMaestro");
+    const modulo = await obtenerModulo(moduloId, null, { forceRefresh: true });
+    if (!modal || !modulo) return;
+
+    inicializarEstadoModalNotasMaestro(modulo);
+    Object.keys(NOTAS_MAESTRO_SOURCE_CONFIG).forEach((source) => renderizarPanelNotasMaestro(source));
+    actualizarUiModalNotasMaestro();
+    setEstadoBotonesModalNotasMaestro({ guardando: false, aplicando: false, regenerando: false });
+
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+
+    const state = obtenerEstadoModalNotasMaestro();
+    if (!state.cache?.[state.activeTab]?.html) {
+        await generarNotasMaestroConIA(moduloId, state.activeTab);
+    }
+};
+
+window.regenerarNotasMaestro = async function () {
+    if (!moduloNotasMaestroId) return;
+    const state = obtenerEstadoModalNotasMaestro();
+    await generarNotasMaestroConIA(moduloNotasMaestroId, state.activeTab, { force: true });
+};
+
+async function generarNotasMaestroConIA(moduloId, source = "actividad_original", options = {}) {
+    const state = obtenerEstadoModalNotasMaestro();
+    const targetSource = obtenerConfigFuenteNotasMaestro(source).key;
+    const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
+    const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
+    const force = options?.force === true;
+    state.generationState = state.generationState || {
+        actividad_original: { requestId: 0, inFlight: null },
+        propuesta: { requestId: 0, inFlight: null }
+    };
+    const sourceGenerationState = state.generationState[targetSource] || { requestId: 0, inFlight: null };
+    state.generationState[targetSource] = sourceGenerationState;
+
+    if (sourceGenerationState.inFlight && !force) {
+        return sourceGenerationState.inFlight;
+    }
+
+    sourceGenerationState.requestId = Number(sourceGenerationState.requestId || 0) + 1;
+    const currentRequestId = sourceGenerationState.requestId;
+
+    const run = (async () => {
+    try {
+        setEstadoBotonesModalNotasMaestro({ regenerando: true });
+        mostrarLoadingTabNotasMaestro(targetSource, `Generando notas del maestro desde ${obtenerConfigFuenteNotasMaestro(targetSource).label.toLowerCase()}...`);
+
+        const modulo = await obtenerModulo(moduloId, null, { forceRefresh: true });
+        if (!modulo) throw new Error("No se encontró el módulo");
+
+        const { prompt, imageParts, tipoModulo } = await construirContextoGeneracionNotasMaestro(modulo, targetSource);
+        const payloadParts = [{ text: prompt }, ...imageParts];
+        const { response, data } = await geminiGenerateRequest({
+            contents: [{ parts: payloadParts }]
+        });
         if (!response.ok) {
             throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${response.status}`));
         }
 
         const notasTexto = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No se pudieron generar las notas.";
         const contenidoNotasHTML = renderizarContenidoNotasMaestro(notasTexto);
+        const notasHTML = construirNotasMaestroShellHtml({
+            modulo,
+            tituloTipo: obtenerEtiquetaTipoNotasMaestro(tipoModulo, targetSource),
+            contenidoNotasHTML
+        });
 
-        // Crear HTML con formato adecuado
-        const notasHTML = `
-        <div class="notas-maestro-simple space-y-4 text-sm text-slate-700 leading-relaxed">
+        const generatedAt = new Date().toISOString();
+        const sourceConfig = obtenerConfigFuenteNotasMaestro(targetSource);
+        const payloadGenerado = {
+            [sourceConfig.field]: notasHTML,
+            [sourceConfig.timestampField]: generatedAt
+        };
 
-            <!-- Header -->
-            <div class="rounded-lg border bg-background p-4 shadow-sm">
-            <div class="flex items-center gap-2 text-base font-semibold text-slate-900">
-                <i class="fas fa-book-open text-slate-600"></i>
-                Notas pedagógicas para el docente
-            </div>
-            <p class="mt-1 text-xs text-muted-foreground">
-                Orientaciones didácticas generadas a partir del contenido del módulo
-            </p>
-            </div>
+        await guardarModulo(moduloId, payloadGenerado);
+        sincronizarModuloLocal(moduloId, String(curso?.id || "").trim() || null, payloadGenerado);
 
-            <!-- Metadata -->
-            <div class="rounded-lg border bg-muted/40 p-4">
-            <p class="text-xs text-slate-600">
-                <span class="font-medium text-slate-900">Módulo analizado:</span>
-                ${modulo.nombre || "Sin nombre"}
-                <span class="mx-1 text-slate-400">•</span>
-                <span class="capitalize">${tipoModulo}</span>
-            </p>
-            </div>
-
-            <!-- Contenido -->
-            <div class="space-y-4 rounded-lg border bg-background p-4">
-            ${contenidoNotasHTML}
-            </div>
-
-        </div>
-        `;
-
-        // Mostrar en el modal
-        contenidoModal.innerHTML = notasHTML;
-        
-        // Habilitar botón de guardar
-        if (btnGuardarNotas) {
-            btnGuardarNotas.disabled = false;
-            btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Guardar Notas';
+        const latestState = obtenerEstadoModalNotasMaestro();
+        const latestRequestId = Number(latestState?.generationState?.[targetSource]?.requestId || 0);
+        if (latestRequestId !== currentRequestId) {
+            return;
         }
-        if (btnAplicarNotas) {
-            btnAplicarNotas.disabled = false;
-        }
-        
-        // Mostrar botón de regenerar
-        if (btnRegenerarNotas) {
-            btnRegenerarNotas.classList.remove("hidden");
-        }
-        
-        // Aplicar estilos
-        aplicarEstilosNotas();
-        
+
+        latestState.modulo = {
+            ...(latestState.modulo || {}),
+            ...payloadGenerado
+        };
+        latestState.cache[targetSource] = {
+            html: notasHTML,
+            generatedAt,
+            loaded: true
+        };
+        renderizarPanelNotasMaestro(targetSource);
+        actualizarUiModalNotasMaestro();
+
+        if (btnGuardarNotas) btnGuardarNotas.disabled = false;
+        if (btnAplicarNotas) btnAplicarNotas.disabled = false;
     } catch (error) {
-        contenidoModal.innerHTML = `
-            <div class="cb-notes-error p-4">
-                <p class="font-semibold cb-notes-error-title">Error al generar las notas</p>
-                <p class="text-sm mt-2 cb-notes-error-message">${escapeHtml(error.message)}</p>
-                <button data-mc-action="reintentar-notas-maestro"
-                        class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cb-notes-error-button">
-                    <i class="fas fa-sync-alt mr-2"></i> Reintentar
-                </button>
-            </div>
-        `;
-        if (btnAplicarNotas) {
-            btnAplicarNotas.disabled = true;
+        const nodo = obtenerNodoContenidoNotasMaestro(targetSource);
+        if (nodo) {
+            nodo.innerHTML = `
+                <div class="cb-notes-error p-4">
+                    <p class="font-semibold cb-notes-error-title">Error al generar las notas</p>
+                    <p class="text-sm mt-2 cb-notes-error-message">${escapeHtml(error.message)}</p>
+                </div>
+            `;
+        }
+        if (btnAplicarNotas) btnAplicarNotas.disabled = true;
+    } finally {
+        setEstadoBotonesModalNotasMaestro({ regenerando: false });
+    }
+    })();
+
+    sourceGenerationState.inFlight = run;
+    try {
+        return await run;
+    } finally {
+        if (state.generationState?.[targetSource]?.inFlight === run) {
+            state.generationState[targetSource].inFlight = null;
         }
     }
 }
 
 function construirPromptQuizz({
-  preguntasDetectadas,
-  tipoModulo,
-  nombreModulo,
-  contenidoLimpio,
-  idiomaDetectado
+    preguntasDetectadas,
+    tipoModulo,
+    nombreModulo,
+    contenidoLimpio,
+    idiomaDetectado,
+    source = ""
 }) {
-  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
-  const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
-  return `
+    const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
+    const isEnglish = String(idiomaDetectado?.code || "").toLowerCase() === "en";
+    return `
 Eres un experto en pedagogía y diseño instruccional.
 
-Vas a generar notas del maestro con estructura editorial fija para el siguiente quiz.
+Vas a generar notas del maestro con estructura editorial fija para las siguientes actividades.
 
 ${plantilla.contract}
 
 REGLAS OBLIGATORIAS:
 - El módulo contiene EXACTAMENTE ${preguntasDetectadas} preguntas.
-- Analiza únicamente las preguntas reales del quiz.
+- Antes de redactar las notas, analiza primero la fuente completa y detecta qué actividad o bloque didáctico propone cada grupo de preguntas.
+- Debes desarrollar orientación docente para TODAS las actividades, bloques o grupos de preguntas presentes en la fuente, desde la primera hasta la última.
+- Si detectas varias actividades dentro del mismo módulo, debes mencionar y desarrollar cada una; no te detengas en las primeras preguntas.
+- No cierres la guía ni redactes el cierre hasta haber cubierto el último bloque real de actividades de la fuente.
+- Analiza únicamente las preguntas reales de las actividades.
 - No agregues preguntas inexistentes.
 - No inventes estaciones ni recursos que no aparezcan.
-- Convierte el análisis del quiz a la plantilla editorial obligatoria.
+- Convierte el análisis de las actividades a la plantilla editorial obligatoria.
 ${isEnglish ? `
 - Keep the exact English template structure and wording required by the contract.
-- Make the "Choose some words from the text, such as:" list reflect the quiz vocabulary (5+ key words from the quiz content).
-- In "While Using the book section", adapt "picture" to whatever the quiz provides (text, images, prompts) without adding new headings.
+- Make the "Choose some words from the text, such as:" list reflect the activity vocabulary (5+ key words from the activity content).
+- In "While Using the book section", adapt "picture" to whatever the activity provides (text, images, prompts) without adding new headings.
+- Do not add paragraphs titled "Support activity:" or "Extension activity:".
 ` : `
 - En "${plantilla.sectionNames.previousKnowledge}" indica qué saberes y vocabulario conviene activar.
-- En "${plantilla.sectionNames.objectives}" redacta una meta clara que inicie con "${plantilla.objectiveLead}" y añade la línea "${plantilla.abilitiesLabel}:".
-- En "${plantilla.sectionNames.opening}" explica cómo introducir el quiz antes de resolverlo.
+- En "${plantilla.sectionNames.objectives}" redacta el contenido como lista de bullets; el primer bullet debe iniciar con "${plantilla.objectiveLead}" y otro bullet debe iniciar con "${plantilla.abilitiesLabel}:".
+- En "${plantilla.sectionNames.opening}" explica cómo introducir las actividades antes de resolverlas.
 - En "${plantilla.sectionNames.whileUsingBook}" explica cómo acompañar cada pregunta como evidencia de comprensión, sin enumerarlas como examen aislado.
-- En "${plantilla.supportLabel}:" incluye apoyo concreto para estudiantes que necesiten andamiaje.
-- En "${plantilla.extensionLabel}:" incluye una variante de profundización fiel al contenido.
+- En "${plantilla.sectionNames.whileUsingBook}" explica también qué hará el estudiante, cómo debe conducirlo el docente y qué resultados o evidencias se esperan en cada actividad o bloque de preguntas.
+- Antes de "${plantilla.sectionNames.closing}" añade un último párrafo integrado al flujo que explique cómo acompañar a estudiantes con necesidades específicas de apoyo educativo, por ejemplo TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones, aplicado a la actividad real.
+- Ese párrafo inclusivo debe partir de barreras concretas de esta actividad y proponer adaptaciones específicas; no uses recomendaciones genéricas reutilizables ni frases vacías que sirvan para cualquier módulo.
+- Debe incluir ejemplos reales del módulo, por ejemplo mencionar una pregunta, una instrucción, una tabla, una lectura, una comparación, una consigna o una retroalimentación concreta y explicar cómo la adaptaría el docente para ese estudiante.
+- Es obligatorio explicar con ejemplos qué diría o haría el maestro en esa actividad concreta; no basta con mencionar apoyos generales.
 - En "${plantilla.sectionNames.closing}" explica cómo cerrar y verificar comprensión.
+- No agregues párrafos titulados "Actividad de apoyo:" ni "Actividad de ampliación:".
+- Si necesitas proponer una pregunta inicial para abrir la actividad, usa la expresión "pregunta detonadora" y nunca "pregunta disparadora".
 `}
+
+DEBES INCORPORAR A LA GUÍA DOCENTE:
+- Qué hacer en cada actividad, bloque o tramo de las actividades.
+- Cómo hacerlo en el aula paso a paso, incluyendo qué instrucciones conviene dar, qué observar y cuándo intervenir.
+- Qué resultados se esperan en cada actividad, incluyendo evidencias de comprensión, errores previsibles y criterios de logro.
+- Usa las retroalimentaciones correcta, incorrecta y global de las actividades como insumo pedagógico para explicarle al docente qué comprensión se espera, qué confusiones puede anticipar y cómo aprovechar esas retroalimentaciones durante la mediación.
+- Si varias preguntas pertenecen a una misma actividad, intégralas como un mismo bloque didáctico en lugar de describirlas como preguntas sueltas.
+- Escribe estas explicaciones como párrafos corridos dentro de las secciones de la plantilla, no como listas, bullets ni subtítulos repetitivos tipo "Qué hacer:" o "Cómo hacerlo:" en renglones separados.
+- El párrafo de apoyo inclusivo debe mencionar apoyos realmente útiles para esta actividad específica y justificar por qué ayudan aquí.
+- Ese párrafo debe aterrizarse en acciones observables del docente usando ejemplos textuales o estructurales de la actividad real.
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
 - Nombre: ${nombreModulo}
 
-CONTENIDO DEL QUIZZ:
+CONTENIDO DE LAS ACTIVIDADES:
 ================================
 ${contenidoLimpio}
 ================================
@@ -8747,13 +10188,14 @@ Devuelve SOLO las notas del maestro en la estructura solicitada.
 }
 
 function construirPromptContenido({
-  tipoModulo,
-  nombreModulo,
-  contenidoLimpio,
-  idiomaDetectado
+    tipoModulo,
+    nombreModulo,
+    contenidoLimpio,
+    idiomaDetectado,
+    source = ""
 }) {
-  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
-  return `
+    const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
+    return `
 Eres un experto en pedagogía y diseño instruccional.
 
 Vas a generar notas del maestro sobre un módulo de contenido con estructura editorial fija.
@@ -8764,6 +10206,9 @@ OBJETIVO:
 Orientar al docente sobre cómo trabajar este contenido en el aula.
 
 REGLAS:
+- Antes de redactar las notas, analiza primero la fuente completa y detecta si contiene una o varias actividades, procedimientos, consignas o momentos didácticos.
+- Si la fuente contiene varias actividades, consignas, ejercicios, tablas, comparaciones o bloques, debes recorrerlos todos y desarrollar orientación para cada uno de principio a fin.
+- No te limites a los primeros apartados del contenido ni cierres la guía antes de haber llegado al último bloque real de la fuente.
 - No estructures el texto como cuestionario.
 - No uses ordinales ni bloques libres sin encabezados.
 - No inventes actividades que no aparezcan.
@@ -8775,9 +10220,16 @@ ENFÓCATE EN:
 - Cómo abordar el contenido paso a paso.
 - Qué ideas clave deben enfatizarse.
 - Qué aprendizajes se esperan.
+- Si la fuente contiene actividades, explica para cada una qué hará el estudiante, cómo debe guiarlo el docente y qué resultados o productos se esperan.
+- Si la fuente contiene instrucciones, procedimientos, tablas, comparaciones o ejercicios, traduce eso a acciones concretas para el docente, no a descripciones generales.
+- Integra esas explicaciones en párrafos fluidos dentro de cada sección; no uses listas, bullets ni bloques sueltos para "qué hacer", "cómo hacerlo" o "resultados esperados".
 - Usa la plantilla fija y adapta cada sección al contenido real del módulo.
-- En "${plantilla.supportLabel}:" incluye una ayuda concreta para estudiantes con dificultad.
-- En "${plantilla.extensionLabel}:" incluye una ampliación auténtica, no genérica.
+- En "${plantilla.sectionNames.objectives}" usa lista de bullets; el primer bullet debe iniciar con "${plantilla.objectiveLead}" y otro con "${plantilla.abilitiesLabel}:".
+- Antes de "${plantilla.sectionNames.closing}" incluye un párrafo aplicado a la actividad real que oriente al docente sobre cómo acompañar a estudiantes con necesidades específicas de apoyo educativo, por ejemplo TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones.
+- Ese párrafo inclusivo debe analizar barreras concretas del contenido o de la tarea y proponer apoyos realmente pertinentes para esta actividad; evita texto genérico que pueda copiarse a cualquier módulo.
+- Debes usar ejemplos concretos del contenido o de la tarea, explicando qué parte exacta se adapta y cómo intervendría el maestro en ese momento.
+- No agregues párrafos titulados "Actividad de apoyo:" ni "Actividad de ampliación:".
+- Si propones una pregunta inicial, usa la expresión "pregunta detonadora" y nunca "pregunta disparadora".
 
 INFORMACIÓN DEL MÓDULO:
 - Tipo: ${tipoModulo}
@@ -8793,14 +10245,15 @@ Devuelve SOLO las notas del maestro en la estructura solicitada.
 }
 
 function construirPromptLeccion({
-  tipoModulo,
-  nombreModulo,
-  contenidoLimpio,
-  preguntasDetectadas,
-  idiomaDetectado
+    tipoModulo,
+    nombreModulo,
+    contenidoLimpio,
+    preguntasDetectadas,
+    idiomaDetectado,
+    source = ""
 }) {
-  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
-  return `
+    const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
+    return `
 Eres un experto en pedagogía y diseño instruccional.
 
 Vas a generar notas del maestro sobre una lección interactiva de Moodle con estructura editorial fija.
@@ -8813,14 +10266,24 @@ aprovechando las escenas, el contenido y las preguntas como verificación
 del aprendizaje, no como un cuestionario independiente.
 
 REGLAS IMPORTANTES:
-- NO trates la lección como un quizz.
+- Antes de redactar las notas, analiza primero la secuencia real de la lección y detecta qué hará el estudiante en cada momento.
+- Debes cubrir toda la secuencia real de la lección, desde el primer momento hasta el último punto de verificación o cierre.
+- Si la lección contiene varios tramos, escenas, actividades o verificaciones, desarrolla cada uno; no resumir solo el arranque de la lección.
+- NO trates la lección como un bloque de preguntas independientes.
 - NO uses la palabra “cuestionario”.
 - Las preguntas funcionan como puntos de control o verificación.
 - No enumeres preguntas como si fueran un examen.
 - NO inventes escenas, actividades ni rutas que no existan.
 - Usa la plantilla fija y adapta cada sección al flujo de la lección.
 - En "${plantilla.sectionNames.whileUsingBook}" explica cómo conducir la navegación y monitorear los puntos de verificación.
-- Incluye "${plantilla.supportLabel}:" y "${plantilla.extensionLabel}:" dentro de esa sección.
+- En "${plantilla.sectionNames.whileUsingBook}" debes explicar qué se hará en cada tramo de la lección, cómo acompañarlo y qué resultados se esperan.
+- Escribe todo en párrafos editoriales corridos, sin listas, bullets ni bloques mecánicos.
+- En "${plantilla.sectionNames.objectives}" usa lista de bullets; el primer bullet debe iniciar con "${plantilla.objectiveLead}" y otro con "${plantilla.abilitiesLabel}:".
+- Antes de "${plantilla.sectionNames.closing}" añade un párrafo específico sobre cómo acompañar a estudiantes con necesidades específicas de apoyo educativo, por ejemplo TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones, aplicado a la secuencia real.
+- Ese párrafo inclusivo debe derivarse de la secuencia real, de sus barreras y de sus exigencias cognitivas o de acceso; no uses recomendaciones universales sin aterrizarlas a la lección.
+- Debe incluir ejemplos concretos de escenas, instrucciones, verificaciones o preguntas reales de la lección y cómo el maestro las ajustaría en esa secuencia.
+- No agregues párrafos titulados "Actividad de apoyo:" ni "Actividad de ampliación:".
+- Si propones una pregunta inicial, usa la expresión "pregunta detonadora" y nunca "pregunta disparadora".
 
 ENFÓCATE EN:
 - Propósito pedagógico general de la lección.
@@ -8845,13 +10308,14 @@ Devuelve SOLO las notas del maestro en la estructura solicitada.
 }
 
 function construirPromptActividadGuiada({
-  tipoModulo,
-  nombreModulo,
-  contenidoLimpio,
-  idiomaDetectado
+    tipoModulo,
+    nombreModulo,
+    contenidoLimpio,
+    idiomaDetectado,
+    source = ""
 }) {
-  const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
-  return `
+    const plantilla = obtenerPlantillaEstructuraNotasMaestro(idiomaDetectado);
+    return `
 Eres un experto en pedagogía y diseño instruccional.
 
 Vas a generar notas del maestro para una actividad práctica con estructura editorial fija.
@@ -8862,6 +10326,9 @@ OBJETIVO:
 Entregar instrucciones claras y accionables para que el docente ejecute la actividad con su grupo.
 
 REGLAS IMPORTANTES:
+- Antes de redactar las notas, analiza primero la actividad completa y detecta sus pasos reales.
+- Debes desarrollar todos los pasos, tramos o actividades presentes en la fuente, desde el inicio hasta el último momento de trabajo.
+- Si detectas varias consignas, ejercicios o productos dentro del mismo módulo, debes cubrir cada uno y no cerrar la guía antes de completar el último.
 - Redacta la guía en orden secuencial (inicio, desarrollo y cierre).
 - Incluye tiempos sugeridos y qué debe observar el docente en cada etapa.
 - Explica cómo acompañar al estudiante si se bloquea o comete errores.
@@ -8870,7 +10337,14 @@ REGLAS IMPORTANTES:
 - Usa la plantilla fija como salida final.
 - En "${plantilla.sectionNames.opening}" enfoca la activación y preparación.
 - En "${plantilla.sectionNames.whileUsingBook}" describe la ejecución acompañada de la actividad.
-- Incluye "${plantilla.supportLabel}:" y "${plantilla.extensionLabel}:" dentro de esa sección.
+- En "${plantilla.sectionNames.whileUsingBook}" debes dejar claro qué hará el estudiante, cómo debe conducirlo el docente y qué resultados concretos se esperan en cada parte.
+- Integra todo eso en párrafos corridos, sin listas, bullets ni subtítulos internos repetidos.
+- En "${plantilla.sectionNames.objectives}" usa lista de bullets; el primer bullet debe iniciar con "${plantilla.objectiveLead}" y otro con "${plantilla.abilitiesLabel}:".
+- Antes de "${plantilla.sectionNames.closing}" añade un párrafo concreto sobre cómo apoyar a estudiantes con necesidades específicas de apoyo educativo, por ejemplo TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones, siempre aterrizado a la actividad real.
+- Ese párrafo inclusivo debe surgir del análisis de la actividad específica, de sus materiales, instrucciones y barreras de participación; no repitas fórmulas genéricas.
+- Debe incluir ejemplos concretos de los pasos, materiales o consignas reales de la actividad y describir cómo el maestro los adaptaría.
+- No agregues párrafos titulados "Actividad de apoyo:" ni "Actividad de ampliación:".
+- Si propones una pregunta inicial, usa la expresión "pregunta detonadora" y nunca "pregunta disparadora".
 
 ENFÓCATE EN:
 - Propósito de la actividad.
@@ -8898,27 +10372,27 @@ Devuelve SOLO las notas del maestro en la estructura solicitada.
 function aplicarEstilosNotas() {
     const contenedor = document.querySelector('.notas-maestro-simple');
     if (!contenedor) return;
-    
+
     // Estilos para párrafos
     const parrafos = contenedor.querySelectorAll('p');
     parrafos.forEach((p, index) => {
         if (index > 0) { // No aplicar al primer párrafo si es el de información
             p.classList.add("cb-notes-paragraph");
-            
+
             // Destacar párrafos con números de preguntas
             const texto = p.textContent.toLowerCase();
             const tieneNumero = REGEX_ORDINALES.test(texto);
-            
+
             if (tieneNumero) {
                 p.classList.add("cb-notes-paragraph-question");
             }
-            
+
             // Resaltar números de preguntas
             p.innerHTML = p.innerHTML.replace(
-                new RegExp(`\\b(${ORDINALES.join("|")})\\b (\\w+)`, "gi"), 
+                new RegExp(`\\b(${ORDINALES.join("|")})\\b (\\w+)`, "gi"),
                 '<strong class="cb-notes-ordinal-highlight">$1 $2</strong>'
             );
-            
+
             // Resaltar frases clave
             const frasesClave = ['Le sugerimos que', 'Es importante que', 'Se recomienda'];
             frasesClave.forEach(frase => {
@@ -8934,23 +10408,23 @@ function aplicarEstilosNotas() {
 // Funciones auxiliares (mantener igual)
 function extraerTextoParaAnalisis(html) {
     if (!html) return "";
-    
+
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
-    
+
     // Remover elementos de interfaz
     tempDiv.querySelectorAll('.parrafo-actions, .icon-btn, .fa, .btn').forEach(el => el.remove());
-    
+
     // Obtener texto limpio
     const texto = tempDiv.textContent || tempDiv.innerText || "";
-    
+
     // Limpiar espacios extras
     return texto.replace(/\s+/g, ' ').trim();
 }
 
 function limpiarYFormatearTexto(texto) {
     if (!texto) return "";
-    
+
     // Limpiar código y marcas
     let textoLimpio = texto
         .replace(/```html/gi, "")
@@ -8958,24 +10432,24 @@ function limpiarYFormatearTexto(texto) {
         .replace(/^"|"$/g, '')
         .replace(/\\n/g, '\n')
         .trim();
-    
+
     // Corregir mayúsculas al inicio de párrafos
     const parrafos = textoLimpio.split('\n\n');
     const parrafosCorregidos = parrafos.map(parrafo => {
         let p = parrafo.trim();
         if (p.length === 0) return "";
-        
+
         // Asegurar que empiece con mayúscula
         p = p.charAt(0).toUpperCase() + p.slice(1);
-        
+
         // Asegurar que termine con punto
         if (!p.endsWith('.') && !p.endsWith('!') && !p.endsWith('?')) {
             p += '.';
         }
-        
+
         return p;
     }).filter(p => p.length > 0);
-    
+
     return parrafosCorregidos.join('\n\n');
 }
 
@@ -9095,8 +10569,54 @@ function renderizarContenidoModulo(contenido, tipoModulo = "") {
 
 window.renderizarContenidoModulo = renderizarContenidoModulo;
 
+function construirBloqueNotasMaestroInyectadasHtml(modulo = {}) {
+    const fuenteActiva = inferirFuenteActivaNotasMaestro(modulo);
+    const htmlNotas = obtenerNotasGuardadasPorFuente(modulo, fuenteActiva)
+        || sanitizarHtmlEditorial(modulo?.notasMaestroInline || "");
+    if (!htmlNotas) return "";
+
+    return `
+        <section class="notas-maestro-inyectadas cb-notes-shell cb-notes-shell--injected" data-inyectado-en="${Date.now()}">
+            <header class="cb-notes-shell__header">
+                <p class="cb-notes-shell__eyebrow">Apoyo docente</p>
+                <h4 class="cb-notes-shell__title">Notas del maestro</h4>
+            </header>
+            <div class="cb-notes-shell__content">
+                ${htmlNotas}
+            </div>
+        </section>
+    `.trim();
+}
+
+function quitarNotasMaestroDelContenido(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return "";
+
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+
+    root.querySelectorAll(".notas-maestro-inyectadas, [data-cb-notes-modal-stamp='1']").forEach((node) => node.remove());
+
+    const esFragmentoNotas = (node) => {
+        if (!(node instanceof Element)) return false;
+        if (node.matches(".notas-maestro-inyectadas, [data-cb-notes-modal-stamp='1']")) return true;
+        if (node.querySelector(".cb-module-block-title.is-proposal, .cb-module-question-heading, .cb-module-question-block")) return false;
+        return !!node.querySelector(".cb-notes-shell__eyebrow, .cb-notes-shell__title, .cb-notes-shell__meta, [data-cb-notes-modal-stamp='1']")
+            || node.matches(".cb-notes-shell__eyebrow, .cb-notes-shell__title, .cb-notes-shell__meta");
+    };
+
+    let cursor = root.firstElementChild;
+    while (cursor && esFragmentoNotas(cursor)) {
+        const next = cursor.nextElementSibling;
+        cursor.remove();
+        cursor = next;
+    }
+
+    return root.innerHTML.trim();
+}
+
 function normalizarContenidoModuloPersistible(contenido = "") {
-    const raw = String(contenido || "").trim();
+    const raw = quitarNotasMaestroDelContenido(contenido);
     if (!raw) return "";
     return sanitizarHtmlEditorial(renderizarContenidoModulo(raw));
 }
@@ -9261,6 +10781,19 @@ function decorarContenidoModuloRenderizado(html = "", tipoModulo = "") {
             currentQuestionBlock.appendChild(node);
         }
     });
+
+    const primerTituloPropuesta = root.querySelector(".cb-module-block-title.is-proposal");
+    if (primerTituloPropuesta && !primerTituloPropuesta.closest(".cb-module-proposal-block")) {
+        const proposalWrapper = document.createElement("section");
+        proposalWrapper.className = "cb-module-proposal-block";
+        primerTituloPropuesta.parentNode?.insertBefore(proposalWrapper, primerTituloPropuesta);
+        let cursor = primerTituloPropuesta;
+        while (cursor) {
+            const next = cursor.nextElementSibling;
+            proposalWrapper.appendChild(cursor);
+            cursor = next;
+        }
+    }
 
     root.querySelectorAll(".cb-module-generated-graphic").forEach((figure) => {
         renderModuleGraphicInlinePreview(figure);
@@ -9553,10 +11086,10 @@ function convertirMarkdownBasicoAHtml(markdown) {
             const nivel = encabezado[1].length;
             const tituloRaw = encabezado[2].trim();
             const contenido = formatearInlineMarkdown(tituloRaw);
-            
+
             let extraClass = "";
             let icon = "";
-            
+
             const lower = tituloRaw.toLowerCase();
             if (lower.includes("conocimientos previos") || lower.includes("previous knowledge")) {
                 extraClass = "cb-notes-section-preview";
@@ -9580,7 +11113,7 @@ function convertirMarkdownBasicoAHtml(markdown) {
                 extraClass = "cb-notes-section-closing";
                 icon = '<i class="fas fa-flag-checkered mr-2"></i>';
             }
-            
+
             html.push(`<h${nivel} class="cb-notes-header ${extraClass}">${icon}${contenido}</h${nivel}>`);
             continue;
         }
@@ -9661,188 +11194,247 @@ function renderizarContenidoNotasMaestro(notasTexto) {
 }
 
 function detectarModoNotasMaestro({ tipoModulo, contenidoHTML, contenidoLimpio }) {
-  const tipoNormalizado = normalizarTipoModulo(tipoModulo);
+    const tipoNormalizado = normalizarTipoModulo(tipoModulo);
 
-  const preguntasDetectadas =
-    (contenidoHTML.match(/PREGUNTA\s*\d+/gi) || []).length;
+    const preguntasDetectadas =
+        (contenidoHTML.match(/PREGUNTA\s*\d+/gi) || []).length;
 
-  switch (tipoNormalizado) {
-    case "quiz":
-      return {
-        modo: "quiz",
-        preguntasDetectadas
-      };
+    switch (tipoNormalizado) {
+        case "quiz":
+            return {
+                modo: "quiz",
+                preguntasDetectadas
+            };
 
-    case "leccion":
-      return {
-        modo: "leccion",
-        preguntasDetectadas
-      };
+        case "leccion":
+            return {
+                modo: "leccion",
+                preguntasDetectadas
+            };
 
-    case "notas_maestro":
-      return {
-        modo: "actividad_guiada",
-        preguntasDetectadas: 0
-      };
+        case "notas_maestro":
+            return {
+                modo: "actividad_guiada",
+                preguntasDetectadas: 0
+            };
 
-    case "pagina":
-    case "libro":
-      return {
-        modo: "contenido",
-        preguntasDetectadas: 0
-      };
+        case "pagina":
+        case "libro":
+            return {
+                modo: "contenido",
+                preguntasDetectadas: 0
+            };
 
-    default:
-      return {
-        modo: "contenido",
-        preguntasDetectadas: 0
-      };
-  }
+        default:
+            return {
+                modo: "contenido",
+                preguntasDetectadas: 0
+            };
+    }
 }
 
 
 function formatearParrafos(texto) {
     const parrafos = texto.split('\n\n').filter(p => p.trim().length > 0);
-    
+
     return parrafos.map((parrafo, index) => {
         const tieneNumero = REGEX_ORDINALES.test(parrafo.toLowerCase());
-        
+
         let clases = "cb-notes-paragraph";
-        
+
         if (index === 0) {
             clases += " cb-notes-paragraph-intro";
         } else if (tieneNumero) {
             clases += " cb-notes-paragraph-question";
         }
-        
+
         // Resaltar números de preguntas
         let contenido = parrafo.replace(
-            /\b(primera|segunda|tercera|cuarta|quinta|sexta)\b (\w+)/gi, 
+            /\b(primera|segunda|tercera|cuarta|quinta|sexta)\b (\w+)/gi,
             '<strong class="cb-notes-ordinal-highlight">$1 $2</strong>'
         );
-        
+
         return `<p class="${clases}">${contenido}</p>`;
     }).join('');
 }
 
+function obtenerHtmlPersistibleNotasMaestro(contenidoNodo) {
+    if (!contenidoNodo) return "";
+    const bloqueNotas = contenidoNodo.querySelector(".notas-maestro-simple");
+    const baseHtml = (bloqueNotas ? bloqueNotas.outerHTML : contenidoNodo.innerHTML).trim();
+    return sanitizarHtmlEditorial(baseHtml);
+}
+
 // Función para guardar las notas generadas
-window.guardarNotasMaestro = async function() {
+window.guardarNotasMaestro = async function () {
     if (!moduloNotasMaestroId) {
         alert("No hay módulo seleccionado");
         return;
     }
-    
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
     const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
     const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
-    
-    if (!contenidoModal || contenidoModal.innerHTML.includes("Error")) {
+    const state = obtenerEstadoModalNotasMaestro();
+    const source = state.activeTab;
+    const contenidoNodo = obtenerNodoContenidoNotasMaestro(source);
+
+    if (!contenidoNodo || contenidoNodo.innerHTML.includes("Error")) {
         alert("No hay notas válidas para guardar");
         return;
     }
-    
+
     try {
         // Cambiar estado de los botones
-        btnGuardarNotas.disabled = true;
-        btnGuardarNotas.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Guardando...';
-        if (btnRegenerarNotas) btnRegenerarNotas.disabled = true;
-        
+        setEstadoBotonesModalNotasMaestro({ guardando: true });
+        if (btnGuardarNotas) {
+            btnGuardarNotas.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Guardando...';
+        }
+
         // Obtener el módulo
         const modulo = await obtenerModulo(moduloNotasMaestroId);
-        
+        if (!modulo) throw new Error("No se encontró el módulo.");
+
+        const htmlPersistible = obtenerHtmlPersistibleNotasMaestro(contenidoNodo);
+        if (!htmlPersistible) {
+            throw new Error("No hay notas válidas para guardar.");
+        }
+
+        const sourceConfig = obtenerConfigFuenteNotasMaestro(source);
+        const generatedAt = state.cache?.[source]?.generatedAt || new Date().toISOString();
+        const payload = {
+            ...construirPayloadPreferenciasNotasMaestro(state),
+            [sourceConfig.field]: htmlPersistible,
+            [sourceConfig.timestampField]: generatedAt,
+            fuenteNotasMaestroActiva: state.selectedSource
+        };
+
+        if (state.selectedSource === source) {
+            payload.notasMaestroInline = htmlPersistible;
+            payload.notasMaestroInlineGenerado = generatedAt;
+        }
+
         // Guardar las notas en el módulo
-        await guardarModulo(moduloNotasMaestroId, {
-            notasMaestro: sanitizarHtmlEditorial(contenidoModal.innerHTML),
-            notasMaestroGenerado: new Date().toISOString()
-        });
-        
+        await guardarModulo(moduloNotasMaestroId, payload);
+        sincronizarModuloLocal(moduloNotasMaestroId, String(curso?.id || "").trim() || null, payload);
+
+        state.cache[source] = {
+            html: htmlPersistible,
+            generatedAt,
+            loaded: true
+        };
+        renderizarPanelNotasMaestro(source);
+        actualizarUiModalNotasMaestro();
+
         // Restaurar botones
-        btnGuardarNotas.disabled = false;
-        btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Actualizar Notas';
-        if (btnRegenerarNotas) btnRegenerarNotas.disabled = false;
-        
+        if (btnGuardarNotas) {
+            btnGuardarNotas.innerHTML = `<i class="fas fa-save mr-2"></i> Guardar ${sourceConfig.label}`;
+        }
+        setEstadoBotonesModalNotasMaestro({ guardando: false });
+
         // Mostrar notificación
         mostrarNotificacion("✅ Notas para el maestro guardadas correctamente", 'success');
-        
-        // Actualizar la vista para mostrar que están guardadas
-        const fecha = new Date().toLocaleString();
-        const fechaDiv = document.createElement('div');
-        fechaDiv.className = "text-xs text-green-600 mt-4 text-center";
-        fechaDiv.innerHTML = `<i class="fas fa-check-circle mr-1"></i> Guardado: ${fecha}`;
-        contenidoModal.appendChild(fechaDiv);
-        
+
     } catch (error) {
-        
-        // Restaurar botones
-        btnGuardarNotas.disabled = false;
-        btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Guardar Notas';
-        if (btnRegenerarNotas) btnRegenerarNotas.disabled = false;
-        
+        setEstadoBotonesModalNotasMaestro({ guardando: false });
+        actualizarUiModalNotasMaestro();
         mostrarNotificacion(`❌ Error al guardar: ${error.message}`, 'error');
     }
 };
 
-window.aplicarNotasMaestro = async function() {
+window.aplicarNotasMaestro = async function () {
     if (!moduloNotasMaestroId) {
         alert("No hay módulo seleccionado");
         return;
     }
-
-    const contenidoModal = document.getElementById("contenidoNotasMaestro");
     const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    if (!contenidoModal || !btnAplicarNotas) return;
-
-    if (contenidoModal.innerHTML.includes("Error")) {
-        alert("No hay notas válidas para aplicar");
-        return;
-    }
-
-    const bloqueNotas = contenidoModal.querySelector(".notas-maestro-simple");
-    const htmlAplicable = sanitizarHtmlEditorial((bloqueNotas ? bloqueNotas.outerHTML : contenidoModal.innerHTML).trim());
-    if (!htmlAplicable) {
-        alert("No hay contenido generado para aplicar");
-        return;
-    }
+    if (!btnAplicarNotas) return;
 
     try {
-        btnAplicarNotas.disabled = true;
+        setEstadoBotonesModalNotasMaestro({ aplicando: true });
         btnAplicarNotas.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Aplicando...';
 
+        const state = obtenerEstadoModalNotasMaestro();
+        const source = state.selectedSource;
+        const sourceConfig = obtenerConfigFuenteNotasMaestro(source);
+        const entry = state.cache?.[source] || { html: "", generatedAt: "" };
+        const htmlPersistible = sanitizarHtmlEditorial(entry.html || "");
+        if (!htmlPersistible) {
+            throw new Error(`No hay notas guardadas en ${sourceConfig.label}.`);
+        }
+        const generatedAt = entry.generatedAt || new Date().toISOString();
+
         const contModulo = document.getElementById(`contenido-${moduloNotasMaestroId}`);
-        if (contModulo) {
-            contModulo.innerHTML = htmlAplicable;
+        if (!contModulo) {
+            throw new Error("No se encontró el contenedor del módulo.");
         }
 
-        await guardarModulo(moduloNotasMaestroId, { contenido: htmlAplicable });
+        const nuevoContenido = quitarNotasMaestroDelContenido(
+            normalizarBloquesNotasMaestroInyectadas(contModulo.innerHTML)
+        );
+        contModulo.innerHTML = nuevoContenido;
+        const moduloIdSafe = String(moduloNotasMaestroId || "").trim();
+        window.__suppressModuloUpdatedToast = window.__suppressModuloUpdatedToast || {};
+        window.__suppressModuloUpdatedToast[moduloIdSafe] = Date.now() + 4000;
+        await guardarModulo(moduloNotasMaestroId, {
+            contenido: nuevoContenido,
+            mostrarNotasMaestroInline: true,
+            fuenteNotasMaestroActiva: source,
+            [sourceConfig.field]: htmlPersistible,
+            [sourceConfig.timestampField]: generatedAt,
+            notasMaestroInline: htmlPersistible,
+            notasMaestroInlineGenerado: generatedAt
+        });
+        sincronizarModuloLocal(moduloNotasMaestroId, String(curso?.id || "").trim() || null, {
+            contenido: nuevoContenido,
+            mostrarNotasMaestroInline: true,
+            fuenteNotasMaestroActiva: source,
+            [sourceConfig.field]: htmlPersistible,
+            [sourceConfig.timestampField]: generatedAt,
+            notasMaestroInline: htmlPersistible,
+            notasMaestroInlineGenerado: generatedAt
+        });
+        contModulo.dataset.lastSavedHtml = normalizarContenidoModuloPersistible(
+            sanitizeRichText(nuevoContenido)
+        );
+        sincronizarBloqueNotasMaestroDerivado(moduloNotasMaestroId, {
+            notasMaestroInline: htmlPersistible,
+            fuenteNotasMaestroActiva: source,
+            [sourceConfig.field]: htmlPersistible,
+            mostrarNotasMaestroInline: true
+        });
+        actualizarVisibilidadNotasMaestroEnCard(document.getElementById(`modulo-${moduloNotasMaestroId}`), true);
 
-        mostrarNotificacion("✅ Contenido aplicado al módulo correctamente", "success");
+        mostrarNotificacion("✅ Notas del maestro aplicadas al módulo", "success");
     } catch (error) {
         mostrarNotificacion(`❌ Error al aplicar contenido: ${error.message}`, "error");
     } finally {
-        btnAplicarNotas.disabled = false;
+        setEstadoBotonesModalNotasMaestro({ aplicando: false });
         btnAplicarNotas.innerHTML = '<i class="fas fa-file-import mr-2"></i> Aplicar al módulo';
     }
 };
 
 // Función para cerrar el modal
-window.cerrarModalNotasMaestro = function() {
+window.cerrarModalNotasMaestro = function () {
     const modal = document.getElementById("modalNotasMaestro");
     const btnGuardarNotas = document.getElementById("btnGuardarNotasMaestro");
     const btnRegenerarNotas = document.getElementById("btnRegenerarNotasMaestro");
     const btnAplicarNotas = document.getElementById("btnAplicarNotasMaestro");
-    
+
     // Resetear estado
     moduloNotasMaestroId = null;
-    
+    notasMaestroModalState = null;
+
     // Limpiar contenido
-    document.getElementById("contenidoNotasMaestro").innerHTML = "";
-    
+    Object.values(NOTAS_MAESTRO_SOURCE_CONFIG).forEach((config) => {
+        const nodo = document.getElementById(config.contentId);
+        if (nodo) nodo.innerHTML = "";
+    });
+
     // Resetear botones
     if (btnGuardarNotas) {
         btnGuardarNotas.disabled = true;
         btnGuardarNotas.innerHTML = '<i class="fas fa-save mr-2"></i> Guardar Notas';
     }
-    
+
     if (btnRegenerarNotas) {
         btnRegenerarNotas.classList.add("hidden");
         btnRegenerarNotas.disabled = false;
@@ -9851,35 +11443,93 @@ window.cerrarModalNotasMaestro = function() {
         btnAplicarNotas.disabled = true;
         btnAplicarNotas.innerHTML = '<i class="fas fa-file-import mr-2"></i> Aplicar al módulo';
     }
-    
+
     // Ocultar modal
     modal.classList.add("hidden");
     modal.classList.remove("flex");
 };
 
 
-async function eliminarModulo(moduloId) {
-    const sub = subtemaActivo;
+let eliminandoModuloIds = new Set();
 
-    // Eliminar del array local (usando solo el ID interno si es necesario)
-    const idInterno = extraerIdInternoModulo(moduloId);
-    sub.modulosIds = sub.modulosIds.filter(id => {
-        // Comparar IDs: si el ID en el array contiene guión bajo, comparar completo
-        // si no, comparar solo la parte después del guión bajo
-        if (id.includes('_')) {
-            return id !== moduloId;
-        } else {
-            return id !== idInterno;
+function encontrarSubtemaPorModulo(moduloId = "") {
+    const idCompuesto = String(moduloId || "").trim();
+    const idInterno = extraerIdInternoModulo(idCompuesto);
+    const temas = Array.isArray(curso?.temas) ? curso.temas : [];
+
+    for (const tema of temas) {
+        const subtemas = Array.isArray(tema?.subtemas) ? tema.subtemas : [];
+        for (const sub of subtemas) {
+            const modulosIds = Array.isArray(sub?.modulosIds) ? sub.modulosIds : [];
+            const found = modulosIds.some((id) => {
+                const current = String(id || "").trim();
+                return current === idCompuesto || extraerIdInternoModulo(current) === idInterno;
+            });
+            if (found) return sub;
         }
-    });
-    
-    await guardarCursoFirebase();
+    }
 
-    // IMPORTANTE: Borrar con ID compuesto
-    const idParaBorrar = moduloId.includes('_') ? moduloId : `${curso.id}_${moduloId}`;
-    await deleteDoc(doc(db, "moodleCourses", idParaBorrar));
+    return null;
+}
 
-    cargarSubtema(sub);
+async function eliminarModulo(moduloId) {
+    const moduloIdSafe = String(moduloId || "").trim();
+    if (!moduloIdSafe) return;
+    if (eliminandoModuloIds.has(moduloIdSafe)) return;
+
+    eliminandoModuloIds.add(moduloIdSafe);
+
+    try {
+        const sub = encontrarSubtemaPorModulo(moduloIdSafe) || subtemaActivo;
+        if (!sub) {
+            throw new Error("No se encontró el subtema del módulo.");
+        }
+
+        const idInterno = extraerIdInternoModulo(moduloIdSafe);
+        const idParaBorrar = moduloIdSafe.includes('_') ? moduloIdSafe : `${curso.id}_${idInterno}`;
+
+        sub.modulosIds = (sub.modulosIds || []).filter((id) => {
+            const current = String(id || "").trim();
+            return current !== moduloIdSafe && extraerIdInternoModulo(current) !== idInterno;
+        });
+
+        if (Array.isArray(sub.modulos)) {
+            sub.modulos = sub.modulos.filter((mod) => {
+                const currentId = String(mod?.id || "").trim();
+                return currentId !== idInterno && currentId !== moduloIdSafe;
+            });
+        }
+
+        if (window.subtemaActivo?.id === sub.id) {
+            window.subtemaActivo.modulosIds = [...(sub.modulosIds || [])];
+            if (Array.isArray(sub.modulos)) {
+                window.subtemaActivo.modulos = [...sub.modulos];
+            }
+        }
+
+        const activo = localStorage.getItem("moduloActivo");
+        if (activo === moduloIdSafe || activo === idInterno || extraerIdInternoModulo(activo) === idInterno) {
+            localStorage.removeItem("moduloActivo");
+        }
+
+        modulosCache.delete(idParaBorrar);
+        modulosCache.delete(idInterno);
+
+        try {
+            await deleteDoc(doc(db, "moodleCourses", idParaBorrar));
+        } catch (error) {
+            console.warn("No se pudo borrar el documento del módulo antes de guardar el curso:", error);
+        }
+
+        await guardarCursoFirebase();
+        renderTemas();
+
+        if (window.subtemaActivo?.id === sub.id) {
+            await cargarSubtema(sub);
+        }
+    } finally {
+        eliminandoModuloIds.delete(moduloIdSafe);
+    }
 }
 
 window.eliminarModulo = eliminarModulo;
@@ -9895,6 +11545,9 @@ window.eliminarModulo = eliminarModulo;
 
 function construirContenidoInicialModulo(tipo) {
     const tipoNormalizado = normalizarTipoModulo(tipo);
+    if (tipoNormalizado === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+        return crearDefaultsFuentesDestacadas().contenido;
+    }
     if (tipoNormalizado === "temario") {
         return `
 <h2>Temario</h2>
@@ -9917,16 +11570,17 @@ function construirContenidoInicialModulo(tipo) {
   <p>Active ideas previas del grupo sobre el tema, el vocabulario clave y el contexto necesario para comprender la actividad.</p>
 
   <h2>Objetivos</h2>
-  <p>Para aplicar los conceptos centrales del módulo en una situación guiada, con acompañamiento docente y reflexión final.</p>
-  <p><strong>Habilidades intelectuales:</strong> CFU, CFC, NST, NFU, NMI</p>
+  <ul>
+    <li>Para aplicar los conceptos centrales del módulo en una situación guiada, con acompañamiento docente y reflexión final.</li>
+    <li><strong>Habilidades intelectuales:</strong> CFU, CFC, NST, NFU, NMI</li>
+  </ul>
 
   <h2>Apertura</h2>
   <p>Presente brevemente el reto, modele un ejemplo corto y confirme que el grupo entiende la consigna antes de iniciar.</p>
 
   <h2>Durante el uso del libro</h2>
   <p>Indique al alumnado que resuelva la actividad paso a paso, individualmente o en parejas, mientras usted monitorea y da retroalimentación puntual.</p>
-  <p><strong>Actividad de apoyo:</strong> Ofrezca vocabulario visible, pistas guiadas o un ejemplo parcial para estudiantes que necesiten andamiaje.</p>
-  <p><strong>Actividad de ampliación:</strong> Pida una variante más compleja, una justificación adicional o una aplicación en un contexto nuevo.</p>
+  <p>Para estudiantes con necesidades específicas de apoyo educativo, el docente debe adaptar ejemplos concretos de la actividad real. Por ejemplo, si una consigna pide leer, comparar, responder o completar información, conviene modelar ese mismo paso con un ejemplo del módulo, fragmentar la instrucción usando el material real, verificar comprensión en ese punto preciso y ajustar el apoyo visual, auditivo o de acompañamiento según la barrera que aparezca en esa tarea.</p>
 
   <h2>Cierre</h2>
   <p>Socialice respuestas, compare estrategias y cierre con una breve reflexión sobre qué aprendieron y cómo lo resolvieron.</p>
@@ -9936,6 +11590,9 @@ function construirContenidoInicialModulo(tipo) {
 
 function construirInstruccionesInicialesModulo(tipo) {
     const tipoNormalizado = normalizarTipoModulo(tipo);
+    if (tipoNormalizado === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+        return crearDefaultsFuentesDestacadas().instrucciones;
+    }
     if (tipoNormalizado === "temario") {
         return "";
     }
@@ -9961,12 +11618,14 @@ Títulos obligatorios y en este orden:
 5. Cierre
 
 Reglas obligatorias:
-- En "Objetivos" incluye una oración que empiece con "Para".
-- Después incluye una línea exacta que empiece con "Habilidades intelectuales:".
+- En "Objetivos" usa lista de bullets.
+- El primer bullet debe incluir una oración que empiece con "Para".
+- Otro bullet debe empezar exactamente con "Habilidades intelectuales:".
 - Dentro de "Durante el uso del libro" incluye:
   - orientación principal para acompañar el trabajo
-  - un párrafo que empiece exactamente con "Actividad de apoyo:"
-  - un párrafo que empiece exactamente con "Actividad de ampliación:"
+  - un último párrafo, antes de "Cierre", sobre cómo acompañar a estudiantes con necesidades específicas de apoyo educativo, como TDAH, hiperactividad, discapacidad visual, discapacidad auditiva u otras dificultades de atención, autorregulación, acceso, comunicación o seguimiento de instrucciones
+  - ese párrafo debe usar ejemplos concretos de la actividad real y explicar exactamente qué adaptaría el docente
+- Si propones una pregunta inicial, usa la expresión "pregunta detonadora" y no "pregunta disparadora".
 - Usa español natural, tono docente profesional y estructura editorial clara.
 - Devuelve el resultado con encabezados visibles y contenido listo para mostrarse en el módulo.
 `.trim();
@@ -10003,6 +11662,11 @@ function obtenerMetaSelectorModulo(tipo = "") {
             icon: "fa-book-open-reader",
             accent: "amber",
             ayuda: "Texto base para transcripcion o analisis."
+        },
+        fuentes_destacadas: {
+            icon: "fa-book-bookmark",
+            accent: "sky",
+            ayuda: "Fuentes destacadas. Extracción de contenido de fuentes externas"
         },
         archivo: {
             icon: "fa-file",
@@ -10055,6 +11719,7 @@ function obtenerEtiquetaSelectorModulo(tipo = "") {
         pagina: "Texto",
         temario: "Ruta",
         lectura: "Lectura",
+        fuentes_destacadas: "",
         archivo: "Archivo",
         libro: "Capitulos",
         leccion: "Guiado",
@@ -10065,6 +11730,17 @@ function obtenerEtiquetaSelectorModulo(tipo = "") {
     };
 
     return etiquetas[tipoNormalizado] || "Base";
+}
+
+function construirTituloSelectorModulo(tipo = "") {
+    if (normalizarTipoModulo(tipo) === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+        return `
+            <span class="cb-selector-modulo-card__title-line">Fuentes destacadas.</span>
+            <span class="cb-selector-modulo-card__title-line">Extracción de contenido de fuentes externas</span>
+        `.trim();
+    }
+
+    return String(tipo || "");
 }
 
 function setModalSelectorModuloBusy(modal, busy = false) {
@@ -10111,11 +11787,11 @@ function mostrarSelectorModulo(subtema) {
         "Página",
         "Temario",
         "Lectura",
+        FEATURED_SOURCE_MODULE_TYPE,
         "Archivo",
         "Libro",
         "Lección",
         "Tarea",
-        "URL",
         "Archivo adjunto",
         "Notas del Maestro",
     ];
@@ -10139,18 +11815,23 @@ function mostrarSelectorModulo(subtema) {
     // Crear botones
     tipos.forEach(tipo => {
         const meta = obtenerMetaSelectorModulo(tipo);
+        const etiqueta = obtenerEtiquetaSelectorModulo(tipo);
+        const esFuenteDestacada = normalizarTipoModulo(tipo) === FEATURED_SOURCE_MODULE_TYPE_NORMALIZED;
         const btn = document.createElement("button");
         btn.type = "button";
         btn.dataset.selectorModuloCard = "1";
+        if (esFuenteDestacada) {
+            btn.dataset.selectorModuloFeatured = "1";
+        }
         btn.className = `cb-selector-modulo-card cb-selector-modulo-card--${meta.accent}`;
         btn.innerHTML = `
             <span class="cb-selector-modulo-card__icon" aria-hidden="true">
                 <i class="fas ${meta.icon}"></i>
             </span>
             <span class="cb-selector-modulo-card__body">
-                <span class="cb-selector-modulo-card__title">${tipo}</span>
-                <span class="cb-selector-modulo-card__meta">${obtenerEtiquetaSelectorModulo(tipo)}</span>
-                <span class="cb-selector-modulo-card__help">${meta.ayuda}</span>
+                <span class="cb-selector-modulo-card__title">${construirTituloSelectorModulo(tipo)}</span>
+                ${etiqueta ? `<span class="cb-selector-modulo-card__meta">${etiqueta}</span>` : ""}
+                ${esFuenteDestacada ? "" : `<span class="cb-selector-modulo-card__help">${meta.ayuda}</span>`}
             </span>
             <span class="cb-selector-modulo-card__spinner" aria-hidden="true">
                 <i class="fas fa-spinner fa-spin"></i>
@@ -10171,7 +11852,7 @@ function mostrarSelectorModulo(subtema) {
             try {
                 const nuevoModuloId = crypto.randomUUID();
 
-                const nuevoModulo = {
+                const nuevoModulo = quitarUndefinedPlano({
                     id: nuevoModuloId,
                     cursoId: curso.id,
                     subtemaId: subtema.id,
@@ -10180,12 +11861,17 @@ function mostrarSelectorModulo(subtema) {
                     contenido: construirContenidoInicialModulo(tipo),
                     instrucciones: construirInstruccionesInicialesModulo(tipo),
                     incluirInstruccionOriginalEnPropuesta: false,
+                    incluirImagenOriginalEnPropuesta: false,
                     generarGrafico: false,
                     ignorarContextoOtrosModulos: false,
+                    transcribirEstructurarMismoTipoActividad: false,
+                    distractoresRetadoresQuiz: false,
+                    fuenteDestacadaUrl: esFuenteDestacada ? "" : undefined,
+                    fuenteDestacadaReferencia: esFuenteDestacada ? "" : undefined,
                     traducciones: [],
                     creado: Date.now(),
                     actualizado: Date.now()
-                };
+                });
 
                 await guardarModulo(nuevoModuloId, nuevoModulo, curso.id);
 
@@ -10266,11 +11952,11 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null, options 
     // Determinar cursoId
     let cursoIdParaBuscar = cursoIdEspecifico || (curso ? curso.id : null);
     const forceRefresh = options?.forceRefresh === true;
-    
+
     if (!cursoIdParaBuscar) {
         return null;
     }
-    
+
     const idParaBuscar = construirDocIdModulo(moduloId, cursoIdParaBuscar);
     if (!idParaBuscar) return null;
 
@@ -10278,28 +11964,28 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null, options 
     if (cached && !forceRefresh) {
         return cached;
     }
-    
-    
+
+
     const docRef = doc(db, "moodleCourses", idParaBuscar);
     const snap = await getDoc(docRef);
-    
+
     if (snap.exists()) {
         const data = snap.data();
-        
+
         // Asegurar que el ID interno esté presente
         if (!data.id) {
             data.id = extraerIdInternoModulo(idParaBuscar, cursoIdParaBuscar);
         }
-        
+
         modulosCache.set(idParaBuscar, data);
         return data;
     } else {
-        
+
         // Intentar con el ID original (por compatibilidad)
         if (moduloId !== idParaBuscar) {
             const docRefOriginal = doc(db, "moodleCourses", moduloId);
             const snapOriginal = await getDoc(docRefOriginal);
-            
+
             if (snapOriginal.exists()) {
                 const data = snapOriginal.data();
                 if (!data.id) data.id = moduloId;
@@ -10307,7 +11993,7 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null, options 
                 return data;
             }
         }
-        
+
         return null;
     }
 }
@@ -10316,12 +12002,12 @@ export async function obtenerModulo(moduloId, cursoIdEspecifico = null, options 
 // Función auxiliar para normalizar IDs
 function normalizarIdModulo(moduloId, paraFirestore = false) {
     if (!moduloId) return null;
-    
+
     // Si ya tiene el formato correcto
     if (moduloId.includes('_')) {
         return moduloId;
     }
-    
+
     // Si no, construir el formato
     if (curso && curso.id) {
         if (paraFirestore) {
@@ -10332,7 +12018,7 @@ function normalizarIdModulo(moduloId, paraFirestore = false) {
             return moduloId;
         }
     }
-    
+
     return moduloId;
 }
 
@@ -10381,6 +12067,14 @@ function quitarUndefinedPlano(obj = {}) {
     return out;
 }
 
+function obtenerPayloadFuentesDestacadasDesdeModal(instruccionesHtml = "") {
+    const tipoActual = String(window.__moduloEditandoInstruccionesTipo || "").trim();
+    if (normalizarTipoModulo(tipoActual) !== FEATURED_SOURCE_MODULE_TYPE_NORMALIZED) {
+        return {};
+    }
+    return extraerCamposFuentesDestacadasDesdeInstrucciones(instruccionesHtml);
+}
+
 export function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
     const moduloIdSafe = String(moduloId || "").trim();
     const cursoIdSafe = String(cursoId || "").trim();
@@ -10393,7 +12087,7 @@ export function sincronizarModuloLocal(moduloId, cursoId, payload = {}) {
             if (!item || typeof item !== "object") return;
             const itemId = String(item.id || "").trim();
             const itemFullId = construirDocIdModulo(itemId, cursoIdSafe);
-            
+
             // Comparar tanto contra ID corto como largo para mayor robustez
             if (itemId === moduloIdSafe || itemFullId === moduloIdSafe || itemId === moduloIdSafe.split('_').pop()) {
                 Object.assign(item, payload);
@@ -10503,19 +12197,19 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
     try {
         // Determinar qué cursoId usar
         let cursoIdParaGuardar = cursoIdEspecifico || (curso ? curso.id : null);
-        
+
         if (!cursoIdParaGuardar) {
             throw new Error("No hay cursoId especificado");
         }
-        
+
         // Crear el ID del documento
         const docId = construirDocIdModulo(moduloId, cursoIdParaGuardar);
         if (!docId) throw new Error("No se pudo construir docId del módulo");
         const docRef = doc(db, "moodleCourses", docId);
-        
+
         // Primero verificar si existe
         const snap = await getDoc(docRef);
-        
+
         const cambiosSanitizados = { ...(cambios || {}) };
         if (Object.prototype.hasOwnProperty.call(cambiosSanitizados, "instrucciones")) {
             cambiosSanitizados.instrucciones = sanitizarInstruccionesModuloPersistibles(cambiosSanitizados.instrucciones);
@@ -10538,6 +12232,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
 
         const datosActualizados = {
             ...cambiosSanitizados,
+            docType: "module",
             actualizado: Date.now(),
             cursoId: cursoIdParaGuardar,
             // 🔥 Añadir timestamp para sincronización
@@ -10545,12 +12240,12 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
             // 🔥 Añadir ID del usuario que modificó
             modificadoPor: currentUserId
         };
-        
+
         // Si no tiene ID en los datos, agregarlo
         if (!datosActualizados.id) {
             datosActualizados.id = extraerIdInternoModulo(moduloId, cursoIdParaGuardar);
         }
-        
+
         if (snap.exists()) {
             await updateDoc(docRef, datosActualizados);
             const payloadLocal = {
@@ -10571,7 +12266,7 @@ export async function guardarModulo(moduloId, cambios, cursoIdEspecifico = null)
             modulosCache.set(docId, dataNuevo);
             sincronizarModuloLocal(moduloId, cursoIdParaGuardar, dataNuevo);
         }
-        
+
         return true;
     } catch (error) {
         if (esErrorTamanoFirestore(error)) {
@@ -10634,47 +12329,47 @@ window.editarModulo = async function (moduloId) {
             </div>
         </div>
     `;
-    
+
     const existingModal = document.getElementById("modalEditContenidoModulo");
     if (existingModal) existingModal.remove();
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHTML);
-    
+
     const modal = document.getElementById("modalEditContenidoModulo");
     const textarea = document.getElementById("inputEditContenidoModulo");
     const btnCancelar = document.getElementById("btnCancelarEditContenidoModulo");
     const btnConfirmar = document.getElementById("btnConfirmarEditContenidoModulo");
-    
+
     modal.classList.remove("hidden");
     modal.classList.add("flex");
     setTimeout(() => textarea.focus(), 100);
-    
+
     const nuevoContenido = await new Promise((resolve) => {
         const limpiar = () => {
             btnConfirmar.onclick = null;
             btnCancelar.onclick = null;
         };
-        
+
         btnConfirmar.onclick = () => {
             const valor = textarea.value;
             limpiar();
             modal.classList.add("hidden");
             resolve(valor);
         };
-        
+
         btnCancelar.onclick = () => {
             limpiar();
             modal.classList.add("hidden");
             resolve(null);
         };
-        
+
         modal.onkeydown = (e) => {
             if (e.key === 'Escape') btnCancelar.click();
         };
     });
-    
+
     setTimeout(() => modal.remove(), 300);
-    
+
     if (nuevoContenido === null) return; // cancelar
 
     await guardarModulo(moduloId, { contenido: nuevoContenido });
@@ -10695,7 +12390,7 @@ function puedeAnalizar() {
 
 
 window.analizarModulo = async function (moduloId) {
-    
+
     if (!puedeAnalizar()) {
         mostrarModalAnalisis(`
             <div class="p-4 text-yellow-700 bg-yellow-100 border border-yellow-300 rounded">
@@ -10720,7 +12415,7 @@ window.analizarModulo = async function (moduloId) {
     try {
         const endpoint = getGeminiEndpoint();
 
-const prompt = `
+        const prompt = `
 Eres un experto en análisis pedagógico, lingüístico y didáctico.
 anliza el módulo en busca de contenido falso, incoherente o contradictorio.
  -Evalúa la coherencia del módulo.  
@@ -10773,7 +12468,7 @@ ${modulo.contenido || "(Vacío)"}
 
         const body = {
             contents: [
-                { parts: [ { text: prompt } ] }
+                { parts: [{ text: prompt }] }
             ]
         };
 
@@ -10873,7 +12568,7 @@ ${subtema.contenidoGenerado}
 
         // activar menú contextual
         setTimeout(() => activarAccionesEnParrafos(), 50);
-        
+
 
     } catch (err) {
         contPrev.replaceChildren();
@@ -10968,28 +12663,28 @@ window.renderListadoTraduccionesSubtema = function (subtema) {
 
 
 
-window.traducirModulo = async function(moduloId) {
+window.traducirModulo = async function (moduloId) {
     const modulo = await obtenerModulo(moduloId);
     if (!modulo) return;
 
     // ✅ GUARDAR ESTE MÓDULO COMO ACTIVO EN localStorage
     localStorage.setItem("moduloActivo", moduloId);
-    
+
     // Establecer el módulo en traducción
     window.__moduloTraduciendo = modulo;
-    
+
     // Mostrar el modal de traducción
     const modal = document.getElementById("modalTraduccionModulo");
     const select = document.getElementById("selectIdiomaTraduccion");
     const cont = document.getElementById("contenidoTraduccionModulo");
-    
+
     // Resetear el modal
     select.value = "";
     cont.innerHTML = `<p class="text-gray-400 text-sm">Aquí aparecerá la traducción del módulo.</p>`;
     delete cont.dataset.traduccionId;
     delete cont.dataset.moduloId;
     actualizarBotonAplicarTraduccionModulo();
-    
+
     // Cargar traducciones existentes
     if (modulo.traducciones && modulo.traducciones.length > 0) {
         renderListadoTraducciones(modulo);
@@ -10999,7 +12694,7 @@ window.traducirModulo = async function(moduloId) {
             listaCont.innerHTML = `<p class="text-gray-400 text-sm">No hay traducciones aún.</p>`;
         }
     }
-    
+
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
@@ -11017,7 +12712,7 @@ document.getElementById("btnGenerarTraduccion").onclick = async function () {
 
     // ✅ USAR window.__moduloTraduciendo en lugar de buscar en localStorage
     const modulo = window.__moduloTraduciendo;
-    
+
     if (!modulo) {
         alert("No hay módulo seleccionado para traducir.");
         return;
@@ -11104,7 +12799,7 @@ window.abrirTraduccionSubtema = function (idTraduccion) {
     const cont = document.getElementById("contenidoTraduccionSubtema");
     if (!cont) return;
 
-        cont.innerHTML = sanitizarHtmlEditorial(t.contenido);
+    cont.innerHTML = sanitizarHtmlEditorial(t.contenido);
     cont.dataset.traduccionId = idTraduccion;
 
 
@@ -11145,13 +12840,13 @@ window.eliminarTraduccionSubtema = async function (idTraduccion) {
 
 
 // Asegúrate de que esta función esté definida GLOBALMENTE, no dentro de otro scope
-window.renderListadoTraducciones = function(modulo) {
+window.renderListadoTraducciones = function (modulo) {
     const cont = document.getElementById("listaTraduccionesExistentes");
-    
+
     if (!cont) {
         return;
     }
-    
+
     if (!modulo.traducciones || modulo.traducciones.length === 0) {
         cont.innerHTML = `<p class="text-gray-400 text-sm">No hay traducciones aún.</p>`;
         return;
@@ -11202,7 +12897,7 @@ function actualizarBotonAplicarTraduccionModulo({ traduccionId = "", moduloId = 
 
 window.abrirTraduccion = async function (idTraduccion, moduloId = null) {
     let modulo = window.__moduloTraduciendo;
-    
+
     // Si no tenemos el módulo en memoria o se especifica un ID diferente
     if (!modulo || (moduloId && modulo.id !== moduloId)) {
         if (moduloId) {
@@ -11290,7 +12985,7 @@ window.aplicarTraduccionAlModulo = async function (idTraduccion, moduloId = null
 
 window.eliminarTraduccion = async function (idTraduccion, moduloId = null) {
     let modulo = moduloId ? await obtenerModulo(moduloId) : window.__moduloTraduciendo;
-    
+
     if (!modulo) {
         alert("No se encontró el módulo.");
         return;
@@ -11347,10 +13042,10 @@ if (btnAplicarTraduccionModulo && btnAplicarTraduccionModulo.dataset.cbBound !==
 }
 
 // Asegúrate de que este código se ejecute al cargar la página
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const btnCancelarTraduccion = document.getElementById("btnCancelarTraduccion");
     if (btnCancelarTraduccion) {
-        btnCancelarTraduccion.onclick = function() {
+        btnCancelarTraduccion.onclick = function () {
             document.getElementById("modalTraduccionModulo").classList.add("hidden");
         };
     }
@@ -11371,7 +13066,7 @@ const descripcionesTono = {
         titulo: "CIENTÍFICO",
         descripcion: "Objetivo, preciso, basado en evidencia. Usa terminología técnica, datos verificables y metodología clara. Formato impersonal y neutral."
     },
-    
+
     // Estilo Informativo
     periodistico: {
         titulo: "PERIODÍSTICO",
@@ -11381,7 +13076,7 @@ const descripcionesTono = {
         titulo: "INFORMATIVO",
         descripcion: "Claro, didáctico, organizado. Explica conceptos complejos de manera accesible. Usa ejemplos concretos y estructura lógica para facilitar la comprensión."
     },
-    
+
     // Estilo Literario
     literario: {
         titulo: "LITERARIO",
@@ -11395,7 +13090,7 @@ const descripcionesTono = {
         titulo: "POÉTICO",
         descripcion: "Rítmico, metafórico, conciso. Usa imágenes potentes, sonoridad del lenguaje y economía de palabras. Enfocado en la experiencia sensorial y emocional."
     },
-    
+
     // Estilo Conversacional
     amigable: {
         titulo: "AMIGABLE",
@@ -11405,7 +13100,7 @@ const descripcionesTono = {
         titulo: "COLOQUIAL",
         descripcion: "Natural, informal, espontáneo. Usa lenguaje cotidiano, contracciones y expresiones comunes. Como una conversación real entre personas."
     },
-    
+
     // Estilo Educativo
     infantil: {
         titulo: "INFANTIL",
@@ -11419,7 +13114,7 @@ const descripcionesTono = {
         titulo: "DIDÁCTICO",
         descripcion: "Pedagógico, estructurado, progresivo. Divide la información en pasos, incluye ejemplos prácticos y ejercicios de aplicación. Enfocado en el aprendizaje."
     },
-    
+
     // Estilo Especializado
     tecnico: {
         titulo: "TÉCNICO",
@@ -11436,17 +13131,17 @@ const descripcionesTono = {
 };
 
 // Abrir el modal y guardar el ID del módulo
-window.abrirModalTono = function(moduloId) {
+window.abrirModalTono = function (moduloId) {
     moduloTonoActual = moduloId;
     contenidoGeneradoTono = null;
-    
+
     const modal = document.getElementById("modalCambiarTono");
-    
+
     // Obtener contenido original del módulo
     const contElement = document.getElementById(`contenido-${moduloId}`);
     if (contElement) {
         const contenidoOriginal = contElement.innerHTML.trim();
-        
+
         // Mostrar contenido original (recortado)
         const contOriginalDiv = document.getElementById("contenidoOriginalTono");
         if (contOriginalDiv) {
@@ -11456,33 +13151,33 @@ window.abrirModalTono = function(moduloId) {
                 textoRecortado = textoRecortado.substring(0, 200) + '...';
             }
             contOriginalDiv.textContent = textoRecortado || "(Contenido vacío)";
-            
+
             // Contar palabras
             const palabras = textoRecortado.split(/\s+/).filter(word => word.length > 0).length;
             document.getElementById("palabrasOriginal").textContent = palabras;
         }
     }
-    
+
     // Resetear estado del modal
     document.getElementById("selectTono").value = "";
-    document.getElementById("contenidoGeneradoTono").innerHTML = 
+    document.getElementById("contenidoGeneradoTono").innerHTML =
         '<p class="text-gray-400 text-sm">Selecciona un tono y haz clic en "Generar Vista Previa"</p>';
     document.getElementById("btnAplicarTono").disabled = true;
     document.getElementById("btnAplicarTono").innerHTML = '<i class="fas fa-check mr-2"></i> Aplicar al módulo';
     document.getElementById("contadorPalabras").classList.add("hidden");
-    
+
     // Ocultar descripción
     const descripcionDiv = document.getElementById("descripcionTono");
     if (descripcionDiv) {
         descripcionDiv.classList.add("hidden");
     }
-    
+
     // Ocultar spinner
     const modalSpinner = document.getElementById("spinnerTono");
     if (modalSpinner) {
         modalSpinner.classList.add("hidden");
     }
-    
+
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
@@ -11493,7 +13188,7 @@ function mostrarDescripcionTono() {
     const tono = document.getElementById("selectTono").value;
     const descripcionDiv = document.getElementById("descripcionTono");
     const textoDescripcion = document.getElementById("textoDescripcion");
-    
+
     if (tono && descripcionesTono[tono]) {
         const info = descripcionesTono[tono];
         textoDescripcion.textContent = info.descripcion;
@@ -11504,39 +13199,39 @@ function mostrarDescripcionTono() {
 }
 
 // Cerrar el modal
-window.cerrarModalTono = function() {
+window.cerrarModalTono = function () {
     const modal = document.getElementById("modalCambiarTono");
     if (!modal) return;
-    
+
     // Resetear estados
     moduloTonoActual = null;
     contenidoGeneradoTono = null;
-    
+
     // Ocultar descripción
     const descripcionDiv = document.getElementById("descripcionTono");
     if (descripcionDiv) {
         descripcionDiv.classList.add("hidden");
     }
-    
+
     // Ocultar spinner
     const modalSpinner = document.getElementById("spinnerTono");
     if (modalSpinner) {
         modalSpinner.classList.add("hidden");
     }
-    
+
     // Re-habilitar botones
     const btnGenerar = document.getElementById("btnGenerarTono");
     const btnAplicar = document.getElementById("btnAplicarTono");
     if (btnGenerar) btnGenerar.disabled = false;
     if (btnAplicar) btnAplicar.disabled = true;
-    
+
     // Ocultar modal
     modal.classList.add("hidden");
     modal.classList.remove("flex");
 };
 
 // Generar vista previa del contenido con nuevo tono
-window.generarVistaPreviaTono = async function() {
+window.generarVistaPreviaTono = async function () {
     if (!moduloTonoActual) {
         alert("Error: No hay módulo seleccionado.");
         return;
@@ -11571,7 +13266,7 @@ window.generarVistaPreviaTono = async function() {
     const modalSpinner = document.getElementById("spinnerTono");
     const btnGenerar = document.getElementById("btnGenerarTono");
     const contenidoGeneradoDiv = document.getElementById("contenidoGeneradoTono");
-    
+
     if (modalSpinner) {
         modalSpinner.classList.remove("hidden");
     }
@@ -11592,7 +13287,7 @@ window.generarVistaPreviaTono = async function() {
         const endpoint = getGeminiEndpoint();
 
         const infoTono = descripcionesTono[tono];
-        
+
         const prompt = `
 # REESCRIBIR CONTENIDO CON TONO ESPECÍFICO
 
@@ -11651,11 +13346,11 @@ NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
         // Mostrar en el modal
         if (contenidoGeneradoDiv) {
             contenidoGeneradoDiv.innerHTML = sanitizarHtmlEditorial(nuevoContenido);
-            
+
             // Contar palabras del nuevo contenido
             const textoLimpio = nuevoContenido.replace(/<[^>]*>/g, ' ').trim();
             const palabrasNuevas = textoLimpio.split(/\s+/).filter(word => word.length > 0).length;
-            
+
             // Mostrar contador
             const contadorDiv = document.getElementById("contadorPalabras");
             const palabrasNuevoSpan = document.getElementById("palabrasNuevo");
@@ -11673,7 +13368,7 @@ NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
         }
 
     } catch (err) {
-        
+
         if (contenidoGeneradoDiv) {
             contenidoGeneradoDiv.innerHTML = `
                 <div class="text-red-600 text-sm">
@@ -11698,7 +13393,7 @@ NO agregues comentarios, ni explicaciones, ni etiquetas adicionales.
 };
 
 // Aplicar el contenido generado al módulo
-window.aplicarCambioTono = async function() {
+window.aplicarCambioTono = async function () {
     if (!moduloTonoActual || !contenidoGeneradoTono) {
         alert("Error: No hay contenido generado para aplicar.");
         return;
@@ -11721,7 +13416,7 @@ window.aplicarCambioTono = async function() {
     // Mostrar spinner de aplicación
     const modalSpinner = document.getElementById("spinnerTono");
     const btnAplicar = document.getElementById("btnAplicarTono");
-    
+
     if (modalSpinner) {
         modalSpinner.classList.remove("hidden");
         modalSpinner.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Aplicando contenido al módulo...`;
@@ -11768,51 +13463,51 @@ window.aplicarCambioTono = async function() {
         alert(`✓ Contenido actualizado con tono ${infoTono.titulo}`);
 
     } catch (err) {
-        
+
         if (modalSpinner) {
             modalSpinner.classList.add("hidden");
         }
         if (btnAplicar) {
             btnAplicar.disabled = false;
         }
-        
+
         alert(`Error al guardar el contenido: ${err.message}`);
     }
 };
 
 // Agrega esto en el DOMContentLoaded o al final de moodleCourse.js
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Conectar botón Cancelar
     const btnCancelarTono = document.getElementById("btnCancelarTono");
     if (btnCancelarTono) {
-        btnCancelarTono.onclick = function() {
+        btnCancelarTono.onclick = function () {
             window.cerrarModalTono();
         };
     }
-    
+
     // Conectar botón Generar Vista Previa
     const btnGenerarTono = document.getElementById("btnGenerarTono");
     if (btnGenerarTono) {
-        btnGenerarTono.onclick = function() {
+        btnGenerarTono.onclick = function () {
             window.generarVistaPreviaTono();
         };
     }
-    
+
     // Conectar botón Aplicar
     const btnAplicarTono = document.getElementById("btnAplicarTono");
     if (btnAplicarTono) {
-        btnAplicarTono.onclick = function() {
+        btnAplicarTono.onclick = function () {
             window.aplicarCambioTono();
         };
     }
-    
+
     // Mostrar descripción cuando se selecciona un tono
     const selectTono = document.getElementById("selectTono");
     if (selectTono) {
         selectTono.addEventListener('change', mostrarDescripcionTono);
-        
+
         // También permitir Enter para generar
-        selectTono.addEventListener('keypress', function(e) {
+        selectTono.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 window.generarVistaPreviaTono();
             }
@@ -11839,7 +13534,7 @@ window.abrirModalCrearTabla = function (moduloId) {
 
     const previewOrigen = document.getElementById("tablaPreviewOrigen");
     if (previewOrigen) {
-        previewOrigen.innerHTML = htmlOriginalModuloTabla || 
+        previewOrigen.innerHTML = htmlOriginalModuloTabla ||
             "<p class='text-xs text-gray-400'>Sin contenido para organizar.</p>";
     }
 
@@ -12004,12 +13699,12 @@ window.copiarTablaPreview = async function () {
 window.activarAccionesEnParrafos = function () {
     // 🔥 CORRECCIÓN: Eliminar completamente los menús contextuales al pasar el mouse
     // Solo dejaremos el menú de formato que aparece al seleccionar texto
-    
+
     // Limpiar cualquier menú contextual existente
     document.querySelectorAll('.parrafo-actions').forEach(el => {
         el.remove();
     });
-    
+
     // También eliminar estilos añadidos anteriormente
     const elementos = document.querySelectorAll(`
         #resultadoGenerado p, #resultadoGenerado li, #resultadoGenerado td, #resultadoGenerado th,
@@ -12023,7 +13718,7 @@ window.activarAccionesEnParrafos = function () {
         #contenidoTraduccionSubtema th, #contenidoTraduccionSubtema h1, #contenidoTraduccionSubtema h2,
         #contenidoTraduccionSubtema h3, #contenidoTraduccionSubtema h4
     `);
-    
+
     // Quitar estilos específicos añadidos anteriormente
     elementos.forEach(el => {
         el.style.position = "";
@@ -12031,7 +13726,7 @@ window.activarAccionesEnParrafos = function () {
         el.style.paddingRight = "";
         el.classList.remove('parrafo-editando');
     });
-    
+
 };
 
 
@@ -12135,7 +13830,7 @@ let currentSelection = null;
 document.addEventListener("DOMContentLoaded", () => {
     formatMenu = document.getElementById("textFormatMenu");
     activarMenuFormatoSeleccion();
-    
+
     // 🔥 AÑADE ESTO para inicializar el modal de reformular
     inicializarModalReformular();
 });
@@ -12144,13 +13839,13 @@ document.addEventListener("DOMContentLoaded", () => {
 function inicializarModalReformular() {
     const radios = document.querySelectorAll('input[name="tipoReformulacion"]');
     const inputPersonalizadoContainer = document.getElementById("inputPersonalizadoContainer");
-    
+
     if (!radios.length) {
         return;
     }
-    
+
     radios.forEach(radio => {
-        radio.addEventListener('change', function() {
+        radio.addEventListener('change', function () {
             if (this.value === "personalizado") {
                 if (inputPersonalizadoContainer) {
                     inputPersonalizadoContainer.classList.remove("hidden");
@@ -12163,11 +13858,11 @@ function inicializarModalReformular() {
             }
         });
     });
-    
+
     // Botón Cancelar
     const btnCancelar = document.getElementById("btnCancelarReformular");
     const btnConfirmar = document.getElementById("btnConfirmarReformular");
-    
+
 }
 
 
@@ -12184,14 +13879,14 @@ function activarMenuFormatoSeleccion() {
 
     // Acciones del menú
     formatMenu.addEventListener("click", (e) => {
-        
+
         const action = e.target.closest("button")?.dataset?.action;
-        
+
         if (!action) return;
-        
+
         // Llamar a la función correcta
         ejecutarAccionFormato(action);
-        
+
         formatMenu.classList.add("hidden");
     });
 
@@ -12208,13 +13903,13 @@ function manejarSeleccionTexto(e) {
         if (!sel.rangeCount) return;
 
         currentSelection = sel.getRangeAt(0);
-        
+
         // 🔥 CORRECCIÓN: Solo mostrar menú si la selección está dentro de .modulo-contenido
         const commonAncestor = currentSelection.commonAncestorContainer;
         const isInsideModuloContenido = commonAncestor.closest?.('.modulo-contenido');
         const isInsideGenerado = commonAncestor.closest?.('#resultadoGenerado');
         const isInsideTraduccion = commonAncestor.closest?.('#contenidoTraduccionModulo, #contenidoTraduccionSubtema');
-        
+
         // Si no está en ninguna de estas áreas permitidas, no mostrar menú
         if (!isInsideModuloContenido && !isInsideGenerado && !isInsideTraduccion) {
             formatMenu.classList.add("hidden");
@@ -12246,12 +13941,12 @@ function ejecutarAccionFormato(action) {
             // Usar las funciones existentes para formato
             ejecutarAccionFormatoBase(action);
             break;
-            
+
         case "reformular":
             // 🔥 CORRECCIÓN: Abrir modal en lugar de reformular automáticamente
             mostrarModalReformular();
             break;
-            
+
         case "delete":
             eliminarSeleccion();
             break;
@@ -12262,16 +13957,16 @@ function ejecutarAccionFormato(action) {
 function ejecutarAccionFormatoBase(action) {
     const range = currentSelection.cloneRange();
     const container = range.commonAncestorContainer;
-    
+
     if (container.nodeType === Node.TEXT_NODE) {
         const parent = container.parentElement;
-        
+
         // Si ya tiene el formato y queremos aplicar el mismo, quitar formato
         if (action === "bold" && (parent.tagName === 'STRONG' || parent.tagName === 'B')) {
             limpiarFormatoSeleccionado();
             return;
         }
-        
+
         if (action === "italic" && (parent.tagName === 'EM' || parent.tagName === 'I')) {
             limpiarFormatoSeleccionado();
             return;
@@ -12298,7 +13993,7 @@ function ejecutarAccionFormatoBase(action) {
         if (range.toString().trim() === "" || range.collapsed) {
             return;
         }
-        
+
         range.surroundContents(wrapper);
         guardarContenidoEditado();
     } catch (e) {
@@ -12314,30 +14009,30 @@ function ejecutarAccionFormatoBase(action) {
 
 
 function mostrarModalReformular() {
-    
+
     const modal = document.getElementById("modalReformular");
-    
+
     // Verificar si hay estilos que lo ocultan
 
-    
+
     if (!currentSelection) {
         return;
     }
-    
+
     textoOriginalParaReformular = currentSelection.toString().trim();
     seleccionOriginalParaReformular = currentSelection;
-    
-    
+
+
     if (!textoOriginalParaReformular) {
         alert("No hay texto seleccionado para reformular.");
         return;
     }
-    
+
     if (!modal) {
         alert("Error: No se puede abrir el modal de reformulación");
         return;
     }
-    
+
     const preview = document.getElementById("textoSeleccionadoPreview");
     if (!preview) {
     } else {
@@ -12348,27 +14043,27 @@ function mostrarModalReformular() {
         }
         preview.textContent = textoPreview;
     }
-    
+
     // Resetear valores
     const radioMejorar = document.querySelector('input[name="tipoReformulacion"][value="mejorar"]');
     if (radioMejorar) {
         radioMejorar.checked = true;
     }
-    
+
     const inputContainer = document.getElementById("inputPersonalizadoContainer");
     if (inputContainer) {
         inputContainer.classList.add("hidden");
     }
-    
+
     const instruccionesInput = document.getElementById("instruccionesPersonalizadas");
     if (instruccionesInput) {
         instruccionesInput.value = "";
     }
-    
+
     // Mostrar modal
     modal.classList.remove("hidden");
     modal.classList.add("flex");
-    
+
     // Enfocar en el modal
     setTimeout(() => {
         document.getElementById("instruccionesPersonalizadas")?.focus();
@@ -12376,12 +14071,12 @@ function mostrarModalReformular() {
 }
 
 // Manejar cambio en tipo de reformulación
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const radios = document.querySelectorAll('input[name="tipoReformulacion"]');
     const inputPersonalizadoContainer = document.getElementById("inputPersonalizadoContainer");
-    
+
     radios.forEach(radio => {
-        radio.addEventListener('change', function() {
+        radio.addEventListener('change', function () {
             if (this.value === "personalizado") {
                 inputPersonalizadoContainer.classList.remove("hidden");
                 document.getElementById("instruccionesPersonalizadas").focus();
@@ -12390,12 +14085,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-    
+
     // Botón Cancelar
-    document.getElementById("btnCancelarReformular").addEventListener("click", function() {
+    document.getElementById("btnCancelarReformular").addEventListener("click", function () {
         document.getElementById("modalReformular").classList.add("hidden");
     });
-    
+
     // Botón Confirmar
     document.getElementById("btnConfirmarReformular").addEventListener("click", ejecutarReformulacionConInstrucciones);
 });
@@ -12404,19 +14099,19 @@ document.addEventListener('DOMContentLoaded', function() {
 async function ejecutarReformulacionConInstrucciones() {
     const modal = document.getElementById("modalReformular");
     const btnConfirmar = document.getElementById("btnConfirmarReformular");
-    
+
     if (!seleccionOriginalParaReformular || !textoOriginalParaReformular) {
         alert("Error: No hay texto seleccionado.");
         return;
     }
-    
+
     // Obtener tipo de reformulación seleccionado
     const tipoSeleccionado = document.querySelector('input[name="tipoReformulacion"]:checked').value;
     const idiomaDetectado = detectarIdiomaParaNotas(textoOriginalParaReformular || "");
-    
+
     // Construir prompt según el tipo
     let instruccionesIA = "";
-    
+
     switch (tipoSeleccionado) {
         case "mejorar":
             instruccionesIA = construirInstruccionReformulacion("mejorar", idiomaDetectado);
@@ -12446,30 +14141,30 @@ async function ejecutarReformulacionConInstrucciones() {
             instruccionesIA = construirInstruccionReformulacion("personalizado", idiomaDetectado, instruccionesPersonal);
             break;
     }
-    
+
     // Mostrar loading
     const originalBtnText = btnConfirmar.innerHTML;
     btnConfirmar.disabled = true;
     btnConfirmar.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Reformulando...';
-    
+
     try {
         // Llamar a la función de IA
         const textoReformulado = await reformularTextoConIA(textoOriginalParaReformular, instruccionesIA, idiomaDetectado);
-        
+
         // Reemplazar el texto en el documento
         seleccionOriginalParaReformular.deleteContents();
         const nuevoNodo = document.createTextNode(textoReformulado);
         seleccionOriginalParaReformular.insertNode(nuevoNodo);
-        
+
         // Guardar cambios
         guardarContenidoEditado();
-        
+
         // Cerrar modal
         modal.classList.add("hidden");
-        
+
         // Mostrar notificación
         mostrarNotificacion("✅ Texto reformulado exitosamente", 'success');
-        
+
     } catch (error) {
         mostrarNotificacion("❌ Error al reformular el texto", 'error');
     } finally {
@@ -12532,7 +14227,7 @@ async function reformularTextoConIA(textoOriginal, instrucciones, idiomaDetectad
         const endpoint = getGeminiEndpoint();
         const idiomaLabel = idiomaDetectado?.label || "español";
         const idiomaCode = idiomaDetectado?.code || "es";
-        
+
         const prompt = `
 ${instrucciones}
 
@@ -12551,25 +14246,25 @@ REGLAS IMPORTANTES:
 - Devuelve SOLO el texto reformulado
 - Mantén la misma longitud aproximada (a menos que sea extender o resumir)
         `;
-        
+
         const { response, data } = await geminiGenerateRequest({
             contents: [{ parts: [{ text: prompt }] }]
         });
-        
+
         if (!response.ok) {
             throw new Error(String(data?.error?.message || data?.error || `Gemini HTTP ${response.status}`));
         }
-        
+
         let textoReformulado = data?.candidates?.[0]?.content?.parts?.[0]?.text || textoOriginal;
-        
+
         // Limpiar respuesta
         textoReformulado = textoReformulado
             .replace(/```/g, "")
             .replace(/^"|"$/g, '')
             .trim();
-        
+
         return textoReformulado;
-        
+
     } catch (error) {
         throw error;
     }
@@ -12589,14 +14284,14 @@ async function reformularSeleccionConIA() {
         // Usar la función de reformular que ya tienes
         if (typeof reformularParrafoConIA === 'function') {
             const textoReformulado = await reformularParrafoConIA(textoSeleccionado);
-            
+
             // Reemplazar la selección
             currentSelection.deleteContents();
             const nuevoNodo = document.createTextNode(textoReformulado);
             currentSelection.insertNode(nuevoNodo);
-            
+
             guardarContenidoEditado();
-            
+
             // Restaurar menú
             menu.innerHTML = originalHTML;
         }
@@ -12607,7 +14302,7 @@ async function reformularSeleccionConIA() {
 
 function eliminarSeleccion() {
     if (!confirm("¿Eliminar el texto seleccionado?")) return;
-    
+
     try {
         currentSelection.deleteContents();
         guardarContenidoEditado();
@@ -12625,19 +14320,19 @@ function limpiarFormatoSeleccionado() {
     if (!sel.rangeCount) return;
 
     const range = sel.getRangeAt(0);
-    
+
     // Obtener el elemento contenedor más cercano
     let container = range.commonAncestorContainer;
-    
+
     // Si el contenedor es un nodo de texto, subir al elemento padre
     if (container.nodeType === Node.TEXT_NODE) {
         container = container.parentElement;
     }
-    
+
     // Verificar si el contenedor ya tiene formato (strong o em)
     const isBold = container.tagName === 'STRONG' || container.tagName === 'B';
     const isItalic = container.tagName === 'EM' || container.tagName === 'I';
-    
+
     if (isBold || isItalic) {
         // Reemplazar el elemento formateado por su contenido
         const fragment = document.createDocumentFragment();
@@ -12645,7 +14340,7 @@ function limpiarFormatoSeleccionado() {
             fragment.appendChild(container.firstChild);
         }
         container.parentNode.replaceChild(fragment, container);
-        
+
         // Restaurar la selección
         const newRange = document.createRange();
         newRange.setStart(fragment, 0);
@@ -12732,7 +14427,7 @@ function guardarContenidoEditado() {
                 return;
             }
         }
-    }   
+    }
 
 }
 
@@ -12809,22 +14504,22 @@ const btnGuardarFirebase = document.getElementById("btnGuardarFirebase");
 if (btnGuardarFirebase) {
     btnGuardarFirebase.addEventListener("click", async () => {
         if (!cursoDocId) return;
-        
+
         // Verificar si el usuario actual tiene permisos para editar
         const cursoActual = cursosUsuario.find(c => c.id === cursoDocId);
-        
+
         if (!cursoActual) {
             alert("Curso no encontrado");
             return;
         }
-        
+
         if (!cursoActual.esPropio && !cursoActual.permisos.editar) {
             alert("No tienes permisos para guardar cambios en este curso");
             return;
         }
-        
+
         await guardarCursoFirebase();
-        
+
         // Feedback visual
         const icon = btnGuardarFirebase.querySelector("i");
         if (!icon) return;
@@ -12925,9 +14620,140 @@ function limpiarEncabezadosDuplicadosWord(html = "", tituloReferencia = "", { qu
 
 function limpiarContenidoModuloParaWord(html = "", modulo = {}) {
     let limpio = String(html || "").trim();
-    limpio = quitarActividadOriginalDelContenido(limpio);
+    limpio = quitarActividadOriginalDelContenido(limpio, {
+        esEncabezadoOriginalWord
+    });
     limpio = limpiarEncabezadosDuplicadosWord(limpio, modulo?.nombre || "", { quitarTituloGenerico: true });
     return limpio;
+}
+
+const WORD_EXPORT_MODE_CONFIG = {
+    visible: "visible",
+    actividad_original: "actividad_original",
+    actividad_propuesta: "actividad_propuesta",
+    mix_original: "mix_original",
+    mix_propuesta: "mix_propuesta"
+};
+
+let pendingWordExportRequest = null;
+
+function normalizarModoExportWord(value = "") {
+    const raw = String(value || "").trim().toLowerCase();
+    return WORD_EXPORT_MODE_CONFIG[raw] || WORD_EXPORT_MODE_CONFIG.visible;
+}
+
+function obtenerTemaCursoPorId(temaId = "", cursoActual = curso) {
+    const temaIdSafe = String(temaId || "").trim();
+    if (!temaIdSafe || !cursoActual?.temas?.length) return null;
+    return cursoActual.temas.find((tema) => String(tema?.id || "").trim() === temaIdSafe) || null;
+}
+
+function obtenerModoExportWordSeleccionado() {
+    const selected = document.querySelector('input[name="exportWordMode"]:checked');
+    return normalizarModoExportWord(selected?.value || WORD_EXPORT_MODE_CONFIG.visible);
+}
+
+function abrirModalExportacionWord() {
+    const modal = document.getElementById("modalExportacionWord");
+    if (!modal) return;
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+}
+
+function cerrarModalExportacionWord() {
+    const modal = document.getElementById("modalExportacionWord");
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+    pendingWordExportRequest = null;
+}
+
+function ocultarModalExportacionWordSinReset() {
+    const modal = document.getElementById("modalExportacionWord");
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+}
+
+async function solicitarExportacionWord(request = {}) {
+    pendingWordExportRequest = request;
+    abrirModalExportacionWord();
+}
+
+function inicializarModalExportacionWord() {
+    const modal = document.getElementById("modalExportacionWord");
+    const btnCancelar = document.getElementById("btnCancelarExportacionWord");
+    const btnConfirmar = document.getElementById("btnConfirmarExportacionWord");
+    if (!modal || modal.dataset.cbBound === "1") return;
+
+    btnCancelar?.addEventListener("click", () => cerrarModalExportacionWord());
+    modal.querySelector('[data-mc-action="cerrar-modal-exportacion-word"]')?.addEventListener("click", () => cerrarModalExportacionWord());
+    modal.addEventListener("click", (event) => {
+        if (event.target === modal) cerrarModalExportacionWord();
+    });
+
+    btnConfirmar?.addEventListener("click", async () => {
+        const request = pendingWordExportRequest;
+        if (!request) {
+            cerrarModalExportacionWord();
+            return;
+        }
+
+        const mode = obtenerModoExportWordSeleccionado();
+        const triggerButton = request.triggerButton || null;
+        if (triggerButton) {
+            triggerButton.disabled = true;
+            triggerButton.classList.add("opacity-50", "cursor-wait");
+        }
+
+        ocultarModalExportacionWordSinReset();
+
+        try {
+            if (request.scope === "tema") {
+                const cursoFuente = request.cursoActual || curso;
+                const temaActual = request.temaActual || obtenerTemaCursoPorId(request.temaId, cursoFuente);
+                if (!temaActual) {
+                    throw new Error(`No se encontró el tema a exportar (${request.temaId || "sin id"}).`);
+                }
+                await exportarTemaWord(temaActual, {
+                    incluirArchivados: mostrarModulosArchivados,
+                    exportMode: mode
+                });
+            } else if (request.scope === "subtema") {
+                const subtemaActual = request.subtemaActual;
+                if (!subtemaActual) {
+                    throw new Error("No se encontró el subtema a exportar.");
+                }
+                await exportarSubtemaWord(subtemaActual, {
+                    incluirArchivados: mostrarModulosArchivados,
+                    exportMode: mode
+                });
+            } else if (request.scope === "curso" && request.cursoActual) {
+                await exportarCursoCompletoWord(request.cursoActual, {
+                    incluirArchivados: mostrarModulosArchivados,
+                    exportMode: mode
+                });
+            }
+        } catch (error) {
+            console.error("Error exportando a Word:", error);
+            alert("Error exportando a Word");
+        } finally {
+            pendingWordExportRequest = null;
+            if (triggerButton) {
+                triggerButton.classList.remove("cursor-wait");
+                triggerButton.classList.remove("opacity-50");
+                if (request.scope === "curso") {
+                    triggerButton.disabled = !curso;
+                    triggerButton.classList.toggle("opacity-50", !curso);
+                    triggerButton.classList.toggle("cursor-not-allowed", !curso);
+                } else {
+                    triggerButton.disabled = false;
+                }
+            }
+        }
+    });
+
+    modal.dataset.cbBound = "1";
 }
 
 function construirIntroduccionWord(value = "", tituloReferencia = "", headingTag = "h3") {
@@ -12949,7 +14775,7 @@ function construirIntroduccionWord(value = "", tituloReferencia = "", headingTag
     `;
 }
 
-function construirContenidoModuloWord(modulo = {}) {
+function construirContenidoModuloWord(modulo = {}, { exportMode = WORD_EXPORT_MODE_CONFIG.visible } = {}) {
     const contenidoBase = construirContenidoHtmlWord(modulo.contenido || "<p>(Sin contenido)</p>")
         .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-background[^"]*shadow-sm[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
         .replace(/<div[^>]*class="[^"]*rounded-lg[^"]*bg-muted\/40[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
@@ -12959,118 +14785,100 @@ function construirContenidoModuloWord(modulo = {}) {
         .replace(/<h1[^>]*class="[^"]*font-semibold[^"]*text-slate-900[^"]*mt-3[^"]*mb-2[^"]*"[^>]*>([\s\S]*?)<\/h1>/gi, '<h2 class="word-titulo2">$1</h2>');
     const contenidoLimpio = limpiarContenidoModuloParaWord(contenidoBase, modulo);
 
-    const instruccionOriginal = modulo.incluirInstruccionOriginalEnPropuesta === true && String(modulo.instrucciones || "").trim()
-        ? `
-            <div class="word-instruccion-original">
-                <h4>Instrucción original</h4>
-                ${convertirInstruccionesOriginalesAHtmlWord(modulo.instrucciones || "")}
-            </div>
-        `
+    const modo = normalizarModoExportWord(exportMode);
+    const mostrarOriginalVisible = modulo.mostrarActividadOriginal !== false;
+    const mostrarPropuestaVisible = modulo.mostrarPropuestaActividad !== false;
+    const mostrarNotasVisibles = modulo.mostrarNotasMaestroInline !== false;
+    const fuenteActivaNotas = inferirFuenteActivaNotasMaestro(modulo);
+
+    const actividadOriginalHtml = String(modulo?.instrucciones || "").trim()
+        ? construirActividadOriginalHtmlModulo(modulo, {
+            hidratarHtmlInstruccionesGemini,
+            sanitizarHtmlEditorial,
+            escapeHtml,
+            instruccionesImagenes: modulo?.instruccionesImagenes || []
+        })
         : "";
+    const propuestaHtml = contenidoLimpio || "";
+    const notasOriginalHtml = construirBloqueNotasMaestroWord(modulo, "actividad_original");
+    const notasPropuestaHtml = construirBloqueNotasMaestroWord(modulo, "propuesta");
+    const notasVisiblesHtml = mostrarNotasVisibles
+        ? construirBloqueNotasMaestroWord(modulo, fuenteActivaNotas)
+        : "";
+
+    const bloques = [];
+    if (modo === WORD_EXPORT_MODE_CONFIG.visible) {
+        if (mostrarNotasVisibles && notasVisiblesHtml) bloques.push(notasVisiblesHtml);
+        if (mostrarOriginalVisible && actividadOriginalHtml) bloques.push(actividadOriginalHtml);
+        if (mostrarPropuestaVisible && propuestaHtml) bloques.push(`<div class="word-propuesta-generada">${propuestaHtml}</div>`);
+    } else if (modo === WORD_EXPORT_MODE_CONFIG.actividad_original) {
+        if (notasOriginalHtml) bloques.push(notasOriginalHtml);
+        if (actividadOriginalHtml) bloques.push(actividadOriginalHtml);
+    } else if (modo === WORD_EXPORT_MODE_CONFIG.actividad_propuesta) {
+        if (notasPropuestaHtml) bloques.push(notasPropuestaHtml);
+        if (propuestaHtml) bloques.push(`<div class="word-propuesta-generada">${propuestaHtml}</div>`);
+    } else if (modo === WORD_EXPORT_MODE_CONFIG.mix_original) {
+        if (notasOriginalHtml) bloques.push(notasOriginalHtml);
+        if (actividadOriginalHtml) bloques.push(actividadOriginalHtml);
+        if (notasPropuestaHtml) bloques.push(notasPropuestaHtml);
+        if (propuestaHtml) bloques.push(`<div class="word-propuesta-generada">${propuestaHtml}</div>`);
+    } else if (modo === WORD_EXPORT_MODE_CONFIG.mix_propuesta) {
+        if (notasPropuestaHtml) bloques.push(notasPropuestaHtml);
+        if (propuestaHtml) bloques.push(`<div class="word-propuesta-generada">${propuestaHtml}</div>`);
+        if (notasOriginalHtml) bloques.push(notasOriginalHtml);
+        if (actividadOriginalHtml) bloques.push(actividadOriginalHtml);
+    }
+
+    const contenidoFinal = bloques.map((block) => String(block || "").trim()).filter(Boolean).join("\n");
+    if (!contenidoFinal) return "";
 
     return `
         <div class="modulo">
             <h3 class="modulo-nombre-word">${escapeHtml(modulo.nombre || "Módulo sin nombre")}</h3>
-            ${instruccionOriginal}
-            <div class="word-propuesta-generada">
-                ${contenidoLimpio || "<p>(Sin contenido)</p>"}
-            </div>
+            ${contenidoFinal}
         </div>
     `;
 }
 
-function construirActividadOriginalHtmlModulo(modulo = {}) {
-    const instruccionesRaw = String(modulo?.instrucciones || "").trim();
-    if (!instruccionesRaw) return "";
-    const hydrated = hidratarHtmlInstruccionesGemini(instruccionesRaw, String(modulo?.id || "").trim());
-    const bodyHtml = instruccionesRaw.includes("<") && instruccionesRaw.includes(">")
-        ? sanitizarHtmlEditorial(hydrated)
-        : `<p>${escapeHtml(hydrated).replace(/\n/g, "<br>")}</p>`;
+function construirBloqueNotasMaestroWord(modulo = {}, source = "") {
+    const html = obtenerNotasGuardadasPorFuente(modulo, source);
+    if (!html) return "";
+
     return `
-        <div class="word-instruccion-original">
-            <h4>Actividad original</h4>
-            <div>${bodyHtml}</div>
+        <div class="word-notas-maestro">
+            <h3 class="word-section-title">Notas del Maestro (${source === "actividad_original" ? "Original" : "Propuesta"})</h3>
+            <div>${html}</div>
         </div>
-    `.trim();
+    `;
 }
-
-function contenidoModuloYaIncluyeActividadOriginal(html = "") {
-    const raw = String(html || "").trim();
-    if (!raw) return false;
-    const root = document.createElement("div");
-    root.innerHTML = raw;
-    if (root.querySelector(".cb-module-block-title.is-original, .word-instruccion-original")) return true;
-    return Array.from(root.querySelectorAll("h1, h2, h3, h4, p, li, blockquote"))
-        .some((node) => esEncabezadoOriginalWord(node.textContent || ""));
-}
-
-function quitarActividadOriginalDelContenido(html = "") {
-    const raw = String(html || "").trim();
-    if (!raw) return "";
-    const root = document.createElement("div");
-    root.innerHTML = raw;
-
-    root.querySelectorAll(".word-instruccion-original").forEach((node) => node.remove());
-
-    const headings = Array.from(root.querySelectorAll(".cb-module-block-title.is-original, h1, h2, h3, h4, p, li, blockquote"));
-    headings.forEach((heading) => {
-        const text = String(heading.textContent || "").trim();
-        const esBloqueOriginal =
-            heading.classList?.contains("is-original") ||
-            esEncabezadoOriginalWord(text);
-        if (!esBloqueOriginal) return;
-
-        let cursor = heading.nextElementSibling;
-        const nodesToRemove = [heading];
-        while (cursor) {
-            const next = cursor.nextElementSibling;
-            const textCursor = String(cursor.textContent || "").trim();
-            const esSiguienteSeparador =
-                cursor.classList?.contains("cb-module-block-title") ||
-                esEncabezadoOriginalWord(textCursor) ||
-                /^propuesta(?:\s+actividad(?:\s+\d+)?)?\b/i.test(textCursor);
-            if (esSiguienteSeparador) break;
-            nodesToRemove.push(cursor);
-            cursor = next;
-        }
-        nodesToRemove.forEach((node) => node.remove());
-    });
-
-    return root.innerHTML.trim();
-}
-
-function aplicarVisibilidadActividadOriginalEnContenido(html = "", modulo = {}, visible = false) {
-    const contenidoBase = String(html || "").trim();
-    const root = document.createElement("div");
-    const contenidoRenderizado = typeof renderizarContenidoModulo === "function"
-        ? renderizarContenidoModulo(contenidoBase, modulo?.tipo || "")
-        : contenidoBase;
-    root.innerHTML = contenidoRenderizado && !/Sin contenido generado/i.test(contenidoRenderizado)
-        ? contenidoRenderizado
-        : "";
-
-    root.innerHTML = quitarActividadOriginalDelContenido(root.innerHTML);
-    if (visible) {
-        const bloqueActividadOriginal = construirActividadOriginalHtmlModulo(modulo);
-        if (bloqueActividadOriginal) {
-            const anchor = root.querySelector(".cb-module-block-title.is-proposal, .cb-module-question-heading, .cb-module-generated-graphic, .cb-module-question-block");
-            if (anchor) {
-                anchor.insertAdjacentHTML("beforebegin", bloqueActividadOriginal);
-            } else if (root.innerHTML.trim()) {
-                root.insertAdjacentHTML("afterbegin", bloqueActividadOriginal);
-            } else {
-                root.innerHTML = bloqueActividadOriginal;
-            }
-        }
-    }
-
-    return normalizarContenidoModuloPersistible(root.innerHTML);
-}
-
-window.aplicarVisibilidadActividadOriginalEnContenido = aplicarVisibilidadActividadOriginalEnContenido;
 
 let moduloActionsFloatingMenu = null;
 let moduloActionsFloatingMenuTrigger = null;
+
+registrarToggleOriginalActivity(window, {
+    getCursoIdModulo: () => String(curso?.id || "").trim() || null,
+    obtenerModulo,
+    sincronizarModuloLocal,
+    renderizarContenidoModulo,
+    normalizarContenidoModuloPersistible,
+    sanitizeRichText,
+    guardarModulo,
+    modulosCache,
+    construirDocIdModulo,
+    getSubtemaActivo: () => window.subtemaActivo,
+    mostrarNotificacion,
+    renderTemas,
+    helpers: {
+        renderizarContenidoModulo,
+        normalizarContenidoModuloPersistible,
+        construirActividadOriginalHtmlModulo,
+        quitarActividadOriginalDelContenido,
+        hidratarHtmlInstruccionesGemini,
+        sanitizarHtmlEditorial,
+        escapeHtml,
+        esEncabezadoOriginalWord
+    }
+});
 
 function obtenerMenuAccionesModuloFlotante() {
     if (moduloActionsFloatingMenu && document.body.contains(moduloActionsFloatingMenu)) {
@@ -13122,7 +14930,7 @@ function posicionarMenuAccionesModuloFlotante(menu, trigger) {
     menu.style.top = `${Math.round(top)}px`;
 }
 
-window.toggleMenuAccionesModulo = function(actionEl) {
+window.toggleMenuAccionesModulo = function (actionEl) {
     const trigger = actionEl?.closest?.(".cb-module-actions-menu__trigger") || null;
     if (!trigger) return;
     const menuRoot = trigger.closest(".cb-module-actions-menu");
@@ -13159,48 +14967,197 @@ window.addEventListener("scroll", () => {
     posicionarMenuAccionesModuloFlotante(moduloActionsFloatingMenu, moduloActionsFloatingMenuTrigger);
 }, true);
 
-window.agregarActividadOriginalAlModulo = async function(moduloId) {
-    const cursoIdModulo = String(curso?.id || "").trim() || null;
-    const modulo = await obtenerModulo(moduloId, cursoIdModulo);
-    if (!modulo) {
-        alert("No se encontró el módulo.");
-        return;
-    }
-    const mostrarActual = modulo.mostrarActividadOriginal !== false;
-    const nuevaVisibilidad = !mostrarActual;
-    const payloadLocal = {
-        mostrarActividadOriginal: nuevaVisibilidad
-    };
+const modulosEnInyeccion = new Set();
 
-    sincronizarModuloLocal(moduloId, cursoIdModulo, payloadLocal);
+function actualizarEstadoBotonesNotasMaestro(card, visibles) {
+    if (!card) return;
 
-    const card = document.getElementById(`modulo-${moduloId}`);
-    if (card) {
-        card.classList.toggle("modulo-original-oculta", !nuevaVisibilidad);
-        const icon = card.querySelector('[data-mc-action="agregar-actividad-original-modulo"] i');
-        if (icon) {
-            icon.classList.toggle("fa-eye", nuevaVisibilidad);
-            icon.classList.toggle("fa-eye-slash", !nuevaVisibilidad);
+    const nextTitle = visibles ? "Ocultar Notas del Maestro" : "Notas del Maestro";
+    const nextAriaLabel = visibles ? "Ocultar Notas del Maestro" : "Notas del Maestro";
+
+    const botonesNotas = card.querySelectorAll('[data-mc-action="toggle-notas-maestro-inline"]');
+    botonesNotas.forEach((btn) => {
+        btn.title = nextTitle;
+        btn.setAttribute("aria-label", nextAriaLabel);
+
+        const textSpan = btn.querySelector("span");
+        if (textSpan) {
+            textSpan.textContent = visibles ? "Ocultar notas del maestro" : "Notas del maestro";
         }
-        const originalBlock = card.querySelector(".word-instruccion-original");
-        if (originalBlock) {
-            originalBlock.hidden = !nuevaVisibilidad;
+    });
+}
+
+function actualizarVisibilidadNotasMaestroEnCard(card, visibles) {
+    if (!card) return;
+    card.classList.toggle("modulo-notas-maestro-ocultas", !visibles);
+
+    const notas = card.querySelectorAll(".notas-maestro-inyectadas");
+    notas.forEach((el) => {
+        if (visibles) {
+            el.classList.remove("hidden");
+            el.hidden = false;
+            el.style.removeProperty("display");
+        } else {
+            el.classList.add("hidden");
+            el.hidden = true;
+            el.style.setProperty("display", "none", "important");
+        }
+    });
+
+    actualizarEstadoBotonesNotasMaestro(card, visibles);
+}
+window.actualizarVisibilidadNotasMaestroEnCard = actualizarVisibilidadNotasMaestroEnCard;
+
+function normalizarBloquesNotasMaestroInyectadas(html = "") {
+    const raw = String(html || "").trim();
+    if (!raw) return raw;
+
+    const root = document.createElement("div");
+    root.innerHTML = raw;
+    const bloques = Array.from(root.querySelectorAll(".notas-maestro-inyectadas"));
+    if (bloques.length <= 1) {
+        return root.innerHTML.trim();
+    }
+
+    bloques.slice(1).forEach((node) => node.remove());
+    return root.innerHTML.trim();
+}
+
+function sincronizarBloqueNotasMaestroDerivado(moduloId, moduloData = {}) {
+    const contenidoDiv = document.getElementById(`contenido-${moduloId}`);
+    if (!contenidoDiv) return;
+
+    const baseHtml = quitarNotasMaestroDelContenido(
+        normalizarBloquesNotasMaestroInyectadas(contenidoDiv.innerHTML)
+    );
+    if (baseHtml !== contenidoDiv.innerHTML.trim()) {
+        contenidoDiv.innerHTML = baseHtml;
+    }
+
+    const mostrar = moduloData?.mostrarNotasMaestroInline !== false;
+    const bloqueNotas = mostrar ? construirBloqueNotasMaestroInyectadasHtml(moduloData) : "";
+    if (bloqueNotas) {
+        contenidoDiv.insertAdjacentHTML("afterbegin", bloqueNotas);
+    }
+}
+window.sincronizarBloqueNotasMaestroDerivado = sincronizarBloqueNotasMaestroDerivado;
+
+function resolverVisibilidadNotasMaestroSnapshot(moduloId, data = {}) {
+    const moduloIdSafe = String(moduloId || "").trim();
+    const remoto = data?.mostrarNotasMaestroInline !== false;
+    window.__pendingNotasMaestroVisibility = window.__pendingNotasMaestroVisibility || {};
+    const pending = window.__pendingNotasMaestroVisibility[moduloIdSafe];
+    if (!pending) return remoto;
+
+    if (Number(pending.until || 0) <= Date.now()) {
+        delete window.__pendingNotasMaestroVisibility[moduloIdSafe];
+        return remoto;
+    }
+
+    if (pending.visible === remoto) {
+        delete window.__pendingNotasMaestroVisibility[moduloIdSafe];
+        return remoto;
+    }
+
+    return pending.visible;
+}
+
+window.inyectarNotasMaestroAlModulo = async function(moduloId, btnElement) {
+    if (!moduloId) return;
+
+    if (modulosEnInyeccion.has(moduloId)) return;
+    modulosEnInyeccion.add(moduloId);
+
+    if (btnElement) {
+        btnElement.disabled = true;
+        btnElement.style.opacity = "0.5";
+        btnElement.classList.add("cursor-not-allowed");
+    }
+
+    try {
+        const contenidoDiv = document.getElementById(`contenido-${moduloId}`);
+        const card = document.getElementById(`modulo-${moduloId}`);
+        if (!contenidoDiv || !card) return;
+
+        const cursoIdModulo = String(curso?.id || "").trim() || null;
+        const modulo = await obtenerModulo(moduloId, cursoIdModulo);
+        const contenidoNormalizado = quitarNotasMaestroDelContenido(
+            normalizarBloquesNotasMaestroInyectadas(contenidoDiv.innerHTML)
+        );
+        if (contenidoNormalizado !== contenidoDiv.innerHTML.trim()) {
+            contenidoDiv.innerHTML = contenidoNormalizado;
+        }
+
+        const notasVisiblesActual = !card.classList.contains("modulo-notas-maestro-ocultas");
+        const moduloIdSafe = String(moduloId || "").trim();
+        const htmlNotas = obtenerNotasGuardadasPorFuente(modulo, inferirFuenteActivaNotasMaestro(modulo))
+            || sanitizarHtmlEditorial(modulo?.notasMaestroInline || "");
+
+        if (!notasVisiblesActual) {
+            if (!htmlNotas) {
+                mostrarNotificacion("No hay notas del maestro guardadas para este módulo.", "warning");
+                return;
+            }
+            window.__pendingNotasMaestroVisibility = window.__pendingNotasMaestroVisibility || {};
+            window.__pendingNotasMaestroVisibility[moduloIdSafe] = {
+                visible: true,
+                until: Date.now() + 5000
+            };
+            window.__suppressModuloUpdatedToast = window.__suppressModuloUpdatedToast || {};
+            window.__suppressModuloUpdatedToast[moduloIdSafe] = Date.now() + 4000;
+            await guardarModulo(moduloId, {
+                contenido: contenidoNormalizado,
+                mostrarNotasMaestroInline: true
+            }, cursoIdModulo);
+            sincronizarModuloLocal(moduloId, cursoIdModulo, {
+                contenido: contenidoNormalizado,
+                notasMaestroInline: modulo?.notasMaestroInline || "",
+                mostrarNotasMaestroInline: true
+            });
+            contenidoDiv.dataset.lastSavedHtml = normalizarContenidoModuloPersistible(
+                sanitizeRichText(contenidoNormalizado)
+            );
+            sincronizarBloqueNotasMaestroDerivado(moduloId, {
+                ...modulo,
+                mostrarNotasMaestroInline: true
+            });
+            actualizarVisibilidadNotasMaestroEnCard(card, true);
+            mostrarNotificacion("Notas del maestro mostradas", "info");
+            return;
+        }
+
+        const nuevaVisibilidad = false;
+        window.__pendingNotasMaestroVisibility = window.__pendingNotasMaestroVisibility || {};
+        window.__pendingNotasMaestroVisibility[moduloIdSafe] = {
+            visible: nuevaVisibilidad,
+            until: Date.now() + 5000
+        };
+        actualizarVisibilidadNotasMaestroEnCard(card, nuevaVisibilidad);
+
+        window.__suppressModuloUpdatedToast = window.__suppressModuloUpdatedToast || {};
+        window.__suppressModuloUpdatedToast[moduloIdSafe] = Date.now() + 4000;
+        await guardarModulo(moduloId, { mostrarNotasMaestroInline: nuevaVisibilidad }, cursoIdModulo);
+        sincronizarModuloLocal(moduloId, cursoIdModulo, {
+            mostrarNotasMaestroInline: nuevaVisibilidad,
+            notasMaestroInline: modulo?.notasMaestroInline || ""
+        });
+        sincronizarBloqueNotasMaestroDerivado(moduloId, {
+            ...modulo,
+            mostrarNotasMaestroInline: nuevaVisibilidad
+        });
+
+        mostrarNotificacion(nuevaVisibilidad ? "Notas mostradas" : "Notas ocultadas", "info");
+    } catch (error) {
+        console.error("Error al alternar notas:", error);
+        mostrarNotificacion("Error al alternar las notas del maestro.", "error");
+    } finally {
+        modulosEnInyeccion.delete(moduloId);
+        if (btnElement) {
+            btnElement.disabled = false;
+            btnElement.style.opacity = "1";
+            btnElement.classList.remove("cursor-not-allowed");
         }
     }
-
-    await guardarModulo(moduloId, payloadLocal, cursoIdModulo);
-
-    const moduloActualizado = {
-        ...modulo,
-        mostrarActividadOriginal: nuevaVisibilidad
-    };
-    modulosCache.set(construirDocIdModulo(moduloId, cursoIdModulo), moduloActualizado);
-    if (window.subtemaActivo?.modulos && Array.isArray(window.subtemaActivo.modulos)) {
-        const target = window.subtemaActivo.modulos.find((item) => String(item?.id || "").trim() === String(moduloId || "").trim());
-        if (target) Object.assign(target, moduloActualizado);
-    }
-    renderTemas();
-    mostrarNotificacion(nuevaVisibilidad ? "Actividad original mostrada." : "Actividad original oculta.", "success");
 };
 
 function limpiarRespuestaTraduccionModulo(texto = "", tipoModulo = "") {
@@ -13238,8 +15195,8 @@ function crearEstilosWordCurso() {
     .modulo { margin: 0 0 24px 0; padding: 0; border: 0; background: transparent; page-break-inside: avoid; }
     .modulo-nombre-word { font-size: 16pt !important; line-height: 1.2 !important; font-weight: 700 !important; margin: 0 0 14px 0 !important; }
     .word-titulo2, .cb-module-block-title { font-size: 14pt !important; font-weight: 700 !important; margin: 18px 0 12px 0 !important; padding-bottom: 0; border-bottom: 0; }
-    .word-instruccion-original { margin: 12px 0 18px 0; padding: 0; border: 0; background: transparent; }
-    .word-instruccion-original h4 { font-size: 12pt !important; margin: 0 0 8px 0 !important; font-weight: 700 !important; }
+    .cb-original-activity-block { margin: 12px 0 18px 0; padding: 0; border: 0; background: transparent; }
+    .cb-original-activity-block h4 { font-size: 12pt !important; margin: 0 0 8px 0 !important; font-weight: 700 !important; }
     .word-propuesta-generada { margin-top: 0; padding: 0; border: 0; }
     .cb-module-original-body { margin-bottom: 18px; padding-bottom: 0; border-bottom: 0; }
     .cb-module-meta-line.is-question { font-weight: 700; margin-bottom: 16px; }
@@ -13255,7 +15212,13 @@ function crearEstilosWordCurso() {
     `;
 }
 
-async function construirDocumentoWordSubtema(subtema) {
+function debeIncluirModuloEnExportWord(modulo = {}, { incluirArchivados = false } = {}) {
+    if (!modulo) return false;
+    if (modulo.archivado === true && !incluirArchivados) return false;
+    return true;
+}
+
+async function construirDocumentoWordSubtema(subtema, { incluirArchivados = false, exportMode = WORD_EXPORT_MODE_CONFIG.visible } = {}) {
     const nombreSubtema = subtema?.nombre || "Subtema";
     const tituloSubtema = escapeHtml(nombreSubtema);
     let html = `
@@ -13284,8 +15247,8 @@ async function construirDocumentoWordSubtema(subtema) {
     } else {
         for (const modId of subtema.modulosIds) {
             const modulo = await obtenerModulo(modId);
-            if (!modulo || modulo.archivado) continue;
-            html += construirContenidoModuloWord(modulo);
+            if (!debeIncluirModuloEnExportWord(modulo, { incluirArchivados })) continue;
+            html += construirContenidoModuloWord(modulo, { exportMode });
         }
     }
 
@@ -13293,14 +15256,93 @@ async function construirDocumentoWordSubtema(subtema) {
     return html;
 }
 
-async function exportarTemaWord(tema) {
+async function exportarSubtemaWord(subtema, { incluirArchivados = false, exportMode = WORD_EXPORT_MODE_CONFIG.visible } = {}) {
+    if (!subtema) {
+        alert("No hay un subtema cargado para exportar.");
+        return;
+    }
+
+    const nombreSubtema = escapeHtml(subtema?.nombre || "Subtema");
 
     let html = `
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>${tema.nombre}</title>
+<title>${nombreSubtema}</title>
+<style>
+    ${crearEstilosWordCurso()}
+    .modulo { margin-top: 15px; }
+</style>
+</head>
+<body>
+
+<h1 class="word-doc-title">${nombreSubtema}</h1>
+`;
+
+    const contenidoGenerado = String(subtema?.contenidoGenerado || "").trim();
+    if (contenidoGenerado) {
+        html += construirIntroduccionWord(contenidoGenerado, subtema?.nombre || "Subtema", "h2");
+    }
+
+    html += `<h2 class="word-section-title">Módulos</h2>`;
+
+    if (!subtema.modulosIds || subtema.modulosIds.length === 0) {
+        html += `<p>(Sin módulos)</p>`;
+    } else {
+        for (const modId of subtema.modulosIds) {
+            const modulo = await obtenerModulo(modId);
+            if (!modulo) {
+                html += `<p>(Módulo no encontrado)</p>`;
+                continue;
+            }
+            if (!debeIncluirModuloEnExportWord(modulo, { incluirArchivados })) continue;
+
+            const moduloHtml = construirContenidoModuloWord(modulo, { exportMode });
+            if (!moduloHtml) continue;
+            html += moduloHtml;
+        }
+    }
+
+    html += `
+</body>
+</html>
+`;
+
+    try {
+        if (!window.htmlDocx?.asBlob) {
+            throw new Error("htmlDocx no está disponible en window");
+        }
+        const blob = window.htmlDocx.asBlob(html);
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = `${sanitizeFilename(subtema?.nombre || "Subtema", "Subtema")}.docx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+        console.error("Error exportando el subtema a Word:", e);
+        alert("Error exportando el subtema a Word");
+    }
+}
+
+async function exportarTemaWord(tema, { incluirArchivados = false, exportMode = WORD_EXPORT_MODE_CONFIG.visible } = {}) {
+    console.log("[WordExport] Iniciando exportación de tema:", tema?.nombre, "Modo:", exportMode);
+    if (!tema) {
+        alert("No hay un tema cargado para exportar.");
+        return;
+    }
+
+    const nombreTema = escapeHtml(tema?.nombre || "Tema");
+
+    let html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${nombreTema}</title>
 <style>
     ${crearEstilosWordCurso()}
     .subtema { margin-top: 25px; }
@@ -13309,40 +15351,47 @@ async function exportarTemaWord(tema) {
 </head>
 <body>
 
-<h1 class="word-doc-title">${tema.nombre}</h1>
+<h1 class="word-doc-title">${nombreTema}</h1>
 `;
 
     // Recorrer todos los subtemas del tema
-    for (const sub of tema.subtemas) {
+    const subtemas = tema.subtemas || [];
+    console.log(`[WordExport] El tema tiene ${subtemas.length} subtemas.`);
+
+    for (const sub of subtemas) {
+        const nombreSubtema = escapeHtml(sub?.nombre || "Subtema");
+        console.log(`[WordExport] Procesando subtema: ${nombreSubtema}`);
 
         html += `
         <div class="subtema">
-            <h2 class="word-subtema-title">${sub.nombre}</h2>
+            <h2 class="word-subtema-title">${nombreSubtema}</h2>
 
-            ${construirIntroduccionWord(sub.contenidoGenerado || "<p>(Sin contenido)</p>", sub.nombre || "Subtema", "h3")}
+            ${construirIntroduccionWord(sub?.contenidoGenerado || "<p>(Sin contenido)</p>", sub?.nombre || "Subtema", "h3")}
 
             <h3 class="word-section-title">Módulos</h3>
         `;
 
         // SI NO TIENE MODULOS
         if (!sub.modulosIds || sub.modulosIds.length === 0) {
+            console.log(`[WordExport] El subtema ${nombreSubtema} no tiene módulos.`);
             html += `<p>(Sin módulos)</p>`;
         } else {
+            console.log(`[WordExport] Cargando ${sub.modulosIds.length} módulos para subtema ${nombreSubtema}`);
 
             // 🔥 Cargar cada módulo desde Firebase
             for (const modId of sub.modulosIds) {
-
+                console.log(`[WordExport] Obteniendo módulo: ${modId}`);
                 const modulo = await obtenerModulo(modId);
 
                 if (!modulo) {
                     html += `<p>(Módulo no encontrado)</p>`;
                     continue;
                 }
-                if (modulo.archivado) {
-                    continue;
-                }
+                if (!debeIncluirModuloEnExportWord(modulo, { incluirArchivados })) continue;
 
-                html += construirContenidoModuloWord(modulo);
+                const moduloHtml = construirContenidoModuloWord(modulo, { exportMode });
+                if (!moduloHtml) continue;
+                html += moduloHtml;
             }
         }
 
@@ -13356,17 +15405,25 @@ async function exportarTemaWord(tema) {
 
     // EXPORTAR A WORD
     try {
+        if (!window.htmlDocx?.asBlob) {
+            throw new Error("htmlDocx no está disponible en window");
+        }
         const blob = window.htmlDocx.asBlob(html);
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${tema.nombre}.docx`;
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = `${sanitizeFilename(tema?.nombre || "Tema", "Tema")}.docx`;
+        document.body.appendChild(a);
         a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
+        console.error("Error exportando el tema a Word:", e);
         alert("Error exportando el tema a Word");
     }
 }
 
-async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = false } = {}) {
+async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = false, exportMode = WORD_EXPORT_MODE_CONFIG.visible } = {}) {
     if (!cursoActual?.temas?.length) {
         alert("No hay un curso cargado para exportar.");
         return;
@@ -13413,9 +15470,10 @@ async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = fals
                 } else {
                     for (const modId of sub.modulosIds) {
                         const modulo = await obtenerModulo(modId);
-                        if (!modulo) continue;
-                        if (modulo.archivado && !incluirArchivados) continue;
-                        html += construirContenidoModuloWord(modulo);
+                        if (!debeIncluirModuloEnExportWord(modulo, { incluirArchivados })) continue;
+                        const moduloHtml = construirContenidoModuloWord(modulo, { exportMode });
+                        if (!moduloHtml) continue;
+                        html += moduloHtml;
                     }
                 }
 
@@ -13432,12 +15490,20 @@ async function exportarCursoCompletoWord(cursoActual, { incluirArchivados = fals
 `;
 
     try {
+        if (!window.htmlDocx?.asBlob) {
+            throw new Error("htmlDocx no está disponible en window");
+        }
         const blob = window.htmlDocx.asBlob(html);
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${cursoActual.nombre || "Curso"}.docx`;
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = `${sanitizeFilename(cursoActual?.nombre || "Curso", "Curso")}.docx`;
+        document.body.appendChild(a);
         a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
+        console.error("Error exportando el curso a Word:", e);
         alert("Error exportando el curso a Word");
     }
 }
@@ -14221,11 +16287,11 @@ async function manejarPegadoImagenGemini(file = null) {
     const editor = obtenerEditorGemini();
     if (!editor) return false;
 
-        const optimized = await optimizarImagenGemini(file);
-        const dataUrl = String(optimized?.dataUrl || "");
-        if (!dataUrl.startsWith("data:image/")) {
-            throw new Error("No se pudo procesar la imagen pegada.");
-        }
+    const optimized = await optimizarImagenGemini(file);
+    const dataUrl = String(optimized?.dataUrl || "");
+    if (!dataUrl.startsWith("data:image/")) {
+        throw new Error("No se pudo procesar la imagen pegada.");
+    }
 
     editor.focus();
     restaurarSeleccionGemini();
@@ -14343,11 +16409,11 @@ function insertTable() {
             </tbody>
         </table>
     `;
-    
+
     // Insertar tabla en la posición actual
     document.execCommand('insertHTML', false, tableHTML);
     guardarSeleccionGemini();
-    
+
     // Actualizar indicador
     updateFormatInfo("Tabla insertada. Puedes editar su contenido.");
 }
@@ -14356,11 +16422,11 @@ function insertTable() {
 function pasteAsPlainText() {
     const editor = obtenerEditorGemini();
     if (!editor) return;
-    
+
     // Enfocar el editor
     editor.focus();
     restaurarSeleccionGemini();
-    
+
     // Usar el comando paste (requiere permisos del navegador)
     try {
         document.execCommand('paste');
@@ -14385,12 +16451,12 @@ async function pasteWithFormat() {
 
     editor.focus();
     restaurarSeleccionGemini();
-    
+
     try {
         // Intentar obtener HTML del portapapeles
         const items = await navigator.clipboard.read();
         let htmlContent = null;
-        
+
         for (const item of items) {
             if (item.types.includes('text/html')) {
                 const blob = await item.getType('text/html');
@@ -14399,7 +16465,7 @@ async function pasteWithFormat() {
                 break;
             }
         }
-        
+
         if (htmlContent) {
             // Extraer solo el body si viene como HTML completo
             const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
@@ -14454,11 +16520,11 @@ function clearFormat() {
 function updateFormatInfo(message) {
     const formatInfo = document.getElementById('formatInfo');
     const formatStatus = document.getElementById('formatStatus');
-    
+
     if (formatInfo && formatStatus) {
         formatStatus.textContent = message;
         formatInfo.classList.remove('hidden');
-        
+
         // Ocultar después de 3 segundos
         setTimeout(() => {
             formatInfo.classList.add('hidden');
@@ -14467,22 +16533,22 @@ function updateFormatInfo(message) {
 }
 
 // Manejar el evento de pegado en el editor
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     inicializarToolbarInstruccionesGemini();
     const editor = obtenerEditorGemini();
-    
+
     if (editor) {
         // Manejar evento de pegado
-        editor.addEventListener('paste', async function(e) {
+        editor.addEventListener('paste', async function (e) {
             const clipboardData = e.clipboardData || window.clipboardData;
             if (!clipboardData) return;
 
-    const items = Array.from(clipboardData.items || []);
-    const imageItems = items.filter((item) => String(item?.type || "").startsWith("image/"));
-    const clipboardHtml = clipboardData.getData('text/html') || "";
-    const clipboardText = clipboardData.getData('text/plain') || "";
-    const htmlTieneImagenes = /<img\b/i.test(clipboardHtml) || /data:image\//i.test(clipboardHtml) || /<figure\b/i.test(clipboardHtml);
-    if (imageItems.length > 0) {
+            const items = Array.from(clipboardData.items || []);
+            const imageItems = items.filter((item) => String(item?.type || "").startsWith("image/"));
+            const clipboardHtml = clipboardData.getData('text/html') || "";
+            const clipboardText = clipboardData.getData('text/plain') || "";
+            const htmlTieneImagenes = /<img\b/i.test(clipboardHtml) || /data:image\//i.test(clipboardHtml) || /<figure\b/i.test(clipboardHtml);
+            if (imageItems.length > 0) {
                 e.preventDefault();
                 try {
                     editor.focus();
@@ -14569,15 +16635,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateFormatInfo("Contenido pegado");
             }, 100);
         });
-        
+
         // Manejar placeholder
-        editor.addEventListener('focus', function() {
+        editor.addEventListener('focus', function () {
             if (this.innerHTML === '<br>' || this.innerHTML.trim() === '') {
                 this.innerHTML = '';
             }
         });
-        
-        editor.addEventListener('blur', function() {
+
+        editor.addEventListener('blur', function () {
             if (this.innerHTML === '' || this.innerHTML === '<br>') {
                 this.innerHTML = '';
             }
@@ -14586,7 +16652,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Modificar la función abrirInstruccionesGemini para manejar HTML
-window.abrirInstruccionesGemini = async function(moduloId) {
+window.abrirInstruccionesGemini = async function (moduloId) {
     inicializarToolbarInstruccionesGemini();
     const cursoIdModulo = String(curso?.id || "").trim() || null;
     let modulo = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
@@ -14614,6 +16680,7 @@ window.abrirInstruccionesGemini = async function(moduloId) {
     // Guardamos referencia al ID, no el objeto
     window.__moduloEditandoInstruccionesId = moduloId;
     window.__moduloEditandoInstruccionesCursoId = String(modulo.cursoId || cursoIdModulo || "").trim();
+    window.__moduloEditandoInstruccionesTipo = String(modulo.tipo || "").trim();
 
     // Obtener el editor
     const editor = document.getElementById('txtModalInstruccionesGemini');
@@ -14621,6 +16688,8 @@ window.abrirInstruccionesGemini = async function(moduloId) {
     const checkIncluirImagenOriginal = document.getElementById('checkIncluirImagenOriginalModulo');
     const checkGenerarGrafico = document.getElementById('checkGenerarGraficoModulo');
     const checkIgnorarContexto = document.getElementById('checkIgnorarContextoOtrosModulos');
+    const checkTranscribirEstructurarMismoTipo = document.getElementById('checkTranscribirEstructurarMismoTipoModulo');
+    const checkDistractoresRetadoresQuiz = document.getElementById('checkDistractoresRetadoresQuizModulo');
     if (!editor) {
         return;
     }
@@ -14669,11 +16738,16 @@ No lo conviertas en lectura extensa, cuestionario ni actividad evaluativa.`
     if (checkIgnorarContexto) {
         checkIgnorarContexto.checked = modulo.ignorarContextoOtrosModulos === true;
     }
-
+    if (checkTranscribirEstructurarMismoTipo) {
+        checkTranscribirEstructurarMismoTipo.checked = modulo.transcribirEstructurarMismoTipoActividad === true;
+    }
+    if (checkDistractoresRetadoresQuiz) {
+        checkDistractoresRetadoresQuiz.checked = modulo.distractoresRetadoresQuiz === true;
+    }
     // Mostrar modal
     document.getElementById("modalInstruccionesGemini").classList.remove("hidden");
     document.getElementById("modalInstruccionesGemini").classList.add("flex");
-    
+
     // Enfocar el editor
     setTimeout(() => {
         editor.focus();
@@ -14689,6 +16763,8 @@ function inicializarEventosModalInstruccionesGemini() {
     const checkIncluirImagenOriginal = document.getElementById("checkIncluirImagenOriginalModulo");
     const checkGenerarGrafico = document.getElementById("checkGenerarGraficoModulo");
     const checkIgnorarContexto = document.getElementById("checkIgnorarContextoOtrosModulos");
+    const checkTranscribirEstructurarMismoTipo = document.getElementById("checkTranscribirEstructurarMismoTipoModulo");
+    const checkDistractoresRetadoresQuiz = document.getElementById("checkDistractoresRetadoresQuizModulo");
     if (!btnCerrar || !btnGuardar || !modal) return;
     if (btnGuardar.dataset.cbBound === "1") return;
 
@@ -14701,6 +16777,7 @@ function inicializarEventosModalInstruccionesGemini() {
     btnCerrar.addEventListener("click", () => {
         window.__moduloEditandoInstruccionesId = null;
         window.__moduloEditandoInstruccionesCursoId = null;
+        window.__moduloEditandoInstruccionesTipo = null;
         modal.classList.add("hidden");
         modal.classList.remove("flex");
     });
@@ -14716,13 +16793,17 @@ function inicializarEventosModalInstruccionesGemini() {
         const moduloActual = (docId && modulosCache.get(docId)) || {};
         const instruccionesImagenes = sanitizarInstruccionesImagenes(moduloActual?.instruccionesImagenes || []);
 
+        const instruccionesNormalizadas = normalizarHtmlInstruccionesGeminiParaEstadoLocal(editor.innerHTML, moduloId, instruccionesImagenes);
         sincronizarModuloLocal(moduloId, cursoIdModulo, {
-            instrucciones: normalizarHtmlInstruccionesGeminiParaEstadoLocal(editor.innerHTML, moduloId, instruccionesImagenes),
+            instrucciones: instruccionesNormalizadas,
             instruccionesImagenes,
             incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
             incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
             generarGrafico: checkGenerarGrafico?.checked === true,
-            ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
+            ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true,
+            transcribirEstructurarMismoTipoActividad: checkTranscribirEstructurarMismoTipo?.checked === true,
+            distractoresRetadoresQuiz: checkDistractoresRetadoresQuiz?.checked === true,
+            ...obtenerPayloadFuentesDestacadasDesdeModal(instruccionesNormalizadas)
         });
     };
 
@@ -14732,10 +16813,9 @@ function inicializarEventosModalInstruccionesGemini() {
         editor.addEventListener("keyup", sincronizarCamposGeminiLocal);
         editor.addEventListener("blur", sincronizarCamposGeminiLocal);
     }
-    [checkIncluirOriginal, checkIncluirImagenOriginal, checkGenerarGrafico, checkIgnorarContexto].forEach(chk => {
+    [checkIncluirOriginal, checkIncluirImagenOriginal, checkGenerarGrafico, checkIgnorarContexto, checkTranscribirEstructurarMismoTipo, checkDistractoresRetadoresQuiz].forEach(chk => {
         if (chk) chk.addEventListener("change", sincronizarCamposGeminiLocal);
     });
-
     btnGuardar.addEventListener("click", async () => {
         const editor = obtenerEditorGemini();
         if (!editor) return;
@@ -14761,7 +16841,10 @@ function inicializarEventosModalInstruccionesGemini() {
                 incluirInstruccionOriginalEnPropuesta: checkIncluirOriginal?.checked === true,
                 incluirImagenOriginalEnPropuesta: checkIncluirImagenOriginal?.checked === true,
                 generarGrafico: checkGenerarGrafico?.checked === true,
-                ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true
+                ignorarContextoOtrosModulos: checkIgnorarContexto?.checked === true,
+                transcribirEstructurarMismoTipoActividad: checkTranscribirEstructurarMismoTipo?.checked === true,
+                distractoresRetadoresQuiz: checkDistractoresRetadoresQuiz?.checked === true,
+                ...obtenerPayloadFuentesDestacadasDesdeModal(contenidoHTML)
             };
 
             sincronizarModuloLocal(moduloId, cursoIdModulo, payloadLocal);
@@ -14774,6 +16857,10 @@ function inicializarEventosModalInstruccionesGemini() {
             const incluirImagenOriginalPersistido = docSnap?.data()?.incluirImagenOriginalEnPropuesta === true;
             const generarGraficoPersistido = docSnap?.data()?.generarGrafico === true;
             const ignorarContextoPersistido = docSnap?.data()?.ignorarContextoOtrosModulos === true;
+            const transcribirEstructurarPersistido = docSnap?.data()?.transcribirEstructurarMismoTipoActividad === true;
+            const distractoresRetadoresPersistido = docSnap?.data()?.distractoresRetadoresQuiz === true;
+            const fuenteUrlPersistida = String(docSnap?.data()?.fuenteDestacadaUrl || "").trim();
+            const fuenteReferenciaPersistida = String(docSnap?.data()?.fuenteDestacadaReferencia || "").trim();
             const instruccionesImagenesPersistidas = JSON.stringify(sanitizarInstruccionesImagenes(docSnap?.data()?.instruccionesImagenes || []));
             const instruccionesImagenesEsperadas = JSON.stringify(payloadLocal.instruccionesImagenes);
 
@@ -14784,7 +16871,11 @@ function inicializarEventosModalInstruccionesGemini() {
                 incluirOriginalPersistido !== payloadLocal.incluirInstruccionOriginalEnPropuesta ||
                 incluirImagenOriginalPersistido !== payloadLocal.incluirImagenOriginalEnPropuesta ||
                 generarGraficoPersistido !== payloadLocal.generarGrafico ||
-                ignorarContextoPersistido !== payloadLocal.ignorarContextoOtrosModulos
+                ignorarContextoPersistido !== payloadLocal.ignorarContextoOtrosModulos ||
+                transcribirEstructurarPersistido !== payloadLocal.transcribirEstructurarMismoTipoActividad ||
+                distractoresRetadoresPersistido !== payloadLocal.distractoresRetadoresQuiz ||
+                fuenteUrlPersistida !== String(payloadLocal.fuenteDestacadaUrl || "").trim() ||
+                fuenteReferenciaPersistida !== String(payloadLocal.fuenteDestacadaReferencia || "").trim()
             ) {
                 throw new Error("Las instrucciones o sus opciones no quedaron persistidas en Firebase.");
             }
@@ -14798,11 +16889,30 @@ function inicializarEventosModalInstruccionesGemini() {
                 const moduloRefrescado = await obtenerModulo(moduloId, cursoIdModulo, { forceRefresh: true });
                 if (moduloRefrescado) {
                     sincronizarModuloLocal(moduloId, cursoIdModulo, moduloRefrescado);
+                    await sincronizarSnapshotActividadOriginal({
+                        moduloId,
+                        data: moduloRefrescado,
+                        renderizarContenidoModulo,
+                        normalizarContenidoModuloPersistible,
+                        sanitizeRichText,
+                        helpers: {
+                            renderizarContenidoModulo,
+                            normalizarContenidoModuloPersistible,
+                            construirActividadOriginalHtmlModulo,
+                            contenidoModuloYaIncluyeActividadOriginal,
+                            quitarActividadOriginalDelContenido,
+                            hidratarHtmlInstruccionesGemini,
+                            sanitizarHtmlEditorial,
+                            escapeHtml,
+                            esEncabezadoOriginalWord
+                        }
+                    });
                 }
             }
 
             window.__moduloEditandoInstruccionesId = null;
             window.__moduloEditandoInstruccionesCursoId = null;
+            window.__moduloEditandoInstruccionesTipo = null;
             modal.classList.add("hidden");
             modal.classList.remove("flex");
 
@@ -14842,12 +16952,12 @@ const APP_VERSION = "2026.04.13-02";
 const storedVersion = localStorage.getItem("APP_VERSION");
 
 if (storedVersion && storedVersion !== APP_VERSION) {
-  localStorage.setItem("APP_VERSION", APP_VERSION);
+    localStorage.setItem("APP_VERSION", APP_VERSION);
 
-  // Fuerza recarga real (equivalente a hard reload)
-  window.location.reload(true);
+    // Fuerza recarga real (equivalente a hard reload)
+    window.location.reload(true);
 } else {
-  localStorage.setItem("APP_VERSION", APP_VERSION);
+    localStorage.setItem("APP_VERSION", APP_VERSION);
 }
 
 function inicializarBotonGuardarSesion() {
@@ -14855,46 +16965,89 @@ function inicializarBotonGuardarSesion() {
     if (!btn) return;
 
     btn.addEventListener("click", async () => {
-        try {
-            updateGlobalSaveStatus(true);
-            
-            // 1. Forzar guardado de módulos editándose
-            const promesasModulos = [];
-            document.querySelectorAll('.contenido-editable').forEach(contenedor => {
-                const modId = contenedor.dataset.moduloId;
-                if (!modId) return;
-
-                // Limpiar timers pendientes
-                if (moduloAutosaveTimers.has(modId)) {
-                    clearTimeout(moduloAutosaveTimers.get(modId));
-                    moduloAutosaveTimers.delete(modId);
-                }
-
-                const htmlCrudo = sanitizeRichText(contenedor.innerHTML);
-                const html = normalizarContenidoModuloPersistible(htmlCrudo);
-                const ultimo = contenedor.dataset.lastSavedHtml || "";
-                
-                if (html !== ultimo) {
-                    promesasModulos.push(guardarModulo(modId, { contenido: html }).then(() => {
-                        contenedor.dataset.lastSavedHtml = html;
-                    }));
-                }
-            });
-
-            if (promesasModulos.length > 0) {
-                await Promise.all(promesasModulos);
-            }
-
-            // 2. Guardar estado general del curso
-            await guardarCursoFirebase();
-
-            mostrarNotificacion("Sesión guardada correctamente", "success");
-        } catch (error) {
-            console.error("Error al guardar sesión:", error);
-            mostrarNotificacion("Error al guardar la sesión completa", "error");
-        } finally {
-            updateGlobalSaveStatus(false);
+        if (saveSessionInFlight) {
+            return saveSessionInFlight;
         }
+
+        const originalHtml = btn.innerHTML;
+
+        saveSessionInFlight = (async () => {
+            try {
+                manualSessionSaveActive = true;
+                refrescarVisibilidadGlobalSaveStatus();
+                btn.disabled = true;
+                btn.classList.add("is-loading");
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Guardando cambios...</span>';
+
+                // 1. Forzar guardado de módulos editándose
+                const promesasModulos = [];
+                document.querySelectorAll('.contenido-editable').forEach(contenedor => {
+                    const modId = contenedor.dataset.moduloId;
+                    if (!modId) return;
+
+                    // Limpiar timers pendientes
+                    if (moduloAutosaveTimers.has(modId)) {
+                        clearTimeout(moduloAutosaveTimers.get(modId));
+                        moduloAutosaveTimers.delete(modId);
+                    }
+
+                    const htmlCrudo = sanitizeRichText(contenedor.innerHTML);
+                    const html = normalizarContenidoModuloPersistible(htmlCrudo);
+                    const ultimo = contenedor.dataset.lastSavedHtml || "";
+
+                    if (html !== ultimo) {
+                        promesasModulos.push(
+                            ejecutarConTimeout(
+                                guardarModulo(modId, { contenido: html }),
+                                SAVE_SESSION_TIMEOUT_MS,
+                                `el módulo ${modId}`
+                            ).then(() => {
+                                contenedor.dataset.lastSavedHtml = html;
+                                return { moduloId: modId, ok: true };
+                            }).catch((error) => {
+                                return { moduloId: modId, ok: false, error };
+                            })
+                        );
+                    }
+                });
+
+                if (promesasModulos.length > 0) {
+                    const resultadosModulos = await Promise.all(promesasModulos);
+                    const fallidos = resultadosModulos.filter((item) => item && item.ok === false);
+                    if (fallidos.length) {
+                        const resumen = fallidos
+                            .slice(0, 3)
+                            .map((item) => `${item.moduloId}: ${item.error?.message || item.error || "Error desconocido"}`)
+                            .join(" | ");
+                        throw new Error(`No se pudieron guardar ${fallidos.length} módulo(s). ${resumen}`);
+                    }
+                }
+
+                // 2. Guardar estado general del curso
+                const guardadoCursoOk = await ejecutarConTimeout(
+                    guardarCursoFirebase(),
+                    SAVE_SESSION_TIMEOUT_MS,
+                    "el curso"
+                );
+                if (guardadoCursoOk !== true) {
+                    throw new Error("El curso no confirmó guardado correctamente.");
+                }
+
+                mostrarNotificacion("Sesión guardada correctamente", "success");
+            } catch (error) {
+                console.error("Error al guardar sesión:", error);
+                mostrarNotificacion("Error al guardar la sesión completa", "error");
+            } finally {
+                manualSessionSaveActive = false;
+                refrescarVisibilidadGlobalSaveStatus();
+                btn.disabled = false;
+                btn.classList.remove("is-loading");
+                btn.innerHTML = originalHtml;
+                saveSessionInFlight = null;
+            }
+        })();
+
+        return saveSessionInFlight;
     });
 
     // Ctrl+S / Cmd+S global
@@ -14916,6 +17069,7 @@ function bootMoodleCourseUI() {
         inicializarPublicarCursoUI();
         inicializarToggleArchivadosUI();
         inicializarBotonExportCursoWord();
+        inicializarModalExportacionWord();
         inicializarBotonGuardarSesion();
         console.log("[Aprende] bootMoodleCourseUI completado.");
     } catch (e) {

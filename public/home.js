@@ -15,7 +15,7 @@ import { firebaseWebConfig, assertFirebaseWebConfig } from "./firebase-web-confi
 import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js?v=2026-1.0.0.59";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
-import { authFetchJson } from "./api-client.js";
+import { authFetchJson, buildApiUrl, hasAvailableApiBase } from "./api-client.js";
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-1.0.1.34";
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
@@ -911,8 +911,8 @@ const configurarEventos = () => {
         const snapPlay = await getDoc(docRefPlay);
         if (snapPlay.exists()) {
           const dataPlay = snapPlay.data();
-          const sessionPlay = dataPlay.session || dataPlay;
-          sessionPlay.id = id;
+          const shallowSession = createDashboardSessionFallback(dataPlay, id);
+          const sessionPlay = await loadFullDashboardPodcasterSession(id, shallowSession);
           abrirReproductorMultimedia(sessionPlay);
         }
       } catch (err) {
@@ -1016,6 +1016,7 @@ async function loadUserAprende() {
         .filter(d => {
           const data = d.data();
           if (data.docType === "module") return false;
+          if (data.archivado === true) return false;
           if (data.docType === "course") return true;
           return !d.id.includes("_") && Array.isArray(data.temas);
         })
@@ -2379,14 +2380,333 @@ async function loadUserPodcasts() {
  * REPRODUCTOR MULTIMEDIA (DASHBOARD)
  */
 let currentMultimediaSession = null;
+let multimediaPlayerUnsubscribe = null;
 let homePlaybackState = {
   stageVideoSlot: 0,
   montageCursorMs: 0,
   montageAudioPlayers: {}
 };
 
+function extractDashboardSessionRows(session = null) {
+  const source = session && typeof session === "object" ? session : {};
+  const scriptRows = Array.isArray(source?.script?.rows) ? source.script.rows : [];
+  const nestedSessionScriptRows = Array.isArray(source?.session?.script?.rows) ? source.session.script.rows : [];
+  const nestedSessionRows = Array.isArray(source?.session?.rows) ? source.session.rows : [];
+  const topRows = Array.isArray(source?.rows) ? source.rows : [];
+  
+  // Recopilar todos los sets de filas no vacíos
+  const candidateSets = [scriptRows, nestedSessionScriptRows, nestedSessionRows, topRows].filter(s => s.length > 0);
+  
+  if (candidateSets.length === 0) {
+     console.warn("[Dashboard] No se encontraron filas en la sesión:", source.id);
+     return [];
+  }
+  if (candidateSets.length === 1) return candidateSets[0];
+  
+  // Si hay varios, mezclarlos secuencialmente
+  let merged = candidateSets[0];
+  for (let i = 1; i < candidateSets.length; i++) {
+    merged = mergeDashboardRows(merged, candidateSets[i]);
+  }
+  return merged;
+}
+
+function pickDashboardRowValue(primaryValue, fallbackValue) {
+  if (typeof primaryValue === "string") {
+    return primaryValue.trim() ? primaryValue : fallbackValue;
+  }
+  if (Array.isArray(primaryValue)) {
+    return primaryValue.length ? primaryValue : (Array.isArray(fallbackValue) ? fallbackValue : primaryValue);
+  }
+  if (primaryValue == null) return fallbackValue;
+  return primaryValue;
+}
+
+function mergeDashboardRowData(primaryRow = null, fallbackRow = null) {
+  const primary = primaryRow && typeof primaryRow === "object" ? primaryRow : {};
+  const fallback = fallbackRow && typeof fallbackRow === "object" ? fallbackRow : {};
+  const merged = { ...fallback, ...primary };
+  [
+    "id",
+    "text",
+    "Guion",
+    "guion",
+    "guión",
+    "voiceOverText",
+    "narration",
+    "voiceOver",
+    "script",
+    "sceneDescription",
+    "description",
+    "Descripción",
+    "onScreenText",
+    "Texto en Pantalla",
+    "visualNotes",
+    "visualElement",
+    "Elemento visual",
+    "Elemento Visual",
+    "visualNotesOriginalText",
+    "visualNotesProposal"
+  ].forEach((key) => {
+    if (key === "visualNotesProposal") {
+      // Para la propuesta activa, respetamos el valor del documento principal incluso si es vacío
+      merged[key] = (primary[key] !== undefined) ? String(primary[key] || "").trim() : pickDashboardRowValue(primary[key], fallback[key]);
+    } else {
+      merged[key] = pickDashboardRowValue(primary[key], fallback[key]);
+    }
+  });
+  // Campos de propuestas: El documento de Firestore (primary) manda sobre la resolución
+  merged.visualNotesProposals = normalizeDashboardProposalState(
+    primary.visualNotesProposals !== undefined
+      ? primary.visualNotesProposals
+      : (fallback.visualNotesProposals || [])
+  );
+  merged.visualNotesResolvedProposals = normalizeDashboardProposalState(
+    primary.visualNotesResolvedProposals !== undefined
+      ? primary.visualNotesResolvedProposals
+      : (fallback.visualNotesResolvedProposals || [])
+  );
+  
+  if (merged.visualNotesProposal || merged.visualNotesProposals?.length > 0) {
+     console.log("[Dashboard] Fila mezclada con propuestas:", merged.id, {
+        active: merged.visualNotesProposal,
+        historyCount: merged.visualNotesProposals?.length
+     });
+  }
+  return merged;
+}
+
+function resolveDashboardRowScript(row = null) {
+  return String(
+    row?.voiceOverText
+    || row?.text
+    || row?.Guion
+    || row?.guion
+    || row?.guión
+    || row?.narration
+    || row?.voiceOver
+    || row?.script
+    || ""
+  ).trim();
+}
+
+function resolveDashboardRowSceneDescription(row = null) {
+  return String(
+    row?.sceneDescription
+    || row?.Descripción
+    || row?.description
+    || row?.scenePrompt
+    || row?.descripcionEscena
+    || row?.descripcionDeEscena
+    || row?.escena
+    || row?.scene
+    || ""
+  ).trim();
+}
+
+function resolveDashboardRowOnScreenText(row = null) {
+  return String(
+    row?.onScreenText
+    || row?.["Texto en pantalla"]
+    || row?.["Texto en Pantalla"]
+    || row?.textoPantalla
+    || row?.textoEnPantalla
+    || ""
+  ).trim();
+}
+
+function resolveDashboardRowVisualNotes(row = null) {
+  return String(
+    row?.visualNotes
+    || row?.visualElement
+    || row?.["Elemento visual"]
+    || row?.["Elemento Visual"]
+    || row?.visual
+    || row?.elementoVisual
+    || row?.elemento_visual
+    || ""
+  ).trim();
+}
+
+function resolveDashboardActiveRow(rows = [], activeEntry = null) {
+  const list = Array.isArray(rows) ? rows : [];
+  const entry = activeEntry && typeof activeEntry === "object" ? activeEntry : null;
+  const byId = entry?.rowId ? list.find((row) => String(row?.id || "").trim() === String(entry.rowId || "").trim()) : null;
+  if (byId) return byId;
+  const idx = Number(entry?.index);
+  if (Number.isFinite(idx) && idx >= 0 && idx < list.length) {
+    return list[idx] || null;
+  }
+  return null;
+}
+
+function mergeDashboardRows(primaryRows = [], fallbackRows = []) {
+  const primaryList = Array.isArray(primaryRows) ? primaryRows : [];
+  const fallbackList = Array.isArray(fallbackRows) ? fallbackRows : [];
+  const mergedRows = [];
+  const fallbackById = new Map();
+  fallbackList.forEach((row, index) => {
+    const key = String(row?.id || `row-index-${index}`).trim();
+    fallbackById.set(key, row);
+  });
+  primaryList.forEach((row, index) => {
+    const key = String(row?.id || `row-index-${index}`).trim();
+    mergedRows.push(mergeDashboardRowData(row, fallbackById.get(key)));
+    fallbackById.delete(key);
+  });
+  fallbackById.forEach((row) => {
+    mergedRows.push(mergeDashboardRowData({}, row));
+  });
+  return mergedRows;
+}
+
+function buildDashboardProposalShallowRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const nextRow = { ...row };
+    // Asegurar IDs y aplicar límites básicos para la vista previa, sin eliminar campos desconocidos
+    if (!nextRow.id) nextRow.id = String(Math.random()).slice(2);
+    if (typeof nextRow.text === "string") nextRow.text = nextRow.text.trim();
+    if (typeof nextRow.voiceOverText === "string") nextRow.voiceOverText = nextRow.voiceOverText.trim();
+    
+    return nextRow;
+  }).filter((row) => row.id);
+}
+
+function cloneDashboardSessionPayload(session = null) {
+  if (!session || typeof session !== "object") return null;
+  try {
+    return JSON.parse(JSON.stringify(session));
+  } catch (_) {
+    return null;
+  }
+}
+
+function findDashboardActiveRowIndex(rows = [], activeRowId = "", activeEntry = null) {
+  const key = String(activeRowId || "").trim();
+  const list = Array.isArray(rows) ? rows : [];
+  let rowIndex = list.findIndex((row) => String(row?.id || "").trim() === key);
+  if (rowIndex === -1 && key.startsWith("row_")) {
+    const idx = parseInt(key.replace("row_", ""), 10);
+    if (!Number.isNaN(idx) && list[idx]) rowIndex = idx;
+  }
+  if (rowIndex === -1 && activeEntry && Number.isFinite(Number(activeEntry.index))) {
+    rowIndex = Number(activeEntry.index);
+  }
+  return rowIndex;
+}
+
+async function loadFullDashboardPodcasterSession(sessionId = "", fallbackSession = null) {
+  const cleanId = String(sessionId || fallbackSession?.id || "").trim();
+  if (!cleanId) return fallbackSession || null;
+  try {
+    const payloadRef = doc(db, "podcaster_sessions_payloads", cleanId);
+    const payloadSnap = await getDoc(payloadRef);
+    const payload = payloadSnap.exists() ? payloadSnap.data()?.payload || null : null;
+    const base = cloneDashboardSessionPayload(payload) || cloneDashboardSessionPayload(fallbackSession) || {};
+    const fallbackClone = cloneDashboardSessionPayload(fallbackSession) || {};
+    if (!base || typeof base !== "object") return fallbackSession || null;
+    base.id = cleanId;
+    const mergedRows = mergeDashboardRows(
+      extractDashboardSessionRows(base),
+      extractDashboardSessionRows(fallbackClone)
+    );
+    if (mergedRows.length) {
+      if (!base.script || typeof base.script !== "object") {
+        base.script = {};
+      }
+      base.script.rows = mergedRows;
+      base.rows = mergedRows;
+    }
+    return base;
+  } catch (error) {
+    console.warn("[Dashboard] No se pudo cargar payload completo de la sesión:", error);
+    return fallbackSession || null;
+  }
+}
+
+function createDashboardSessionFallback(data = null, sessionId = "") {
+  const source = data && typeof data === "object" ? data : {};
+  const nested = source?.session && typeof source.session === "object" ? source.session : {};
+  const base = cloneDashboardSessionPayload(nested) || cloneDashboardSessionPayload(source) || {};
+  if (!base || typeof base !== "object") {
+    return { id: String(sessionId || "").trim() };
+  }
+  const mergedRows = mergeDashboardRows(
+    extractDashboardSessionRows(nested),
+    extractDashboardSessionRows(source)
+  );
+  if (mergedRows.length) {
+    if (!base.script || typeof base.script !== "object") {
+      base.script = {};
+    }
+    base.script.rows = mergedRows;
+    base.rows = mergedRows;
+  }
+  base.id = String(sessionId || base.id || "").trim();
+  return base;
+}
+
+async function mutateDashboardProposalSession(activeRowId = "", mutator = null) {
+  const sessionId = String(currentMultimediaSession?.id || "").trim();
+  const rowId = String(activeRowId || window._currentActiveRowId || "").trim();
+  if (!sessionId || !rowId || typeof mutator !== "function") {
+    return { ok: false, rowIndex: -1, session: currentMultimediaSession };
+  }
+  const sessionRef = doc(db, "podcaster_sessions", sessionId);
+  const payloadRef = doc(db, "podcaster_sessions_payloads", sessionId);
+  const [sessionSnap, payloadSnap] = await Promise.all([getDoc(sessionRef), getDoc(payloadRef)]);
+  const sessionData = sessionSnap.exists() ? (sessionSnap.data() || {}) : {};
+  const payloadSession = payloadSnap.exists() ? payloadSnap.data()?.payload || null : null;
+  const sourceSession = cloneDashboardSessionPayload(payloadSession)
+    || cloneDashboardSessionPayload(sessionData?.session)
+    || cloneDashboardSessionPayload(currentMultimediaSession)
+    || {};
+  sourceSession.id = sessionId;
+  if (!sourceSession.script || typeof sourceSession.script !== "object") {
+    sourceSession.script = {};
+  }
+  const rows = extractDashboardSessionRows(sourceSession).map((row) => ({
+    ...row,
+    visualNotesProposals: Array.isArray(row?.visualNotesProposals) ? [...row.visualNotesProposals] : [],
+    visualNotesResolvedProposals: normalizeDashboardProposalState(row?.visualNotesResolvedProposals)
+  }));
+  if (!Array.isArray(sourceSession.script.rows)) {
+    sourceSession.script.rows = rows;
+  }
+  const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession || sourceSession);
+  const activeEntry = entries.find((entry) => String(entry?.rowId || "").trim() === rowId) || null;
+  const rowIndex = findDashboardActiveRowIndex(rows, rowId, activeEntry);
+  if (rowIndex < 0 || !rows[rowIndex]) {
+    return { ok: false, rowIndex: -1, session: sourceSession };
+  }
+  const changed = mutator(rows, rowIndex, sourceSession) === true;
+  if (!changed) {
+    return { ok: false, rowIndex, session: sourceSession };
+  }
+  sourceSession.script.rows = rows;
+  if (Array.isArray(sourceSession.rows)) {
+    sourceSession.rows = rows;
+  }
+  const proposalRows = buildDashboardProposalShallowRows(rows);
+  const writeOps = [];
+  if (payloadSnap.exists()) {
+    writeOps.push(updateDoc(payloadRef, {
+      payload: sourceSession,
+      updatedAt: new Date().toISOString()
+    }));
+  }
+  writeOps.push(updateDoc(sessionRef, {
+    "session.script.rows": proposalRows,
+    updatedAt: new Date().toISOString()
+  }));
+  await Promise.all(writeOps);
+  currentMultimediaSession = sourceSession;
+  return { ok: true, rowIndex, session: sourceSession };
+}
+
 const storage = getStorage(app);
 const multimediaPlaybackController = new PodcasterPlaybackController();
+const staleProxyMediaUrls = new Set();
 
 function formatMs(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -2395,24 +2715,157 @@ function formatMs(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function resolveStorageVideoUrl(downloadUrl, storagePath) {
-  if (storagePath) {
-    const s = String(storagePath);
-    if (s.startsWith("gs://") || s.startsWith("http")) return s;
-    const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || 'charly-brown.firebasestorage.app';
-    return `gs://${bucket}/${s}`;
+function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = {}) {
+  const clean = String(url || "").trim();
+  if (!clean) return;
+  staleProxyMediaUrls.add(clean);
+  console.warn("[Dashboard] Proxy media marcada como stale:", reason, {
+    url: clean.slice(0, 240),
+    ...payload
+  });
+}
+
+function isMarkedStaleProxyMediaUrl(url = "") {
+  const clean = String(url || "").trim();
+  return clean ? staleProxyMediaUrls.has(clean) : false;
+}
+
+function parseFirebaseStorageObjectUrl(rawUrl = "") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return null;
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    const host = String(parsed.hostname || "").toLowerCase();
+    const isFirebaseStorageHost = (
+      host === "firebasestorage.googleapis.com"
+      || host.endsWith("firebasestorage.app")
+      || host === "storage.googleapis.com"
+    );
+    if (!isFirebaseStorageHost) return null;
+    if (host === "firebasestorage.googleapis.com") {
+      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
+      if (!match) return null;
+      const bucket = String(match[1] || "").trim();
+      let objectPath = String(match[2] || "").trim();
+      if (!bucket || !objectPath) return null;
+      try { objectPath = decodeURIComponent(objectPath); } catch (_) { }
+      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
+        try { objectPath = decodeURIComponent(objectPath); } catch (_) { }
+      }
+      objectPath = objectPath.replace(/^\/+/, "").trim();
+      return objectPath ? { bucket, storagePath: objectPath } : null;
+    }
+    if (host === "storage.googleapis.com") {
+      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
+      if (parts.length < 2) return null;
+      const bucket = String(parts.shift() || "").trim();
+      const normalizedStoragePath = parts.join("/").trim();
+      return bucket && normalizedStoragePath ? { bucket, storagePath: normalizedStoragePath } : null;
+    }
+    const pathname = String(parsed.pathname || "").replace(/^\/+/, "").trim();
+    return pathname ? { bucket: host, storagePath: pathname } : null;
+  } catch (_) {
+    return null;
   }
-  return downloadUrl || "";
+}
+
+function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
+  const cleanStoragePath = String(storagePath || "").trim();
+  if (cleanStoragePath) return cleanStoragePath;
+  const parsed = parseFirebaseStorageObjectUrl(rawUrl);
+  return String(parsed?.storagePath || "").trim();
+}
+
+function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media") {
+  const clean = String(rawUrl || "").trim();
+  const cleanStoragePath = String(storagePath || "").trim();
+  const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
+  if (cleanStoragePath) {
+    const storageProxyUrl = buildApiUrl(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+    if (!isMarkedStaleProxyMediaUrl(storageProxyUrl)) {
+      return storageProxyUrl;
+    }
+  }
+  if (!clean) return "";
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    return buildApiUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
+  } catch (_) {
+    return clean;
+  }
+}
+
+function resolveStorageVideoUrl(downloadUrl, storagePath) {
+  const clean = String(downloadUrl || "").trim();
+  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
+  if (!clean && !cleanStoragePath) return "";
+  if (!hasAvailableApiBase()) return clean;
+  try {
+    if (cleanStoragePath) {
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
+    }
+    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
+    if (clean.startsWith("/api/assets/proxy-image?")) {
+      const parsedProxy = new URL(buildApiUrl(clean), window.location.origin);
+      const nested = String(parsedProxy.searchParams.get("url") || "").trim();
+      return nested ? buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrl(clean);
+    }
+    const parsed = new URL(clean, window.location.origin);
+    const pathname = String(parsed.pathname || "").toLowerCase();
+    const hasVideoExt = /\.(mp4|webm|mov|m4v)(?:$|\?)/i.test(pathname);
+    const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
+    if (isStorageUrl || hasVideoExt) {
+      return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
+    }
+    return clean;
+  } catch (_) {
+    return clean;
+  }
 }
 
 function resolveStorageAudioUrl(downloadUrl, storagePath) {
-  if (storagePath) {
-    const s = String(storagePath);
-    if (s.startsWith("gs://") || s.startsWith("http")) return s;
-    const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || 'charly-brown.firebasestorage.app';
-    return `gs://${bucket}/${s}`;
+  const clean = String(downloadUrl || "").trim();
+  const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
+  if (!clean && !cleanStoragePath) return "";
+  if (!hasAvailableApiBase()) return clean;
+  try {
+    if (cleanStoragePath) {
+      const staleStorageProxyUrl = buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
+      if (isMarkedStaleProxyMediaUrl(staleStorageProxyUrl) && clean) {
+        const parsed = new URL(clean, window.location.origin);
+        return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
+      }
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
+    }
+    if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);
+    if (clean.startsWith("/api/assets/proxy-image?")) {
+      const parsedProxy = new URL(buildApiUrl(clean), window.location.origin);
+      const nested = String(parsedProxy.searchParams.get("url") || "").trim();
+      return nested ? buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(nested)}`) : buildApiUrl(clean);
+    }
+    const parsed = new URL(clean, window.location.origin);
+    const pathname = String(parsed.pathname || "").toLowerCase();
+    const hasAudioExt = /\.(wav|mp3|ogg|m4a|flac)(?:$|\?)/i.test(pathname);
+    const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
+    if (isStorageUrl || hasAudioExt) {
+      return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
+    }
+    return clean;
+  } catch (_) {
+    return clean;
   }
-  return downloadUrl || "";
+}
+
+function normalizeDialogueAudioPlaybackRate(value = 1) {
+  return Math.max(0.5, Math.min(2.25, Number(value || 1) || 1));
+}
+
+function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
+  const key = String(rowId || "").trim();
+  if (!key) return 1;
+  const audioMap = session?.dialogueAudioMap || session?.podcastStudioUiState?.dialogueAudiosByRowId || {};
+  const clip = audioMap?.[key] || null;
+  return normalizeDialogueAudioPlaybackRate(clip?.playbackRate || 1);
 }
 
 let cachedRuntimeEntries = null;
@@ -2433,7 +2886,7 @@ const multimediaPlaybackDeps = {
     }
     
     console.log("[Dashboard] Building timeline runtime entries (fresh)...");
-    const rows = s?.rows || s?.script?.rows || [];
+    const rows = extractDashboardSessionRows(s);
     const videoConfig = s?.podcastVideoConfig || s?.script?.podcastVideoConfig || {};
     const ui = s?.podcastStudioUiState || {};
 
@@ -2449,11 +2902,13 @@ const multimediaPlaybackDeps = {
 
       const sceneClip = videoMap[rowId];
       const audioClip = audioMap[rowId];
+      const clipPlaybackRate = resolveDialogueAudioPlaybackRate(s, rowId);
+      const effectiveAudioDurationMs = Math.round((Number(audioClip?.durationSec || 0) * 1000) / clipPlaybackRate);
 
       if (!sceneClip && !audioClip) return null;
 
       if (!clip) {
-        const durationSec = Number(audioClip?.durationSec || 8);
+        const durationSec = Math.max(0.5, effectiveAudioDurationMs > 0 ? (effectiveAudioDurationMs / 1000) : Number(audioClip?.durationSec || 8));
         clip = {
           rowId,
           startMs: currentMs,
@@ -2486,7 +2941,7 @@ const multimediaPlaybackDeps = {
           url: String(audioClip?.downloadUrl || "").trim(),
           mimeType: "audio/wav"
         },
-        audioDurationMs: Number(audioClip?.durationSec || 0) * 1000,
+        audioDurationMs: Math.round((Number(audioClip?.durationSec || 0) * 1000) / clipPlaybackRate),
         zIndex: Number(clip.zIndex || index + 1)
       };
 
@@ -2494,7 +2949,7 @@ const multimediaPlaybackDeps = {
       if (rawDur > 0 && rawDur < 100) rawDur *= 1000;
       
       if (rawDur <= 0) {
-        rawDur = Number(audioClip?.durationSec || 0) * 1000;
+        rawDur = effectiveAudioDurationMs;
       }
       
       if (rawDur <= 0) rawDur = 3000;
@@ -2524,10 +2979,8 @@ const multimediaPlaybackDeps = {
   resolveFirebaseStorageUrl: async (gsPath) => {
     if (!gsPath) return "";
     try {
-      const config = window.__CHARLY_CONFIG__ || {};
-      const apiBase = (config.apiBaseUrl || "").replace(/\/api$/, "");
-      if (apiBase) {
-        const proxyUrl = `${apiBase}/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`;
+      const proxyUrl = buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`);
+      if (proxyUrl) {
         return proxyUrl;
       }
       return gsPath;
@@ -2594,25 +3047,47 @@ const multimediaPlaybackDeps = {
       cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
     }
     
+    const existingOnScreenTextClips = s?.timelineOnScreenTextClipsByRowId
+      || s?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
+      || s?.script?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
+      || s?.podcastStudioUiState?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
+      || s?.podcastStudioUiState?.timelineOnScreenTextClipsByRowId
+      || {};
+
     if (!cfg.timelineOnScreenTextClipsByRowId) {
       const textClips = {};
       const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
       entries.forEach(entry => {
-        const allRows = s.rows || s.script?.rows || [];
+        const allRows = extractDashboardSessionRows(s);
         const row = allRows.find(r => r.id === entry.rowId);
         const dialogueText = row?.onScreenText || row?.text || "";
+        const savedClip = existingOnScreenTextClips?.[entry.rowId] || null;
         if (dialogueText) {
           textClips[entry.rowId] = {
             id: `text_${entry.rowId}`,
             rowId: entry.rowId,
             startMs: entry.startMs,
             durationMs: entry.durationMs,
-            onScreenText: dialogueText
+            onScreenText: dialogueText,
+            hidden: savedClip?.hidden === true,
+            autoHidden: savedClip?.autoHidden === true
           };
         }
       });
       cfg.timelineOnScreenTextClipsByRowId = textClips;
       console.log("[Dashboard] Synthesized on-screen text clips:", Object.keys(textClips).length);
+    } else if (existingOnScreenTextClips && Object.keys(existingOnScreenTextClips).length) {
+      cfg.timelineOnScreenTextClipsByRowId = Object.fromEntries(
+        Object.entries(cfg.timelineOnScreenTextClipsByRowId || {}).map(([rowId, clip]) => {
+          const savedClip = existingOnScreenTextClips?.[rowId] || null;
+          if (!savedClip) return [rowId, clip];
+          return [rowId, {
+            ...clip,
+            hidden: savedClip?.hidden === true,
+            autoHidden: savedClip?.autoHidden === true
+          }];
+        })
+      );
     }
     
     cachedVideoConfig = cfg;
@@ -2645,9 +3120,18 @@ const multimediaPlaybackDeps = {
         const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession);
         const activeEntry = entries.find(e => current >= e.startMs && current < e.endMs);
         if (activeEntry) {
-          const rows = currentMultimediaSession.rows || currentMultimediaSession.script?.rows || [];
-          const row = rows.find(r => r.id === activeEntry.rowId);
+          const rows = extractDashboardSessionRows(currentMultimediaSession);
+          const row = resolveDashboardActiveRow(rows, activeEntry);
           
+          if (!row) {
+             console.warn("[Dashboard] Fila no encontrada para activeEntry:", activeEntry);
+          } else {
+             console.log("[Dashboard] Renderizando fila:", row.id, {
+                visualNotesProposal: row.visualNotesProposal,
+                visualNotesProposals: row.visualNotesProposals,
+                visualNotesResolvedProposals: row.visualNotesResolvedProposals
+             });
+          }
           const scriptEl = document.getElementById("infoSceneScript");
           const descEl = document.getElementById("infoSceneDesc");
           const ostEl = document.getElementById("infoSceneOST");
@@ -2658,38 +3142,54 @@ const multimediaPlaybackDeps = {
           // Guardar el ID actual para el guardado
           window._currentActiveRowId = activeEntry.rowId;
 
-          if (scriptEl) scriptEl.textContent = row?.text || "--";
-          if (descEl) descEl.textContent = row?.sceneDescription || row?.description || "--";
-          if (ostEl) ostEl.textContent = row?.onScreenText || "--";
+          if (scriptEl) scriptEl.textContent = resolveDashboardRowScript(row) || "--";
+          if (descEl) descEl.textContent = resolveDashboardRowSceneDescription(row) || "--";
+          if (ostEl) ostEl.textContent = resolveDashboardRowOnScreenText(row) || "--";
           
           if (visualEl) {
-            if (row?.visualNotesOriginalStored === true && row?.visualNotesOriginalText !== row?.visualNotes) {
-              visualEl.innerHTML = `<span style="color: #10b981; font-size: 10px; display: block; margin-bottom: 2px;">(PROPUESTA APLICADA)</span>${row.visualNotes}<br><small style="color: #64748b; font-size: 9px; display: block; margin-top: 4px;">Original: ${row.visualNotesOriginalText}</small>`;
+            const visualNotes = resolveDashboardRowVisualNotes(row);
+            const activeProposal = resolveDashboardDisplayedVisualProposal(row);
+            const isResolved = isDashboardProposalResolved(row, activeProposal);
+            
+            if (row?.visualNotesOriginalStored === true && row?.visualNotesOriginalText !== visualNotes) {
+              visualEl.innerHTML = `<span class="proposal-badge is-realized" style="margin-bottom: 4px;">PROPUESTA APLICADA</span><br>${visualNotes}<br><small style="color: #64748b; font-size: 9px; display: block; margin-top: 4px;">Original: ${row.visualNotesOriginalText}</small>`;
+            } else if (activeProposal && !isResolved) {
+              visualEl.innerHTML = `<span class="proposal-badge is-pending" style="margin-bottom: 4px;">PROPUESTA ACTIVA</span><br>${activeProposal}<br><small style="color: #64748b; font-size: 9px; display: block; margin-top: 4px;">Original: ${visualNotes || "--"}</small>`;
             } else {
-              visualEl.textContent = row?.visualNotes || row?.visualElement || "--";
+              visualEl.textContent = visualNotes || "--";
             }
           }
 
           // Propuesta Pendiente (Aparte)
           const activeProposalGroup = document.getElementById("infoSceneActiveProposalGroup");
           const activeProposalEl = document.getElementById("infoSceneActiveProposal");
+          const displayedProposal = resolveDashboardDisplayedVisualProposal(row);
           if (activeProposalGroup && activeProposalEl) {
-            if (row?.visualNotesProposal) {
+            const activeProposalBadge = activeProposalGroup.querySelector(".info-label");
+            if (displayedProposal) {
               activeProposalGroup.style.display = "block";
-              activeProposalEl.textContent = row.visualNotesProposal;
-              activeProposalEl.classList.toggle("is-resolved", isDashboardProposalResolved(row, row.visualNotesProposal));
+              activeProposalEl.textContent = displayedProposal;
+              const isResolved = isDashboardProposalResolved(row, displayedProposal);
+              activeProposalEl.classList.toggle("is-resolved", isResolved);
+              activeProposalEl.style.textDecoration = isResolved ? "line-through" : "none";
+              activeProposalEl.style.color = isResolved ? "#10b981" : "inherit";
+              
+              if (activeProposalBadge) {
+                 activeProposalBadge.style.backgroundColor = isResolved ? "#10b981" : "#fbbf24";
+                 activeProposalBadge.textContent = isResolved ? "PROPUESTA REALIZADA" : "PROPUESTA ACTIVA";
+              }
               
               const btnApply = document.getElementById("btnApplyActiveProposal");
               const btnDelete = document.getElementById("btnDeleteActiveProposal");
               
               if (btnApply) {
                  btnApply.onclick = async () => {
-                    await aplicarPropuestaDesdeDashboard(row.visualNotesProposal);
+                    await aplicarPropuestaDesdeDashboard(displayedProposal);
                  };
               }
               if (btnDelete) {
                  btnDelete.onclick = async () => {
-                    await eliminarPropuestaDesdeDashboard(row.visualNotesProposal);
+                    await eliminarPropuestaDesdeDashboard(displayedProposal);
                  };
               }
             } else {
@@ -2704,35 +3204,48 @@ const multimediaPlaybackDeps = {
           const proposalsGroup = document.getElementById("infoSceneProposalsGroup");
           const proposalsList = document.getElementById("infoSceneProposalsList");
           if (proposalsList) {
-             const proposals = Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : (row?.visualNotesProposal ? [row.visualNotesProposal] : []);
-             if (proposals.length > 0) {
+             const history = Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : [];
+             const active = row?.visualNotesProposal ? [row.visualNotesProposal] : [];
+             const resolved = Array.isArray(row?.visualNotesResolvedProposals) ? row.visualNotesResolvedProposals : [];
+             
+             // Mezclar todo y quitar duplicados manteniendo orden
+             const allUnique = Array.from(new Set([...history, ...active, ...resolved])).map(p => String(p || "").trim()).filter(Boolean);
+             
+             console.log("[Dashboard] Propuestas encontradas:", allUnique.length, allUnique);
+             
+             if (allUnique.length > 0) {
                 if (proposalsGroup) proposalsGroup.style.display = "block";
-                proposalsList.innerHTML = proposals.map((p, pIdx) => `
-                   <div class="proposal-item-dashboard${isDashboardProposalResolved(row, p) ? " is-resolved" : ""}" style="font-size: 11px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                      <span style="flex: 1;">${p}</span>
-                      <button class="btn-apply-proposal-dashboard" data-proposal-text="${p.replace(/"/g, '&quot;')}" style="background: none; border: none; color: #10b981; cursor: pointer; padding: 2px;" title="Aplicar esta propuesta">
-                         <i class="fas fa-check-circle"></i>
-                      </button>
-                      <button class="btn-delete-proposal-dashboard" data-proposal-text="${p.replace(/"/g, '&quot;')}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px;" title="Marcar propuesta como realizada">
-                         <i class="fas fa-trash"></i>
-                      </button>
-                   </div>
-                `).join("");
-
-                // Agregar listeners a los nuevos botones
-                proposalsList.querySelectorAll(".btn-apply-proposal-dashboard").forEach(btn => {
-                   btn.onclick = async (e) => {
-                      const text = e.currentTarget.dataset.proposalText;
-                      await aplicarPropuestaDesdeDashboard(text);
-                   };
-                });
-
-                proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(btn => {
-                   btn.onclick = async (e) => {
-                      const text = e.currentTarget.dataset.proposalText;
-                      await eliminarPropuestaDesdeDashboard(text);
-                   };
-                });
+                const resolvedSet = new Set(normalizeDashboardProposalState(resolved));
+                
+                const html = allUnique.map((p) => {
+                   const text = String(p || "").trim();
+                   const isDone = resolvedSet.has(text);
+                   const escaped = text.replace(/"/g, '&quot;');
+                    return `
+                       <div class="proposal-item-dashboard${isDone ? " is-resolved" : " is-pending"}" style="padding: 10px 14px; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                          <div style="color: ${isDone ? "#10b981" : "#fcd34d"}; text-decoration: ${isDone ? "line-through" : "none"}; line-height: 1.5; font-weight: 500; font-size: 11px; flex: 1;">${text}</div>
+                          <div style="display: flex; gap: 8px; flex: 0 0 auto;">
+                             ${isDone ? `
+                                <button class="btn-unresolve-proposal-dashboard" data-proposal-text="${escaped}" style="background: rgba(251, 191, 36, 0.1); border: none; color: #fbbf24; cursor: pointer; padding: 4px; border-radius: 4px;" title="Restaurar a pendientes">
+                                   <i class="fas fa-undo"></i>
+                                </button>
+                             ` : `
+                                <button class="btn-apply-proposal-dashboard" data-proposal-text="${escaped}" style="background: rgba(59, 130, 246, 0.1); border: none; color: #3b82f6; cursor: pointer; padding: 4px; border-radius: 4px;" title="Seleccionar oficial">
+                                   <i class="fas fa-thumbtack"></i>
+                                </button>
+                                <button class="btn-delete-proposal-dashboard" data-proposal-text="${escaped}" style="background: rgba(16, 185, 129, 0.1); border: none; color: #10b981; cursor: pointer; padding: 4px; border-radius: 4px;" title="Marcar realizada">
+                                   <i class="fas fa-check-circle"></i>
+                                </button>
+                             `}
+                          </div>
+                       </div>
+                    `;
+                }).join("");
+                
+                proposalsList.innerHTML = html;
+                proposalsList.querySelectorAll(".btn-apply-proposal-dashboard").forEach(b => b.onclick = (e) => aplicarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
+                proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(b => b.onclick = (e) => eliminarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
+                proposalsList.querySelectorAll(".btn-unresolve-proposal-dashboard").forEach(b => b.onclick = (e) => unresolvePropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
              } else {
                 if (proposalsGroup) proposalsGroup.style.display = "none";
                 proposalsList.innerHTML = "";
@@ -2792,10 +3305,7 @@ const multimediaPlaybackDeps = {
 
     // Resolución final (gs:// -> Proxy)
     if (finalUrl && String(finalUrl).startsWith('gs://')) {
-      const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || 'charly-brown.firebasestorage.app';
-      const gsPath = finalUrl.startsWith('gs://') ? finalUrl : `gs://${bucket}/${finalUrl}`;
-      const apiBase = (window.__CHARLY_CONFIG__?.apiBaseUrl || "").replace(/\/api$/, "");
-      finalUrl = `${apiBase}/api/assets/proxy-media?storagePath=${encodeURIComponent(gsPath)}`;
+      finalUrl = resolveStorageAudioUrl("", finalUrl);
     }
     
     cfg.sourceUrl = finalUrl;
@@ -2828,7 +3338,9 @@ const multimediaPlaybackDeps = {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   },
   resolveDialogueAudioForRow: (s, rowId) => (s?.dialogueAudioMap || s?.podcastStudioUiState?.dialogueAudiosByRowId)?.[rowId],
+  resolveDialogueAudioPlaybackRate: (s, rowId) => resolveDialogueAudioPlaybackRate(s, rowId),
   resolveStorageAudioUrl: (url, path) => resolveStorageAudioUrl(url, path),
+  markStaleProxyMediaUrl,
   ensureTimelineClipsByRowId: (s) => s?.timelineClipMap || s?.podcastStudioUiState?.timelineClipsByRowId || {},
   resolveTimelineClipMix: (s, rowId) => (s?.timelineClipMixes || s?.podcastStudioUiState?.timelineClipMixesByRowId || s?.podcastStudioUiState?.timelineClipMixes)?.[rowId] || { voiceVolume: 1, backgroundVolume: 1, videoVolume: 1 },
   getOnScreenTextClipEffectiveDurationMs: (c) => c?.durationMs || 0,
@@ -2896,6 +3408,10 @@ function initMultimediaPlayer() {
 
   document.getElementById("cerrarMultimediaPlayer")?.addEventListener("click", () => {
     multimediaPlaybackController.stop();
+    if (multimediaPlayerUnsubscribe) {
+      multimediaPlayerUnsubscribe();
+      multimediaPlayerUnsubscribe = null;
+    }
     document.getElementById("modalMultimediaPlayer").classList.add("hidden");
   });
 
@@ -2951,6 +3467,13 @@ function initMultimediaPlayer() {
 
 async function abrirReproductorMultimedia(session) {
   currentMultimediaSession = session;
+  const sessionId = String(session?.id || "").trim();
+  
+  if (multimediaPlayerUnsubscribe) {
+    multimediaPlayerUnsubscribe();
+    multimediaPlayerUnsubscribe = null;
+  }
+
   const modal = document.getElementById("modalMultimediaPlayer");
   const title = document.getElementById("playerTitle");
   const btnToggle = document.getElementById("btnToggleSceneInfo");
@@ -2958,56 +3481,53 @@ async function abrirReproductorMultimedia(session) {
 
   if (modal) {
     modal.classList.remove("hidden");
+
+    // Iniciar listeners en tiempo real para propuestas y cambios (Shallow + Payload)
+    if (sessionId) {
+      const sessionRef = doc(db, "podcaster_sessions", sessionId);
+      const payloadRef = doc(db, "podcaster_sessions_payloads", sessionId);
+      
+      const updateFn = (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const incomingRows = extractDashboardSessionRows(data?.payload ? data.payload : data);
+        
+        if (currentMultimediaSession && incomingRows.length > 0) {
+           const currentRows = extractDashboardSessionRows(currentMultimediaSession);
+           const updatedRows = mergeDashboardRows(incomingRows, currentRows);
+           
+           currentMultimediaSession = {
+             ...currentMultimediaSession,
+             ...(data?.payload ? data.payload : data),
+             script: {
+               ...(currentMultimediaSession.script || {}),
+               rows: updatedRows
+             }
+           };
+           
+           if (!modal.classList.contains("hidden")) {
+             multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+           }
+        }
+      };
+
+      multimediaPlayerUnsubscribe = onSnapshot(sessionRef, updateFn);
+      
+      // Listener adicional para el payload por si las propuestas solo están ahí
+      const payloadUnsub = onSnapshot(payloadRef, updateFn);
+      const originalUnsub = multimediaPlayerUnsubscribe;
+      multimediaPlayerUnsubscribe = () => {
+         originalUnsub();
+         payloadUnsub();
+      };
+    }
+
     if (title) title.textContent = session.title || "Sin título";
-    
-    // Resetear panel lateral
     if (sidePanel) sidePanel.classList.remove("is-open");
     if (btnToggle) btnToggle.classList.remove("active");
 
-    // Resetear monitor de escena
-    ["infoSceneScript", "infoSceneDesc", "infoSceneOST", "infoSceneVisual"].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = "--";
-    });
-    const timeEl = document.getElementById("infoSceneTime");
-    if (timeEl) timeEl.textContent = "00:00.0";
-    
-    // Inicializar con la primera escena
-    const rows = session.rows || session.script?.rows || [];
-    if (rows.length > 0) {
-      window._currentActiveRowId = rows[0].id;
-      const first = rows[0];
-      if (document.getElementById("infoSceneScript")) document.getElementById("infoSceneScript").textContent = first.text || "--";
-      if (document.getElementById("infoSceneDesc")) document.getElementById("infoSceneDesc").textContent = first.sceneDescription || first.description || "--";
-      if (document.getElementById("infoSceneOST")) document.getElementById("infoSceneOST").textContent = first.onScreenText || "--";
-      if (document.getElementById("infoSceneVisual")) {
-        const visualEl = document.getElementById("infoSceneVisual");
-        const proposal = first.visualNotesProposal;
-        visualEl.innerHTML = proposal ? `<strong>(PROPUESTA ACTIVA)</strong><br>${proposal}` : (first.visualNotes || "--");
-        
-        // Historial de propuestas
-        const proposalsList = document.getElementById("infoSceneProposalsList");
-        const proposalsGroup = document.getElementById("infoSceneProposalsGroup");
-        const activeProposalEl = document.getElementById("infoSceneActiveProposal");
-        if (proposalsList) {
-          const proposals = Array.isArray(first.visualNotesProposals) ? first.visualNotesProposals : (first.visualNotesProposal ? [first.visualNotesProposal] : []);
-          if (proposals.length > 0) {
-            if (proposalsGroup) proposalsGroup.style.display = "block";
-            proposalsList.innerHTML = proposals.map(p => `
-              <div class="proposal-item-dashboard${isDashboardProposalResolved(first, p) ? " is-resolved" : ""}" style="font-size: 11px; padding: 4px 8px;">${p}</div>
-            `).join("");
-          } else {
-            if (proposalsGroup) proposalsGroup.style.display = "none";
-          }
-        }
-        if (activeProposalEl) {
-          activeProposalEl.classList.toggle("is-resolved", isDashboardProposalResolved(first, proposal));
-        }
-      }
-      if (document.getElementById("infoSceneProposalText")) {
-        document.getElementById("infoSceneProposalText").value = "";
-      }
-    }
+    // Forzar un primer renderizado de la UI de transporte (que incluye el monitor de escena)
+    multimediaPlaybackDeps.updatePodcastVideoTransportUi();
 
     multimediaPlaybackController.sync(session);
     multimediaPlaybackController.stop();
@@ -3033,130 +3553,25 @@ async function abrirReproductorMultimedia(session) {
         try {
           btn.disabled = true;
           btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
-          
-          const sessionRef = doc(db, "podcaster_sessions", currentMultimediaSession.id);
-          console.log("[Dashboard] Intentando guardar en Firebase:", sessionRef.path);
-          const snap = await getDoc(sessionRef);
-          
-          if (snap.exists()) {
-            const data = snap.data();
-            console.log("[Dashboard] DATOS COMPLETOS DE FIREBASE:", JSON.stringify(data).substring(0, 1000) + "...");
-            
-            // BUSQUEDA PROFUNDA DE FILAS (Prioridad al objeto session)
-            let rows = [];
-            const s = data.session || {};
-            
-            if (s.script?.rows) rows = s.script.rows;
-            else if (s.rows) rows = s.rows;
-            else if (data.script?.rows) rows = data.script.rows;
-            else if (data.rows) rows = data.rows;
-            else if (s.podcastStudioUiState?.rows) rows = s.podcastStudioUiState.rows;
-            else {
-               // Fuerza bruta: buscar el primer array que parezca una lista de filas
-               const searchIn = (obj) => {
-                  for (const key in obj) {
-                     if (Array.isArray(obj[key]) && obj[key].length > 0 && (obj[key][0].id || obj[key][0].text)) return obj[key];
-                     if (obj[key] && typeof obj[key] === 'object') {
-                        const found = searchIn(obj[key]);
-                        if (found) return found;
-                     }
-                  }
-                  return null;
-               };
-               rows = searchIn(data) || [];
+          const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+            rows[rowIndex].visualNotesProposal = proposalText;
+            if (!Array.isArray(rows[rowIndex].visualNotesProposals)) {
+              rows[rowIndex].visualNotesProposals = [];
             }
-
-            const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession);
-            const activeEntry = entries.find(e => e.rowId === window._currentActiveRowId);
-            
-            console.log("[Dashboard] Diagnóstico de Guardado:", {
-               buscandoId: window._currentActiveRowId,
-               filasEnFirebase: rows.length,
-               entradasTimeline: entries.length,
-               escenaDetectada: activeEntry ? activeEntry.index : "No detectada",
-               clavesDoc: Object.keys(data)
-            });
-
-            // Intento 1: Por ID exacto
-            let rowIndex = rows.findIndex(r => r.id === window._currentActiveRowId);
-            
-            // Intento 2: Por índice si el ID tiene formato de índice
-            if (rowIndex === -1 && window._currentActiveRowId.startsWith("row_")) {
-              const idx = parseInt(window._currentActiveRowId.replace("row_", ""));
-              if (!isNaN(idx) && rows[idx]) rowIndex = idx;
+            if (!rows[rowIndex].visualNotesProposals.includes(proposalText)) {
+              rows[rowIndex].visualNotesProposals.push(proposalText);
             }
-            
-            // Intento 3: SI TODO FALLA, buscamos por posición en el Timeline
-            if (rowIndex === -1 && activeEntry) {
-              console.log("[Dashboard] ID no hallado, usando índice de entrada del Timeline:", activeEntry.index);
-              rowIndex = activeEntry.index;
-            }
-            
-            if (rowIndex !== -1 && rows[rowIndex]) {
-              console.log("[Dashboard] Fila localizada con éxito en índice:", rowIndex);
-              
-              // Actualizar tanto el campo individual como el HISTORIAL
-              rows[rowIndex].visualNotesProposal = proposalText;
-              if (!Array.isArray(rows[rowIndex].visualNotesProposals)) {
-                rows[rowIndex].visualNotesProposals = [];
-              }
-              if (!rows[rowIndex].visualNotesProposals.includes(proposalText)) {
-                rows[rowIndex].visualNotesProposals.push(proposalText);
-              }
-              
-              const updateData = {};
-              let foundKey = "rows";
-              if (data.session?.script?.rows) foundKey = "session.script.rows";
-              else if (data.session?.rows) foundKey = "session.rows";
-              else if (data.script?.rows) foundKey = "script.rows";
-              else if (data.session?.podcastStudioUiState?.rows) foundKey = "session.podcastStudioUiState.rows";
-              else {
-                  // Fallback dinámico si se halló por fuerza bruta
-                  const findPath = (obj, target, currentPath = "") => {
-                      for (const key in obj) {
-                          const path = currentPath ? `${currentPath}.${key}` : key;
-                          if (obj[key] === target) return path;
-                          if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
-                              const p = findPath(obj[key], target, path);
-                              if (p) return p;
-                          }
-                      }
-                      return null;
-                  };
-                  foundKey = findPath(data, rows) || "rows";
-              }
-              
-              console.log("[Dashboard] Guardando en campo:", foundKey);
-              updateData[foundKey] = rows;
-              updateData.updatedAt = new Date().toISOString();
-              
-              await updateDoc(sessionRef, updateData);
-              
-              // Notificar actividad al Studio
-              await notifyActivity("está añadiendo una propuesta nueva", rowIndex);
-              
-              // Actualizar local de forma redundante para asegurar el renderizado
-              if (currentMultimediaSession.script?.rows) {
-                 currentMultimediaSession.script.rows = rows;
-              }
-              if (currentMultimediaSession.rows) {
-                 currentMultimediaSession.rows = rows;
-              }
-              if (currentMultimediaSession.session?.script?.rows) {
-                 currentMultimediaSession.session.script.rows = rows;
-              }
-
-              // Forzar refresco inmediato de la UI
-              multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-
-              alert("✅ Propuesta guardada correctamente.");
-            } else {
-              console.warn("[Dashboard] Fallo al localizar fila. Buscábamos:", window._currentActiveRowId);
-              alert("No se encontró la escena actual en el documento original. Por favor, asegúrate de que el ID coincide.");
-            }
-          } else {
-            alert("El documento de la sesión no existe en Firebase.");
+            return true;
+          });
+          if (!result.ok) {
+            console.warn("[Dashboard] Fallo al localizar fila. Buscábamos:", window._currentActiveRowId);
+            alert("No se encontró la escena actual en el documento original. Por favor, asegúrate de que el ID coincide.");
+            return;
           }
+          await notifyActivity("está añadiendo una propuesta nueva", result.rowIndex);
+          multimediaPlaybackController.sync(currentMultimediaSession);
+          multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+          alert("✅ Propuesta guardada correctamente.");
         } catch (err) {
           console.error("[Dashboard] Error fatal al guardar:", err);
           alert("Error de Firebase: " + err.message);
@@ -3220,6 +3635,35 @@ function normalizeDashboardProposalState(list = []) {
    ));
 }
 
+function resolveDashboardActiveVisualProposal(row = null) {
+   if (!row || typeof row !== "object") return "";
+   const resolved = new Set(normalizeDashboardProposalState(row?.visualNotesResolvedProposals));
+   const explicit = String(row?.visualNotesProposal || "").trim();
+   
+   // Si hay una propuesta explícita y NO está resuelta, es la activa
+   if (explicit && !resolved.has(explicit)) return explicit;
+   
+   const proposals = Array.isArray(row?.visualNotesProposals)
+      ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : [];
+   for (let index = proposals.length - 1; index >= 0; index -= 1) {
+      const candidate = String(proposals[index] || "").trim();
+      if (candidate && !resolved.has(candidate)) return candidate;
+   }
+   return "";
+}
+
+function resolveDashboardDisplayedVisualProposal(row = null) {
+   if (!row || typeof row !== "object") return "";
+   const explicit = String(row?.visualNotesProposal || "").trim();
+   if (explicit) return explicit;
+   const active = resolveDashboardActiveVisualProposal(row);
+   if (active) {
+      console.log("[Dashboard] Propuesta activa resuelta para fila:", row.id, active);
+   }
+   return active;
+}
+
 function isDashboardProposalResolved(row = null, proposalText = "") {
    const proposal = String(proposalText || "").trim();
    if (!proposal || !row || typeof row !== "object") return false;
@@ -3229,71 +3673,62 @@ function isDashboardProposalResolved(row = null, proposalText = "") {
 async function eliminarPropuestaDesdeDashboard(proposalText) {
    if (!currentMultimediaSession || !window._currentActiveRowId) return;
    
-   console.log("[Dashboard] Eliminando propuesta:", window._currentActiveRowId);
+   console.log("[Dashboard] Marcando propuesta como realizada:", window._currentActiveRowId);
    
    try {
-      const sessionRef = doc(db, "podcaster_sessions", currentMultimediaSession.id);
-      const snap = await getDoc(sessionRef);
-      
-      if (snap.exists()) {
-         const data = snap.data();
-         let rows = [];
-         const s = data.session || {};
+      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+         const targetRow = rows[rowIndex];
          
-         if (s.script?.rows) rows = s.script.rows;
-         else if (s.rows) rows = s.rows;
-         else if (data.script?.rows) rows = data.script.rows;
-         else if (data.rows) rows = data.rows;
-         else rows = s.podcastStudioUiState?.rows || [];
-
-         let rowIndex = rows.findIndex(r => r.id === window._currentActiveRowId);
-         if (rowIndex === -1 && window._currentActiveRowId.startsWith("row_")) {
-            const idx = parseInt(window._currentActiveRowId.replace("row_", ""));
-            if (!isNaN(idx) && rows[idx]) rowIndex = idx;
+         // Asegurar que esté en el historial antes de marcarla como realizada
+         if (!Array.isArray(targetRow.visualNotesProposals)) {
+            targetRow.visualNotesProposals = [];
+         }
+         if (!targetRow.visualNotesProposals.includes(proposalText)) {
+            targetRow.visualNotesProposals.push(proposalText);
          }
 
-         if (rowIndex !== -1 && rows[rowIndex]) {
-            const resolved = normalizeDashboardProposalState(rows[rowIndex].visualNotesResolvedProposals);
-            if (!resolved.includes(proposalText)) {
-               resolved.push(proposalText);
-            }
-            rows[rowIndex].visualNotesResolvedProposals = resolved;
-
-            // Detectar campo para guardar
-            let foundKey = "rows";
-            if (data.session?.script?.rows) foundKey = "session.script.rows";
-            else if (data.session?.rows) foundKey = "session.rows";
-            else if (data.script?.rows) foundKey = "script.rows";
-            
-            const updateData = {};
-            updateData[foundKey] = rows;
-            updateData.updatedAt = new Date().toISOString();
-            
-            await updateDoc(sessionRef, updateData);
-            
-            // Notificar actividad al Studio
-            await notifyActivity("ha marcado una propuesta como realizada", rowIndex);
-            
-            // Actualizar objeto local de forma redundante para asegurar el renderizado
-            if (currentMultimediaSession.script?.rows) {
-               currentMultimediaSession.script.rows = rows;
-            }
-            if (currentMultimediaSession.rows) {
-               currentMultimediaSession.rows = rows;
-            }
-            if (currentMultimediaSession.session?.script?.rows) {
-               currentMultimediaSession.session.script.rows = rows;
-            }
-
-            // Forzar refresco inmediato de la UI
-            multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-
-            console.log("[Dashboard] Propuesta marcada como realizada");
+         const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
+         if (!resolved.includes(proposalText)) {
+            resolved.push(proposalText);
          }
-      }
+         targetRow.visualNotesResolvedProposals = resolved;
+         // Si la propuesta que marcamos como realizada era la "activa", la limpiamos
+         if (String(targetRow.visualNotesProposal || "").trim() === proposalText) {
+            targetRow.visualNotesProposal = "";
+         }
+         return true;
+      });
+      if (!result.ok) return;
+      await notifyActivity("ha marcado una propuesta como realizada", result.rowIndex);
+      multimediaPlaybackController.sync(currentMultimediaSession);
+      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+      console.log("[Dashboard] Propuesta marcada como realizada");
    } catch (error) {
       console.error("[Dashboard] Error al marcar propuesta como realizada:", error);
       alert("No se pudo actualizar la propuesta. Intenta de nuevo.");
+   }
+}
+
+async function unresolvePropuestaDesdeDashboard(proposalText) {
+   if (!currentMultimediaSession || !window._currentActiveRowId) return;
+   
+   console.log("[Dashboard] Restaurando propuesta a pendientes:", window._currentActiveRowId);
+   
+   try {
+      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+         const targetRow = rows[rowIndex];
+         const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
+         targetRow.visualNotesResolvedProposals = resolved.filter(p => p !== proposalText);
+         // Al restaurarla, la volvemos a poner como la propuesta activa
+         targetRow.visualNotesProposal = proposalText;
+         return true;
+      });
+      if (!result.ok) return;
+      await notifyActivity("ha restaurado una propuesta a pendientes", result.rowIndex);
+      multimediaPlaybackController.sync(currentMultimediaSession);
+      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+   } catch (error) {
+      console.error("[Dashboard] Error al restaurar propuesta:", error);
    }
 }
 
@@ -3303,77 +3738,25 @@ async function aplicarPropuestaDesdeDashboard(proposalText) {
    console.log("[Dashboard] Aplicando propuesta como oficial:", window._currentActiveRowId);
    
    try {
-      const sessionRef = doc(db, "podcaster_sessions", currentMultimediaSession.id);
-      const snap = await getDoc(sessionRef);
+      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+         const targetRow = rows[rowIndex];
+         targetRow.visualNotesProposal = proposalText;
+         if (!Array.isArray(targetRow.visualNotesProposals)) {
+            targetRow.visualNotesProposals = [];
+         }
+         if (!targetRow.visualNotesProposals.includes(proposalText)) {
+            targetRow.visualNotesProposals.push(proposalText);
+         }
+         // Al aplicar, quitamos de resueltas si estaba ahí
+         targetRow.visualNotesResolvedProposals = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals).filter(p => p !== proposalText);
+         return true;
+      });
+      if (!result.ok) return;
       
-      if (snap.exists()) {
-         const data = snap.data();
-         let rows = [];
-         const s = data.session || {};
-         
-         // Reutilizamos la lógica de búsqueda de filas que ya tenemos
-         if (s.script?.rows) rows = s.script.rows;
-         else if (s.rows) rows = s.rows;
-         else if (data.script?.rows) rows = data.script.rows;
-         else if (data.rows) rows = data.rows;
-         else rows = s.podcastStudioUiState?.rows || [];
-
-         let rowIndex = rows.findIndex(r => r.id === window._currentActiveRowId);
-         if (rowIndex === -1 && window._currentActiveRowId.startsWith("row_")) {
-            const idx = parseInt(window._currentActiveRowId.replace("row_", ""));
-            if (!isNaN(idx) && rows[idx]) rowIndex = idx;
-         }
-
-         if (rowIndex !== -1 && rows[rowIndex]) {
-            const targetRow = rows[rowIndex];
-
-            // En lugar de sobrescribir, la marcamos como activa/seleccionada
-            targetRow.visualNotesProposal = proposalText;
-            
-            // Aseguramos que esté en el historial
-            if (!Array.isArray(targetRow.visualNotesProposals)) {
-               targetRow.visualNotesProposals = [];
-            }
-            if (!targetRow.visualNotesProposals.includes(proposalText)) {
-               targetRow.visualNotesProposals.push(proposalText);
-            }
-            if (Array.isArray(targetRow.visualNotesResolvedProposals)) {
-               targetRow.visualNotesResolvedProposals = targetRow.visualNotesResolvedProposals.filter(p => p !== proposalText);
-            }
-
-            // Detectar campo para guardar
-            let foundKey = "rows";
-            if (data.session?.script?.rows) foundKey = "session.script.rows";
-            else if (data.session?.rows) foundKey = "session.rows";
-            else if (data.script?.rows) foundKey = "script.rows";
-            
-            const updateData = {};
-            updateData[foundKey] = rows;
-            updateData.updatedAt = new Date().toISOString();
-            
-            await updateDoc(sessionRef, updateData);
-            
-            // Notificar actividad al Studio
-            await notifyActivity("ha seleccionado una propuesta como activa", rowIndex);
-            
-            // Actualizar local de forma redundante
-            if (currentMultimediaSession.script?.rows) {
-               currentMultimediaSession.script.rows = rows;
-            }
-            if (currentMultimediaSession.rows) {
-               currentMultimediaSession.rows = rows;
-            }
-            if (currentMultimediaSession.session?.script?.rows) {
-               currentMultimediaSession.session.script.rows = rows;
-            }
-
-            // Sincronizar player y forzar UI
-            multimediaPlaybackController.sync(currentMultimediaSession);
-            multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-
-            alert("✅ Propuesta aplicada como elemento visual oficial.");
-         }
-      }
+      await notifyActivity("ha seleccionado una propuesta como activa", result.rowIndex);
+      multimediaPlaybackController.sync(currentMultimediaSession);
+      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+      alert("✅ Propuesta aplicada como elemento visual oficial.");
    } catch (err) {
       console.error("[Dashboard] Error al aplicar propuesta:", err);
       alert("Error al aplicar: " + err.message);
@@ -3777,10 +4160,19 @@ function renderUserItemList(container, items, type) {
       const firstVideoClip = Object.values(clipMap).find(c => c.videoSrc);
       if (firstVideoClip) {
         const rawSrc = firstVideoClip.videoSrc;
-        previewUrl = rawSrc.startsWith('gs://') 
-          ? `${window.__CHARLY_CONFIG__?.apiBaseUrl}/api/assets/proxy-media?storagePath=${encodeURIComponent(rawSrc)}`
+        previewUrl = rawSrc.startsWith('gs://')
+          ? resolveStorageVideoUrl("", rawSrc)
           : rawSrc;
       }
+
+      const rows = extractDashboardSessionRows(session);
+      const hasAnyProposal = rows.some(r => (r.visualNotesProposals?.length > 0 || !!r.visualNotesProposal));
+      const hasPending = hasAnyProposal && rows.some(r => {
+        const proposals = Array.isArray(r.visualNotesProposals) ? r.visualNotesProposals : [];
+        const resolved = Array.isArray(r.visualNotesResolvedProposals) ? r.visualNotesResolvedProposals : [];
+        const pending = proposals.some(p => !resolved.includes(p));
+        return pending || !!r.visualNotesProposal;
+      });
 
       card.className = `workbench-item workbench-item-multimedia accordion-item`;
       card.innerHTML = `
@@ -3788,7 +4180,10 @@ function renderUserItemList(container, items, type) {
           <div class="workbench-item-preview">
             ${previewUrl ? `<video src="${previewUrl}" muted playsinline></video>` : `<i class="fas fa-video" style="color: #475569; font-size: 16px;"></i>`}
           </div>
-          <div class="workbench-item-title">${escapeHtml(displayTitle)}</div>
+          <div class="workbench-item-title">
+            ${escapeHtml(displayTitle)}
+            ${hasPending ? `<span class="proposal-badge is-pending" style="margin-left: 10px; vertical-align: middle;">PROPUESTA</span>` : ""}
+          </div>
           <i class="fas fa-chevron-down multimedia-accordion-icon"></i>
         </div>
         <div class="multimedia-accordion-body">
@@ -3805,6 +4200,16 @@ function renderUserItemList(container, items, type) {
               <span class="multimedia-detail-label">Estado</span>
               <span class="multimedia-detail-value"><span class="workbench-tag is-status">Publicado</span></span>
             </div>
+            ${hasAnyProposal ? `
+                <div class="multimedia-detail-item">
+                  <span class="multimedia-detail-label">Propuestas</span>
+                  <span class="multimedia-detail-value">
+                    ${hasPending 
+                      ? `<span class="proposal-badge is-pending">Pendientes</span>` 
+                      : `<span class="proposal-badge is-realized">Realizadas</span>`}
+                  </span>
+                </div>
+            ` : ""}
             <div class="multimedia-action-area">
               <button class="btn-multimedia-play-large btn-multimedia-play" data-id="${item.id}">
                 <i class="fas fa-play-circle"></i> Ver Video

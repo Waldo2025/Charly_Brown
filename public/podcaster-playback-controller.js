@@ -63,6 +63,15 @@ export class PodcasterPlaybackController extends EventEmitter {
   // --- Helpers ---
   clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
   toFiniteNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
+  clampPlaybackRate(rate, min = 0.5, max = 2.25) {
+    return Math.max(min, Math.min(max, Number(rate) || 1));
+  }
+  resolveSegmentSourceOffsetSec(currentMs, segmentStartMs, trimInMs = 0, clipPlaybackRate = 1) {
+    const safeTrimInMs = Math.max(0, Number(trimInMs || 0));
+    const timelineOffsetMs = Math.max(0, Number(currentMs || 0) - Math.max(0, Number(segmentStartMs || 0)));
+    const sourceOffsetMs = safeTrimInMs + (timelineOffsetMs * this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25));
+    return sourceOffsetMs / 1000;
+  }
 
   getEntryAtMs(currentMs) {
     const now = performance.now();
@@ -538,17 +547,16 @@ export class PodcasterPlaybackController extends EventEmitter {
         }, { once: true });
       }
 
-      audio.playbackRate = speed;
+      const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
+      audio.playbackRate = this.clampPlaybackRate(speed * clipPlaybackRate);
       const mix = this.deps?.resolveTimelineClipMix?.(session, rowId) || { voiceVolume: 1 };
       audio.volume = this.clamp01(mix.voiceVolume);
 
-      const clip = clipMap[rowId];
-      const trimInMs = Math.max(0, Number(clip?.trimInMs || 0));
-      const offsetMs = currentMs - segment.startMs;
-      const offsetSec = (trimInMs + offsetMs) / 1000;
+      const segmentTrimInMs = Math.max(0, Number(segment?.trimInMs || 0));
+      const offsetSec = this.resolveSegmentSourceOffsetSec(currentMs, segment.startMs, segmentTrimInMs, clipPlaybackRate);
 
       const drift = Math.abs(audio.currentTime - offsetSec);
-      if (audio.dataset.initialized === "false" || drift > 0.15) {
+      if (audio.dataset.initialized === "false" || drift > 0.22) {
         this.seekTo(audio, offsetSec);
         audio.dataset.initialized = "true";
       }
@@ -791,13 +799,17 @@ export class PodcasterPlaybackController extends EventEmitter {
   }
 
   // --- Overlays ---
-  syncOverlay(currentMs) {
+  syncOverlay(currentMs, options = {}) {
     const overlay = this.els?.podcastOnScreenTextOverlay;
     if (!overlay) return;
 
     const session = this.deps?.getActiveSession?.() || this.state.session;
     const cfg = this.deps?.getPodcastVideoConfig?.(session) || this.state.config;
     const settings = this.deps?.normalizeOnScreenTextTrackSettings?.(cfg?.onScreenTextTrack || {});
+    const preferredRowId = String(options?.rowId || options?.preferredRowId || this.state.activeRowId || "").trim();
+    const forceRow = options?.forceRow === true;
+    const editorPreviewMode = this.deps?.podcastVideoState?.montageActive !== true;
+    const shouldShowPreferredRow = forceRow || (editorPreviewMode && Boolean(preferredRowId));
 
     const isEnabled = settings?.enabled && settings?.showTrack !== false;
 
@@ -814,9 +826,22 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const clips = cfg?.timelineOnScreenTextClipsByRowId || this.deps?.ensureOnScreenTextClipsByRowId?.(session) || {};
     const clipList = Object.values(clips);
+    const candidates = clipList.map((clip) => {
+      const rowId = String(clip?.rowId || "").trim();
+      const isTimeActive = (currentMs + 1) >= clip.startMs
+        && currentMs < (clip.startMs + this.deps.getOnScreenTextClipEffectiveDurationMs(clip));
+      const isPreferred = Boolean(preferredRowId) && rowId === preferredRowId;
+      return {
+        clip,
+        rowId,
+        isTimeActive,
+        isPreferred
+      };
+    });
 
-    // Find clip with a 1ms epsilon to handle rounding
-    const selected = clipList.find(c => (currentMs + 1) >= c.startMs && currentMs < (c.startMs + this.deps.getOnScreenTextClipEffectiveDurationMs(c)));
+    let selected = candidates.find((item) => item.isPreferred && (item.isTimeActive || shouldShowPreferredRow))?.clip
+      || candidates.find((item) => item.isTimeActive)?.clip
+      || null;
 
     if (!selected || selected.hidden === true) {
       overlay.innerHTML = "";

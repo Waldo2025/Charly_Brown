@@ -180,6 +180,25 @@ service cloud.firestore {
         data.sharedWithIds.hasAny([request.auth.uid]);
     }
 
+    function canReadPodcasterSessionData(data) {
+      return isEditor() ||
+        (
+          isSignedIn() && (
+            data.publicar == true ||
+            data.published == true ||
+            isOwner(data.ownerId) ||
+            isPodcasterSharedWithUser(data)
+          )
+        );
+    }
+
+    function canAccessPodcasterSessionById(sessionId) {
+      return exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) &&
+        canReadPodcasterSessionData(
+          get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data
+        );
+    }
+
     function isPodcasterSessionShape(data, sessionId) {
       return (data.ownerId is string) &&
         isStringField(data, "title", 0, 240) &&
@@ -237,9 +256,7 @@ service cloud.firestore {
     }
 
     match /podcaster_sessions/{sessionId} {
-      allow read: if isEditor();
-      allow read: if isSignedIn() && (resource.data.publicar == true || resource.data.published == true);
-      allow read: if isSignedIn() && (isOwner(resource.data.ownerId) || isPodcasterSharedWithUser(resource.data));
+      allow read: if canReadPodcasterSessionData(resource.data);
       allow create: if isSignedIn() && (isOwner(request.resource.data.ownerId) || isEditor()) && isPodcasterSessionShape(request.resource.data, sessionId);
       allow update: if isEditor() || (
         isSignedIn() &&
@@ -250,6 +267,33 @@ service cloud.firestore {
       allow delete: if isAdmin() || (
         isSignedIn() &&
         isOwner(resource.data.ownerId)
+      );
+    }
+
+    match /podcaster_sessions_payloads/{sessionId} {
+      allow read: if canAccessPodcasterSessionById(sessionId);
+      allow create: if isSignedIn() && (
+        isEditor() ||
+        (
+          request.resource.data.ownerId == request.auth.uid &&
+          request.resource.data.sessionId == sessionId &&
+          request.resource.data.payload is map &&
+          request.resource.data.payload.id == sessionId
+        )
+      );
+      allow update: if isEditor() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) &&
+        get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.sessionId == sessionId &&
+        request.resource.data.payload is map &&
+        request.resource.data.payload.id == sessionId
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) &&
+        get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.ownerId == request.auth.uid
       );
     }
 

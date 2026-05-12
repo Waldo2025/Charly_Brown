@@ -1742,11 +1742,7 @@
       #sessionFeed,
       #sidebar2,
       #sidebarTemas,
-      #sidebarTemas #cursoSeleccionadoNombre,
-      main.bg-background,
-      main.flex-1.bg-background,
-      #contenidoEditor,
-      .content-card {
+      #sidebarTemas #cursoSeleccionadoNombre {
         background-color: var(--app-bg-color) !important;
         color: var(--app-text-color) !important;
       }
@@ -2036,10 +2032,7 @@
       #mainToolbar [class~="bg-white"],
       #sidebarTemas [class*="bg-card"],
       #sidebarTemas [class*="bg-accent"],
-      #sidebarTemas [class~="bg-white"],
-      main.bg-background [class*="bg-card"],
-      main.bg-background [class*="bg-background"],
-      main.bg-background [class~="bg-white"] {
+      #sidebarTemas [class~="bg-white"] {
         background-color: var(--app-bg-color) !important;
       }
 
