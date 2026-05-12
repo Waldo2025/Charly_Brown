@@ -26314,6 +26314,10 @@ function render() {
   updatePodcastPlayerUi();
   renderGenerationStatus(session);
   renderSessions();
+  const sessionTitle = session.title || "Sesión sin título";
+  document.querySelectorAll(".floating-panel-session-title").forEach((el) => {
+    el.textContent = sessionTitle;
+  });
   syncCustomTooltips(document);
   setComposerGenerationMode(composerGenerationMode);
   setComposerVideoTableMode(composerVideoTableMode);

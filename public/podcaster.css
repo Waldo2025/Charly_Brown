@@ -2509,6 +2509,19 @@ body.is-resizing-podcast-stage {
   letter-spacing: 0.01em;
 }
 
+.floating-panel-session-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 20px;
+  text-transform: none;
+  opacity: 0.95;
+}
+
 #podcastVideoShell .floating-panel-head,
 #podcastVideoShell .floating-panel-head h3 {
   color: var(--pod-text);
