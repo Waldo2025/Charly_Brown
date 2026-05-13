@@ -3,6 +3,9 @@ const admin = require("firebase-admin");
 const {GoogleGenAI} = require("@google/genai");
 const {randomUUID} = require("node:crypto");
 const lamejs = require("lamejs");
+const {
+  buildDialogueVideoPromptBundle,
+} = require("./dialogue-video-prompt.js");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -2484,7 +2487,12 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
   const voiceName = clampText(req.body?.voiceName || "", 80);
   const genderGroup = clampText(req.body?.genderGroup || "", 40);
   const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
-  const scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+  const promptProfile = clampText(req.body?.promptProfile || "", 80);
+  let scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+  const sceneDescription = clampText(req.body?.sceneDescription || "", 1600);
+  const visualNotes = clampText(req.body?.visualNotes || "", 2200);
+  const onScreenText = clampText(req.body?.onScreenText || "", 1200);
+  const transition = clampText(req.body?.transition || "", 1200);
   const videoDirective = clampText(req.body?.videoDirective || "", 1400);
   const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
   const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
@@ -2768,17 +2776,53 @@ async function forwardPodcasterDialogueVideoGenerate(req, res) {
       expression,
       contentMode: "podcast",
     });
-  const sceneVisualPrompt = scenePrompt || [
+  const timelineScenePromptBundle = buildDialogueVideoPromptBundle({
+    promptProfile,
+    educationalVideo,
+    speakerName,
+    speakerLabel,
+    voiceName,
+    genderGroup,
+    expression,
+    counterpartSpeakerName,
+    scenarioPrompt,
+    scenePrompt,
+    sceneDescription,
+    visualNotes,
+    onScreenText,
+    transition,
+    videoDirective,
+    imagePrompts,
+    performanceDirective,
+    previousScene,
+    relateWithPreviousScene: req.body?.relateWithPreviousScene === true,
+    continuityFrameBase64,
+    forceImmediateChange,
+    hasPortraitAsset,
+    dialogueAudioStoragePath,
+    dialogueAudioUrl,
+    inferredTargetDurationSec,
+    originalText,
+    text,
+    characterPrompt,
+    studioScenePrompt,
+    useSceneReferenceAsInitImage,
+    referenceImageName,
+    hasSceneReferenceVideo,
+    referenceVideoName,
+    regenerationAnalysis: null,
+  });
+  const sceneVisualPrompt = timelineScenePromptBundle?.sceneVisualPrompt || (scenePrompt || [
     educationalVideo ? "Escena educativa basada en guion técnico." : `Escena de ${speakerName}.`,
     scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
     videoDirective ? `Prioridad manual: ${videoDirective}` : ""
-  ].filter(Boolean).join(" ").trim();
-  const sceneImagePromptList = imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
+  ].filter(Boolean).join(" ").trim());
+  const sceneImagePromptList = timelineScenePromptBundle?.sceneImagePromptList || (imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
     `${sceneVisualPrompt} Imagen principal horizontal 16:9.`,
     `${sceneVisualPrompt} Variante en plano cerrado, y otra toma de apoyo del set.`
-  ] : []);
+  ] : []));
 
-  const prompt = [
+  const prompt = timelineScenePromptBundle?.prompt || [
     educationalVideo
       ? "Genera un video educativo corto, claro y realista."
       : "Genera un video cinematográfico corto y realista para podcast.",

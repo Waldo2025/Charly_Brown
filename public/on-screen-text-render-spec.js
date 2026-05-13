@@ -170,7 +170,7 @@
       shadowOffsetYPx,
       shadowOpacity,
       overlayXPct: clampNumber(source.overlayXPct, 0, 1, 0.5),
-      overlayYPct: clampNumber(source.overlayYPct, 0, 1, 0.92)
+      overlayYPct: clampNumber(source.overlayYPct, 0, 1, 0.86)
     };
   }
 
@@ -180,37 +180,255 @@
     return `is-style-${valid}`;
   }
 
+  function getOnScreenTextBgPresetClass(bgPreset = "") {
+    const key = String(bgPreset || "").trim().toLowerCase();
+    const valid = (key === "solid" || key === "glass" || key === "none") ? key : "glass";
+    return `is-bg-${valid}`;
+  }
+
   function getOnScreenTextFontFamilyCss(fontFamily = "") {
     const key = String(fontFamily || "").trim();
     const found = PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES.find((item) => item.value === key) || PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES[0];
     return String(found?.family || '"Unbounded", system-ui, sans-serif');
   }
 
-  function buildOnScreenTextPreviewStrokeShadowCss(settings = null, options = {}) {
-    if (!settings) return "none";
-    const strokeWidthPx = Math.max(0, Number(options?.strokeWidthPx || settings.strokeWidthPx || 0) || 0);
-    if (strokeWidthPx <= 0) return "none";
-    const color = String(settings.strokeColor || "#0f172a").trim();
-    const steps = 8;
-    const shadows = [];
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      const x = (Math.cos(angle) * strokeWidthPx).toFixed(2);
-      const y = (Math.sin(angle) * strokeWidthPx).toFixed(2);
-      shadows.push(`${x}px ${y}px 0 ${color}`);
+  function getOnScreenTextClipText(row = null) {
+    return String(
+      row?.onScreenText
+      || row?.textoPantalla
+      || row?.textoEnPantalla
+      || row?.text
+      || ""
+    ).replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeOnScreenTextClipItem(raw = {}, rowId = "") {
+    const key = String(rowId || raw?.rowId || "").trim();
+    if (!key) return null;
+    const sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw?.sourceDurationMs, raw?.durationMs ?? 8000)));
+    const trimInMs = Math.max(0, Math.min(sourceDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw?.trimInMs, 0))));
+    const fallbackTrimOut = sourceDurationMs;
+    const trimOutMs = Math.max(
+      trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
+      Math.min(sourceDurationMs, Math.round(toFiniteNumber(raw?.trimOutMs, raw?.durationMs ?? fallbackTrimOut)))
+    );
+    return {
+      rowId: key,
+      startMs: Math.max(0, Math.round(toFiniteNumber(raw?.startMs, 0))),
+      sourceDurationMs,
+      trimInMs,
+      trimOutMs,
+      hidden: raw?.hidden === true,
+      autoHidden: raw?.autoHidden === true,
+      zIndex: Math.max(1, Math.round(toFiniteNumber(raw?.zIndex, 1)))
+    };
+  }
+
+  function normalizeOnScreenTextClipsByRowId(raw = {}) {
+    const next = {};
+    if (!raw || typeof raw !== "object") return next;
+    Object.entries(raw).forEach(([rowId, clip]) => {
+      const normalized = normalizeOnScreenTextClipItem(clip, rowId);
+      if (!normalized) return;
+      next[normalized.rowId] = normalized;
+    });
+    return next;
+  }
+
+  function normalizeOnScreenTextLayoutItem(raw = {}, rowId = "") {
+    const key = String(rowId || raw?.rowId || "").trim();
+    if (!key) return null;
+    const widthPct = Math.max(0.08, Math.min(0.9, toFiniteNumber(raw?.widthPct, Number.NaN)));
+    const heightPct = Math.max(0.05, Math.min(0.6, toFiniteNumber(raw?.heightPct, Number.NaN)));
+    const safeWidthPct = Number.isFinite(widthPct) ? widthPct : 0.58;
+    const safeHeightPct = Number.isFinite(heightPct) ? heightPct : 0.14;
+    const xPct = Math.max(0, Math.min(Math.max(0, 1 - safeWidthPct), toFiniteNumber(raw?.xPct, Number.NaN)));
+    const yPct = Math.max(0, Math.min(Math.max(0, 1 - safeHeightPct), toFiniteNumber(raw?.yPct, Number.NaN)));
+    return {
+      rowId: key,
+      xPct: Number.isFinite(xPct) ? xPct : 0.21,
+      yPct: Number.isFinite(yPct) ? yPct : 0.7,
+      widthPct: safeWidthPct,
+      heightPct: safeHeightPct,
+      zIndex: Math.max(1, Math.min(999, Math.round(toFiniteNumber(raw?.zIndex, 1))))
+    };
+  }
+
+  function normalizeOnScreenTextLayoutByRowId(raw = {}) {
+    const next = {};
+    if (!raw || typeof raw !== "object") return next;
+    Object.entries(raw).forEach(([rowId, layout]) => {
+      const normalized = normalizeOnScreenTextLayoutItem(layout, rowId);
+      if (!normalized) return;
+      next[normalized.rowId] = normalized;
+    });
+    return next;
+  }
+
+  function resolveOnScreenTextDimensionOptions(options = {}) {
+    const config = options && typeof options === "object" ? options : {};
+    return {
+      sourceWidth: Math.max(160, Math.round(Number(config.sourceWidth || 0) || 1280)),
+      sourceHeight: Math.max(90, Math.round(Number(config.sourceHeight || 0) || 720)),
+      resolution: config.resolution || "source"
+    };
+  }
+
+  function estimateOnScreenTextLayoutHeightPct(text = "", settings = null, widthPct = 0.58, options = {}) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const cleanText = String(text || "").replace(/\s+/g, " ").trim();
+    const fontSizePx = Math.max(16, Math.min(96, Number(current.fontSizePx || 44)));
+    const approxCharWidthPx = Math.max(8, fontSizePx * 0.54);
+    const dims = resolveOnScreenTextDimensionOptions(options);
+    const exportCanvas = resolveOnScreenTextExportCanvasSize(dims.resolution, dims.sourceWidth, dims.sourceHeight);
+    const boxWidthPx = Math.max(120, Math.round(exportCanvas.width * Math.max(0.08, Math.min(0.9, Number(widthPct || 0.58)))));
+    const charsPerLine = Math.max(8, Math.floor(boxWidthPx / approxCharWidthPx));
+    const lineCount = Math.max(1, Math.ceil(Math.max(1, cleanText.length) / Math.max(1, charsPerLine)));
+    const lineHeightPx = Math.max(20, Math.round(fontSizePx * 1.18));
+    const verticalPaddingPx = Math.max(16, Math.round(fontSizePx * 0.68));
+    const estimatedHeightPx = Math.max(48, (lineCount * lineHeightPx) + verticalPaddingPx);
+    return Math.max(0.07, Math.min(0.34, estimatedHeightPx / Math.max(360, exportCanvas.height)));
+  }
+
+  function estimateOnScreenTextLayoutWidthPct(text = "", settings = null, options = {}) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const cleanText = String(text || "").replace(/\s+/g, " ").trim();
+    const fontSizePx = Math.max(16, Math.min(96, Number(current.fontSizePx || 44)));
+    const approxCharWidthPx = Math.max(8, fontSizePx * 0.54);
+    const dims = resolveOnScreenTextDimensionOptions(options);
+    const exportCanvas = resolveOnScreenTextExportCanvasSize(dims.resolution, dims.sourceWidth, dims.sourceHeight);
+    const minPct = Math.max(0.22, Math.min(0.88, Number(options?.minPct || 0.58)));
+    const maxPct = Math.max(minPct, Math.min(0.92, Number(options?.maxPct || 0.92)));
+    const targetLines = Math.max(1, Math.min(4, Math.round(Number(options?.targetLines || 2) || 2)));
+    const textWidthPx = Math.max(120, (Math.max(1, cleanText.length) * approxCharWidthPx) / targetLines);
+    const paddingPx = Math.max(28, Math.round(fontSizePx * 1.2));
+    const desiredPct = (textWidthPx + paddingPx) / Math.max(360, exportCanvas.width);
+    return Math.max(minPct, Math.min(maxPct, desiredPct));
+  }
+
+  function buildDefaultOnScreenTextLayoutForRow(row = null, settings = null, options = {}) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const getText = typeof options?.getText === "function" ? options.getText : getOnScreenTextClipText;
+    const rowId = String(options?.rowId || row?.id || "").trim();
+    const text = getText(row);
+    const widthPct = estimateOnScreenTextLayoutWidthPct(text, current, {
+      ...options,
+      minPct: 0.58,
+      maxPct: 0.92,
+      targetLines: 2
+    });
+    const heightPct = estimateOnScreenTextLayoutHeightPct(text, current, widthPct, options);
+    const centerXPct = Math.max(0, Math.min(1, Number(current.overlayXPct || 0.5)));
+    const safeBottomEdgePct = Math.max(0, Math.min(1, Number(current.overlayYPct || 0.86)));
+    const xPct = Math.max(0, Math.min(1 - widthPct, centerXPct - (widthPct / 2)));
+    const yPct = Math.max(0, Math.min(1 - heightPct, safeBottomEdgePct - heightPct));
+    return normalizeOnScreenTextLayoutItem({
+      rowId,
+      xPct,
+      yPct,
+      widthPct,
+      heightPct,
+      zIndex: Math.max(1, Number(options?.rowIndex || row?.index || 1) || 1)
+    }, rowId);
+  }
+
+  function expandOnScreenTextLayoutToFitText(layout = null, row = null, settings = null, options = {}) {
+    const baseLayout = normalizeOnScreenTextLayoutItem(layout || {}, String(options?.rowId || row?.id || layout?.rowId || "").trim());
+    if (!baseLayout) return null;
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const getText = typeof options?.getText === "function" ? options.getText : getOnScreenTextClipText;
+    const text = getText(row);
+    if (!text) return baseLayout;
+    const dims = resolveOnScreenTextDimensionOptions(options);
+    const exportCanvas = resolveOnScreenTextExportCanvasSize(dims.resolution, dims.sourceWidth, dims.sourceHeight);
+    const currentWidthPct = Math.max(0.08, Math.min(0.9, Number(baseLayout.widthPct || 0.58)));
+    const currentBoxWidthPx = Math.max(120, Math.round(exportCanvas.width * currentWidthPct));
+    const fontSizePx = Math.max(16, Math.min(96, Number(current.fontSizePx || 44)));
+    const approxCharWidthPx = Math.max(8, fontSizePx * 0.54);
+    const charsPerLine = Math.max(8, Math.floor(currentBoxWidthPx / approxCharWidthPx));
+    const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+    let estimatedLines = 1;
+    let currentLine = "";
+    for (const word of words) {
+      const nextLine = currentLine ? `${currentLine} ${word}` : word;
+      if (nextLine.length <= charsPerLine) {
+        currentLine = nextLine;
+      } else {
+        estimatedLines += 1;
+        currentLine = word;
+      }
     }
-    return shadows.join(",");
+    if (estimatedLines <= 2) return baseLayout;
+    const recommendedWidthPct = estimateOnScreenTextLayoutWidthPct(text, current, {
+      ...options,
+      minPct: 0.58,
+      maxPct: 0.92,
+      targetLines: 2
+    });
+    const nextWidthPct = Math.max(currentWidthPct, recommendedWidthPct);
+    const nextHeightPct = Math.max(
+      Math.max(0.07, Number(baseLayout.heightPct || 0.14)),
+      estimateOnScreenTextLayoutHeightPct(text, current, nextWidthPct, options)
+    );
+    const centerXPct = Math.max(0, Math.min(1, Number(baseLayout.xPct || 0) + (currentWidthPct / 2)));
+    const nextXPct = Math.max(0, Math.min(1 - nextWidthPct, centerXPct - (nextWidthPct / 2)));
+    const nextYPct = Math.max(0, Math.min(1 - nextHeightPct, Number(baseLayout.yPct || 0)));
+    return normalizeOnScreenTextLayoutItem({
+      ...baseLayout,
+      xPct: nextXPct,
+      yPct: nextYPct,
+      widthPct: nextWidthPct,
+      heightPct: nextHeightPct
+    }, baseLayout.rowId);
+  }
+
+  function buildOnScreenTextPreviewStrokeShadowCss(settings = null, options = {}) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const strokeWidthPx = Math.max(0, Math.min(12, Number(options?.strokeWidthPx ?? current.strokeWidthPx ?? 0) || 0));
+    if (strokeWidthPx <= 0.01) return "none";
+    const color = String(current.strokeColor || "#0f172a").trim() || "#0f172a";
+    const radii = [Math.max(0.5, strokeWidthPx)];
+    if (strokeWidthPx > 1.35) {
+      radii.unshift(Math.max(0.4, strokeWidthPx * 0.58));
+    }
+    const shadows = [];
+    radii.forEach((radius, ringIndex) => {
+      const steps = Math.max(12, Math.ceil(radius * (ringIndex === radii.length - 1 ? 18 : 12)));
+      for (let index = 0; index < steps; index += 1) {
+        const angle = (Math.PI * 2 * index) / steps;
+        const x = (Math.cos(angle) * radius).toFixed(3);
+        const y = (Math.sin(angle) * radius).toFixed(3);
+        shadows.push(`${x}px ${y}px 0 ${color}`);
+      }
+    });
+    return shadows.join(", ");
   }
 
   function buildOnScreenTextPreviewShadowCss(settings = null, options = {}) {
-    if (!settings || settings.shadowEnabled === false) return "none";
-    const opacity = Math.max(0, Math.min(1, Number(settings.shadowOpacity ?? 0.55)));
-    if (opacity <= 0.001) return "none";
-    const blurPx = Math.max(0, Math.min(32, Math.round(toFiniteNumber(settings.shadowBlurPx, 12))));
-    const offsetXPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(settings.shadowOffsetXPx, 0))));
-    const offsetYPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(settings.shadowOffsetYPx, 4))));
-    const color = String(settings.strokeColor || "#0f172a").trim();
-    return `${offsetXPx}px ${offsetYPx}px ${blurPx}px rgba(0,0,0,${opacity})`;
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    if (current.shadowEnabled === false || Number(current.shadowOpacity || 0) <= 0.001) return "none";
+    const alpha = Math.max(0, Math.min(1, Number(current.shadowOpacity || 0)));
+    const strokeWidthPx = Math.max(0, Math.round(Number(options?.strokeWidthPx ?? current.strokeWidthPx ?? 0) || 0));
+    const blurPx = Math.max(0, Math.round(Number(current.shadowBlurPx || 0) || 0));
+    const offsetXPx = Math.round(Number(current.shadowOffsetXPx || 0) || 0);
+    const offsetYPx = Math.round(Number(current.shadowOffsetYPx || 0) || 0);
+    if (strokeWidthPx > 0) {
+      const separationPx = Math.max(1, Math.round(strokeWidthPx));
+      const expandedX = offsetXPx === 0 ? 0 : (Math.sign(offsetXPx) * (Math.abs(offsetXPx) + separationPx));
+      const expandedY = offsetYPx === 0 ? separationPx : (Math.sign(offsetYPx) * (Math.abs(offsetYPx) + separationPx));
+      const expandedBlur = Math.max(separationPx + 2, Math.round((blurPx || 4) + separationPx * 0.7));
+      const softBlur = Math.max(expandedBlur + 4, Math.round(expandedBlur * 1.35));
+      const softX = offsetXPx === 0 ? 0 : Math.sign(offsetXPx) * Math.max(1, Math.round(Math.abs(expandedX) * 0.6));
+      const softY = offsetYPx === 0 ? Math.max(1, Math.round(separationPx * 0.7)) : Math.sign(offsetYPx) * Math.max(1, Math.round(Math.abs(expandedY) * 0.62));
+      return `${expandedX}px ${expandedY}px ${expandedBlur}px rgba(15, 23, 42, ${(alpha * 0.58).toFixed(3)}), ${softX}px ${softY}px ${softBlur}px rgba(2, 6, 23, ${(alpha * 0.36).toFixed(3)})`;
+    }
+    const tightBlur = Math.max(1, Math.round(blurPx * 0.38));
+    const tightX = Math.round(offsetXPx * 0.35);
+    const tightY = Math.round(offsetYPx * 0.35);
+    const softBlur = Math.max(2, Math.round(blurPx * 0.9));
+    const softX = Math.round(offsetXPx * 0.18);
+    const softY = Math.round(offsetYPx * 0.18);
+    return `${tightX}px ${tightY}px ${tightBlur}px rgba(15, 23, 42, ${(alpha * 0.92).toFixed(3)}), ${softX}px ${softY}px ${softBlur}px rgba(2, 6, 23, ${(alpha * 0.62).toFixed(3)})`;
   }
 
   function wrapOnScreenTextRenderText(text, options) {
@@ -291,7 +509,7 @@
     const fontSizePx = clampNumber(settings.fontSizePx, 16, 96, 44);
     const lineSpacingPx = 6;
     const lineHeightPx = Math.max(fontSizePx + lineSpacingPx, Math.round(fontSizePx * 1.22));
-    const widthPct = clampNumber(layout.widthPct, 0.08, 0.96, 0.38);
+    const widthPct = clampNumber(layout.widthPct, 0.08, 0.96, 0.58);
     const heightPct = clampNumber(layout.heightPct, 0.05, 0.6, 0.14);
     const boxWidthPx = Math.max(120, Math.round(exportCanvasWidth * widthPct));
     const minBoxHeightPx = Math.max(fontSizePx + 4, Math.round(lineHeightPx + (fontSizePx * 0.2)));
@@ -307,12 +525,16 @@
     const shadowY = shadowEnabled ? clampNumber(settings.shadowOffsetYPx, -80, 80, 8) : 0;
     const strokeEnabled = strokeWidthPx > 0.001;
     const boxEnabled = settings.boxEnabled === true && clampNumber(settings.bgOpacity, 0, 1, 0) > 0.001;
-    const bottomSafetyPx = Math.round(exportCanvasHeight * 0.01);
+    const bottomSafetyPx = Math.max(
+      Math.round(lineHeightPx * 2.4),
+      Math.round(fontSizePx * 1.9),
+      Math.round(exportCanvasHeight * 0.035)
+    );
     const xPct = clampNumber(layout.xPct, 0, Math.max(0, 1 - widthPct), 0);
-    const rawYPct = clampNumber(layout.yPct, 0, 0.99, 0.92);
+    const rawYPct = clampNumber(layout.yPct, 0, 0.99, 0.7);
     const rawXPx = Math.max(0, Math.round(exportCanvasWidth * xPct));
     const rawYPx = Math.max(0, Math.round(exportCanvasHeight * rawYPct));
-    const maxYPx = Math.max(0, exportCanvasHeight - (boxHeightPx * 0.5));
+    const maxYPx = Math.max(0, exportCanvasHeight - boxHeightPx - bottomSafetyPx);
     const yPx = Math.max(0, Math.min(maxYPx, rawYPx));
     const textAlign = normalizeTextAlign(settings.textAlign);
     const wrappedText = wrapOnScreenTextRenderText(text, {
@@ -375,7 +597,7 @@
     const current = normalizeOnScreenTextTrackSettings(settings || {});
     const previewWidthPx = Math.max(1, Math.round(Number(options?.previewWidthPx || options?.overlayWidthPx || options?.bubbleWidthPx || 0) || 0));
     const previewHeightPx = Math.max(1, Math.round(Number(options?.previewHeightPx || options?.overlayHeightPx || options?.bubbleHeightPx || 0) || 0));
-    const widthPct = Math.max(0.08, Math.min(0.96, Number(options?.widthPct || 0.38)));
+    const widthPct = Math.max(0.08, Math.min(0.96, Number(options?.widthPct || 0.58)));
     const heightPct = Math.max(0.05, Math.min(0.6, Number(options?.heightPct || 0.14)));
     const sourceWidth = Math.max(160, Math.round(Number(options?.sourceWidth || 1280)));
     const sourceHeight = Math.max(90, Math.round(Number(options?.sourceHeight || 720)));
@@ -400,6 +622,7 @@
     return {
       ...spec,
       stylePreset: getOnScreenTextStylePresetClass(current.stylePreset),
+      bgPresetClass: getOnScreenTextBgPresetClass(current.bgPreset),
       bubbleWidthPx: spec.boxWidthPx,
       bubbleHeightPx: spec.boxHeightPx,
       borderWidthPx: spec.strokeWidthPx,
@@ -439,6 +662,39 @@
     return parts.join(";");
   }
 
+  function wrapOnScreenTextPreviewText(text = "", options = {}) {
+    return wrapOnScreenTextRenderText(text, options).replace(/…/g, "...");
+  }
+
+  function resolveOnScreenTextPreviewWrapFromMeasuredWidth(text = "", renderMetrics = null, contentWidthPx = 0) {
+    const safeMetrics = renderMetrics && typeof renderMetrics === "object" ? renderMetrics : {};
+    const usableWidthPx = Math.max(48, Math.round(Number(contentWidthPx || safeMetrics.previewInnerBoxWidthPx || 0) || 0));
+    const approxCharWidthPx = Math.max(6, Number(safeMetrics.previewApproxCharWidthPx || safeMetrics.approxCharWidthPx || 0) || 6);
+    const safetyInsetPx = Math.max(6, Math.round(approxCharWidthPx * 0.85));
+    const maxChars = Math.max(6, Math.floor(Math.max(24, usableWidthPx - safetyInsetPx) / approxCharWidthPx));
+    const maxLines = Math.max(1, Math.round(Number(safeMetrics.maxLines || 2) || 2));
+    return String(
+      wrapOnScreenTextPreviewText(text, {
+        fallback: "",
+        maxChars,
+        maxLines
+      }) || ""
+    );
+  }
+
+  function getOnScreenTextResizeHandles() {
+    return ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+  }
+
+  function buildOnScreenTextSelectionFrameHtml() {
+    const handles = getOnScreenTextResizeHandles();
+    return `
+      <span class="podcast-onscreen-selection-frame" aria-hidden="true">
+        ${handles.map((handle) => `<span class="podcast-onscreen-resize-handle is-${handle}" data-handle="${handle}"></span>`).join("")}
+      </span>
+    `;
+  }
+
   function getOnScreenTextClipEffectiveDurationMs(clip = null) {
     if (!clip) return STUDIO_TIMELINE_MIN_CLIP_MS;
     const trimInMs = Math.max(0, Number(clip?.trimInMs || 0) || 0);
@@ -451,9 +707,26 @@
     wrapOnScreenTextRenderText,
     resolveOnScreenTextRenderSpec,
     normalizeOnScreenTextTrackSettings,
+    normalizeOnScreenTextClipItem,
+    normalizeOnScreenTextClipsByRowId,
+    normalizeOnScreenTextLayoutItem,
+    normalizeOnScreenTextLayoutByRowId,
     resolveOnScreenTextRenderMetrics,
+    estimateOnScreenTextLayoutHeightPct,
+    estimateOnScreenTextLayoutWidthPct,
+    buildDefaultOnScreenTextLayoutForRow,
+    expandOnScreenTextLayoutToFitText,
     getOnScreenTextStylePresetClass,
+    getOnScreenTextBgPresetClass,
+    getOnScreenTextFontFamilyCss,
+    getOnScreenTextClipText,
+    buildOnScreenTextPreviewStrokeShadowCss,
+    buildOnScreenTextPreviewShadowCss,
+    wrapOnScreenTextPreviewText,
+    resolveOnScreenTextPreviewWrapFromMeasuredWidth,
     buildOnScreenTextBubbleInlineStyle,
+    getOnScreenTextResizeHandles,
+    buildOnScreenTextSelectionFrameHtml,
     getOnScreenTextClipEffectiveDurationMs,
     toFiniteNumber
   };

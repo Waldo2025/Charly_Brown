@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
 
-if (/data-setting="stylePreset"/.test(source) || />\s*Acabado\s*</.test(source)) {
-  throw new Error("El modal ya no debe exponer el control Acabado/stylePreset.");
+if (!/data-setting="stylePreset"/.test(source)) {
+  throw new Error("El modal debe seguir exponiendo el selector de variante visual.");
 }
 
 if (!/data-setting="fontVariant"/.test(source)) {
@@ -14,8 +15,12 @@ if (!/data-setting="strokeColor"/.test(source) || !/data-setting="strokeWidthPx"
   throw new Error("El modal debe exponer controles de color y grosor de stroke.");
 }
 
-if (!/function normalizeOnScreenTextTrackSettings\(raw = \{\}\) \{[\s\S]*const strokeColor = String\(source\.strokeColor \|\| ""\)\.trim\(\) \|\| "#0f172a";[\s\S]*const strokeWidthPx = Math\.max\(0, Math\.min\(12, toFiniteNumber\(source\.strokeWidthPx, Number\.NaN\)\)\);[\s\S]*strokeColor,[\s\S]*strokeWidthPx:/m.test(source)) {
-  throw new Error("La normalización del track debe soportar strokeColor y strokeWidthPx.");
+if (!/function normalizeOnScreenTextTrackSettings\(raw = \{\}\) \{[\s\S]*const strokeColor = String\(source\.strokeColor \|\| ""\)\.trim\(\) \|\| "#0f172a";[\s\S]*const strokeWidthPx = Math\.max\(0, Math\.min\(12, toFiniteNumber\(source\.strokeWidthPx, Number\.NaN\)\)\);[\s\S]*strokeColor,[\s\S]*strokeWidthPx:/m.test(shared)) {
+  throw new Error("La normalización del track debe vivir en la spec compartida y soportar strokeColor y strokeWidthPx.");
+}
+
+if (!/return normalizeSharedOnScreenTextTrackSettings\s*\?\s*normalizeSharedOnScreenTextTrackSettings\(raw\)/.test(source)) {
+  throw new Error("Podcaster debe delegar la normalización del track al módulo compartido.");
 }
 
 if (!/else if \(key === "fontVariant"\) \{[\s\S]*current\.fontWeight = isBold \? "bold" : "normal";[\s\S]*current\.fontStyle = isItalic \? "italic" : "normal";/m.test(source)) {

@@ -270,33 +270,6 @@ service cloud.firestore {
       );
     }
 
-    match /podcaster_sessions_payloads/{sessionId} {
-      allow read: if canAccessPodcasterSessionById(sessionId);
-      allow create: if isSignedIn() && (
-        isEditor() ||
-        (
-          request.resource.data.ownerId == request.auth.uid &&
-          request.resource.data.sessionId == sessionId &&
-          request.resource.data.payload is map &&
-          request.resource.data.payload.id == sessionId
-        )
-      );
-      allow update: if isEditor() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) &&
-        get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.ownerId == request.auth.uid &&
-        request.resource.data.ownerId == request.auth.uid &&
-        request.resource.data.sessionId == sessionId &&
-        request.resource.data.payload is map &&
-        request.resource.data.payload.id == sessionId
-      );
-      allow delete: if isAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/podcaster_sessions/$(sessionId)) &&
-        get(/databases/$(database)/documents/podcaster_sessions/$(sessionId)).data.ownerId == request.auth.uid
-      );
-    }
-
     // Fuentes de lecturas para juego/editor.
     match /lecturasASC/{docId} {
       allow read: if isSignedIn() || isPublished(resource.data) || isEditor() || isDocOwner(resource.data) || isLecturaSharedWithUser(resource.data);

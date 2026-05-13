@@ -8,8 +8,8 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /function extractDashboardSessionRows\(session = null\) \{[\s\S]*const scriptRows = Array\.isArray\(source\?\.script\?\.rows\) \? source\.script\.rows : \[];[\s\S]*const topRows = Array\.isArray\(source\?\.rows\) \? source\.rows : \[];[\s\S]*return mergeDashboardRows\(scriptRows, topRows\);/,
-  "home.js debe fusionar script.rows y rows para no perder datos de escena cuando una fuente es shallow."
+  /function extractDashboardSessionRows\(session = null\) \{[\s\S]*const scriptRows = Array\.isArray\(source\?\.script\?\.rows\) \? source\.script\.rows : \[];[\s\S]*const topRows = Array\.isArray\(source\?\.rows\) \? source\.rows : \[];[\s\S]*const candidateSets = \[scriptRows, nestedSessionScriptRows, nestedSessionRows, topRows\]\.filter\(s => s\.length > 0\);[\s\S]*merged = mergeDashboardRows\(merged, candidateSets\[i\]\);/,
+  "home.js debe fusionar secuencialmente todas las variantes legacy de filas para no perder datos de escena."
 );
 
 assert.match(
@@ -20,14 +20,14 @@ assert.match(
 
 assert.match(
   source,
-  /const rows = extractDashboardSessionRows\(session\);[\s\S]*if \(rows\.length > 0\) \{/,
-  "La apertura del reproductor debe inicializar infoScene desde las filas fusionadas."
+  /const rows = extractDashboardSessionRows\(session\);[\s\S]*const hasAnyProposal = rows\.some/,
+  "El dashboard debe derivar su estado multimedia desde las filas fusionadas de la sesión."
 );
 
 assert.match(
   source,
-  /const rows = extractDashboardSessionRows\(currentMultimediaSession\);[\s\S]*const row = rows\.find\(r => r\.id === activeEntry\.rowId\);/,
-  "La actualización reactiva del panel debe buscar la fila activa dentro de las filas rehidratadas."
+  /const rows = extractDashboardSessionRows\(currentMultimediaSession\);[\s\S]*const row = resolveDashboardActiveRow\(rows, activeEntry\);/,
+  "La actualización reactiva del panel debe resolver la fila activa dentro de las filas rehidratadas."
 );
 
 assert.match(

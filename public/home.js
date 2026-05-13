@@ -2,9 +2,9 @@ import {
   initializeApp
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
-  getFirestore, collection, query, where, getDocs, doc,
+  initializeFirestore, collection, query, where, getDocs, doc,
   updateDoc, arrayUnion, arrayRemove, getDoc, addDoc, deleteDoc, onSnapshot,
-  orderBy, limit
+  orderBy, limit, persistentLocalCache, persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import {
   getAuth,
@@ -20,17 +20,21 @@ import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?
 
 const app = initializeApp(assertFirebaseWebConfig(firebaseWebConfig));
 void bootstrapFirebaseAppCheck(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
 const auth = getAuth(app);
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     await verificarRolUsuario(user);
-    
+
     // Obtener nombre real del usuario
     obtenerNombreUsuarioActual(user).then(name => {
       currentUserName = name;
-      console.log("[Dashboard] Usuario identificado:", currentUserName);
+
     });
 
     // — Logic moved to sidebar.js —
@@ -65,11 +69,9 @@ setTimeout(() => {
 // Función para notificar actividad al Studio (podcaster.js)
 async function notifyActivity(action = "", sceneIndex = -1) {
   if (!currentMultimediaSession || !currentMultimediaSession.id) {
-    console.log("[Dashboard] No hay sesión activa para notificar actividad.");
     return;
   }
   try {
-    console.log("[Dashboard] Notificando actividad:", { action, sceneIndex, user: currentUserName });
     const sessionRef = doc(db, "podcaster_sessions", currentMultimediaSession.id);
     await updateDoc(sessionRef, {
       recentActivity: {
@@ -79,7 +81,6 @@ async function notifyActivity(action = "", sceneIndex = -1) {
         timestamp: Date.now()
       }
     });
-    console.log("[Dashboard] Actividad notificada con éxito.");
   } catch (err) {
     console.warn("[Dashboard] Error al notificar actividad:", err);
   }
@@ -639,13 +640,11 @@ const renderLecturas = () => {
 
   const unsub1 = onSnapshot(query(collection(db, "lecturas"), where("estatusLectura", "==", "Compartido"), where("publicar", "==", true)), async (snap1) => {
     const lecturas1 = await procesarSnapLecturas(snap1);
-    const lecturas2 = JSON.parse(localStorage.getItem("cacheLecturasNuevas") || "[]");
+    const lecturas2Marcadas = (lecturasCombinadas || []).filter(l => l.fromLecturasNuevas);
 
     const mapaLecturas = new Map();
-    [...lecturas1, ...lecturas2].forEach(l => mapaLecturas.set(l.id, l));
+    [...lecturas1, ...lecturas2Marcadas].forEach(l => mapaLecturas.set(l.id, l));
     lecturasCombinadas = Array.from(mapaLecturas.values());
-
-    localStorage.setItem("lecturasCompartidas", JSON.stringify(lecturasCombinadas));
     renderizarLecturasDesdeArray(lecturasCombinadas);
   });
 
@@ -675,11 +674,11 @@ function appendLecturaModalImage(container, imageUrl = "") {
 
   const wrapper = document.createElement("div");
   wrapper.className = "lectura-modal-image-wrapper";
-  
+
   const img = document.createElement("img");
   img.src = safeImageUrl;
   img.alt = "Imagen de apoyo";
-  
+
   wrapper.appendChild(img);
   container.appendChild(wrapper);
 }
@@ -752,7 +751,7 @@ const configurarEventos = () => {
       const card = accHeader.closest(".workbench-item, .item-lectura, .accordion-item");
       if (card) {
         card.classList.toggle("is-expanded");
-        return; 
+        return;
       }
     }
 
@@ -890,7 +889,7 @@ const configurarEventos = () => {
     const btnWorkbench = e.target.closest('.btn-workbench-action');
     if (btnWorkbench) {
       const wbType = btnWorkbench.dataset.type;
-      
+
       if (wbType === 'unidad') {
         window.location.href = `generarLectura.html?unidadId=${id}&userId=${user.uid}&action=openUnidad`;
       } else if (wbType === 'multimedia' || wbType === 'podcast') {
@@ -1003,7 +1002,7 @@ async function loadUserAprende() {
 
     let q;
     if (filter === "published") {
-      q = query(collection(db, "moodleCourses"), where("publicar", "==", true), orderBy("actualizado", "desc")); 
+      q = query(collection(db, "moodleCourses"), where("publicar", "==", true), orderBy("actualizado", "desc"));
     } else {
       q = isAdmin
         ? query(collection(db, "moodleCourses"), orderBy("actualizado", "desc"))
@@ -2012,10 +2011,10 @@ function updateWorkbenchListTitle(scope) {
     unidades: { published: "Unidades publicadas", all: "Todas las unidades", mine: "Mis unidades creadas" },
     aprende: { published: "Sesiones publicadas", all: "Todas las sesiones", mine: "Mis sesiones creadas" }
   };
-  
+
   const scopeLabels = labels[scope] || labels.lecturas;
   const label = filter === "published" ? scopeLabels.published : (isAdmin ? scopeLabels.all : scopeLabels.mine);
-  
+
   const idMap = { lecturas: "lecturasWorkbenchListTitle", unidades: "unidadesWorkbenchListTitle", aprende: "aprendeWorkbenchListTitle" };
   const title = document.getElementById(idMap[scope] || "lecturasWorkbenchListTitle");
   if (title) title.textContent = label;
@@ -2254,7 +2253,7 @@ async function loadUserMultimedia() {
     dashboardUnsubscribes.multimedia = onSnapshot(q, async (snap) => {
       let allItems = [];
       const authorIds = new Set();
-      
+
       snap.forEach(docSnap => {
         const data = docSnap.data();
         const session = data.session || data;
@@ -2393,16 +2392,15 @@ function extractDashboardSessionRows(session = null) {
   const nestedSessionScriptRows = Array.isArray(source?.session?.script?.rows) ? source.session.script.rows : [];
   const nestedSessionRows = Array.isArray(source?.session?.rows) ? source.session.rows : [];
   const topRows = Array.isArray(source?.rows) ? source.rows : [];
-  
+
   // Recopilar todos los sets de filas no vacíos
   const candidateSets = [scriptRows, nestedSessionScriptRows, nestedSessionRows, topRows].filter(s => s.length > 0);
-  
+
   if (candidateSets.length === 0) {
-     console.warn("[Dashboard] No se encontraron filas en la sesión:", source.id);
-     return [];
+    return [];
   }
   if (candidateSets.length === 1) return candidateSets[0];
-  
+
   // Si hay varios, mezclarlos secuencialmente
   let merged = candidateSets[0];
   for (let i = 1; i < candidateSets.length; i++) {
@@ -2466,13 +2464,7 @@ function mergeDashboardRowData(primaryRow = null, fallbackRow = null) {
       ? primary.visualNotesResolvedProposals
       : (fallback.visualNotesResolvedProposals || [])
   );
-  
-  if (merged.visualNotesProposal || merged.visualNotesProposals?.length > 0) {
-     console.log("[Dashboard] Fila mezclada con propuestas:", merged.id, {
-        active: merged.visualNotesProposal,
-        historyCount: merged.visualNotesProposals?.length
-     });
-  }
+
   return merged;
 }
 
@@ -2554,22 +2546,24 @@ function mergeDashboardRows(primaryRows = [], fallbackRows = []) {
     mergedRows.push(mergeDashboardRowData(row, fallbackById.get(key)));
     fallbackById.delete(key);
   });
-  fallbackById.forEach((row) => {
-    mergedRows.push(mergeDashboardRowData({}, row));
-  });
+  // NO añadir filas huérfanas del fallback si ya tenemos filas en el set primario.
+  // Esto evita que filas eliminadas en el Studio vuelvan a aparecer en el Dashboard.
+  if (primaryList.length === 0) {
+    fallbackById.forEach((row) => {
+      mergedRows.push(mergeDashboardRowData({}, row));
+    });
+  }
   return mergedRows;
 }
 
 function buildDashboardProposalShallowRows(rows = []) {
   return (Array.isArray(rows) ? rows : []).map((row) => {
     const nextRow = { ...row };
-    // Asegurar IDs y aplicar límites básicos para la vista previa, sin eliminar campos desconocidos
-    if (!nextRow.id) nextRow.id = String(Math.random()).slice(2);
+    // Preservamos el ID original. No generamos IDs aleatorios aquí para evitar romper la sincronización.
     if (typeof nextRow.text === "string") nextRow.text = nextRow.text.trim();
     if (typeof nextRow.voiceOverText === "string") nextRow.voiceOverText = nextRow.voiceOverText.trim();
-    
     return nextRow;
-  }).filter((row) => row.id);
+  });
 }
 
 function cloneDashboardSessionPayload(session = null) {
@@ -2599,27 +2593,34 @@ async function loadFullDashboardPodcasterSession(sessionId = "", fallbackSession
   const cleanId = String(sessionId || fallbackSession?.id || "").trim();
   if (!cleanId) return fallbackSession || null;
   try {
-    const payloadRef = doc(db, "podcaster_sessions_payloads", cleanId);
-    const payloadSnap = await getDoc(payloadRef);
-    const payload = payloadSnap.exists() ? payloadSnap.data()?.payload || null : null;
-    const base = cloneDashboardSessionPayload(payload) || cloneDashboardSessionPayload(fallbackSession) || {};
+    const sessionRef = doc(db, "podcaster_sessions", cleanId);
+    const sessionSnap = await getDoc(sessionRef);
+    if (!sessionSnap.exists()) return fallbackSession || null;
+    const data = sessionSnap.data() || {};
+    const sessionData = data?.session && typeof data.session === "object" ? data.session : data;
+    const base = cloneDashboardSessionPayload(sessionData) || cloneDashboardSessionPayload(fallbackSession) || {};
     const fallbackClone = cloneDashboardSessionPayload(fallbackSession) || {};
     if (!base || typeof base !== "object") return fallbackSession || null;
     base.id = cleanId;
+    if (data.publicar === true) base.publicar = true;
+    if (data.archived === true) base.archived = true;
+    if (data.ownerId || data.updatedAt?.toDate) {
+      base.cloudMeta = {
+        ownerId: String(data.ownerId || "").trim() || null,
+        savedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null
+      };
+    }
     const mergedRows = mergeDashboardRows(
       extractDashboardSessionRows(base),
       extractDashboardSessionRows(fallbackClone)
     );
     if (mergedRows.length) {
-      if (!base.script || typeof base.script !== "object") {
-        base.script = {};
-      }
-      base.script.rows = mergedRows;
+      base.script = { ...(base.script || {}), rows: mergedRows };
       base.rows = mergedRows;
     }
     return base;
   } catch (error) {
-    console.warn("[Dashboard] No se pudo cargar payload completo de la sesión:", error);
+    console.warn("[Dashboard] No se pudo cargar la sesión completa desde podcaster_sessions:", error);
     return fallbackSession || null;
   }
 }
@@ -2649,64 +2650,64 @@ function createDashboardSessionFallback(data = null, sessionId = "") {
 async function mutateDashboardProposalSession(activeRowId = "", mutator = null) {
   const sessionId = String(currentMultimediaSession?.id || "").trim();
   const rowId = String(activeRowId || window._currentActiveRowId || "").trim();
-  if (!sessionId || !rowId || typeof mutator !== "function") {
+  if (!sessionId || !rowId || typeof mutator !== "function") return { ok: false, rowIndex: -1 };
+
+  const sessionRef = doc(db, "podcaster_sessions", sessionId);
+
+  try {
+    const sessionSnap = await getDoc(sessionRef);
+    const now = new Date().toISOString();
+    const writeOps = [];
+    let rowIndex = -1;
+
+    if (sessionSnap.exists()) {
+      const sDoc = sessionSnap.data() || {};
+      const sSession = sDoc.session || sDoc;
+      let sRows = null;
+      const sRowsPath = "session.script.rows";
+
+      if (Array.isArray(sSession.script?.rows)) {
+        sRows = sSession.script.rows;
+      } else if (Array.isArray(sSession.rows)) {
+        sRows = sSession.rows;
+      } else if (Array.isArray(sDoc.rows)) {
+        sRows = sDoc.rows;
+      }
+
+      if (sRowsPath && Array.isArray(sRows)) {
+        const rowsCopy = sRows.map(r => ({ ...r }));
+        const idx = rowsCopy.findIndex(r => String(r.id || "").trim() === rowId);
+        if (idx >= 0) {
+          rowIndex = idx;
+          if (mutator(rowsCopy, idx, sSession) === true) {
+            const proposalRows = buildDashboardProposalShallowRows(rowsCopy);
+            writeOps.push(updateDoc(sessionRef, {
+              [sRowsPath]: proposalRows,
+              "session.updatedAt": now,
+              sessionUpdatedAt: now,
+              updatedAt: now
+            }));
+          }
+        }
+      }
+    }
+
+    if (writeOps.length > 0) {
+      await Promise.all(writeOps);
+    }
+
+    return { ok: writeOps.length > 0, rowIndex, session: currentMultimediaSession };
+  } catch (err) {
+    console.error("[Dashboard] Error crítico en mutateDashboardProposalSession:", err);
     return { ok: false, rowIndex: -1, session: currentMultimediaSession };
   }
-  const sessionRef = doc(db, "podcaster_sessions", sessionId);
-  const payloadRef = doc(db, "podcaster_sessions_payloads", sessionId);
-  const [sessionSnap, payloadSnap] = await Promise.all([getDoc(sessionRef), getDoc(payloadRef)]);
-  const sessionData = sessionSnap.exists() ? (sessionSnap.data() || {}) : {};
-  const payloadSession = payloadSnap.exists() ? payloadSnap.data()?.payload || null : null;
-  const sourceSession = cloneDashboardSessionPayload(payloadSession)
-    || cloneDashboardSessionPayload(sessionData?.session)
-    || cloneDashboardSessionPayload(currentMultimediaSession)
-    || {};
-  sourceSession.id = sessionId;
-  if (!sourceSession.script || typeof sourceSession.script !== "object") {
-    sourceSession.script = {};
-  }
-  const rows = extractDashboardSessionRows(sourceSession).map((row) => ({
-    ...row,
-    visualNotesProposals: Array.isArray(row?.visualNotesProposals) ? [...row.visualNotesProposals] : [],
-    visualNotesResolvedProposals: normalizeDashboardProposalState(row?.visualNotesResolvedProposals)
-  }));
-  if (!Array.isArray(sourceSession.script.rows)) {
-    sourceSession.script.rows = rows;
-  }
-  const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession || sourceSession);
-  const activeEntry = entries.find((entry) => String(entry?.rowId || "").trim() === rowId) || null;
-  const rowIndex = findDashboardActiveRowIndex(rows, rowId, activeEntry);
-  if (rowIndex < 0 || !rows[rowIndex]) {
-    return { ok: false, rowIndex: -1, session: sourceSession };
-  }
-  const changed = mutator(rows, rowIndex, sourceSession) === true;
-  if (!changed) {
-    return { ok: false, rowIndex, session: sourceSession };
-  }
-  sourceSession.script.rows = rows;
-  if (Array.isArray(sourceSession.rows)) {
-    sourceSession.rows = rows;
-  }
-  const proposalRows = buildDashboardProposalShallowRows(rows);
-  const writeOps = [];
-  if (payloadSnap.exists()) {
-    writeOps.push(updateDoc(payloadRef, {
-      payload: sourceSession,
-      updatedAt: new Date().toISOString()
-    }));
-  }
-  writeOps.push(updateDoc(sessionRef, {
-    "session.script.rows": proposalRows,
-    updatedAt: new Date().toISOString()
-  }));
-  await Promise.all(writeOps);
-  currentMultimediaSession = sourceSession;
-  return { ok: true, rowIndex, session: sourceSession };
 }
 
 const storage = getStorage(app);
 const multimediaPlaybackController = new PodcasterPlaybackController();
 const staleProxyMediaUrls = new Set();
+let homeStageVideoLoadTokenSeq = 0;
+const homeStageVideoLoadTokensByEl = new WeakMap();
 
 function formatMs(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -2719,10 +2720,6 @@ function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = 
   const clean = String(url || "").trim();
   if (!clean) return;
   staleProxyMediaUrls.add(clean);
-  console.warn("[Dashboard] Proxy media marcada como stale:", reason, {
-    url: clean.slice(0, 240),
-    ...payload
-  });
 }
 
 function isMarkedStaleProxyMediaUrl(url = "") {
@@ -2856,20 +2853,505 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
   }
 }
 
+const HOME_TIMELINE_MIN_CLIP_MS = 500;
+
+function normalizeHomePanelMusicDuckingWhenGeminiPct(value, fallback = 60) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return fallback;
+  if (raw >= 40 && raw <= 100) return raw;
+  if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
+  return fallback;
+}
+
+function normalizeHomePanelMusicMutedLoopIndexes(value = []) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((item) => Math.max(0, Math.floor(Number(item) || 0)))
+      .filter((item) => Number.isFinite(item) && item >= 0 && item <= 999)
+  )).sort((a, b) => a - b);
+}
+
+function normalizeHomePanelMusicLoopSettings(value = [], sourceDurationMs = 0) {
+  if (!Array.isArray(value)) return [];
+  const maxDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, Math.round(Number(sourceDurationMs || 0) || 0));
+  const maxTrimInMs = Math.max(0, maxDurationMs - HOME_TIMELINE_MIN_CLIP_MS);
+  const map = new Map();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const loopIndex = Math.max(0, Math.floor(Number(item.loopIndex) || 0));
+    if (!Number.isFinite(loopIndex) || loopIndex > 999) return;
+    const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(item.trimInMs || 0) || 0)));
+    const rawTrimOutMs = Math.round(Number(item.trimOutMs || maxDurationMs) || maxDurationMs);
+    const trimOutMs = Math.max(trimInMs + HOME_TIMELINE_MIN_CLIP_MS, Math.min(maxDurationMs, rawTrimOutMs));
+    map.set(loopIndex, { loopIndex, trimInMs, trimOutMs });
+  });
+  return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
+}
+
+function normalizeHomePanelMusicTrack(track = null) {
+  if (!track || typeof track !== "object") return null;
+  const sourceDurationMs = Math.max(0, Math.round((Number(track.durationSec || 0) || 0) * 1000));
+  const startOffsetMs = Math.max(0, Math.round(Number(track.startOffsetMs || 0) || 0));
+  const maxTrimInMs = Math.max(0, sourceDurationMs - HOME_TIMELINE_MIN_CLIP_MS);
+  const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(track.trimInMs || 0) || 0)));
+  const rawTrimOutMs = Math.round(Number(track.trimOutMs || sourceDurationMs) || sourceDurationMs);
+  const trimOutMs = sourceDurationMs > 0
+    ? Math.max(trimInMs + HOME_TIMELINE_MIN_CLIP_MS, Math.min(sourceDurationMs, rawTrimOutMs))
+    : 0;
+  return {
+    libraryId: String(track.libraryId || "").trim(),
+    slotLabel: String(track.slotLabel || "").trim(),
+    enabledInSession: track.enabledInSession !== false,
+    name: String(track.name || "Audio").trim() || "Audio",
+    mimeType: String(track.mimeType || "audio/mpeg").trim() || "audio/mpeg",
+    size: Math.max(0, Number(track.size || 0) || 0),
+    durationSec: Math.max(0, Number(track.durationSec || 0) || 0),
+    startOffsetMs,
+    trimInMs,
+    trimOutMs,
+    localDataUrl: String(track.localDataUrl || "").trim(),
+    downloadUrl: String(track.downloadUrl || "").trim(),
+    storagePath: String(track.storagePath || "").trim(),
+    updatedAt: String(track.updatedAt || "").trim(),
+    model: String(track.model || "").trim(),
+    prompt: String(track.prompt || "").trim(),
+    durationMeasuredWith: String(track.durationMeasuredWith || "").trim().toLowerCase(),
+    montageVolume: track.montageVolume !== undefined ? Math.max(0, Math.min(100, Number(track.montageVolume) || 0)) : 100,
+    duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(track.duckingWhenGeminiPct, 60),
+    stabilize: track.stabilize === true,
+    loopSettings: normalizeHomePanelMusicLoopSettings(track.loopSettings || [], sourceDurationMs),
+    mutedLoopIndexes: normalizeHomePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || []),
+    segmentStartOverrides: Array.isArray(track.segmentStartOverrides)
+      ? track.segmentStartOverrides
+        .map((item) => ({
+          loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
+          startMs: Math.max(0, Math.round(Number(item?.startMs || 0) || 0))
+        }))
+        .filter((item) => Number.isFinite(item.loopIndex) && item.loopIndex <= 999 && Number.isFinite(item.startMs))
+      : []
+  };
+}
+
+function normalizeHomePanelMusicTrackList(value = []) {
+  const list = Array.isArray(value) ? value.map((item) => normalizeHomePanelMusicTrack(item)).filter(Boolean) : [];
+  return list.map((track, index) => ({
+    ...track,
+    slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
+    enabledInSession: track.enabledInSession !== false
+  }));
+}
+
+function resolveHomePanelMusicTrackKind(value = "") {
+  return String(value || "").trim() === "ai" ? "ai" : "uploaded";
+}
+
+function getHomePanelMusicUploadedTracks(cfg = null) {
+  const uploadedTracks = normalizeHomePanelMusicTrackList(cfg?.trackLibrary?.uploadedTracks || []);
+  if (uploadedTracks.length) return uploadedTracks;
+  const uploaded = normalizeHomePanelMusicTrack(cfg?.trackLibrary?.uploaded || null);
+  if (uploaded) {
+    return [{ ...uploaded, slotLabel: String(uploaded.slotLabel || "Audio 1").trim() || "Audio 1" }];
+  }
+  const track = normalizeHomePanelMusicTrack(cfg?.track || null);
+  if (track && !track.model) {
+    return [{ ...track, slotLabel: String(track.slotLabel || "Audio 1").trim() || "Audio 1" }];
+  }
+  return [];
+}
+
+function getHomePanelMusicTrackDurationSec(track = null) {
+  const normalized = normalizeHomePanelMusicTrack(track);
+  const directDurationSec = Math.max(0, Number(normalized?.durationSec || 0) || 0);
+  if (directDurationSec > 0.05) return directDurationSec;
+  const sizeBytes = Math.max(0, Number(normalized?.size || 0) || 0);
+  if (sizeBytes <= 0) return 0;
+  const mimeType = String(normalized?.mimeType || "").trim().toLowerCase();
+  if (!mimeType.includes("wav") && !mimeType.includes("wave")) {
+    return 0;
+  }
+  const bitsPerSecond = 1411200;
+  return Math.max(0, Number(((sizeBytes * 8) / bitsPerSecond).toFixed(2)) || 0);
+}
+
+function resolveHomePanelMusicTrackByKind(cfg = null, kind = "") {
+  const trackKind = resolveHomePanelMusicTrackKind(kind || cfg?.selectedTrackKind || "uploaded");
+  const selectedTrack = normalizeHomePanelMusicTrack(cfg?.track || null);
+  if (trackKind === "uploaded") {
+    const uploadedTracks = getHomePanelMusicUploadedTracks(cfg).filter((track) => track?.enabledInSession !== false);
+    if (selectedTrack && !selectedTrack.model) {
+      const selectedSlotLabel = String(selectedTrack.slotLabel || "").trim();
+      const match = uploadedTracks.find((item) => String(item?.slotLabel || "").trim() === selectedSlotLabel);
+      if (match) return normalizeHomePanelMusicTrack(match);
+      return selectedTrack;
+    }
+    return normalizeHomePanelMusicTrack(uploadedTracks[0] || null);
+  }
+  if (cfg?.trackLibrary?.ai) return normalizeHomePanelMusicTrack(cfg.trackLibrary.ai);
+  if (selectedTrack?.model) return selectedTrack;
+  return null;
+}
+
+function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, options = {}) {
+  if (!Array.isArray(sourceItems)) return [];
+  const resolveAudio = typeof options.resolveStorageAudioUrl === "function" ? options.resolveStorageAudioUrl : resolveStorageAudioUrl;
+  const uploadedTracks = getHomePanelMusicUploadedTracks(cfg);
+  const panelVolume = Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 100) || 0));
+  const panelDucking = normalizeHomePanelMusicDuckingWhenGeminiPct(cfg?.duckingWhenGeminiPct, 60);
+  return sourceItems.map((item) => {
+    const trackIndex = Math.max(0, Math.floor(Number(item?.trackIndex || 0) || 0));
+    const loopIndex = Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0));
+    const track = uploadedTracks[trackIndex] || null;
+    const sourceUrl = String(resolveAudio(item?.sourceUrl || item?.downloadUrl || "", item?.storagePath || "") || "").trim();
+    if (!sourceUrl) return null;
+    const startOffsetMs = Math.max(0, Math.round(Number(item?.startOffsetMs ?? item?.startMs ?? 0) || 0));
+    const rawEndOffsetMs = Math.round(Number(item?.endOffsetMs ?? item?.endMs ?? 0) || 0);
+    const rawDurationMs = Math.round(Number(item?.durationMs || 0) || 0);
+    const durationMs = Math.max(0, rawDurationMs || rawEndOffsetMs - startOffsetMs);
+    const endOffsetMs = Math.max(startOffsetMs, rawEndOffsetMs || (startOffsetMs + durationMs));
+    const mutedLoopIndexes = new Set(normalizeHomePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
+    return {
+      ...item,
+      sourceUrl,
+      startOffsetMs,
+      endOffsetMs,
+      durationSec: Math.max(0, Number(item?.durationSec || durationMs / 1000) || 0),
+      trimInMs: Math.max(0, Math.round(Number(item?.trimInMs || 0) || 0)),
+      trimOutMs: Math.max(0, Math.round(Number(item?.trimOutMs || 0) || 0)),
+      trackIndex,
+      loopIndex,
+      muted: item?.muted === true || mutedLoopIndexes.has(loopIndex),
+      volume: item?.volume !== undefined
+        ? Math.max(0, Math.min(100, Number(item.volume) || 0))
+        : (track?.montageVolume !== undefined ? track.montageVolume : panelVolume),
+      duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(
+        item?.duckingWhenGeminiPct ?? item?.duckingPct ?? track?.duckingWhenGeminiPct,
+        panelDucking
+      ),
+      stabilize: item?.stabilize !== undefined
+        ? item.stabilize === true
+        : (track?.stabilize !== undefined ? track.stabilize : cfg?.stabilize === true)
+    };
+  }).filter(Boolean);
+}
+
+function buildHomeUploadedPanelMusicSegments(session = null, options = {}) {
+  const cfg = options.config || null;
+  const buildTimelineRuntimeEntries = typeof options.buildTimelineRuntimeEntries === "function"
+    ? options.buildTimelineRuntimeEntries
+    : (() => []);
+  const getTimelineTotalDurationMs = typeof options.getTimelineTotalDurationMs === "function"
+    ? options.getTimelineTotalDurationMs
+    : ((s) => {
+      const entries = buildTimelineRuntimeEntries(s);
+      if (!entries.length) return HOME_TIMELINE_MIN_CLIP_MS;
+      return Math.max(HOME_TIMELINE_MIN_CLIP_MS, ...entries.map((entry) => Math.max(0, Number(entry?.endMs || 0) || 0)));
+    });
+  const allTracks = getHomePanelMusicUploadedTracks(cfg);
+  const uploadedTracks = allTracks.filter((track) => track?.enabledInSession !== false && getHomePanelMusicTrackDurationSec(track) > 0.05);
+  const entries = buildTimelineRuntimeEntries(session);
+  const totalDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
+  const sceneEntries = entries.length ? entries : [{ startMs: 0, endMs: totalDurationMs }];
+  if (!uploadedTracks.length) return [];
+  const resolveFullTrackIndex = (track = null, fallbackIndex = 0) => {
+    const normalized = normalizeHomePanelMusicTrack(track);
+    if (!normalized) return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
+    const slotLabel = String(normalized.slotLabel || "").trim();
+    if (slotLabel) {
+      const byLabel = allTracks.findIndex((item) => String(item?.slotLabel || "").trim() === slotLabel);
+      if (byLabel >= 0) return byLabel;
+    }
+    const byIdentity = allTracks.findIndex((item) => item === track);
+    if (byIdentity >= 0) return byIdentity;
+    return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
+  };
+  const applyOverrides = (segmentList = []) => segmentList.map((segment) => {
+    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
+    const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
+    const track = allTracks[trackIndex] || null;
+    const overrides = Array.isArray(track?.segmentStartOverrides) ? track.segmentStartOverrides : [];
+    const override = overrides.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex);
+    if (!override) return segment;
+    const durationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) - Number(segment?.startMs || 0) || 0));
+    const nextStart = Math.max(0, Math.min(totalDurationMs - durationMs, Math.round(Number(override.startMs || 0) || 0)));
+    return {
+      ...segment,
+      startMs: nextStart,
+      endMs: nextStart + durationMs
+    };
+  });
+  if (uploadedTracks.length === 1) {
+    const single = uploadedTracks[0];
+    const fullTrackIndex = resolveFullTrackIndex(single, 0);
+    const durationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, Math.round(getHomePanelMusicTrackDurationSec(single) * 1000));
+    const segments = [];
+    let sceneCursor = 0;
+    let loopIndex = 0;
+    while (sceneCursor < sceneEntries.length && loopIndex < 120) {
+      const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
+      let endSceneCursor = sceneCursor;
+      let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
+      while (endSceneCursor + 1 < sceneEntries.length) {
+        const candidateEndMs = Math.max(
+          segmentEndMs,
+          Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs
+        );
+        if ((candidateEndMs - startMs) > durationMs + 1) break;
+        endSceneCursor += 1;
+        segmentEndMs = candidateEndMs;
+      }
+      const sceneBatchDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, segmentEndMs - startMs);
+      const loopSettings = normalizeHomePanelMusicLoopSettings(single?.loopSettings || [], sceneBatchDurationMs);
+      const loopSetting = loopSettings.find((item) => item.loopIndex === loopIndex) || {
+        loopIndex,
+        trimInMs: 0,
+        trimOutMs: sceneBatchDurationMs
+      };
+      const trimInMs = Math.max(
+        0,
+        Math.min(
+          sceneBatchDurationMs - HOME_TIMELINE_MIN_CLIP_MS,
+          Number(loopSetting?.trimInMs || 0) || 0
+        )
+      );
+      const trimOutMs = Math.max(
+        trimInMs + HOME_TIMELINE_MIN_CLIP_MS,
+        Math.min(sceneBatchDurationMs, Number(loopSetting?.trimOutMs || sceneBatchDurationMs) || sceneBatchDurationMs)
+      );
+      segments.push({
+        ...single,
+        slotLabel: String(single.slotLabel || "Audio 1").trim() || "Audio 1",
+        trackIndex: fullTrackIndex,
+        startMs,
+        endMs: startMs + trimOutMs,
+        durationSec: getHomePanelMusicTrackDurationSec(single),
+        trimInMs,
+        trimOutMs,
+        loop: false,
+        loopIndex
+      });
+      sceneCursor = endSceneCursor + 1;
+      loopIndex += 1;
+    }
+    return applyOverrides(segments);
+  }
+  const segments = [];
+  let sceneCursor = 0;
+  uploadedTracks.forEach((track, index) => {
+    if (sceneCursor >= sceneEntries.length) return;
+    const fullTrackIndex = resolveFullTrackIndex(track, index);
+    const trackDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, Math.round(getHomePanelMusicTrackDurationSec(track) * 1000));
+    const remainingTracksAfterCurrent = Math.max(0, uploadedTracks.length - index - 1);
+    const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
+    let endSceneCursor = sceneCursor;
+    let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
+    while (endSceneCursor + 1 < sceneEntries.length) {
+      const remainingScenesAfterCandidate = Math.max(0, sceneEntries.length - (endSceneCursor + 2));
+      if (remainingScenesAfterCandidate < remainingTracksAfterCurrent) break;
+      const candidateEndMs = Math.max(segmentEndMs, Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs);
+      if ((candidateEndMs - startMs) > trackDurationMs + 1) break;
+      endSceneCursor += 1;
+      segmentEndMs = candidateEndMs;
+    }
+    const availableDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, totalDurationMs - startMs);
+    const visibleDurationMs = Math.max(HOME_TIMELINE_MIN_CLIP_MS, Math.min(trackDurationMs, availableDurationMs));
+    segments.push({
+      ...track,
+      slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
+      trackIndex: fullTrackIndex,
+      startMs,
+      endMs: startMs + visibleDurationMs,
+      durationSec: getHomePanelMusicTrackDurationSec(track),
+      trimInMs: 0,
+      trimOutMs: visibleDurationMs,
+      loop: false,
+      loopIndex: 0
+    });
+    sceneCursor = endSceneCursor + 1;
+  });
+  return applyOverrides(segments);
+}
+
+function buildHomePanelMontageMusicConfig(session = null, options = {}) {
+  const rawCfg = session?.panelMusicConfig || session?.session?.panelMusicConfig ||
+    session?.panelMusicState || session?.session?.panelMusicState ||
+    session?.podcastStudioUiState?.panelMusicState ||
+    session?.podcastStudioUiState?.panelMusicConfig;
+  const cfg = rawCfg ? JSON.parse(JSON.stringify(rawCfg)) : { sourceType: "none" };
+  const normalized = {
+    preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
+    volume: Math.max(0, Math.min(100, Number(cfg?.volume ?? 22) || 22)),
+    montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 100) || 0)),
+    duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(cfg?.duckingWhenGeminiPct ?? cfg?.duckingPct, 60),
+    stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
+    sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
+    selectedTrackKind: resolveHomePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
+    trackLibrary: {
+      uploaded: normalizeHomePanelMusicTrack(cfg?.trackLibrary?.uploaded || null),
+      uploadedTracks: normalizeHomePanelMusicTrackList(cfg?.trackLibrary?.uploadedTracks || []),
+      ai: normalizeHomePanelMusicTrack(cfg?.trackLibrary?.ai || null)
+    },
+    track: normalizeHomePanelMusicTrack(cfg?.track || null),
+    sourceItems: Array.isArray(cfg?.sourceItems) ? cfg.sourceItems : []
+  };
+  if (!normalized.trackLibrary.uploaded && normalized.track && !normalized.track.model) {
+    normalized.trackLibrary.uploaded = normalized.track;
+  }
+  if (!normalized.trackLibrary.uploadedTracks.length && normalized.trackLibrary.uploaded) {
+    normalized.trackLibrary.uploadedTracks = [{
+      ...normalized.trackLibrary.uploaded,
+      slotLabel: String(normalized.trackLibrary.uploaded.slotLabel || "Audio 1").trim() || "Audio 1"
+    }];
+  }
+  if (!normalized.trackLibrary.ai && normalized.track && normalized.track.model) {
+    normalized.trackLibrary.ai = normalized.track;
+  }
+  const resolveAudio = typeof options.resolveStorageAudioUrl === "function" ? options.resolveStorageAudioUrl : resolveStorageAudioUrl;
+  const uploadedMode = normalized.selectedTrackKind === "uploaded";
+  const activeTrack = resolveHomePanelMusicTrackByKind(normalized, normalized.selectedTrackKind) || normalized.track;
+  const persistedSourceItems = normalizeHomePanelMusicSourceItems(normalized.sourceItems, normalized, { resolveStorageAudioUrl: resolveAudio });
+  const uploadedSegments = uploadedMode && !persistedSourceItems.length
+    ? buildHomeUploadedPanelMusicSegments(session, {
+      config: normalized,
+      buildTimelineRuntimeEntries: options.buildTimelineRuntimeEntries,
+      getTimelineTotalDurationMs: options.getTimelineTotalDurationMs
+    })
+    : [];
+  const uploadedTracks = getHomePanelMusicUploadedTracks(normalized);
+  const sourceItems = persistedSourceItems.length
+    ? persistedSourceItems
+    : uploadedSegments.map((segment) => {
+      const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
+      const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
+      const track = uploadedTracks[trackIndex] || null;
+      const mutedLoopIndexes = new Set(normalizeHomePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
+      return {
+        slotLabel: String(segment?.slotLabel || "").trim(),
+        sourceUrl: String(resolveAudio(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
+        startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
+        endOffsetMs: Math.max(0, Number(segment?.endMs || 0) || 0),
+        loop: segment?.loop === true,
+        durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
+        trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
+        trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),
+        trackIndex,
+        loopIndex,
+        muted: mutedLoopIndexes.has(loopIndex),
+        volume: track?.montageVolume !== undefined ? track.montageVolume : normalized.montageVolume,
+        duckingWhenGeminiPct: track?.duckingWhenGeminiPct !== undefined ? track.duckingWhenGeminiPct : normalized.duckingWhenGeminiPct,
+        stabilize: track?.stabilize !== undefined ? track.stabilize : normalized.stabilize
+      };
+    }).filter((segment) => segment.sourceUrl);
+  const sourceUrl = (!uploadedMode && normalized.sourceType === "track")
+    ? String(resolveAudio(activeTrack?.downloadUrl || activeTrack?.localDataUrl || "", activeTrack?.storagePath || "") || "").trim()
+    : "";
+  const sourceType = uploadedMode
+    ? (sourceItems.length ? "track" : "none")
+    : (normalized.sourceType === "track" && sourceUrl ? "track" : "none");
+  return {
+    sourceType,
+    preset: normalized.preset,
+    sourceUrl,
+    sourceItems,
+    volume: normalized.montageVolume,
+    duckingWhenGeminiPct: normalized.duckingWhenGeminiPct,
+    stabilize: normalized.stabilize,
+    durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
+    startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
+    trimInMs: Math.max(0, Number(activeTrack?.trimInMs || 0) || 0),
+    trimOutMs: Math.max(0, Number(activeTrack?.trimOutMs || 0) || 0),
+    loopSettings: Array.isArray(activeTrack?.loopSettings)
+      ? activeTrack.loopSettings.map((item) => ({
+        loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
+        trimInMs: Math.max(0, Number(item?.trimInMs || 0) || 0),
+        trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0)
+      }))
+      : [],
+    mutedLoopIndexes: normalizeHomePanelMusicMutedLoopIndexes(activeTrack?.mutedLoopIndexes || []),
+    enabled: sourceType !== "none" && (!!sourceUrl || sourceItems.length > 0)
+  };
+}
+
 function normalizeDialogueAudioPlaybackRate(value = 1) {
   return Math.max(0.5, Math.min(2.25, Number(value || 1) || 1));
 }
 
 function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
+  const s = session || (typeof currentMultimediaSession !== "undefined" ? currentMultimediaSession : null);
   const key = String(rowId || "").trim();
-  if (!key) return 1;
-  const audioMap = session?.dialogueAudioMap || session?.podcastStudioUiState?.dialogueAudiosByRowId || {};
-  const clip = audioMap?.[key] || null;
-  return normalizeDialogueAudioPlaybackRate(clip?.playbackRate || 1);
+  if (!key || !s) return 1;
+  
+  // Combinar todas las fuentes posibles de configuración de audio para no perder nada
+  const audioMap = {
+    ...(s.script?.dialogueAudioMap || {}),
+    ...(s.podcastStudioUiState?.dialogueAudiosByRowId || {}),
+    ...(s.dialogueAudioMap || {})
+  };
+    
+  let clip = audioMap[key] || null;
+  let rate = 1;
+
+  if (clip && clip.playbackRate) {
+    rate = clip.playbackRate;
+  }
+  
+  // Buscar siempre en la fila como fallback definitivo o override
+  if (s.script?.rows) {
+    const row = s.script.rows.find(r => String(r.id || "").trim() === key);
+    if (row && row.playbackRate) {
+      // Si la fila tiene un rate explícito, lo preferimos si es distinto de 1
+      if (rate === 1 || row.playbackRate !== 1) {
+        rate = row.playbackRate;
+      }
+    }
+  }
+
+  const finalRate = normalizeDialogueAudioPlaybackRate(rate);
+  
+  if (clip || rate !== 1) {
+    console.log(`[Playback:Resolution] ${key} -> Rate: ${finalRate.toFixed(2)} (Clip: ${clip ? 'Encontrado' : 'No encontrado'}, MapKeys: ${Object.keys(audioMap).length})`);
+  }
+  
+  return finalRate;
+}
+
+function resolveTimelineClipMix(session = null, rowId = "") {
+  if (!session) return { videoVolume: 1, voiceVolume: 1, backgroundVolume: 1 };
+  const key = String(rowId || "").trim();
+  const videoConfig = session.podcastVideoConfig || session.script?.podcastVideoConfig || {};
+  
+  // Obtener clips (pueden estar en varias rutas según el origen de la sesión)
+  const clipMap = session.timelineClipMap 
+    || videoConfig.timelineClipsByRowId 
+    || session.podcastStudioUiState?.timelineClipsByRowId 
+    || {};
+    
+  const clip = clipMap[key] || null;
+  
+  // Valores base por defecto
+  const fallbackVeoPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultVeoVolumePct ?? 100)));
+  const fallbackGeminiPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultGeminiVolumePct ?? 100)));
+  
+  // Overrides específicos del clip (seteados en el modal de duración/volumen del Studio)
+  const veoOverride = clip?.veoVolumeOverridePct;
+  const geminiOverride = clip?.geminiVolumeOverridePct;
+  
+  const veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
+  const geminiPct = Number.isFinite(geminiOverride) ? Math.max(0, Math.min(100, Math.round(geminiOverride))) : fallbackGeminiPct;
+  
+  // Override de música de fondo (timelineSceneAudioMixByRowId)
+  const backgroundOverride = videoConfig.timelineSceneAudioMixByRowId?.[key]?.backgroundMusicVolumePct;
+  const backgroundPct = Number.isFinite(backgroundOverride) ? Math.max(0, Math.min(200, Math.round(backgroundOverride))) : 100;
+  
+  return {
+    videoVolume: Math.max(0, Math.min(1, veoPct / 100)),
+    voiceVolume: Math.max(0, Math.min(1, geminiPct / 100)),
+    backgroundVolume: Math.max(0, Math.min(2, backgroundPct / 100))
+  };
 }
 
 let cachedRuntimeEntries = null;
-let cachedRuntimeEntriesSessionId = null;
+let cachedRuntimeEntriesKey = null;
 let cachedVideoConfig = null;
 let cachedVideoConfigSessionId = null;
 
@@ -2881,11 +3363,14 @@ const multimediaPlaybackDeps = {
   },
   buildTimelineRuntimeEntries: (s) => {
     if (!s) return [];
-    if (cachedRuntimeEntries && cachedRuntimeEntriesSessionId === s.id) {
+    const currentUpdateAt = s.updatedAt || s.payload?.updatedAt || 0;
+    const cacheKey = `${s.id}_${currentUpdateAt}`;
+
+    if (cachedRuntimeEntries && cachedRuntimeEntriesKey === cacheKey) {
       return cachedRuntimeEntries;
     }
-    
-    console.log("[Dashboard] Building timeline runtime entries (fresh)...");
+
+
     const rows = extractDashboardSessionRows(s);
     const videoConfig = s?.podcastVideoConfig || s?.script?.podcastVideoConfig || {};
     const ui = s?.podcastStudioUiState || {};
@@ -2897,7 +3382,7 @@ const multimediaPlaybackDeps = {
     let currentMs = 0;
     const entries = rows.map((row, index) => {
       const rowId = row.id || `row_${index}`;
-      if (!row.id) row.id = rowId; 
+      if (!row.id) row.id = rowId;
       let clip = clipMap[rowId];
 
       const sceneClip = videoMap[rowId];
@@ -2947,33 +3432,33 @@ const multimediaPlaybackDeps = {
 
       let rawDur = Number(clip.durationMs || clip.sourceDurationMs || 0);
       if (rawDur > 0 && rawDur < 100) rawDur *= 1000;
-      
+
       if (rawDur <= 0) {
         rawDur = effectiveAudioDurationMs;
       }
-      
+
       if (rawDur <= 0) rawDur = 3000;
 
       const trimIn = Number(clip.trimInMs || 0);
       let trimOut = Number(clip.trimOutMs || rawDur);
       if (trimOut > 0 && trimOut < 100) trimOut *= 1000;
-      
+
       if (trimOut <= trimIn) trimOut = trimIn + rawDur;
 
       const durationMs = Math.max(500, trimOut - trimIn);
-      
+
       entry.startMs = currentMs;
       entry.durationMs = durationMs;
       entry.effectiveDurationMs = durationMs;
       entry.endMs = entry.startMs + durationMs;
-      
+
       currentMs = entry.endMs;
       return entry;
     }).filter(Boolean);
 
     const finalEntries = entries.sort((a, b) => a.startMs - b.startMs);
     cachedRuntimeEntries = finalEntries;
-    cachedRuntimeEntriesSessionId = s.id;
+    cachedRuntimeEntriesKey = cacheKey;
     return finalEntries;
   },
   resolveFirebaseStorageUrl: async (gsPath) => {
@@ -2985,48 +3470,94 @@ const multimediaPlaybackDeps = {
       }
       return gsPath;
     } catch (e) {
-      console.warn("[Dashboard] Error al resolver URL de Storage:", gsPath, e);
       return gsPath;
     }
   },
-  setPodcastStageVideoSourceForElement: async (el, url) => {
-    if (!el) return;
+  setPodcastStageVideoSourceForElement: async (el, url, options = {}) => {
+    if (!el || !url) return false;
+    const cleanUrl = String(url || "").trim();
+    if (!cleanUrl) return false;
+    const loadToken = ++homeStageVideoLoadTokenSeq;
+    homeStageVideoLoadTokensByEl.set(el, loadToken);
+
+    if (String(el.dataset.src || "").trim() === cleanUrl && el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      el.hidden = options.keepHidden === true;
+      return true;
+    }
+
+    let preferredSource = "";
+    try {
+      preferredSource = multimediaPlaybackController.getBlobUrlSync(cleanUrl) || "";
+      if (!preferredSource) {
+        preferredSource = await multimediaPlaybackController.getBlobUrl(cleanUrl);
+      }
+    } catch (_) {
+      preferredSource = "";
+    }
+    preferredSource = String(preferredSource || cleanUrl).trim();
+
+    try {
+      const sourceUrl = new URL(preferredSource, window.location.origin);
+      if (sourceUrl.origin === window.location.origin) {
+        el.removeAttribute("crossorigin");
+      } else {
+        el.crossOrigin = "anonymous";
+      }
+    } catch (_) {
+      el.removeAttribute("crossorigin");
+    }
+
     return new Promise((resolve) => {
-      el.src = url;
-      el.load();
+      el.dataset.src = cleanUrl;
+      el.src = preferredSource;
+      el.hidden = options.keepHidden === true;
+      el.preload = "auto";
+      try { el.load(); } catch (_) { }
 
       let hasResolved = false;
-      const onDone = () => {
-        if (!hasResolved) {
-          hasResolved = true;
-          resolve();
-        }
+      const cleanup = () => {
+        el.onloadeddata = null;
+        el.oncanplay = null;
+        el.onerror = null;
+      };
+      const onDone = (ready = true) => {
+        if (hasResolved) return;
+        hasResolved = true;
+        cleanup();
+        const stillExpected = (
+          homeStageVideoLoadTokensByEl.get(el) === loadToken
+          && String(el.dataset.src || "").trim() === cleanUrl
+        );
+        const hasData = el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+        resolve(Boolean(ready) && stillExpected && hasData);
       };
 
-      el.onloadedmetadata = onDone;
-      el.oncanplay = onDone;
-      el.onerror = (err) => {
-        onDone();
-      };
+      el.onloadeddata = () => onDone(true);
+      el.oncanplay = () => onDone(true);
+      el.onerror = () => onDone(false);
 
-      setTimeout(onDone, 3500);
+      setTimeout(() => onDone(true), 3500);
     });
   },
   setActiveStageVideoSlot: (slot) => { homePlaybackState.stageVideoSlot = slot; },
   podcastVideoState: homePlaybackState,
   isDashboard: true,
-  getPlaybackSpeed: () => 1,
+  getPlaybackSpeed: () => Number(currentMultimediaSession?.podcastVideoConfig?.playbackSpeed || 1),
   getPodcastVideoConfig: (s) => {
     if (!s) return {};
     if (cachedVideoConfig && cachedVideoConfigSessionId === s.id) {
       return cachedVideoConfig;
     }
-    
+
     if (!s.podcastVideoConfig) {
       s.podcastVideoConfig = s.podcastStudioUiState?.podcastVideoConfig || {};
     }
-    const cfg = JSON.parse(JSON.stringify(s.podcastVideoConfig)); 
-    
+    const cfg = JSON.parse(JSON.stringify(s.podcastVideoConfig));
+    const normalizeSharedTrack = window.normalizeOnScreenTextTrackSettings || ((value) => value || {});
+    const normalizeSharedClipItem = window.normalizeOnScreenTextClipItem || ((value, rowId) => ({ ...(value || {}), rowId }));
+    const normalizeSharedClipMap = window.normalizeOnScreenTextClipsByRowId || ((value) => value || {});
+    const normalizeSharedLayoutMap = window.normalizeOnScreenTextLayoutByRowId || ((value) => value || {});
+
     if (!cfg.geminiDialogueTrack || !cfg.geminiDialogueTrack.segments?.length) {
       const segments = [];
       const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
@@ -3046,13 +3577,20 @@ const multimediaPlaybackDeps = {
     if (!cfg.onScreenTextTrack) {
       cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
     }
-    
-    const existingOnScreenTextClips = s?.timelineOnScreenTextClipsByRowId
+    cfg.onScreenTextTrack = normalizeSharedTrack(cfg.onScreenTextTrack);
+
+    const existingOnScreenTextClips = normalizeSharedClipMap(s?.timelineOnScreenTextClipsByRowId
       || s?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
       || s?.script?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
       || s?.podcastStudioUiState?.podcastVideoConfig?.timelineOnScreenTextClipsByRowId
       || s?.podcastStudioUiState?.timelineOnScreenTextClipsByRowId
-      || {};
+      || {});
+    const existingOnScreenTextLayouts = normalizeSharedLayoutMap(s?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId
+      || s?.timelineOnScreenTextLayoutByRowId
+      || s?.script?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId
+      || s?.podcastStudioUiState?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId
+      || s?.podcastStudioUiState?.timelineOnScreenTextLayoutByRowId
+      || {});
 
     if (!cfg.timelineOnScreenTextClipsByRowId) {
       const textClips = {};
@@ -3063,33 +3601,41 @@ const multimediaPlaybackDeps = {
         const dialogueText = row?.onScreenText || row?.text || "";
         const savedClip = existingOnScreenTextClips?.[entry.rowId] || null;
         if (dialogueText) {
-          textClips[entry.rowId] = {
-            id: `text_${entry.rowId}`,
+          const clip = normalizeSharedClipItem({
             rowId: entry.rowId,
             startMs: entry.startMs,
-            durationMs: entry.durationMs,
-            onScreenText: dialogueText,
+            sourceDurationMs: entry.durationMs,
+            trimInMs: 0,
+            trimOutMs: entry.durationMs,
             hidden: savedClip?.hidden === true,
-            autoHidden: savedClip?.autoHidden === true
-          };
+            autoHidden: savedClip?.autoHidden === true,
+            zIndex: Math.max(1, Number(entry.zIndex || entry.index || 1) || 1)
+          }, entry.rowId);
+          if (clip) textClips[entry.rowId] = clip;
         }
       });
-      cfg.timelineOnScreenTextClipsByRowId = textClips;
-      console.log("[Dashboard] Synthesized on-screen text clips:", Object.keys(textClips).length);
+      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(textClips);
     } else if (existingOnScreenTextClips && Object.keys(existingOnScreenTextClips).length) {
-      cfg.timelineOnScreenTextClipsByRowId = Object.fromEntries(
+      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(Object.fromEntries(
         Object.entries(cfg.timelineOnScreenTextClipsByRowId || {}).map(([rowId, clip]) => {
           const savedClip = existingOnScreenTextClips?.[rowId] || null;
-          if (!savedClip) return [rowId, clip];
-          return [rowId, {
+          const normalized = normalizeSharedClipItem(savedClip ? {
             ...clip,
             hidden: savedClip?.hidden === true,
             autoHidden: savedClip?.autoHidden === true
-          }];
+          } : clip, rowId);
+          return [rowId, normalized];
         })
-      );
+      ));
+    } else {
+      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(cfg.timelineOnScreenTextClipsByRowId || {});
     }
-    
+    if (!cfg.timelineOnScreenTextLayoutByRowId && existingOnScreenTextLayouts && Object.keys(existingOnScreenTextLayouts).length) {
+      cfg.timelineOnScreenTextLayoutByRowId = JSON.parse(JSON.stringify(existingOnScreenTextLayouts));
+    } else {
+      cfg.timelineOnScreenTextLayoutByRowId = normalizeSharedLayoutMap(cfg.timelineOnScreenTextLayoutByRowId || {});
+    }
+
     cachedVideoConfig = cfg;
     cachedVideoConfigSessionId = s.id;
     return cfg;
@@ -3122,16 +3668,7 @@ const multimediaPlaybackDeps = {
         if (activeEntry) {
           const rows = extractDashboardSessionRows(currentMultimediaSession);
           const row = resolveDashboardActiveRow(rows, activeEntry);
-          
-          if (!row) {
-             console.warn("[Dashboard] Fila no encontrada para activeEntry:", activeEntry);
-          } else {
-             console.log("[Dashboard] Renderizando fila:", row.id, {
-                visualNotesProposal: row.visualNotesProposal,
-                visualNotesProposals: row.visualNotesProposals,
-                visualNotesResolvedProposals: row.visualNotesResolvedProposals
-             });
-          }
+
           const scriptEl = document.getElementById("infoSceneScript");
           const descEl = document.getElementById("infoSceneDesc");
           const ostEl = document.getElementById("infoSceneOST");
@@ -3145,12 +3682,12 @@ const multimediaPlaybackDeps = {
           if (scriptEl) scriptEl.textContent = resolveDashboardRowScript(row) || "--";
           if (descEl) descEl.textContent = resolveDashboardRowSceneDescription(row) || "--";
           if (ostEl) ostEl.textContent = resolveDashboardRowOnScreenText(row) || "--";
-          
+
           if (visualEl) {
             const visualNotes = resolveDashboardRowVisualNotes(row);
             const activeProposal = resolveDashboardDisplayedVisualProposal(row);
             const isResolved = isDashboardProposalResolved(row, activeProposal);
-            
+
             if (row?.visualNotesOriginalStored === true && row?.visualNotesOriginalText !== visualNotes) {
               visualEl.innerHTML = `<span class="proposal-badge is-realized" style="margin-bottom: 4px;">PROPUESTA APLICADA</span><br>${visualNotes}<br><small style="color: #64748b; font-size: 9px; display: block; margin-top: 4px;">Original: ${row.visualNotesOriginalText}</small>`;
             } else if (activeProposal && !isResolved) {
@@ -3173,55 +3710,55 @@ const multimediaPlaybackDeps = {
               activeProposalEl.classList.toggle("is-resolved", isResolved);
               activeProposalEl.style.textDecoration = isResolved ? "line-through" : "none";
               activeProposalEl.style.color = isResolved ? "#10b981" : "inherit";
-              
+
               if (activeProposalBadge) {
-                 activeProposalBadge.style.backgroundColor = isResolved ? "#10b981" : "#fbbf24";
-                 activeProposalBadge.textContent = isResolved ? "PROPUESTA REALIZADA" : "PROPUESTA ACTIVA";
+                activeProposalBadge.style.backgroundColor = isResolved ? "#10b981" : "#fbbf24";
+                activeProposalBadge.textContent = isResolved ? "PROPUESTA REALIZADA" : "PROPUESTA ACTIVA";
               }
-              
+
               const btnApply = document.getElementById("btnApplyActiveProposal");
               const btnDelete = document.getElementById("btnDeleteActiveProposal");
-              
+
               if (btnApply) {
-                 btnApply.onclick = async () => {
-                    await aplicarPropuestaDesdeDashboard(displayedProposal);
-                 };
+                btnApply.onclick = async () => {
+                  await aplicarPropuestaDesdeDashboard(displayedProposal);
+                };
               }
               if (btnDelete) {
-                 btnDelete.onclick = async () => {
-                    await eliminarPropuestaDesdeDashboard(displayedProposal);
-                 };
+                btnDelete.onclick = async () => {
+                  await eliminarPropuestaDesdeDashboard(displayedProposal);
+                };
               }
             } else {
               activeProposalGroup.style.display = "none";
               activeProposalEl.classList.remove("is-resolved");
             }
           }
-          
+
           if (timeEl) timeEl.textContent = `${(current / 1000).toFixed(1)}s`;
-          
+
           // Sincronizar el historial de propuestas
           const proposalsGroup = document.getElementById("infoSceneProposalsGroup");
           const proposalsList = document.getElementById("infoSceneProposalsList");
           if (proposalsList) {
-             const history = Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : [];
-             const active = row?.visualNotesProposal ? [row.visualNotesProposal] : [];
-             const resolved = Array.isArray(row?.visualNotesResolvedProposals) ? row.visualNotesResolvedProposals : [];
-             
-             // Mezclar todo y quitar duplicados manteniendo orden
-             const allUnique = Array.from(new Set([...history, ...active, ...resolved])).map(p => String(p || "").trim()).filter(Boolean);
-             
-             console.log("[Dashboard] Propuestas encontradas:", allUnique.length, allUnique);
-             
-             if (allUnique.length > 0) {
-                if (proposalsGroup) proposalsGroup.style.display = "block";
-                const resolvedSet = new Set(normalizeDashboardProposalState(resolved));
-                
-                const html = allUnique.map((p) => {
-                   const text = String(p || "").trim();
-                   const isDone = resolvedSet.has(text);
-                   const escaped = text.replace(/"/g, '&quot;');
-                    return `
+            const history = Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : [];
+            const active = row?.visualNotesProposal ? [row.visualNotesProposal] : [];
+            const resolved = Array.isArray(row?.visualNotesResolvedProposals) ? row.visualNotesResolvedProposals : [];
+
+            // Mezclar todo y quitar duplicados manteniendo orden
+            const allUnique = Array.from(new Set([...history, ...active, ...resolved])).map(p => String(p || "").trim()).filter(Boolean);
+
+
+
+            if (allUnique.length > 0) {
+              if (proposalsGroup) proposalsGroup.style.display = "block";
+              const resolvedSet = new Set(normalizeDashboardProposalState(resolved));
+
+              const html = allUnique.map((p) => {
+                const text = String(p || "").trim();
+                const isDone = resolvedSet.has(text);
+                const escaped = text.replace(/"/g, '&quot;');
+                return `
                        <div class="proposal-item-dashboard${isDone ? " is-resolved" : " is-pending"}" style="padding: 10px 14px; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                           <div style="color: ${isDone ? "#10b981" : "#fcd34d"}; text-decoration: ${isDone ? "line-through" : "none"}; line-height: 1.5; font-weight: 500; font-size: 11px; flex: 1;">${text}</div>
                           <div style="display: flex; gap: 8px; flex: 0 0 auto;">
@@ -3240,96 +3777,41 @@ const multimediaPlaybackDeps = {
                           </div>
                        </div>
                     `;
-                }).join("");
-                
-                proposalsList.innerHTML = html;
-                proposalsList.querySelectorAll(".btn-apply-proposal-dashboard").forEach(b => b.onclick = (e) => aplicarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
-                proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(b => b.onclick = (e) => eliminarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
-                proposalsList.querySelectorAll(".btn-unresolve-proposal-dashboard").forEach(b => b.onclick = (e) => unresolvePropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
-             } else {
-                if (proposalsGroup) proposalsGroup.style.display = "none";
-                proposalsList.innerHTML = "";
-             }
+              }).join("");
+
+              proposalsList.innerHTML = html;
+              proposalsList.querySelectorAll(".btn-apply-proposal-dashboard").forEach(b => b.onclick = (e) => aplicarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
+              proposalsList.querySelectorAll(".btn-delete-proposal-dashboard").forEach(b => b.onclick = (e) => eliminarPropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
+              proposalsList.querySelectorAll(".btn-unresolve-proposal-dashboard").forEach(b => b.onclick = (e) => unresolvePropuestaDesdeDashboard(e.currentTarget.dataset.proposalText));
+            } else {
+              if (proposalsGroup) proposalsGroup.style.display = "none";
+              proposalsList.innerHTML = "";
+            }
           }
 
           // Sincronizar el textarea solo si cambia de escena y no estamos escribiendo (foco)
           if (proposalTextarea && document.activeElement !== proposalTextarea) {
-             if (proposalTextarea.dataset.lastRowId !== activeEntry.rowId) {
-                proposalTextarea.value = ""; // Limpiar para nueva propuesta
-                proposalTextarea.dataset.lastRowId = activeEntry.rowId;
-             }
+            if (proposalTextarea.dataset.lastRowId !== activeEntry.rowId) {
+              proposalTextarea.value = ""; // Limpiar para nueva propuesta
+              proposalTextarea.dataset.lastRowId = activeEntry.rowId;
+            }
           }
         }
       }
     }
   },
   getPanelMontageMusicConfig: (s) => {
-    // Intentar encontrar la configuración en múltiples ubicaciones posibles (compatibilidad con versiones previas y sesiones sanitizadas)
-    const rawCfg = s?.panelMusicConfig || s?.session?.panelMusicConfig || 
-                s?.panelMusicState || s?.session?.panelMusicState ||
-                s?.podcastStudioUiState?.panelMusicState || 
-                s?.podcastStudioUiState?.panelMusicConfig;
-    
-    // Clonar para no mutar el objeto original de forma inesperada (aunque aquí lo normalizamos)
-    const cfg = rawCfg ? JSON.parse(JSON.stringify(rawCfg)) : { sourceType: 'none' };
-    
-    // Asegurar que sourceType sea válido
-    if (!cfg.sourceType) cfg.sourceType = 'none';
-
-    // Si ya tiene sourceItems (chips en timeline), asegurar que las URLs se resuelvan (vía proxy si es gs://)
-    if (Array.isArray(cfg.sourceItems)) {
-      cfg.sourceItems = cfg.sourceItems.map(item => ({
-        ...item,
-        sourceUrl: item.sourceUrl || ""
-      }));
-    }
-
-    // Resolver URL del track principal
-    // Prioridad: sourceUrl (ya resuelta) > track.downloadUrl > track.storagePath > presets
-    let finalUrl = cfg.sourceUrl || cfg.url || (cfg.track?.downloadUrl) || "";
-    
-    if (!finalUrl && cfg.track?.storagePath) {
-       finalUrl = cfg.track.storagePath;
-    }
-
-    // SOPORTE PARA PRESETS: Si es un preset y no tiene URL, asignamos un track por defecto del backend si es posible
-    // o al menos marcamos como habilitado para que el controlador intente algo.
-    if (!finalUrl && cfg.sourceType === 'preset') {
-       // Por ahora, si es preset, intentamos ver si hay un track en la librería que podamos usar como fallback
-       const fallbackTrack = cfg.trackLibrary?.ai || cfg.trackLibrary?.uploaded;
-       if (fallbackTrack) {
-          finalUrl = fallbackTrack.downloadUrl || fallbackTrack.storagePath || "";
-          console.log("[Dashboard] Usando track de librería como fallback para preset:", finalUrl);
-       }
-    }
-
-    // Resolución final (gs:// -> Proxy)
-    if (finalUrl && String(finalUrl).startsWith('gs://')) {
-      finalUrl = resolveStorageAudioUrl("", finalUrl);
-    }
-    
-    cfg.sourceUrl = finalUrl;
-    cfg.url = finalUrl;
-    // Soporte para volumen base y ducking (reducción de volumen cuando habla Gemini)
-    cfg.volume = Number(cfg.volume ?? 100);
-    cfg.duckingWhenGeminiPct = Number(cfg.duckingWhenGeminiPct ?? cfg.duckingPct ?? 60);
-    
-    // El audio está habilitado si tiene una URL o si tiene segmentos en el timeline
-    cfg.enabled = cfg.sourceType !== 'none' && (!!finalUrl || (cfg.sourceItems && cfg.sourceItems.length > 0));
-    
-    console.log("[Dashboard] Normalized Background Music Config:", { 
-      sourceType: cfg.sourceType, 
-      hasSourceUrl: !!cfg.sourceUrl, 
-      sourceItemsCount: cfg.sourceItems?.length || 0,
-      enabled: cfg.enabled,
-      volume: cfg.volume,
-      ducking: cfg.duckingWhenGeminiPct
+    return buildHomePanelMontageMusicConfig(s, {
+      buildTimelineRuntimeEntries: multimediaPlaybackDeps.buildTimelineRuntimeEntries,
+      getTimelineTotalDurationMs: multimediaPlaybackDeps.getTimelineTotalDurationMs,
+      resolveStorageAudioUrl
     });
-    return cfg;
   },
   ensureOnScreenTextClipsByRowId: (s) => {
     const cfg = multimediaPlaybackDeps.getPodcastVideoConfig(s);
-    return cfg.timelineOnScreenTextClipsByRowId || {};
+    return (window.normalizeOnScreenTextClipsByRowId
+      ? window.normalizeOnScreenTextClipsByRowId(cfg.timelineOnScreenTextClipsByRowId || {})
+      : (cfg.timelineOnScreenTextClipsByRowId || {}));
   },
   getActiveSession: () => currentMultimediaSession,
   getAuthHeaders: async () => {
@@ -3337,18 +3819,38 @@ const multimediaPlaybackDeps = {
     const token = await auth.currentUser?.getIdToken();
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   },
-  resolveDialogueAudioForRow: (s, rowId) => (s?.dialogueAudioMap || s?.podcastStudioUiState?.dialogueAudiosByRowId)?.[rowId],
+  resolveDialogueAudioForRow: (s, rowId) => {
+    const key = String(rowId || "").trim();
+    const map = s?.dialogueAudioMap 
+      || s?.podcastStudioUiState?.dialogueAudiosByRowId 
+      || s?.script?.dialogueAudioMap 
+      || {};
+    return map[key] || null;
+  },
   resolveDialogueAudioPlaybackRate: (s, rowId) => resolveDialogueAudioPlaybackRate(s, rowId),
   resolveStorageAudioUrl: (url, path) => resolveStorageAudioUrl(url, path),
   markStaleProxyMediaUrl,
   ensureTimelineClipsByRowId: (s) => s?.timelineClipMap || s?.podcastStudioUiState?.timelineClipsByRowId || {},
-  resolveTimelineClipMix: (s, rowId) => (s?.timelineClipMixes || s?.podcastStudioUiState?.timelineClipMixesByRowId || s?.podcastStudioUiState?.timelineClipMixes)?.[rowId] || { voiceVolume: 1, backgroundVolume: 1, videoVolume: 1 },
-  getOnScreenTextClipEffectiveDurationMs: (c) => c?.durationMs || 0,
+  resolveTimelineClipMix: (s, rowId) => resolveTimelineClipMix(s, rowId),
+  getOnScreenTextClipEffectiveDurationMs: (c) => window.getOnScreenTextClipEffectiveDurationMs
+    ? window.getOnScreenTextClipEffectiveDurationMs(c)
+    : (c?.durationMs || 0),
   normalizeOnScreenTextTrackSettings: (s) => window.normalizeOnScreenTextTrackSettings ? window.normalizeOnScreenTextTrackSettings(s) : { enabled: true, showTrack: true },
-  getOnScreenTextClipText: (row) => row.onScreenText || row.text || "",
+  getOnScreenTextClipText: (row) => window.getOnScreenTextClipText
+    ? window.getOnScreenTextClipText(row)
+    : (row.onScreenText || row.text || ""),
   resolveOnScreenTextRenderMetrics: (s, o) => window.resolveOnScreenTextRenderMetrics ? window.resolveOnScreenTextRenderMetrics(s, o) : {},
   getOnScreenTextStylePresetClass: (p) => window.getOnScreenTextStylePresetClass ? window.getOnScreenTextStylePresetClass(p) : "",
   getOnScreenTextBgPresetClass: (p) => window.getOnScreenTextBgPresetClass ? window.getOnScreenTextBgPresetClass(p) : "",
+  getOnScreenTextLayoutForRow: (s, rowId) => {
+    const key = String(rowId || "").trim();
+    if (!key) return null;
+    const cfg = multimediaPlaybackDeps.getPodcastVideoConfig(s);
+    const existingOnScreenTextLayouts = window.normalizeOnScreenTextLayoutByRowId
+      ? window.normalizeOnScreenTextLayoutByRowId(s?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId || cfg?.timelineOnScreenTextLayoutByRowId || {})
+      : (s?.podcastVideoConfig?.timelineOnScreenTextLayoutByRowId || cfg?.timelineOnScreenTextLayoutByRowId || {});
+    return existingOnScreenTextLayouts?.[key] || null;
+  },
   buildOnScreenTextBubbleInlineStyle: (s, o) => window.buildOnScreenTextBubbleInlineStyle ? window.buildOnScreenTextBubbleInlineStyle(s, o) : "",
   escapeHtml: (t) => {
     const div = document.createElement('div');
@@ -3360,17 +3862,22 @@ const multimediaPlaybackDeps = {
   },
   setPodcastVideoStatus: (status) => {
     console.log(`[Player] Status: ${status}`);
+  },
+  getPlaybackSpeed: () => {
+    const s = currentMultimediaSession;
+    const cfg = s?.podcastVideoConfig || s?.session?.podcastVideoConfig || {};
+    return Math.max(0.5, Math.min(2.0, Number(cfg.playbackSpeed || 1.0)));
   }
 };
 
 function initMultimediaPlayer() {
-  console.log("[Dashboard] Intentando inicializar el reproductor...");
-  
+
+
   const videoA = document.getElementById("playerVideoA");
   const videoB = document.getElementById("playerVideoB");
   const overlay = document.getElementById("playerOverlay");
   const stage = document.getElementById("playerStage");
-  
+
   if (!videoA || !videoB || !overlay || !stage) {
     console.error("[Dashboard] Faltan elementos críticos para el reproductor:", { videoA: !!videoA, videoB: !!videoB, overlay: !!overlay, stage: !!stage });
     // No abortamos del todo, intentamos seguir si al menos están los videos
@@ -3379,10 +3886,12 @@ function initMultimediaPlayer() {
   const els = {
     podcastActiveSpeakerVideo: videoA,
     podcastActiveSpeakerVideoAlt: videoB,
+    podcastActiveSpeakerBackdropVideo: document.getElementById("podcastActiveSpeakerBackdropVideo"),
+    podcastActiveSpeakerBackdropVideoAlt: document.getElementById("podcastActiveSpeakerBackdropVideoAlt"),
     podcastOnScreenTextOverlay: overlay,
     podcastVideoStage: stage
   };
-  
+
   multimediaPlaybackController.init(els, multimediaPlaybackDeps);
 
   const playBtn = document.getElementById("playerPlayBtn");
@@ -3431,6 +3940,7 @@ function initMultimediaPlayer() {
         alert("No hay escenas con video/audio para exportar.");
         return;
       }
+      const effectivePanelMusicConfig = multimediaPlaybackDeps.getPanelMontageMusicConfig(session);
 
       const payload = {
         sessionId: session.id,
@@ -3442,10 +3952,13 @@ function initMultimediaPlayer() {
         includeReviewExcel: false,
         filename: `Export_${session.title || session.id}`.replace(/\s+/g, '_'),
         onscreenTextSettings: session.podcastVideoConfig?.onscreenTextSettings || session.podcastStudioUiState?.onscreenTextSettings || {},
-        panelMusicConfig: session.panelMusicConfig || session.podcastStudioUiState?.panelMusicConfig || {}
+        panelMusicConfig: {
+          ...(session.panelMusicConfig || session.podcastStudioUiState?.panelMusicConfig || {}),
+          ...effectivePanelMusicConfig
+        }
       };
 
-      console.log("[Dashboard] Iniciando exportación de montaje...", payload);
+
 
       const result = await authFetchJson("/podcaster/montage/export", {
         method: "POST",
@@ -3453,7 +3966,7 @@ function initMultimediaPlayer() {
       });
 
       alert("Exportación iniciada con éxito. El video estará listo en unos minutos y aparecerá en tu galería.");
-      console.log("[Dashboard] Exportación iniciada:", result);
+
 
     } catch (e) {
       console.error("[Dashboard] Error al exportar:", e);
@@ -3468,7 +3981,7 @@ function initMultimediaPlayer() {
 async function abrirReproductorMultimedia(session) {
   currentMultimediaSession = session;
   const sessionId = String(session?.id || "").trim();
-  
+
   if (multimediaPlayerUnsubscribe) {
     multimediaPlayerUnsubscribe();
     multimediaPlayerUnsubscribe = null;
@@ -3482,44 +3995,107 @@ async function abrirReproductorMultimedia(session) {
   if (modal) {
     modal.classList.remove("hidden");
 
-    // Iniciar listeners en tiempo real para propuestas y cambios (Shallow + Payload)
+    // Iniciar listener en tiempo real para propuestas y cambios del documento principal
     if (sessionId) {
       const sessionRef = doc(db, "podcaster_sessions", sessionId);
-      const payloadRef = doc(db, "podcaster_sessions_payloads", sessionId);
-      
+
+      let hasPendingChanges = false;
       const updateFn = (snap) => {
         if (!snap.exists()) return;
-        const data = snap.data();
-        const incomingRows = extractDashboardSessionRows(data?.payload ? data.payload : data);
+        const data = snap.data() || {};
+        const sessionData = data?.session && typeof data.session === "object" ? data.session : data;
+        const incomingSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+        if (!incomingSession) return;
+        incomingSession.id = String(incomingSession.id || sessionId).trim() || sessionId;
+        if (data.publicar === true) incomingSession.publicar = true;
+        if (data.archived === true) incomingSession.archived = true;
         
+        // Aviso de cambios si detectamos versión nueva
+        const getMs = (val) => {
+          if (!val) return 0;
+          if (typeof val === 'number') return val;
+          if (val.toMillis) return val.toMillis();
+          if (val.seconds) return val.seconds * 1000;
+          return new Date(val).getTime() || 0;
+        };
+
+        const incomingUpdateAt = getMs(incomingSession?.updatedAt || data?.sessionUpdatedAt || data?.updatedAt);
+        const currentUpdateAt = getMs(currentMultimediaSession?.updatedAt || currentMultimediaSession?.cloudMeta?.savedAt);
+
+        if (currentMultimediaSession && incomingUpdateAt > currentUpdateAt && !hasPendingChanges) {
+           console.log("[Dashboard] Cambio detectado remoto:", { incomingUpdateAt, currentUpdateAt });
+           hasPendingChanges = true;
+           showPlaybackUpdateBadge();
+           return;
+        }
+
+        const incomingRows = extractDashboardSessionRows(incomingSession);
+
         if (currentMultimediaSession && incomingRows.length > 0) {
-           const currentRows = extractDashboardSessionRows(currentMultimediaSession);
-           const updatedRows = mergeDashboardRows(incomingRows, currentRows);
-           
-           currentMultimediaSession = {
-             ...currentMultimediaSession,
-             ...(data?.payload ? data.payload : data),
-             script: {
-               ...(currentMultimediaSession.script || {}),
-               rows: updatedRows
-             }
-           };
-           
-           if (!modal.classList.contains("hidden")) {
-             multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-           }
+          const currentRows = extractDashboardSessionRows(currentMultimediaSession);
+          const updatedRows = mergeDashboardRows(incomingRows, currentRows);
+
+          // Mezcla no destructiva: preservar mapas de audio/clips del objeto actual si el entrante no los tiene
+          currentMultimediaSession = {
+            ...currentMultimediaSession,
+            ...incomingSession,
+            dialogueAudioMap: incomingSession?.dialogueAudioMap || currentMultimediaSession.dialogueAudioMap,
+            timelineClipMap: incomingSession?.timelineClipMap || currentMultimediaSession.timelineClipMap,
+            podcastVideoConfig: {
+              ...(currentMultimediaSession.podcastVideoConfig || {}),
+              ...(incomingSession?.podcastVideoConfig || {})
+            },
+            script: {
+              ...(currentMultimediaSession.script || {}),
+              ...(incomingSession?.script || {}),
+              rows: updatedRows
+            }
+          };
+
+          if (!modal.classList.contains("hidden")) {
+            multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+          }
         }
       };
 
-      multimediaPlayerUnsubscribe = onSnapshot(sessionRef, updateFn);
-      
-      // Listener adicional para el payload por si las propuestas solo están ahí
-      const payloadUnsub = onSnapshot(payloadRef, updateFn);
-      const originalUnsub = multimediaPlayerUnsubscribe;
-      multimediaPlayerUnsubscribe = () => {
-         originalUnsub();
-         payloadUnsub();
+      const hidePlaybackUpdateBadge = () => {
+        const badge = document.getElementById("playerUpdateBadge");
+        if (badge) badge.classList.add("hidden");
+        hasPendingChanges = false;
       };
+
+      const showPlaybackUpdateBadge = () => {
+        const badge = document.getElementById("playerUpdateBadge");
+        if (!badge) return;
+        badge.classList.remove("hidden");
+        badge.onclick = async () => {
+          console.log("[Dashboard] Iniciando descarga de actualización manual para sesión:", sessionId);
+          hidePlaybackUpdateBadge();
+          
+          try {
+            // Forzar recarga completa de la sesión actual desde Firebase
+            const freshSession = await loadFullDashboardPodcasterSession(sessionId, currentMultimediaSession);
+            if (freshSession) {
+              console.log("[Dashboard] Sesión fresca cargada con éxito. Sincronizando controlador...");
+              currentMultimediaSession = freshSession;
+              
+              // Importante: invalidar caches de filas que pudieran haber cambiado su audio
+              const rows = extractDashboardSessionRows(freshSession);
+              rows.forEach(r => multimediaPlaybackController.invalidateRowAudioCache(r.id));
+              
+              multimediaPlaybackController.sync(currentMultimediaSession);
+              multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+              console.log("[Dashboard] Sincronización completada.");
+            } else {
+              console.warn("[Dashboard] No se pudo obtener una sesión fresca.");
+            }
+          } catch (err) {
+            console.error("[Dashboard] Error al actualizar sesión manual:", err);
+          }
+        };
+      };
+
+      multimediaPlayerUnsubscribe = onSnapshot(sessionRef, updateFn);
     }
 
     if (title) title.textContent = session.title || "Sin título";
@@ -3538,18 +4114,18 @@ async function abrirReproductorMultimedia(session) {
       // Limpiar listeners previos para evitar duplicados
       const newBtn = btnSave.cloneNode(true);
       btnSave.parentNode.replaceChild(newBtn, btnSave);
-      
+
       newBtn.addEventListener("click", async (e) => {
-        console.log("[Dashboard] Click detectado en Guardar Propuesta. ID Fila:", window._currentActiveRowId);
+
         if (!currentMultimediaSession || !window._currentActiveRowId) {
           alert("No hay una escena seleccionada para proponer cambios.");
           return;
         }
-        
+
         const btn = e.currentTarget;
         const originalText = btn.innerHTML;
         const proposalText = document.getElementById("infoSceneProposalText").value;
-        
+
         try {
           btn.disabled = true;
           btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
@@ -3592,30 +4168,30 @@ async function abrirReproductorMultimedia(session) {
     const proposalTextarea = document.getElementById("infoSceneProposalText");
 
     if (btnToggleProposal && newProposalContainer) {
-       btnToggleProposal.onclick = () => {
-          const isHidden = newProposalContainer.style.display === "none";
-          
-          if (isHidden) {
-             // Caso 1: Estaba oculto -> Mostrar
-             newProposalContainer.style.display = "block";
-             btnToggleProposal.style.color = "#fbbf24"; // Ámbar (activo)
-             if (proposalTextarea) proposalTextarea.focus();
-             
-             // Notificar actividad: empezando a redactar
-             notifyActivity("está proponiendo cambios", window._currentActiveRowId?.replace("row_", "") || -1);
-          } else {
-             // Caso 2: Ya estaba visible -> "Crear nueva" (Limpiar y enfocar)
-             if (proposalTextarea) {
-                proposalTextarea.value = "";
-                proposalTextarea.focus();
-                // Opcional: Feedback visual rápido de limpieza
-                proposalTextarea.style.backgroundColor = "rgba(251, 191, 36, 0.1)";
-                setTimeout(() => {
-                   if (proposalTextarea) proposalTextarea.style.backgroundColor = "";
-                }, 300);
-             }
+      btnToggleProposal.onclick = () => {
+        const isHidden = newProposalContainer.style.display === "none";
+
+        if (isHidden) {
+          // Caso 1: Estaba oculto -> Mostrar
+          newProposalContainer.style.display = "block";
+          btnToggleProposal.style.color = "#fbbf24"; // Ámbar (activo)
+          if (proposalTextarea) proposalTextarea.focus();
+
+          // Notificar actividad: empezando a redactar
+          notifyActivity("está proponiendo cambios", window._currentActiveRowId?.replace("row_", "") || -1);
+        } else {
+          // Caso 2: Ya estaba visible -> "Crear nueva" (Limpiar y enfocar)
+          if (proposalTextarea) {
+            proposalTextarea.value = "";
+            proposalTextarea.focus();
+            // Opcional: Feedback visual rápido de limpieza
+            proposalTextarea.style.backgroundColor = "rgba(251, 191, 36, 0.1)";
+            setTimeout(() => {
+              if (proposalTextarea) proposalTextarea.style.backgroundColor = "";
+            }, 300);
           }
-       };
+        }
+      };
     }
 
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session);
@@ -3628,139 +4204,139 @@ async function abrirReproductorMultimedia(session) {
 // Cableado de controles del reproductor (Eliminado - movido a initMultimediaPlayer)
 
 function normalizeDashboardProposalState(list = []) {
-   return Array.from(new Set(
-      (Array.isArray(list) ? list : [])
-         .map((entry) => String(entry || "").trim())
-         .filter(Boolean)
-   ));
+  return Array.from(new Set(
+    (Array.isArray(list) ? list : [])
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+  ));
 }
 
 function resolveDashboardActiveVisualProposal(row = null) {
-   if (!row || typeof row !== "object") return "";
-   const resolved = new Set(normalizeDashboardProposalState(row?.visualNotesResolvedProposals));
-   const explicit = String(row?.visualNotesProposal || "").trim();
-   
-   // Si hay una propuesta explícita y NO está resuelta, es la activa
-   if (explicit && !resolved.has(explicit)) return explicit;
-   
-   const proposals = Array.isArray(row?.visualNotesProposals)
-      ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
-      : [];
-   for (let index = proposals.length - 1; index >= 0; index -= 1) {
-      const candidate = String(proposals[index] || "").trim();
-      if (candidate && !resolved.has(candidate)) return candidate;
-   }
-   return "";
+  if (!row || typeof row !== "object") return "";
+  const resolved = new Set(normalizeDashboardProposalState(row?.visualNotesResolvedProposals));
+  const explicit = String(row?.visualNotesProposal || "").trim();
+
+  // Si hay una propuesta explícita y NO está resuelta, es la activa
+  if (explicit && !resolved.has(explicit)) return explicit;
+
+  const proposals = Array.isArray(row?.visualNotesProposals)
+    ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+  for (let index = proposals.length - 1; index >= 0; index -= 1) {
+    const candidate = String(proposals[index] || "").trim();
+    if (candidate && !resolved.has(candidate)) return candidate;
+  }
+  return "";
 }
 
 function resolveDashboardDisplayedVisualProposal(row = null) {
-   if (!row || typeof row !== "object") return "";
-   const explicit = String(row?.visualNotesProposal || "").trim();
-   if (explicit) return explicit;
-   const active = resolveDashboardActiveVisualProposal(row);
-   if (active) {
-      console.log("[Dashboard] Propuesta activa resuelta para fila:", row.id, active);
-   }
-   return active;
+  if (!row || typeof row !== "object") return "";
+  const explicit = String(row?.visualNotesProposal || "").trim();
+  if (explicit) return explicit;
+  const active = resolveDashboardActiveVisualProposal(row);
+  if (active) {
+
+  }
+  return active;
 }
 
 function isDashboardProposalResolved(row = null, proposalText = "") {
-   const proposal = String(proposalText || "").trim();
-   if (!proposal || !row || typeof row !== "object") return false;
-   return normalizeDashboardProposalState(row.visualNotesResolvedProposals).includes(proposal);
+  const proposal = String(proposalText || "").trim();
+  if (!proposal || !row || typeof row !== "object") return false;
+  return normalizeDashboardProposalState(row.visualNotesResolvedProposals).includes(proposal);
 }
 
 async function eliminarPropuestaDesdeDashboard(proposalText) {
-   if (!currentMultimediaSession || !window._currentActiveRowId) return;
-   
-   console.log("[Dashboard] Marcando propuesta como realizada:", window._currentActiveRowId);
-   
-   try {
-      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
-         const targetRow = rows[rowIndex];
-         
-         // Asegurar que esté en el historial antes de marcarla como realizada
-         if (!Array.isArray(targetRow.visualNotesProposals)) {
-            targetRow.visualNotesProposals = [];
-         }
-         if (!targetRow.visualNotesProposals.includes(proposalText)) {
-            targetRow.visualNotesProposals.push(proposalText);
-         }
+  if (!currentMultimediaSession || !window._currentActiveRowId) return;
 
-         const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
-         if (!resolved.includes(proposalText)) {
-            resolved.push(proposalText);
-         }
-         targetRow.visualNotesResolvedProposals = resolved;
-         // Si la propuesta que marcamos como realizada era la "activa", la limpiamos
-         if (String(targetRow.visualNotesProposal || "").trim() === proposalText) {
-            targetRow.visualNotesProposal = "";
-         }
-         return true;
-      });
-      if (!result.ok) return;
-      await notifyActivity("ha marcado una propuesta como realizada", result.rowIndex);
-      multimediaPlaybackController.sync(currentMultimediaSession);
-      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-      console.log("[Dashboard] Propuesta marcada como realizada");
-   } catch (error) {
-      console.error("[Dashboard] Error al marcar propuesta como realizada:", error);
-      alert("No se pudo actualizar la propuesta. Intenta de nuevo.");
-   }
+
+
+  try {
+    const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+      const targetRow = rows[rowIndex];
+
+      // Asegurar que esté en el historial antes de marcarla como realizada
+      if (!Array.isArray(targetRow.visualNotesProposals)) {
+        targetRow.visualNotesProposals = [];
+      }
+      if (!targetRow.visualNotesProposals.includes(proposalText)) {
+        targetRow.visualNotesProposals.push(proposalText);
+      }
+
+      const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
+      if (!resolved.includes(proposalText)) {
+        resolved.push(proposalText);
+      }
+      targetRow.visualNotesResolvedProposals = resolved;
+      // Si la propuesta que marcamos como realizada era la "activa", la limpiamos
+      if (String(targetRow.visualNotesProposal || "").trim() === proposalText) {
+        targetRow.visualNotesProposal = "";
+      }
+      return true;
+    });
+    if (!result.ok) return;
+    await notifyActivity("ha marcado una propuesta como realizada", result.rowIndex);
+    multimediaPlaybackController.sync(currentMultimediaSession);
+    multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+
+  } catch (error) {
+    console.error("[Dashboard] Error al marcar propuesta como realizada:", error);
+    alert("No se pudo actualizar la propuesta. Intenta de nuevo.");
+  }
 }
 
 async function unresolvePropuestaDesdeDashboard(proposalText) {
-   if (!currentMultimediaSession || !window._currentActiveRowId) return;
-   
-   console.log("[Dashboard] Restaurando propuesta a pendientes:", window._currentActiveRowId);
-   
-   try {
-      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
-         const targetRow = rows[rowIndex];
-         const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
-         targetRow.visualNotesResolvedProposals = resolved.filter(p => p !== proposalText);
-         // Al restaurarla, la volvemos a poner como la propuesta activa
-         targetRow.visualNotesProposal = proposalText;
-         return true;
-      });
-      if (!result.ok) return;
-      await notifyActivity("ha restaurado una propuesta a pendientes", result.rowIndex);
-      multimediaPlaybackController.sync(currentMultimediaSession);
-      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-   } catch (error) {
-      console.error("[Dashboard] Error al restaurar propuesta:", error);
-   }
+  if (!currentMultimediaSession || !window._currentActiveRowId) return;
+
+
+
+  try {
+    const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+      const targetRow = rows[rowIndex];
+      const resolved = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals);
+      targetRow.visualNotesResolvedProposals = resolved.filter(p => p !== proposalText);
+      // Al restaurarla, la volvemos a poner como la propuesta activa
+      targetRow.visualNotesProposal = proposalText;
+      return true;
+    });
+    if (!result.ok) return;
+    await notifyActivity("ha restaurado una propuesta a pendientes", result.rowIndex);
+    multimediaPlaybackController.sync(currentMultimediaSession);
+    multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+  } catch (error) {
+    console.error("[Dashboard] Error al restaurar propuesta:", error);
+  }
 }
 
 async function aplicarPropuestaDesdeDashboard(proposalText) {
-   if (!currentMultimediaSession || !window._currentActiveRowId) return;
-   
-   console.log("[Dashboard] Aplicando propuesta como oficial:", window._currentActiveRowId);
-   
-   try {
-      const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
-         const targetRow = rows[rowIndex];
-         targetRow.visualNotesProposal = proposalText;
-         if (!Array.isArray(targetRow.visualNotesProposals)) {
-            targetRow.visualNotesProposals = [];
-         }
-         if (!targetRow.visualNotesProposals.includes(proposalText)) {
-            targetRow.visualNotesProposals.push(proposalText);
-         }
-         // Al aplicar, quitamos de resueltas si estaba ahí
-         targetRow.visualNotesResolvedProposals = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals).filter(p => p !== proposalText);
-         return true;
-      });
-      if (!result.ok) return;
-      
-      await notifyActivity("ha seleccionado una propuesta como activa", result.rowIndex);
-      multimediaPlaybackController.sync(currentMultimediaSession);
-      multimediaPlaybackDeps.updatePodcastVideoTransportUi();
-      alert("✅ Propuesta aplicada como elemento visual oficial.");
-   } catch (err) {
-      console.error("[Dashboard] Error al aplicar propuesta:", err);
-      alert("Error al aplicar: " + err.message);
-   }
+  if (!currentMultimediaSession || !window._currentActiveRowId) return;
+
+
+
+  try {
+    const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+      const targetRow = rows[rowIndex];
+      targetRow.visualNotesProposal = proposalText;
+      if (!Array.isArray(targetRow.visualNotesProposals)) {
+        targetRow.visualNotesProposals = [];
+      }
+      if (!targetRow.visualNotesProposals.includes(proposalText)) {
+        targetRow.visualNotesProposals.push(proposalText);
+      }
+      // Al aplicar, quitamos de resueltas si estaba ahí
+      targetRow.visualNotesResolvedProposals = normalizeDashboardProposalState(targetRow.visualNotesResolvedProposals).filter(p => p !== proposalText);
+      return true;
+    });
+    if (!result.ok) return;
+
+    await notifyActivity("ha seleccionado una propuesta como activa", result.rowIndex);
+    multimediaPlaybackController.sync(currentMultimediaSession);
+    multimediaPlaybackDeps.updatePodcastVideoTransportUi();
+    alert("✅ Propuesta aplicada como elemento visual oficial.");
+  } catch (err) {
+    console.error("[Dashboard] Error al aplicar propuesta:", err);
+    alert("Error al aplicar: " + err.message);
+  }
 }
 
 // Evento para togglear el panel
@@ -3786,13 +4362,13 @@ function showNotification(message, type = "info") {
 
   const toast = document.createElement("div");
   toast.style.cssText = "min-width: 300px; padding: 16px 20px; border-radius: 12px; background: #1e293b; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.3); border-left: 4px solid #38bdf8; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: auto; animation: slideIn 0.3s ease forwards; font-size: 14px;";
-  
+
   if (type === "success") toast.style.borderLeftColor = "#10b981";
   if (type === "error") toast.style.borderLeftColor = "#ef4444";
   if (type === "warning") toast.style.borderLeftColor = "#f59e0b";
 
   const icon = type === "success" ? "fa-check-circle" : type === "error" ? "fa-exclamation-circle" : type === "warning" ? "fa-exclamation-triangle" : "fa-info-circle";
-  
+
   toast.innerHTML = `
     <div style="display: flex; align-items: center; gap: 12px;">
       <i class="fas ${icon}" style="font-size: 18px; color: ${toast.style.borderLeftColor}"></i>
@@ -3807,7 +4383,7 @@ function showNotification(message, type = "info") {
     setTimeout(() => toast.remove(), 300);
   };
   closeBtn.onclick = close;
-  
+
   container.appendChild(toast);
   setTimeout(close, 6000);
 }
@@ -3841,12 +4417,12 @@ function initExportUiEvents() {
   const btnOpen = document.getElementById("btnOpenExportModal");
   const modal = document.getElementById("videoExportModal");
   const btnConfirm = document.getElementById("btnConfirmExport");
-  
+
   const rangeBitrate = document.getElementById("exportBitrateMbps");
   const labelBitrate = document.getElementById("exportBitrateValue");
   const rangeCrf = document.getElementById("exportCrfValue");
   const labelCrf = document.getElementById("exportCrfLabel");
-  
+
   const radioBitrateMode = document.getElementsByName("exportBitrateMode");
   const groupBitrateValue = document.getElementById("exportBitrateValueGroup");
   const groupCrfValue = document.getElementById("exportCrfValueGroup");
@@ -3867,7 +4443,7 @@ function initExportUiEvents() {
     else if (val < 21) desc = "Alta Calidad";
     else if (val > 28) desc = "Baja Calidad (Pequeño)";
     else if (val > 24) desc = "Calidad Estándar-Baja";
-    
+
     if (labelCrf) labelCrf.textContent = `${val} (${desc})`;
   });
 
@@ -3892,7 +4468,7 @@ async function startMontageExport() {
 
   const btnConfirm = document.getElementById("btnConfirmExport");
   const modal = document.getElementById("videoExportModal");
-  
+
   // Recoger opciones
   const resolution = document.querySelector('input[name="exportResolution"]:checked')?.value || "source";
   const bitrateMode = document.querySelector('input[name="exportBitrateMode"]:checked')?.value || "custom";
@@ -3913,8 +4489,8 @@ async function startMontageExport() {
     // Construir payload simplificado basado en lo que el backend espera
     // Reusamos la lógica de persistencia para obtener los sourceItems correctos
     const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession);
-    const audioTimeline = currentMultimediaSession.panelMusicConfig || {};
-    
+    const effectivePanelMusicConfig = multimediaPlaybackDeps.getPanelMontageMusicConfig(currentMultimediaSession);
+
     // El backend espera una estructura específica que normalizeMontageExportRequestBody procesa
     const payload = {
       sessionId: currentMultimediaSession.id,
@@ -3934,15 +4510,15 @@ async function startMontageExport() {
         trimOutMs: e.trimOutMs,
         onScreenText: e.onScreenText
       })),
-      backgroundMusic: currentMultimediaSession.panelMusicConfig || null,
+      backgroundMusic: effectivePanelMusicConfig || null,
       audioTimeline: {
-         enabled: true,
-         backgroundSegments: currentMultimediaSession.panelMusicConfig?.sourceItems || []
+        enabled: true,
+        backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
       }
     };
 
-    console.log("[Dashboard] Iniciando exportación con payload:", payload);
-    
+
+
     const response = await authFetchJson("/api/podcaster/montage/export", {
       method: "POST",
       body: JSON.stringify({ input: payload })
@@ -3972,7 +4548,7 @@ async function pollExportStatus() {
 
   try {
     const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
-    
+
     if (data.status === "ready") {
       const url = data.downloadUrl || data.export?.downloadUrl;
       if (url) {
@@ -3992,7 +4568,7 @@ async function pollExportStatus() {
       // Seguimos polleando
       const progress = Math.round((data.progress || 0) * 100);
       console.log(`[Dashboard] Export progress: ${progress}% - Stage: ${data.stage}`);
-      
+
       // Podríamos mostrar el progreso en un toast persistente o en el botón
       exportJobState.pollTimer = setTimeout(() => pollExportStatus(), 3000);
     }
@@ -4012,7 +4588,7 @@ function renderUserItemList(container, items, type) {
     return;
   }
 
-  console.log(`[Dashboard] Rendering ${items.length} items of type ${type}`);
+
   items.forEach(item => {
     const card = document.createElement("div");
     // Clase base según el tipo
@@ -4021,9 +4597,9 @@ function renderUserItemList(container, items, type) {
     if (type === "download") accentClass = "workbench-item-download";
     if (type === "aprende") accentClass = "workbench-item-aprende";
     if (type === "multimedia" || type === "podcast") accentClass = "workbench-item-multimedia";
-    
+
     card.className = `workbench-item ${accentClass}`;
-    
+
     // Inyectar metadatos para filtrado (Primaria, Grado, etc.)
     card.dataset.nivel = String(item.nivel || "").toLowerCase();
     card.dataset.grado = String(item.grado || "").toLowerCase();
@@ -4059,7 +4635,7 @@ function renderUserItemList(container, items, type) {
     } else {
       displayTitle = item.titulo || item.nombre || "Documento";
       metaLabel = type.toUpperCase();
-      
+
       // Ajuste específico para Aprende
       if (type === 'aprende') {
         displayTitle = item.nombre || "Sesión de Aprende";
@@ -4067,7 +4643,7 @@ function renderUserItemList(container, items, type) {
     }
 
     const rawDate = item.timestamp || item.creado || item.actualizado || item.updatedAt || item.sessionUpdatedAt || item.createdAt;
-    
+
     let dateObj = null;
     if (rawDate) {
       if (rawDate.toDate) {
@@ -4079,7 +4655,7 @@ function renderUserItemList(container, items, type) {
         dateObj = new Date(rawDate);
       }
     }
-    
+
     let date = "Fecha desconocida";
     if (dateObj && !isNaN(dateObj.getTime())) {
       const now = new Date();
@@ -4155,7 +4731,7 @@ function renderUserItemList(container, items, type) {
       const session = item.session || item;
       const ui = session?.podcastStudioUiState || {};
       const clipMap = session?.timelineClipMap || ui.timelineClipsByRowId || {};
-      
+
       let previewUrl = "";
       const firstVideoClip = Object.values(clipMap).find(c => c.videoSrc);
       if (firstVideoClip) {
@@ -4204,9 +4780,9 @@ function renderUserItemList(container, items, type) {
                 <div class="multimedia-detail-item">
                   <span class="multimedia-detail-label">Propuestas</span>
                   <span class="multimedia-detail-value">
-                    ${hasPending 
-                      ? `<span class="proposal-badge is-pending">Pendientes</span>` 
-                      : `<span class="proposal-badge is-realized">Realizadas</span>`}
+                    ${hasPending
+            ? `<span class="proposal-badge is-pending">Pendientes</span>`
+            : `<span class="proposal-badge is-realized">Realizadas</span>`}
                   </span>
                 </div>
             ` : ""}
@@ -4218,15 +4794,6 @@ function renderUserItemList(container, items, type) {
           </div>
         </div>
       `;
-
-      // El toggle se maneja globalmente en configurarEventos
-      /*
-      const header = card.querySelector('.multimedia-accordion-header');
-      header.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-multimedia-play')) return;
-        card.classList.toggle('is-expanded');
-      });
-      */
 
       const video = card.querySelector('video');
       if (video) {
@@ -4529,10 +5096,10 @@ async function abrirLecturaDashboard(id, col) {
     renderLecturaModalContent(contenedor, textoGuardado, urlImagen, actualCol);
 
     agregarMarcadoresDePosicion(contenedor);
-    
+
     const modal = document.getElementById("modalLectura");
     modal.classList.remove("hidden");
-    
+
     window.unsubscribeComentarios = await renderComentarios(id);
 
   } catch (err) {
@@ -4571,7 +5138,7 @@ window.addEventListener('word-download-started', async (e) => {
       editadoEn: new Date(),
       editadoPor: auth.currentUser?.email || auth.currentUser?.uid || "Desconocido"
     });
-    console.log("Descarga de Word registrada con éxito.");
+
   } catch (err) {
     console.error("Error al registrar descarga de Word:", err);
   }
@@ -4631,7 +5198,7 @@ async function openAprendeViewer(cursoId) {
   try {
     const docRef = doc(db, "moodleCourses", cursoId);
     const snap = await getDoc(docRef);
-    
+
     if (!snap.exists()) {
       contentDiv.innerHTML = "<p class='text-danger'>El curso no existe o ha sido eliminado.</p>";
       return;
@@ -4670,7 +5237,7 @@ async function openAprendeViewer(cursoId) {
     });
 
     const resultados = await Promise.all(promesas);
-    
+
     // Renderizar
     let fullHTML = "";
     let currentTema = "";

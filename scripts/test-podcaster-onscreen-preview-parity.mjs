@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 
 const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
-const front = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../public/podcaster-playback-controller.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
+const home = readFileSync(new URL("../public/home.html", import.meta.url), "utf8");
 
 if (!/function wrapOnScreenTextRenderText\(text, options\)/.test(shared)
   || !/wrappedText,/.test(shared)
@@ -10,19 +11,22 @@ if (!/function wrapOnScreenTextRenderText\(text, options\)/.test(shared)
   throw new Error("La spec compartida debe resolver wrap y posición vertical segura.");
 }
 
-if (!/const wrappedText = String\(renderMetrics\.wrappedText \|\| wrapOnScreenTextPreviewText\(selected\.text, \{[\s\S]*maxChars: renderMetrics\.maxChars,[\s\S]*maxLines: renderMetrics\.maxLines[\s\S]*\}\)\);/m.test(front)
-  || !/const bubbleTopPct = Math\.max\(0, Math\.min\(1, Number\(\(renderMetrics\.clampedYPct \?\? rowLayout\?\.yPct\) \|\| 0\)\)\);/.test(front)
-  || !/const bottomSafetyPct = Math\.max\(0, Math\.min\(0\.3, Number\(renderMetrics\.bottomSafetyPct \|\| 0\)\)\);/.test(front)) {
-  throw new Error("El overlay del editor debe consumir wrap y margen inferior de la spec compartida.");
+if (!/const rowLayout = this\.deps\?\.getOnScreenTextLayoutForRow\?\.\(session, selected\.rowId\)\s*\|\|\s*null;/.test(controller)
+  || !/const renderOptions = \{\s*text,\s*previewWidthPx,\s*previewHeightPx,[\s\S]*widthPct: Number\(rowLayout\?\.widthPct \|\| 0\.58\),[\s\S]*heightPct: Number\(rowLayout\?\.heightPct \|\| 0\.14\),[\s\S]*xPct: Number\(rowLayout\?\.xPct \|\| 0\.21\),[\s\S]*yPct: Number\(rowLayout\?\.yPct \|\| 0\.7\)/m.test(controller)) {
+  throw new Error("El overlay del editor debe consumir el layout por fila al resolver métricas.");
 }
 
-if (!/overlay\.style\.setProperty\("--pod-onscreen-text-stroke-color", String\(settings\.strokeColor \|\| "#0f172a"\)\);/.test(front)
-  || !/overlay\.style\.setProperty\("--pod-onscreen-text-border-width", `\$\{Math\.max\(0, Math\.min\(12, Number\(renderMetrics\.previewBorderWidthPx \?\? 2\)\)\)}px`\);/.test(front)) {
-  throw new Error("El preview debe aplicar color y grosor de stroke explícitos desde los settings.");
+if (!/contentNode\.style\.setProperty\("--pod-onscreen-text-bubble-width", `\$\{bubbleWidthPx\}px`\);/.test(controller)
+  || !/contentNode\.style\.setProperty\("min-height", `\$\{bubbleHeightPx\}px`\);/.test(controller)
+  || !/contentNode\.style\.setProperty\("height", "auto"\);/.test(controller)
+  || !/overlay\.style\.setProperty\("--pod-onscreen-text-x", `\$\{bubbleLeftPct \* 100\}%`\);/.test(controller)
+  || !/overlay\.style\.setProperty\("--pod-onscreen-text-y", `\$\{bubbleTopPct \* 100\}%`\);/.test(controller)) {
+  throw new Error("El preview debe aplicar geometría de burbuja desde el layout por fila.");
 }
 
-if (!/parts\.push\(\s*`width:\$\{bubbleWidth\}px`,\s*`min-height:\$\{bubbleHeight\}px`,\s*"height:auto",\s*`min-width:\$\{bubbleWidth\}px`\s*\);/m.test(front)) {
-  throw new Error("La burbuja del preview debe crecer en altura para no cortar la segunda linea.");
+if (!/const contentHtml = this\.deps\.escapeHtml\(renderMetrics\.wrappedText \|\| text\);/.test(controller)
+  || !/contentNode\.style\.setProperty\('--pod-onscreen-text-color', settings\.textColor \|\| '#f8fafc'\);/.test(controller)) {
+  throw new Error("El preview debe seguir usando el wrap compartido y los tokens de estilo del texto.");
 }
 
 if (!/letter-spacing:\s*0;/.test(css)
@@ -33,8 +37,11 @@ if (!/letter-spacing:\s*0;/.test(css)
   throw new Error("La capa visual del texto en el editor debe usar tokens cercanos al render exportado.");
 }
 
-if (!/\.podcast-on-screen-text-bubble\s*\{[\s\S]*background:\s*transparent;[\s\S]*box-shadow:\s*none;[\s\S]*backdrop-filter:\s*none;/m.test(css)) {
-  throw new Error("La burbuja base del texto ya no debe dibujar caja o vidrio detrás del texto.");
+if (!/top:\s*var\(--pod-onscreen-text-y, 72%\);/.test(css)
+  || !/max-width:\s*min\(96%, 1400px\);/.test(css)
+  || !/top:\s*var\(--pod-onscreen-text-y, 72%\);/.test(home)
+  || !/max-width:\s*min\(96%, 1400px\);/.test(home)) {
+  throw new Error("Editor y Home deben compartir defaults de posición y ancho para el texto en pantalla.");
 }
 
 console.log("Podcast onscreen preview parity OK.");

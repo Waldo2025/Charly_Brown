@@ -20,14 +20,26 @@ assert.match(
 
 assert.match(
   source,
-  /if \(isOnScreenTextDrag\) \{[\s\S]*scheduleCloudAutosave\("timeline-onscreen-text"\);[\s\S]*return;/,
-  "El drag del texto en pantalla debe persistirse al soltar sin pasar por la sincronización de Gemini."
+  /function finalizeLinkedGeminiTimelineDrag\(options = \{\}\) \{[\s\S]*scheduleCloudAutosave\(\s*isOnScreenTextDrag\s*\?\s*"timeline-onscreen-text"\s*:\s*"timeline-gemini-audio"\s*\);[\s\S]*\}/,
+  "El cierre de drag Gemini/texto debe persistir una sola vez desde un helper común."
 );
 
 assert.match(
   source,
-  /if \(dragMode === "gemini-segment-move"\) \{[\s\S]*scheduleCloudAutosave\("timeline-gemini-audio"\);[\s\S]*\}/,
-  "El drag del chip de audio Gemini debe agendar autosave al soltar."
+  /void flushCloudAutosaveNow\(\s*String\(getActiveSession\(\)\?\.id \|\| ""\)\.trim\(\),\s*isOnScreenTextDrag\s*\?\s*"timeline-onscreen-text"\s*:\s*"timeline-gemini-audio"\s*\);/,
+  "El cierre del drag Gemini/texto debe forzar flush inmediato a Firebase para no perder offsets al recargar."
+);
+
+assert.match(
+  source,
+  /upsertPodcastVideoConfig\(\(nextCfg\) => \(\{[\s\S]*geminiDialogueTrack:[\s\S]*\}\), \{ autosave: false \}\);/,
+  "El drag en tiempo real del chip Gemini no debe disparar autosave genérico durante pointermove."
+);
+
+assert.match(
+  source,
+  /syncOnScreenTextClipsWithGeminiTrack\(\{ render: false, autosave: false \}\);/,
+  "La sincronización texto→Gemini durante el drag debe evitar autosave genérico."
 );
 
 console.log("Timeline drag autosave audio and text OK.");

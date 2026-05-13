@@ -6,12 +6,25 @@ const DEFAULT_RENDER_API_BASE = "https://charly-brown-gemini-backend.onrender.co
 
 function getAlternateLocalApiUrl(url = "") {
   const finalUrl = String(url || "").trim();
+  const isLocalRuntime = isLocalHostRuntime();
+  
   if (finalUrl.startsWith("http://127.0.0.1:8787")) {
     return finalUrl.replace("http://127.0.0.1:8787", "http://localhost:8787");
   }
   if (finalUrl.startsWith("http://localhost:8787")) {
     return finalUrl.replace("http://localhost:8787", "http://127.0.0.1:8787");
   }
+  
+  // Si estamos en localhost y la URL es remota (Render), intentamos el fallback local
+  if (isLocalRuntime && finalUrl.includes(".onrender.com/api")) {
+    try {
+      const parsed = new URL(finalUrl);
+      return `${DEFAULT_LOCAL_API_BASE}${parsed.pathname.replace(/^\/api/, "")}${parsed.search}`;
+    } catch (_) {
+      return "";
+    }
+  }
+  
   return "";
 }
 
@@ -59,13 +72,17 @@ export function resolveApiBase() {
   const host = String(window.location.hostname || "").toLowerCase();
   const port = String(window.location.port || "");
   const isLocalHost = isLocalHostRuntime();
+  
   if (isLocalHost) {
-    if (configured) {
+    // Si estamos en localhost, priorizamos el backend local (8787)
+    // a menos que la URL configurada sea explícitamente local (evita usar Render por error)
+    if (configured && isLoopbackApiBase(configured)) {
       return configured.replace(/\/+$/, "");
     }
     if (port === "8787") return "/api";
     return DEFAULT_LOCAL_API_BASE;
   }
+  
   if (configured) {
     const sanitized = configured.replace(/\/+$/, "");
     return sanitized;

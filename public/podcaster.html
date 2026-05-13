@@ -86,8 +86,8 @@
                 <div class="composer-chip-group"></div>
                 <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
                   <span class="composer-mode-label">Podcast</span>
-                  <label class="composer-switch" for="composerModeToggle">
-                    <input id="composerModeToggle" type="checkbox" aria-label="Activar modo video">
+                  <label class="composer-switch" for="composerModeToggle_footer">
+                    <input id="composerModeToggle_footer" type="checkbox" aria-label="Activar modo video">
                     <span class="composer-switch-track" aria-hidden="true">
                       <span class="composer-switch-thumb"></span>
                     </span>
@@ -96,18 +96,18 @@
                 </div>
                 <div id="composerTableModeWrap" class="composer-mode-switch" role="group" aria-label="Modo de tabla (componer o crear)">
                   <span class="composer-mode-label">Componer</span>
-                  <label class="composer-switch" for="composerTableModeToggle">
-                    <input id="composerTableModeToggle" type="checkbox" aria-label="Crear tabla nueva o componer tabla">
+                  <label class="composer-switch" for="composerTableModeToggle_footer">
+                    <input id="composerTableModeToggle_footer" type="checkbox" aria-label="Crear tabla nueva o componer tabla">
                     <span class="composer-switch-track" aria-hidden="true">
                       <span class="composer-switch-thumb"></span>
                     </span>
                   </label>
                   <span class="composer-mode-label">Crear</span>
                 </div>
-                <div id="composerPublishModeWrap" class="composer-mode-switch" role="group" aria-label="Estado de publicación de la sesión">
+                <div id="composerPublishModeWrap_footer" class="composer-mode-switch" role="group" aria-label="Estado de publicación de la sesión">
                   <span class="composer-mode-label">Borrador</span>
-                  <label class="composer-switch" for="sessionPublishToggle">
-                    <input id="sessionPublishToggle" type="checkbox" aria-label="Publicar sesión">
+                  <label class="composer-switch" for="sessionPublishToggle_footer">
+                    <input id="sessionPublishToggle_footer" type="checkbox" aria-label="Publicar sesión">
                     <span class="composer-switch-track" aria-hidden="true">
                       <span class="composer-switch-thumb"></span>
                     </span>
@@ -413,11 +413,33 @@
       </div>
       <div class="floating-panel-head">
         <h3 class="podcast-brand-title">
-          <span>Snoopy Video Creator</span>
+          <span>Snoopy Video Creator Creativo</span>
           <img src="SnoopyPodcastCreator.png" alt="Snoopy Video Creator" class="podcast-brand-title-icon" loading="lazy">
         </h3>
         <div class="floating-panel-session-title" title="Nombre de la sesión"></div>
         
+        <div class="composer-mode-switch" role="group" aria-label="Modo de generación">
+          <span class="composer-mode-label">Podcast</span>
+          <label class="composer-switch" for="composerModeToggle">
+            <input id="composerModeToggle" type="checkbox" aria-label="Activar modo video">
+            <span class="composer-switch-track" aria-hidden="true">
+              <span class="composer-switch-thumb"></span>
+            </span>
+          </label>
+          <span class="composer-mode-label">Activa video</span>
+        </div>
+
+        <div id="composerPublishModeWrap" class="composer-mode-switch" role="group" aria-label="Estado de publicación de la sesión">
+          <span class="composer-mode-label">Borrador</span>
+          <label class="composer-switch" for="sessionPublishToggle">
+            <input id="sessionPublishToggle" type="checkbox" aria-label="Publicar sesión">
+            <span class="composer-switch-track" aria-hidden="true">
+              <span class="composer-switch-thumb"></span>
+            </span>
+          </label>
+          <span class="composer-mode-label">Publicar</span>
+        </div>
+
         <div id="podcastVideoActivityNotification" class="activity-notification-wrap" style="display: none; pointer-events: auto;">
           <i class="fas fa-user-edit"></i>
           <span class="activity-text"></span>

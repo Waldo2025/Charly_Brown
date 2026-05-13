@@ -52,27 +52,27 @@
 }
 
 :root {
-  --pod-bg: color-mix(in srgb, var(--app-bg-color, #f8fafc) 98%, #eef2f7 2%);
-  --pod-surface: color-mix(in srgb, var(--app-bg-color, #ffffff) 99%, #f3f5f8 1%);
-  --pod-surface-2: color-mix(in srgb, var(--app-bg-color, #ffffff) 96%, #eef2f7 4%);
-  --pod-surface-3: color-mix(in srgb, var(--app-bg-color, #ffffff) 93%, #edf2f7 7%);
-  --pod-border: color-mix(in srgb, var(--app-text-color, #111827) 10%, #d1d5db 90%);
-  --pod-border-strong: color-mix(in srgb, var(--app-text-color, #111827) 18%, #cbd5e1 82%);
-  --pod-text: var(--app-text-color, #111827);
-  --pod-muted: color-mix(in srgb, var(--app-text-color, #334155) 52%, #94a3b8 48%);
-  --pod-accent: var(--cb-chrome-bg, #3f4d98);
-  --pod-accent-soft: color-mix(in srgb, var(--cb-chrome-bg, #3f4d98) 10%, #ffffff 90%);
-  --pod-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --pod-shadow-lg: 0 14px 24px rgba(15, 23, 42, 0.06);
-  --pod-radius-xl: 24px;
-  --pod-radius-lg: 18px;
-  --pod-radius-md: 14px;
-  --pod-radius-sm: 10px;
-  --pod-sidepanel-min: 420px;
-  --pod-sidepanel-max: 540px;
-  --pod-studio-inspector-min: 320px;
-  --pod-studio-inspector-max: 620px;
-  --pod-studio-inspector-width: 420px;
+  --pod-bg: #f8fafc;
+  --pod-surface: #ffffff;
+  --pod-surface-2: #f1f5f9;
+  --pod-surface-3: #e2e8f0;
+  --pod-border: #e2e8f0;
+  --pod-border-strong: #cbd5e1;
+  --pod-text: #0f172a;
+  --pod-muted: #64748b;
+  --pod-accent: #3b82f6;
+  --pod-accent-soft: #eff6ff;
+  --pod-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  --pod-shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  --pod-radius-xl: 20px;
+  --pod-radius-lg: 14px;
+  --pod-radius-md: 10px;
+  --pod-radius-sm: 8px;
+  --pod-sidepanel-min: 360px;
+  --pod-sidepanel-max: 420px;
+  --pod-studio-inspector-min: 300px;
+  --pod-studio-inspector-max: 580px;
+  --pod-studio-inspector-width: 380px;
 }
 
 * {
@@ -202,12 +202,12 @@ body.is-resizing-podcast-stage {
 
 .podcaster-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 248px) minmax(0, 1.5fr) minmax(var(--pod-sidepanel-min), var(--pod-sidepanel-max));
+  grid-template-columns: 220px minmax(0, 2fr) minmax(var(--pod-sidepanel-min), var(--pod-sidepanel-max));
   gap: 0;
 }
 
 .podcaster-layout:not(.has-sidepanel) {
-  grid-template-columns: minmax(220px, 248px) minmax(0, 1fr) 0;
+  grid-template-columns: 220px minmax(0, 1fr) 0;
 }
 
 .sessions-rail {
@@ -501,16 +501,27 @@ body.is-resizing-podcast-stage {
 
 .chat-message {
   width: min(100%, 760px);
-  line-height: 1.65;
+  line-height: 1.6;
   white-space: pre-wrap;
-  font-size: 15px;
+  font-size: 14.5px;
   color: var(--pod-text);
-  padding: 14px 44px 12px 14px;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--pod-text) 12%, transparent 88%);
-  background: color-mix(in srgb, var(--pod-accent) 12%, var(--pod-surface) 88%);
+  padding: 16px 44px 16px 16px;
+  border-radius: var(--pod-radius-lg);
+  border: 1px solid var(--pod-border);
+  background: var(--pod-surface);
+  box-shadow: var(--pod-shadow);
   position: relative;
   justify-self: start;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chat-message:hover {
+  box-shadow: var(--pod-shadow-lg);
+}
+
+/* Filtering non-chat responses */
+.chat-message.assistant:not(:has(.chat-connect-btn:not(:disabled))) {
+  display: none !important;
 }
 
 .chat-message-body {
@@ -639,10 +650,11 @@ body.is-resizing-podcast-stage {
   z-index: 5;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--pod-bg) 0%, transparent) 0%,
-    color-mix(in srgb, var(--pod-bg) 92%, transparent) 16%,
-    color-mix(in srgb, var(--pod-bg) 100%, transparent) 36%
+    rgba(248, 250, 252, 0) 0%,
+    rgba(248, 250, 252, 0.8) 20%,
+    rgba(248, 250, 252, 1) 100%
   );
+  backdrop-filter: blur(8px);
   padding: 0 24px 28px;
 }
 
@@ -651,9 +663,9 @@ body.is-resizing-podcast-stage {
   margin: 0 auto;
   background: var(--pod-surface);
   border: 1px solid var(--pod-border);
-  border-radius: 26px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-  padding: 12px 14px 10px;
+  border-radius: 20px;
+  box-shadow: var(--pod-shadow-lg);
+  padding: 8px 12px;
 }
 
 .composer-topline,
@@ -685,35 +697,41 @@ body.is-resizing-podcast-stage {
 .composer-chip,
 .composer-chip-button {
   border: 1px solid var(--pod-border);
-  background: transparent;
-  color: var(--pod-text);
+  background: var(--pod-surface-2);
+  color: var(--pod-muted);
   border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
   line-height: 1;
+  transition: all 0.2s ease;
 }
 
 .composer-chip-button {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+}
+
+.composer-chip-button:hover {
+  background: var(--pod-surface-3);
+  color: var(--pod-text);
 }
 
 .composer-chip-button.is-active {
-  background: rgba(21, 128, 61, 0.1);
-  border-color: rgba(22, 163, 74, 0.45);
-  color: #166534;
+  background: var(--pod-accent-soft);
+  border-color: var(--pod-accent);
+  color: var(--pod-accent);
 }
 
 .composer-mode-switch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 3px 8px;
   border: 1px solid var(--pod-border);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.08);
+  background: var(--pod-surface-2);
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
@@ -932,7 +950,8 @@ body.is-resizing-podcast-stage {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 12px 20px 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pod-border);
 }
 
 .sidepanel-header-actions {
@@ -1303,23 +1322,30 @@ body.is-resizing-podcast-stage {
 }
 
 #onScreenTextTrackPanel {
-  --montage-modal-surface: rgba(46, 50, 56, 0.86);
-  --montage-modal-surface-2: rgba(46, 50, 56, 0.68);
-  --montage-modal-border: rgba(255, 255, 255, 0.14);
-  --montage-modal-border-strong: rgba(255, 255, 255, 0.20);
-  --montage-modal-text: rgba(248, 250, 252, 0.94);
-  --montage-modal-muted: rgba(203, 213, 225, 0.76);
-  --pod-surface: var(--montage-modal-surface);
-  --pod-surface-2: var(--montage-modal-surface-2);
-  --pod-border: var(--montage-modal-border);
-  --pod-border-strong: var(--montage-modal-border-strong);
-  --pod-text: var(--montage-modal-text);
-  --pod-muted: var(--montage-modal-muted);
+  --studio-surface: rgba(46, 50, 56, 0.86);
+  --studio-surface-2: rgba(46, 50, 56, 0.68);
+  --studio-surface-3: rgba(60, 64, 72, 0.62);
+  --studio-border: rgba(255, 255, 255, 0.14);
+  --studio-border-strong: rgba(255, 255, 255, 0.20);
+  --studio-text: rgba(248, 250, 252, 0.94);
+  --studio-muted: rgba(203, 213, 225, 0.74);
+  --studio-shadow: 0 18px 44px rgba(2, 6, 23, 0.30);
+  --studio-shadow-lg: 0 38px 110px rgba(2, 6, 23, 0.44);
 
-  width: auto;
-  inline-size: max-content;
-  max-width: calc(100vw - 24px);
-  max-inline-size: calc(100vw - 24px);
+  --pod-surface: var(--studio-surface);
+  --pod-surface-2: var(--studio-surface-2);
+  --pod-surface-3: var(--studio-surface-3);
+  --pod-border: var(--studio-border);
+  --pod-border-strong: var(--studio-border-strong);
+  --pod-text: var(--studio-text);
+  --pod-muted: var(--studio-muted);
+  --pod-shadow: var(--studio-shadow);
+  --pod-shadow-lg: var(--studio-shadow-lg);
+
+  width: 320px;
+  inline-size: 320px;
+  max-width: 320px;
+  max-inline-size: 320px;
   margin: 0;
   justify-self: start;
   align-self: start;
@@ -1327,7 +1353,9 @@ body.is-resizing-podcast-stage {
   border: 1px solid color-mix(in srgb, var(--pod-border) 92%, transparent 8%);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(46, 50, 56, 0.98), rgba(38, 41, 46, 0.99));
+    radial-gradient(980px 520px at 14% 10%, color-mix(in srgb, var(--pod-accent) 18%, transparent 82%), transparent 62%),
+    radial-gradient(840px 520px at 88% 18%, rgba(30, 32, 36, 0.42), transparent 54%),
+    linear-gradient(180deg, rgba(60, 64, 72, 0.92), rgba(38, 41, 46, 0.88));
   box-shadow:
     0 24px 72px rgba(2, 6, 23, 0.28),
     0 10px 20px rgba(2, 6, 23, 0.12);
@@ -1339,8 +1367,8 @@ body.is-resizing-podcast-stage {
 }
 
 #onScreenTextTrackPanel .music-config-head h3 {
-  font-size: 13px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0.04em;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1349,9 +1377,10 @@ body.is-resizing-podcast-stage {
   cursor: inherit;
   user-select: none;
   touch-action: none;
-  padding: 10px 12px;
+  margin: 0;
+  border-radius: 10px 10px 0 0;
+  border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
 }
 
 #onScreenTextTrackPanel .music-config-head .row-icon-btn {
@@ -1378,22 +1407,14 @@ body.is-resizing-podcast-stage {
 }
 
 .onscreen-text-inspector-shell {
-  display: inline-grid;
+  display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  width: auto;
-  inline-size: max-content;
-  max-width: 100%;
+  gap: 6px;
+  width: 100%;
 }
 
 .onscreen-text-inspector-rail {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(48, 48, 48, 0.92);
+  display: none !important;
 }
 
 .onscreen-text-inspector-titlebar {
@@ -1423,7 +1444,7 @@ body.is-resizing-podcast-stage {
 }
 
 .onscreen-text-inspector-title-copy strong {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.94);
 }
@@ -1446,7 +1467,7 @@ body.is-resizing-podcast-stage {
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(61, 61, 61, 0.92);
   color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
 }
 
@@ -1458,15 +1479,15 @@ body.is-resizing-podcast-stage {
 
 .onscreen-text-inspector-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 10px;
-  padding: 12px;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 8px;
   min-height: 100%;
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(46, 46, 46, 0.96), rgba(39, 39, 39, 0.96));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--pod-surface) 92%, #0b1020 8%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   align-items: start;
 }
 
@@ -1486,8 +1507,8 @@ body.is-resizing-podcast-stage {
 }
 
 .onscreen-text-inspector-panel-head strong {
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.9);
 }
@@ -1503,10 +1524,10 @@ body.is-resizing-podcast-stage {
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(62, 62, 62, 0.92);
   color: rgba(255, 255, 255, 0.76);
-  border-radius: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
+  border-radius: 4px;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -1537,7 +1558,7 @@ body.is-resizing-podcast-stage {
 }
 
 .onscreen-text-inline-row {
-  grid-template-columns: 88px minmax(260px, 1fr);
+  grid-template-columns: 50px minmax(0, 1fr);
 }
 
 .onscreen-text-swatch-field {
@@ -1545,18 +1566,18 @@ body.is-resizing-podcast-stage {
 }
 
 .onscreen-text-swatch-field input[type="color"] {
-  inline-size: 42px !important;
-  width: 42px !important;
-  min-width: 42px;
-  block-size: 42px !important;
-  height: 42px !important;
-  padding: 3px !important;
-  border-radius: 10px !important;
+  inline-size: 32px !important;
+  width: 32px !important;
+  min-width: 32px;
+  block-size: 32px !important;
+  height: 32px !important;
+  padding: 2px !important;
+  border-radius: 6px !important;
   cursor: pointer;
 }
 
 .onscreen-text-metric-field .studio-volume-control {
-  min-height: 42px;
+  min-height: 32px;
 }
 
 @media (max-width: 720px) {
@@ -1587,30 +1608,30 @@ body.is-resizing-podcast-stage {
 }
 
 #onScreenTextTrackPanel .row-field span {
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 #onScreenTextTrackPanel .row-field select,
 #onScreenTextTrackPanel .row-field input,
 #onScreenTextTrackPanel .row-field textarea {
-  min-height: 36px;
-  padding: 7px 10px;
-  font-size: 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(29, 29, 29, 0.96);
   color: rgba(255, 255, 255, 0.94);
   font-variant-numeric: tabular-nums;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 #onScreenTextTrackPanel .row-field input[type="color"] {
-  height: 36px;
+  height: 28px;
   padding: 2px;
-  border-radius: 10px;
+  border-radius: 6px;
 }
 
 #onScreenTextTrackPanel .podcast-text-track-select {
@@ -1621,18 +1642,22 @@ body.is-resizing-podcast-stage {
 }
 
 #onScreenTextTrackPanel .studio-volume-control {
-  grid-template-columns: minmax(0, 1fr) 58px;
-  gap: 8px;
+  grid-template-columns: 1fr 44px;
+  gap: 6px;
   align-items: center;
 }
 
 #onScreenTextTrackPanel .studio-volume-control input[type="number"] {
-  padding: 8px 8px;
+  padding: 4px 6px;
   text-align: right;
 }
 
 #onScreenTextTrackPanel .row-field input[type="range"] {
   height: 18px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  cursor: pointer;
 }
 
 .dialogue-video-directive-label {
@@ -2535,7 +2560,41 @@ body.is-resizing-podcast-stage {
 }
 
 #podcastVideoShell .floating-panel-head {
-  padding: 8px 10px;
+  padding: 6px 12px;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+#podcastVideoShell .floating-panel-head .composer-mode-switch {
+  background: rgba(15, 23, 42, 0.42);
+  border-color: rgba(255, 255, 255, 0.08);
+  padding: 3px 8px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+#podcastVideoShell .floating-panel-head .composer-mode-label {
+  font-size: 10px;
+}
+
+#podcastVideoShell .floating-panel-head .composer-switch-track {
+  width: 28px;
+  height: 14px;
+}
+
+#podcastVideoShell .floating-panel-head .composer-switch-thumb {
+  width: 10px;
+  height: 10px;
+}
+
+#podcastVideoShell .floating-panel-head .composer-switch input:checked ~ .composer-switch-track .composer-switch-thumb {
+  transform: translateX(14px);
+}
+
+#podcastVideoShell .floating-panel-head .floating-panel-session-title {
+  margin-left: 10px;
+  margin-right: auto;
+  font-size: 14px;
 }
 
 #podcastVideoShell .podcast-video-speaker-meta strong {
@@ -3189,11 +3248,11 @@ body.is-resizing-podcast-stage {
   --pod-onscreen-text-user-shadow: none;
   --pod-onscreen-text-stroke-shadow: none;
   --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
-  max-width: min(88%, 1000px);
+  max-width: min(96%, 1400px);
   position: absolute;
-  left: var(--pod-onscreen-text-x, 50%);
-  top: var(--pod-onscreen-text-y, 92%);
-  transform: translate(-50%, -100%);
+  left: var(--pod-onscreen-text-x, 21%);
+  top: var(--pod-onscreen-text-y, 72%);
+  transform: none;
   display: block;
   box-sizing: border-box;
   padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
@@ -3245,7 +3304,7 @@ body.is-resizing-podcast-stage {
 
 .podcast-on-screen-text-content.is-bg-none {
   display: block;
-  max-width: min(88%, var(--pod-onscreen-text-bubble-width, 1000px)) !important;
+  max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
   min-width: 0 !important;
   min-height: 0 !important;
   text-align: var(--pod-onscreen-text-align, center);
@@ -3257,7 +3316,7 @@ body.is-resizing-podcast-stage {
 
 .podcast-on-screen-text-content.is-bg-none.is-resizable {
   display: block;
-  max-width: min(88%, var(--pod-onscreen-text-bubble-width, 1000px)) !important;
+  max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
   text-align: var(--pod-onscreen-text-align, center);
 }
 
@@ -6370,14 +6429,20 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .music-config-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--pod-surface) 92%, #0b1020 8%);
+  padding: 8px 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .music-config-head h3 {
   margin: 0;
   font-size: 14px;
+  color: #ffffff;
 }
 
 .music-config-grid {
@@ -6667,12 +6732,12 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .composer-send-btn,
 .row-icon-btn,
 .session-menu-btn {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: 0;
   background: transparent;
   color: var(--pod-text);
-  border-radius: 10px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

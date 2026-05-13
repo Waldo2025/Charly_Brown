@@ -26,8 +26,8 @@ assert.match(
 
 assert.match(
   source,
-  /const proposal = resolveDashboardDisplayedVisualProposal\(first\);/,
-  "La escena inicial del reproductor debe mostrar propuestas visuales desde historial."
+  /const hasAnyProposal = rows\.some\(r => \(r\.visualNotesProposals\?\.length > 0 \|\| !!r\.visualNotesProposal\)\);[\s\S]*const hasPending = hasAnyProposal && rows\.some/,
+  "La sección de videos de Home debe detectar propuestas visuales desde el historial de filas de la sesión."
 );
 
 console.log("Home displays visual proposals from history OK.");

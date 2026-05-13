@@ -436,6 +436,10 @@
           </div>
         </div>
         <div class="player-head-actions">
+          <div id="playerUpdateBadge" class="player-update-badge hidden">
+             <i class="fas fa-sync-alt"></i>
+             <span>Cambios disponibles</span>
+          </div>
           <button id="btnOpenExportModal" class="player-action-btn" title="Exportar Video">
             <i class="fas fa-file-export"></i>
           </button>
@@ -449,9 +453,11 @@
       <div class="multimedia-player-content">
         <div class="multimedia-player-main">
           <div id="playerStage" class="player-stage">
-          <video id="playerVideoA" class="player-video" playsinline muted preload="auto"></video>
-          <video id="playerVideoB" class="player-video" playsinline muted preload="auto" style="opacity: 0;"></video>
-          <div id="playerOverlay" class="player-overlay"></div>
+            <video id="podcastActiveSpeakerBackdropVideo" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="playerVideoA" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="podcastActiveSpeakerBackdropVideoAlt" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <video id="playerVideoB" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <div id="playerOverlay" class="player-overlay"></div>
           <style>
             .player-stage {
               position: relative;
@@ -465,13 +471,29 @@
               inset: 0;
               width: 100%;
               height: 100%;
-              object-fit: cover;
-              /* IMPORTANTE: El controlador original usa opacidad y z-index */
+              object-fit: contain;
+              object-position: center center;
               opacity: 0;
               visibility: hidden;
               z-index: 1;
               display: block !important;
-              transition: opacity 0.3s ease;
+              transition: opacity 0.4s ease, transform 0.4s ease;
+              background: #020617;
+              will-change: opacity, transform;
+            }
+            .player-video-backdrop {
+              object-fit: cover;
+              filter: blur(26px) saturate(1.08);
+              transform: scale(1.12);
+              z-index: 0;
+            }
+            .player-video.is-blur-backdrop-foreground {
+              width: 76%;
+              height: 76%;
+              inset: 50% auto auto 50%;
+              transform: translate(-50%, -50%);
+              box-shadow: 0 28px 60px rgba(2, 6, 23, 0.44), 0 0 0 1px rgba(255, 255, 255, 0.08);
+              z-index: 2;
             }
             /* El controlador aplicará estilos en línea que sobreescribirán esto */
             .player-overlay {
@@ -507,29 +529,38 @@
 
             .podcast-on-screen-text-content {
               --pod-onscreen-text-preset-shadow: 0 3px 14px rgba(2, 6, 23, 0.24);
-              max-width: min(88%, 1000px);
+              --pod-onscreen-text-user-shadow: none;
+              --pod-onscreen-text-stroke-shadow: none;
+              --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
+              max-width: min(96%, 1400px);
               position: absolute;
-              left: var(--pod-onscreen-text-x, 50%);
-              top: var(--pod-onscreen-text-y, 92%);
-              transform: translate(-50%, -100%);
+              left: var(--pod-onscreen-text-x, 21%);
+              top: var(--pod-onscreen-text-y, 72%);
+              transform: none;
               display: block;
               box-sizing: border-box;
-              padding: calc(0.36em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
+              padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
               border-radius: calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
-              background: rgba(15, 23, 42, 0.75) !important;
-              backdrop-filter: blur(8px) saturate(1.1) !important;
-              border: 1px solid rgba(255, 255, 255, 0.1);
-              box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+              background: transparent;
+              box-shadow: none;
+              backdrop-filter: none;
               color: var(--pod-onscreen-text-color, #f8fafc);
               font-family: var(--pod-onscreen-text-font-family, inherit);
               font-size: var(--pod-onscreen-text-font-size, 16px);
               font-weight: var(--pod-onscreen-text-font-weight, 500);
               font-style: var(--pod-onscreen-text-font-style, normal);
               text-align: var(--pod-onscreen-text-align, center);
+              letter-spacing: 0;
               line-height: var(--pod-onscreen-text-line-height, 1.22em);
               white-space: pre-wrap;
-              text-shadow: var(--pod-onscreen-text-stroke-shadow, 0 0 0 transparent), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow, 0 0 0 transparent);
+              overflow-wrap: anywhere;
+              text-wrap: pretty;
+              text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
               opacity: var(--pod-onscreen-text-opacity, 1);
+              width: var(--pod-onscreen-text-bubble-width, auto);
+              height: var(--pod-onscreen-text-bubble-height, auto);
+              min-width: 0;
+              min-height: 0;
               transition: opacity 0.18s ease;
             }
 
@@ -568,6 +599,10 @@
               background: transparent !important;
               box-shadow: none !important;
               backdrop-filter: none !important;
+              padding-inline: 0 !important;
+              padding-left: 0 !important;
+              padding-right: 0 !important;
+              max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
             }
 
             .multimedia-render-btn {
@@ -585,6 +620,31 @@
 
             .multimedia-render-btn:hover {
               filter: brightness(1.1);
+            }
+            .player-update-badge {
+              background: #fbbf24;
+              color: #0f172a;
+              padding: 0 0.75rem;
+              height: 28px;
+              border-radius: 14px;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+              font-size: 11px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-right: 12px;
+              box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+              animation: playerBadgePulse 2s infinite;
+              transition: transform 0.2s;
+            }
+            .player-update-badge:hover {
+              transform: scale(1.05);
+            }
+            @keyframes playerBadgePulse {
+              0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6); }
+              70% { box-shadow: 0 0 0 10px rgba(251, 191, 36, 0); }
+              100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
             }
           </style>
         </div>

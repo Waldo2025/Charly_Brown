@@ -26,6 +26,9 @@ const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
+  buildDialogueVideoPromptBundle
+} = require("./dialogue-video-prompt.js");
+const {
   createHeavyWorkCoordinator,
   validateDialogueVideoInlineReferenceBudget
 } = require("./podcaster-stability.js");
@@ -4994,7 +4997,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
+    const promptProfile = clampText(req.body?.promptProfile || "", 80);
     let scenarioPrompt = clampText(req.body?.scenarioPrompt || "", 2400);
+    const sceneDescription = clampText(req.body?.sceneDescription || "", 1600);
+    const visualNotes = clampText(req.body?.visualNotes || "", 2200);
+    const onScreenText = clampText(req.body?.onScreenText || "", 1200);
+    const transition = clampText(req.body?.transition || "", 1200);
     const videoDirective = clampText(req.body?.videoDirective || "", 1400);
     const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
@@ -5383,15 +5391,51 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         expression,
         contentMode: "podcast"
       });
-    const sceneVisualPrompt = scenePrompt || [
+    const timelineScenePromptBundle = buildDialogueVideoPromptBundle({
+      promptProfile,
+      educationalVideo,
+      speakerName,
+      speakerLabel,
+      voiceName,
+      genderGroup,
+      expression,
+      counterpartSpeakerName,
+      scenarioPrompt,
+      scenePrompt,
+      sceneDescription,
+      visualNotes,
+      onScreenText,
+      transition,
+      videoDirective,
+      imagePrompts,
+      performanceDirective,
+      previousScene,
+      relateWithPreviousScene,
+      continuityFrameBase64,
+      forceImmediateChange,
+      hasPortraitAsset,
+      dialogueAudioStoragePath,
+      dialogueAudioUrl,
+      inferredTargetDurationSec,
+      originalText,
+      text,
+      characterPrompt,
+      studioScenePrompt,
+      useSceneReferenceAsInitImage,
+      referenceImageName,
+      hasSceneReferenceVideo,
+      referenceVideoName,
+      regenerationAnalysis: null
+    });
+    const sceneVisualPrompt = timelineScenePromptBundle?.sceneVisualPrompt || (scenePrompt || [
       educationalVideo ? "Escena educativa basada en guion técnico." : `Escena de ${speakerName}.`,
       scenarioPrompt ? `Contexto visual: ${scenarioPrompt}` : "",
       videoDirective ? `Prioridad manual: ${videoDirective}` : ""
-    ].filter(Boolean).join(" ").trim();
-    const sceneImagePromptList = imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
+    ].filter(Boolean).join(" ").trim());
+    const sceneImagePromptList = timelineScenePromptBundle?.sceneImagePromptList || (imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
       `${sceneVisualPrompt} Imagen principal horizontal 16:9.`,
       `${sceneVisualPrompt} Variante en plano cerrado, y otra toma de apoyo del set.`
-    ] : []);
+    ] : []));
 
     let regenerationAnalysis = null;
     if (enhanceFromExistingVideo && (analysisVideoStoragePath || analysisVideoDownloadUrl) && hasGeminiKey() && isFfmpegAvailable()) {
@@ -5426,7 +5470,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
     }
 
-    const prompt = [
+    const prompt = timelineScenePromptBundle?.prompt || [
       educationalVideo
         ? "Genera un video educativo corto, claro y realista."
         : "Genera un video cinematográfico corto y realista para podcast.",
