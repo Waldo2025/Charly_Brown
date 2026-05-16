@@ -3366,11 +3366,11 @@ body.is-resizing-podcast-stage {
   --pod-onscreen-text-user-shadow: 0 0 0 transparent;
   --pod-onscreen-text-stroke-shadow: 0 0 0 transparent;
   --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
-  max-width: min(88%, 1000px);
+  max-width: min(96%, 1400px);
   position: absolute;
-  left: var(--pod-onscreen-text-x, 50%);
-  top: var(--pod-onscreen-text-y, 92%);
-  transform: translate(-50%, -100%);
+  left: var(--pod-onscreen-text-x, 21%);
+  top: var(--pod-onscreen-text-y, 72%);
+  transform: none;
   display: block;
   box-sizing: border-box;
   padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
@@ -3712,7 +3712,8 @@ body.is-resizing-podcast-stage {
   overflow: hidden;
 }
 
-.podcast-active-speaker-video {
+.podcast-active-speaker-video,
+.podcast-active-speaker-image {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -3721,12 +3722,13 @@ body.is-resizing-podcast-stage {
   object-position: center center;
   border-radius: inherit;
   z-index: 1;
-  /* Evita "pantallazo" gris cuando el <video> aún no tiene frame decodificado. */
+  /* Evita "pantallazo" gris cuando el medio aún no carga. */
   background: #020617;
   will-change: opacity, transform, filter;
 }
 
-.podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop) {
+.podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop),
+.podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop) {
   scale: var(--pod-scene-media-scale, 1);
 }
 

@@ -59,7 +59,10 @@ export class PodcasterPlaybackController extends EventEmitter {
       loadingSrc: '',
       preloadingSrc: '',
       preloadingPromise: null,
-      activeSlot: 0
+      activeSlot: 0,
+      imageLoadingSrc: '',
+      imageLoadingPromise: null,
+      imageSwapToken: 0
     };
     this.activeLoopId = 0;
     this.visualLayoutMode = "default";
@@ -105,6 +108,50 @@ export class PodcasterPlaybackController extends EventEmitter {
     const timelineOffsetMs = Math.max(0, Number(currentMs || 0) - Math.max(0, Number(segmentStartMs || 0)));
     const sourceOffsetMs = safeTrimInMs + (timelineOffsetMs * this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25));
     return sourceOffsetMs / 1000;
+  }
+  isImageStageEntry(entry = null) {
+    if (!entry) return false;
+    if (entry.isImageClip === true) return true;
+    const explicitType = String(entry?.clip?.type || entry?.type || "").trim().toLowerCase();
+    if (explicitType === "image") return true;
+    const source = String(entry?.videoSrc || "").trim();
+    if (/\.(jpg|jpeg|png|webp|gif|avif)(?:[?#]|$)/i.test(source)) return true;
+    if (/\/api\/assets\/proxy-image\?/i.test(source)) return true;
+    return false;
+  }
+  parseOverlayCssPercent(value, fallback = 0) {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+    const numeric = Number(raw.replace("%", ""));
+    if (!Number.isFinite(numeric)) return fallback;
+    return this.clamp01(numeric / 100);
+  }
+  resolveLiveOnScreenTextLayout(selectedRowId, baseLayout, overlay, previewEl) {
+    const rowId = String(selectedRowId || "").trim();
+    if (!rowId || !overlay || !previewEl) return baseLayout;
+    const dragState = this.deps?.podcastVideoState?.onScreenTextOverlayDrag;
+    const resizeState = this.deps?.podcastVideoState?.onScreenTextOverlayResize;
+    const activeInteraction = [dragState, resizeState].find((item) => String(item?.rowId || "").trim() === rowId) || null;
+    if (!activeInteraction) return baseLayout;
+    const bubble = overlay.querySelector(`.podcast-on-screen-text-content[data-row-id="${CSS.escape(rowId)}"]`);
+    if (!bubble) return baseLayout;
+    const previewRect = previewEl.getBoundingClientRect?.();
+    const bubbleRect = bubble.getBoundingClientRect?.();
+    const previewWidthPx = Math.max(1, Number(previewRect?.width || previewEl.clientWidth || 1));
+    const previewHeightPx = Math.max(1, Number(previewRect?.height || previewEl.clientHeight || 1));
+    const widthPx = Math.max(
+      1,
+      this.toFiniteNumber(String(bubble.style.getPropertyValue("--pod-onscreen-text-bubble-width") || "").replace("px", ""), Number(bubbleRect?.width || 0))
+    );
+    const heightPx = Math.max(1, Number(bubbleRect?.height || 0));
+    return {
+      ...(baseLayout || {}),
+      rowId,
+      xPct: this.parseOverlayCssPercent(bubble.style.getPropertyValue("--pod-onscreen-text-x"), Number(baseLayout?.xPct || 0)),
+      yPct: this.parseOverlayCssPercent(bubble.style.getPropertyValue("--pod-onscreen-text-y"), Number(baseLayout?.yPct || 0)),
+      widthPct: Math.max(0.08, Math.min(0.9, widthPx / previewWidthPx)),
+      heightPct: Math.max(0.05, Math.min(0.6, heightPx / previewHeightPx))
+    };
   }
 
   getEntryAtMs(currentMs) {
@@ -164,6 +211,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         let finalUrl = url;
         const isDirectFirebaseUrl = url.includes('firebasestorage.googleapis.com');
+        const isImageLikeUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#]|$)/i.test(String(url || "").trim());
 
         if (url.includes('/api/assets/proxy-media') || url.includes('/api/assets/proxy-image') || isDirectFirebaseUrl) {
           try {
@@ -200,6 +248,17 @@ export class PodcasterPlaybackController extends EventEmitter {
           if (this.deps?.resolveFirebaseStorageUrl) {
             finalUrl = await this.deps.resolveFirebaseStorageUrl(finalUrl);
           }
+        }
+
+        const isImageLikeFinalUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#]|$)/i.test(String(finalUrl || "").trim());
+        const isDirectRemoteImage = isImageLikeFinalUrl && !String(finalUrl || "").includes('/api/');
+        if (isDirectFirebaseUrl && isDirectRemoteImage) {
+          this.blobCache.set(url, finalUrl);
+          return finalUrl;
+        }
+        if (isImageLikeUrl && isDirectRemoteImage) {
+          this.blobCache.set(url, finalUrl);
+          return finalUrl;
         }
 
         const fetchOptions = {};
@@ -449,7 +508,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         el.addEventListener('loadedmetadata', onLoaded);
       }
     } catch (e) {
-      console.warn('[PlaybackController] Error seeking:', e);
+      void e;
     }
   }
 
@@ -551,12 +610,12 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (activeClip) {
       if (this.state.activeOnScreenTextId !== activeClip.id) {
         this.state.activeOnScreenTextId = activeClip.id;
-        console.log(`[Playback:Text] Mostrando texto para ${activeClip.rowId}: "${activeClip.onScreenText.substring(0, 30)}..."`);
+        // console.log(`[Playback:Text] Mostrando texto para ${activeClip.rowId}: "${activeClip.onScreenText.substring(0, 30)}..."`);
         this.deps?.renderOnScreenText?.(activeClip);
       }
     } else {
       if (this.state.activeOnScreenTextId !== "") {
-        console.log(`[Playback:Text] Limpiando texto`);
+        // console.log(`[Playback:Text] Limpiando texto`);
         this.state.activeOnScreenTextId = "";
         this.deps?.renderOnScreenText?.(null);
       }
@@ -605,7 +664,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       
       this.emit('timeupdate', { currentMs: ms });
     } catch (e) {
-      console.warn("[PlaybackController] Tick error:", e);
+      void e;
     } finally {
       this.state.isTickProcessing = false;
     }
@@ -619,7 +678,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     
     if (activeEntry && activeEntry.rowId !== this.state.activeRowId) {
       this.state.activeRowId = activeEntry.rowId;
-      console.log(`[Playback] → Nueva escena activa: ${activeEntry.rowId} (Inicio: ${activeEntry.startMs}ms, Duración: ${activeEntry.durationMs}ms)`);
+      // console.log(`[Playback] → Nueva escena activa: ${activeEntry.rowId} (Inicio: ${activeEntry.startMs}ms, Duración: ${activeEntry.durationMs}ms)`);
     }
 
     const config = this.deps?.getPodcastVideoConfig?.(session) || {};
@@ -696,11 +755,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       // Log informativo de resolución (solo una vez por inicialización de segmento)
       if (audio.dataset.initialized === "false") {
-        console.log(`[Playback:Audio] Configurando ${rowId}: Speed=${speed.toFixed(2)}x, ClipRate=${clipPlaybackRate.toFixed(2)}x -> Effective=${effectiveRate.toFixed(2)}x`);
+        // console.log(`[Playback:Audio] Configurando ${rowId}: Speed=${speed.toFixed(2)}x, ClipRate=${clipPlaybackRate.toFixed(2)}x -> Effective=${effectiveRate.toFixed(2)}x`);
       }
 
       if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-        console.log(`[Playback:Audio] Ajustando velocidad para ${rowId}: ${audio.playbackRate.toFixed(2)}x -> ${effectiveRate.toFixed(2)}x`);
+        // console.log(`[Playback:Audio] Ajustando velocidad para ${rowId}: ${audio.playbackRate.toFixed(2)}x -> ${effectiveRate.toFixed(2)}x`);
         audio.playbackRate = effectiveRate;
         audio.defaultPlaybackRate = effectiveRate;
       }
@@ -716,14 +775,14 @@ export class PodcasterPlaybackController extends EventEmitter {
       
       if (isFirstSync || drift > 0.25) {
         if (isFirstSync || drift > 0.5) {
-           console.log(`[Playback:Audio] Sincronizando tiempo para ${rowId}: ${audio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s (Drift: ${drift.toFixed(3)}s)`);
+           // console.log(`[Playback:Audio] Sincronizando tiempo para ${rowId}: ${audio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s (Drift: ${drift.toFixed(3)}s)`);
         }
         this.seekTo(audio, offsetSec);
         audio.dataset.initialized = "true";
       }
 
       if (this.state.isPlaying && audio.paused) {
-        console.log(`[Playback:Audio] Play para ${rowId}`);
+        // console.log(`[Playback:Audio] Play para ${rowId}`);
         audio.play().then(() => {
           // Re-aplicar velocidad tras el play por seguridad (algunos navegadores la resetean al iniciar el play)
           if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
@@ -751,7 +810,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (activeSegment) {
       if (this.backgroundSrc !== activeSegment.sourceUrl) {
         this.backgroundSrc = activeSegment.sourceUrl;
-        console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl}`);
+        // console.log(`[Playback:Music] Cambio de track de fondo: ${activeSegment.sourceUrl}`);
         try {
           const blobSrc = await this.getBlobUrl(activeSegment.sourceUrl);
           this.backgroundAudio = new Audio();
@@ -798,18 +857,18 @@ export class PodcasterPlaybackController extends EventEmitter {
       
       const drift = Math.abs(this.backgroundAudio.currentTime - offsetSec);
       if (this.backgroundAudio.dataset.initialized === "false" || drift > 0.3) {
-        console.log(`[Playback:Music] Sincronizando tiempo: ${this.backgroundAudio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s`);
+        // console.log(`[Playback:Music] Sincronizando tiempo: ${this.backgroundAudio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s`);
         this.seekTo(this.backgroundAudio, offsetSec);
         this.backgroundAudio.dataset.initialized = "true";
       }
 
       if (this.state.isPlaying && this.backgroundAudio.paused) {
-        console.log(`[Playback:Music] Play`);
+        // console.log(`[Playback:Music] Play`);
         this.backgroundAudio.play().catch(() => { });
       }
     } else {
       if (this.backgroundAudio && !this.backgroundAudio.paused) {
-        console.log(`[Playback:Music] Stop (fuera de segmento)`);
+        // console.log(`[Playback:Music] Stop (fuera de segmento)`);
         this.backgroundAudio.pause();
       }
       this.backgroundSrc = "";
@@ -852,9 +911,16 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     // Pre-load upcoming
     const entries = this.deps?.buildTimelineRuntimeEntries?.(this.state.session) || [];
-    const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 4000);
-    upcoming.forEach(e => this.getBlobUrl(e.videoSrc));
+    const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 12000);
+    upcoming.forEach(e => {
+      if (this.isImageStageEntry(e)) {
+        this.preloadImageSrc(e.videoSrc).catch(() => { });
+      } else {
+        this.getBlobUrl(e.videoSrc);
+      }
+    });
     this.preloadUpcomingStageSlot(entry, upcoming);
+    this.preloadUpcomingStylizedText(entry, upcoming);
 
     if (entry) {
       await this.syncStageSwitching(entry, currentMs);
@@ -876,7 +942,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const inactiveSrc = String(inactiveEl?.dataset?.src || "").trim();
     const nextEntry = upcomingEntries.find((item) => {
       const src = String(item?.videoSrc || "").trim();
-      return src && src !== activeSrc && item?.isImageClip !== true;
+      return src && src !== activeSrc && this.isImageStageEntry(item) !== true;
     });
     const nextSrc = String(nextEntry?.videoSrc || "").trim();
     if (!nextSrc) return;
@@ -926,7 +992,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     const task = new Promise((resolve, reject) => {
       const probe = new Image();
+      try { probe.crossOrigin = "anonymous"; } catch (_) { }
       probe.decoding = "async";
+      try { probe.fetchPriority = "high"; } catch (_) { }
       probe.onload = () => resolve(cleanSrc);
       probe.onerror = () => {
         this.stageMachine.imagePreloadCache.delete(cleanSrc);
@@ -941,7 +1009,10 @@ export class PodcasterPlaybackController extends EventEmitter {
   async ensureStageImageReady(imageEl, src = "") {
     const cleanSrc = String(src || "").trim();
     if (!imageEl || !cleanSrc) throw new Error("missing_stage_image");
+    try { imageEl.crossOrigin = "anonymous"; } catch (_) { }
     imageEl.decoding = "async";
+    try { imageEl.loading = "eager"; } catch (_) { }
+    try { imageEl.fetchPriority = "high"; } catch (_) { }
     const currentSrc = String(imageEl.getAttribute("src") || "").trim();
     if (currentSrc !== cleanSrc) {
       imageEl.src = cleanSrc;
@@ -969,6 +1040,86 @@ export class PodcasterPlaybackController extends EventEmitter {
     return cleanSrc;
   }
 
+  preloadUpcomingStylizedText(currentEntry, upcomingEntries = []) {
+    const editor = window.PodcasterMediaEditor;
+    if (typeof editor?.prewarmStylizedText !== "function") return;
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    if (!session?.stylizedTextMap) return;
+
+    const activeRowId = String(currentEntry?.rowId || "").trim();
+    const nextEntry = upcomingEntries.find((item) => {
+      const rowId = String(item?.rowId || "").trim();
+      return rowId && rowId !== activeRowId && session.stylizedTextMap?.[rowId];
+    });
+    if (!nextEntry?.rowId) return;
+    editor.prewarmStylizedText(nextEntry.rowId, session);
+  }
+
+  requestImageStageSwap(entry = null) {
+    const imageEl = this.els?.podcastActiveSpeakerImage;
+    const cleanSrc = String(entry?.videoSrc || "").trim();
+    if (!imageEl || !cleanSrc) return;
+
+    const currentSrc = String(imageEl.dataset.src || imageEl.getAttribute("src") || "").trim();
+    const isReady = imageEl.complete
+      && Number(imageEl.naturalWidth || 0) > 0
+      && Number(imageEl.naturalHeight || 0) > 0;
+
+    const revealImage = () => {
+      imageEl.style.opacity = "1";
+      imageEl.style.visibility = "visible";
+      imageEl.hidden = false;
+
+      const session = this.state.session || this.deps?.getActiveSession?.();
+      const effects = session?.visualEffectsMap?.[entry.rowId];
+      let className = "podcast-active-speaker-image is-visible";
+      if (effects && effects.effects?.length) {
+        const speedClass = `speed-${effects.speed || 5}`;
+        const effectClasses = effects.effects.map(e => `ken-burns-${e}`).join(" ");
+        className += ` ${effectClasses} ${speedClass}`;
+      }
+      imageEl.className = className;
+    };
+
+    if (currentSrc === cleanSrc && isReady) {
+      this.hideAllVideos();
+      revealImage();
+      return;
+    }
+
+    this.hideAllVideos();
+    imageEl.hidden = false;
+    imageEl.style.visibility = "visible";
+    imageEl.style.opacity = "0";
+
+    const existingToken = Number(this.stageMachine.imageSwapToken || 0) + 1;
+    this.stageMachine.imageSwapToken = existingToken;
+
+    if (this.stageMachine.imageLoadingSrc === cleanSrc && this.stageMachine.imageLoadingPromise) {
+      this.stageMachine.imageLoadingPromise.then(() => {
+        if (this.stageMachine.imageSwapToken !== existingToken) return;
+        revealImage();
+      }).catch(() => { });
+      return;
+    }
+
+    this.stageMachine.imageLoadingSrc = cleanSrc;
+    this.stageMachine.imageLoadingPromise = Promise.resolve()
+      .then(() => this.preloadImageSrc(cleanSrc))
+      .then(() => this.ensureStageImageReady(imageEl, cleanSrc))
+      .then(() => {
+        if (this.stageMachine.imageSwapToken !== existingToken) return;
+        revealImage();
+      })
+      .catch(() => { })
+      .finally(() => {
+        if (this.stageMachine.imageLoadingSrc === cleanSrc) {
+          this.stageMachine.imageLoadingSrc = "";
+          this.stageMachine.imageLoadingPromise = null;
+        }
+      });
+  }
+
   async syncStageSwitching(entry, currentMs) {
     const trimInMs = Math.max(0, Number(entry.clip?.trimInMs || 0));
     const offsetMs = currentMs - entry.startMs;
@@ -984,35 +1135,11 @@ export class PodcasterPlaybackController extends EventEmitter {
     
     if (!activeEl) return;
 
-    const isImage = entry.isImageClip
-      || entry.videoSrc?.match(/\.(jpg|jpeg|png|webp|gif)/i)
-      || (entry.clip && entry.clip.type === 'image');
+    const isImage = this.isImageStageEntry(entry);
     this.applySceneMediaScale(entry);
 
     if (isImage) {
-        try {
-            await this.preloadImageSrc(entry.videoSrc);
-            await this.ensureStageImageReady(imageEl, entry.videoSrc);
-        } catch (_) {
-            return;
-        }
-        this.hideAllVideos();
-        if (imageEl) {
-            imageEl.style.opacity = "1";
-            imageEl.style.visibility = "visible";
-            imageEl.hidden = false;
-            
-            // Apply Ken Burns
-            const session = this.state.session || this.deps?.getActiveSession?.();
-            const effects = session?.visualEffectsMap?.[entry.rowId];
-            let className = 'podcast-active-speaker-image is-visible';
-            if (effects && effects.effects?.length) {
-                const speedClass = `speed-${effects.speed || 5}`;
-                const effectClasses = effects.effects.map(e => `ken-burns-${e}`).join(' ');
-                className += ` ${effectClasses} ${speedClass}`;
-            }
-            imageEl.className = className;
-        }
+        this.requestImageStageSwap(entry);
         return;
     } else {
         this.hideAllImages();
@@ -1143,7 +1270,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
       } catch (e) {
-        console.warn('[PlaybackController] Switch error:', e);
+        void e;
       } finally {
         this.stageMachine.loadingSrc = '';
       }
@@ -1275,23 +1402,22 @@ export class PodcasterPlaybackController extends EventEmitter {
     const previewEl = this.els?.podcastVideoStage?.querySelector(".podcast-video-preview") || overlay.parentElement;
     const previewWidthPx = previewEl?.clientWidth || 1280;
     const previewHeightPx = previewEl?.clientHeight || 720;
-    const rowLayout = this.deps?.getOnScreenTextLayoutForRow?.(session, selected.rowId) || null;
-    const renderOptions = {
+    const persistedLayout = this.deps?.getOnScreenTextLayoutForRow?.(session, selected.rowId) || null;
+    const rowLayout = this.resolveLiveOnScreenTextLayout(selected.rowId, persistedLayout, overlay, previewEl);
+    const previewSpec = this.deps?.resolveOnScreenTextPreviewLayoutSpec?.({
+      rowId: selected.rowId,
+      settings,
+      layout: rowLayout,
       text,
       previewWidthPx,
-      previewHeightPx,
-      widthPct: Number(rowLayout?.widthPct || 0.58),
-      heightPct: Number(rowLayout?.heightPct || 0.14),
-      xPct: Number(rowLayout?.xPct || 0.21),
-      yPct: Number(rowLayout?.yPct || 0.7)
-    };
+      previewHeightPx
+    }) || null;
+    const renderMetrics = previewSpec?.metrics || {};
+    const presetClass = previewSpec?.presetClass || this.deps?.getOnScreenTextStylePresetClass?.(settings.stylePreset) || "";
+    const bgClass = previewSpec?.bgClass || this.deps?.getOnScreenTextBgPresetClass?.(settings.bgPreset) || "";
+    const inlineStyle = previewSpec?.inlineStyle || renderMetrics.inlineStyle || (this.deps.buildOnScreenTextBubbleInlineStyle ? this.deps.buildOnScreenTextBubbleInlineStyle(settings, renderMetrics) : "");
 
-    const renderMetrics = this.deps?.resolveOnScreenTextRenderMetrics?.(settings, renderOptions) || {};
-    const presetClass = this.deps?.getOnScreenTextStylePresetClass?.(settings.stylePreset) || "";
-    const bgClass = this.deps?.getOnScreenTextBgPresetClass?.(settings.bgPreset) || "";
-    const inlineStyle = renderMetrics.inlineStyle || (this.deps.buildOnScreenTextBubbleInlineStyle ? this.deps.buildOnScreenTextBubbleInlineStyle(settings, renderMetrics) : "");
-
-    const contentHtml = this.deps.escapeHtml(renderMetrics.wrappedText || text);
+    const contentHtml = this.deps.escapeHtml(previewSpec?.wrappedText || renderMetrics.wrappedText || text);
 
     const unescapeMap = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'" };
     const rawCssText = String(inlineStyle).replace(/&amp;|&lt;|&gt;|&quot;|&#039;/g, m => unescapeMap[m]);
@@ -1313,28 +1439,18 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
         }
       });
-      const bubbleWidthPx = Math.max(1, Math.round(Number(renderMetrics.previewBoxWidthPx || renderMetrics.bubbleWidthPx || 0) || 0));
-      const bubbleHeightPx = Math.max(1, Math.round(Number(renderMetrics.previewBoxHeightPx || renderMetrics.bubbleHeightPx || 0) || 0));
-      const isDashboardPreview = this.deps?.isDashboard === true;
-      const widthPctForPreview = Math.max(0.08, Math.min(0.96, bubbleWidthPx / Math.max(1, previewWidthPx)));
-      const storedBubbleLeftPct = Math.max(0, Math.min(1, Number(rowLayout?.xPct ?? renderMetrics.xPct ?? 0.21) || 0.21));
-      const storedBubbleTopPct = Math.max(0, Math.min(1, Number(renderMetrics.clampedYPct ?? rowLayout?.yPct ?? 0.7) || 0.7));
-      // Studio y Home comparten datos persistidos, pero no el mismo framing visual.
-      // En Home respetamos el layout guardado tal cual. En podcaster.html aplicamos
-      // un offset de preview únicamente visual: baja bastante el texto y lo centra
-      // horizontalmente, sin mutar x/y persistidos ni afectar export/Home.
-      const bubbleLeftPct = isDashboardPreview
-        ? storedBubbleLeftPct
-        : Math.max(0, Math.min(1 - widthPctForPreview, 0.5 - (widthPctForPreview / 2)));
-      const bubbleTopPct = isDashboardPreview
-        ? storedBubbleTopPct
-        : Math.max(0, Math.min(0.9, storedBubbleTopPct + 0.14));
+      const bubbleWidthPx = Math.max(1, Math.round(Number(previewSpec?.bubbleWidthPx || renderMetrics.previewBoxWidthPx || renderMetrics.bubbleWidthPx || 0) || 1));
+      const bubbleHeightPx = Math.max(1, Math.round(Number(previewSpec?.bubbleHeightPx || renderMetrics.previewBoxHeightPx || renderMetrics.bubbleHeightPx || 0) || 1));
+      const bubbleLeftPct = this.clamp01(Number(previewSpec?.xPct ?? rowLayout?.xPct ?? 0));
+      const bubbleTopPct = this.clamp01(Number(previewSpec?.yPct ?? rowLayout?.yPct ?? 0));
       contentNode.style.setProperty("--pod-onscreen-text-bubble-width", `${bubbleWidthPx}px`);
       contentNode.style.setProperty("width", `${bubbleWidthPx}px`);
       contentNode.style.setProperty("min-width", `${bubbleWidthPx}px`);
       contentNode.style.setProperty("min-height", `${bubbleHeightPx}px`);
       contentNode.style.setProperty("height", "auto");
       contentNode.style.setProperty('--pod-onscreen-text-color', settings.textColor || '#f8fafc');
+      contentNode.style.setProperty("--pod-onscreen-text-x", `${bubbleLeftPct * 100}%`);
+      contentNode.style.setProperty("--pod-onscreen-text-y", `${bubbleTopPct * 100}%`);
       overlay.style.setProperty("--pod-onscreen-text-x", `${bubbleLeftPct * 100}%`);
       overlay.style.setProperty("--pod-onscreen-text-y", `${bubbleTopPct * 100}%`);
     }
@@ -1391,7 +1507,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       await audio.play();
       return true;
     } catch (e) {
-      console.warn("[PlaybackController] Standalone audio blocked:", e);
+      void e;
       this.state.standaloneAudio = null;
       return false;
     }

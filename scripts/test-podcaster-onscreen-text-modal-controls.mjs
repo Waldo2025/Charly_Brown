@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
-const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 
 if (!/data-setting="stylePreset"/.test(source)) {
   throw new Error("El modal debe seguir exponiendo el selector de variante visual.");

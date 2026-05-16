@@ -35,7 +35,7 @@ const {
 const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
-} = require(path.resolve(__dirname, "..", "public", "js", "on-screen-text-render-spec.js"));
+} = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-on-screen-text.js"));
 const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");

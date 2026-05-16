@@ -726,7 +726,7 @@
                 <div id="podcastVideoWave" class="podcast-video-wave" aria-hidden="true"></div>
                 <div id="podcastVideoSpeakerCard" class="podcast-video-speaker-card">
                   <div class="podcast-video-speaker-avatar">
-                    <img id="podcastActiveSpeakerImage" src="" alt="Locutor activo" loading="lazy">
+                    <img id="podcastActiveSpeakerAvatarImage" src="" alt="Locutor activo" loading="lazy">
                     <div id="podcastSpeakerMouth" class="podcast-speaker-mouth" aria-hidden="true"></div>
                   </div>
                   <div class="podcast-video-speaker-meta">
@@ -764,11 +764,11 @@
             Acciones de escena
           </div>
           <div class="studio-generate-toolbar">
-            <button id="generateDialogueVideoBtn" class="row-icon-btn" type="button"
+            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video"
               title="Generar video de la escena activa con Veo" aria-label="Generar video de escena activa">
               <i class="fas fa-film"></i>
             </button>
-            <button id="generateDialogueAudioBtn" class="row-icon-btn" type="button"
+            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-audio"
               title="Generar voz de la escena activa" aria-label="Generar voz de escena activa">
               <i class="fas fa-microphone-alt"></i>
             </button>
@@ -806,10 +806,10 @@
             <button id="reorderTimelineTracksBtn" class="row-icon-btn" type="button" aria-label="Reordenar escenas entre tracks" data-tooltip="Reordenar escenas entre tracks">
               <i class="fas fa-stream"></i>
             </button>
-            <button id="generateAllDialogueVideosBtn" class="row-icon-btn" type="button" aria-label="Generar escenas faltantes" data-tooltip="Generar escenas faltantes">
+            <button class="row-icon-btn" type="button" data-action="timeline-generate-scene-video-batch" aria-label="Generar escenas faltantes" data-tooltip="Generar escenas faltantes">
               <i class="fas fa-layer-group"></i>
             </button>
-            <button id="regenerateAllDialogueVideosBtn" class="row-icon-btn" type="button" aria-label="Generar o regenerar todas las escenas" data-tooltip="Generar/Regenerar todas las escenas">
+            <button class="row-icon-btn" type="button" data-action="timeline-regenerate-scene-video-batch-hq" aria-label="Generar o regenerar todas las escenas" data-tooltip="Generar/Regenerar todas las escenas">
               <i class="fas fa-sync-alt"></i>
             </button>
             <button id="autoLinkStorageVideosBtn" class="row-icon-btn" type="button" aria-label="Autoconectar videos desde Storage" data-tooltip="Autoconectar videos desde Storage">
@@ -1588,24 +1588,24 @@
 
         <div id="sceneMediaUploadContainer" style="display: none;">
           <input type="file" id="podcast-media-upload-input" name="filepond" />
-          
-          <div id="image-movement-settings" style="display: none; padding: 1.5rem; background: #fff; border-radius: 12px; margin-top: 1rem; border: 1px solid var(--pme-border);">
-            <h6 style="margin-top: 0; font-weight: 600; color: var(--pme-text);">Efectos de Movimiento (Ken Burns)</h6>
-            <div class="movement-options-grid">
-              <div class="movement-option" data-effect="pan-left"><i class='fas fa-arrow-right'></i> Izq a Der</div>
-              <div class="movement-option" data-effect="pan-right"><i class='fas fa-arrow-left'></i> Der a Izq</div>
-              <div class="movement-option" data-effect="pan-up"><i class='fas fa-arrow-up'></i> Abajo a Arriba</div>
-              <div class="movement-option" data-effect="pan-down"><i class='fas fa-arrow-down'></i> Arriba a Abajo</div>
-              <div class="movement-option" data-effect="zoom-in"><i class='fas fa-search-plus'></i> Zoom In</div>
-              <div class="movement-option" data-effect="zoom-out"><i class='fas fa-search-minus'></i> Zoom Out</div>
-            </div>
-            <div class="speed-control">
-              <label style="display: flex; justify-content: space-between; font-weight: 500; font-size: 0.85rem; margin-bottom: 0.5rem;">
-                <span>Rapidez del efecto</span>
-                <span id="movement-speed-label" style="color: var(--pme-primary);">Normal</span>
-              </label>
-              <input type="range" class="form-range" id="movement-speed-range" min="1" max="10" value="5">
-            </div>
+        </div>
+
+        <div id="image-movement-settings" style="display: none; padding: 1.5rem; background: #f9fafb; border-radius: 12px; margin-top: 1rem; border: 1px solid var(--pme-border);">
+          <h6 style="margin-top: 0; font-weight: 600; color: var(--pme-text); font-size: 0.9rem; margin-bottom: 1rem;">Efectos de Movimiento (Ken Burns)</h6>
+          <div class="movement-options-grid">
+            <div class="movement-option" data-effect="pan-left"><i class='fas fa-arrow-right'></i> Izq a Der</div>
+            <div class="movement-option" data-effect="pan-right"><i class='fas fa-arrow-left'></i> Der a Izq</div>
+            <div class="movement-option" data-effect="pan-up"><i class='fas fa-arrow-up'></i> Abajo a Arriba</div>
+            <div class="movement-option" data-effect="pan-down"><i class='fas fa-arrow-down'></i> Arriba a Abajo</div>
+            <div class="movement-option" data-effect="zoom-in"><i class='fas fa-search-plus'></i> Zoom In</div>
+            <div class="movement-option" data-effect="zoom-out"><i class='fas fa-search-minus'></i> Zoom Out</div>
+          </div>
+          <div class="speed-control" style="margin-top: 1.25rem;">
+            <label style="display: flex; justify-content: space-between; font-weight: 500; font-size: 0.85rem; margin-bottom: 0.5rem;">
+              <span>Rapidez del efecto</span>
+              <span id="movement-speed-label" style="color: var(--pme-primary);">Normal</span>
+            </label>
+            <input type="range" class="form-range" id="movement-speed-range" min="1" max="10" value="5" style="width: 100%;">
           </div>
         </div>
       </div>
@@ -1694,15 +1694,17 @@
 
   <script src="vendor/sortablejs/Sortable.min.js"></script>
   <script type="module" src="js/chromeLayout.js"></script>
-  <script src="js/on-screen-text-render-spec.js?v=2026-04-25-2"></script>
+  <script src="podcaster/podcaster-on-screen-text.js?v=2026-05-16-1"></script>
   <script type="module" src="js/sidebar.js"></script>
   <script type="module" src="podcaster/podcaster-reels.js"></script>
+  <script type="module" src="podcaster/podcaster-video-generator.js?v=2026-05-16"></script>
   <script type="module" src="podcaster/podcaster.js?v=2026-1.0.1.42"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/filepond/dist/filepond.min.js"></script>
   <script src="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script type="module" src="podcaster/podcaster-media-editor.js?v=2026-1.0.11.58"></script>
+  <script type="module" src="podcaster/podcaster-media-replacement.js?v=2026-1.0.11.58"></script>
   <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

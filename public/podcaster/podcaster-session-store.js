@@ -284,17 +284,40 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const localSession = id ? localById.get(id) : null;
     if (id) localById.delete(id);
     if (!localSession) return cloudSession;
+    const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
+    const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
+    const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     const localRows = Array.isArray(localSession?.script?.rows) ? localSession.script.rows : [];
     const cloudRows = Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : [];
     const resolvedRows = mergeSessionRowsWithFallback(cloudRows, localRows);
+    const isShallow = cloudSession.isStub === true || !cloudSession.dialogueVideoMap || Object.keys(cloudSession.dialogueVideoMap).length === 0;
+    
     return {
       ...localSession,
       ...cloudSession,
+      dialogueVideoMap: isShallow && localSession?.dialogueVideoMap && Object.keys(localSession.dialogueVideoMap).length > 0 
+        ? localSession.dialogueVideoMap 
+        : (cloudSession?.dialogueVideoMap || localSession?.dialogueVideoMap || {}),
+      rowReferenceImageMap: isShallow && localSession?.rowReferenceImageMap && Object.keys(localSession.rowReferenceImageMap).length > 0
+        ? localSession.rowReferenceImageMap
+        : (cloudSession?.rowReferenceImageMap || localSession?.rowReferenceImageMap || {}),
+      rowReferenceImageListMap: isShallow && localSession?.rowReferenceImageListMap && Object.keys(localSession.rowReferenceImageListMap).length > 0
+        ? localSession.rowReferenceImageListMap
+        : (cloudSession?.rowReferenceImageListMap || localSession?.rowReferenceImageListMap || {}),
+      rowReferenceVideoMap: isShallow && localSession?.rowReferenceVideoMap && Object.keys(localSession.rowReferenceVideoMap).length > 0
+        ? localSession.rowReferenceVideoMap
+        : (cloudSession?.rowReferenceVideoMap || localSession?.rowReferenceVideoMap || {}),
+      rowReferenceModeByRowId: isShallow && localSession?.rowReferenceModeByRowId && Object.keys(localSession.rowReferenceModeByRowId).length > 0
+        ? localSession.rowReferenceModeByRowId
+        : (cloudSession?.rowReferenceModeByRowId || localSession?.rowReferenceModeByRowId || {}),
       script: {
         ...(localSession?.script || {}),
         ...(cloudSession?.script || {}),
         rows: resolvedRows
       },
+      podcastVideoConfig: preferLocalVideoConfig
+        ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
+        : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {}),
       rows: resolvedRows,
       isStub: cloudSession.isStub === true
     };

@@ -10,20 +10,23 @@ function initFirebase() {
         const app = !getApps().length ? initializeApp(firebaseWebConfig) : getApp();
         db = getFirestore();
     } catch (e) {
-        console.warn('Firebase initialization warning:', e);
+        void e;
     }
 }
 
-let currentEditingRowId = null;
-let uploadedMediaUrl = null;
-let uploadedStoragePath = null;
-let uploadedMediaType = null;
 let fabricCanvas = null;
-let pond = null;
 const stylizedTextBitmapCache = new Map();
 
 const STYLIZED_TEXT_STAGE_WIDTH = 1280;
 const STYLIZED_TEXT_STAGE_HEIGHT = 720;
+const VALID_CANVAS_TEXT_BASELINES = new Set([
+    'top',
+    'hanging',
+    'middle',
+    'alphabetic',
+    'ideographic',
+    'bottom'
+]);
 const STYLIZED_TEXT_ALLOWED_OBJECT_TYPES = new Set(['i-text', 'text', 'textbox', 'group']);
 
 // --- DOM Elements ---
@@ -31,17 +34,6 @@ let els = {};
 
 function initElements() {
     els = {
-        modal: document.getElementById('podcastSceneVideoSelectorModal'),
-        uploadTabBtn: document.getElementById('sceneVideoTabUploadBtn'),
-        libraryTabBtn: document.getElementById('sceneVideoTabGeneratedBtn'),
-        othersTabBtn: document.getElementById('sceneVideoTabOthersBtn'),
-        uploadContainer: document.getElementById('sceneMediaUploadContainer'),
-        libraryContainer: document.getElementById('sceneVideoSelectorLibraryContainer'),
-        confirmBtn: document.getElementById('confirmSceneMediaReplacementBtn'),
-        movementSettings: document.getElementById('image-movement-settings'),
-        speedRange: document.getElementById('movement-speed-range'),
-        speedLabel: document.getElementById('movement-speed-label'),
-        addStylizedTextBtn: document.getElementById('addStylizedTextBtn'),
         textModal: document.getElementById('stylizedTextEditorModal'),
         textInput: document.getElementById('stylized-text-input'),
         textFont: document.getElementById('stylized-text-font'),
@@ -52,108 +44,14 @@ function initElements() {
         saveTextBtn: document.getElementById('saveStylizedTextBtn'),
         cancelTextBtn: document.getElementById('cancelStylizedTextBtn'),
         closeTextBtn: document.getElementById('closeStylizedTextEditorBtn'),
-        deleteTextBtn: document.getElementById('deleteStylizedTextBtn')
+        deleteTextBtn: document.getElementById('deleteStylizedTextBtn'),
+        addStylizedTextBtn: document.getElementById('addStylizedTextBtn')
     };
 }
 
-// --- FilePond Setup ---
-function initFilePond() {
-    if (pond) return;
+let currentEditingRowId = null;
 
-    FilePond.registerPlugin(FilePondPluginImagePreview);
-    pond = FilePond.create(document.getElementById('podcast-media-upload-input'), {
-        allowMultiple: false,
-        name: 'filepond',
-        labelIdle: 'Arrastra tus archivos o <span class="filepond--label-action">Explora</span>',
-        acceptedFileTypes: ['image/*', 'video/*'],
-        server: {
-            process: (fieldName, file, metadata, load, error, progress, abort) => {
-                const session = window.PodcasterState?.activeSession || {};
-                const sessionId = session.id || 'unknown';
-                const controller = new AbortController();
-                progress(true, 0, file.size || 1);
 
-                (async () => {
-                    try {
-                        const headers = await getAuthHeaders({
-                            "Content-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream",
-                            "X-Session-Id": String(sessionId || "").trim(),
-                            "X-Row-Id": String(currentEditingRowId || "").trim(),
-                            "X-File-Name": String(file.name || "scene-media").trim() || "scene-media",
-                            "X-Mime-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream"
-                        });
-                        const response = await fetch(buildApiUrl("/api/podcaster/scene-media/upload"), {
-                            method: "POST",
-                            headers,
-                            body: file,
-                            signal: controller.signal
-                        });
-                        const data = await response.json().catch(() => ({}));
-                        if (!response.ok) {
-                            throw new Error(String(data?.error || "No se pudo subir el archivo."));
-                        }
-                        const media = data?.media && typeof data.media === "object" ? data.media : null;
-                        if (!media?.downloadUrl) {
-                            throw new Error("Upload sin downloadUrl.");
-                        }
-                        uploadedMediaUrl = String(media.downloadUrl || "").trim();
-                        uploadedStoragePath = String(media.storagePath || "").trim();
-                        uploadedMediaType = String(media.type || (String(file.type || "").startsWith("image/") ? "image" : "video")).trim();
-                        progress(true, file.size || 1, file.size || 1);
-                        load(uploadedMediaUrl);
-
-                        if (uploadedMediaType === 'image') {
-                            els.movementSettings.style.display = 'block';
-                        } else {
-                            els.movementSettings.style.display = 'none';
-                        }
-                        els.confirmBtn.style.display = 'inline-block';
-                    } catch (err) {
-                        error(err?.message || 'Upload failed');
-                    }
-                })();
-
-                return {
-                    abort: () => {
-                        controller.abort();
-                        abort();
-                    }
-                };
-            }
-        }
-    });
-}
-
-// --- Movement Options Logic ---
-function initMovementOptions() {
-    const options = document.querySelectorAll('.movement-option');
-    options.forEach(opt => {
-        opt.addEventListener('click', () => {
-            opt.classList.toggle('is-selected');
-        });
-    });
-
-    if (els.speedRange) {
-        els.speedRange.addEventListener('input', (e) => {
-            const val = parseInt(e.target.value);
-            let label = 'Normal';
-            if (val < 4) label = 'Lento';
-            if (val > 7) label = 'Rápido';
-            if (els.speedLabel) els.speedLabel.textContent = label;
-        });
-    }
-}
-
-function getSelectedEffects() {
-    const selected = [];
-    document.querySelectorAll('.movement-option.is-selected').forEach(opt => {
-        selected.push(opt.dataset.effect);
-    });
-    return {
-        effects: selected,
-        speed: parseInt(els.speedRange.value)
-    };
-}
 
 function parseStylizedTextSceneData(raw = null) {
     if (!raw) return null;
@@ -161,7 +59,7 @@ function parseStylizedTextSceneData(raw = null) {
         try {
             return JSON.parse(raw);
         } catch (error) {
-            console.warn('Invalid stylized text payload:', error);
+            void error;
             return null;
         }
     }
@@ -191,6 +89,13 @@ function sanitizeStylizedTextSceneData(raw = null) {
 
 function sanitizeStylizedTextObject(raw = null) {
     if (!raw || typeof raw !== 'object') return null;
+    const normalizeCanvasTextBaseline = (value = '') => {
+        const baseline = String(value || '').trim().toLowerCase();
+        if (!baseline) return value;
+        if (baseline === 'alphabetical') return 'alphabetic';
+        if (VALID_CANVAS_TEXT_BASELINES.has(baseline)) return baseline;
+        return 'alphabetic';
+    };
     const sanitizeNestedValue = (value, parentKey = '') => {
         if (Array.isArray(value)) {
             return value.map((item) => sanitizeNestedValue(item, parentKey));
@@ -199,8 +104,8 @@ function sanitizeStylizedTextObject(raw = null) {
             return value;
         }
         const nextValue = { ...value };
-        if (String(nextValue.textBaseline || '').trim().toLowerCase() === 'alphabetical') {
-            nextValue.textBaseline = 'alphabetic';
+        if (Object.prototype.hasOwnProperty.call(nextValue, 'textBaseline')) {
+            nextValue.textBaseline = normalizeCanvasTextBaseline(nextValue.textBaseline);
         }
         Object.keys(nextValue).forEach((key) => {
             if (key === 'clipPath') {
@@ -406,7 +311,8 @@ function buildStylizedTextBitmapCacheKey(textData = null) {
 }
 
 function renderStylizedTextToDataUrl(textData = null) {
-    const cacheKey = buildStylizedTextBitmapCacheKey(textData);
+    const sanitizedTextData = sanitizeStylizedTextSceneData(textData);
+    const cacheKey = buildStylizedTextBitmapCacheKey(sanitizedTextData);
     if (!cacheKey) return Promise.resolve('');
     if (stylizedTextBitmapCache.has(cacheKey)) {
         return Promise.resolve(stylizedTextBitmapCache.get(cacheKey) || '');
@@ -421,7 +327,7 @@ function renderStylizedTextToDataUrl(textData = null) {
             backgroundColor: 'transparent',
             renderOnAddRemove: false
         });
-        staticCanvas.loadFromJSON(textData, () => {
+        staticCanvas.loadFromJSON(sanitizedTextData, () => {
             staticCanvas.setBackgroundColor('transparent', staticCanvas.renderAll.bind(staticCanvas));
             staticCanvas.renderAll();
             const dataUrl = canvasEl.toDataURL('image/png');
@@ -606,208 +512,9 @@ async function openStylizedTextEditor() {
     });
 }
 
-// --- Event Handlers ---
 function setupEventListeners() {
-    if (!els.uploadTabBtn || !els.confirmBtn) return;
 
-    // Modal Tabs
-    els.uploadTabBtn.addEventListener('click', () => {
-        els.uploadTabBtn.classList.add('is-active');
-        els.uploadTabBtn.setAttribute('aria-selected', 'true');
-        
-        if (els.libraryTabBtn) {
-            els.libraryTabBtn.classList.remove('is-active');
-            els.libraryTabBtn.setAttribute('aria-selected', 'false');
-        }
-        if (els.othersTabBtn) {
-            els.othersTabBtn.classList.remove('is-active');
-            els.othersTabBtn.setAttribute('aria-selected', 'false');
-        }
 
-        els.uploadContainer.style.display = 'block';
-        els.libraryContainer.style.display = 'none';
-        initFilePond();
-    });
-
-    const deactivateUploadTab = () => {
-        els.uploadTabBtn.classList.remove('is-active');
-        els.uploadTabBtn.setAttribute('aria-selected', 'false');
-        els.uploadContainer.style.display = 'none';
-        els.libraryContainer.style.display = 'block';
-    };
-
-    if (els.libraryTabBtn) {
-        els.libraryTabBtn.addEventListener('click', deactivateUploadTab);
-    }
-    if (els.othersTabBtn) {
-        els.othersTabBtn.addEventListener('click', deactivateUploadTab);
-    }
-
-    // Replacement logic
-    els.confirmBtn.addEventListener('click', async () => {
-        currentEditingRowId = String(els.modal?.dataset?.rowId || currentEditingRowId || '').trim();
-        const selectedLibrary = window._selectedLibraryVideo;
-        const mediaUrl = uploadedMediaUrl || selectedLibrary?.downloadUrl;
-        const mediaType = uploadedMediaType || selectedLibrary?.type || 'video';
-        
-        if (!mediaUrl || !currentEditingRowId) return;
-
-        const session = window.PodcasterState?.activeSession;
-        if (!session) return;
-
-        const effects = getSelectedEffects();
-        
-        // Update session in Firestore
-        try {
-            const sessionRef = doc(db, 'podcaster_sessions', session.id);
-            
-            // Get fresh data to ensure we don't corrupt the array
-            const snap = await getDoc(sessionRef);
-            if (!snap.exists()) return;
-            const docData = snap.data();
-            const currentSession = docData.session || {};
-            const rawRows = currentSession.script?.rows || [];
-            
-            // Repair logic: if rows is an object (due to Firestore dot-notation corruption), convert back to array
-            let rows = [];
-            if (Array.isArray(rawRows)) {
-                rows = [...rawRows];
-            } else if (rawRows && typeof rawRows === 'object') {
-                rows = Object.keys(rawRows)
-                    .sort((a, b) => parseInt(a) - parseInt(b))
-                    .map(k => rawRows[k]);
-            }
-
-            const rowIdx = rows.findIndex(r => String(r.id).trim() === String(currentEditingRowId).trim());
-
-            if (rowIdx !== -1) {
-                rows[rowIdx] = {
-                    ...rows[rowIdx],
-                    videoSrc: mediaUrl,
-                    mediaType: mediaType,
-                    updatedAt: new Date().toISOString()
-                };
-            }
-
-            const isImageMedia = mediaType === 'image';
-            const finalStoragePath = uploadedStoragePath || selectedLibrary?.storagePath || '';
-            const mediaData = {
-                downloadUrl: mediaUrl,
-                storagePath: finalStoragePath,
-                mimeType: selectedLibrary?.mimeType || (isImageMedia ? 'image/jpeg' : 'video/mp4'),
-                type: mediaType,
-                updatedAt: serverTimestamp(),
-                model: mediaType === 'video' ? 'veo' : null,
-                segments: null,
-                variants: null
-            };
-            const imageReferenceData = isImageMedia ? {
-                name: selectedLibrary?.name || 'Referencia de escena',
-                downloadUrl: mediaUrl,
-                storagePath: finalStoragePath,
-                mimeType: selectedLibrary?.mimeType || 'image/jpeg',
-                updatedAt: new Date().toISOString()
-            } : null;
-
-            const updatePayload = {
-                [`session.dialogueVideoMap.${currentEditingRowId}`]: mediaData,
-                [`session.rowReferenceModeByRowId.${currentEditingRowId}`]: isImageMedia ? 'image' : 'video',
-                [`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.type`]: mediaType,
-                [`session.script.rows`]: rows,
-                [`session.updatedAt`]: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            };
-            
-            if (isImageMedia) {
-                updatePayload[`session.rowReferenceImageMap.${currentEditingRowId}`] = imageReferenceData;
-                updatePayload[`session.rowReferenceImageListMap.${currentEditingRowId}`] = [imageReferenceData];
-                updatePayload[`session.rowReferenceVideoMap.${currentEditingRowId}`] = deleteField();
-                updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = effects;
-            } else {
-                updatePayload[`session.rowReferenceVideoMap.${currentEditingRowId}`] = mediaData;
-                updatePayload[`session.rowReferenceImageMap.${currentEditingRowId}`] = deleteField();
-                updatePayload[`session.rowReferenceImageListMap.${currentEditingRowId}`] = deleteField();
-                updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
-            }
-            
-            // 1. Actualizar el estado local en PodcasterUI inmediatamente (evita race condiciones con auto-save)
-            if (window.PodcasterUI?.upsertActiveSession) {
-                const now = new Date().toISOString();
-                window.PodcasterUI.upsertActiveSession((current) => {
-                    const next = { ...current };
-                    const currentRows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
-                    
-                    // Asegurar mapas base
-                    next.dialogueVideoMap = { ...(next.dialogueVideoMap || {}) };
-                    next.visualEffectsMap = { ...(next.visualEffectsMap || {}) };
-                    next.rowReferenceModeByRowId = { ...(next.rowReferenceModeByRowId || {}) };
-                    next.rowReferenceVideoMap = { ...(next.rowReferenceVideoMap || {}) };
-                    next.rowReferenceImageMap = { ...(next.rowReferenceImageMap || {}) };
-                    next.rowReferenceImageListMap = { ...(next.rowReferenceImageListMap || {}) };
-                    next.podcastVideoConfig = { ...(next.podcastVideoConfig || {}) };
-                    next.podcastVideoConfig.timelineClipsByRowId = { ...(next.podcastVideoConfig.timelineClipsByRowId || {}) };
-                    next.script = {
-                        ...(next.script || {}),
-                        rows: currentRows.map((row) => (
-                            String(row?.id || '').trim() === currentEditingRowId
-                                ? {
-                                    ...row,
-                                    videoSrc: mediaUrl,
-                                    mediaType,
-                                    updatedAt: now
-                                }
-                                : row
-                        ))
-                    };
-                    next.updatedAt = now;
-                    
-                    // Aplicar cambios con fecha ISO para el estado local
-                    const localMediaData = { ...mediaData, updatedAt: now };
-                    next.dialogueVideoMap[currentEditingRowId] = localMediaData;
-                    next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] = {
-                        ...(next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] || {}),
-                        type: mediaType
-                    };
-                    
-                    if (isImageMedia) {
-                        const localImageRef = { ...imageReferenceData, updatedAt: now };
-                        next.rowReferenceModeByRowId[currentEditingRowId] = "image";
-                        next.rowReferenceImageMap[currentEditingRowId] = localImageRef;
-                        next.rowReferenceImageListMap[currentEditingRowId] = [localImageRef];
-                        delete next.rowReferenceVideoMap[currentEditingRowId];
-                        next.visualEffectsMap[currentEditingRowId] = effects;
-                    } else {
-                        next.rowReferenceModeByRowId[currentEditingRowId] = "video";
-                        next.rowReferenceVideoMap[currentEditingRowId] = localMediaData;
-                        delete next.rowReferenceImageMap[currentEditingRowId];
-                        delete next.rowReferenceImageListMap[currentEditingRowId];
-                        next.visualEffectsMap[currentEditingRowId] = null;
-                    }
-                    
-                    return next;
-                }, { render: true });
-                if (String(window.PodcasterState?.activeRowId || '').trim() === currentEditingRowId) {
-                    window.PodcasterUI.syncStageMedia?.(currentEditingRowId, { force: true });
-                }
-            }
-
-            // 2. Guardar en Firestore (usa serverTimestamp())
-            await updateDoc(sessionRef, updatePayload);
-
-            // Reset selection
-            window._selectedLibraryVideo = null;
-            uploadedMediaUrl = null;
-            uploadedStoragePath = null;
-            uploadedMediaType = null;
-            currentEditingRowId = "";
-            if (els.modal) delete els.modal.dataset.rowId;
-
-            els.modal.hidden = true;
-        } catch (err) {
-            console.error('Error saving replacement:', err);
-            alert('Error al guardar el reemplazo.');
-        }
-    });
 
     // Stylized Text
     els.addStylizedTextBtn.addEventListener('click', openStylizedTextEditor);
@@ -891,20 +598,7 @@ function setupEventListeners() {
         });
     }
 
-    document.addEventListener('podcaster:scene-media-selector-open', (event) => {
-        currentEditingRowId = String(event?.detail?.rowId || '').trim();
-        window._selectedLibraryVideo = null;
-        uploadedMediaUrl = null;
-        uploadedStoragePath = null;
-        uploadedMediaType = null;
-        if (els.modal && currentEditingRowId) {
-            els.modal.dataset.rowId = currentEditingRowId;
-        }
-        if (els.confirmBtn) els.confirmBtn.style.display = 'none';
-        if (els.movementSettings) els.movementSettings.style.display = 'none';
-        if (pond) pond.removeFiles();
-        els.libraryTabBtn?.click();
-    });
+
 
     document.addEventListener('click', (e) => {
         const editBtn = e.target.closest("[data-action='timeline-edit-stylized-text']");
@@ -915,19 +609,23 @@ function setupEventListeners() {
     });
 }
 
-// Initialize on load
 document.addEventListener('DOMContentLoaded', () => {
     initElements();
-    // Only proceed if we are in a page with the expected UI
-    if (!els.modal && !els.addStylizedTextBtn) return;
+    if (!els.textModal && !els.addStylizedTextBtn) return;
     
     initFirebase();
-    if (els.speedRange) initMovementOptions();
     setupEventListeners();
 });
 
 // Export for use in players
 window.PodcasterMediaEditor = {
+    prewarmStylizedText: async (rowId, session) => {
+        const textDataStr = session?.stylizedTextMap?.[rowId];
+        if (!textDataStr) return '';
+        const textData = sanitizeStylizedTextSceneData(textDataStr);
+        if (!textData?.objects?.length) return '';
+        return renderStylizedTextToDataUrl(textData);
+    },
     renderStylizedText: async (container, rowId, session) => {
         const textDataStr = session?.stylizedTextMap?.[rowId];
         if (!textDataStr) {

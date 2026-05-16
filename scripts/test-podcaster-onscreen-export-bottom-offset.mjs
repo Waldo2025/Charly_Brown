@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const source = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 if (!/const bottomSafetyPx = Math\.max\(\s*Math\.round\(lineHeightPx \* 2\.4\),\s*Math\.round\(fontSizePx \* 1\.9\),\s*Math\.round\(exportCanvasHeight \* 0\.035\)\s*\);/s.test(shared)) {

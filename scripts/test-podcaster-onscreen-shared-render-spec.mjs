@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   resolveOnScreenTextRenderSpec
-} = require("../public/on-screen-text-render-spec.js");
+} = require("../public/podcaster/podcaster-on-screen-text.js");
 
 const baseInput = {
   settings: {

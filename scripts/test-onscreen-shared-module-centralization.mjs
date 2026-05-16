@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const shared = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/on-screen-text-render-spec.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-on-screen-text.js",
   "utf8"
 );
 
 const podcaster = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
 

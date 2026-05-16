@@ -6,22 +6,22 @@ const source = fs.readFileSync(
   "utf8"
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
   /const isDashboardPreview = this\.deps\?\.isDashboard === true;/,
-  "El controlador debe distinguir Home del preview de Studio."
+  "El controller no debe bifurcar offsets distintos entre Home y Studio."
+);
+
+assert.doesNotMatch(
+  source,
+  /0\.5 - \(widthPctForPreview \/ 2\)|storedBubbleTopPct \+ 0\.14/,
+  "El preview de Studio no debe recentrar ni bajar el texto con offsets hardcodeados."
 );
 
 assert.match(
   source,
-  /const bubbleLeftPct = isDashboardPreview[\s\S]*0\.5 - \(widthPctForPreview \/ 2\)/m,
-  "En podcaster.html el preview debe recentrar horizontalmente el texto en pantalla."
+  /const previewSpec = this\.deps\?\.resolveOnScreenTextPreviewLayoutSpec\?\.\(\{/,
+  "La posición final del subtítulo debe salir de la spec compartida."
 );
 
-assert.match(
-  source,
-  /const bubbleTopPct = isDashboardPreview[\s\S]*storedBubbleTopPct \+ 0\.14/m,
-  "En podcaster.html el preview debe bajar el texto respecto al layout persistido."
-);
-
-console.log("Podcaster onscreen studio preview offset OK.");
+console.log("Podcaster onscreen studio preview offset removed OK.");

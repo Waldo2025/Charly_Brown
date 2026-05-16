@@ -1,47 +1,38 @@
 import { readFileSync } from "node:fs";
 
-const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const controller = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+const front = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
-const home = readFileSync(new URL("../public/home.html", import.meta.url), "utf8");
 
-if (!/function wrapOnScreenTextRenderText\(text, options\)/.test(shared)
-  || !/wrappedText,/.test(shared)
-  || !/clampedYPct: Math\.max\(0, Math\.min\(1, yPx \/ exportCanvasHeight\)\)/.test(shared)) {
-  throw new Error("La spec compartida debe resolver wrap y posición vertical segura.");
+if (!/function resolveOnScreenTextPreviewLayoutSpec\(input = \{\}\)/.test(shared)) {
+  throw new Error("La spec compartida debe exponer una resolución única del preview del texto en pantalla.");
 }
 
-if (!/const rowLayout = this\.deps\?\.getOnScreenTextLayoutForRow\?\.\(session, selected\.rowId\)\s*\|\|\s*null;/.test(controller)
-  || !/const renderOptions = \{\s*text,\s*previewWidthPx,\s*previewHeightPx,[\s\S]*widthPct: Number\(rowLayout\?\.widthPct \|\| 0\.58\),[\s\S]*heightPct: Number\(rowLayout\?\.heightPct \|\| 0\.14\),[\s\S]*xPct: Number\(rowLayout\?\.xPct \|\| 0\.21\),[\s\S]*yPct: Number\(rowLayout\?\.yPct \|\| 0\.7\)/m.test(controller)) {
-  throw new Error("El overlay del editor debe consumir el layout por fila al resolver métricas.");
+if (!/const resolveSharedOnScreenTextPreviewLayoutSpec = typeof onScreenTextRenderSpecApi\.resolveOnScreenTextPreviewLayoutSpec === "function"/.test(front)
+  || !/function resolveOnScreenTextPreviewLayoutSpec\(input = \{\}\) \{[\s\S]*resolveSharedOnScreenTextPreviewLayoutSpec/m.test(front)) {
+  throw new Error("podcaster.js debe delegar la geometría del preview al módulo compartido.");
 }
 
-if (!/contentNode\.style\.setProperty\("--pod-onscreen-text-bubble-width", `\$\{bubbleWidthPx\}px`\);/.test(controller)
-  || !/contentNode\.style\.setProperty\("min-height", `\$\{bubbleHeightPx\}px`\);/.test(controller)
-  || !/contentNode\.style\.setProperty\("height", "auto"\);/.test(controller)
-  || !/overlay\.style\.setProperty\("--pod-onscreen-text-x", `\$\{bubbleLeftPct \* 100\}%`\);/.test(controller)
-  || !/overlay\.style\.setProperty\("--pod-onscreen-text-y", `\$\{bubbleTopPct \* 100\}%`\);/.test(controller)) {
-  throw new Error("El preview debe aplicar geometría de burbuja desde el layout por fila.");
+if (!/const rowLayout = this\.resolveLiveOnScreenTextLayout\(selected\.rowId, persistedLayout, overlay, previewEl\);/.test(controller)
+  || !/const previewSpec = this\.deps\?\.resolveOnScreenTextPreviewLayoutSpec\?\.\(\{[\s\S]*layout: rowLayout,[\s\S]*text,[\s\S]*previewWidthPx,[\s\S]*previewHeightPx/m.test(controller)) {
+  throw new Error("El controller debe consumir un único preview spec compartido para renderizar el overlay.");
 }
 
-if (!/const contentHtml = this\.deps\.escapeHtml\(renderMetrics\.wrappedText \|\| text\);/.test(controller)
-  || !/contentNode\.style\.setProperty\('--pod-onscreen-text-color', settings\.textColor \|\| '#f8fafc'\);/.test(controller)) {
-  throw new Error("El preview debe seguir usando el wrap compartido y los tokens de estilo del texto.");
+if (!/const bubbleLeftPct = this\.clamp01\(Number\(previewSpec\?\.xPct \?\? rowLayout\?\.xPct \?\? 0\)\);/.test(controller)
+  || !/const bubbleTopPct = this\.clamp01\(Number\(previewSpec\?\.yPct \?\? rowLayout\?\.yPct \?\? 0\)\);/.test(controller)) {
+  throw new Error("El preview debe usar xPct/yPct persistidos como posición final, sin reinterpretarlos.");
 }
 
-if (!/letter-spacing:\s*0;/.test(css)
-  || !/line-height:\s*var\(--pod-onscreen-text-line-height, 1\.22em\);/.test(css)
-  || !/--pod-onscreen-text-stroke-color:\s*rgba\(15, 23, 42, 0\.88\);/.test(css)
-  || !/--pod-onscreen-text-stroke-shadow:\s*none;/.test(css)
-  || !/text-shadow:\s*var\(--pod-onscreen-text-stroke-shadow\), var\(--pod-onscreen-text-preset-shadow\), var\(--pod-onscreen-text-user-shadow\);/.test(css)) {
-  throw new Error("La capa visual del texto en el editor debe usar tokens cercanos al render exportado.");
+if (/storedBubbleCenterXPct|actualBubbleWidthPct|bubbleTopPct = isDashboardPreview|storedBubbleTopPct \+ 0\.14/.test(controller)) {
+  throw new Error("El controller no debe mantener compensaciones legacy de centrado o offsets verticales.");
 }
 
-if (!/top:\s*var\(--pod-onscreen-text-y, 72%\);/.test(css)
-  || !/max-width:\s*min\(96%, 1400px\);/.test(css)
-  || !/top:\s*var\(--pod-onscreen-text-y, 72%\);/.test(home)
-  || !/max-width:\s*min\(96%, 1400px\);/.test(home)) {
-  throw new Error("Editor y Home deben compartir defaults de posición y ancho para el texto en pantalla.");
+if (!/left:\s*var\(--pod-onscreen-text-x, 21%\);/.test(css)
+  || !/top:\s*var\(--pod-onscreen-text-y, 72%\);/.test(css)
+  || !/transform:\s*none;/.test(css)
+  || !/max-width:\s*min\(96%, 1400px\);/.test(css)) {
+  throw new Error("El CSS del Studio debe respetar la semántica top-left del layout persistido.");
 }
 
 console.log("Podcast onscreen preview parity OK.");

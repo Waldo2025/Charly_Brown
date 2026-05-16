@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
 const handlesMatch = source.match(
   /function getOnScreenTextResizeHandles\(settings = null\) \{([\s\S]*?)\n\}/m
@@ -14,17 +15,9 @@ if (/bgPreset[\s\S]*return \["w", "e"\]/.test(handlesMatch[1])) {
   throw new Error("El texto sin fondo no debe limitar el resize a izquierda/derecha.");
 }
 
-const styleMatch = source.match(
-  /function buildOnScreenTextBubbleInlineStyle\(settings = null, options = \{\}\) \{([\s\S]*?)\n\}/m
-);
-
-if (!styleMatch) {
-  throw new Error("No se encontró buildOnScreenTextBubbleInlineStyle.");
-}
-
-if (!/`width:\$\{bubbleWidth\}px`/.test(styleMatch[1])
-  || !/`min-height:\$\{bubbleHeight\}px`/.test(styleMatch[1])
-  || !/"height:auto"/.test(styleMatch[1])) {
+if (!/contentNode\.style\.setProperty\("--pod-onscreen-text-bubble-width", `\$\{bubbleWidthPx\}px`\);/.test(controller)
+  || !/contentNode\.style\.setProperty\("min-height", `\$\{bubbleHeightPx\}px`\);/.test(controller)
+  || !/contentNode\.style\.setProperty\("height", "auto"\);/.test(controller)) {
   throw new Error("La burbuja debe mantener ancho explícito y altura flexible para respetar el resize vertical sin cortar lineas.");
 }
 

@@ -51,6 +51,12 @@
   ];
 
   const STUDIO_TIMELINE_MIN_CLIP_MS = 100;
+  const STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT = 0.58;
+  const STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT = 0.14;
+  const STUDIO_ONSCREEN_TEXT_DEFAULT_CENTER_X_PCT = 0.5;
+  const STUDIO_ONSCREEN_TEXT_DEFAULT_BOTTOM_EDGE_PCT = 0.86;
+  const STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_X_PCT = 0.21;
+  const STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_Y_PCT = 0.7;
 
   function toFiniteNumber(v, f) {
     const n = Number(v);
@@ -99,6 +105,20 @@
 
   function normalizeFontStyle(value) {
     return String(value || "").trim().toLowerCase() === "italic" ? "italic" : "normal";
+  }
+
+  function buildCanonicalOnScreenTextLayoutBounds(widthPct = STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT, heightPct = STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT, settings = null) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const safeWidthPct = clampNumber(widthPct, 0.08, 0.9, STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT);
+    const safeHeightPct = clampNumber(heightPct, 0.05, 0.6, STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT);
+    const centerXPct = clampNumber(current.overlayXPct, 0, 1, STUDIO_ONSCREEN_TEXT_DEFAULT_CENTER_X_PCT);
+    const bottomEdgePct = clampNumber(current.overlayYPct, 0, 1, STUDIO_ONSCREEN_TEXT_DEFAULT_BOTTOM_EDGE_PCT);
+    return {
+      widthPct: safeWidthPct,
+      heightPct: safeHeightPct,
+      xPct: Math.max(0, Math.min(1 - safeWidthPct, centerXPct - (safeWidthPct / 2))),
+      yPct: Math.max(0, Math.min(1 - safeHeightPct, bottomEdgePct - safeHeightPct))
+    };
   }
 
   function normalizeOnScreenTextTrackSettings(raw = {}) {
@@ -247,12 +267,13 @@
     const heightPct = Math.max(0.05, Math.min(0.6, toFiniteNumber(raw?.heightPct, Number.NaN)));
     const safeWidthPct = Number.isFinite(widthPct) ? widthPct : 0.58;
     const safeHeightPct = Number.isFinite(heightPct) ? heightPct : 0.14;
+    const defaults = buildCanonicalOnScreenTextLayoutBounds(safeWidthPct, safeHeightPct);
     const xPct = Math.max(0, Math.min(Math.max(0, 1 - safeWidthPct), toFiniteNumber(raw?.xPct, Number.NaN)));
     const yPct = Math.max(0, Math.min(Math.max(0, 1 - safeHeightPct), toFiniteNumber(raw?.yPct, Number.NaN)));
     return {
       rowId: key,
-      xPct: Number.isFinite(xPct) ? xPct : 0.21,
-      yPct: Number.isFinite(yPct) ? yPct : 0.7,
+      xPct: Number.isFinite(xPct) ? xPct : defaults.xPct,
+      yPct: Number.isFinite(yPct) ? yPct : defaults.yPct,
       widthPct: safeWidthPct,
       heightPct: safeHeightPct,
       zIndex: Math.max(1, Math.min(999, Math.round(toFiniteNumber(raw?.zIndex, 1))))
@@ -323,18 +344,30 @@
       targetLines: 2
     });
     const heightPct = estimateOnScreenTextLayoutHeightPct(text, current, widthPct, options);
-    const centerXPct = Math.max(0, Math.min(1, Number(current.overlayXPct || 0.5)));
-    const safeBottomEdgePct = Math.max(0, Math.min(1, Number(current.overlayYPct || 0.86)));
-    const xPct = Math.max(0, Math.min(1 - widthPct, centerXPct - (widthPct / 2)));
-    const yPct = Math.max(0, Math.min(1 - heightPct, safeBottomEdgePct - heightPct));
+    const defaults = buildCanonicalOnScreenTextLayoutBounds(widthPct, heightPct, current);
     return normalizeOnScreenTextLayoutItem({
       rowId,
-      xPct,
-      yPct,
+      xPct: defaults.xPct,
+      yPct: defaults.yPct,
       widthPct,
       heightPct,
       zIndex: Math.max(1, Number(options?.rowIndex || row?.index || 1) || 1)
     }, rowId);
+  }
+
+  function shouldRepairLegacyOnScreenTextLayout(layout = null, settings = null, options = {}) {
+    if (!layout || typeof layout !== "object") return false;
+    const normalized = normalizeOnScreenTextLayoutItem(layout, String(layout?.rowId || options?.rowId || "").trim());
+    if (!normalized) return false;
+    const expected = buildCanonicalOnScreenTextLayoutBounds(normalized.widthPct, normalized.heightPct, settings || {});
+    const closeTo = (a, b, tolerance = 0.02) => Math.abs(Number(a) - Number(b)) <= tolerance;
+    const matchesLegacyLeft = closeTo(normalized.xPct, STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_X_PCT, 0.02);
+    const matchesLegacyTop = closeTo(normalized.yPct, STUDIO_ONSCREEN_TEXT_LEGACY_DEFAULT_Y_PCT, 0.025);
+    const matchesLegacySize = closeTo(normalized.widthPct, STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT, 0.08)
+      && closeTo(normalized.heightPct, STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT, 0.08);
+    const isAlreadyCanonical = closeTo(normalized.xPct, expected.xPct, 0.02)
+      && closeTo(normalized.yPct, expected.yPct, 0.02);
+    return matchesLegacyLeft && matchesLegacyTop && matchesLegacySize && !isAlreadyCanonical;
   }
 
   function expandOnScreenTextLayoutToFitText(layout = null, row = null, settings = null, options = {}) {
@@ -669,6 +702,61 @@
     return parts.join(";");
   }
 
+  function resolveOnScreenTextPreviewLayoutSpec(input = {}) {
+    const config = input && typeof input === "object" ? input : {};
+    const settings = normalizeOnScreenTextTrackSettings(config.settings || {});
+    const fallbackLayout = buildCanonicalOnScreenTextLayoutBounds(
+      Number(config?.layout?.widthPct),
+      Number(config?.layout?.heightPct),
+      settings
+    );
+    const layout = normalizeOnScreenTextLayoutItem({
+      ...(config.layout || {}),
+      rowId: String(config?.rowId || config?.layout?.rowId || "").trim(),
+      widthPct: Number.isFinite(Number(config?.layout?.widthPct)) ? Number(config.layout.widthPct) : fallbackLayout.widthPct,
+      heightPct: Number.isFinite(Number(config?.layout?.heightPct)) ? Number(config.layout.heightPct) : fallbackLayout.heightPct,
+      xPct: Number.isFinite(Number(config?.layout?.xPct)) ? Number(config.layout.xPct) : fallbackLayout.xPct,
+      yPct: Number.isFinite(Number(config?.layout?.yPct)) ? Number(config.layout.yPct) : fallbackLayout.yPct
+    }, String(config?.rowId || config?.layout?.rowId || "").trim());
+    const previewWidthPx = Math.max(1, Math.round(Number(config.previewWidthPx || 0) || 1280));
+    const previewHeightPx = Math.max(1, Math.round(Number(config.previewHeightPx || 0) || 720));
+    const sourceWidth = Math.max(160, Math.round(Number(config.sourceWidth || 0) || 1280));
+    const sourceHeight = Math.max(90, Math.round(Number(config.sourceHeight || 0) || 720));
+    const text = String(config.text || "").trim();
+    const metrics = resolveOnScreenTextRenderMetrics(settings, {
+      text,
+      fallback: String(config.fallback || "").trim(),
+      previewWidthPx,
+      previewHeightPx,
+      sourceWidth,
+      sourceHeight,
+      resolution: config.resolution || "source",
+      widthPct: layout?.widthPct,
+      heightPct: layout?.heightPct,
+      xPct: layout?.xPct,
+      yPct: layout?.yPct
+    });
+    const xPct = clampNumber(layout?.xPct, 0, Math.max(0, 1 - Number(layout?.widthPct || fallbackLayout.widthPct)), fallbackLayout.xPct);
+    const yPct = clampNumber(layout?.yPct, 0, Math.max(0, 1 - Number(layout?.heightPct || fallbackLayout.heightPct)), fallbackLayout.yPct);
+    const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || 0) || 1));
+    const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || 0) || 1));
+    return {
+      rowId: String(layout?.rowId || config?.rowId || "").trim(),
+      text,
+      wrappedText: String(metrics.wrappedText || text),
+      xPct,
+      yPct,
+      widthPct: Number(layout?.widthPct || fallbackLayout.widthPct),
+      heightPct: Number(layout?.heightPct || fallbackLayout.heightPct),
+      bubbleWidthPx,
+      bubbleHeightPx,
+      metrics,
+      inlineStyle: buildOnScreenTextBubbleInlineStyle(settings, { metrics }),
+      presetClass: getOnScreenTextStylePresetClass(settings.stylePreset),
+      bgClass: getOnScreenTextBgPresetClass(settings.bgPreset)
+    };
+  }
+
   function wrapOnScreenTextPreviewText(text = "", options = {}) {
     return wrapOnScreenTextRenderText(text, options).replace(/…/g, "...");
   }
@@ -732,6 +820,8 @@
     wrapOnScreenTextPreviewText,
     resolveOnScreenTextPreviewWrapFromMeasuredWidth,
     buildOnScreenTextBubbleInlineStyle,
+    resolveOnScreenTextPreviewLayoutSpec,
+    shouldRepairLegacyOnScreenTextLayout,
     getOnScreenTextResizeHandles,
     buildOnScreenTextSelectionFrameHtml,
     getOnScreenTextClipEffectiveDurationMs,

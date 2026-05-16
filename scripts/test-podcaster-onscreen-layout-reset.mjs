@@ -26,7 +26,7 @@ assert.match(
 
 assert.match(
   source,
-  /rows\.forEach\(\(row, index\) => \{[\s\S]*const layout = buildDefaultOnScreenTextLayoutForRow\(\{ \.\.\.row, index: index \+ 1 \}, settings\);[\s\S]*next\[rowId\] = layout;[\s\S]*changed = true;/m,
+  /rows\.forEach\(\(row, index\) => \{[\s\S]*const defaultLayout = buildDefaultOnScreenTextLayoutForRow\(\{ \.\.\.row, index: index \+ 1 \}, settings\);[\s\S]*next\[rowId\] = defaultLayout;[\s\S]*changed = true;/m,
   "El reset debe reconstruir todos los layouts desde el estándar nuevo."
 );
 

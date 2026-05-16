@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const source = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 if (!/strokeColor:\s*clampText\(trackRaw\?\.strokeColor \|\| "#0f172a", 24\) \|\| "#0f172a"/.test(source)
