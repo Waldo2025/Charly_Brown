@@ -1785,6 +1785,7 @@ function sanitizePodcasterSession(raw = {}) {
       downloadUrl,
       storagePath,
       mimeType,
+      type: "image",
       updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
     };
   };
@@ -1846,6 +1847,7 @@ function sanitizePodcasterSession(raw = {}) {
         downloadUrl,
         storagePath,
         mimeType,
+        type: explicitType || "video",
         updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
       };
     });
@@ -4395,49 +4397,59 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
 
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
     const ownerSlug = normalizeStorageSegment(uid, "anon");
-    const prefix = includeAllOwners
-      ? `podcaster/sessions/${sessionSlug}/owners/`
-      : `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/`;
+    const prefixes = includeAllOwners
+      ? [`podcaster/sessions/${sessionSlug}/owners/`, `podcaster/sessions/${sessionSlug}/videos/`]
+      : [
+        `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/videos/`,
+        `podcaster/sessions/${sessionSlug}/videos/`
+      ];
+    const allowedExts = new Set(["mp4", "webm", "mov", "mkv", "png", "jpg", "jpeg", "webp", "gif"]);
 
     const buckets = getStorageBucketCandidates();
     const filesByPath = new Map();
 
     await Promise.allSettled(buckets.map(async (bucket) => {
       if (!bucket) return;
-      try {
-        // Use delimiter:"" to list all files recursively under prefix
-        const [files] = await bucket.getFiles({ prefix, maxResults: 200 });
-        for (const file of files) {
-          const filePath = String(file.name || "").trim();
-          if (!filePath || filesByPath.has(filePath)) continue;
-          // Only include video files
-          const ext = filePath.split(".").pop().toLowerCase();
-          if (!["mp4", "webm", "mov", "mkv"].includes(ext)) continue;
-          const [metadata] = await file.getMetadata().catch(() => [{}]);
-          const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "").trim();
-          const downloadUrl = token
-            ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
-            : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
-          // Extract row slug from path: .../videos/{rowSlug}/{filename}
-          const pathParts = filePath.split("/");
-          const fileIdx = pathParts.indexOf("videos");
-          const rowFolder = fileIdx >= 0 && pathParts[fileIdx + 1] ? pathParts[fileIdx + 1] : "";
-          const ownerIdx = pathParts.indexOf("owners");
-          const ownerFolder = ownerIdx >= 0 && pathParts[ownerIdx + 1] ? pathParts[ownerIdx + 1] : "";
-          const fileName = pathParts[pathParts.length - 1] || filePath;
-          filesByPath.set(filePath, {
-            name: fileName,
-            ownerFolder,
-            rowFolder,
-            storagePath: filePath,
-            downloadUrl,
-            size: Number(metadata?.size || 0),
-            updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
-          });
+      await Promise.allSettled(prefixes.map(async (prefix) => {
+        try {
+          const [files] = await bucket.getFiles({ prefix, maxResults: 200 });
+          for (const file of files) {
+            const filePath = String(file.name || "").trim();
+            if (!filePath || filesByPath.has(filePath)) continue;
+            const ext = filePath.split(".").pop().toLowerCase();
+            if (!allowedExts.has(ext)) continue;
+            const [metadata] = await file.getMetadata().catch(() => [{}]);
+            const token = String(metadata?.metadata?.firebaseStorageDownloadTokens || "").trim();
+            const mimeType = String(metadata?.contentType || "").trim().toLowerCase()
+              || (["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? `image/${ext === "jpg" ? "jpeg" : ext}` : "video/mp4");
+            const type = mimeType.startsWith("image/") ? "image" : "video";
+            const downloadUrl = token
+              ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
+              : `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media`;
+            const pathParts = filePath.split("/");
+            const fileIdx = pathParts.indexOf("videos");
+            const rowFolder = fileIdx >= 0 && pathParts[fileIdx + 1]
+              ? pathParts[fileIdx + 1]
+              : ((pathParts[pathParts.length - 1] || "").match(/^(row_[^_/]+?)(?:[-_]|$)/)?.[1] || "");
+            const ownerIdx = pathParts.indexOf("owners");
+            const ownerFolder = ownerIdx >= 0 && pathParts[ownerIdx + 1] ? pathParts[ownerIdx + 1] : "";
+            const fileName = pathParts[pathParts.length - 1] || filePath;
+            filesByPath.set(filePath, {
+              name: fileName,
+              ownerFolder,
+              rowFolder,
+              storagePath: filePath,
+              downloadUrl,
+              mimeType,
+              type,
+              size: Number(metadata?.size || 0),
+              updatedAt: String(metadata?.updated || metadata?.timeCreated || "").trim() || null
+            });
+          }
+        } catch (_) {
+          // Ignore per-prefix errors and try next prefix
         }
-      } catch (_) {
-        // Ignore per-bucket errors and try next bucket
-      }
+      }));
     }));
 
     const videos = Array.from(filesByPath.values())
@@ -4448,7 +4460,7 @@ app.get("/api/podcaster/sessions/list-videos", async (req, res) => {
         return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
       });
 
-    return res.status(200).json({ ok: true, prefix, videos });
+    return res.status(200).json({ ok: true, prefix: prefixes[0], prefixes, videos });
   } catch (error) {
     return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo listar videos de la sesión.") });
   }
@@ -8503,6 +8515,65 @@ app.post("/api/podcaster/music/upload", async (req, res) => {
   }
 });
 
+app.post("/api/podcaster/scene-media/upload", express.raw({ type: "*/*", limit: MAX_DIALOGUE_VIDEO_BYTES }), async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.headers["x-session-id"] || "", 180);
+    const rowId = clampText(req.headers["x-row-id"] || "", 180);
+    const originalFileName = clampText(req.headers["x-file-name"] || "scene-media", 220) || "scene-media";
+    const mimeType = clampText(req.headers["x-mime-type"] || req.headers["content-type"] || "application/octet-stream", 160) || "application/octet-stream";
+    const previousStoragePath = clampText(req.headers["x-previous-storage-path"] || "", 700);
+    const buffer = Buffer.isBuffer(req.body) ? Buffer.from(req.body) : Buffer.alloc(0);
+
+    if (!sessionId) return res.status(400).json({ error: "Falta sessionId." });
+    if (!rowId) return res.status(400).json({ error: "Falta rowId." });
+    if (!buffer.length) return res.status(400).json({ error: "No se recibió archivo." });
+
+    const isImage = mimeType.startsWith("image/");
+    const maxBytes = isImage ? MAX_SPEAKER_PORTRAIT_BYTES : MAX_DIALOGUE_VIDEO_BYTES;
+    if (buffer.length > maxBytes) {
+      return res.status(413).json({ error: isImage ? "La imagen excede el tamaño permitido." : "El video excede el tamaño permitido." });
+    }
+
+    const ext = isImage ? getImageExtension(mimeType || "image/png") : getVideoExtension(mimeType || "video/mp4");
+    const sessionSlug = normalizeStorageSegment(sessionId, "session");
+    const rowSlug = normalizeStorageSegment(rowId, "row");
+    const fileBaseName = String(originalFileName || "").replace(/\.[^.]+$/, "");
+    const fileSlug = normalizeStorageSegment(fileBaseName, "media");
+    const storagePath = `podcaster/sessions/${sessionSlug}/owners/${normalizeStorageSegment(uid, "anon")}/videos/${rowSlug}_${Date.now()}_${fileSlug}.${ext}`;
+
+    const asset = await uploadScreenshotAsset({
+      path: storagePath,
+      buffer,
+      mimeType,
+      metadata: {
+        uid,
+        sessionId,
+        rowId,
+        fileName: originalFileName,
+        kind: isImage ? "scene_image_replacement" : "scene_video_replacement"
+      }
+    });
+    if (previousStoragePath && previousStoragePath !== storagePath) {
+      await deleteStoragePath(previousStoragePath).catch(() => {});
+    }
+    return res.status(200).json({
+      ok: true,
+      media: {
+        name: originalFileName,
+        mimeType,
+        size: buffer.length,
+        type: isImage ? "image" : "video",
+        downloadUrl: asset.downloadUrl,
+        storagePath: asset.path,
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo subir media de escena.") });
+  }
+});
+
 function normalizePodcastSceneLibraryItem(docSnap = null) {
   const data = docSnap && typeof docSnap.data === "function" ? (docSnap.data() || {}) : (docSnap || {});
   const libraryId = String(docSnap?.id || data.libraryId || data.id || "").trim();
@@ -9504,10 +9575,18 @@ app.post("/api/gemini/live-token", async (req, res) => {
 
 app.get("/api/assets/proxy-image", async (req, res) => {
   try {
+    const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
+    if (storagePath) {
+      const downloaded = await downloadStorageObjectToBuffer(storagePath);
+      const mimeType = String(downloaded?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "private, max-age=120");
+      return res.status(200).send(downloaded.buffer);
+    }
     const rawUrl = String(req.query?.url || "").trim();
     const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
     if (!normalizedUrl) {
-      return res.status(400).json({ error: "Falta parámetro url." });
+      return res.status(400).json({ error: "Falta parámetro url o storagePath." });
     }
     let parsed = null;
     try {

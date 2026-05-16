@@ -1,15 +1,13 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getFirestore, doc, updateDoc, getDoc, serverTimestamp, deleteField } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
+import { buildApiUrl, getAuthHeaders } from "../js/api-client.js";
 
 let db;
-let storage;
 
 function initFirebase() {
     try {
         const app = !getApps().length ? initializeApp(firebaseWebConfig) : getApp();
-        storage = getStorage(app);
         db = getFirestore();
     } catch (e) {
         console.warn('Firebase initialization warning:', e);
@@ -72,37 +70,52 @@ function initFilePond() {
             process: (fieldName, file, metadata, load, error, progress, abort) => {
                 const session = window.PodcasterState?.activeSession || {};
                 const sessionId = session.id || 'unknown';
-                const storagePath = `podcaster/sessions/${sessionId}/videos/${currentEditingRowId}_${Date.now()}_${file.name}`;
-                const storageRef = ref(storage, storagePath);
-                const uploadTask = uploadBytesResumable(storageRef, file);
+                const controller = new AbortController();
+                progress(true, 0, file.size || 1);
 
-                uploadTask.on('state_changed', 
-                    (snapshot) => {
-                        progress(true, snapshot.bytesTransferred, snapshot.totalBytes);
-                    }, 
-                    (err) => {
-                        error(err.message);
-                    }, 
-                    () => {
-                        getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
-                            uploadedMediaUrl = downloadURL;
-                            uploadedStoragePath = storagePath;
-                            uploadedMediaType = file.type.startsWith('image/') ? 'image' : 'video';
-                            load(downloadURL);
-                            
-                            if (uploadedMediaType === 'image') {
-                                els.movementSettings.style.display = 'block';
-                            } else {
-                                els.movementSettings.style.display = 'none';
-                            }
-                            els.confirmBtn.style.display = 'inline-block';
+                (async () => {
+                    try {
+                        const headers = await getAuthHeaders({
+                            "Content-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream",
+                            "X-Session-Id": String(sessionId || "").trim(),
+                            "X-Row-Id": String(currentEditingRowId || "").trim(),
+                            "X-File-Name": String(file.name || "scene-media").trim() || "scene-media",
+                            "X-Mime-Type": String(file.type || "application/octet-stream").trim() || "application/octet-stream"
                         });
+                        const response = await fetch(buildApiUrl("/api/podcaster/scene-media/upload"), {
+                            method: "POST",
+                            headers,
+                            body: file,
+                            signal: controller.signal
+                        });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            throw new Error(String(data?.error || "No se pudo subir el archivo."));
+                        }
+                        const media = data?.media && typeof data.media === "object" ? data.media : null;
+                        if (!media?.downloadUrl) {
+                            throw new Error("Upload sin downloadUrl.");
+                        }
+                        uploadedMediaUrl = String(media.downloadUrl || "").trim();
+                        uploadedStoragePath = String(media.storagePath || "").trim();
+                        uploadedMediaType = String(media.type || (String(file.type || "").startsWith("image/") ? "image" : "video")).trim();
+                        progress(true, file.size || 1, file.size || 1);
+                        load(uploadedMediaUrl);
+
+                        if (uploadedMediaType === 'image') {
+                            els.movementSettings.style.display = 'block';
+                        } else {
+                            els.movementSettings.style.display = 'none';
+                        }
+                        els.confirmBtn.style.display = 'inline-block';
+                    } catch (err) {
+                        error(err?.message || 'Upload failed');
                     }
-                );
+                })();
 
                 return {
                     abort: () => {
-                        uploadTask.cancel();
+                        controller.abort();
                         abort();
                     }
                 };
@@ -178,17 +191,35 @@ function sanitizeStylizedTextSceneData(raw = null) {
 
 function sanitizeStylizedTextObject(raw = null) {
     if (!raw || typeof raw !== 'object') return null;
-    const next = {
-        ...raw,
-        backgroundColor: '',
-        overlayFill: '',
-        clipPath: null
+    const sanitizeNestedValue = (value, parentKey = '') => {
+        if (Array.isArray(value)) {
+            return value.map((item) => sanitizeNestedValue(item, parentKey));
+        }
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+        const nextValue = { ...value };
+        if (String(nextValue.textBaseline || '').trim().toLowerCase() === 'alphabetical') {
+            nextValue.textBaseline = 'alphabetic';
+        }
+        Object.keys(nextValue).forEach((key) => {
+            if (key === 'clipPath') {
+                nextValue[key] = null;
+                return;
+            }
+            nextValue[key] = sanitizeNestedValue(nextValue[key], key);
+        });
+        if (parentKey === 'styles') {
+            return nextValue;
+        }
+        return nextValue;
     };
 
-    // Corregir error común de Fabric.js / Canvas API donde 'alphabetical' no es un valor válido (debe ser 'alphabetic')
-    if (String(next.textBaseline || '').trim().toLowerCase() === 'alphabetical') {
-        next.textBaseline = 'alphabetic';
-    }
+    const next = sanitizeNestedValue(raw) || null;
+    if (!next || typeof next !== 'object') return null;
+    next.backgroundColor = '';
+    next.overlayFill = '';
+    next.clipPath = null;
 
     if (Array.isArray(raw.objects)) {
         next.objects = raw.objects.map((item) => sanitizeStylizedTextObject(item)).filter(Boolean);
@@ -614,6 +645,7 @@ function setupEventListeners() {
 
     // Replacement logic
     els.confirmBtn.addEventListener('click', async () => {
+        currentEditingRowId = String(els.modal?.dataset?.rowId || currentEditingRowId || '').trim();
         const selectedLibrary = window._selectedLibraryVideo;
         const mediaUrl = uploadedMediaUrl || selectedLibrary?.downloadUrl;
         const mediaType = uploadedMediaType || selectedLibrary?.type || 'video';
@@ -703,30 +735,60 @@ function setupEventListeners() {
                 const now = new Date().toISOString();
                 window.PodcasterUI.upsertActiveSession((current) => {
                     const next = { ...current };
+                    const currentRows = Array.isArray(current?.script?.rows) ? current.script.rows : [];
                     
                     // Asegurar mapas base
                     next.dialogueVideoMap = { ...(next.dialogueVideoMap || {}) };
+                    next.visualEffectsMap = { ...(next.visualEffectsMap || {}) };
                     next.rowReferenceModeByRowId = { ...(next.rowReferenceModeByRowId || {}) };
                     next.rowReferenceVideoMap = { ...(next.rowReferenceVideoMap || {}) };
+                    next.rowReferenceImageMap = { ...(next.rowReferenceImageMap || {}) };
                     next.rowReferenceImageListMap = { ...(next.rowReferenceImageListMap || {}) };
+                    next.podcastVideoConfig = { ...(next.podcastVideoConfig || {}) };
+                    next.podcastVideoConfig.timelineClipsByRowId = { ...(next.podcastVideoConfig.timelineClipsByRowId || {}) };
+                    next.script = {
+                        ...(next.script || {}),
+                        rows: currentRows.map((row) => (
+                            String(row?.id || '').trim() === currentEditingRowId
+                                ? {
+                                    ...row,
+                                    videoSrc: mediaUrl,
+                                    mediaType,
+                                    updatedAt: now
+                                }
+                                : row
+                        ))
+                    };
+                    next.updatedAt = now;
                     
                     // Aplicar cambios con fecha ISO para el estado local
                     const localMediaData = { ...mediaData, updatedAt: now };
                     next.dialogueVideoMap[currentEditingRowId] = localMediaData;
+                    next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] = {
+                        ...(next.podcastVideoConfig.timelineClipsByRowId[currentEditingRowId] || {}),
+                        type: mediaType
+                    };
                     
                     if (isImageMedia) {
                         const localImageRef = { ...imageReferenceData, updatedAt: now };
                         next.rowReferenceModeByRowId[currentEditingRowId] = "image";
+                        next.rowReferenceImageMap[currentEditingRowId] = localImageRef;
                         next.rowReferenceImageListMap[currentEditingRowId] = [localImageRef];
                         delete next.rowReferenceVideoMap[currentEditingRowId];
+                        next.visualEffectsMap[currentEditingRowId] = effects;
                     } else {
                         next.rowReferenceModeByRowId[currentEditingRowId] = "video";
                         next.rowReferenceVideoMap[currentEditingRowId] = localMediaData;
+                        delete next.rowReferenceImageMap[currentEditingRowId];
                         delete next.rowReferenceImageListMap[currentEditingRowId];
+                        next.visualEffectsMap[currentEditingRowId] = null;
                     }
                     
                     return next;
                 }, { render: true });
+                if (String(window.PodcasterState?.activeRowId || '').trim() === currentEditingRowId) {
+                    window.PodcasterUI.syncStageMedia?.(currentEditingRowId, { force: true });
+                }
             }
 
             // 2. Guardar en Firestore (usa serverTimestamp())
@@ -735,15 +797,11 @@ function setupEventListeners() {
             // Reset selection
             window._selectedLibraryVideo = null;
             uploadedMediaUrl = null;
+            uploadedStoragePath = null;
+            uploadedMediaType = null;
+            currentEditingRowId = "";
+            if (els.modal) delete els.modal.dataset.rowId;
 
-            // Trigger re-render/refresh in podcaster.js if possible
-            if (window.PodcasterUI?.refreshSession) {
-                await window.PodcasterUI.refreshSession();
-            }
-            else {
-                location.reload(); // Fallback
-            }
-            
             els.modal.hidden = true;
         } catch (err) {
             console.error('Error saving replacement:', err);
@@ -833,23 +891,22 @@ function setupEventListeners() {
         });
     }
 
-    // Intercept row ID from podcaster.js modal opening
-    document.addEventListener('click', (e) => {
-        const replaceBtn = e.target.closest("[data-action='replace-scene-video-from-storage']");
-        if (replaceBtn) {
-            currentEditingRowId = replaceBtn.dataset.rowId;
-            // Reset modal state
-            uploadedMediaUrl = null;
-            uploadedStoragePath = null;
-            els.confirmBtn.style.display = 'none';
-            els.movementSettings.style.display = 'none';
-            if (pond) pond.removeFiles();
-            
-            // Default to library tab
-            els.libraryTabBtn.click();
-            return;
+    document.addEventListener('podcaster:scene-media-selector-open', (event) => {
+        currentEditingRowId = String(event?.detail?.rowId || '').trim();
+        window._selectedLibraryVideo = null;
+        uploadedMediaUrl = null;
+        uploadedStoragePath = null;
+        uploadedMediaType = null;
+        if (els.modal && currentEditingRowId) {
+            els.modal.dataset.rowId = currentEditingRowId;
         }
+        if (els.confirmBtn) els.confirmBtn.style.display = 'none';
+        if (els.movementSettings) els.movementSettings.style.display = 'none';
+        if (pond) pond.removeFiles();
+        els.libraryTabBtn?.click();
+    });
 
+    document.addEventListener('click', (e) => {
         const editBtn = e.target.closest("[data-action='timeline-edit-stylized-text']");
         if (editBtn) {
             window.PodcasterState.activeRowId = editBtn.dataset.rowId;

@@ -876,7 +876,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const inactiveSrc = String(inactiveEl?.dataset?.src || "").trim();
     const nextEntry = upcomingEntries.find((item) => {
       const src = String(item?.videoSrc || "").trim();
-      return src && src !== activeSrc;
+      return src && src !== activeSrc && item?.isImageClip !== true;
     });
     const nextSrc = String(nextEntry?.videoSrc || "").trim();
     if (!nextSrc) return;

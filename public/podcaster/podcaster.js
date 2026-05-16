@@ -9506,13 +9506,22 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
+  const explicitType = String(options.type || options.mediaKind || "").trim().toLowerCase();
+  const mimeType = String(options.mimeType || "").trim().toLowerCase();
+  const combinedSource = `${clean} ${cleanStoragePath}`.toLowerCase();
+  const treatAsImage = explicitType === "image"
+    || mimeType.startsWith("image/")
+    || /\.(jpg|jpeg|png|webp|gif)(\?|$|\s)/i.test(combinedSource);
 
   try {
     const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
     
     // Si tenemos path de storage o es un asset de librería, usamos el resolver con consciencia de fallos (stale)
     if (cleanStoragePath || isLibraryAsset) {
-      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
+      if (treatAsImage) {
+        staleProxyMediaUrls.delete(buildApiUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(cleanStoragePath)}`));
+      }
+      return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, treatAsImage ? "image" : "media", options);
     }
 
     // Si ya es una URL de proxy, solo añadimos el timestamp si falta
@@ -9532,9 +9541,13 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
     const pathname = String(parsed.pathname || "").toLowerCase();
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(host);
     const hasVideoExt = /\.(mp4|webm|mov|m4v)(?:$|\?)/i.test(pathname);
+    const hasImageExt = /\.(jpg|jpeg|png|webp|gif)(?:$|\?)/i.test(pathname);
 
-    if (isStorageUrl || hasVideoExt) {
-      return resolveStaleAwareProxyMediaUrl(clean, "", "media", options);
+    if (isStorageUrl || hasVideoExt || hasImageExt || treatAsImage) {
+      if (treatAsImage || hasImageExt) {
+        staleProxyMediaUrls.delete(buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}`));
+      }
+      return resolveStaleAwareProxyMediaUrl(clean, "", treatAsImage || hasImageExt ? "image" : "media", options);
     }
 
     return clean;
@@ -19508,10 +19521,20 @@ function closeSceneVideoSelectorModal() {
 
 async function openSceneVideoSelectorModal(rowId = "") {
   const session = getActiveSession();
-  if (!session || !rowId) return;
+  const key = String(rowId || "").trim();
+  if (!session || !key) return;
   const sessionSlug = String(session.slug || session.id || "").trim();
 
-  if (els.podcastSceneVideoSelectorModal) els.podcastSceneVideoSelectorModal.hidden = false;
+  if (els.podcastSceneVideoSelectorModal) {
+    els.podcastSceneVideoSelectorModal.hidden = false;
+    els.podcastSceneVideoSelectorModal.dataset.rowId = key;
+  }
+  window._selectedLibraryVideo = null;
+  document.dispatchEvent(new CustomEvent("podcaster:scene-media-selector-open", {
+    detail: {
+      rowId: key
+    }
+  }));
   if (els.sceneVideoSelectorGeneratedGrid) {
     els.sceneVideoSelectorGeneratedGrid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 2rem;"><i class="fas fa-spinner fa-spin"></i> Buscando videos de esta sesión...</div>';
   }
@@ -19544,7 +19567,7 @@ async function openSceneVideoSelectorModal(rowId = "") {
     // Be lenient with response format, similar to other parts of the app
     const allVideos = Array.isArray(data?.videos) ? data.videos : (Array.isArray(data) ? data : []);
 
-    const normalizedRowId = String(rowId || "").trim().toLowerCase();
+    const normalizedRowId = key.toLowerCase();
     const hasRowIdInText = (value = "") => String(value || "").trim().toLowerCase().includes(normalizedRowId);
     const rowVideos = allVideos.filter((v) => {
       if (!normalizedRowId) return false;
@@ -19570,7 +19593,12 @@ async function openSceneVideoSelectorModal(rowId = "") {
       card.style.cssText = "border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; cursor: pointer; transition: border-color 0.2s;";
       
       const downloadUrl = String(video.downloadUrl || video.videoDownloadUrl || video.url || video.videoUrl || "").trim();
-      const isImg = /\.(jpg|jpeg|png|webp|gif)/i.test(downloadUrl) || video.type === 'image';
+      const mimeType = String(video.contentType || video.mimeType || "").trim().toLowerCase();
+      const storagePath = String(video.storagePath || video.path || "").trim();
+      const isImg = mimeType.startsWith("image/")
+        || video.type === 'image'
+        || /\.(jpg|jpeg|png|webp|gif)/i.test(downloadUrl)
+        || /\.(jpg|jpeg|png|webp|gif)$/i.test(storagePath);
       
       const mediaHtml = isImg 
         ? `<img src="${escapeHtml(downloadUrl)}" style="width: 100%; height: 120px; object-fit: cover; background: #000;" loading="lazy">`
@@ -19587,7 +19615,7 @@ async function openSceneVideoSelectorModal(rowId = "") {
         window._selectedLibraryVideo = {
           id: video.id,
           downloadUrl: downloadUrl,
-          storagePath: String(video.storagePath || video.path || "").trim(),
+          storagePath: storagePath,
           mimeType: String(video.contentType || video.mimeType || (isImg ? "image/jpeg" : "video/mp4")).trim(),
           type: isImg ? 'image' : 'video'
         };
@@ -19959,13 +19987,6 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
   const activeSession = session || getActiveSession();
   const sessionId = String(activeSession?.id || "").trim();
   const key = String(rowId || "").trim() || String(podcastVideoState.activeRowId || "").trim();
-  
-  // Simplificación y Guard de Performance: Evitar re-sincronizar si el estado crítico no ha cambiado
-  const playbackActive = podcastPlaybackState.active === true;
-  const isSpeaking = podcastVideoState.speaking === true;
-  const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${podcastVideoState.montageActive}`;
-  if (!options.force && podcastVideoState.lastSyncedStageKey === stateKey) return;
-  podcastVideoState.lastSyncedStageKey = stateKey;
 
   const educationalMode = isEducationalVideoMode(activeSession);
   const editorPreviewMode = podcastVideoState.montageActive !== true;
@@ -20004,8 +20025,26 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
   const src = resolveStorageVideoUrl(
     ((isReferenceVideo || isReferenceImage) ? referenceAsset?.downloadUrl : "") || firstSegment?.downloadUrl || (staleBaseClip ? "" : (clip?.downloadUrl || "")),
     ((isReferenceVideo || isReferenceImage) ? referenceAsset?.storagePath : "") || firstSegment?.storagePath || (staleBaseClip ? "" : (clip?.storagePath || "")),
-    { updatedAt: clip?.updatedAt || "" }
+    {
+      updatedAt: clip?.updatedAt || "",
+      type: referenceAsset?.type || referenceAsset?.kind || firstSegment?.type || clip?.type || "",
+      mimeType: referenceAsset?.mimeType || firstSegment?.mimeType || clip?.mimeType || ""
+    }
   );
+
+  // Guard de performance: evita re-sync si no cambió el estado ni el media efectivo
+  const playbackActive = podcastPlaybackState.active === true;
+  const isSpeaking = podcastVideoState.speaking === true;
+  const mediaSignature = [
+    String(src || "").trim(),
+    String(referenceAsset?.storagePath || firstSegment?.storagePath || clip?.storagePath || "").trim(),
+    String(referenceAsset?.downloadUrl || firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
+    String(referenceAsset?.kind || referenceAsset?.type || firstSegment?.type || clip?.type || "").trim().toLowerCase()
+  ].join("|");
+  const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${podcastVideoState.montageActive}_${mediaSignature}`;
+  if (!options.force && podcastVideoState.lastSyncedStageKey === stateKey) return;
+  podcastVideoState.lastSyncedStageKey = stateKey;
+
   const stageVideo = activeBundle.foreground;
   const inactiveVideo = inactiveBundle.foreground;
   const stageBackdrop = activeBundle.backdrop;
@@ -20060,7 +20099,8 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
       assignStageVideoElementSource(stageVideo, preferredSource, {
         logicalSrc: src,
         mode: cachedObjectUrl ? "cache" : "direct",
-        cacheKey: src
+        cacheKey: src,
+        rowId: key
       });
       if (!cachedObjectUrl) {
         ensurePodcastStageVideoCachedObjectUrl(src).catch(() => { });
@@ -20081,7 +20121,8 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
         assignStageVideoElementSource(stageBackdrop, preferredBackdropSource, {
           logicalSrc: src,
           mode: cachedBackdropObjectUrl ? "cache" : "direct",
-          cacheKey: src
+          cacheKey: src,
+          rowId: key
         });
       }
       stageBackdrop.hidden = visualLayoutMode !== "blur-backdrop";
@@ -21613,9 +21654,12 @@ function assignStageVideoElementSource(videoEl = null, source = "", options = {}
   if (!cleanSource || !logicalSrc) return;
   const mode = String(options.mode || "").trim() || "direct";
   const cacheKey = String(options.cacheKey || "").trim();
+  const rowId = String(options.rowId || "").trim();
   releaseTransientStageVideoObjectUrl(videoEl);
   videoEl.src = cleanSource;
   videoEl.dataset.src = logicalSrc;
+  if (rowId) videoEl.dataset.rowId = rowId;
+  else delete videoEl.dataset.rowId;
   if (mode === "cache" || mode === "transient") {
     videoEl.dataset.objectUrl = cleanSource;
     videoEl.dataset.objectUrlMode = mode;
@@ -21627,6 +21671,12 @@ function assignStageVideoElementSource(videoEl = null, source = "", options = {}
     videoEl.addEventListener("error", () => {
       const failedSrc = String(videoEl.dataset.src || videoEl.currentSrc || videoEl.src || "").trim();
       if (!failedSrc) return;
+      if (
+        /\/api\/assets\/proxy-image\?/i.test(failedSrc)
+        || /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(failedSrc)
+      ) {
+        return;
+      }
       markStaleProxyMediaUrl(failedSrc, "proxy-media-404", {
         rowId: String(podcastVideoState.activeRowId || "").trim() || undefined
       });
@@ -21634,17 +21684,29 @@ function assignStageVideoElementSource(videoEl = null, source = "", options = {}
       const activeRowId = String(podcastVideoState.activeRowId || "").trim();
       if (activeSession && activeRowId) {
         const clip = resolveDialogueVideoForRow(activeSession, activeRowId);
+        const referenceAsset = resolveRowReferenceAsset(activeRowId, activeSession);
         const attemptedSegment = resolveDialogueVideoSegments(clip).find((segment) => {
           const candidateSrc = resolveStorageVideoUrl(
             segment?.downloadUrl || clip?.downloadUrl || "",
             segment?.storagePath || clip?.storagePath || ""
           );
           return candidateSrc && candidateSrc === failedSrc;
-        }) || clip;
-        markStaleDialogueVideoSource(String(activeSession?.id || "").trim(), activeRowId, attemptedSegment);
-        queueMicrotask(() => {
-          try { syncPodcastVideoStageMedia(activeSession, activeRowId); } catch (_) { }
-        });
+        }) || (
+          referenceAsset?.kind === "video"
+            && resolveStorageVideoUrl(referenceAsset?.downloadUrl || "", referenceAsset?.storagePath || "") === failedSrc
+            ? referenceAsset
+            : null
+        ) || (
+          clip && resolveStorageVideoUrl(clip?.downloadUrl || "", clip?.storagePath || "") === failedSrc
+            ? clip
+            : null
+        );
+        if (attemptedSegment) {
+          markStaleDialogueVideoSource(String(activeSession?.id || "").trim(), activeRowId, attemptedSegment);
+          queueMicrotask(() => {
+            try { syncPodcastVideoStageMedia(activeSession, activeRowId); } catch (_) { }
+          });
+        }
       }
     });
     videoEl.__podcasterStageErrorBound = true;
@@ -33589,16 +33651,6 @@ function attachEvents() {
       document.querySelectorAll(".row-menu-container.is-open").forEach(m => m.classList.remove("is-open"));
     }
 
-    const replaceSceneVideoBtn = event.target.closest("[data-action='replace-scene-video-from-storage'][data-row-id]");
-    if (replaceSceneVideoBtn) {
-      event.preventDefault();
-      event.stopPropagation();
-      const rowId = String(replaceSceneVideoBtn.dataset.rowId || "").trim();
-      if (!rowId) return;
-      openSceneVideoSelectorModal(rowId);
-      closePodcastTimelineClipMenu();
-      return;
-    }
     const floatingClose = event.target.closest("[data-action]");
     const libraryToggle = event.target.closest("[data-action='toggle-podcast-scene-library-menu'][data-library-id]");
     if (libraryToggle) {
@@ -34193,5 +34245,6 @@ window.PodcasterUI = {
   },
   render: () => render(),
   upsertActiveSession: (updater, options) => upsertActiveSession(updater, options),
-  upsertPodcastVideoConfig: (updater, options) => upsertPodcastVideoConfig(updater, options)
+  upsertPodcastVideoConfig: (updater, options) => upsertPodcastVideoConfig(updater, options),
+  syncStageMedia: (rowId = "", options = {}) => syncPodcastVideoStageMedia(getActiveSession(), rowId, options)
 };
