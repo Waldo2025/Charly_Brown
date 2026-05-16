@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 const audioBuildMatch = source.match(
   /const buildMontageAudioSubtrackRowHtml = \(track = null, trackIndex = 0, trackItems = \[\]\) => \{[\s\S]*?const leftPx = Math\.max\([\s\S]*?\);[\s\S]*?data-action="timeline-select-scene"[\s\S]*?\};/m

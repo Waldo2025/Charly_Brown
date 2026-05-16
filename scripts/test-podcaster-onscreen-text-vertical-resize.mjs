@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 const handlesMatch = source.match(
   /function getOnScreenTextResizeHandles\(settings = null\) \{([\s\S]*?)\n\}/m

@@ -2,32 +2,36 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
+  "utf8"
+);
+const storeSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-session-store.js",
   "utf8"
 );
 
 assert.match(
   source,
-  /function mergeCloudSessionOverLocalCache\(cloudSession = null, localSession = null\)/,
-  "Debe existir un merge explícito donde la nube gane sobre la caché local."
+  /const bootstrapResult = await sessionStore\.bootstrapSessions\(/,
+  "init debe delegar la resolución local-vs-cloud al session store."
 );
 
 assert.match(
-  source,
-  /finalSessions = await loadCloudSessions\(\);[\s\S]*finalSessions = mergeCloudSessionsOverLocalCache\(finalSessions, localSessions\);/m,
-  "init debe cargar primero desde Firebase y solo después mezclar fallback local sin permitir que el caché pise el timeline persistido."
+  storeSource,
+  /if \(localFingerprint && cloudFingerprint && localFingerprint === cloudFingerprint && localUpdatedAt === cloudUpdatedAt\) \{/,
+  "El session store debe preferir la caché local cuando fingerprint y updatedAt coinciden."
 );
 
 assert.match(
   source,
   /const mergedSession = mergeCloudSessionOverLocalCache\(cloudSession, nextSession\);/,
-  "setActiveSession debe rehidratar la sesión activa usando a Firebase como fuente de verdad para geminiDialogueTrack."
+  "Las sesiones stub deben seguir pudiendo completarse desde cloud."
 );
 
 assert.doesNotMatch(
   source,
-  /cloudUpdatedAt >= localUpdatedAt \|\| nextSession\.isStub/,
-  "setActiveSession no debe decidir el timeline Gemini por comparación de timestamps locales vs remotos."
+  /if \(nextSession\?\.isStub \|\| nextSession\?\.script\?\.rows\?\.length\)/,
+  "setActiveSession ya no debe rehidratar desde cloud una sesión local completa."
 );
 
-console.log("Podcaster Gemini cloud source-of-truth OK.");
+console.log("Podcaster local-first bootstrap and stub-only cloud hydration OK.");

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const jsSource = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const jsSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 
 const beginDragMatch = jsSource.match(

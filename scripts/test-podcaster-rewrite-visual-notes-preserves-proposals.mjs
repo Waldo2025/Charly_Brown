@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!source.includes("async function rewriteVisualNotesWithGemini(")) {
   throw new Error("No existe rewriteVisualNotesWithGemini.");
@@ -26,7 +26,7 @@ if (source.includes("visualNotes: normalizedRewrite,")) {
   throw new Error("La regeneración visual no debe sustituir el visual oficial directamente.");
 }
 
-if (!source.includes("scheduleCloudAutosave(\"script-edit\");")) {
+if (!source.includes("scheduleSessionLocalPersist(\"script-edit\");")) {
   throw new Error("La regeneración visual no agenda autosave de la sesión.");
 }
 

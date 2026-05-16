@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!/function insertLibrarySceneIntoSession\(item = null, options = \{\}\) \{/.test(source)) {
   throw new Error("Falta insertLibrarySceneIntoSession para validar insercion en track nuevo.");

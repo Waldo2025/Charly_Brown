@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
 

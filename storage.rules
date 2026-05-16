@@ -130,6 +130,15 @@ service firebase.storage {
       allow read, write: if isSignedIn() && isSafePublicAsset(fileName);
     }
 
+    match /podcaster/sessions/{sessionId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+    match /podcaster/sessions/{sessionId}/{subDir}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
     // Deny-by-default.
     match /{allPaths=**} {
       allow read, write: if false;

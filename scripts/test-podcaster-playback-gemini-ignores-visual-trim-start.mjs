@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster-playback-controller.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
 const syncAudioMatch = source.match(
   /async syncAudio\(currentMs, speed\) \{[\s\S]*?await this\.syncBackgroundMusic\(currentMs, speed, hasVoice\);\n  \}/m

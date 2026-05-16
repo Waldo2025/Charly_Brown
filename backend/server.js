@@ -35,7 +35,7 @@ const {
 const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
-} = require(path.resolve(__dirname, "..", "public", "on-screen-text-render-spec.js"));
+} = require(path.resolve(__dirname, "..", "public", "js", "on-screen-text-render-spec.js"));
 const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
@@ -511,6 +511,10 @@ async function probeMediaHasAudioWithFfmpeg(inputPath = "") {
     timeoutCode: "scene_probe_timeout"
   });
   return /Stream #.*: Audio:/i.test(probeResult.stderr || "");
+}
+
+async function probeImageDimensionsWithFfmpeg(inputPath = "", label = "probe_image") {
+  return probeMediaVideoDimensionsWithFfmpeg(inputPath, label);
 }
 
 function resolveMontageReviewCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
@@ -1758,20 +1762,41 @@ function sanitizePodcasterSession(raw = {}) {
     };
   });
 
+  const sanitizeReferenceImageRecord = (value = null, fallbackName = "Referencia") => {
+    if (!value || typeof value !== "object") return null;
+    const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
+    const mediaRef = normalizePersistedMediaReference(
+      clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+      clampText(String(value?.storagePath || value?.path || "").trim(), 700)
+    );
+    const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
+    const storagePath = clampText(mediaRef.storagePath || "", 700);
+    const mimeType = clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png";
+    const explicitType = String(value?.type || value?.mediaKind || "").trim().toLowerCase();
+    const combinedSource = `${downloadUrl} ${storagePath}`.toLowerCase();
+    const looksLikeImage = mimeType.startsWith("image/")
+      || explicitType === "image"
+      || /\.(png|jpe?g|webp|gif)(\?|$|\s)/i.test(combinedSource);
+    if (!dataUrl.startsWith("data:image/") && !downloadUrl && !storagePath) return null;
+    if (!looksLikeImage) return null;
+    return {
+      name: clampText(value?.name || fallbackName, 180) || fallbackName,
+      dataUrl: dataUrl.startsWith("data:image/") ? dataUrl : "",
+      downloadUrl,
+      storagePath,
+      mimeType,
+      updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
+    };
+  };
+
   const sanitizeReferenceImageMap = (rawMap = {}, maxEntries = 120) => {
     const source = rawMap && typeof rawMap === "object" ? rawMap : {};
     const next = {};
     Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
       const key = clampText(rawKey || "", 160);
-      if (!key || !value || typeof value !== "object") return;
-      const dataUrl = clampText(String(value?.dataUrl || "").trim(), 900_000);
-      if (!dataUrl.startsWith("data:image/")) return;
-      next[key] = {
-        name: clampText(value?.name || "Referencia", 180) || "Referencia",
-        dataUrl,
-        mimeType: clampText(value?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
-        updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
-      };
+      const normalized = sanitizeReferenceImageRecord(value, "Referencia");
+      if (!key || !normalized) return;
+      next[key] = normalized;
     });
     return next;
   };
@@ -1785,16 +1810,10 @@ function sanitizePodcasterSession(raw = {}) {
       const key = clampText(rawKey || "", 160);
       const list = Array.isArray(value) ? value : [];
       if (!key || !list.length) return;
-      const normalizedList = list.slice(0, maxItemsPerEntry).map((item) => {
-        const dataUrl = clampText(String(item?.dataUrl || "").trim(), 900_000);
-        if (!dataUrl.startsWith("data:image/")) return null;
-        return {
-          name: clampText(item?.name || "Referencia", 180) || "Referencia",
-          dataUrl,
-          mimeType: clampText(item?.mimeType || "image/png", 120).trim().toLowerCase() || "image/png",
-          updatedAt: clampText(item?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
-        };
-      }).filter(Boolean);
+      const normalizedList = list
+        .slice(0, maxItemsPerEntry)
+        .map((item) => sanitizeReferenceImageRecord(item, "Referencia"))
+        .filter(Boolean);
       if (normalizedList.length) next[key] = normalizedList;
     });
     return next;
@@ -1811,11 +1830,22 @@ function sanitizePodcasterSession(raw = {}) {
       const key = clampText(rawKey || "", 160);
       if (!key || !value || typeof value !== "object") return;
       const dataUrl = clampText(String(value?.dataUrl || "").trim(), 8_000_000);
-      if (!dataUrl.startsWith("data:video/")) return;
+      const mediaRef = normalizePersistedMediaReference(
+        clampText(String(value?.downloadUrl || value?.url || value?.dataUrl || "").trim(), 3000),
+        clampText(String(value?.storagePath || value?.path || "").trim(), 700)
+      );
+      const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
+      const storagePath = clampText(mediaRef.storagePath || "", 700);
+      const mimeType = clampText(value?.mimeType || "video/mp4", 120).trim().toLowerCase() || "video/mp4";
+      const explicitType = String(value?.type || value?.mediaKind || "").trim().toLowerCase();
+      if (!dataUrl.startsWith("data:video/") && !downloadUrl && !storagePath) return;
+      if (mimeType.startsWith("image/") || explicitType === "image") return;
       next[key] = {
         name: clampText(value?.name || "Referencia de video", 180) || "Referencia de video",
         dataUrl,
-        mimeType: clampText(value?.mimeType || "video/mp4", 120).trim().toLowerCase() || "video/mp4",
+        downloadUrl,
+        storagePath,
+        mimeType,
         updatedAt: clampText(value?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString()
       };
     });
@@ -7193,11 +7223,15 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       err.detail = { kind, index, storagePath: "", url: "" };
       throw err;
     }
-    const isAudioKind = kind !== "video";
+    const normalizedKind = kind === "audio" ? "audio" : (kind === "image" ? "image" : "video");
+    const isImageKind = normalizedKind === "image";
+    const isAudioKind = normalizedKind === "audio";
     const ext = isAudioKind
       ? (getAudioExtension(String(asset?.mimeType || "audio/mpeg")) || "audio")
-      : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
-    const outPath = path.join(tmpDir, `in-${kind}-${String(index + 1).padStart(3, "0")}.${ext}`);
+      : isImageKind
+        ? (getImageExtension(String(asset?.mimeType || "image/png")) || "png")
+        : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
+    const outPath = path.join(tmpDir, `in-${normalizedKind}-${String(index + 1).padStart(3, "0")}.${ext}`);
     const validateDownloadedAsset = async (targetPath = "") => {
       const stat = await fs.promises.stat(targetPath).catch(() => null);
       if (!stat || !stat.isFile() || Number(stat.size || 0) <= 0) {
@@ -7589,6 +7623,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const durSec = Math.max(0.2, durationMs / 1000);
       const useNativeVideoAudio = entry?.useNativeVideoAudio === true;
       const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
+      const isImageAsset = String(videoAsset?.mediaKind || videoAsset?.type || "").trim().toLowerCase() === "image"
+        || String(videoAsset?.mimeType || "").trim().toLowerCase().startsWith("image/");
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
 
       if (!rowId) {
@@ -7598,10 +7634,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       }
       if (!videoAsset?.storagePath && !videoAsset?.url) {
         skippedEntries.push(buildMontageSkippedEntry(entry, i, "missing_video_source", {
-          kind: "video",
+          kind: isImageAsset ? "image" : "video",
           code: "missing_download_source",
           index: i,
-          lastError: `Escena ${sceneIndex} sin video fuente para exportar.`
+          lastError: `Escena ${sceneIndex} sin ${isImageAsset ? "imagen" : "video"} fuente para exportar.`
         }));
         continue;
       }
@@ -7612,7 +7648,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         totalScenes: input.entries.length
       });
       logMontageMemory("render_scene_before", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
-      let currentSceneSubstage = "scene_download_video";
+      let currentSceneSubstage = isImageAsset ? "scene_download_image" : "scene_download_video";
       try {
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
         const videoDownloadUrl = String(videoAsset?.url || "").trim();
@@ -7623,7 +7659,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           rowId,
           totalScenes: input.entries.length,
           substage: currentSceneSubstage,
-          hint: `Descargando asset de la escena ${sceneIndex} de ${input.entries.length}.`,
+          hint: `Descargando ${isImageAsset ? "imagen" : "video"} de la escena ${sceneIndex} de ${input.entries.length}.`,
           progress: sceneProgressBase,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl
@@ -7634,21 +7670,22 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           rowId,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl,
-          substage: "scene_download_video"
+          substage: currentSceneSubstage
         }));
-        const inputVideoPath = await downloadInput(videoAsset, "video", i);
-        const downloadedVideoStat = await fs.promises.stat(inputVideoPath).catch(() => null);
+        const inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+        const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
           jobId,
           sceneIndex,
           rowId,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl,
-          substage: "scene_download_video",
+          substage: currentSceneSubstage,
           elapsedMs: Date.now() - sceneStepStartMs,
           extra: {
-            localPath: inputVideoPath,
-            sizeBytes: Number(downloadedVideoStat?.size || 0) || 0
+            localPath: inputVisualPath,
+            sizeBytes: Number(downloadedVisualStat?.size || 0) || 0,
+            mediaKind: isImageAsset ? "image" : "video"
           }
         }));
         const forceSilentAudio = input.useTimelineAudio === true && !useNativeVideoAudio;
@@ -7657,37 +7694,41 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
           : "default";
-        emitSceneSubstage({
-          sceneIndex,
-          rowId,
-          totalScenes: input.entries.length,
-          substage: "scene_probe_audio",
-          hint: `Analizando audio de la escena ${sceneIndex} de ${input.entries.length}.`,
-          progress: sceneProgressBase + 0.015,
-          storagePath: videoStoragePath,
-          downloadUrl: videoDownloadUrl
-        });
-        console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
-          jobId,
-          sceneIndex,
-          rowId,
-          storagePath: videoStoragePath,
-          downloadUrl: videoDownloadUrl,
-          substage: "scene_probe_audio"
-        }));
-        const probeAudioStartMs = Date.now();
         currentSceneSubstage = "scene_probe_audio";
-        const videoHasAudio = await probeMediaHasAudioWithFfmpeg(inputVideoPath);
-        console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
-          jobId,
-          sceneIndex,
-          rowId,
-          storagePath: videoStoragePath,
-          downloadUrl: videoDownloadUrl,
-          substage: "scene_probe_audio",
-          elapsedMs: Date.now() - probeAudioStartMs,
-          extra: { videoHasAudio }
-        }));
+        if (!isImageAsset) {
+          emitSceneSubstage({
+            sceneIndex,
+            rowId,
+            totalScenes: input.entries.length,
+            substage: "scene_probe_audio",
+            hint: `Analizando audio de la escena ${sceneIndex} de ${input.entries.length}.`,
+            progress: sceneProgressBase + 0.015,
+            storagePath: videoStoragePath,
+            downloadUrl: videoDownloadUrl
+          });
+          console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
+            jobId,
+            sceneIndex,
+            rowId,
+            storagePath: videoStoragePath,
+            downloadUrl: videoDownloadUrl,
+            substage: "scene_probe_audio"
+          }));
+        }
+        const probeAudioStartMs = Date.now();
+        const videoHasAudio = isImageAsset ? false : await probeMediaHasAudioWithFfmpeg(inputVisualPath);
+        if (!isImageAsset) {
+          console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
+            jobId,
+            sceneIndex,
+            rowId,
+            storagePath: videoStoragePath,
+            downloadUrl: videoDownloadUrl,
+            substage: "scene_probe_audio",
+            elapsedMs: Date.now() - probeAudioStartMs,
+            extra: { videoHasAudio }
+          }));
+        }
         emitSceneSubstage({
           sceneIndex,
           rowId,
@@ -7708,7 +7749,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }));
         const probeDimensionsStartMs = Date.now();
         currentSceneSubstage = "scene_probe_dimensions";
-        const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, `montage_scene_probe_${sceneIndex}`);
+        const sourceDims = isImageAsset
+          ? await probeImageDimensionsWithFfmpeg(inputVisualPath, `montage_scene_probe_image_${sceneIndex}`)
+          : await probeMediaVideoDimensionsWithFfmpeg(inputVisualPath, `montage_scene_probe_${sceneIndex}`);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
           jobId,
           sceneIndex,
@@ -7720,7 +7763,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           extra: sourceDims
         }));
         const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
-        const args = ["-y", "-hide_banner", "-loglevel", "warning", "-i", inputVideoPath];
+        const args = ["-y", "-hide_banner", "-loglevel", "warning"];
+        if (isImageAsset) {
+          args.push("-loop", "1", "-framerate", "24", "-i", inputVisualPath);
+        } else {
+          args.push("-i", inputVisualPath);
+        }
         
         // Input 1: anullsrc como fallback universal para asegurar pista de audio
         args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
@@ -7747,21 +7795,30 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           audioFilterGraph = `[1:a]volume=1.0,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo[aout]`;
         }
 
-        args.push("-ss", String(trimSec), "-t", String(durSec));
+        if (isImageAsset) {
+          args.push("-t", String(durSec));
+        } else {
+          args.push("-ss", String(trimSec), "-t", String(durSec));
+        }
         
         // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
         let videoFilterGraph = "";
         if (visualLayoutMode === "blur-backdrop") {
           const fgWidth = Math.max(2, Math.round((canvas.width * 0.76) / 2) * 2);
           const fgHeight = Math.max(2, Math.round((canvas.height * 0.76) / 2) * 2);
+          const visualSourceGraph = isImageAsset
+            ? "[0:v]split=2[vbg_src][vfg_src]"
+            : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`;
           videoFilterGraph = [
-            `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`,
+            visualSourceGraph,
             `[vbg_src]scale=${canvas.width}:${canvas.height}:force_original_aspect_ratio=increase,crop=${canvas.width}:${canvas.height},boxblur=24:8,eq=saturation=1.08[bg]`,
             `[vfg_src]scale=${fgWidth}:${fgHeight}:force_original_aspect_ratio=decrease,pad=${fgWidth}:${fgHeight}:(ow-iw)/2:(oh-ih)/2:color=0x05070B[fg]`,
             `[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto[vout]`
           ].join(";");
         } else {
-          videoFilterGraph = `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`;
+          videoFilterGraph = isImageAsset
+            ? `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`
+            : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`;
         }
 
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);

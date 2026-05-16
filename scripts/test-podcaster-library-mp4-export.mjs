@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const front = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const front = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const back = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 const nativeAudioFn = front.match(

@@ -7,12 +7,12 @@ const htmlSource = fs.readFileSync(
 );
 
 const publicSource = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
 
 const playbackControllerSource = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster-playback-controller.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-playback-controller.js",
   "utf8"
 );
 

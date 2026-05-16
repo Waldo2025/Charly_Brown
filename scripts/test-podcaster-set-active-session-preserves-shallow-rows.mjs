@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const storeSource = readFileSync(new URL("../public/podcaster/podcaster-session-store.js", import.meta.url), "utf8");
 
 assert.match(
   source,
@@ -10,15 +11,21 @@ assert.match(
 );
 
 assert.match(
-  source,
-  /const resolvedRows = mergeSessionRowsWithFallback\(hydratedRows, shallowRows\);/,
-  "setActiveSession debe recomponer filas usando sesión remota \\+ shallow."
+  storeSource,
+  /const resolvedRows = mergeSessionRowsWithFallback\(cloudRows, localRows\);/,
+  "El session store debe recomponer filas usando cloud \\+ fallback local."
+);
+
+assert.match(
+  storeSource,
+  /rows: resolvedRows/,
+  "El merge cloud/local debe conservar las filas resueltas."
 );
 
 assert.match(
   source,
-  /rows: resolvedRows/,
-  "setActiveSession debe conservar las filas resueltas al rehidratar la sesión."
+  /if \(nextSession\?\.isStub\) \{/,
+  "setActiveSession solo debe rehidratar sesiones stub."
 );
 
-console.log("setActiveSession preserves shallow rows when remote rows are empty OK.");
+console.log("Session store preserves shallow rows and setActiveSession only hydrates stubs OK.");

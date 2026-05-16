@@ -21,13 +21,20 @@
 .loading-spinner-snoopy {
   width: 110px;
   height: auto;
-  filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));
+  filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
   animation: snoopy-float 2.4s ease-in-out infinite;
 }
 
 @keyframes snoopy-float {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-20px) scale(1.05); }
+
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-20px) scale(1.05);
+  }
 }
 
 .loading-dots {
@@ -43,36 +50,50 @@
   animation: dot-pulse 1.4s infinite;
 }
 
-.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 @keyframes dot-pulse {
-  0%, 100% { opacity: 0.3; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.2); }
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 
 :root {
-  --pod-bg: #f8fafc;
-  --pod-surface: #ffffff;
-  --pod-surface-2: #f1f5f9;
-  --pod-surface-3: #e2e8f0;
-  --pod-border: #e2e8f0;
-  --pod-border-strong: #cbd5e1;
-  --pod-text: #0f172a;
-  --pod-muted: #64748b;
-  --pod-accent: #3b82f6;
-  --pod-accent-soft: #eff6ff;
-  --pod-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  --pod-shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  --pod-bg: color-mix(in srgb, var(--app-bg-color, #f8fafc) 98%, #eef2f7 2%);
+  --pod-surface: color-mix(in srgb, var(--app-bg-color, #ffffff) 99%, #f3f5f8 1%);
+  --pod-surface-2: color-mix(in srgb, var(--app-bg-color, #ffffff) 96%, #eef2f7 4%);
+  --pod-surface-3: color-mix(in srgb, var(--app-bg-color, #ffffff) 93%, #edf2f7 7%);
+  --pod-border: color-mix(in srgb, var(--app-text-color, #111827) 10%, #d1d5db 90%);
+  --pod-border-strong: color-mix(in srgb, var(--app-text-color, #111827) 18%, #cbd5e1 82%);
+  --pod-text: var(--app-text-color, #111827);
+  --pod-muted: color-mix(in srgb, var(--app-text-color, #334155) 52%, #94a3b8 48%);
+  --pod-accent: var(--cb-chrome-bg, #3f4d98);
+  --pod-accent-soft: color-mix(in srgb, var(--cb-chrome-bg, #3f4d98) 10%, #ffffff 90%);
+  --pod-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --pod-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
   --pod-radius-xl: 20px;
   --pod-radius-lg: 14px;
   --pod-radius-md: 10px;
   --pod-radius-sm: 8px;
-  --pod-sidepanel-min: 360px;
-  --pod-sidepanel-max: 420px;
-  --pod-studio-inspector-min: 300px;
-  --pod-studio-inspector-max: 580px;
-  --pod-studio-inspector-width: 380px;
+  --pod-sidepanel-min: 420px;
+  --pod-sidepanel-max: 540px;
+  --pod-studio-inspector-min: 320px;
+  --pod-studio-inspector-max: 620px;
+  --pod-studio-inspector-width: 420px;
 }
 
 * {
@@ -297,8 +318,13 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes podcaster-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-scroll-region {
@@ -519,10 +545,7 @@ body.is-resizing-podcast-stage {
   box-shadow: var(--pod-shadow-lg);
 }
 
-/* Filtering non-chat responses */
-.chat-message.assistant:not(:has(.chat-connect-btn:not(:disabled))) {
-  display: none !important;
-}
+/* All assistant messages are visible */
 
 .chat-message-body {
   white-space: pre-wrap;
@@ -648,12 +671,10 @@ body.is-resizing-podcast-stage {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  background: linear-gradient(
-    180deg,
-    rgba(248, 250, 252, 0) 0%,
-    rgba(248, 250, 252, 0.8) 20%,
-    rgba(248, 250, 252, 1) 100%
-  );
+  background: linear-gradient(180deg,
+      rgba(248, 250, 252, 0) 0%,
+      rgba(248, 250, 252, 0.8) 20%,
+      rgba(248, 250, 252, 1) 100%);
   backdrop-filter: blur(8px);
   padding: 0 24px 28px;
 }
@@ -747,8 +768,8 @@ body.is-resizing-podcast-stage {
   user-select: none;
 }
 
-.composer-switch input:not(:checked) ~ .composer-mode-label:first-of-type,
-.composer-switch input:checked ~ .composer-mode-label:last-of-type {
+.composer-switch input:not(:checked)~.composer-mode-label:first-of-type,
+.composer-switch input:checked~.composer-mode-label:last-of-type {
   color: #fff;
   font-weight: 600;
 }
@@ -757,11 +778,13 @@ body.is-resizing-podcast-stage {
 .composer-mode-switch .composer-mode-label:first-child {
   opacity: 0.6;
 }
+
 .composer-mode-switch:has(.composer-switch input:not(:checked)) .composer-mode-label:first-child {
   color: #fff;
   opacity: 1;
   font-weight: 600;
 }
+
 .composer-mode-switch:has(.composer-switch input:checked) .composer-mode-label:last-child {
   color: #fff;
   opacity: 1;
@@ -801,11 +824,11 @@ body.is-resizing-podcast-stage {
   transition: transform .2s ease;
 }
 
-.composer-switch input:checked + .composer-switch-track {
+.composer-switch input:checked+.composer-switch-track {
   background: rgba(37, 99, 235, 0.75);
 }
 
-.composer-switch input:checked + .composer-switch-track .composer-switch-thumb {
+.composer-switch input:checked+.composer-switch-track .composer-switch-thumb {
   transform: translateX(20px);
 }
 
@@ -1115,7 +1138,8 @@ body.is-resizing-podcast-stage {
 #podcastVideoShell.floating-panel-card {
   width: 100%;
   max-width: none;
-  min-height: 100vh; height: auto;
+  min-height: 100vh;
+  height: auto;
   max-height: none;
   margin: 0;
   border-radius: 0;
@@ -1479,9 +1503,9 @@ body.is-resizing-podcast-stage {
 
 .onscreen-text-inspector-panel {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  padding: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 10px;
+  padding: 12px;
   min-height: 100%;
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
@@ -1493,7 +1517,9 @@ body.is-resizing-podcast-stage {
 
 .onscreen-text-inspector-panel.is-appearance,
 .onscreen-text-inspector-panel.is-character,
-.onscreen-text-inspector-panel.is-shadow {
+.onscreen-text-inspector-panel.is-shadow,
+.onscreen-text-inspector-panel.is-stroke,
+.onscreen-text-inspector-panel.is-background {
   grid-column: 1;
 }
 
@@ -1581,18 +1607,23 @@ body.is-resizing-podcast-stage {
 }
 
 @media (max-width: 720px) {
+
   .onscreen-text-inspector-shell,
   #onScreenTextTrackModalBody {
     grid-template-columns: 1fr;
   }
+
   .onscreen-text-inline-fields.is-triple,
   .onscreen-text-inline-fields.is-quad,
   .onscreen-text-inline-row {
     grid-template-columns: 1fr;
   }
+
   .onscreen-text-inspector-panel.is-character,
   .onscreen-text-inspector-panel.is-appearance,
-  .onscreen-text-inspector-panel.is-shadow {
+  .onscreen-text-inspector-panel.is-shadow,
+  .onscreen-text-inspector-panel.is-stroke,
+  .onscreen-text-inspector-panel.is-background {
     grid-column: 1;
   }
 }
@@ -1860,11 +1891,9 @@ body.is-resizing-podcast-stage {
   border-bottom: 1px solid color-mix(in srgb, var(--pod-border) 68%, transparent 32%);
   color: var(--pod-text);
   background:
-    linear-gradient(
-      180deg,
+    linear-gradient(180deg,
       rgba(255, 255, 255, 0.06),
-      rgba(255, 255, 255, 0.02)
-    );
+      rgba(255, 255, 255, 0.02));
 }
 
 .montage-export-panel .floating-panel-head h3 {
@@ -1906,6 +1935,7 @@ body.is-resizing-podcast-stage {
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 .montage-export-custom-bitrate {
   grid-column: 1 / -1;
   display: grid;
@@ -1913,9 +1943,9 @@ body.is-resizing-podcast-stage {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.montage-export-grid > .row-field,
-.montage-export-grid > label.row-field,
-.montage-export-grid > div.row-field {
+.montage-export-grid>.row-field,
+.montage-export-grid>label.row-field,
+.montage-export-grid>div.row-field {
   border: 1px solid color-mix(in srgb, var(--pod-border) 92%, transparent 8%);
   border-radius: 18px;
   background:
@@ -1926,7 +1956,7 @@ body.is-resizing-podcast-stage {
   padding: 10px 12px 12px;
 }
 
-.montage-export-grid .row-field > span:first-child {
+.montage-export-grid .row-field>span:first-child {
   font-size: 12px;
   color: var(--pod-muted);
   letter-spacing: 0.02em;
@@ -2072,7 +2102,7 @@ body.is-resizing-podcast-stage {
   border: 1px solid color-mix(in srgb, var(--pod-border) 74%, transparent 26%);
   background:
     linear-gradient(180deg, rgba(2, 6, 23, 0.48), rgba(2, 6, 23, 0.66)),
-    repeating-linear-gradient(135deg, rgba(255,255,255,0.02) 0 12px, rgba(255,255,255,0.00) 12px 24px);
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0 12px, rgba(255, 255, 255, 0.00) 12px 24px);
   min-height: 286px;
   display: flex;
   flex-direction: column;
@@ -2131,6 +2161,11 @@ body.is-resizing-podcast-stage {
 #montageExportPreviewOverlay {
   pointer-events: none;
   z-index: 10;
+}
+
+#montageExportStylizedTextOverlay {
+  pointer-events: none;
+  z-index: 9;
 }
 
 .montage-export-preview-stage img {
@@ -2241,7 +2276,9 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes montage-export-spin {
-  to { transform: scale(1) rotate(360deg); }
+  to {
+    transform: scale(1) rotate(360deg);
+  }
 }
 
 .montage-export-status-text {
@@ -2269,12 +2306,10 @@ body.is-resizing-podcast-stage {
   height: 100%;
   width: var(--montage-export-progress, 42%);
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--pod-accent) 62%, #38bdf8 38%) 0%,
-    color-mix(in srgb, #38bdf8 56%, var(--pod-accent) 44%) 50%,
-    color-mix(in srgb, var(--pod-accent) 62%, #38bdf8 38%) 100%
-  );
+  background: linear-gradient(90deg,
+      color-mix(in srgb, var(--pod-accent) 62%, #38bdf8 38%) 0%,
+      color-mix(in srgb, #38bdf8 56%, var(--pod-accent) 44%) 50%,
+      color-mix(in srgb, var(--pod-accent) 62%, #38bdf8 38%) 100%);
   transform: none;
   transition: width 220ms ease;
 }
@@ -2291,9 +2326,17 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes montage-export-indeterminate {
-  0% { transform: translateX(-120%); }
-  50% { transform: translateX(60%); }
-  100% { transform: translateX(260%); }
+  0% {
+    transform: translateX(-120%);
+  }
+
+  50% {
+    transform: translateX(60%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 .montage-export-actions {
@@ -2376,7 +2419,7 @@ body.is-resizing-podcast-stage {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.timeline-clip-duration-panel .row-field > span:first-child {
+.timeline-clip-duration-panel .row-field>span:first-child {
   color: var(--pod-muted);
 }
 
@@ -2458,23 +2501,23 @@ body.is-resizing-podcast-stage {
 .podcast-studio-inspector-collapsed-handle {
   position: absolute;
   top: 18px;
-  right: 0;
-  transform: translateX(50%);
-  width: 28px;
-  height: 56px;
+  right: 10px;
+  transform: none;
+  width: 32px;
+  height: 64px;
   border: 1px solid color-mix(in srgb, var(--pod-border) 88%, transparent 12%);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--pod-surface) 96%, #0f172a 4%);
+  background: color-mix(in srgb, var(--pod-surface) 98%, #0f172a 2%);
   color: var(--pod-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+  box-shadow: -4px 10px 25px rgba(15, 23, 42, 0.15);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease, border-color 0.18s ease;
-  z-index: 3;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 2000;
 }
 
 .podcast-studio-inspector-collapsed-handle:hover,
@@ -2491,7 +2534,7 @@ body.is-resizing-podcast-stage {
 #podcastVideoShell.floating-panel-card {
   overflow-x: hidden;
   overflow-y: visible;
-  
+
 }
 
 #podcastVideoShell.floating-panel-card::-webkit-scrollbar {
@@ -2508,6 +2551,13 @@ body.is-resizing-podcast-stage {
   overflow: visible;
   padding-right: 12px;
   align-content: start;
+}
+
+#podcastActiveSpeakerVideoAlt {
+  display: block;
+  margin-inline: auto;
+  justify-self: center;
+  align-self: center;
 }
 
 .floating-panel-head {
@@ -2587,7 +2637,7 @@ body.is-resizing-podcast-stage {
   height: 10px;
 }
 
-#podcastVideoShell .floating-panel-head .composer-switch input:checked ~ .composer-switch-track .composer-switch-thumb {
+#podcastVideoShell .floating-panel-head .composer-switch input:checked~.composer-switch-track .composer-switch-thumb {
   transform: translateX(14px);
 }
 
@@ -2713,8 +2763,15 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes activity-fade-in {
-  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes podcast-loader-ripple {
@@ -2722,9 +2779,11 @@ body.is-resizing-podcast-stage {
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.72);
   }
+
   18% {
     opacity: 0.95;
   }
+
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(3.7);
@@ -2732,9 +2791,12 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes podcast-loader-float {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0);
   }
+
   50% {
     transform: translateY(-8px);
   }
@@ -2751,26 +2813,28 @@ body.is-resizing-podcast-stage {
 }
 
 .podcast-video-stage {
-  position: relative;
-  border: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
-  border-radius: 16px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: visible;
   display: grid;
-  grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
-  align-items: stretch;
-  gap: 12px;
-  padding: 10px 10px 18px;
-  width: 100%;
-  max-width: 100%;
-  --pod-stage-max-height-base: clamp(220px, 42vh, 560px);
-  --pod-stage-max-height: var(--pod-stage-user-max-height, var(--pod-stage-max-height-base));
-  max-height: calc(var(--pod-stage-max-height) + 56px);
-  background: radial-gradient(circle at 12% 10%, color-mix(in srgb, var(--pod-accent) 20%, transparent 80%) 0%, transparent 46%),
-    radial-gradient(circle at 85% 80%, color-mix(in srgb, #38bdf8 14%, transparent 86%) 0%, transparent 50%),
-    color-mix(in srgb, var(--pod-surface) 86%, #020617 14%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 16px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+  box-shadow: none;
+  height: auto;
+}
+
+/* Cuando el usuario redimensiona, el max-height del stage
+   lo controla directamente el preview vía --pod-stage-max-height */
+.podcast-video-stage.is-user-resized {
+  max-height: none;
+  transition: none;
+}
+
+.podcast-video-stage.is-library-collapsed {
+  grid-template-columns: 0px 1fr;
+  gap: 0;
 }
 
 #podcastVideoShell #podcastVideoStage {
@@ -2798,32 +2862,22 @@ body.is-resizing-podcast-stage {
 }
 
 .podcast-video-library {
-  min-width: 0;
-  min-height: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* Mismo max-height que el preview — ambas columnas encogen juntas con el resize */
+  max-height: var(--pod-stage-max-height);
+  border-right: 1px solid color-mix(in srgb, var(--pod-border) 60%, transparent 40%);
   padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--pod-border) 72%, transparent 28%);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--pod-surface) 92%, #0b1020 8%);
+  gap: 8px;
+  align-self: stretch;
   overflow: hidden;
-}
-
-.podcast-video-stage.is-library-collapsed {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .podcast-video-stage.is-library-collapsed .podcast-video-library {
-  position: absolute;
-  inline-size: 0;
-  min-inline-size: 0;
-  max-inline-size: 0;
-  padding: 0;
-  border: 0;
+  width: 0 !important;
   opacity: 0;
   pointer-events: none;
-  overflow: hidden;
 }
 
 .podcast-video-library-head-actions {
@@ -2832,38 +2886,44 @@ body.is-resizing-podcast-stage {
   gap: 6px;
 }
 
+
+
 .podcast-video-library-collapsed-handle {
   position: absolute;
-  left: 8px;
-  top: 50%;
-  z-index: 7;
-  width: 26px;
-  height: 54px;
-  border: 1px solid color-mix(in srgb, var(--pod-border) 78%, transparent 22%);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--pod-surface) 92%, #020617 8%);
-  color: var(--pod-text);
+  top: 18px;
+  left: 10px;
+  transform: none;
+  width: 32px;
+  height: 64px;
+  border: 1px solid color-mix(in srgb, var(--pod-border) 88%, transparent 12%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pod-surface) 98%, #0f172a 2%);
+  color: var(--pod-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 4px 10px 25px rgba(15, 23, 42, 0.15);
   cursor: pointer;
+  z-index: 2000;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity 0.16s ease, background 0.16s ease;
 }
 
-.podcast-video-stage:hover .podcast-video-library-collapsed-handle,
-.podcast-video-stage:focus-within .podcast-video-library-collapsed-handle,
-.podcast-video-stage.is-library-collapsed .podcast-video-library-collapsed-handle {
-  opacity: 0.96;
+/* Cuando está colapsada explícitamente */
+.podcast-video-shell.is-library-collapsed .podcast-video-library-collapsed-handle {
+  opacity: 1;
   pointer-events: auto;
 }
 
 .podcast-video-library-collapsed-handle:hover {
-  background: color-mix(in srgb, var(--pod-accent) 20%, var(--pod-surface) 80%);
+  color: var(--pod-accent);
+  background: color-mix(in srgb, var(--pod-accent) 4%, var(--pod-surface) 96%);
 }
 
 .podcast-video-library-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 172px auto;
+  grid-template-columns: minmax(0, 1fr) 110px auto;
   gap: 8px;
   align-items: center;
 }
@@ -2883,9 +2943,9 @@ body.is-resizing-podcast-stage {
 }
 
 .podcast-scene-library-color-filter {
-  width: 172px;
-  min-width: 172px;
-  max-width: 172px;
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
   justify-self: end;
 }
 
@@ -2895,20 +2955,28 @@ body.is-resizing-podcast-stage {
 
 .podcast-video-library-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pod-muted);
+  font-weight: 600;
+  margin: 2px 0 -4px;
 }
 
 .podcast-video-library-head strong {
-  display: block;
-  font-size: 15px;
-  color: var(--pod-text);
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
 }
 
 .podcast-video-library-head span,
 .podcast-video-library-toolbar {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--pod-muted);
 }
 
@@ -3024,17 +3092,11 @@ body.is-resizing-podcast-stage {
 
 .podcast-scene-library-meta,
 .podcast-scene-library-copy p {
-  font-size: 12px;
-  color: var(--pod-muted);
-  margin: 0;
+  display: none;
 }
 
 .podcast-scene-library-copy p {
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: none;
 }
 
 .podcast-scene-library-actions-portal {
@@ -3124,7 +3186,7 @@ body.is-resizing-podcast-stage {
 }
 
 .podcast-video-stage.is-user-resized .podcast-video-preview {
-  min-height: clamp(260px, 34vh, 560px);
+  min-height: clamp(220px, 28vh, 560px);
 }
 
 .podcast-video-preview-shell {
@@ -3133,7 +3195,6 @@ body.is-resizing-podcast-stage {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding-bottom: 10px;
   position: relative;
   z-index: 1;
 }
@@ -3146,13 +3207,14 @@ body.is-resizing-podcast-stage {
   border: 0;
   border-radius: 10px;
   background: color-mix(in srgb, #0f172a 46%, transparent 54%);
-  box-shadow: 0 0 0 1px color-mix(in srgb, rgba(255,255,255,0.22) 60%, transparent 40%) inset;
+  box-shadow: 0 0 0 1px color-mix(in srgb, rgba(255, 255, 255, 0.22) 60%, transparent 40%) inset;
   cursor: ns-resize;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-2px);
   transition: opacity 0.16s ease, transform 0.16s ease, background 0.16s ease;
-  z-index: 2;
+  z-index: 2000;
+  /* Aseguramos que esté por encima de la pestaña lateral si coinciden */
 }
 
 .podcast-stage-resize-handle::before {
@@ -3161,7 +3223,7 @@ body.is-resizing-podcast-stage {
   left: 12px;
   right: 12px;
   top: 8px;
-  border-top: 2px solid color-mix(in srgb, rgba(255,255,255,0.72) 68%, transparent 32%);
+  border-top: 2px solid color-mix(in srgb, rgba(255, 255, 255, 0.72) 68%, transparent 32%);
   border-radius: 999px;
 }
 
@@ -3183,10 +3245,12 @@ body.is-resizing-podcast-stage {
 
 .podcast-video-preview {
   position: relative;
+  --pod-scene-media-scale: 1;
   width: 100%;
   aspect-ratio: var(--pod-stage-aspect, 16 / 9);
   min-height: 0;
   height: auto;
+  /* Controlado por JS resize via --pod-stage-max-height en el shell */
   max-height: var(--pod-stage-max-height);
   max-width: calc(var(--pod-stage-max-height) * var(--pod-stage-aspect-w, 16) / var(--pod-stage-aspect-h, 9));
   margin-inline: auto;
@@ -3198,21 +3262,75 @@ body.is-resizing-podcast-stage {
   transition: transform 0.22s ease;
 }
 
-.podcast-preview-add-onscreen-text-btn {
+.podcast-stylized-text-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.podcast-preview-scene-zoom-controls {
   position: absolute;
   top: 10px;
   left: 10px;
-  z-index: 6;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.podcast-preview-add-stylized-text-btn {
+  /* position: absolute; */
+  /* top: 10px; */
+  /* left: 10px; */
+  z-index: 11;
   width: 34px;
   height: 34px;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, #0b1222 76%, var(--pod-surface) 24%);
-  border: 1px solid color-mix(in srgb, var(--pod-border) 70%, transparent 30%);
-  color: color-mix(in srgb, var(--pod-text) 86%, #ffffff 14%);
-  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.22);
+  background: color-mix(in srgb, #0b1222 85%, var(--pod-surface) 15%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.podcast-preview-add-stylized-text-btn:hover {
+  background: var(--pod-accent);
+  transform: scale(1.05);
+}
+
+/* removed redundant declaration */
+
+.podcast-preview-scene-zoom-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, #0b1222 85%, var(--pod-surface) 15%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.podcast-preview-scene-zoom-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pod-accent) 74%, #38bdf8 26%);
+  transform: scale(1.05);
+}
+
+.podcast-preview-scene-zoom-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .podcast-preview-add-onscreen-text-btn:hover {
@@ -3245,14 +3363,14 @@ body.is-resizing-podcast-stage {
 .podcast-on-screen-text-content {
   --pod-onscreen-text-preset-shadow:
     0 3px 14px rgba(2, 6, 23, 0.24);
-  --pod-onscreen-text-user-shadow: none;
-  --pod-onscreen-text-stroke-shadow: none;
+  --pod-onscreen-text-user-shadow: 0 0 0 transparent;
+  --pod-onscreen-text-stroke-shadow: 0 0 0 transparent;
   --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
-  max-width: min(96%, 1400px);
+  max-width: min(88%, 1000px);
   position: absolute;
-  left: var(--pod-onscreen-text-x, 21%);
-  top: var(--pod-onscreen-text-y, 72%);
-  transform: none;
+  left: var(--pod-onscreen-text-x, 50%);
+  top: var(--pod-onscreen-text-y, 92%);
+  transform: translate(-50%, -100%);
   display: block;
   box-sizing: border-box;
   padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
@@ -3383,10 +3501,21 @@ body.is-resizing-podcast-stage {
   bottom: -8px;
 }
 
-.podcast-onscreen-resize-handle.is-n { top: -8px; }
-.podcast-onscreen-resize-handle.is-s { bottom: -8px; }
-.podcast-onscreen-resize-handle.is-e { right: -8px; }
-.podcast-onscreen-resize-handle.is-w { left: -8px; }
+.podcast-onscreen-resize-handle.is-n {
+  top: -8px;
+}
+
+.podcast-onscreen-resize-handle.is-s {
+  bottom: -8px;
+}
+
+.podcast-onscreen-resize-handle.is-e {
+  right: -8px;
+}
+
+.podcast-onscreen-resize-handle.is-w {
+  left: -8px;
+}
 
 .podcast-onscreen-resize-handle.is-e,
 .podcast-onscreen-resize-handle.is-w {
@@ -3505,11 +3634,9 @@ body.is-resizing-podcast-stage {
   height: 44%;
   opacity: 0.24;
   background:
-    repeating-linear-gradient(
-      90deg,
+    repeating-linear-gradient(90deg,
       color-mix(in srgb, var(--pod-accent) 78%, #67e8f9 22%) 0 6px,
-      transparent 6px 12px
-    );
+      transparent 6px 12px);
   transform: translateY(12px) scaleY(0.32);
   transform-origin: center bottom;
   transition: transform 0.18s ease, opacity 0.18s ease;
@@ -3522,8 +3649,13 @@ body.is-resizing-podcast-stage {
 }
 
 @keyframes podcast-wave-drift {
-  0% { background-position: 0 0; }
-  100% { background-position: 56px 0; }
+  0% {
+    background-position: 0 0;
+  }
+
+  100% {
+    background-position: 56px 0;
+  }
 }
 
 .podcast-video-speaker-card {
@@ -3594,6 +3726,10 @@ body.is-resizing-podcast-stage {
   will-change: opacity, transform, filter;
 }
 
+.podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop) {
+  scale: var(--pod-scene-media-scale, 1);
+}
+
 .podcast-active-speaker-video-backdrop {
   object-fit: cover;
   filter: blur(26px) saturate(1.08);
@@ -3619,6 +3755,10 @@ body.is-resizing-podcast-stage {
 
 .podcast-active-speaker-video-alt {
   z-index: 1;
+}
+
+.montage-export-preview-container {
+  --pod-scene-media-scale: 1;
 }
 
 .podcast-video-preview.is-transitioning .podcast-video-wave {
@@ -3863,11 +4003,11 @@ body.is-resizing-podcast-stage {
   align-items: stretch;
 }
 
-.podcast-video-timeline-canvas.is-normal .podcast-normal-onscreen-text-track-row > .podcast-video-track-label {
+.podcast-video-timeline-canvas.is-normal .podcast-normal-onscreen-text-track-row>.podcast-video-track-label {
   display: none;
 }
 
-.podcast-video-timeline-canvas.is-normal .podcast-normal-onscreen-text-track-row > .podcast-video-track-lane {
+.podcast-video-timeline-canvas.is-normal .podcast-normal-onscreen-text-track-row>.podcast-video-track-lane {
   border-radius: 16px;
 }
 
@@ -3899,12 +4039,10 @@ body.podcast-timeline-dragging .podcast-video-track-drop-zone {
   display: grid;
   gap: 8px;
   padding-top: 10px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, rgba(2, 6, 23, 0) 0%, transparent 100%) 0%,
-    color-mix(in srgb, var(--pod-surface) 90%, #0b1020 10%) 18%,
-    color-mix(in srgb, var(--pod-surface) 92%, #0b1020 8%) 100%
-  );
+  background: linear-gradient(180deg,
+      color-mix(in srgb, rgba(2, 6, 23, 0) 0%, transparent 100%) 0%,
+      color-mix(in srgb, var(--pod-surface) 90%, #0b1020 10%) 18%,
+      color-mix(in srgb, var(--pod-surface) 92%, #0b1020 8%) 100%);
   border-top: 1px solid color-mix(in srgb, var(--pod-border) 82%, transparent 18%);
 }
 
@@ -3919,8 +4057,13 @@ body.podcast-timeline-dragging .podcast-video-track-drop-zone {
 }
 
 @media (max-width: 920px) {
-  .podcast-video-stage.is-library-collapsed {
-    grid-template-columns: 1fr;
+  .podcast-video-shell.is-library-collapsed .podcast-video-library {
+    width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .podcast-video-library-collapsed-handle {
@@ -3955,7 +4098,7 @@ body.podcast-timeline-dragging .podcast-video-track-drop-zone {
   width: var(--pod-track-label-width);
   min-width: var(--pod-track-label-width);
   max-width: var(--pod-track-label-width);
-  height: 100%;
+  height: 16vh;
   border: 1px solid var(--pod-border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--pod-surface) 94%, #0b1020 6%);
@@ -4061,7 +4204,7 @@ body.podcast-timeline-dragging .podcast-video-track-drop-zone {
 .podcast-onscreen-text-timeline-clip {
   position: absolute;
   top: 10px;
-  height: 86px;
+  height: 13vh;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--pod-border) 74%, transparent 26%);
   background:
@@ -4127,6 +4270,8 @@ body.podcast-timeline-dragging .podcast-video-track-drop-zone {
   overflow: hidden;
   word-break: break-word;
   line-height: 1.06;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .podcast-onscreen-text-clip-meta {
@@ -4192,6 +4337,7 @@ body.podcast-timeline-dragging .podcast-track-reorder-handle {
 .podcast-video-track-lane {
   position: relative;
   min-height: 96px;
+  height: 16vh;
   padding-bottom: 10px;
   border: 1px solid color-mix(in srgb, var(--pod-border) 76%, transparent 24%);
   border-radius: 10px;
@@ -4250,6 +4396,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .podcast-audio-track-lane.is-locked .podcast-audio-timeline-chip {
   opacity: 0.92;
+  height: 13vh;
 }
 
 .podcast-audio-track-lane.is-locked .podcast-audio-timeline-chip.is-active,
@@ -4301,7 +4448,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   padding-right: 38px;
 }
 
-.podcast-montage-audio-chip > span {
+.podcast-montage-audio-chip>span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4337,6 +4484,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   border-color: color-mix(in srgb, #16a34a 52%, var(--pod-border) 48%);
   background: color-mix(in srgb, #dcfce7 72%, var(--pod-surface) 28%);
   color: #14532d;
+  height: 13vh;
 }
 
 .podcast-montage-audio-chip.is-live {
@@ -4440,7 +4588,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   border-style: dashed;
 }
 
-.podcast-audio-timeline-chip > span {
+.podcast-audio-timeline-chip>span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4451,7 +4599,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   height: 22px;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, rgba(255,255,255,0.84) 78%, transparent 22%);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.84) 78%, transparent 22%);
   color: currentColor;
   display: inline-flex;
   align-items: center;
@@ -4461,7 +4609,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 }
 
 .podcast-audio-loop-mute-btn:hover {
-  background: color-mix(in srgb, rgba(255,255,255,0.92) 88%, transparent 12%);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.92) 88%, transparent 12%);
 }
 
 .podcast-audio-timeline-chip:hover .podcast-video-clip-handle,
@@ -4482,40 +4630,32 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   inset: 0;
   border-radius: inherit;
   background-image:
-    repeating-linear-gradient(
-      90deg,
+    repeating-linear-gradient(90deg,
       color-mix(in srgb, var(--pod-border) 34%, transparent 66%) 0,
       color-mix(in srgb, var(--pod-border) 34%, transparent 66%) 1px,
       transparent 1px,
-      transparent calc(var(--pod-timeline-px-per-sec) / 2)
-    ),
-    repeating-linear-gradient(
-      90deg,
+      transparent calc(var(--pod-timeline-px-per-sec) / 2)),
+    repeating-linear-gradient(90deg,
       color-mix(in srgb, var(--pod-border) 52%, transparent 48%) 0,
       color-mix(in srgb, var(--pod-border) 52%, transparent 48%) 1px,
       transparent 1px,
-      transparent var(--pod-timeline-px-per-sec)
-    );
+      transparent var(--pod-timeline-px-per-sec));
   pointer-events: none;
 }
 
 .podcast-montage-audio-lane::before,
 .podcast-audio-track-lane.is-locked::before {
   background-image:
-    repeating-linear-gradient(
-      90deg,
+    repeating-linear-gradient(90deg,
       rgba(15, 23, 42, 0.10) 0,
       rgba(15, 23, 42, 0.10) 1px,
       transparent 1px,
-      transparent calc(var(--pod-timeline-px-per-sec) / 2)
-    ),
-    repeating-linear-gradient(
-      90deg,
+      transparent calc(var(--pod-timeline-px-per-sec) / 2)),
+    repeating-linear-gradient(90deg,
       rgba(15, 23, 42, 0.14) 0,
       rgba(15, 23, 42, 0.14) 1px,
       transparent 1px,
-      transparent var(--pod-timeline-px-per-sec)
-    );
+      transparent var(--pod-timeline-px-per-sec));
   opacity: 0.9;
 }
 
@@ -4581,20 +4721,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-video-timeline-clip.is-overlap-fade {
   /* Visual fade en la zona de intersección (timeline): al encimar clips,
      A se desvanece al final y B se revela al inicio. */
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 var(--clip-fade-in, 0px),
-    #000 calc(100% - var(--clip-fade-out, 0px)),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 var(--clip-fade-in, 0px),
-    #000 calc(100% - var(--clip-fade-out, 0px)),
-    transparent 100%
-  );
+  -webkit-mask-image: linear-gradient(to right,
+      transparent 0,
+      #000 var(--clip-fade-in, 0px),
+      #000 calc(100% - var(--clip-fade-out, 0px)),
+      transparent 100%);
+  mask-image: linear-gradient(to right,
+      transparent 0,
+      #000 var(--clip-fade-in, 0px),
+      #000 calc(100% - var(--clip-fade-out, 0px)),
+      transparent 100%);
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%;
@@ -4645,7 +4781,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   cursor: progress;
 }
 
-.podcast-video-clip-body.is-generating > :not(.podcast-video-clip-loading) {
+.podcast-video-clip-body.is-generating> :not(.podcast-video-clip-loading) {
   opacity: 0.46;
 }
 
@@ -4670,6 +4806,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   background: color-mix(in srgb, #f59e0b 22%, transparent 78%) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 35%, transparent 65%);
 }
+
 .podcast-video-clip-body.has-all-proposals-realized {
   background: color-mix(in srgb, #22c55e 25%, transparent 75%) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #22c55e 40%, transparent 60%);
@@ -4893,6 +5030,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     height: 24px;
     border-radius: 8px;
   }
+
   .podcast-video-clip-actions {
     gap: 2px;
   }
@@ -4902,14 +5040,17 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   .podcast-video-clip-preview {
     display: none;
   }
+
   .podcast-video-clip-body {
     grid-template-columns: 30px 1fr;
     padding: 4px 8px;
   }
+
   .podcast-video-clip-actions {
     grid-column: 1;
     justify-self: start;
   }
+
   .podcast-video-clip-meta {
     grid-column: 2;
   }
@@ -5055,6 +5196,28 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   display: block;
 }
 
+.podcast-scene-stylized-text-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 7;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.92);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
 .podcast-video-scene-preview.is-generating,
 .podcast-video-clip-preview.is-generating {
   pointer-events: none;
@@ -5144,6 +5307,9 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 }
 
 .studio-generate-toolbar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 2px 0 -4px;
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -5338,6 +5504,19 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   flex-wrap: nowrap;
 }
 
+/* Cuando is-middle está fuera del transport (sobre el studio-layout) */
+.podcast-video-transport-group.is-middle.is-floating-toolbar {
+  position: static;
+  transform: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--pod-border);
+  flex-wrap: wrap;
+}
+
 .podcast-video-transport-group.is-right {
   justify-self: end;
 }
@@ -5372,7 +5551,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   max-width: 100%;
 }
 
-#podcastVideoShell.is-video-educativo .podcast-video-track-row:not(.podcast-audio-track-row):not(.podcast-montage-audio-subtrack-row):not(.podcast-onscreen-text-track-row):not(.is-educational-scene-track):not([data-track-id="on-screen-text"]) > .podcast-video-track-label {
+#podcastVideoShell.is-video-educativo .podcast-video-track-row:not(.podcast-audio-track-row):not(.podcast-montage-audio-subtrack-row):not(.podcast-onscreen-text-track-row):not(.is-educational-scene-track):not([data-track-id="on-screen-text"])>.podcast-video-track-label {
   display: none;
 }
 
@@ -5443,12 +5622,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-.podcast-studio-inspector-toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-}
+
 
 .podcast-studio-inspector-resize-handle {
   display: grid;
@@ -5963,7 +6137,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   overflow: auto;
 }
 
-.podcast-modal-body > p {
+.podcast-modal-body>p {
   margin: 0 0 0.65rem;
   color: color-mix(in srgb, var(--pod-text) 80%, transparent 20%);
   font-size: 0.9rem;
@@ -6158,11 +6332,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   .podcast-portrait-viewer {
     padding: 14px;
   }
+
   .podcast-portrait-viewer-card {
     width: min(1040px, calc(100vw - 20px));
     max-height: calc(100vh - 20px);
     padding: 12px;
   }
+
   .podcast-portrait-viewer-stage {
     padding: 10px;
     max-height: calc(100vh - 160px);
@@ -6218,7 +6394,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   gap: 4px;
 }
 
-.compact-field span, 
+.compact-field span,
 .full-field span,
 .compact-slider span {
   font-size: 11px;
@@ -6321,6 +6497,8 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   padding: 12px;
   display: grid;
   gap: 10px;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .script-setup-panel {
@@ -6576,7 +6754,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   margin-top: 8px;
 }
 
-.timeline-clip-duration-continuity input[disabled] + span {
+.timeline-clip-duration-continuity input[disabled]+span {
   opacity: 0.66;
 }
 
@@ -7160,11 +7338,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 }
 
 @keyframes podcast-pause-blink {
+
   0%,
   100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.42;
     transform: scale(0.94);
@@ -7617,4 +7797,111 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     grid-column: auto;
     padding-top: 0;
   }
+}
+
+/* REEL / SHORT MODE */
+.is-reel-mode {
+  --pod-stage-aspect: 9 / 16 !important;
+  --pod-stage-aspect-w: 9 !important;
+  --pod-stage-aspect-h: 16 !important;
+  /* Aumentamos significativamente el tope de altura base para el modo Reel */
+  --pod-stage-max-height-base: clamp(600px, 90vh, 1600px) !important;
+}
+
+.podcast-video-shell.is-reel-mode .podcast-video-preview {
+  /* Usamos clamp para que la variable respete el mismo mínimo que el min-height, evitando deformación */
+  --effective-stage-h: clamp(450px, var(--pod-stage-max-height, 740px), 82vh);
+  height: var(--effective-stage-h) !important;
+  width: calc(var(--effective-stage-h) * 9 / 16) !important;
+  min-height: 450px !important;
+  aspect-ratio: 9 / 16 !important;
+  margin-inline: 0 !important;
+  /* box-shadow: 0 30px 70px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1); */
+  border-radius: 28px;
+  overflow: hidden;
+  position: relative;
+}
+
+.podcast-video-shell.is-reel-mode .podcast-video-stage {
+  max-height: none !important;
+  height: auto !important;
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-inline: 0 !important;
+  gap: 24px;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.podcast-video-shell.is-reel-mode .podcast-video-preview-shell {
+  flex: 1 !important;
+  width: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 40px;
+}
+
+
+
+.podcast-video-shell.is-reel-mode .podcast-active-speaker-video {
+  object-fit: cover !important;
+}
+
+.podcast-video-shell.is-reel-mode .podcast-video-speaker-card {
+  bottom: 30px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(320px, calc(100% - 60px)) !important;
+  padding: 12px 16px !important;
+  background: rgba(2, 6, 23, 0.76) !important;
+}
+
+/* En modo reel: stage a la izquierda, tracks a la derecha. El transport se mantiene arriba (fuera de este grid) */
+.podcast-video-shell.is-reel-mode .podcast-studio-main {
+  grid-template-columns: auto 1fr !important;
+  grid-template-rows: auto !important;
+  grid-template-areas: "stage tracks" !important;
+  align-items: start !important;
+  gap: 24px !important;
+}
+
+.podcast-video-shell.is-reel-mode #podcastVideoStage {
+  grid-area: stage !important;
+  width: auto !important;
+}
+
+/* El transport ahora es externo al grid de studio-main, por lo que no necesita grid-area aquí */
+.podcast-video-shell.is-reel-mode .podcast-video-transport {
+  width: 100% !important;
+  margin-bottom: 16px !important;
+}
+
+.podcast-video-shell.is-reel-mode .podcast-studio-tracks {
+  grid-area: tracks !important;
+  align-self: stretch !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* Home Player Reel Mode */
+.player-stage.is-reel-mode {
+  aspect-ratio: 9 / 16 !important;
+  width: auto !important;
+  height: min(780px, 80vh) !important;
+  max-width: 90vw;
+  margin-inline: auto;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.player-stage.is-reel-mode .player-video {
+  object-fit: cover !important;
 }

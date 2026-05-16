@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="runtime-config-loader.js" defer></script>
+  <script src="js/runtime-config-loader.js" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title></title>
   <link href="vendor/boxicons/boxicons.min.css" rel="stylesheet">
@@ -25,8 +25,59 @@
   <link rel="stylesheet" href="home.css?v=2026-1.0.1.36">
   <link rel="stylesheet" href="chatbot.css?v=2026-1.0.1.36">
   <link rel="stylesheet" href="header.css?v=2026-1.0.1.36">
+  <style>
+    /* Ken Burns Effects */
+    @keyframes ken-burns-pan-left { from { transform: scale(1.2) translateX(-10%); } to { transform: scale(1.2) translateX(10%); } }
+    @keyframes ken-burns-pan-right { from { transform: scale(1.2) translateX(10%); } to { transform: scale(1.2) translateX(-10%); } }
+    @keyframes ken-burns-pan-up { from { transform: scale(1.2) translateY(10%); } to { transform: scale(1.2) translateY(-10%); } }
+    @keyframes ken-burns-pan-down { from { transform: scale(1.2) translateY(-10%); } to { transform: scale(1.2) translateY(10%); } }
+    @keyframes ken-burns-zoom-in { from { transform: scale(1); } to { transform: scale(1.3); } }
+    @keyframes ken-burns-zoom-out { from { transform: scale(1.3); } to { transform: scale(1); } }
+
+    .ken-burns-pan-left { animation: ken-burns-pan-left var(--kb-duration, 10s) ease-in-out infinite alternate; }
+    .ken-burns-pan-right { animation: ken-burns-pan-right var(--kb-duration, 10s) ease-in-out infinite alternate; }
+    .ken-burns-pan-up { animation: ken-burns-pan-up var(--kb-duration, 10s) ease-in-out infinite alternate; }
+    .ken-burns-pan-down { animation: ken-burns-pan-down var(--kb-duration, 10s) ease-in-out infinite alternate; }
+    .ken-burns-zoom-in { animation: ken-burns-zoom-in var(--kb-duration, 10s) ease-in-out infinite alternate; }
+    .ken-burns-zoom-out { animation: ken-burns-zoom-out var(--kb-duration, 10s) ease-in-out infinite alternate; }
+
+    .speed-1 { --kb-duration: 20s; }
+    .speed-2 { --kb-duration: 18s; }
+    .speed-3 { --kb-duration: 16s; }
+    .speed-4 { --kb-duration: 14s; }
+    .speed-5 { --kb-duration: 12s; }
+    .speed-6 { --kb-duration: 10s; }
+    .speed-7 { --kb-duration: 8s; }
+    .speed-8 { --kb-duration: 6s; }
+    .speed-9 { --kb-duration: 4s; }
+    .speed-10 { --kb-duration: 2s; }
+
+    .podcast-stylized-text-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    
+    .player-stage img.podcast-active-speaker-image {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .player-stage img.podcast-active-speaker-image.is-visible {
+        opacity: 1;
+    }
+  </style>
   <script src="vendor/chartjs/chart.umd.js"></script>
-  <script src="html-docx.js"></script>
+  <script src="js/html-docx.js"></script>
 
 </head>
 
@@ -457,6 +508,8 @@
             <video id="playerVideoA" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
             <video id="podcastActiveSpeakerBackdropVideoAlt" class="player-video player-video-backdrop" playsinline preload="auto" muted style="opacity: 0;"></video>
             <video id="playerVideoB" class="player-video" playsinline preload="auto" muted style="opacity: 0;"></video>
+            <img id="podcastActiveSpeakerImage" class="podcast-active-speaker-image" alt="Scene image" hidden crossorigin="anonymous">
+            <div id="podcastStylizedTextOverlay" class="podcast-stylized-text-overlay"></div>
             <div id="playerOverlay" class="player-overlay"></div>
           <style>
             .player-stage {
@@ -529,8 +582,8 @@
 
             .podcast-on-screen-text-content {
               --pod-onscreen-text-preset-shadow: 0 3px 14px rgba(2, 6, 23, 0.24);
-              --pod-onscreen-text-user-shadow: none;
-              --pod-onscreen-text-stroke-shadow: none;
+              --pod-onscreen-text-user-shadow: 0 0 0 transparent;
+              --pod-onscreen-text-stroke-shadow: 0 0 0 transparent;
               --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.88);
               max-width: min(96%, 1400px);
               position: absolute;
@@ -875,12 +928,15 @@
   </div>
 
 
-  <script src="on-screen-text-render-spec.js"></script>
-  <script type="module" src="podcaster-playback-controller.js"></script>
-  <script type="module" src="home.js?v=2026-1.0.1.46"></script>
-  <script type="module" src="chromeLayout.js"></script>
-  <script type="module" src="sidebar.js"></script>
-  <script type="module" src="chatbot.js"></script>
+  <script src="js/on-screen-text-render-spec.js"></script>
+  <script type="module" src="podcaster/podcaster-playback-controller.js"></script>
+  <script type="module" src="podcaster/podcaster-reels.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script type="module" src="podcaster/podcaster-media-editor.js?v=1.0.0"></script>
+  <script type="module" src="js/home.js?v=2026-1.0.1.46"></script>
+  <script type="module" src="js/chromeLayout.js"></script>
+  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="js/chatbot.js"></script>
 
   <!-- Bootstrap JS -->
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
@@ -890,7 +946,7 @@
 
   <script src="vendor/vanilla-tilt/vanilla-tilt.min.js"></script>
 
-  <script src="update-banner-loader.js" defer></script>
+  <script src="js/update-banner-loader.js" defer></script>
 </body>
 
 </html>

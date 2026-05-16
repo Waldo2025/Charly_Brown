@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 
-const jsSource = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const jsSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("../public/podcaster.html", import.meta.url), "utf8");
-const playbackSource = readFileSync(new URL("../public/podcaster.playback.js", import.meta.url), "utf8");
+const playbackSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
 if (!/id="timelineClipBackgroundVolumeRange"/.test(htmlSource) || !/id="timelineClipBackgroundVolumeNumber"/.test(htmlSource)) {
   throw new Error("El modal debe exponer controles para volumen de audio de fondo por escena.");
@@ -28,8 +28,10 @@ if (!/buildTrackBackgroundSegments/.test(jsSource) || !/backgroundSegments: \[\.
   throw new Error("El export debe incluir segmentos de fondo por escena en audioTimeline.");
 }
 
-if (!/resolveSceneBackgroundMusicVolumePctAtMs\(currentMs, panelVolumePct, mseRuntimeEntries\)/.test(playbackSource)) {
-  throw new Error("El playback debe usar el override de fondo de la escena activa.");
+if (!/const mix = entry\?\.rowId \? this\.deps\?\.resolveTimelineClipMix\?\.\(session, entry\.rowId\) : null;/.test(playbackSource)
+  || !/const sceneBackgroundFactor = mix \? \(mix\.backgroundVolume \?\? 1\.0\) : 1\.0;/.test(playbackSource)
+  || !/const finalVolume = \(baseVolume \/ 100\) \* this\.backgroundDuckFactor \* sceneBackgroundFactor;/.test(playbackSource)) {
+  throw new Error("El playback vivo debe aplicar el override de fondo de la escena activa mediante resolveTimelineClipMix.");
 }
 
 console.log("Podcast scene background volume override OK.");

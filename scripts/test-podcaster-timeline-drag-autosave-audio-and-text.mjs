@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
 
@@ -20,20 +20,26 @@ assert.match(
 
 assert.match(
   source,
-  /function finalizeLinkedGeminiTimelineDrag\(options = \{\}\) \{[\s\S]*scheduleCloudAutosave\(\s*isOnScreenTextDrag\s*\?\s*"timeline-onscreen-text"\s*:\s*"timeline-gemini-audio"\s*\);[\s\S]*\}/,
-  "El cierre de drag Gemini/texto debe persistir una sola vez desde un helper común."
+  /function finalizeLinkedGeminiTimelineDrag\(options = \{\}\) \{[\s\S]*if \(PODCAST_SESSION_MANUAL_SAVE_ONLY !== true\) \{[\s\S]*persistSessions\(\);[\s\S]*sessionStore\.markDirty\(/,
+  "El cierre de drag Gemini/texto no debe persistir localmente cuando el editor está en modo guardado manual."
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
   /void flushCloudAutosaveNow\(\s*String\(getActiveSession\(\)\?\.id \|\| ""\)\.trim\(\),\s*isOnScreenTextDrag\s*\?\s*"timeline-onscreen-text"\s*:\s*"timeline-gemini-audio"\s*\);/,
-  "El cierre del drag Gemini/texto debe forzar flush inmediato a Firebase para no perder offsets al recargar."
+  "El cierre del drag Gemini/texto ya no debe forzar flush inmediato a Firebase."
 );
 
 assert.match(
   source,
-  /upsertPodcastVideoConfig\(\(nextCfg\) => \(\{[\s\S]*geminiDialogueTrack:[\s\S]*\}\), \{ autosave: false \}\);/,
-  "El drag en tiempo real del chip Gemini no debe disparar autosave genérico durante pointermove."
+  /upsertPodcastVideoConfig\(\(nextCfg\) => \(\{[\s\S]*geminiDialogueTrack:[\s\S]*\}\), \{ autosave: false, persist: false, recordHistory: false \}\);/,
+  "El drag en tiempo real del chip Gemini no debe disparar autosave ni snapshots de historial durante pointermove."
+);
+
+assert.match(
+  source,
+  /upsertPodcastVideoConfig\(\(cfg\) => \{[\s\S]*\[isText \? "timelineOnScreenTextClipsByRowId" : "timelineClipsByRowId"\]: nextClips[\s\S]*\}, \{ autosave: false, persist: false, recordHistory: false \}\);/m,
+  "El drag en tiempo real de escenas y texto no debe persistir ni registrar historial en cada frame."
 );
 
 assert.match(
@@ -42,4 +48,4 @@ assert.match(
   "La sincronización texto→Gemini durante el drag debe evitar autosave genérico."
 );
 
-console.log("Timeline drag autosave audio and text OK.");
+console.log("Timeline drag persists locally and avoids immediate cloud flush OK.");

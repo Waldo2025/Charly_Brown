@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const shared = readFileSync(new URL("../public/on-screen-text-render-spec.js", import.meta.url), "utf8");
-const controller = readFileSync(new URL("../public/podcaster-playback-controller.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 const home = readFileSync(new URL("../public/home.html", import.meta.url), "utf8");
 

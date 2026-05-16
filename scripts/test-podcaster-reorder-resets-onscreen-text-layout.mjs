@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!/const STUDIO_REORDER_ONSCREEN_TEXT_WIDTH_PCT = 0\.52;/.test(source)) {
   throw new Error("El reorder debe fijar un widthPct estándar para texto en pantalla.");

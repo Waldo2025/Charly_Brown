@@ -1,18 +1,18 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!/function hasExplicitMultiTrackTimeline\(session = null\) \{/.test(source)) {
   throw new Error("Debe existir un helper para detectar timelines multipista explicitos.");
 }
 
 if (!/const preserveTrackLayout = hasExplicitMultiTrackTimeline\(beforeSession\);/.test(source)
-  || !/const ordered = \(educationalVideoMode \|\| preserveTrackLayout\)/.test(source)
-  || !/trackId: \(educationalVideoMode && !preserveTrackLayout\) \? primaryTrackId : String\(clip\?\.trackId \|\| ""\)\.trim\(\)/.test(source)) {
+  || !/const ordered = \(educationalVideoMode \|\| preserveTrackLayout(?: \|\| isPodcast)?\)/.test(source)
+  || !/trackId: \(educationalVideoMode && !preserveTrackLayout\) \? primaryTrackId : String\(nextClip\?\.trackId \|\| ""\)\.trim\(\)/.test(source)) {
   throw new Error("El reorder no debe colapsar tracks explicitos en modo educativo.");
 }
 
-if (!/const nextSession = \{[\s\S]*timelineClipsByRowId: nextClips[\s\S]*\};[\s\S]*timelineTracks: ensureTimelineTracks\(nextSession, \{ persist: false \}\),/m.test(source)) {
+if (!/const nextBaseConfig = \{[\s\S]*timelineClipsByRowId: nextClips[\s\S]*\};[\s\S]*const nextSession = \{[\s\S]*podcastVideoConfig: nextBaseConfig[\s\S]*\};[\s\S]*nextBaseConfig\.timelineTracks = ensureTimelineTracks\(nextSession, \{ persist: false \}\);/m.test(source)) {
   throw new Error("El reorder debe reconstruir timelineTracks a partir del layout reordenado, no del snapshot anterior.");
 }
 

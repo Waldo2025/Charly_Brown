@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 const montageChipBlockMatch = source.match(
   /const buildMontageAudioSubtrackRowHtml = .*?const laneId = `montage-audio:\$\{trackId\}`;/s

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
-const controllerSource = readFileSync(new URL("../public/podcaster-playback-controller.js", import.meta.url), "utf8");
-const studioSource = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const controllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+const studioSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!/if \(session && this\.deps\?\.syncPodcastStudioRuntimeUi\) \{[\s\S]*?this\.deps\.syncPodcastStudioRuntimeUi\(session, activeRowId, speaker, \{\s*speaking: true,\s*lightweightInspector: true\s*\}\);/m.test(controllerSource)) {
   throw new Error("El playback del Studio debe usar la ruta runtime liviana en vez de setPodcastVideoRow pesado por escena.");

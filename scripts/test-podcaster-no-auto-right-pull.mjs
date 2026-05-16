@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 if (!/const STUDIO_REORDER_SUBTITLE_INSET_PX = 0;/.test(source)) {
   throw new Error("El inset automático de Gemini tras reorder debe ser 0.");
