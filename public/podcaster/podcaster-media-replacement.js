@@ -79,11 +79,9 @@ function buildSceneReplacementContext(rowId = "", extra = {}) {
 }
 
 function logSceneReplacement(step = "", rowId = "", details = {}) {
-    const context = buildSceneReplacementContext(rowId, details);
-    console.log(`[SceneReplacement] ${String(step || "").trim() || "event"}`, {
-        ...context,
-        ...details
-    });
+    void step;
+    void rowId;
+    void details;
 }
 
 function initFirebase() {
@@ -346,10 +344,6 @@ function initFilePond() {
                         }
                         if (els.confirmBtn) els.confirmBtn.style.display = 'inline-block';
                     } catch (err) {
-                        console.log("[SceneReplacement] upload:error", {
-                            ...buildSceneReplacementContext(currentEditingRowId),
-                            message: String(err?.message || "Upload failed").trim()
-                        });
                         error(err?.message || 'Upload failed');
                     }
                 })();
@@ -552,7 +546,14 @@ function setupEventListeners() {
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
             }
             
-            // 1. Local sync
+            // 1. Invalidate caches on the playback controller
+            if (typeof playbackController?.invalidateRowMediaCache === "function") {
+                playbackController.invalidateRowMediaCache(currentEditingRowId, session);
+            } else if (typeof playbackController?.invalidateRowAudioCache === "function") {
+                playbackController.invalidateRowAudioCache(currentEditingRowId);
+            }
+
+            // 2. Local sync
             if (typeof window.upsertActiveSession === "function") {
                 const now = new Date().toISOString();
                 window.upsertActiveSession((current) => {
@@ -637,11 +638,6 @@ function setupEventListeners() {
             if (els.modal) delete els.modal.dataset.rowId;
             els.modal.hidden = true;
             currentReplacementRequestMeta = { triggerSource: "unknown" };
-            console.log("[SceneReplacement] confirm:complete", {
-                ...buildSceneReplacementContext(persistedRowId, { session }),
-                persistedMediaUrl: mediaUrl,
-                persistedMediaType: mediaType
-            });
 
         } catch (err) {
             console.error('[MediaReplacement] Error saving replacement:', err);
@@ -824,10 +820,6 @@ async function openSceneVideoSelectorModal(rowId = "", options = {}) {
       }
     }
   } catch (error) {
-    console.log("[SceneReplacement] library:load-error", {
-      ...buildSceneReplacementContext(key, { session, triggerSource: currentReplacementRequestMeta.triggerSource }),
-      message: String(error?.message || "").trim()
-    });
     if (els.sceneVideoSelectorGeneratedGrid) {
       els.sceneVideoSelectorGeneratedGrid.innerHTML = `<div style="text-align: center; grid-column: 1 / -1; padding: 2rem; color: var(--error-color);">Error: ${escapeHtml(error.message)}</div>`;
     }

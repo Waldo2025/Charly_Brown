@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster-public-library.js", import.meta.url), "utf8");
 
 if (!/function insertLibrarySceneIntoSession\(item = null, options = \{\}\) \{/.test(source)) {
   throw new Error("Falta insertLibrarySceneIntoSession para validar insercion en track nuevo.");
 }
 
-if (!/if \(insertIntoNewTrack\) \{[\s\S]*assignedTrackId = makeId\("track"\);[\s\S]*nextTracks\.splice\([\s\S]*nextTracks = normalizeTimelineTracks\(nextTracks\);/m.test(source)) {
+if (!/if \(insertIntoNewTrack\) \{[\s\S]*assignedTrackId = (makeId\("track"\)|variantTrack\.id);[\s\S]*nextTracks\.splice\([\s\S]*nextTracks = (window\.)?normalizeTimelineTracks\(nextTracks\);/m.test(source)) {
   throw new Error("Insertar desde biblioteca en track nuevo debe crear y normalizar un track nuevo.");
 }
 
@@ -14,7 +14,7 @@ if (!/timelineViewMode:\s*insertIntoNewTrack\s*\?\s*"tracks"\s*:\s*\(String\(cfg
   throw new Error("Insertar en track nuevo debe forzar la vista timeline en modo tracks.");
 }
 
-if (!/setTimelineViewMode\("tracks"\);/.test(source)) {
+if (!/(window\.)?setTimelineViewMode\("tracks"\);/.test(source)) {
   throw new Error("La UI debe pasar a modo tracks tras insertar en track nuevo.");
 }
 

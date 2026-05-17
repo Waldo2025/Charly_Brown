@@ -2160,7 +2160,8 @@ function sanitizePodcasterSession(raw = {}) {
           .map((rowId) => clampText(rowId || "", 120))
           .filter((rowId) => rowIdSet.has(String(rowId || "").trim()))
       )).slice(0, 400)
-      : []
+      : [],
+    composerGenerationMode: String(rawStudioUiState?.composerGenerationMode || "").trim().toLowerCase() === "video" ? "video" : "script"
   };
   const podcastVideoConfig = {
     enabled: raw?.podcastVideoConfig?.enabled === true,

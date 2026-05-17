@@ -1,6 +1,11 @@
 
 import { authFetchJson, buildApiUrl } from "../js/api-client.js";
 
+const runtime = globalThis.PodcasterGenerationRuntime;
+if (!runtime || typeof runtime !== "object") {
+  throw new Error("PodcasterGenerationRuntime no está disponible. Revisa la carga de podcaster.js.");
+}
+
 // --- Constants ---
 const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 2;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
@@ -8,13 +13,22 @@ const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 // --- State ---
 const dialogueVideoGenerationTasks = new Map();
 const dialogueVideoGenerationPending = new Set();
-const dialogueAudioGenerationPending = new Set();
 const timelineSceneVideoGenerationPending = new Set();
 const timelineSceneVideoGenerationStatus = new Map();
 const brokenDialogueVideoRows = new Set();
 let nextDialogueVideoRequestAt = 0;
 
 // --- Helpers ---
+
+function logSceneVideoGeneration(step = "", details = {}) {
+  try {
+    const payload = {
+      step: String(step || "").trim() || "event",
+      ...details
+    };
+    console.info("[SceneVideoGeneration]", payload);
+  } catch (_) { }
+}
 
 function buildTimelineSceneGenerationKey(session, rowId) {
   const sessionId = String(session?.id || "").trim();
@@ -175,12 +189,20 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
     ].join("|");
     if (stateKey && stateKey !== lastStateKey) {
       lastStateKey = stateKey;
+      logSceneVideoGeneration("job:update", {
+        jobId: cleanJobId,
+        rowId: String(options.rowId || "").trim(),
+        sceneNumber: String(options.sceneNumber || "").trim(),
+        status,
+        stage: String(data?.stage || "").trim(),
+        variant: String(data?.variant || "").trim(),
+        model: String(data?.model || "").trim(),
+        hint
+      });
+      console.info(`[SceneVideoGeneration] Polling Job Update [${cleanJobId}]: status=${status}, stage=${data?.stage || ""}, model=${data?.model || ""}, attempt=${data?.attempt || ""}, hint=${hint}`);
       if (typeof options.onUpdate === "function") {
         try { options.onUpdate(data); } catch (_) { }
       }
-      try {
-        // Devtools log disabled to keep console output focused on actionable errors.
-      } catch (_) { }
     }
     if (status === "ready" && data?.dialogueVideo && typeof data.dialogueVideo === "object") {
       return data;
@@ -219,6 +241,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const educationalMode = isEducationalVideoMode(session);
   const rowReferenceImages = getRowReferenceImageList(session, key);
   const rowReferenceImage = rowReferenceImages[0] || getRowReferenceImageMap(session)[key] || null;
+  const rowReferenceVideo = getRowReferenceVideoMap(session)[key] || null;
+  const referenceMode = rowReferenceVideo ? "video" : "image";
   const pendingKey = `${sessionId}:${key}`;
 
   if (dialogueVideoGenerationTasks.has(pendingKey)) {
@@ -230,7 +254,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const regenerate = options.regenerate === true;
   const enhanceFromExistingVideo = options.enhanceFromExistingVideo === true;
   const silent = options.silent === true;
-  const videoCfg = getPodcastVideoConfig(session);
+  const videoCfg = typeof runtime.getPodcastVideoConfig === "function" ? runtime.getPodcastVideoConfig(session) : {};
   const cheapVideoMode = options.cheapVideoMode === true || videoCfg.cheapVideoMode === true;
   const videoDirective = String(options.videoDirective || row?.videoDirective || resolveVisualNotesForGeneration(row) || "").replace(/\s+/g, " ").trim();
   const scenePrompt = normalizeVideoScenePrompt(row?.scenePrompt || "", row, session);
@@ -265,6 +289,16 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
   const task = (async () => {
     dialogueVideoGenerationPending.add(pendingKey);
+    logSceneVideoGeneration("request:queued", {
+      sessionId,
+      rowId: key,
+      sceneNumber: resolveSceneNumberByRowId(key, session),
+      regenerate,
+      enhanceFromExistingVideo,
+      hasReferenceImages: rowReferenceImages.length > 0,
+      hasReferenceVideo: !!rowReferenceVideo,
+      relateWithPreviousScene
+    });
     if (!silent) setGenerationStatus(`Generando video Veo para escena ${resolveSceneNumberByRowId(key, session)}...`, "is-busy");
     setPodcastVideoStatus(`Generando Video de la Escena ${resolveSceneNumberByRowId(key, session)}`);
 
@@ -277,13 +311,54 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         } catch (_) { }
       }
 
-      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(rowReferenceImages, null, continuityReferenceImageDataUrl);
+      const hosts = typeof runtime.getSpeakerOptions === "function" ? runtime.getSpeakerOptions(session) : [];
+      const counterpartSpeakerLabel = hosts.find(h => h !== speakerLabel) || "";
+      const speakerName = (typeof runtime.getSpeakerNameMap === "function" ? runtime.getSpeakerNameMap(session)[speakerLabel] : "") || speakerLabel || "Locutor";
+      const counterpartSpeakerName = counterpartSpeakerLabel ? ((typeof runtime.getSpeakerNameMap === "function" ? runtime.getSpeakerNameMap(session)[counterpartSpeakerLabel] : "") || counterpartSpeakerLabel) : "";
+
+      const isVideoStyle = typeof runtime.isCurrentModeVideo === "function" ? runtime.isCurrentModeVideo(session) : false;
+
+      const portrait = !isVideoStyle && typeof runtime.resolvePortraitForSpeaker === "function" ? runtime.resolvePortraitForSpeaker(session, speakerLabel) : null;
+      const portraitUrl = portrait?.downloadUrl || "";
+      const portraitStoragePath = portrait?.storagePath || "";
+      const genderGroup = portrait?.genderGroup || "";
+
+      const scenarioPrompt = typeof runtime.resolveSpeakerStudioScenarioPrompt === "function" ? runtime.resolveSpeakerStudioScenarioPrompt(session, speakerLabel) : "";
+      const sceneDescription = String(row?.sceneDescription || "").trim();
+      const strictIdentity = !isVideoStyle && Boolean(portraitUrl || portraitStoragePath);
+
+      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(rowReferenceImages, rowReferenceVideo, continuityReferenceImageDataUrl);
+      const clip = typeof runtime.ensureTimelineClipsByRowId === "function"
+        ? runtime.ensureTimelineClipsByRowId(session, { persist: false })[key]
+        : null;
+      const durationMs = clip
+        ? (typeof runtime.getTimelineClipEffectiveDurationMs === "function"
+          ? runtime.getTimelineClipEffectiveDurationMs(clip)
+          : (clip.trimOutMs - clip.trimInMs))
+        : (typeof runtime.getRowSourceDurationMs === "function"
+          ? runtime.getRowSourceDurationMs(row, session)
+          : 8000);
+      const requestedDurationSec = Math.max(4, Math.min(8, Math.round(durationMs / 1000) || 8));
+
       const body = {
         sessionId,
         rowId: key,
         speaker: speakerLabel,
+        speakerLabel,
+        speakerName,
+        counterpartSpeakerLabel,
+        counterpartSpeakerName,
         voiceName: resolveConfiguredSpeakerVoiceForGeneration(session, row.speaker),
         text: String(row?.text || "").trim(),
+        genderGroup,
+        portraitUrl,
+        portraitStoragePath,
+        scenarioPrompt,
+        sceneDescription,
+        strictIdentity,
+        videoMode: isVideoStyle,
+        educationalVideo: isVideoStyle,
+        contentMode: isVideoStyle ? "educational" : "videopodcast",
         videoDirective,
         scenePrompt,
         imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
@@ -291,8 +366,18 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         transition: String(row?.transition || "").trim(),
         relateWithPreviousScene: relateWithPreviousScene && !!continuityReferenceImageDataUrl,
         audioDurationSec,
+        requestedDurationSec,
         audioUrl: audioClip?.downloadUrl || "",
         audioStoragePath: audioClip?.storagePath || "",
+        referenceMode,
+        referenceImageDataUrls: inlineReferenceBudget.referenceImageDataUrls,
+        referenceImageDataUrl: String(rowReferenceImage?.dataUrl || "").trim(),
+        referenceImageNames: rowReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
+        referenceImageName: String(rowReferenceImage?.name || "").trim(),
+        referenceVideoDataUrl: inlineReferenceBudget.referenceVideoDataUrl,
+        referenceVideoName: String(rowReferenceVideo?.name || "").trim(),
+        referenceVideoMimeType: String(rowReferenceVideo?.mimeType || "video/mp4").trim() || "video/mp4",
+        continuityReferenceImageDataUrl: inlineReferenceBudget.continuityReferenceImageDataUrl,
         regenerate,
         enhanceFromExistingVideo,
         cheapVideoMode,
@@ -302,6 +387,46 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         maxVariantAttempts: options.maxVariantAttempts || 2
       };
 
+      logSceneVideoGeneration("request:start", {
+        sessionId,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session),
+        speakerLabel,
+        speakerName,
+        counterpartSpeakerLabel,
+        counterpartSpeakerName,
+        portraitUrl: !!portraitUrl,
+        portraitStoragePath: !!portraitStoragePath,
+        strictIdentity,
+        genderGroup,
+        scenarioPromptLength: scenarioPrompt.length,
+        sceneDescriptionLength: sceneDescription.length,
+        regenerate,
+        enhanceFromExistingVideo,
+        cheapVideoMode,
+        referenceMode,
+        referenceImageCount: body.referenceImageDataUrls.length,
+        hasReferenceVideo: !!body.referenceVideoDataUrl,
+        hasContinuityReference: !!body.continuityReferenceImageDataUrl,
+        audioDurationSec
+      });
+
+      console.info("[SceneVideoGeneration] Payload constructed and validated. Sending to backend:", {
+        sessionId,
+        rowId: key,
+        speaker: speakerLabel,
+        speakerName,
+        counterpartSpeakerLabel,
+        counterpartSpeakerName,
+        strictIdentity,
+        portraitUrl: portraitUrl || "(none)",
+        portraitStoragePath: portraitStoragePath || "(none)",
+        genderGroup: genderGroup || "(none)",
+        scenarioPrompt: scenarioPrompt || "(none)",
+        sceneDescription: sceneDescription || "(none)",
+        text: body.text
+      });
+
       const resp = await authFetchJson("/api/podcaster/dialogue-videos/generate", {
         method: "POST",
         body: JSON.stringify(body)
@@ -309,7 +434,15 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
 
       if (!resp?.ok) throw new Error(resp?.error || "Error al iniciar generación.");
 
+      logSceneVideoGeneration("request:accepted", {
+        sessionId,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session),
+        jobId: String(resp?.jobId || "").trim()
+      });
+
       const result = await pollDialogueVideoGenerationJob(resp.jobId, {
+        rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
         silent,
         onUpdate: options.onJobUpdate
@@ -326,18 +459,60 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         }
       }), { render: !options.deferTimelineRender });
 
+      if (typeof playbackController?.invalidateRowMediaCache === "function") {
+        playbackController.invalidateRowMediaCache(key, getActiveSession());
+      } else if (typeof playbackController?.invalidateRowAudioCache === "function") {
+        playbackController.invalidateRowAudioCache(key);
+      }
+
+      const finalDurationMs = Math.round(Math.max(0, Number(finalClip?.durationSec || 0)) * 1000);
+      if (finalDurationMs > 0 && typeof runtime.updateTimelineClipForRow === "function") {
+        runtime.updateTimelineClipForRow(key, (prev) => {
+          const currentDurationMs = Number(prev?.sourceDurationMs || 0);
+          const computedDurationMs = typeof runtime.getRowSourceDurationMs === "function"
+            ? runtime.getRowSourceDurationMs(row, session)
+            : finalDurationMs;
+          const targetDurationMs = Math.max(currentDurationMs, computedDurationMs, finalDurationMs);
+          return {
+            ...prev,
+            sourceDurationMs: targetDurationMs,
+            trimInMs: 0,
+            trimOutMs: targetDurationMs
+          };
+        }, { persist: true });
+      }
+
       if (options.syncStageAfterGenerate !== false) {
         setPodcastVideoRow(key, { syncStage: true });
       }
 
+      logSceneVideoGeneration("request:success", {
+        sessionId,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session),
+        storagePath: String(finalClip?.storagePath || "").trim(),
+        downloadUrl: String(finalClip?.downloadUrl || "").trim()
+      });
+
       return finalClip;
     } catch (error) {
+      logSceneVideoGeneration("request:error", {
+        sessionId,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session),
+        message: String(error?.message || "Error al generar video.").trim()
+      });
       console.error("[podcaster] video generation error", error);
       if (!silent) addChatMessage("system", `Error en escena ${resolveSceneNumberByRowId(key, session)}: ${error.message}`);
       throw error;
     } finally {
       dialogueVideoGenerationPending.delete(pendingKey);
       dialogueVideoGenerationTasks.delete(pendingKey);
+      logSceneVideoGeneration("request:cleanup", {
+        sessionId,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session)
+      });
       updatePodcastPlayerUi();
     }
   })();
@@ -346,63 +521,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   return task;
 }
 
-async function generateDialogueAudioForRow(rowId = "", options = {}) {
-  const key = String(rowId || "").trim();
-  const session = getActiveSession();
-  const sessionId = String(session?.id || "").trim();
-  if (!sessionId || !key) return null;
-  const rows = session?.script?.rows || [];
-  const row = rows.find((item) => String(item?.id || "").trim() === key);
-  if (!row) return null;
 
-  const pendingKey = `${sessionId}:${key}`;
-  if (dialogueAudioGenerationPending.has(pendingKey)) return null;
-
-  const voiceName = resolveConfiguredSpeakerVoiceForGeneration(session, row.speaker);
-  const text = buildTargetSpeechLine(row);
-  const regenerate = options.regenerate === true;
-  const silent = options.silent === true;
-
-  dialogueAudioGenerationPending.add(pendingKey);
-  if (!silent) setGenerationStatus(`Generando audio Gemini para escena ${resolveSceneNumberByRowId(key, session)}...`, "is-busy");
-
-  try {
-    const body = {
-      sessionId,
-      rowId: key,
-      speaker: String(row?.speaker || "").trim(),
-      voiceName,
-      text,
-      regenerate,
-      disfluencyConfig: row?.disfluencyConfig || null,
-      ttsDirectionConfig: row?.ttsDirectionConfig || null
-    };
-
-    const resp = await authFetchJson("/api/podcaster/dialogue-audios/generate", {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
-
-    if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");
-
-    const finalAudio = resp.dialogueAudio;
-    upsertActiveSession((current) => ({
-      ...current,
-      dialogueAudioMap: {
-        ...(current.dialogueAudioMap || {}),
-        [key]: finalAudio
-      }
-    }), { render: !options.deferTimelineRender });
-
-    return finalAudio;
-  } catch (error) {
-    console.error("[podcaster] audio generation error", error);
-    if (!silent) addChatMessage("system", `Error audio escena ${resolveSceneNumberByRowId(key, session)}: ${error.message}`);
-    throw error;
-  } finally {
-    dialogueAudioGenerationPending.delete(pendingKey);
-  }
-}
 
 async function promptDialogueVideoDirective(rowId = "", session = null, options = {}) {
   const activeSession = session || getActiveSession();
@@ -435,9 +554,21 @@ async function promptDialogueVideoDirective(rowId = "", session = null, options 
 async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
   const session = getActiveSession();
-  if (!session || !key) return null;
+  if (!session || !key) {
+    logSceneVideoGeneration("flow:skip-missing-context", {
+      sessionId: String(session?.id || "").trim(),
+      rowId: key
+    });
+    return null;
+  }
   const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
-  if (!row) return null;
+  if (!row) {
+    logSceneVideoGeneration("flow:skip-missing-row", {
+      sessionId: String(session?.id || "").trim(),
+      rowId: key
+    });
+    return null;
+  }
 
   const shouldPromptDirective = options.promptDirective === true;
   let nextVideoDirective = normalizeVideoDirectiveText(options.videoDirective != null ? options.videoDirective : (row?.videoDirective || resolveVisualNotesForGeneration(row) || ""));
@@ -456,10 +587,24 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
 
   if (options.setBusyState !== false) podcastVideoState.busy = true;
 
+  logSceneVideoGeneration("flow:start", {
+    sessionId: String(session?.id || "").trim(),
+    rowId: key,
+    sceneNumber: resolveSceneNumberByRowId(key, session),
+    selectRow,
+    shouldPromptDirective,
+    hasExistingVideo: hasStoredMediaSource(resolveDialogueVideoForRow(session, key))
+  });
+
   if (generationKey) {
     timelineSceneVideoGenerationPending.add(generationKey);
     timelineSceneVideoGenerationStatus.set(generationKey, { hint: "Encolando generación de video...", stage: "queued" });
     renderPodcastVideoTimeline(getActiveSession(), { reason: "structure" });
+    logSceneVideoGeneration("flow:spinner-on", {
+      generationKey,
+      rowId: key,
+      sceneNumber: resolveSceneNumberByRowId(key, session)
+    });
   }
 
   if (loadingButton) {
@@ -500,10 +645,20 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     if (generationKey) {
       timelineSceneVideoGenerationPending.delete(generationKey);
       timelineSceneVideoGenerationStatus.delete(generationKey);
-      renderPodcastVideoTimeline(getActiveSession(), { reason: "structure" });
+      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+      logSceneVideoGeneration("flow:spinner-off", {
+        generationKey,
+        rowId: key,
+        sceneNumber: resolveSceneNumberByRowId(key, session)
+      });
     }
     if (loadingButton) setButtonLoadingState(loadingButton, false);
     podcastVideoState.busy = false;
+    logSceneVideoGeneration("flow:complete", {
+      sessionId: String(session?.id || "").trim(),
+      rowId: key,
+      sceneNumber: resolveSceneNumberByRowId(key, session)
+    });
     updatePodcastPlayerUi();
   }
 }
@@ -599,6 +754,7 @@ async function runGenerateMissingDialogueVideos(options = {}) {
     podcastVideoState.bulkVideoGenerationActive = false;
     podcastVideoState.bulkVideoGenerationMode = "";
     if (successCount > 0) {
+      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
       renderPodcastTransitionTimeline(getActiveSession());
       syncPodcastStudioInspector(getActiveSession());
     }
@@ -608,7 +764,11 @@ async function runGenerateMissingDialogueVideos(options = {}) {
 
 // --- Event Listeners ---
 
-  document.addEventListener("click", async (event) => {
+async function handlePodcasterGenerationClick(event) {
+    logSceneVideoGeneration("ui:click", {
+      action: String(event?.target?.closest?.("[data-action]")?.dataset?.action || "").trim(),
+      rowId: String(event?.target?.closest?.("[data-row-id]")?.dataset?.rowId || "").trim()
+    });
     const genAllBtn = event.target.closest("[data-action='timeline-generate-scene-video-batch']");
     if (genAllBtn) {
       runGenerateMissingDialogueVideos({ triggerButton: genAllBtn });
@@ -633,7 +793,7 @@ async function runGenerateMissingDialogueVideos(options = {}) {
       });
       updatePodcastPlayerUi();
       try {
-        await generateDialogueAudioForRow(rowId, { regenerate: shouldRegenerate, silent: false });
+        await runtime.generateDialogueAudioForRow(rowId, { regenerate: shouldRegenerate, silent: false });
       } catch (error) {
         console.error("[podcaster] audio generation error", error);
       } finally {
@@ -646,11 +806,29 @@ async function runGenerateMissingDialogueVideos(options = {}) {
 
     const generateBtn = event.target.closest("[data-action='timeline-generate-scene-video']");
     if (generateBtn) {
-      const rowId = String(generateBtn.dataset.rowId || "").trim();
-      if (!rowId) return;
+      let rowId = String(generateBtn.dataset.rowId || "").trim();
+      if (!rowId) {
+        const session = getActiveSession();
+        rowId = resolveTargetVideoRowId(session);
+      }
+      if (!rowId) {
+        logSceneVideoGeneration("ui:generate-missing-row-id", {});
+        return;
+      }
       const session = getActiveSession();
       const pendingKey = `${String(session?.id || "").trim()}:${rowId}`;
+      logSceneVideoGeneration("ui:generate-clicked", {
+        sessionId: String(session?.id || "").trim(),
+        rowId,
+        sceneNumber: resolveSceneNumberByRowId(rowId, session),
+        pendingKey
+      });
       if (dialogueVideoGenerationPending.has(pendingKey)) {
+        logSceneVideoGeneration("ui:generate-already-pending", {
+          sessionId: String(session?.id || "").trim(),
+          rowId,
+          pendingKey
+        });
         setPodcastVideoStatus("Esta escena ya se está generando. Puedes seguir reproduciendo el montaje.");
         return;
       }
@@ -667,6 +845,11 @@ async function runGenerateMissingDialogueVideos(options = {}) {
           syncStageAfterGenerate: true
         });
       } catch (error) {
+        logSceneVideoGeneration("ui:generate-failed", {
+          sessionId: String(session?.id || "").trim(),
+          rowId,
+          message: String(error?.message || "").trim()
+        });
         setGenerationStatus("Error", "");
         addChatMessage("system", `No se pudo generar video de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
       }
@@ -675,11 +858,29 @@ async function runGenerateMissingDialogueVideos(options = {}) {
 
     const regenerateHqBtn = event.target.closest("[data-action='timeline-regenerate-scene-video-hq']");
     if (regenerateHqBtn) {
-      const rowId = String(regenerateHqBtn.dataset.rowId || "").trim();
-      if (!rowId) return;
+      let rowId = String(regenerateHqBtn.dataset.rowId || "").trim();
+      if (!rowId) {
+        const session = getActiveSession();
+        rowId = resolveTargetVideoRowId(session);
+      }
+      if (!rowId) {
+        logSceneVideoGeneration("ui:regenerate-missing-row-id", {});
+        return;
+      }
       const session = getActiveSession();
       const pendingKey = `${String(session?.id || "").trim()}:${rowId}`;
+      logSceneVideoGeneration("ui:regenerate-clicked", {
+        sessionId: String(session?.id || "").trim(),
+        rowId,
+        sceneNumber: resolveSceneNumberByRowId(rowId, session),
+        pendingKey
+      });
       if (dialogueVideoGenerationPending.has(pendingKey)) {
+        logSceneVideoGeneration("ui:regenerate-already-pending", {
+          sessionId: String(session?.id || "").trim(),
+          rowId,
+          pendingKey
+        });
         setPodcastVideoStatus("Esta escena ya se está generando. Puedes seguir reproduciendo el montaje.");
         return;
       }
@@ -697,12 +898,19 @@ async function runGenerateMissingDialogueVideos(options = {}) {
           enhanceFromExistingVideo: hasStoredMediaSource(existingClip)
         });
       } catch (error) {
+        logSceneVideoGeneration("ui:regenerate-failed", {
+          sessionId: String(session?.id || "").trim(),
+          rowId,
+          message: String(error?.message || "").trim()
+        });
         setGenerationStatus("Error", "");
         addChatMessage("system", `No se pudo regenerar con mejora la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
       }
       return;
     }
-  });
+}
+
+document.addEventListener("click", handlePodcasterGenerationClick, { capture: true });
 
 
 // --- Exposure to Window ---
@@ -712,7 +920,8 @@ window.PodcasterGeneration = {
   get timelineSceneVideoGenerationPending() { return timelineSceneVideoGenerationPending; },
   get timelineSceneVideoGenerationStatus() { return timelineSceneVideoGenerationStatus; },
   get brokenDialogueVideoRows() { return brokenDialogueVideoRows; },
+  buildTimelineSceneGenerationKey,
   runSceneVideoGenerationFlow,
   generateDialogueVideoForRow,
-  generateDialogueAudioForRow
+  generateDialogueAudioForRow: (rowId, options) => runtime.generateDialogueAudioForRow(rowId, options)
 };

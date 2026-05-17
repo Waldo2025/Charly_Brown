@@ -29,6 +29,45 @@ const VALID_CANVAS_TEXT_BASELINES = new Set([
 ]);
 const STYLIZED_TEXT_ALLOWED_OBJECT_TYPES = new Set(['i-text', 'text', 'textbox', 'group']);
 
+function normalizeCanvasTextBaseline(value = '') {
+    const baseline = String(value || '').trim().toLowerCase();
+    if (!baseline) return value;
+    if (baseline === 'alphabetical') return 'alphabetic';
+    if (VALID_CANVAS_TEXT_BASELINES.has(baseline)) return baseline;
+    return 'alphabetic';
+}
+
+function sanitizeStylizedTextRawString(raw = '') {
+    if (typeof raw !== 'string' || !raw) return raw;
+    return raw
+        .replace(/("textBaseline"\s*:\s*")alphabetical(")/gi, '$1alphabetic$2')
+        .replace(/(\\"textBaseline\\"\s*:\s*\\")alphabetical(\\")/gi, '$1alphabetic$2');
+}
+
+function sanitizeStylizedTextValue(value, currentKey = '') {
+    if (currentKey === 'textBaseline') {
+        return normalizeCanvasTextBaseline(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => sanitizeStylizedTextValue(item, currentKey));
+    }
+    if (!value || typeof value !== 'object') {
+        return value;
+    }
+    const nextValue = { ...value };
+    Object.keys(nextValue).forEach((key) => {
+        if (key === 'clipPath') {
+            nextValue[key] = null;
+            return;
+        }
+        nextValue[key] = sanitizeStylizedTextValue(nextValue[key], key);
+    });
+    if (Object.prototype.hasOwnProperty.call(nextValue, 'textBaseline')) {
+        nextValue.textBaseline = normalizeCanvasTextBaseline(nextValue.textBaseline);
+    }
+    return nextValue;
+}
+
 // --- DOM Elements ---
 let els = {};
 
@@ -57,7 +96,7 @@ function parseStylizedTextSceneData(raw = null) {
     if (!raw) return null;
     if (typeof raw === 'string') {
         try {
-            return JSON.parse(raw);
+            return JSON.parse(sanitizeStylizedTextRawString(raw));
         } catch (error) {
             void error;
             return null;
@@ -89,38 +128,7 @@ function sanitizeStylizedTextSceneData(raw = null) {
 
 function sanitizeStylizedTextObject(raw = null) {
     if (!raw || typeof raw !== 'object') return null;
-    const normalizeCanvasTextBaseline = (value = '') => {
-        const baseline = String(value || '').trim().toLowerCase();
-        if (!baseline) return value;
-        if (baseline === 'alphabetical') return 'alphabetic';
-        if (VALID_CANVAS_TEXT_BASELINES.has(baseline)) return baseline;
-        return 'alphabetic';
-    };
-    const sanitizeNestedValue = (value, parentKey = '') => {
-        if (Array.isArray(value)) {
-            return value.map((item) => sanitizeNestedValue(item, parentKey));
-        }
-        if (!value || typeof value !== 'object') {
-            return value;
-        }
-        const nextValue = { ...value };
-        if (Object.prototype.hasOwnProperty.call(nextValue, 'textBaseline')) {
-            nextValue.textBaseline = normalizeCanvasTextBaseline(nextValue.textBaseline);
-        }
-        Object.keys(nextValue).forEach((key) => {
-            if (key === 'clipPath') {
-                nextValue[key] = null;
-                return;
-            }
-            nextValue[key] = sanitizeNestedValue(nextValue[key], key);
-        });
-        if (parentKey === 'styles') {
-            return nextValue;
-        }
-        return nextValue;
-    };
-
-    const next = sanitizeNestedValue(raw) || null;
+    const next = sanitizeStylizedTextValue(raw) || null;
     if (!next || typeof next !== 'object') return null;
     next.backgroundColor = '';
     next.overlayFill = '';

@@ -369,7 +369,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     ? getSessions().find((session) => String(session?.id || "").trim() === String(sessionId || "").trim()) || null
     : getActiveSession();
   if (!target) throw new Error("No hay sesión activa para guardar.");
-  if (!silent) deps.setGenerationStatus?.("Guardando sesión en Firebase...", "is-busy");
+  if (!silent) window.setGenerationStatus?.("Guardando sesión en Firebase...", "is-busy");
   const rawPayload = deps.buildCloudSessionPayload(target);
   const compacted = deps.compactCloudSessionPayload(rawPayload);
   const payload = compacted.payload;
@@ -419,14 +419,14 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     dialogueAudioKeys: Object.keys(deps.getDialogueAudioMap?.(payload) || {}).length
   });
   if (!silent) {
-    deps.addChatMessage?.("assistant", `Sesión guardada en Firebase (${deps.formatDate?.(savedAt) || savedAt}).`);
+    window.addChatMessage?.("assistant", `Sesión guardada en Firebase (${deps.formatDate?.(savedAt) || savedAt}).`);
     if (compacted.strippedReferenceMedia || compacted.trimmedChat) {
       const notes = [];
       if (compacted.strippedReferenceMedia) notes.push("referencias locales pesadas omitidas del guardado cloud");
       if (compacted.trimmedChat) notes.push("historial de chat recortado");
-      deps.setGenerationStatus?.(`Sesión guardada · ${notes.join(" · ")}`, "is-live");
+      window.setGenerationStatus?.(`Sesión guardada · ${notes.join(" · ")}`, "is-live");
     } else {
-      deps.setGenerationStatus?.("Sesión guardada", "is-live");
+      window.setGenerationStatus?.("Sesión guardada", "is-live");
     }
     if (options.render !== false) {
       deps.render?.();

@@ -360,6 +360,56 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
   }
 
+  /**
+   * Deeply evicts all cached media (audio, video, images, proxies) associated with a row.
+   * Call this when video is generated or manually replaced to force updates in stage & timeline.
+   */
+  invalidateRowMediaCache(rowId = "", session = null) {
+    const key = String(rowId || "").trim();
+    if (!key) return;
+
+    // 1. Evacuate audio elements and audio cache
+    this.invalidateRowAudioCache(key);
+
+    // 2. Resolve dialogue video/image clip URLs and evict them from blobCache and Cache Storage
+    const activeSession = session || this.state.session || (typeof getActiveSession === "function" ? getActiveSession() : (window.getActiveSession ? window.getActiveSession() : null));
+    if (activeSession) {
+      const dialogueMap = activeSession.dialogueVideoMap || {};
+      const clip = dialogueMap[key];
+      if (clip) {
+        const segments = clip.segments || [];
+        const urlsToInvalidate = [
+          clip.downloadUrl,
+          clip.storagePath,
+          ...segments.map(s => s.downloadUrl),
+          ...segments.map(s => s.storagePath)
+        ].filter(Boolean);
+
+        urlsToInvalidate.forEach((url) => {
+          this.invalidateBlobUrl(url);
+          // Purge proxy URL variations
+          try {
+            const proxyUrl = `/api/assets/proxy-media?storagePath=${encodeURIComponent(url)}`;
+            this.invalidateBlobUrl(proxyUrl);
+          } catch (_) { }
+          try {
+            const proxyImgUrl = `/api/assets/proxy-image?storagePath=${encodeURIComponent(url)}`;
+            this.invalidateBlobUrl(proxyImgUrl);
+          } catch (_) { }
+        });
+      }
+    }
+
+    // 3. Clear transient synced flags to ensure stage media synchronizes completely fresh next loop
+    this.state.activeRowId = "";
+    if (this.deps?.podcastVideoState) {
+      this.deps.podcastVideoState.lastSyncedStageKey = "";
+    } else if (window.podcastVideoState) {
+      window.podcastVideoState.lastSyncedStageKey = "";
+    }
+  }
+
+
   initAudioContext() {
     if (this.audioCtx) {
       if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
@@ -496,12 +546,27 @@ export class PodcasterPlaybackController extends EventEmitter {
   seekTo(el, seconds) {
     if (!el || !Number.isFinite(seconds)) return;
     try {
+      const isVideo = el.tagName === "VIDEO";
       if (el.readyState >= 1) {
-        el.currentTime = seconds;
+        let targetSeconds = seconds;
+        if (isVideo) {
+          const videoDuration = el.duration;
+          if (Number.isFinite(videoDuration) && videoDuration > 0 && seconds >= videoDuration) {
+            targetSeconds = seconds % videoDuration;
+          }
+        }
+        el.currentTime = targetSeconds;
       } else {
         el.dataset.pendingSeek = seconds;
         const onLoaded = () => {
-          el.currentTime = seconds;
+          let targetSeconds = seconds;
+          if (isVideo) {
+            const videoDuration = el.duration;
+            if (Number.isFinite(videoDuration) && videoDuration > 0 && seconds >= videoDuration) {
+              targetSeconds = seconds % videoDuration;
+            }
+          }
+          el.currentTime = targetSeconds;
           el.removeEventListener('loadedmetadata', onLoaded);
           delete el.dataset.pendingSeek;
         };
@@ -745,6 +810,11 @@ export class PodcasterPlaybackController extends EventEmitter {
             if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
               pvs.montageAudioActualDurationsMs[rowId] = nextMs;
               this.pendingTimelineRender = true;
+              if (typeof window.syncGeminiDialogueTrackWithRuntime === "function") {
+                try {
+                  window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+                } catch (_) {}
+              }
             }
           }
         }, { once: true });
@@ -1145,10 +1215,22 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.hideAllImages();
     }
 
+    // Resolve dynamic wrapping modulo for continuous looping of shorter generated videos
+    let targetOffsetSec = offsetSec;
+    const resolvedDuration = activeEl && activeEl.dataset.src === entry.videoSrc && Number.isFinite(activeEl.duration) && activeEl.duration > 0
+      ? activeEl.duration
+      : (inactiveEl && inactiveEl.dataset.src === entry.videoSrc && Number.isFinite(inactiveEl.duration) && inactiveEl.duration > 0
+        ? inactiveEl.duration
+        : 0);
+
+    if (resolvedDuration > 0 && offsetSec >= resolvedDuration) {
+      targetOffsetSec = offsetSec % resolvedDuration;
+    }
+
     // Use current element if it matches source
     if (activeEl.dataset.src === entry.videoSrc) {
-      if (Math.abs(activeEl.currentTime - offsetSec) > 0.2) {
-        this.seekTo(activeEl, offsetSec);
+      if (Math.abs(activeEl.currentTime - targetOffsetSec) > 0.2) {
+        this.seekTo(activeEl, targetOffsetSec);
       }
       if (this.state.isPlaying && activeEl.paused) {
         activeEl.play().then(() => {
@@ -1179,7 +1261,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       activeEl.volume = this.clamp01(masterClipVolume * effectiveVideoVolume);
       activeEl.muted = activeEl.volume <= 0.0001;
       
-      this.syncBackdrop(entry, activeSlot, offsetSec);
+      this.syncBackdrop(entry, activeSlot, targetOffsetSec);
 
       if (inactiveEl && inactiveEl.dataset.src !== entry.videoSrc) {
         inactiveEl.style.opacity = "0";
@@ -1213,7 +1295,7 @@ export class PodcasterPlaybackController extends EventEmitter {
             const activeReady = await this.deps?.setPodcastStageVideoSourceForElement?.(activeEl, entry.videoSrc);
             if (activeReady !== true) return;
           }
-          this.seekTo(activeEl, offsetSec);
+          this.seekTo(activeEl, targetOffsetSec);
           if (this.state.isPlaying) {
             activeEl.play().then(() => {
               const masterSpeed = this.deps?.getPlaybackSpeed?.() || 1;
@@ -1237,7 +1319,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
         }
 
-        this.seekTo(inactiveEl, offsetSec);
+        this.seekTo(inactiveEl, targetOffsetSec);
         
         // Final Swap
         inactiveEl.style.zIndex = "2";
@@ -1258,7 +1340,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         activeEl.hidden = true;
         activeEl.pause();
 
-        this.syncBackdrop(entry, activeSlot === 1 ? 0 : 1, offsetSec);
+        this.syncBackdrop(entry, activeSlot === 1 ? 0 : 1, targetOffsetSec);
         this.hideInactiveBackdrop(activeSlot === 1 ? 0 : 1);
 
         const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
@@ -1291,8 +1373,15 @@ export class PodcasterPlaybackController extends EventEmitter {
         backdrop.src = blobUrl;
         backdrop.dataset.src = entry.videoSrc;
       }
-      if (Math.abs(backdrop.currentTime - offsetSec) > 0.3) {
-        this.seekTo(backdrop, offsetSec);
+      
+      let targetSeekSec = offsetSec;
+      const backdropDuration = backdrop.duration;
+      if (Number.isFinite(backdropDuration) && backdropDuration > 0 && offsetSec >= backdropDuration) {
+        targetSeekSec = offsetSec % backdropDuration;
+      }
+
+      if (Math.abs(backdrop.currentTime - targetSeekSec) > 0.3) {
+        this.seekTo(backdrop, targetSeekSec);
       }
       backdrop.style.opacity = "1";
       backdrop.style.visibility = "visible";

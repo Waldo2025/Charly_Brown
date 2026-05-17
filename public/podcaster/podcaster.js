@@ -24,83 +24,91 @@ import {
 import { firebaseWebConfig, assertFirebaseWebConfig } from "../js/firebase-web-config.js";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "./podcaster-reels.js";
 import * as PodcasterResize from "./podcaster-resize.js";
+import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js";
+import { createPodcasterHistoryApi } from "./podcaster-history.js";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
 
-const onScreenTextRenderSpecApi = globalThis.PodcasterOnScreenTextRenderSpec || {};
-const resolveSharedOnScreenTextExportCanvasSize = typeof onScreenTextRenderSpecApi.resolveOnScreenTextExportCanvasSize === "function"
-  ? onScreenTextRenderSpecApi.resolveOnScreenTextExportCanvasSize
-  : null;
-const resolveSharedOnScreenTextRenderSpec = typeof onScreenTextRenderSpecApi.resolveOnScreenTextRenderSpec === "function"
-  ? onScreenTextRenderSpecApi.resolveOnScreenTextRenderSpec
-  : null;
-const wrapSharedOnScreenTextRenderText = typeof onScreenTextRenderSpecApi.wrapOnScreenTextRenderText === "function"
-  ? onScreenTextRenderSpecApi.wrapOnScreenTextRenderText
-  : null;
-const normalizeSharedOnScreenTextTrackSettings = typeof onScreenTextRenderSpecApi.normalizeOnScreenTextTrackSettings === "function"
-  ? onScreenTextRenderSpecApi.normalizeOnScreenTextTrackSettings
-  : null;
-const normalizeSharedOnScreenTextClipItem = typeof onScreenTextRenderSpecApi.normalizeOnScreenTextClipItem === "function"
-  ? onScreenTextRenderSpecApi.normalizeOnScreenTextClipItem
-  : null;
-const normalizeSharedOnScreenTextClipsByRowId = typeof onScreenTextRenderSpecApi.normalizeOnScreenTextClipsByRowId === "function"
-  ? onScreenTextRenderSpecApi.normalizeOnScreenTextClipsByRowId
-  : null;
-const normalizeSharedOnScreenTextLayoutItem = typeof onScreenTextRenderSpecApi.normalizeOnScreenTextLayoutItem === "function"
-  ? onScreenTextRenderSpecApi.normalizeOnScreenTextLayoutItem
-  : null;
-const normalizeSharedOnScreenTextLayoutByRowId = typeof onScreenTextRenderSpecApi.normalizeOnScreenTextLayoutByRowId === "function"
-  ? onScreenTextRenderSpecApi.normalizeOnScreenTextLayoutByRowId
-  : null;
-const estimateSharedOnScreenTextLayoutHeightPct = typeof onScreenTextRenderSpecApi.estimateOnScreenTextLayoutHeightPct === "function"
-  ? onScreenTextRenderSpecApi.estimateOnScreenTextLayoutHeightPct
-  : null;
-const estimateSharedOnScreenTextLayoutWidthPct = typeof onScreenTextRenderSpecApi.estimateOnScreenTextLayoutWidthPct === "function"
-  ? onScreenTextRenderSpecApi.estimateOnScreenTextLayoutWidthPct
-  : null;
-const buildSharedDefaultOnScreenTextLayoutForRow = typeof onScreenTextRenderSpecApi.buildDefaultOnScreenTextLayoutForRow === "function"
-  ? onScreenTextRenderSpecApi.buildDefaultOnScreenTextLayoutForRow
-  : null;
-const expandSharedOnScreenTextLayoutToFitText = typeof onScreenTextRenderSpecApi.expandOnScreenTextLayoutToFitText === "function"
-  ? onScreenTextRenderSpecApi.expandOnScreenTextLayoutToFitText
-  : null;
-const getSharedOnScreenTextStylePresetClass = typeof onScreenTextRenderSpecApi.getOnScreenTextStylePresetClass === "function"
-  ? onScreenTextRenderSpecApi.getOnScreenTextStylePresetClass
-  : null;
-const getSharedOnScreenTextBgPresetClass = typeof onScreenTextRenderSpecApi.getOnScreenTextBgPresetClass === "function"
-  ? onScreenTextRenderSpecApi.getOnScreenTextBgPresetClass
-  : null;
-const getSharedOnScreenTextFontFamilyCss = typeof onScreenTextRenderSpecApi.getOnScreenTextFontFamilyCss === "function"
-  ? onScreenTextRenderSpecApi.getOnScreenTextFontFamilyCss
-  : null;
-const getSharedOnScreenTextClipText = typeof onScreenTextRenderSpecApi.getOnScreenTextClipText === "function"
-  ? onScreenTextRenderSpecApi.getOnScreenTextClipText
-  : null;
-const buildSharedOnScreenTextPreviewStrokeShadowCss = typeof onScreenTextRenderSpecApi.buildOnScreenTextPreviewStrokeShadowCss === "function"
-  ? onScreenTextRenderSpecApi.buildOnScreenTextPreviewStrokeShadowCss
-  : null;
-const buildSharedOnScreenTextPreviewShadowCss = typeof onScreenTextRenderSpecApi.buildOnScreenTextPreviewShadowCss === "function"
-  ? onScreenTextRenderSpecApi.buildOnScreenTextPreviewShadowCss
-  : null;
-const wrapSharedOnScreenTextPreviewText = typeof onScreenTextRenderSpecApi.wrapOnScreenTextPreviewText === "function"
-  ? onScreenTextRenderSpecApi.wrapOnScreenTextPreviewText
-  : null;
-const resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth = typeof onScreenTextRenderSpecApi.resolveOnScreenTextPreviewWrapFromMeasuredWidth === "function"
-  ? onScreenTextRenderSpecApi.resolveOnScreenTextPreviewWrapFromMeasuredWidth
-  : null;
-const buildSharedOnScreenTextBubbleInlineStyle = typeof onScreenTextRenderSpecApi.buildOnScreenTextBubbleInlineStyle === "function"
-  ? onScreenTextRenderSpecApi.buildOnScreenTextBubbleInlineStyle
-  : null;
-const resolveSharedOnScreenTextPreviewLayoutSpec = typeof onScreenTextRenderSpecApi.resolveOnScreenTextPreviewLayoutSpec === "function"
-  ? onScreenTextRenderSpecApi.resolveOnScreenTextPreviewLayoutSpec
-  : null;
-const shouldRepairSharedOnScreenTextLayout = typeof onScreenTextRenderSpecApi.shouldRepairLegacyOnScreenTextLayout === "function"
-  ? onScreenTextRenderSpecApi.shouldRepairLegacyOnScreenTextLayout
-  : null;
-const getSharedOnScreenTextResizeHandles = typeof onScreenTextRenderSpecApi.getOnScreenTextResizeHandles === "function"
-  ? onScreenTextRenderSpecApi.getOnScreenTextResizeHandles
-  : null;
-const buildSharedOnScreenTextSelectionFrameHtml = typeof onScreenTextRenderSpecApi.buildOnScreenTextSelectionFrameHtml === "function"
-  ? onScreenTextRenderSpecApi.buildOnScreenTextSelectionFrameHtml
-  : null;
+const onScreenTextRenderSpecApi = globalThis.PodcasterOnScreenTextRenderSpec;
+if (!onScreenTextRenderSpecApi || typeof onScreenTextRenderSpecApi !== "object") {
+  throw new Error("PodcasterOnScreenTextRenderSpec no está disponible. Revisa la carga de podcaster-on-screen-text.js.");
+}
+function requireOnScreenTextApiFunction(name = "") {
+  const fn = onScreenTextRenderSpecApi?.[name];
+  if (typeof fn !== "function") {
+    throw new Error(`PodcasterOnScreenTextRenderSpec.${name} no está disponible.`);
+  }
+  return fn;
+}
+function requirePodcasterChatAssistantApi() {
+  const api = globalThis.PodcasterChatAssistant;
+  if (!api || typeof api !== "object") {
+    throw new Error("PodcasterChatAssistant no está disponible. Revisa la carga de podcaster-chat-assistant.js.");
+  }
+  return api;
+}
+function requirePodcasterChatAssistantApiFunction(name = "") {
+  const fn = requirePodcasterChatAssistantApi()?.[name];
+  if (typeof fn !== "function") {
+    throw new Error(`PodcasterChatAssistant.${name} no está disponible.`);
+  }
+  return fn;
+}
+function requirePodcasterMediaReplacementApiFunction(name = "") {
+  const api = globalThis.PodcasterMediaReplacement;
+  const fn = api?.[name];
+  if (typeof fn !== "function") {
+    throw new Error(`PodcasterMediaReplacement.${name} no está disponible.`);
+  }
+  return fn;
+}
+function addChatMessage(...args) {
+  return requirePodcasterChatAssistantApiFunction("addChatMessage")(...args);
+}
+function removeChatMessage(...args) {
+  return requirePodcasterChatAssistantApiFunction("removeChatMessage")(...args);
+}
+function addScriptAssistantMessage(...args) {
+  return requirePodcasterChatAssistantApiFunction("addScriptAssistantMessage")(...args);
+}
+function renderChat(...args) {
+  return requirePodcasterChatAssistantApiFunction("renderChat")(...args);
+}
+function openSceneVideoSelectorModal(...args) {
+  return requirePodcasterMediaReplacementApiFunction("openSceneVideoSelectorModal")(...args);
+}
+function swapStageToImagePreview(...args) {
+  return requirePodcasterMediaReplacementApiFunction("swapStageToImagePreview")(...args);
+}
+const resolveOnScreenTextExportCanvasSize = requireOnScreenTextApiFunction("resolveOnScreenTextExportCanvasSize");
+const resolveSharedOnScreenTextRenderSpec = requireOnScreenTextApiFunction("resolveOnScreenTextRenderSpec");
+const wrapSharedOnScreenTextRenderText = requireOnScreenTextApiFunction("wrapOnScreenTextRenderText");
+const normalizeOnScreenTextTrackSettings = requireOnScreenTextApiFunction("normalizeOnScreenTextTrackSettings");
+const normalizeSharedOnScreenTextClipItem = requireOnScreenTextApiFunction("normalizeOnScreenTextClipItem");
+const normalizeSharedOnScreenTextClipsByRowId = requireOnScreenTextApiFunction("normalizeOnScreenTextClipsByRowId");
+const normalizeSharedOnScreenTextLayoutItem = requireOnScreenTextApiFunction("normalizeOnScreenTextLayoutItem");
+const normalizeSharedOnScreenTextLayoutByRowId = requireOnScreenTextApiFunction("normalizeOnScreenTextLayoutByRowId");
+const estimateSharedOnScreenTextLayoutHeightPct = requireOnScreenTextApiFunction("estimateOnScreenTextLayoutHeightPct");
+const estimateSharedOnScreenTextLayoutWidthPct = requireOnScreenTextApiFunction("estimateOnScreenTextLayoutWidthPct");
+const buildSharedDefaultOnScreenTextLayoutForRow = requireOnScreenTextApiFunction("buildDefaultOnScreenTextLayoutForRow");
+const expandSharedOnScreenTextLayoutToFitText = requireOnScreenTextApiFunction("expandOnScreenTextLayoutToFitText");
+const getSharedOnScreenTextStylePresetClass = requireOnScreenTextApiFunction("getOnScreenTextStylePresetClass");
+const getSharedOnScreenTextBgPresetClass = requireOnScreenTextApiFunction("getOnScreenTextBgPresetClass");
+const getSharedOnScreenTextFontFamilyCss = requireOnScreenTextApiFunction("getOnScreenTextFontFamilyCss");
+const getSharedOnScreenTextClipText = requireOnScreenTextApiFunction("getOnScreenTextClipText");
+const buildSharedOnScreenTextPreviewStrokeShadowCss = requireOnScreenTextApiFunction("buildOnScreenTextPreviewStrokeShadowCss");
+const buildSharedOnScreenTextPreviewShadowCss = requireOnScreenTextApiFunction("buildOnScreenTextPreviewShadowCss");
+const wrapSharedOnScreenTextPreviewText = requireOnScreenTextApiFunction("wrapOnScreenTextPreviewText");
+const resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth = requireOnScreenTextApiFunction("resolveOnScreenTextPreviewWrapFromMeasuredWidth");
+const buildSharedOnScreenTextBubbleInlineStyle = requireOnScreenTextApiFunction("buildOnScreenTextBubbleInlineStyle");
+const applySharedOnScreenTextTrackSettingValue = requireOnScreenTextApiFunction("applyOnScreenTextTrackSettingValue");
+const applySharedOnScreenTextLookPresetValue = requireOnScreenTextApiFunction("applyOnScreenTextLookPresetValue");
+const buildSharedOnScreenTextTrackModalMarkup = requireOnScreenTextApiFunction("buildOnScreenTextTrackModalMarkup");
+const inferSharedOnScreenTextLookPreset = requireOnScreenTextApiFunction("inferOnScreenTextLookPreset");
+const resolveSharedOnScreenTextPreviewLayoutSpec = requireOnScreenTextApiFunction("resolveOnScreenTextPreviewLayoutSpec");
+const shouldRepairSharedOnScreenTextLayout = requireOnScreenTextApiFunction("shouldRepairLegacyOnScreenTextLayout");
+const getSharedOnScreenTextResizeHandles = requireOnScreenTextApiFunction("getOnScreenTextResizeHandles");
+const buildSharedOnScreenTextSelectionFrameHtml = requireOnScreenTextApiFunction("buildOnScreenTextSelectionFrameHtml");
 
 const STORAGE_KEY_BASE = "cb_podcaster_sessions_v2";
 const LEGACY_STORAGE_KEY = "cb_podcaster_sessions_v1";
@@ -593,6 +601,21 @@ let state = {
   activeSessionId: null,
   liveTokenState: null
 };
+
+// --- EXPORT GLOBALS FOR MODULES ---
+window.els = els;
+window.state = state;
+window.SHORT_SCENE_MIN_SEC = SHORT_SCENE_MIN_SEC;
+window.SHORT_SCENE_MAX_SEC = SHORT_SCENE_MAX_SEC;
+window.VIDEO_SCENE_MAX_SEC = VIDEO_SCENE_MAX_SEC;
+window.VIDEO_DIALOGUE_MAX_SEC = VIDEO_DIALOGUE_MAX_SEC;
+window.VOICES = VOICES;
+window.DEFAULT_HOSTS = DEFAULT_HOSTS;
+window.DEFAULT_DISFLUENCY_CONFIG = DEFAULT_DISFLUENCY_CONFIG;
+window.SPEAKER_ROLE_DESCRIPTIONS = SPEAKER_ROLE_DESCRIPTIONS;
+window.EXPRESSIONS = EXPRESSIONS;
+window.MEDIA_CUES = MEDIA_CUES;
+
 window.PodcasterState = {
   get state() { return state; },
   get activeSession() { return getActiveSession(); },
@@ -734,9 +757,6 @@ let podcastStudioInspectorCollapsed = (() => {
     return false;
   }
 })();
-let podcastStageWidthRatio = null;
-let podcastStageResizeCleanup = null;
-let podcastStageResizeObserver = null;
 let podcastVideoOpenRunToken = 0;
 const globalScenarioImagePending = new Set();
 let geminiLiveAudioCtx = null;
@@ -899,10 +919,6 @@ function clampPodcastStudioInspectorWidthPx(value) {
   return Math.max(PodcasterResize.POD_INSPECTOR_WIDTH_MIN, Math.min(PodcasterResize.POD_INSPECTOR_WIDTH_MAX, numeric));
 }
 
-function clampPodcastStageWidthRatio(value, session = null) {
-  return null;
-}
-
 function normalizePodcastStudioUiState(raw = null, session = null) {
   const source = raw && typeof raw === "object" ? raw : {};
   const cfg = getPodcastVideoConfig(session || getActiveSession());
@@ -1000,10 +1016,6 @@ const PODCAST_STAGE_VIDEO_CACHE_LIMIT = 12;
 const podcastStageVideoCache = new Map();
 const PODCAST_STAGE_AUDIO_CACHE_LIMIT = 24;
 const podcastStageAudioCache = new Map();
-const staleProxyMediaUrls = new Set();
-const staleDialogueVideoSourceKeys = new Set();
-let localProxyMediaUnavailable = false;
-let localProxyMediaUnavailableAt = 0;
 const LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS = 45000;
 const PODCAST_RENDER_DEBUG = (() => {
   try {
@@ -1013,260 +1025,101 @@ const PODCAST_RENDER_DEBUG = (() => {
   }
 })();
 
-function isLocalProxyMediaUrl(url = "") {
-  const src = String(url || "").trim();
-  if (!src) return false;
-  if (!/\/api\/assets\/proxy-media\?/i.test(src)) return false;
-  return /^https?:\/\/(?:127\.0\.0\.1|localhost):8787\//i.test(src);
-}
+const podcasterMediaRuntimeApi = createPodcasterMediaRuntimeApi({
+  localProxyMediaUnavailableTtlMs: LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS,
+  buildApiUrl,
+  resolveDateIso,
+  setGenerationStatus,
+  renderPodcastVideoTimeline,
+  getActiveSession,
+  resolveStorageVideoUrl: (...args) => resolveStorageVideoUrl(...args),
+  logPodcastRenderDebug,
+  nowIso,
+  getPodcastStageVideoCache: () => podcastStageVideoCache,
+  getPodcastStageAudioCache: () => podcastStageAudioCache,
+  isRenderDebugEnabled: () => PODCAST_RENDER_DEBUG
+});
 
-function markLocalProxyMediaUnavailable(reason = "") {
-  localProxyMediaUnavailableAt = Date.now();
-  if (localProxyMediaUnavailable) return;
-  localProxyMediaUnavailable = true;
-  try {
-    setGenerationStatus(`Backend local (127.0.0.1:8787) no disponible${reason ? `: ${reason}` : ""}.`, "");
-  } catch (_) { }
-}
+const {
+  isLocalProxyMediaUrl,
+  markLocalProxyMediaUnavailable,
+  shouldShortCircuitLocalProxyMediaFetch,
+  buildDialogueVideoSourceKey,
+  markStaleProxyMediaUrl,
+  isMarkedStaleProxyMediaUrl,
+  resolveStaleAwareProxyMediaUrl,
+  parseFirebaseStorageObjectUrl,
+  deriveStoragePathFromMediaSource,
+  normalizePersistedMediaReference,
+  normalizeMediaReferenceFromRecord,
+  isLikelyImageMediaRecord,
+  buildImageReferenceRecordFromMedia,
+  markStaleDialogueVideoSource,
+  isStaleDialogueVideoSource
+} = podcasterMediaRuntimeApi;
 
-function shouldShortCircuitLocalProxyMediaFetch(url = "") {
-  if (!isLocalProxyMediaUrl(url)) return false;
-  if (!localProxyMediaUnavailable || !localProxyMediaUnavailableAt) return false;
-  return (Date.now() - localProxyMediaUnavailableAt) <= LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS;
-}
+const podcasterMediaReferenceApi = createPodcasterMediaReferenceApi({
+  getElements: () => els,
+  getActiveSession,
+  nowIso,
+  readDataUrlFromFile,
+  buildImageReferenceRecordFromMedia,
+  normalizeMediaReferenceFromRecord,
+  MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS,
+  MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS,
+  normalizeSpeakerLabel,
+  upsertActiveSession,
+  renderPodcastPortraitStrip,
+  scheduleSessionLocalPersist,
+  renderScript,
+  syncPodcastStudioInspector,
+  renderPodcastVideoShell,
+  renderCreativeVideoShell,
+  renderPodcastVideoTimeline,
+  resolveStorageVideoUrl,
+  resolveCurrentUid,
+  doc,
+  updateDoc,
+  serverTimestamp,
+  firestoreDb,
+  resolveSpeakerDisplayName,
+  resolveSceneNumberByRowId
+});
 
-function buildDialogueVideoSourceKey(sessionId = "", rowId = "", storagePath = "", downloadUrl = "") {
-  const cleanSessionId = String(sessionId || "").trim();
-  const cleanRowId = String(rowId || "").trim();
-  const cleanStoragePath = String(storagePath || "").trim();
-  const cleanDownloadUrl = String(downloadUrl || "").trim();
-  if (!cleanRowId) return "";
-  return `${cleanSessionId}:${cleanRowId}:${cleanStoragePath || cleanDownloadUrl}`;
-}
+const {
+  readImageReferenceFromFile,
+  isLikelyVideoReferenceFile,
+  readVideoReferenceFromFile,
+  normalizeReferenceImageRecord,
+  normalizeReferenceImageList,
+  normalizeReferenceImageMap,
+  normalizeReferenceImageListMap,
+  normalizeReferenceVideoRecord,
+  normalizeReferenceVideoMap,
+  normalizeRowReferenceModeMap,
+  getSpeakerReferenceImageMap,
+  getScenarioReferenceImageMap,
+  getRowReferenceImageListMap,
+  getRowReferenceImageList,
+  getRowReferenceImageMap,
+  getRowReferenceVideoMap,
+  getRowReferenceModeByRowId,
+  resolveRowReferenceAsset,
+  resolveReferenceImagePreviewUrl,
+  persistRowReferencesPatchToCloud,
+  setSpeakerReferenceImage,
+  setScenarioReferenceImage,
+  setRowReferenceImage,
+  setRowReferenceImages,
+  setRowReferenceVideo,
+  promptSpeakerReferenceSelection,
+  promptScenarioReferenceSelection,
+  promptRowReferenceSelection,
+  clearRowReference,
+  bindInputEvents: bindMediaReferenceInputEvents
+} = podcasterMediaReferenceApi;
 
-let staleMediaReRenderTimer = null;
-function markStaleProxyMediaUrl(url = "", reason = "proxy-media-404", payload = {}) {
-  const clean = String(url || "").trim();
-  if (!clean) return;
-  staleProxyMediaUrls.add(clean);
-  if (PODCAST_RENDER_DEBUG) {
-    void reason;
-    void payload;
-  }
-  if (staleMediaReRenderTimer) clearTimeout(staleMediaReRenderTimer);
-  staleMediaReRenderTimer = setTimeout(() => {
-    if (typeof renderPodcastVideoTimeline === "function") {
-      renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "media-stale" });
-    }
-  }, 250);
-}
 
-function isMarkedStaleProxyMediaUrl(url = "") {
-  const clean = String(url || "").trim();
-  return clean ? staleProxyMediaUrls.has(clean) : false;
-}
-
-function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "media", options = {}) {
-  const clean = String(rawUrl || "").trim();
-  const cleanStoragePath = String(storagePath || "").trim();
-  const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
-  const timestamp = options.updatedAt || options.timestamp || "";
-
-  let finalUrl = "";
-  if (cleanStoragePath) {
-    const proxyUrl = buildApiUrl(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`);
-    if (isMarkedStaleProxyMediaUrl(proxyUrl)) {
-      // Si el proxy falló, usamos la URL directa (downloadUrl) si existe
-      finalUrl = clean;
-    } else {
-      finalUrl = proxyUrl;
-    }
-  }
-
-  if (!finalUrl && clean) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const proxyUrl = buildApiUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`);
-      if (isMarkedStaleProxyMediaUrl(proxyUrl)) {
-        // Si el proxy falló incluso con la URL directa, devolvemos la URL directa pura
-        finalUrl = clean;
-      } else {
-        finalUrl = proxyUrl;
-      }
-    } catch (_) {
-      finalUrl = clean;
-    }
-  }
-
-  if (finalUrl && timestamp && finalUrl.includes("/api/assets/proxy-")) {
-    const separator = finalUrl.includes("?") ? "&" : "?";
-    finalUrl = `${finalUrl}${separator}u=${encodeURIComponent(resolveDateIso(timestamp))}`;
-  }
-
-  return finalUrl || clean || "";
-}
-
-function parseFirebaseStorageObjectUrl(rawUrl = "") {
-  const clean = String(rawUrl || "").trim();
-  if (!clean) return null;
-  try {
-    const parsed = new URL(clean, window.location.origin);
-    const host = String(parsed.hostname || "").toLowerCase();
-    const isFirebaseStorageHost = (
-      host === "firebasestorage.googleapis.com"
-      || host.endsWith("firebasestorage.app")
-      || host === "storage.googleapis.com"
-    );
-    if (!isFirebaseStorageHost) return null;
-    if (host === "firebasestorage.googleapis.com") {
-      const match = String(parsed.pathname || "").match(/^\/(?:v0\/)?b\/([^/]+)\/o\/(.+)$/);
-      if (!match) return null;
-      const bucket = String(match[1] || "").trim();
-      let objectPath = String(match[2] || "").trim();
-      if (!bucket || !objectPath) return null;
-      try { objectPath = decodeURIComponent(objectPath); } catch (_) { }
-      if (/%2f/i.test(objectPath) || /%25/i.test(objectPath)) {
-        try { objectPath = decodeURIComponent(objectPath); } catch (_) { }
-      }
-      objectPath = objectPath.replace(/^\/+/, "").trim();
-      return objectPath ? { bucket, storagePath: objectPath } : null;
-    }
-    if (host === "storage.googleapis.com") {
-      const parts = String(parsed.pathname || "").split("/").filter(Boolean);
-      if (parts.length < 2) return null;
-      const bucket = String(parts.shift() || "").trim();
-      const storagePath = parts.join("/").trim();
-      return bucket && storagePath ? { bucket, storagePath } : null;
-    }
-    const pathname = String(parsed.pathname || "").replace(/^\/+/, "").trim();
-    return pathname ? { bucket: host, storagePath: pathname } : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function deriveStoragePathFromMediaSource(rawUrl = "", storagePath = "") {
-  const cleanStoragePath = String(storagePath || "").trim();
-  // Si ya empieza con gs://, lo respetamos tal cual
-  if (cleanStoragePath.startsWith("gs://")) return cleanStoragePath;
-
-  const parsed = parseFirebaseStorageObjectUrl(rawUrl);
-  if (parsed?.bucket && parsed?.storagePath) {
-    return `gs://${parsed.bucket}/${parsed.storagePath}`;
-  }
-
-  if (cleanStoragePath) return cleanStoragePath;
-  return String(parsed?.storagePath || "").trim();
-}
-
-function normalizePersistedMediaReference(rawUrl = "", storagePath = "") {
-  const cleanUrl = String(rawUrl || "").trim();
-  const cleanStoragePath = deriveStoragePathFromMediaSource(cleanUrl, storagePath || "");
-  if (!cleanUrl && !cleanStoragePath) {
-    return {
-      downloadUrl: "",
-      storagePath: ""
-    };
-  }
-  // Favor storagePath as primary, but ALWAYS preserve the downloadUrl as a baseline fallback
-  // if the proxy media health API hasn't validated it yet.
-  return {
-    storagePath: cleanStoragePath,
-    downloadUrl: cleanUrl || (cleanStoragePath ? "" : "")
-  };
-}
-
-function normalizeMediaReferenceFromRecord(record = {}, urlKeys = ["downloadUrl", "url"], pathKeys = ["storagePath", "path"]) {
-  if (!record || typeof record !== "object") {
-    return normalizePersistedMediaReference("", "");
-  }
-  const rawUrl = urlKeys
-    .map((key) => String(record?.[key] || "").trim())
-    .find(Boolean) || "";
-  const rawStoragePath = pathKeys
-    .map((key) => String(record?.[key] || "").trim())
-    .find(Boolean) || "";
-  return normalizePersistedMediaReference(rawUrl, rawStoragePath);
-}
-
-function isLikelyImageMediaRecord(record = null) {
-  if (!record || typeof record !== "object") return false;
-  const mimeType = String(record?.mimeType || "").trim().toLowerCase();
-  if (mimeType.startsWith("image/")) return true;
-  const explicitType = String(record?.type || record?.mediaKind || "").trim().toLowerCase();
-  if (explicitType === "image") return true;
-  const mediaRef = normalizeMediaReferenceFromRecord(
-    record,
-    ["downloadUrl", "url", "dataUrl"],
-    ["storagePath", "path"]
-  );
-  const source = `${String(mediaRef.downloadUrl || "").trim()} ${String(mediaRef.storagePath || "").trim()}`.toLowerCase();
-  return /\.(png|jpe?g|webp|gif)(\?|$|\s)/i.test(source);
-}
-
-function buildImageReferenceRecordFromMedia(raw = null, fallbackName = "Referencia") {
-  if (!raw || typeof raw !== "object") return null;
-  const dataUrl = String(raw?.dataUrl || "").trim();
-  const mediaRef = normalizeMediaReferenceFromRecord(
-    raw,
-    ["downloadUrl", "url", "dataUrl"],
-    ["storagePath", "path"]
-  );
-  const downloadUrl = String(mediaRef.downloadUrl || "").trim();
-  const storagePath = String(mediaRef.storagePath || "").trim();
-  const mimeType = String(raw?.mimeType || "").trim().toLowerCase() || "image/png";
-  if (!dataUrl.startsWith("data:image/") && !downloadUrl && !storagePath) return null;
-  if (!isLikelyImageMediaRecord({ ...raw, downloadUrl, storagePath, mimeType })) return null;
-  return {
-    name: String(raw?.name || fallbackName).trim().slice(0, 180) || fallbackName,
-    dataUrl,
-    downloadUrl,
-    storagePath,
-    mimeType,
-    updatedAt: String(raw?.updatedAt || nowIso()).trim() || nowIso()
-  };
-}
-
-function markStaleDialogueVideoSource(sessionId = "", rowId = "", source = null, reason = "stale-scene-video-storage-path") {
-  const normalized = normalizePersistedMediaReference(source?.downloadUrl || "", source?.storagePath || "");
-  const storagePath = String(normalized.storagePath || "").trim();
-  const downloadUrl = String(source?.downloadUrl || "").trim();
-  const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
-  if (key) staleDialogueVideoSourceKeys.add(key);
-  const storageProxyUrl = storagePath ? buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`) : "";
-  const downloadProxyUrl = downloadUrl ? resolveStorageVideoUrl(downloadUrl, "") : "";
-  [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
-    markStaleProxyMediaUrl(url, reason, {
-      rowId,
-      storagePath: storagePath || undefined
-    });
-    const cachedVideo = podcastStageVideoCache.get(url);
-    if (cachedVideo?.objectUrl) {
-      try { URL.revokeObjectURL(cachedVideo.objectUrl); } catch (_) { }
-    }
-    podcastStageVideoCache.delete(url);
-    const cachedAudio = podcastStageAudioCache.get(url);
-    if (cachedAudio?.objectUrl) {
-      try { URL.revokeObjectURL(cachedAudio.objectUrl); } catch (_) { }
-    }
-    podcastStageAudioCache.delete(url);
-  });
-  logPodcastRenderDebug("dialogue-video-source-stale", {
-    sessionId,
-    rowId,
-    reason,
-    storagePath,
-    downloadUrl: downloadUrl ? `${downloadUrl.slice(0, 180)}${downloadUrl.length > 180 ? "..." : ""}` : "",
-    staleKey: key
-  });
-}
-
-function isStaleDialogueVideoSource(sessionId = "", rowId = "", source = null) {
-  const storagePath = String(source?.storagePath || "").trim();
-  const downloadUrl = String(source?.downloadUrl || "").trim();
-  const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
-  return key ? staleDialogueVideoSourceKeys.has(key) : false;
-}
 let podcastRenderState = {
   timelineStructureKey: "",
   timelineMode: "",
@@ -1294,305 +1147,6 @@ let podcastPlaybackState = {
   recordedChunks: [],
   recordedAt: ""
 };
-let podcastAudioTrackUiState = {
-  activeLoopIndex: -1
-};
-let panelMusicState = {
-  preset: "ambient",
-  volume: 22,
-  montageVolume: 100,
-  duckingWhenGeminiPct: 60,
-  stabilize: false,
-  playing: false,
-  sourceType: "preset",
-  selectedTrackKind: "uploaded",
-  trackLibrary: {
-    uploaded: null,
-    uploadedTracks: [],
-    ai: null
-  },
-  track: null
-};
-function normalizeMontageExportSettings(raw = {}) {
-  const source = raw && typeof raw === "object" ? raw : {};
-  const exportMode = ["normal", "review"].includes(String(source.exportMode || "").trim())
-    ? String(source.exportMode).trim()
-    : "normal";
-  const requestedFormat = String(source.format || "").trim();
-  const format = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
-  const qualityPreset = ["high", "balanced", "small"].includes(String(source.qualityPreset || "").trim())
-    ? String(source.qualityPreset).trim()
-    : "balanced";
-  const resolution = ["source", "1080p", "720p", "480p"].includes(String(source.resolution || "").trim())
-    ? String(source.resolution).trim()
-    : "source";
-  const filename = String(source.filename || "").trim().slice(0, 120);
-  const includeReviewExcel = source.includeReviewExcel !== false;
-  const bitrateMode = ["vbr", "cbr", "custom"].includes(String(source.bitrateMode || "").trim())
-    ? String(source.bitrateMode).trim()
-    : "vbr";
-  const maxBitrate = Math.max(0.1, Math.min(50, Number(source.maxBitrate || 5) || 5));
-  const minBitrate = Math.max(0, Math.min(51, Number(source.minBitrate || 20) || 20));
-
-  return {
-    exportMode,
-    format,
-    qualityPreset,
-    resolution,
-    bitrateMode,
-    maxBitrate,
-    minBitrate,
-    filename,
-    includeReviewExcel,
-    onlyAudio: source.onlyAudio === true
-  };
-}
-
-function sanitizeMontageFilenamePart(value = "") {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-}
-
-function isLegacyAutoMontageFilename(value = "") {
-  const clean = String(value || "").trim();
-  return !clean || /^montage-\d{4}-\d{2}-\d{2}t/i.test(clean);
-}
-
-function defaultMontageExportFilename(session = null) {
-  const activeSession = session || getActiveSession?.() || null;
-  const preferred = sanitizeMontageFilenamePart(
-    activeSession?.title
-    || activeSession?.script?.episodeTitle
-    || activeSession?.script?.summary
-    || activeSession?.prompt
-    || ""
-  );
-  if (preferred) return preferred;
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `montage-${stamp}`;
-}
-
-function stripFileExtension(filename = "") {
-  const clean = String(filename || "").trim();
-  return clean.replace(/\.[a-z0-9]{2,5}$/i, "");
-}
-
-function resolveOnScreenTextExportCanvasSize(resolution = "source", sourceWidth = 0, sourceHeight = 0) {
-  if (resolveSharedOnScreenTextExportCanvasSize) {
-    return resolveSharedOnScreenTextExportCanvasSize(resolution, sourceWidth, sourceHeight);
-  }
-  const key = String(resolution || "source").trim().toLowerCase();
-  const fallbackWidth = Math.max(2, Math.round(toFiniteNumber(sourceWidth, 1280)));
-  const fallbackHeight = Math.max(2, Math.round(toFiniteNumber(sourceHeight, 720)));
-  const safeSourceWidth = fallbackWidth - (fallbackWidth % 2);
-  const safeSourceHeight = fallbackHeight - (fallbackHeight % 2);
-  if (key === "source") {
-    return {
-      width: Math.max(2, safeSourceWidth || 1280),
-      height: Math.max(2, safeSourceHeight || 720)
-    };
-  }
-  const target = key === "1080p" ? { width: 1920, height: 1080 } : key === "720p" ? { width: 1280, height: 720 } : { width: 854, height: 480 };
-  const downscaleRatio = Math.min(
-    1,
-    target.width / Math.max(1, safeSourceWidth || target.width),
-    target.height / Math.max(1, safeSourceHeight || target.height)
-  );
-  const scaledWidth = Math.max(2, Math.floor((Math.max(2, safeSourceWidth || target.width) * downscaleRatio) / 2) * 2);
-  const scaledHeight = Math.max(2, Math.floor((Math.max(2, safeSourceHeight || target.height) * downscaleRatio) / 2) * 2);
-  return {
-    width: scaledWidth,
-    height: scaledHeight
-  };
-}
-
-function formatMontageExportClockMs(ms = 0) {
-  const safe = Math.max(0, Math.round(Number(ms || 0) || 0));
-  const hours = Math.floor(safe / 3600000);
-  const minutes = Math.floor((safe % 3600000) / 60000);
-  const seconds = Math.floor((safe % 60000) / 1000);
-  const millis = safe % 1000;
-  return [
-    String(hours).padStart(2, "0"),
-    String(minutes).padStart(2, "0"),
-    String(seconds).padStart(2, "0")
-  ].join(":") + `.${String(millis).padStart(3, "0")}`;
-}
-
-function formatMontageExportTimelineLabel(entry = null) {
-  const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-  const endMs = Math.max(startMs, Math.round(Number(entry?.timelineEndMs || 0) || 0));
-  const durationMs = Math.max(0, Math.round(Number(entry?.durationMs || 0) || 0));
-  const durationSec = Math.max(0, Math.round((durationMs / 100)) / 10);
-  return `${formatMontageExportClockMs(startMs)} - ${formatMontageExportClockMs(endMs)} · ${durationSec.toFixed(1)} s`;
-}
-
-function ensureMontageExportXlsx() {
-  if (window.XLSX) return Promise.resolve(window.XLSX);
-  if (montageExportXlsxLoaderPromise) return montageExportXlsxLoaderPromise;
-  montageExportXlsxLoaderPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-role="montage-export-xlsx-loader"]');
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.XLSX), { once: true });
-      existing.addEventListener("error", () => reject(new Error("xlsx_load_failed")), { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "vendor/xlsx/xlsx.full.min.js";
-    script.async = true;
-    script.dataset.role = "montage-export-xlsx-loader";
-    script.onload = () => resolve(window.XLSX);
-    script.onerror = () => reject(new Error("xlsx_load_failed"));
-    document.head.appendChild(script);
-  }).finally(() => {
-    if (!window.XLSX) montageExportXlsxLoaderPromise = null;
-  });
-  return montageExportXlsxLoaderPromise;
-}
-
-function buildMontageReviewExcelRows(preparedPayload = null) {
-  const entries = Array.isArray(preparedPayload?.entries) ? preparedPayload.entries : [];
-  return entries.map((entry, index) => ({
-    Escena: Math.max(1, Number(entry?.sceneIndex || index + 1) || index + 1),
-    Tiempo: String(entry?.timelineLabel || formatMontageExportTimelineLabel(entry) || "").trim(),
-    "Guión": String(entry?.voiceOverText || "").trim(),
-    "Descripción de escena": String(entry?.sceneDescription || "").trim(),
-    "Texto en pantalla": String(entry?.onScreenText || "").trim(),
-    "Elemento visual": String(entry?.visualNotes || "").trim(),
-    "Cambios sugeridos": ""
-  }));
-}
-
-async function downloadMontageReviewExcel(preparedPayload = null, baseFilename = "") {
-  const rows = buildMontageReviewExcelRows(preparedPayload);
-  if (!rows.length) throw new Error("montage_review_excel_empty");
-  const XLSX = await ensureMontageExportXlsx();
-  if (!XLSX?.utils?.json_to_sheet || !XLSX?.writeFile) throw new Error("xlsx_unavailable");
-  const ws = XLSX.utils.json_to_sheet(rows, {
-    header: ["Escena", "Tiempo", "Guión", "Descripción de escena", "Texto en pantalla", "Elemento visual", "Cambios sugeridos"]
-  });
-  ws["!cols"] = [
-    { wch: 10 },
-    { wch: 28 },
-    { wch: 44 },
-    { wch: 42 },
-    { wch: 34 },
-    { wch: 44 },
-    { wch: 40 }
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "GuionRevision");
-  const nameBase = stripFileExtension(baseFilename) || stripFileExtension(defaultMontageExportFilename()) || "montage";
-  XLSX.writeFile(wb, `${nameBase}-revision-guion.xlsx`, { compression: true });
-}
-
-function loadMontageExportSettings() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
-    const normalized = normalizeMontageExportSettings(parsed || {});
-    if (isLegacyAutoMontageFilename(normalized.filename)) normalized.filename = "";
-    return normalized;
-  } catch (_) {
-    return normalizeMontageExportSettings({ filename: "" });
-  }
-}
-
-function persistMontageExportSettings() {
-  try {
-    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(montageExportState)));
-  } catch (_) {
-    // noop
-  }
-}
-
-let montageExportState = loadMontageExportSettings();
-let montageExportBusy = false;
-
-function isRenderBackedApiRuntime() {
-  const apiBase = String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim().toLowerCase();
-  return apiBase.includes(".onrender.com/api");
-}
-
-function shouldDisableMontagePreviewInCurrentRuntime() {
-  // El preview del modal se resuelve desde frontend (sin endpoint de render preview),
-  // por lo que no debemos desactivarlo en runtime Render.
-  return false;
-}
-
-function shouldSuspendMontagePreviewActivity() {
-  return montageExportBusy === true || shouldDisableMontagePreviewInCurrentRuntime();
-}
-
-let montageExportPreviewState = {
-  loading: false,
-  error: "",
-  dataUrl: "",
-  mediaType: "",
-  mode: "normal",
-  sceneIndex: 0,
-  disabled: false,
-  lastSignature: "",
-  debounceTimer: null,
-  requestSeq: 0,
-  lastJobPreviewRowId: "",
-  lastJobPreviewAt: 0
-};
-let montageExportJobState = {
-  jobId: "",
-  pollTimer: null,
-  startedAtMs: 0,
-  lastStage: "",
-  lastSceneSubstage: "",
-  lastHint: "",
-  lastProgress: -1,
-  pollFailureCount: 0,
-  reviewExcelEnabled: false,
-  reviewExcelPayload: null,
-  reviewExcelFilename: ""
-};
-let montageExportXlsxLoaderPromise = null;
-let panelMusicAudioCtx = null;
-let panelMusicNodes = [];
-let panelMusicAudioEl = null;
-let panelMusicAiGenerating = false;
-
-function logMontageExportDevtools(event = "", payload = {}, level = "info") {
-  void event;
-  void payload;
-  void level;
-}
-let panelMusicDurationProbeCtx = null;
-const panelMusicDurationProbePendingKinds = new Set();
-let panelMusicGlobalLibraryState = {
-  items: [],
-  loading: false,
-  loadedAt: "",
-  error: ""
-};
-let podcastSceneLibraryState = {
-  items: [],
-  loading: false,
-  loadedAt: "",
-  error: "",
-  filters: {
-    query: "",
-    tagColor: "all"
-  }
-};
-let podcastSceneInsertModalState = {
-  open: false,
-  libraryItem: null,
-  selectedInsertIndex: 0
-};
-let podcastSceneLibraryEditModalState = {
-  open: false,
-  item: null
-};
 let nextDialogueVideoRequestAt = 0;
 let podcastPortraitViewerLastFocus = null;
 let globalTooltipState = {
@@ -1605,12 +1159,6 @@ const runtimeFeatureState = {
   dialogueAudioUnavailable: false,
   dialogueAudioUnavailableWarned: false,
   healthChecked: false
-};
-const connectScriptPanelGenerationState = {
-  active: false,
-  messageId: "",
-  abortController: null,
-  token: 0
 };
 const STUDIO_TRANSITION_TYPES = [
   "cut",
@@ -1691,6 +1239,97 @@ function logVideoCreateDebug(stage = "", payload = {}) {
     // noop
   }
 }
+
+const podcasterPanelMusicApi = createPodcasterPanelMusicApi({
+  panelMusicStorageKeyBase: PANEL_MUSIC_STORAGE_KEY_BASE,
+  maxLocalMusicDataUrlChars: MAX_LOCAL_MUSIC_DATA_URL_CHARS,
+  studioTimelineMinClipMs: STUDIO_TIMELINE_MIN_CLIP_MS,
+  getElements: () => els,
+  resolveCurrentUid,
+  getActiveSession,
+  getSessionRows,
+  nowIso,
+  authFetchJson,
+  addChatMessage,
+  setGenerationStatus,
+  renderPodcastVideoTimeline,
+  upsertActiveSession,
+  resolveStorageAudioUrl,
+  scheduleSessionLocalPersist,
+  getPlaybackController: () => playbackController,
+  getPodcastVideoState: () => podcastVideoState,
+  getTimelineTotalDurationMs,
+  buildTimelineRuntimeEntries,
+  logPodcastRenderDebug,
+  escapeHtml,
+  syncPodcastStudioInspector
+});
+
+const {
+  panelMusicState,
+  panelMusicGlobalLibraryState,
+  podcastAudioTrackUiState,
+  resolvePanelMusicStorageKey,
+  resolvePanelMusicSessionCacheKey,
+  persistPanelMusicSessionTrackCache,
+  loadPanelMusicSessionTrackCache,
+  normalizePanelMusicMutedLoopIndexes,
+  normalizePanelMusicLoopSettings,
+  normalizePanelMusicTrack,
+  normalizeGlobalPanelMusicLibraryTrack,
+  normalizePanelMusicTrackList,
+  resolvePanelMusicTrackKind,
+  getPanelMusicUploadedTracks,
+  getEnabledPanelMusicUploadedTracks,
+  setPanelMusicUploadedTracks,
+  setAllSessionUploadedTracksEnabled,
+  toggleSessionUploadedTrackEnabled,
+  removeUploadedTrackAt,
+  addGlobalMusicTrackToSession,
+  reconcileSessionUploadedTracksWithGlobalLibrary,
+  fetchGlobalPanelMusicLibrary,
+  updateUploadedTrackAt,
+  getPanelMusicTrackByKind,
+  getPanelMusicTrackAvailability,
+  getAvailablePanelMusicTrackKinds,
+  getPanelMusicTrackDurationSec,
+  getPanelMusicLoopCount,
+  buildUploadedPanelMusicSegments,
+  groupUploadedPanelMusicSegmentsByTrack,
+  getPanelMusicLoopSegments,
+  getPanelMusicLoopSetting,
+  upsertPanelMusicLoopSetting,
+  measureAudioDurationInfoFromFile,
+  ensurePanelMusicTrackDuration,
+  ensureAllEnabledUploadedTrackDurations,
+  togglePanelMusicLoopMute,
+  updatePanelMusicTrack,
+  syncActivePanelMusicTrack,
+  selectPanelMusicTrackKind,
+  selectUploadedPanelMusicTrackByIndex,
+  setPanelMusicTrack,
+  loadPanelMusicSettings,
+  loadPanelMusicSettingsIntoState,
+  persistPanelMusicSettings,
+  persistPanelMusicToActiveSession,
+  persistAudioTrackMixSettings,
+  buildDefaultPanelMusicAiPrompt,
+  generatePanelMusicWithAi,
+  syncMusicControls,
+  syncPanelMusicStateFromSession,
+  setPanelMontageMusicVolume,
+  setPanelMontageDuckingWhenGeminiPct,
+  setPanelMontageStabilize,
+  stopPanelMusic,
+  startPanelMusic,
+  resolvePanelMusicTrackSrc,
+  getPanelMontageMusicConfig,
+  handleTimelineSelectAudioLoopChip,
+  handleTimelineToggleAudioLoopMute,
+  ensurePanelMusicTrackUploaded,
+  getPanelMusicAiGenerating,
+  setPanelMusicAiGenerating
+} = podcasterPanelMusicApi;
 
 function setPodcastPlaybackRowStatus(status = "", details = {}) {
   podcastPlaybackState.currentRowStatus = String(status || "").trim();
@@ -1989,10 +1628,6 @@ function resolveDeletedSessionsStorageKey(uid = resolveCurrentUid()) {
   return `${STORAGE_KEY_BASE}:deleted:${String(uid || "").trim() || "auth_required"}`;
 }
 
-function resolvePanelMusicStorageKey(uid = resolveCurrentUid()) {
-  return `${PANEL_MUSIC_STORAGE_KEY_BASE}:${String(uid || "").trim() || "auth_required"}`;
-}
-
 function readJsonArrayStorage(key = "") {
   try {
     const parsed = JSON.parse(localStorage.getItem(String(key || "").trim()) || "[]");
@@ -2048,340 +1683,6 @@ function purgeSessionFromAllStorage(sessionId = "", uid = resolveCurrentUid()) {
   ].forEach((key) => purgeSessionFromStorageKey(key, cleanId));
 }
 
-function resolvePanelMusicSessionCacheKey(sessionId = "", kind = "uploaded", uid = resolveCurrentUid()) {
-  const safeSessionId = String(sessionId || "").trim() || "session";
-  const safeKind = resolvePanelMusicTrackKind(kind);
-  const safeUid = String(uid || "").trim() || "auth_required";
-  return `${PANEL_MUSIC_STORAGE_KEY_BASE}:cache:${safeUid}:${safeSessionId}:${safeKind}`;
-}
-
-function persistPanelMusicSessionTrackCache(sessionId = "", kind = "", localDataUrl = "") {
-  const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
-  const value = String(localDataUrl || "").trim();
-  if (!value) {
-    localStorage.removeItem(key);
-    return;
-  }
-  try {
-    localStorage.setItem(key, value.slice(0, MAX_LOCAL_MUSIC_DATA_URL_CHARS));
-  } catch (_) {
-    try {
-      localStorage.removeItem(key);
-    } catch (_) {
-      // noop
-    }
-  }
-}
-
-function loadPanelMusicSessionTrackCache(sessionId = "", kind = "") {
-  const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
-  return String(localStorage.getItem(key) || "").trim();
-}
-
-function normalizePanelMusicMutedLoopIndexes(value = []) {
-  if (!Array.isArray(value)) return [];
-  return Array.from(new Set(
-    value
-      .map((item) => Math.max(0, Math.floor(Number(item) || 0)))
-      .filter((item) => Number.isFinite(item) && item >= 0 && item <= 999)
-  )).sort((a, b) => a - b);
-}
-
-function normalizePanelMusicLoopSettings(value = [], sourceDurationMs = 0) {
-  if (!Array.isArray(value)) return [];
-  const maxDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sourceDurationMs || 0) || 0));
-  const maxTrimInMs = Math.max(0, maxDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS);
-  const map = new Map();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") return;
-    const loopIndex = Math.max(0, Math.floor(Number(item.loopIndex) || 0));
-    if (!Number.isFinite(loopIndex) || loopIndex > 999) return;
-    const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(item.trimInMs || 0) || 0)));
-    const rawTrimOutMs = Math.round(Number(item.trimOutMs || maxDurationMs) || maxDurationMs);
-    const trimOutMs = Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(maxDurationMs, rawTrimOutMs));
-    map.set(loopIndex, { loopIndex, trimInMs, trimOutMs });
-  });
-  return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
-}
-
-function getPanelMusicLoopSetting(track = null, loopIndex = 0) {
-  const normalized = normalizePanelMusicTrack(track);
-  if (!normalized) return null;
-  const sourceDurationMs = Math.max(
-    STUDIO_TIMELINE_MIN_CLIP_MS,
-    Math.round(getPanelMusicTrackDurationSec(normalized) * 1000) || STUDIO_TIMELINE_MIN_CLIP_MS
-  );
-  const settings = normalizePanelMusicLoopSettings(normalized.loopSettings || [], sourceDurationMs);
-  const key = Math.max(0, Math.floor(Number(loopIndex) || 0));
-  const existing = settings.find((item) => item.loopIndex === key);
-  if (existing) return existing;
-  const defaultTrimInMs = Math.max(0, Math.min(sourceDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(normalized.trimInMs || 0) || 0)));
-  const defaultTrimOutMs = Math.max(
-    defaultTrimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
-    Math.min(sourceDurationMs, Math.round(Number(normalized.trimOutMs || sourceDurationMs) || sourceDurationMs))
-  );
-  return {
-    loopIndex: key,
-    trimInMs: defaultTrimInMs,
-    trimOutMs: defaultTrimOutMs
-  };
-}
-
-function upsertPanelMusicLoopSetting(loopSettings = [], loopIndex = 0, nextValue = {}) {
-  const key = Math.max(0, Math.floor(Number(loopIndex) || 0));
-  const filtered = Array.isArray(loopSettings)
-    ? loopSettings.filter((item) => Math.max(0, Math.floor(Number(item?.loopIndex) || 0)) !== key)
-    : [];
-  filtered.push({
-    loopIndex: key,
-    trimInMs: Math.max(0, Math.round(Number(nextValue?.trimInMs || 0) || 0)),
-    trimOutMs: Math.max(0, Math.round(Number(nextValue?.trimOutMs || 0) || 0))
-  });
-  return filtered.sort((a, b) => Number(a.loopIndex || 0) - Number(b.loopIndex || 0));
-}
-
-function normalizePanelMusicTrack(track = null) {
-  if (!track || typeof track !== "object") return null;
-  const sourceDurationMs = Math.max(0, Math.round((Number(track.durationSec || 0) || 0) * 1000));
-  const startOffsetMs = Math.max(0, Math.round(Number(track.startOffsetMs || 0) || 0));
-  const maxTrimInMs = Math.max(0, sourceDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS);
-  const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(track.trimInMs || 0) || 0)));
-  const rawTrimOutMs = Math.round(Number(track.trimOutMs || sourceDurationMs) || sourceDurationMs);
-  const trimOutMs = sourceDurationMs > 0
-    ? Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.min(sourceDurationMs, rawTrimOutMs))
-    : 0;
-  return {
-    libraryId: String(track.libraryId || "").trim(),
-    slotLabel: String(track.slotLabel || "").trim(),
-    enabledInSession: track.enabledInSession !== false,
-    name: String(track.name || "Audio").trim() || "Audio",
-    mimeType: String(track.mimeType || "audio/mpeg").trim() || "audio/mpeg",
-    size: Math.max(0, Number(track.size || 0) || 0),
-    durationSec: Math.max(0, Number(track.durationSec || 0) || 0),
-    startOffsetMs,
-    trimInMs,
-    trimOutMs,
-    localDataUrl: String(track.localDataUrl || "").trim().slice(0, MAX_LOCAL_MUSIC_DATA_URL_CHARS),
-    downloadUrl: String(track.downloadUrl || "").trim(),
-    storagePath: String(track.storagePath || "").trim(),
-    updatedAt: String(track.updatedAt || nowIso()).trim() || nowIso(),
-    model: String(track.model || "").trim(),
-    prompt: String(track.prompt || "").trim(),
-    durationMeasuredWith: String(track.durationMeasuredWith || "").trim().toLowerCase(),
-    montageVolume: track.montageVolume !== undefined ? Math.max(0, Math.min(100, Number(track.montageVolume) || 0)) : 100,
-    duckingWhenGeminiPct: track.duckingWhenGeminiPct !== undefined ? Math.max(40, Math.min(100, Number(track.duckingWhenGeminiPct) || 0)) : 60,
-    stabilize: track.stabilize === true,
-    loopSettings: normalizePanelMusicLoopSettings(track.loopSettings || [], sourceDurationMs),
-    mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || []),
-    segmentStartOverrides: Array.isArray(track.segmentStartOverrides)
-      ? track.segmentStartOverrides
-        .map((item) => ({
-          loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
-          startMs: Math.max(0, Math.round(Number(item?.startMs || 0) || 0))
-        }))
-        .filter((item) => Number.isFinite(item.loopIndex) && item.loopIndex <= 999 && Number.isFinite(item.startMs))
-      : []
-  };
-}
-
-function normalizeGlobalPanelMusicLibraryTrack(track = null) {
-  const normalized = normalizePanelMusicTrack(track);
-  if (!normalized) return null;
-  return {
-    ...normalized,
-    libraryId: String(track?.libraryId || normalized.libraryId || "").trim(),
-    ownerEmail: String(track?.ownerEmail || "").trim()
-  };
-}
-
-function normalizePanelMusicTrackList(value = []) {
-  const list = Array.isArray(value) ? value.map((item) => normalizePanelMusicTrack(item)).filter(Boolean) : [];
-  return list.map((track, index) => ({
-    ...track,
-    slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
-    enabledInSession: track.enabledInSession !== false
-  }));
-}
-
-function getPanelMusicUploadedTracks() {
-  const list = normalizePanelMusicTrackList(panelMusicState.trackLibrary?.uploadedTracks || []);
-  if (list.length) return list;
-  const legacy = normalizePanelMusicTrack(panelMusicState.trackLibrary?.uploaded || null);
-  return legacy ? [{ ...legacy, slotLabel: String(legacy.slotLabel || "Audio 1").trim() || "Audio 1" }] : [];
-}
-
-function getEnabledPanelMusicUploadedTracks() {
-  return getPanelMusicUploadedTracks().filter((track) => track?.enabledInSession !== false);
-}
-
-function setPanelMusicUploadedTracks(tracks = [], options = {}) {
-  const normalizedList = normalizePanelMusicTrackList(tracks);
-  panelMusicState.trackLibrary.uploadedTracks = normalizedList;
-  panelMusicState.trackLibrary.uploaded = normalizedList[0] || null;
-  if (options.selectIndex !== undefined) {
-    const nextTrack = normalizedList[Math.max(0, Math.min(normalizedList.length - 1, Number(options.selectIndex) || 0))] || null;
-    panelMusicState.track = nextTrack;
-    panelMusicState.selectedTrackKind = "uploaded";
-    panelMusicState.sourceType = nextTrack ? "track" : "preset";
-  } else {
-    syncActivePanelMusicTrack({ kind: panelMusicState.selectedTrackKind, forceTrack: false });
-  }
-}
-
-function setAllSessionUploadedTracksEnabled(enabled = true) {
-  const nextTracks = getPanelMusicUploadedTracks().map((track) => ({
-    ...track,
-    enabledInSession: enabled === true
-  }));
-  setPanelMusicUploadedTracks(nextTracks, { selectIndex: 0 });
-  persistAudioTrackMixSettings();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-}
-
-function toggleSessionUploadedTrackEnabled(index = 0) {
-  const trackIndex = Math.max(0, Math.floor(Number(index) || 0));
-  const tracks = getPanelMusicUploadedTracks();
-  const track = tracks[trackIndex] || null;
-  if (!track) return false;
-  const nextTracks = [...tracks];
-  nextTracks[trackIndex] = {
-    ...track,
-    enabledInSession: track.enabledInSession === false
-  };
-  setPanelMusicUploadedTracks(nextTracks, { selectIndex: trackIndex });
-  persistAudioTrackMixSettings();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-function removeUploadedTrackAt(index = 0, options = {}) {
-  const nextIndex = Math.max(0, Math.floor(Number(index) || 0));
-  const tracks = getPanelMusicUploadedTracks();
-  if (nextIndex < 0 || nextIndex >= tracks.length) return false;
-  const nextTracks = tracks.filter((_, itemIndex) => itemIndex !== nextIndex).map((track, itemIndex) => ({
-    ...track,
-    slotLabel: `Audio ${itemIndex + 1}`
-  }));
-  setPanelMusicUploadedTracks(nextTracks, { selectIndex: Math.max(0, Math.min(nextTracks.length - 1, nextIndex - 1)) });
-  if (!nextTracks.length) {
-    panelMusicState.track = null;
-    panelMusicState.sourceType = "preset";
-  }
-  persistAudioTrackMixSettings();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-function addGlobalMusicTrackToSession(track = null, options = {}) {
-  const normalized = normalizeGlobalPanelMusicLibraryTrack(track);
-  if (!normalized) return false;
-  const existingTracks = getPanelMusicUploadedTracks();
-  const normalizedLibraryId = String(normalized.libraryId || "").trim();
-  const normalizedName = String(normalized.name || "").trim().toLowerCase();
-  const normalizedSize = Math.max(0, Number(normalized.size || 0) || 0);
-  const normalizedDurationSec = Math.max(0, Number(normalized.durationSec || 0) || 0);
-  const existingIndex = existingTracks.findIndex((item) => {
-    const itemLibraryId = String(item?.libraryId || "").trim();
-    if (normalizedLibraryId && itemLibraryId === normalizedLibraryId) return true;
-    if (itemLibraryId) return false;
-    const itemName = String(item?.name || "").trim().toLowerCase();
-    const itemSize = Math.max(0, Number(item?.size || 0) || 0);
-    const itemDurationSec = Math.max(0, Number(item?.durationSec || 0) || 0);
-    const sameName = normalizedName && itemName === normalizedName;
-    const sameSize = normalizedSize > 0 && itemSize > 0 && normalizedSize === itemSize;
-    const similarDuration = normalizedDurationSec > 0 && itemDurationSec > 0 && Math.abs(normalizedDurationSec - itemDurationSec) <= 1.5;
-    return sameName && (sameSize || similarDuration);
-  });
-  if (existingIndex >= 0) {
-    const nextTracks = [...existingTracks];
-    nextTracks[existingIndex] = {
-      ...nextTracks[existingIndex],
-      ...normalized,
-      slotLabel: String(nextTracks[existingIndex]?.slotLabel || normalized.slotLabel || `Audio ${existingIndex + 1}`).trim() || `Audio ${existingIndex + 1}`,
-      localDataUrl: ""
-    };
-    setPanelMusicUploadedTracks(nextTracks, { selectIndex: existingIndex });
-    persistPanelMusicSettings();
-    persistPanelMusicToActiveSession();
-    syncMusicControls();
-    renderPodcastVideoTimeline(getActiveSession());
-    return true;
-  }
-  const nextTrack = {
-    ...normalized,
-    slotLabel: `Audio ${existingTracks.length + 1}`,
-    localDataUrl: ""
-  };
-  setPanelMusicUploadedTracks([
-    ...existingTracks,
-    nextTrack
-  ], { selectIndex: existingTracks.length });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-function reconcileSessionUploadedTracksWithGlobalLibrary() {
-  const libraryById = new Map(
-    (Array.isArray(panelMusicGlobalLibraryState.items) ? panelMusicGlobalLibraryState.items : [])
-      .map((item) => [String(item?.libraryId || "").trim(), normalizeGlobalPanelMusicLibraryTrack(item)])
-      .filter(([libraryId, item]) => libraryId && item)
-  );
-  const existingTracks = getPanelMusicUploadedTracks();
-  if (!existingTracks.length || !libraryById.size) return false;
-  let changed = false;
-  const nextTracks = existingTracks.map((track, index) => {
-    const libraryId = String(track?.libraryId || "").trim();
-    const libraryTrack = libraryId ? libraryById.get(libraryId) : null;
-    if (!libraryTrack) return track;
-    const needsRepair = !String(track?.downloadUrl || "").trim() || !String(track?.storagePath || "").trim();
-    if (!needsRepair) return track;
-    changed = true;
-    return normalizePanelMusicTrack({
-      ...track,
-      ...libraryTrack,
-      slotLabel: String(track?.slotLabel || libraryTrack?.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
-      localDataUrl: ""
-    });
-  });
-  if (!changed) return false;
-  const selectedTrack = normalizePanelMusicTrack(panelMusicState.track);
-  const selectedIndex = selectedTrack && !selectedTrack.model
-    ? Math.max(0, nextTracks.findIndex((track) => String(track?.slotLabel || "").trim() === String(selectedTrack.slotLabel || "").trim()))
-    : 0;
-  setPanelMusicUploadedTracks(nextTracks, { selectIndex: selectedIndex });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-async function fetchGlobalPanelMusicLibrary(options = {}) {
-  panelMusicGlobalLibraryState.loading = true;
-  if (options.render !== false) syncMusicControls();
-  try {
-    const response = await authFetchJson("/api/podcaster/music/library/list", { method: "GET" });
-    panelMusicGlobalLibraryState.items = Array.isArray(response?.tracks)
-      ? response.tracks.map((track) => normalizeGlobalPanelMusicLibraryTrack(track)).filter(Boolean)
-      : [];
-    panelMusicGlobalLibraryState.loadedAt = nowIso();
-    panelMusicGlobalLibraryState.error = "";
-    reconcileSessionUploadedTracksWithGlobalLibrary();
-  } catch (error) {
-    panelMusicGlobalLibraryState.error = String(error?.message || "No se pudo cargar la biblioteca global.");
-  } finally {
-    panelMusicGlobalLibraryState.loading = false;
-    if (options.render !== false) syncMusicControls();
-  }
-  return panelMusicGlobalLibraryState.items;
-}
-
 function normalizePodcastSceneLibraryItem(item = null) {
   if (!item || typeof item !== "object") return null;
   const libraryId = String(item.libraryId || item.id || "").trim();
@@ -2425,448 +1726,7 @@ function normalizePodcastSceneLibraryItem(item = null) {
   };
 }
 
-const PODCAST_LIBRARY_TAG_COLORS = [
-  { value: "slate", label: "Slate" },
-  { value: "red", label: "Rojo" },
-  { value: "amber", label: "Ámbar" },
-  { value: "emerald", label: "Verde" },
-  { value: "sky", label: "Azul" },
-  { value: "violet", label: "Violeta" },
-  { value: "pink", label: "Rosa" }
-];
-
-function getPodcastLibraryTagColorMeta(color = "") {
-  const key = String(color || "slate").trim().toLowerCase();
-  return PODCAST_LIBRARY_TAG_COLORS.find((item) => item.value === key) || PODCAST_LIBRARY_TAG_COLORS[0];
-}
-
-function getPodcastLibraryTagColorStyle(color = "") {
-  const key = String(color || "slate").trim().toLowerCase();
-  const palette = {
-    slate: { bg: "#94a3b8", text: "#e2e8f0", border: "#64748b" },
-    red: { bg: "#ef4444", text: "#fee2e2", border: "#b91c1c" },
-    amber: { bg: "#f59e0b", text: "#fffbeb", border: "#d97706" },
-    emerald: { bg: "#10b981", text: "#ecfdf5", border: "#059669" },
-    sky: { bg: "#38bdf8", text: "#eff6ff", border: "#0284c7" },
-    violet: { bg: "#8b5cf6", text: "#f5f3ff", border: "#7c3aed" },
-    pink: { bg: "#ec4899", text: "#fdf2f8", border: "#db2777" }
-  };
-  return palette[key] || palette.slate;
-}
-
-function filterPodcastSceneLibraryItems(items = []) {
-  const query = String(podcastSceneLibraryState.filters?.query || "").trim().toLowerCase();
-  const tagColor = String(podcastSceneLibraryState.filters?.tagColor || "all").trim().toLowerCase();
-  return (Array.isArray(items) ? items : []).filter((item) => {
-    if (!item) return false;
-    if (tagColor !== "all" && String(item.tagColor || "slate").trim().toLowerCase() !== tagColor) return false;
-    if (!query) return true;
-    const haystack = [
-      item.title,
-      item.tagLabel,
-      item.sceneDescription,
-      item.voiceOverText,
-      item.videoDirective,
-      item.scenePrompt,
-      item.ownerEmail
-    ].map((value) => String(value || "").toLowerCase()).join(" ");
-    return haystack.includes(query);
-  });
-}
-
-async function fetchPodcastSceneLibrary(options = {}) {
-  podcastSceneLibraryState.loading = true;
-  if (options.render !== false) renderPodcastSceneLibrary(getActiveSession());
-  try {
-    const response = await authFetchJson("/api/podcaster/scene-library/list", { method: "GET" });
-    podcastSceneLibraryState.items = Array.isArray(response?.items)
-      ? response.items.map((item) => normalizePodcastSceneLibraryItem(item)).filter(Boolean)
-      : [];
-    podcastSceneLibraryState.loadedAt = nowIso();
-    podcastSceneLibraryState.error = "";
-  } catch (error) {
-    podcastSceneLibraryState.error = String(error?.message || "No se pudo cargar la librería pública de escenas.");
-  } finally {
-    podcastSceneLibraryState.loading = false;
-    if (options.render !== false) renderPodcastSceneLibrary(getActiveSession());
-  }
-  return podcastSceneLibraryState.items;
-}
-
-function renderPodcastSceneLibrary(session = null) {
-  if (!els.podcastSceneLibraryList) return;
-  closePodcastSceneLibraryMenu();
-  const activeSession = session || getActiveSession();
-  const activeRowId = String(podcastVideoState.activeRowId || "").trim();
-  const rows = getSessionRows(activeSession);
-  const insertIndex = rows.findIndex((row) => String(row?.id || "").trim() === activeRowId);
-  const defaultInsertIndex = insertIndex >= 0 ? insertIndex + 1 : rows.length;
-  const filteredItems = filterPodcastSceneLibraryItems(podcastSceneLibraryState.items);
-  if (els.refreshPodcastSceneLibraryBtn) {
-    els.refreshPodcastSceneLibraryBtn.disabled = podcastSceneLibraryState.loading === true;
-  }
-  if (els.uploadLocalPodcastSceneBtn) {
-    els.uploadLocalPodcastSceneBtn.disabled = podcastSceneLibraryState.loading === true;
-  }
-  if (els.podcastSceneLibrarySearchInput) {
-    const value = String(podcastSceneLibraryState.filters?.query || "");
-    if (String(els.podcastSceneLibrarySearchInput.value || "") !== value) {
-      els.podcastSceneLibrarySearchInput.value = value;
-    }
-  }
-  if (els.podcastSceneLibraryColorFilterSelect) {
-    const value = String(podcastSceneLibraryState.filters?.tagColor || "all");
-    if (String(els.podcastSceneLibraryColorFilterSelect.value || "") !== value) {
-      els.podcastSceneLibraryColorFilterSelect.value = value;
-    }
-  }
-  if (podcastSceneLibraryState.loading) {
-    els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">Cargando librería pública...</div>`;
-    return;
-  }
-  if (podcastSceneLibraryState.error) {
-    els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">${escapeHtml(podcastSceneLibraryState.error)}</div>`;
-    return;
-  }
-  if (!podcastSceneLibraryState.items.length) {
-    els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">No hay escenas públicas todavía. Publica una escena para verla aquí.</div>`;
-    return;
-  }
-  if (!filteredItems.length) {
-    els.podcastSceneLibraryList.innerHTML = `<div class="podcast-scene-library-empty">No se encontraron escenas con esos filtros.</div>`;
-    return;
-  }
-  els.podcastSceneLibraryList.innerHTML = filteredItems.map((item) => {
-    const title = String(item.title || "Escena pública").trim() || "Escena pública";
-    const duration = secondsToClock(Math.max(VIDEO_SCENE_MIN_SEC, Number(item.durationSec) || VIDEO_SCENE_MIN_SEC));
-    const thumbUrl = String(item.thumbUrl || item.downloadUrl || "").trim();
-    const tagLabel = String(item.tagLabel || "").trim();
-    const tagMeta = getPodcastLibraryTagColorMeta(item.tagColor);
-    const tagStyle = getPodcastLibraryTagColorStyle(item.tagColor);
-    return `
-      <article class="podcast-scene-library-card" data-library-id="${escapeHtml(item.libraryId)}">
-        <div class="podcast-scene-library-thumb">
-          ${thumbUrl
-        ? `<img src="SnoopyPodcastCreator.png" data-library-thumb="${escapeHtml(thumbUrl)}" alt="${escapeHtml(title)}" loading="lazy">`
-        : `<div class="podcast-scene-library-thumb-empty">Sin miniatura</div>`}
-        </div>
-        <div class="podcast-scene-library-copy">
-          <div class="podcast-scene-library-title-row">
-            <strong title="${escapeHtml(title)}">${escapeHtml(trimWords(title, 8) || title)}</strong>
-            <div class="podcast-scene-library-title-actions">
-              ${tagLabel || tagMeta ? `
-                <span class="podcast-scene-library-tag" title="${escapeHtml(tagLabel || tagMeta.label)}" aria-label="${escapeHtml(tagLabel || tagMeta.label)}" style="background:${escapeHtml(tagStyle.bg)};border-color:${escapeHtml(tagStyle.border)};box-shadow:0 0 0 1px rgba(255,255,255,0.26) inset, 0 0 0 1px ${escapeHtml(tagStyle.border)};"></span>` : ""}
-              <button class="row-icon-btn podcast-scene-library-menu-btn" type="button" data-action="toggle-podcast-scene-library-menu" data-library-id="${escapeHtml(item.libraryId)}" aria-haspopup="menu" aria-expanded="false" title="Más opciones" aria-label="Más opciones">
-                <i class="fas fa-ellipsis-v" aria-hidden="true"></i>
-              </button>
-            </div>
-          </div>
-          <span class="podcast-scene-library-meta">${escapeHtml(duration)}${item.ownerEmail ? ` · ${escapeHtml(item.ownerEmail)}` : ""}</span>
-          <p>${escapeHtml(trimWords(item.sceneDescription || item.voiceOverText || item.videoDirective || title, 12) || "Escena pública reutilizable.")}</p>
-        </div>
-      </article>
-    `;
-  }).join("");
-  attachPodcastLibraryThumbnailLoading();
-}
-
-function getPodcastSceneLibraryMenuPortal() {
-  let portal = document.getElementById("podcastSceneLibraryMenuPortal");
-  if (portal) return portal;
-  portal = document.createElement("div");
-  portal.id = "podcastSceneLibraryMenuPortal";
-  portal.className = "podcast-scene-library-actions-portal";
-  portal.setAttribute("aria-hidden", "false");
-  document.body.appendChild(portal);
-  return portal;
-}
-
-function closePodcastSceneLibraryMenu() {
-  const portal = document.getElementById("podcastSceneLibraryMenuPortal");
-  [portal].filter(Boolean).forEach((target) => {
-    target.innerHTML = "";
-    delete target.dataset.openLibraryId;
-    target.classList.remove("is-open");
-  });
-  if (els.podcastSceneLibraryList) {
-    els.podcastSceneLibraryList
-      .querySelectorAll("[data-action='toggle-podcast-scene-library-menu'][aria-expanded='true']")
-      .forEach((btn) => btn.setAttribute("aria-expanded", "false"));
-  }
-}
-
-function buildPodcastSceneLibraryMenuHtml(item, defaultInsertIndex) {
-  const libraryId = String(item?.libraryId || "").trim();
-  const insertIndex = Math.max(0, Math.round(toFiniteNumber(defaultInsertIndex, 0)));
-  return `
-    <div class="podcast-scene-library-menu is-visible" role="menu" aria-label="Acciones de escena" data-library-id="${escapeHtml(libraryId)}">
-      <button class="row-icon-btn" type="button" role="menuitem" data-action="play-public-scene" data-library-id="${escapeHtml(libraryId)}" title="Reproducir en el preview" aria-label="Reproducir en el preview">
-        <i class="fas fa-play"></i>
-      </button>
-      <button class="row-icon-btn" type="button" role="menuitem" data-action="edit-public-scene" data-library-id="${escapeHtml(libraryId)}" title="Editar datos" aria-label="Editar datos">
-        <i class="fas fa-pen"></i>
-      </button>
-      <button class="row-icon-btn" type="button" role="menuitem" data-action="delete-public-scene" data-library-id="${escapeHtml(libraryId)}" title="Eliminar de la biblioteca" aria-label="Eliminar de la biblioteca">
-        <i class="fas fa-trash"></i>
-      </button>
-      <button class="row-icon-btn" type="button" role="menuitem" data-action="insert-public-scene" data-library-id="${escapeHtml(libraryId)}" data-insert-index="${insertIndex}" title="Insertar en el timeline" aria-label="Insertar en el timeline">
-        <i class="fas fa-plus"></i>
-      </button>
-    </div>
-  `;
-}
-
-function openPodcastSceneLibraryMenu(item, anchorEl, defaultInsertIndex) {
-  if (!item || !anchorEl) return;
-  closePodcastTimelineClipMenu();
-  closePodcastSceneLibraryMenu();
-  const libraryId = String(item.libraryId || "").trim();
-  if (!libraryId) return;
-  const portal = getPodcastSceneLibraryMenuPortal();
-  const menuHtml = buildPodcastSceneLibraryMenuHtml(item, defaultInsertIndex);
-  portal.innerHTML = menuHtml;
-  const menu = portal.querySelector(".podcast-scene-library-menu");
-  if (!menu) return;
-  const anchorRect = anchorEl.getBoundingClientRect();
-  const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-  const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
-  const gap = 10;
-  const margin = 8;
-  menu.style.visibility = "hidden";
-  menu.style.left = "0px";
-  menu.style.top = "0px";
-  portal.classList.add("is-open");
-  const menuRect = menu.getBoundingClientRect();
-  let left = Math.round(anchorRect.right - menuRect.width);
-  left = Math.max(margin, Math.min(viewportW - menuRect.width - margin, left));
-  let top = Math.round(anchorRect.bottom + gap);
-  if (top + menuRect.height > viewportH - margin) {
-    top = Math.round(anchorRect.top - menuRect.height - gap);
-  }
-  top = Math.max(margin, Math.min(viewportH - menuRect.height - margin, top));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  menu.style.visibility = "";
-  portal.dataset.openLibraryId = libraryId;
-  const toggleBtn = anchorEl.closest(".podcast-scene-library-card")?.querySelector("[data-action='toggle-podcast-scene-library-menu'][data-library-id]") || anchorEl;
-  toggleBtn?.setAttribute("aria-expanded", "true");
-}
-
-function buildPodcastSceneInsertPositions(session = null) {
-  const activeSession = session || getActiveSession();
-  const rows = getSessionRows(activeSession);
-  if (!rows.length) {
-    return [{
-      insertIndex: 0,
-      label: "Al inicio del timeline",
-      detail: "Se insertará como la primera escena."
-    }];
-  }
-  const positions = [{
-    insertIndex: 0,
-    label: "Antes de la escena 1",
-    detail: "Se insertará antes de la primera escena."
-  }];
-  for (let index = 0; index < rows.length - 1; index += 1) {
-    positions.push({
-      insertIndex: index + 1,
-      label: `Entre escena ${index + 1} y ${index + 2}`,
-      detail: "Se insertará entre ambas escenas."
-    });
-  }
-  positions.push({
-    insertIndex: rows.length,
-    label: "Al final del timeline",
-    detail: "Se insertará después de la última escena."
-  });
-  return positions;
-}
-
-function renderPodcastSceneInsertModal() {
-  if (!els.podcastSceneInsertModal) return;
-  const open = podcastSceneInsertModalState.open === true && Boolean(podcastSceneInsertModalState.libraryItem);
-  if (!open) {
-    els.podcastSceneInsertModal.hidden = true;
-    return;
-  }
-  const item = podcastSceneInsertModalState.libraryItem;
-  const session = getActiveSession();
-  const positions = buildPodcastSceneInsertPositions(session);
-  const currentIndex = Math.max(0, Math.min(positions.length - 1, Math.round(toFiniteNumber(podcastSceneInsertModalState.selectedInsertIndex, positions[positions.length - 1]?.insertIndex ?? 0))));
-  podcastSceneInsertModalState.selectedInsertIndex = positions[currentIndex]?.insertIndex ?? 0;
-  if (els.podcastSceneInsertTitle) {
-    els.podcastSceneInsertTitle.textContent = `Insertar “${String(item?.title || "Escena pública").trim()}”`;
-  }
-  if (els.podcastSceneInsertHint) {
-    els.podcastSceneInsertHint.textContent = "Elige dónde colocar la escena en el timeline. También puedes crear un track nuevo para dejarla en otra fila.";
-  }
-  if (els.podcastSceneInsertList) {
-    els.podcastSceneInsertList.innerHTML = positions.map((position) => {
-      const selected = Number(position.insertIndex) === Number(podcastSceneInsertModalState.selectedInsertIndex);
-      return `
-        <button type="button" class="podcast-scene-insert-option${selected ? " is-selected" : ""}" data-action="select-scene-insert-position" data-insert-index="${escapeHtml(position.insertIndex)}">
-          <strong>${escapeHtml(position.label)}</strong>
-          <span>${escapeHtml(position.detail)}</span>
-        </button>
-      `;
-    }).join("");
-  }
-  if (els.confirmPodcastSceneInsertBtn) {
-    els.confirmPodcastSceneInsertBtn.disabled = !item;
-  }
-  if (els.confirmPodcastSceneInsertNewTrackBtn) {
-    els.confirmPodcastSceneInsertNewTrackBtn.disabled = !item;
-  }
-  els.podcastSceneInsertModal.hidden = false;
-}
-
-function setPodcastSceneInsertModalOpen(isOpen = false, item = null, selectedInsertIndex = null) {
-  podcastSceneInsertModalState.open = Boolean(isOpen) && Boolean(item);
-  podcastSceneInsertModalState.libraryItem = podcastSceneInsertModalState.open ? normalizePodcastSceneLibraryItem(item) : null;
-  const session = getActiveSession();
-  const rows = getSessionRows(session);
-  const fallbackIndex = rows.length;
-  const nextIndex = Number.isFinite(Number(selectedInsertIndex))
-    ? Math.max(0, Math.min(rows.length, Math.round(Number(selectedInsertIndex))))
-    : fallbackIndex;
-  podcastSceneInsertModalState.selectedInsertIndex = nextIndex;
-  if (!podcastSceneInsertModalState.open && els.podcastSceneInsertModal) {
-    els.podcastSceneInsertModal.hidden = true;
-  }
-  renderPodcastSceneInsertModal();
-}
-
-function closePodcastSceneInsertModal() {
-  podcastSceneInsertModalState.open = false;
-  podcastSceneInsertModalState.libraryItem = null;
-  podcastSceneInsertModalState.selectedInsertIndex = 0;
-  if (els.podcastSceneInsertModal) {
-    els.podcastSceneInsertModal.hidden = true;
-  }
-}
-
-function confirmPodcastSceneInsertSelection(options = {}) {
-  const item = podcastSceneInsertModalState.libraryItem;
-  if (!item) return false;
-  const insertIndex = Math.max(0, Math.round(toFiniteNumber(podcastSceneInsertModalState.selectedInsertIndex, 0)));
-  const inserted = insertLibrarySceneIntoSession(item, {
-    insertIndex,
-    insertIntoNewTrack: options.insertIntoNewTrack === true
-  });
-  if (inserted) {
-    closePodcastSceneInsertModal();
-  }
-  return inserted;
-}
-
-function setPodcastSceneLibraryEditModalOpen(isOpen = false, item = null) {
-  podcastSceneLibraryEditModalState.open = Boolean(isOpen) && Boolean(item);
-  podcastSceneLibraryEditModalState.item = podcastSceneLibraryEditModalState.open ? normalizePodcastSceneLibraryItem(item) : null;
-  if (!els.podcastSceneLibraryEditModal) return;
-  if (!podcastSceneLibraryEditModalState.open) {
-    els.podcastSceneLibraryEditModal.hidden = true;
-    return;
-  }
-  const normalized = podcastSceneLibraryEditModalState.item;
-  if (els.podcastSceneLibraryEditTitle) {
-    els.podcastSceneLibraryEditTitle.textContent = `Editar “${String(normalized?.title || "Escena pública").trim()}”`;
-  }
-  if (els.podcastSceneLibraryEditName) {
-    els.podcastSceneLibraryEditName.value = String(normalized?.title || "");
-  }
-  if (els.podcastSceneLibraryEditTagLabel) {
-    els.podcastSceneLibraryEditTagLabel.value = String(normalized?.tagLabel || "");
-  }
-  if (els.podcastSceneLibraryEditTagColor) {
-    els.podcastSceneLibraryEditTagColor.value = String(normalized?.tagColor || "slate");
-  }
-  els.podcastSceneLibraryEditModal.hidden = false;
-}
-
-function closePodcastSceneLibraryEditModal() {
-  podcastSceneLibraryEditModalState.open = false;
-  podcastSceneLibraryEditModalState.item = null;
-  if (els.podcastSceneLibraryEditModal) {
-    els.podcastSceneLibraryEditModal.hidden = true;
-  }
-}
-
-async function savePodcastSceneLibraryEdit() {
-  const item = podcastSceneLibraryEditModalState.item;
-  if (!item) return false;
-  const libraryId = String(item.libraryId || "").trim();
-  const title = String(els.podcastSceneLibraryEditName?.value || "").trim();
-  const tagLabel = String(els.podcastSceneLibraryEditTagLabel?.value || "").trim();
-  const tagColor = String(els.podcastSceneLibraryEditTagColor?.value || "slate").trim() || "slate";
-  if (!title) {
-    addChatMessage("system", "El nombre de la escena no puede estar vacío.");
-    return false;
-  }
-  const response = await authFetchJson("/api/podcaster/scene-library/update", {
-    method: "POST",
-    body: JSON.stringify({
-      libraryId,
-      title,
-      tagLabel,
-      tagColor
-    })
-  });
-  const updated = normalizePodcastSceneLibraryItem(response?.item || response?.scene || response?.libraryItem || null);
-  if (!updated) throw new Error("No se pudo actualizar la escena pública.");
-  podcastSceneLibraryState.items = podcastSceneLibraryState.items.map((scene) => (
-    String(scene?.libraryId || "").trim() === libraryId ? updated : scene
-  ));
-  podcastSceneLibraryState.loadedAt = nowIso();
-  podcastSceneLibraryState.error = "";
-  closePodcastSceneLibraryEditModal();
-  renderPodcastSceneLibrary(getActiveSession());
-  return true;
-}
-
-async function deletePodcastSceneLibraryItem(item = null) {
-  const normalized = normalizePodcastSceneLibraryItem(item);
-  if (!normalized) return false;
-  const libraryId = String(normalized.libraryId || "").trim();
-  const confirmed = window.confirm(`Se eliminará "${normalized.title}" de la biblioteca pública. ¿Deseas continuar?`);
-  if (!confirmed) return false;
-  await authFetchJson("/api/podcaster/scene-library/delete", {
-    method: "POST",
-    body: JSON.stringify({ libraryId })
-  });
-  podcastSceneLibraryState.items = podcastSceneLibraryState.items.filter((scene) => String(scene?.libraryId || "").trim() !== libraryId);
-  renderPodcastSceneLibrary(getActiveSession());
-  return true;
-}
-
-async function playPodcastSceneLibraryPreview(item = null) {
-  const normalized = normalizePodcastSceneLibraryItem(item);
-  if (!normalized) return false;
-  const source = resolveStorageVideoUrl(normalized.downloadUrl || "", normalized.storagePath || "");
-  if (!source) return false;
-  const video = els.podcastActiveSpeakerVideoAlt || els.podcastActiveSpeakerVideo || null;
-  if (!video) return false;
-  try {
-    if (els.podcastVideoStatus) {
-      els.podcastVideoStatus.textContent = `Previsualizando escena pública: ${String(normalized.title || "Escena pública").trim()}`;
-    }
-    if (video.pause) {
-      try { video.pause(); } catch (_) { }
-    }
-    await setPodcastStageVideoSourceForElement(video, source, { keepHidden: false });
-    video.loop = true;
-    video.playbackRate = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
-    video.volume = 1;
-    video.muted = false;
-    if (typeof setActiveStageVideoSlot === "function" && video === els.podcastActiveSpeakerVideoAlt) {
-      setActiveStageVideoSlot(1);
-    }
-    await safeMediaPlay(video);
-    return true;
-  } catch (error) {
-    addChatMessage("system", `No se pudo reproducir la escena pública (${error.message}).`);
-    return false;
-  }
-}
+// Lógica de librería pública removida y modularizada en podcaster-public-library.js
 
 function captureVideoFrameDataUrl(videoEl = null, options = {}) {
   const video = videoEl || null;
@@ -3243,1414 +2103,9 @@ function duplicateSceneRowsIntoNewTrack(rowIds = [], targetTrackIndex = null) {
   return duplicatedEntries.length > 0;
 }
 
-async function publishCurrentSceneToLibrary(rowId = "", options = {}) {
-  const key = String(rowId || "").trim() || String(podcastVideoState.activeRowId || "").trim();
-  const session = getActiveSession();
-  if (!session || !key) return null;
-  const row = (session?.script?.rows || []).find((item) => String(item?.id || "").trim() === key) || null;
-  if (!row) return null;
-  const clip = resolveDialogueVideoForRow(session, key);
-  const primarySegment = resolvePrimaryDialogueVideoSegment(clip);
-  const videoUrl = resolveStorageVideoUrl(primarySegment?.downloadUrl || clip?.downloadUrl || "", primarySegment?.storagePath || clip?.storagePath || "");
-  if (!videoUrl) {
-    throw new Error("La escena no tiene video para publicar.");
-  }
-  const sceneTitle = String(row.publicSceneTitle || row.sceneDescription || row.scenePrompt || row.voiceOverText || `Escena ${resolveSceneNumberByRowId(key, session)}`).trim();
-  const captureCandidate = getActiveStageVideoEl?.() || els.podcastActiveSpeakerVideoAlt || els.podcastActiveSpeakerVideo || null;
-  let thumbDataUrl = "";
-  if (captureCandidate && String(captureCandidate.dataset?.src || "").trim() === String(videoUrl || "").trim()) {
-    thumbDataUrl = await captureVideoFrameDataUrl(captureCandidate, { timeSec: captureCandidate.currentTime || 0 });
-  }
-  if (!thumbDataUrl) {
-    thumbDataUrl = String(els.podcastActiveSpeakerImage?.src || "").trim();
-  }
-  if (!thumbDataUrl) {
-    thumbDataUrl = "SnoopyPodcastCreator.png";
-  }
-  const payload = {
-    libraryId: String(row.publicSceneLibraryId || "").trim(),
-    sessionId: String(session.id || "").trim(),
-    rowId: key,
-    title: sceneTitle,
-    durationSec: Math.max(VIDEO_SCENE_MIN_SEC, Math.min(VIDEO_SCENE_MAX_SEC, Number(row.durationSec) || VIDEO_SCENE_MAX_SEC)),
-    downloadUrl: String(primarySegment?.downloadUrl || clip?.downloadUrl || "").trim(),
-    storagePath: String(primarySegment?.storagePath || clip?.storagePath || "").trim(),
-    mimeType: String(primarySegment?.mimeType || clip?.mimeType || "video/mp4").trim() || "video/mp4",
-    thumbDataUrl,
-    thumbMimeType: "image/jpeg",
-    sceneDescription: String(row.sceneDescription || row.scenePrompt || "").trim(),
-    onScreenText: String(row.onScreenText || "").trim(),
-    transition: String(row.transition || "").trim(),
-    visualNotes: String(row.visualNotes || row.notes || "").trim(),
-    videoDirective: String(row.videoDirective || "").trim(),
-    scenePrompt: String(row.scenePrompt || "").trim(),
-    voiceOverText: String(row.voiceOverText || row.text || "").trim(),
-    imagePrompts: normalizeVideoImagePrompts(row.imagePrompts || []),
-    videoPreset: String(row.videoPreset || resolveActiveVideoPreset(session) || "creative").trim() || "creative"
-  };
-  if (options.loadingButton) {
-    setButtonLoadingState(options.loadingButton, true, {
-      loadingTitle: "Publicando escena..."
-    });
-  }
-  try {
-    const response = await authFetchJson("/api/podcaster/scene-library/publish", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    const published = normalizePodcastSceneLibraryItem(response?.item || response?.scene || response?.libraryItem || null);
-    if (!published) throw new Error("No se pudo publicar la escena.");
-    podcastSceneLibraryState.items = [
-      published,
-      ...podcastSceneLibraryState.items.filter((item) => String(item?.libraryId || "").trim() !== published.libraryId)
-    ];
-    podcastSceneLibraryState.loadedAt = nowIso();
-    podcastSceneLibraryState.error = "";
-    upsertActiveSession((current) => ({
-      ...current,
-      script: {
-        ...current.script,
-        rows: (current.script?.rows || []).map((item) => (
-          String(item?.id || "").trim() === key
-            ? {
-              ...item,
-              publicSceneLibraryId: published.libraryId,
-              publicScenePublishedAt: published.updatedAt || published.createdAt || nowIso(),
-              publicSceneTitle: published.title,
-              publicSceneThumbUrl: published.thumbUrl || "",
-              publicSceneVideoUrl: published.downloadUrl || ""
-            }
-            : item
-        )),
-        dialogueVideoMap: {
-          ...getDialogueVideoMap(current),
-          [key]: {
-            ...getDialogueVideoMap(current)[key],
-            publicSceneLibraryId: published.libraryId,
-            publicScenePublishedAt: published.updatedAt || published.createdAt || nowIso(),
-            publicSceneTitle: published.title,
-            publicSceneThumbUrl: published.thumbUrl || "",
-            publicSceneVideoUrl: published.downloadUrl || ""
-          }
-        }
-      }
-    }), { render: false });
-    renderPodcastSceneLibrary(getActiveSession());
-    render();
-    scheduleSessionLocalPersist("public-scene");
-    return published;
-  } finally {
-    if (options.loadingButton) {
-      setButtonLoadingState(options.loadingButton, false);
-    }
-  }
-}
+// Métodos de publicación y subida a librería removidos y modularizados en podcaster-public-library.js
 
-async function uploadLocalPodcastSceneLibraryVideo(file = null) {
-  if (!(file instanceof File)) throw new Error("No se recibió un video válido.");
-  if (!String(file.type || "").startsWith("video/")) throw new Error("El archivo debe ser un video.");
-  const button = els.uploadLocalPodcastSceneBtn || null;
-  setButtonLoadingState(button, true, { loadingTitle: "Subiendo video..." });
-  podcastSceneLibraryState.loading = true;
-  renderPodcastSceneLibrary(getActiveSession());
-  try {
-    const [dataUrl, measured] = await Promise.all([
-      readDataUrlFromFile(file, {
-        maxChars: MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS * 10,
-        errorMessage: "No se pudo leer el video local."
-      }),
-      measureVideoFile(file)
-    ]);
-    const response = await authFetchJson("/api/podcaster/scene-library/upload-local", {
-      method: "POST",
-      body: JSON.stringify({
-        title: String(file.name || "Video local").replace(/\.[^.]+$/, "").slice(0, 180) || "Video local",
-        videoDataUrl: dataUrl,
-        mimeType: String(file.type || "video/mp4").trim() || "video/mp4",
-        durationSec: Math.max(0, Number(measured?.durationSec || 0) || 0),
-        thumbDataUrl: String(measured?.thumbDataUrl || "").trim(),
-        size: Math.max(0, Number(file.size || 0) || 0),
-        originalName: String(file.name || "video-local").slice(0, 180)
-      })
-    });
-    const item = normalizePodcastSceneLibraryItem(response?.item || null);
-    if (!item) throw new Error("No se recibió el item de librería.");
-    podcastSceneLibraryState.items = [
-      item,
-      ...podcastSceneLibraryState.items.filter((entry) => String(entry?.libraryId || "").trim() !== item.libraryId)
-    ];
-    podcastSceneLibraryState.error = "";
-    podcastSceneLibraryState.loadedAt = nowIso();
-    setGenerationStatus("Video local agregado a la librería", "is-live");
-  } finally {
-    podcastSceneLibraryState.loading = false;
-    setButtonLoadingState(button, false);
-    renderPodcastSceneLibrary(getActiveSession());
-  }
-}
-
-function insertLibrarySceneIntoSession(item = null, options = {}) {
-  const normalized = normalizePodcastSceneLibraryItem(item);
-  if (!normalized) return false;
-  const session = getActiveSession();
-  if (!session) return false;
-  const insertIndex = Number.isFinite(Number(options.insertIndex))
-    ? Math.max(0, Math.min((session?.script?.rows || []).length, Math.round(Number(options.insertIndex))))
-    : getSceneInsertIndexForLibraryItem(session, options.targetRowId || "");
-  const insertIntoNewTrack = options.insertIntoNewTrack === true;
-  const row = buildPublicSceneRowFromLibraryItem(normalized);
-  if (!row) return false;
-  const rowId = String(row.id || "").trim();
-  const videoSource = normalized.downloadUrl || normalized.storagePath || "";
-  const clip = normalizeDialogueVideoMap({
-    [rowId]: {
-      rowId,
-      speaker: "Narrador",
-      mimeType: normalized.mimeType || "video/mp4",
-      model: "veo-pro", // Convertir a modelo estándar del estudio
-      variant: "creative", // Convertir a variante estándar para que sea editable
-      promptVersion: "copied_from_library_v1",
-      publicSceneLibraryId: normalized.libraryId,
-      publicScenePublishedAt: normalized.updatedAt || normalized.createdAt || nowIso(),
-      publicSceneTitle: normalized.title,
-      publicSceneThumbUrl: normalized.thumbUrl || "",
-      publicSceneVideoUrl: normalized.downloadUrl || "",
-      videoDirective: row.videoDirective,
-      scenePrompt: row.scenePrompt,
-      imagePrompts: row.imagePrompts,
-      durationSec: normalized.durationSec,
-      targetSpeechLine: row.voiceOverText,
-      updatedAt: nowIso(),
-      downloadUrl: normalized.downloadUrl || "",
-      storagePath: normalized.storagePath || "",
-      segments: [{
-        id: `${rowId}-seg-1`,
-        index: 0,
-        durationSec: normalized.durationSec,
-        downloadUrl: normalized.downloadUrl || "",
-        storagePath: normalized.storagePath || "",
-        mimeType: normalized.mimeType || "video/mp4",
-        variant: "creative",
-        targetSpeechLine: row.voiceOverText
-      }]
-    }
-  })[rowId] || null;
-  upsertActiveSession((current) => {
-    const rows = Array.isArray(current?.script?.rows) ? [...current.script.rows] : [];
-    const safeIndex = Math.max(0, Math.min(rows.length, insertIndex));
-    const insertedRow = {
-      ...row,
-      publicScenePublishedAt: normalized.updatedAt || normalized.createdAt || nowIso(),
-      publicSceneTitle: normalized.title,
-      publicSceneThumbUrl: normalized.thumbUrl || "",
-      publicSceneVideoUrl: normalized.downloadUrl || "",
-      // Al ser una copia nativa, no le ponemos el ID de librería para que no aparezca el badge "Pública"
-      // y se comporte como una escena más del proyecto (creativa).
-      publicSceneLibraryId: "", 
-      sourcePublicSceneLibraryId: normalized.libraryId,
-      playbackRate: normalized.playbackRate || 1
-    };
-    rows.splice(safeIndex, 0, insertedRow);
-    const nextDialogueVideoMap = {
-      ...getDialogueVideoMap(current),
-      [rowId]: clip || {
-        rowId,
-        speaker: "Narrador",
-        mimeType: normalized.mimeType || "video/mp4",
-        model: "veo-pro",
-        variant: "creative",
-        promptVersion: "copied_from_library_v1",
-        videoDirective: row.videoDirective,
-        scenePrompt: row.scenePrompt,
-        imagePrompts: row.imagePrompts,
-        durationSec: normalized.durationSec,
-        targetSpeechLine: row.voiceOverText,
-        updatedAt: nowIso(),
-        downloadUrl: normalized.downloadUrl || "",
-        storagePath: normalized.storagePath || "",
-        segments: [{
-          id: `${rowId}-seg-1`,
-          index: 0,
-          durationSec: normalized.durationSec,
-          downloadUrl: normalized.downloadUrl || "",
-          storagePath: normalized.storagePath || "",
-          mimeType: normalized.mimeType || "video/mp4",
-          variant: "public",
-          targetSpeechLine: row.voiceOverText
-        }]
-      }
-    };
-    const nextSessionSnapshot = {
-      ...current,
-      script: {
-        ...current.script,
-        rows
-      },
-      dialogueVideoMap: nextDialogueVideoMap
-    };
-    const cfg = getPodcastVideoConfig(nextSessionSnapshot);
-    let nextTracks = normalizeTimelineTracks(cfg.timelineTracks || []);
-    if (!nextTracks.length) {
-      nextTracks = buildDefaultTimelineTracks(nextSessionSnapshot);
-    }
-    const nextClips = normalizeTimelineClipsByRowId(cfg.timelineClipsByRowId || {});
-    const previousRow = safeIndex > 0 ? rows[safeIndex - 1] || null : null;
-    const nextRow = safeIndex < rows.length - 1 ? rows[safeIndex + 1] || null : null;
-    const previousRowId = String(previousRow?.id || "").trim();
-    const nextRowId = String(nextRow?.id || "").trim();
-    const previousClip = previousRowId ? nextClips[previousRowId] || null : null;
-    const nextClip = nextRowId ? nextClips[nextRowId] || null : null;
-    let assignedTrackId = String(nextClip?.trackId || previousClip?.trackId || "").trim()
-      || resolveTimelineDefaultTrackIdForSpeaker(String(insertedRow?.speaker || "Narrador").trim());
-    if (insertIntoNewTrack) {
-      const anchorTrackId = String(nextClip?.trackId || previousClip?.trackId || "").trim();
-      const anchorTrackIndex = nextTracks.findIndex((track) => String(track?.id || "").trim() === anchorTrackId);
-      const variantTrack = buildTimelineVariantTrackDescriptor(String(insertedRow?.speaker || "Narrador").trim(), nextTracks);
-      assignedTrackId = variantTrack.id;
-      const newTrackIndex = anchorTrackIndex >= 0 ? anchorTrackIndex + (nextClip ? 0 : 1) : nextTracks.length;
-      nextTracks.splice(newTrackIndex, 0, {
-        id: assignedTrackId,
-        label: variantTrack.label,
-        order: newTrackIndex
-      });
-      nextTracks = normalizeTimelineTracks(nextTracks);
-    }
-    const sourceDurationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(Math.max(0, Number(normalized.durationSec || 0) || 0) * 1000) || getRowSourceDurationMs(insertedRow, nextSessionSnapshot)
-    );
-    const inferredStartMs = (() => {
-      if (!insertIntoNewTrack && previousClip && String(previousClip.trackId || "").trim() === assignedTrackId) {
-        return getTimelineClipEndMs(previousClip);
-      }
-      if (nextClip) return Math.max(0, Number(nextClip.startMs || 0));
-      if (previousClip) return getTimelineClipEndMs(previousClip);
-      return 0;
-    })();
-    const insertedTimelineClip = normalizeTimelineClipItem({
-      rowId,
-      speakerKey: String(insertedRow?.speaker || "Narrador").trim(),
-      trackId: assignedTrackId,
-      startMs: inferredStartMs,
-      sourceDurationMs,
-      trimInMs: 0,
-      trimOutMs: sourceDurationMs,
-      zIndex: Math.max(1, Number(nextClip?.zIndex || previousClip?.zIndex || safeIndex + 1))
-    }, rowId);
-    logPodcastBatchDebug("public-scene-insert-track", {
-      rowId,
-      insertIntoNewTrack,
-      assignedTrackId,
-      insertedClipTrackId: String(insertedTimelineClip?.trackId || "").trim(),
-      timelineTracks: nextTracks.map((track) => ({
-        id: String(track?.id || "").trim(),
-        label: String(track?.label || "").trim()
-      }))
-    });
-    return {
-      ...nextSessionSnapshot,
-      podcastVideoConfig: normalizePodcastVideoConfig({
-        ...cfg,
-        timelineTrackVersion: STUDIO_TIMELINE_TRACK_VERSION,
-        timelineVersion: STUDIO_TIMELINE_VERSION,
-        timelineTracks: nextTracks,
-        timelineViewMode: insertIntoNewTrack ? "tracks" : (String(cfg.timelineViewMode || "tracks").trim().toLowerCase() === "normal" ? "normal" : "tracks"),
-        timelineClipsByRowId: insertedTimelineClip
-          ? {
-            ...nextClips,
-            [rowId]: insertedTimelineClip
-          }
-          : nextClips
-      })
-    };
-  }, { render: false });
-  // Asegura que al insertar desde la librería también exista el clip en el track de texto en pantalla.
-  // No re-normaliza todos los clips (para no desajustar al usuario), solo crea el del nuevo row si falta.
-  ensureOnScreenTextClipForRowId(getActiveSession(), rowId, { persist: true });
-  // Persiste la estructura completa del track para que el render no dependa de fallbacks en memoria.
-  ensureOnScreenTextClipsByRowId(getActiveSession(), { persist: true });
-  if (insertIntoNewTrack) {
-    setTimelineViewMode("tracks");
-  }
-  syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
-  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
-  renderPodcastTransitionTimeline(getActiveSession());
-  syncPodcastStudioInspector(getActiveSession());
-  render();
-  if (rowId) {
-    setPodcastVideoRow(rowId, {
-      syncStage: false,
-      preserveMontageCursor: true,
-      reason: "structure"
-    });
-    queueMicrotask(() => {
-      const safeRowId = String(rowId || "").trim();
-      if (!safeRowId) return;
-      try {
-        const scriptRow = els.scriptTableBody?.querySelector?.(`.script-row[data-row-id="${CSS.escape(safeRowId)}"]`);
-        scriptRow?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-        const timelineClip = els.podcastVideoTimeline?.querySelector?.(`.podcast-video-timeline-clip[data-row-id="${CSS.escape(safeRowId)}"], .podcast-video-timeline-item[data-row-id="${CSS.escape(safeRowId)}"]`);
-        timelineClip?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
-      } catch (_) { }
-    });
-  }
-  scheduleSessionLocalPersist("public-scene-insert");
-  // Clona el video de librería a Storage de la sesión activa para evitar URLs con token expirado/403.
-  clonePublicSceneLibraryVideoToSession({
-    sessionId: String(getActiveSession()?.id || "").trim(),
-    rowId,
-    speakerLabel: String(row?.speaker || "Narrador").trim() || "Narrador",
-    sourceStoragePath: String(normalized.storagePath || "").trim(),
-    sourceUrl: String(normalized.downloadUrl || "").trim(),
-    mimeType: String(normalized.mimeType || "video/mp4").trim() || "video/mp4"
-  }).catch(() => { });
-  return true;
-}
-
-function updateUploadedTrackAt(index = 0, nextTrack = null, options = {}) {
-  const tracks = getPanelMusicUploadedTracks();
-  const next = [...tracks];
-  if (nextTrack) {
-    next[Math.max(0, index)] = normalizePanelMusicTrack({
-      ...(tracks[index] || {}),
-      ...nextTrack,
-      slotLabel: String(nextTrack?.slotLabel || tracks[index]?.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`
-    });
-  } else {
-    next.splice(Math.max(0, index), 1);
-  }
-  setPanelMusicUploadedTracks(next, { selectIndex: options.selectIndex });
-}
-
-function resolvePanelMusicTrackKind(value = "") {
-  return String(value || "").trim() === "ai" ? "ai" : "uploaded";
-}
-
-function getPanelMusicTrackByKind(kind = "") {
-  const trackKind = resolvePanelMusicTrackKind(kind);
-  if (trackKind === "uploaded") {
-    const uploadedTracks = getEnabledPanelMusicUploadedTracks();
-    const selectedTrack = normalizePanelMusicTrack(panelMusicState.track);
-    if (selectedTrack && !selectedTrack.model) {
-      const selectedSlotLabel = String(selectedTrack.slotLabel || "").trim();
-      const match = uploadedTracks.find((item) => String(item?.slotLabel || "").trim() === selectedSlotLabel);
-      if (match) return normalizePanelMusicTrack(match);
-      return selectedTrack;
-    }
-    return normalizePanelMusicTrack(uploadedTracks[0] || null);
-  }
-  return normalizePanelMusicTrack(panelMusicState.trackLibrary?.[trackKind] || null);
-}
-
-function getPanelMusicTrackAvailability(kind = "") {
-  const trackKind = resolvePanelMusicTrackKind(kind);
-  if (trackKind === "uploaded") {
-    const uploadedTracks = getPanelMusicUploadedTracks();
-    if (uploadedTracks.length) {
-      const selectedTrack = normalizePanelMusicTrack(panelMusicState.track);
-      if (selectedTrack && !selectedTrack.model) {
-        return selectedTrack;
-      }
-      return uploadedTracks[0];
-    }
-  }
-  const libraryTrack = getPanelMusicTrackByKind(trackKind);
-  if (libraryTrack) return libraryTrack;
-  const activeTrack = normalizePanelMusicTrack(panelMusicState.track);
-  if (!activeTrack) return null;
-  if (trackKind === "ai" && activeTrack.model) return activeTrack;
-  if (trackKind === "uploaded" && !activeTrack.model) return activeTrack;
-  return null;
-}
-
-function getAvailablePanelMusicTrackKinds() {
-  const kinds = [];
-  if (getPanelMusicTrackAvailability("uploaded")) kinds.push("uploaded");
-  if (getPanelMusicTrackAvailability("ai")) kinds.push("ai");
-  return kinds;
-}
-
-function getPanelMusicTrackDurationSec(track = null) {
-  const normalized = normalizePanelMusicTrack(track);
-  const directDurationSec = Math.max(0, Number(normalized?.durationSec || 0) || 0);
-  if (directDurationSec > 0.05) return directDurationSec;
-  const sizeBytes = Math.max(0, Number(normalized?.size || 0) || 0);
-  if (sizeBytes <= 0) return 0;
-  const mimeType = String(normalized?.mimeType || "").trim().toLowerCase();
-  // Para MP3/AAC/OGG comprimidos, estimar por tamaño produce duraciones falsas.
-  // Solo conservamos el fallback para audio PCM/WAV, donde el cálculo es razonablemente fiable.
-  if (!mimeType.includes("wav") && !mimeType.includes("wave")) {
-    logPodcastRenderDebug("audio-track-duration-awaiting-measurement", {
-      name: String(normalized?.name || ""),
-      mimeType,
-      sizeBytes
-    });
-    return 0;
-  }
-  const bitsPerSecond = 1411200;
-  const estimatedDurationSec = Math.max(0, Number(((sizeBytes * 8) / bitsPerSecond).toFixed(2)) || 0);
-  logPodcastRenderDebug("audio-track-duration-fallback", {
-    name: String(normalized?.name || ""),
-    mimeType,
-    sizeBytes,
-    bitsPerSecond,
-    estimatedDurationSec
-  });
-  return estimatedDurationSec;
-}
-
-function getPanelMusicLoopCount(session = null, track = null) {
-  return getPanelMusicLoopSegments(session, track).length || 1;
-}
-
-function buildUploadedPanelMusicSegments(session = null) {
-  const activeSession = session || getActiveSession();
-  const allTracks = getPanelMusicUploadedTracks();
-  const uploadedTracks = getEnabledPanelMusicUploadedTracks().filter((track) => getPanelMusicTrackDurationSec(track) > 0.05);
-  const entries = buildTimelineRuntimeEntries(activeSession);
-  const totalDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
-  const sceneEntries = entries.length
-    ? entries
-    : [{ startMs: 0, endMs: totalDurationMs }];
-  if (!uploadedTracks.length) return [];
-  const resolveFullTrackIndex = (track = null, fallbackIndex = 0) => {
-    const normalized = normalizePanelMusicTrack(track);
-    if (!normalized) return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
-    const slotLabel = String(normalized.slotLabel || "").trim();
-    if (slotLabel) {
-      const byLabel = allTracks.findIndex((item) => String(item?.slotLabel || "").trim() === slotLabel);
-      if (byLabel >= 0) return byLabel;
-    }
-    const byIdentity = allTracks.findIndex((item) => item === track);
-    if (byIdentity >= 0) return byIdentity;
-    return Math.max(0, Math.floor(Number(fallbackIndex) || 0));
-  };
-  const applyOverrides = (segmentList = []) => segmentList.map((segment) => {
-    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
-    const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
-    const track = allTracks[trackIndex] || null;
-    const overrides = Array.isArray(track?.segmentStartOverrides) ? track.segmentStartOverrides : [];
-    const override = overrides.find((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex);
-    if (!override) return segment;
-    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) - Number(segment?.startMs || 0) || 0));
-    const nextStart = Math.max(0, Math.min(totalDurationMs - durationMs, Math.round(Number(override.startMs || 0) || 0)));
-    return {
-      ...segment,
-      startMs: nextStart,
-      endMs: nextStart + durationMs
-    };
-  });
-  if (uploadedTracks.length === 1) {
-    const single = uploadedTracks[0];
-    const fullTrackIndex = resolveFullTrackIndex(single, 0);
-    const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(getPanelMusicTrackDurationSec(single) * 1000));
-    const segments = [];
-    let sceneCursor = 0;
-    let loopIndex = 0;
-    while (sceneCursor < sceneEntries.length && loopIndex < 120) {
-      const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
-      let endSceneCursor = sceneCursor;
-      let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
-      while (endSceneCursor + 1 < sceneEntries.length) {
-        const candidateEndMs = Math.max(segmentEndMs, Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs);
-        if ((candidateEndMs - startMs) > durationMs + 1) break;
-        endSceneCursor += 1;
-        segmentEndMs = candidateEndMs;
-      }
-      const sceneBatchDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, segmentEndMs - startMs);
-      const loopSetting = getPanelMusicLoopSetting({
-        ...single,
-        durationSec: sceneBatchDurationMs / 1000,
-        trimInMs: 0,
-        trimOutMs: sceneBatchDurationMs
-      }, loopIndex);
-      const trimInMs = Math.max(0, Math.min(sceneBatchDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS, Number(loopSetting?.trimInMs || 0) || 0));
-      const trimOutMs = Math.max(
-        trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
-        Math.min(sceneBatchDurationMs, Number(loopSetting?.trimOutMs || sceneBatchDurationMs) || sceneBatchDurationMs)
-      );
-      segments.push({
-        ...single,
-        slotLabel: String(single.slotLabel || "Audio 1").trim() || "Audio 1",
-        trackIndex: fullTrackIndex,
-        startMs,
-        endMs: startMs + trimOutMs,
-        durationSec: getPanelMusicTrackDurationSec(single),
-        trimInMs,
-        trimOutMs,
-        loop: false,
-        loopIndex
-      });
-      sceneCursor = endSceneCursor + 1;
-      loopIndex += 1;
-    }
-    return applyOverrides(segments);
-  }
-  const segments = [];
-  let sceneCursor = 0;
-  uploadedTracks.forEach((track, index) => {
-    if (sceneCursor >= sceneEntries.length) return;
-    const fullTrackIndex = resolveFullTrackIndex(track, index);
-    const trackDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(getPanelMusicTrackDurationSec(track) * 1000));
-    const remainingTracksAfterCurrent = Math.max(0, uploadedTracks.length - index - 1);
-    const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
-    let endSceneCursor = sceneCursor;
-    let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
-    while (endSceneCursor + 1 < sceneEntries.length) {
-      const remainingScenesAfterCandidate = Math.max(0, sceneEntries.length - (endSceneCursor + 2));
-      if (remainingScenesAfterCandidate < remainingTracksAfterCurrent) break;
-      const candidateEndMs = Math.max(segmentEndMs, Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs);
-      if ((candidateEndMs - startMs) > trackDurationMs + 1) break;
-      endSceneCursor += 1;
-      segmentEndMs = candidateEndMs;
-    }
-    const availableDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, totalDurationMs - startMs);
-    const visibleDurationMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.min(trackDurationMs, availableDurationMs)
-    );
-    segments.push({
-      ...track,
-      slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
-      trackIndex: fullTrackIndex,
-      startMs,
-      endMs: startMs + visibleDurationMs,
-      durationSec: getPanelMusicTrackDurationSec(track),
-      trimInMs: 0,
-      trimOutMs: visibleDurationMs,
-      loop: false,
-      loopIndex: 0
-    });
-    sceneCursor = endSceneCursor + 1;
-  });
-  return applyOverrides(segments);
-}
-
-function groupUploadedPanelMusicSegmentsByTrack(session = null) {
-  const segments = buildUploadedPanelMusicSegments(session);
-  const groups = [];
-  const indexByKey = new Map();
-  segments.forEach((segment, fallbackIndex) => {
-    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex ?? fallbackIndex) || 0));
-    const slotLabel = String(segment?.slotLabel || `Audio ${trackIndex + 1}`).trim() || `Audio ${trackIndex + 1}`;
-    const key = `${trackIndex}:${slotLabel}`;
-    if (!indexByKey.has(key)) {
-      indexByKey.set(key, groups.length);
-      groups.push({
-        trackIndex,
-        slotLabel,
-        name: String(segment?.name || slotLabel).trim() || slotLabel,
-        segments: []
-      });
-    }
-    groups[indexByKey.get(key)].segments.push(segment);
-  });
-  return groups;
-}
-
-function getPanelMusicLoopSegments(session = null, track = null) {
-  const normalized = normalizePanelMusicTrack(track);
-  const durationSec = getPanelMusicTrackDurationSec(normalized);
-  const totalDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session || getActiveSession()));
-  if (!normalized || durationSec <= 0.05) return [];
-  const sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(durationSec * 1000));
-  const startOffsetMs = Math.max(0, Math.min(totalDurationMs, Number(normalized.startOffsetMs || 0) || 0));
-  const loopSettings = normalizePanelMusicLoopSettings(normalized.loopSettings || [], sourceDurationMs);
-  const segments = [];
-  let cursorMs = startOffsetMs;
-  let loopIndex = 0;
-  while (cursorMs < totalDurationMs && loopIndex < 120) {
-    const loopSetting = loopSettings.find((item) => item.loopIndex === loopIndex) || getPanelMusicLoopSetting(normalized, loopIndex);
-    const effectiveLoopMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(Number(loopSetting?.trimOutMs || sourceDurationMs) || sourceDurationMs) - Math.round(Number(loopSetting?.trimInMs || 0) || 0)
-    );
-    segments.push({
-      loopIndex,
-      startMs: cursorMs,
-      trimInMs: Math.max(0, Number(loopSetting?.trimInMs || 0) || 0),
-      trimOutMs: Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(loopSetting?.trimOutMs || sourceDurationMs) || sourceDurationMs),
-      effectiveLoopMs
-    });
-    cursorMs += effectiveLoopMs;
-    loopIndex += 1;
-  }
-  return segments;
-}
-
-async function decodeAudioDurationInfoFromSrc(src = "") {
-  const source = String(src || "").trim();
-  if (!source) return { durationSec: 0, method: "" };
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor) {
-    return { durationSec: 0, method: "" };
-  }
-  if (!panelMusicDurationProbeCtx) {
-    panelMusicDurationProbeCtx = new AudioContextCtor();
-  }
-  const response = await fetch(source);
-  if (!response.ok) {
-    const error = new Error(`No se pudo leer audio (${response.status}).`);
-    error.status = Number(response.status) || 0;
-    throw error;
-  }
-  const arrayBuffer = await response.arrayBuffer();
-  if (!(arrayBuffer instanceof ArrayBuffer) || !arrayBuffer.byteLength) {
-    return { durationSec: 0, method: "" };
-  }
-  const decodedBuffer = await new Promise((resolve, reject) => {
-    try {
-      panelMusicDurationProbeCtx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
-    } catch (error) {
-      reject(error);
-    }
-  });
-  return {
-    durationSec: Math.max(0, Number(decodedBuffer?.duration || 0) || 0),
-    method: "decode"
-  };
-}
-
-function isMissingAudioSourceError(error = null) {
-  const status = Number(error?.status || 0);
-  if (status === 404) return true;
-  const text = String(error?.message || error || "").toLowerCase();
-  return text.includes("(404)") || text.includes(" 404 ");
-}
-
-function isProxyStoragePathMediaUrl(src = "") {
-  const source = String(src || "").trim();
-  if (!source) return false;
-  return source.includes("/api/assets/proxy-media?storagePath=");
-}
-
-async function decodeAudioDurationInfoFromArrayBuffer(arrayBuffer = null) {
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor || !(arrayBuffer instanceof ArrayBuffer) || !arrayBuffer.byteLength) {
-    return { durationSec: 0, method: "" };
-  }
-  if (!panelMusicDurationProbeCtx) {
-    panelMusicDurationProbeCtx = new AudioContextCtor();
-  }
-  const decodedBuffer = await new Promise((resolve, reject) => {
-    try {
-      panelMusicDurationProbeCtx.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
-    } catch (error) {
-      reject(error);
-    }
-  });
-  return {
-    durationSec: Math.max(0, Number(decodedBuffer?.duration || 0) || 0),
-    method: "decode"
-  };
-}
-
-async function measureAudioDurationInfoFromFile(file = null) {
-  if (!(file instanceof File)) return { durationSec: 0, method: "" };
-  try {
-    const buffer = await file.arrayBuffer();
-    const decoded = await decodeAudioDurationInfoFromArrayBuffer(buffer);
-    if (Number(decoded?.durationSec || 0) > 0.05) {
-      logPodcastRenderDebug("audio-track-duration-measured", {
-        method: decoded.method,
-        durationSec: decoded.durationSec,
-        srcKind: "file"
-      });
-      return decoded;
-    }
-  } catch (_) {
-    // fallback below
-  }
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const metadata = await readAudioDurationSecFromSrc(objectUrl);
-    logPodcastRenderDebug("audio-track-duration-measured", {
-      method: metadata.method || "metadata_failed",
-      durationSec: Number(metadata?.durationSec || 0) || 0,
-      srcKind: "file-object-url"
-    });
-    return metadata;
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-function readAudioDurationSecFromSrc(src = "") {
-  const source = String(src || "").trim();
-  if (!source) return Promise.resolve({ durationSec: 0, method: "" });
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    let finished = false;
-    let timeoutId = 0;
-    const clear = () => {
-      audio.onloadedmetadata = null;
-      audio.ondurationchange = null;
-      audio.oncanplay = null;
-      audio.ontimeupdate = null;
-      audio.onerror = null;
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-        timeoutId = 0;
-      }
-    };
-    const done = (value = 0, method = "metadata") => {
-      if (finished) return;
-      finished = true;
-      clear();
-      resolve({
-        durationSec: Math.max(0, Number(value || 0) || 0),
-        method
-      });
-    };
-    const tryResolveFiniteDuration = (method = "metadata") => {
-      const duration = Number(audio.duration || 0);
-      if (Number.isFinite(duration) && duration > 0.05) {
-        done(duration, method);
-        return true;
-      }
-      return false;
-    };
-    const tryProbeInfiniteDuration = () => {
-      const duration = Number(audio.duration || 0);
-      if (!Number.isFinite(duration) || duration === Infinity) {
-        try {
-          audio.currentTime = 1e101;
-          return true;
-        } catch (_) {
-          return false;
-        }
-      }
-      return false;
-    };
-    audio.preload = "auto";
-    audio.crossOrigin = "anonymous";
-    audio.onloadedmetadata = () => {
-      if (tryResolveFiniteDuration("metadata")) return;
-      if (!tryProbeInfiniteDuration()) done(0, "");
-    };
-    audio.ondurationchange = () => {
-      tryResolveFiniteDuration("metadata");
-    };
-    audio.oncanplay = () => {
-      tryResolveFiniteDuration("metadata");
-    };
-    audio.ontimeupdate = () => {
-      if (tryResolveFiniteDuration("metadata-probe")) {
-        try { audio.currentTime = 0; } catch (_) { }
-      }
-    };
-    audio.onerror = () => done(0, "");
-    timeoutId = window.setTimeout(() => done(0, ""), 7000);
-    audio.src = source;
-    try { audio.load(); } catch (_) {
-      done(0, "");
-    }
-  });
-}
-
-async function measureAudioDurationInfoFromSrc(src = "") {
-  const source = String(src || "").trim();
-  if (!source) return { durationSec: 0, method: "" };
-  try {
-    const decoded = await decodeAudioDurationInfoFromSrc(source);
-    if (Number(decoded?.durationSec || 0) > 0.05) {
-      logPodcastRenderDebug("audio-track-duration-measured", {
-        method: decoded.method,
-        durationSec: decoded.durationSec,
-        srcKind: source.startsWith("data:") ? "data-url" : "remote"
-      });
-      return decoded;
-    }
-  } catch (error) {
-    if (isMissingAudioSourceError(error)) {
-      return { durationSec: 0, method: "missing" };
-    }
-    // fallback to metadata below
-  }
-  const metadata = await readAudioDurationSecFromSrc(source);
-  logPodcastRenderDebug("audio-track-duration-measured", {
-    method: metadata.method || "metadata_failed",
-    durationSec: Number(metadata?.durationSec || 0) || 0,
-    srcKind: source.startsWith("data:") ? "data-url" : "remote"
-  });
-  return metadata;
-}
-
-async function readImageReferenceFromFile(file = null) {
-  if (!(file instanceof File)) throw new Error("No se recibió una imagen válida.");
-  if (!String(file.type || "").startsWith("image/")) {
-    throw new Error("El archivo debe ser una imagen.");
-  }
-  const dataUrl = await readOptimizedImageReferenceDataUrl(file);
-  const normalized = normalizeReferenceImageRecord({
-    name: String(file.name || "Referencia").trim() || "Referencia",
-    dataUrl,
-    mimeType: String(dataUrl.match(/^data:([^;,]+)/i)?.[1] || file.type || "image/jpeg").trim().toLowerCase() || "image/jpeg",
-    updatedAt: nowIso()
-  });
-  if (!normalized) {
-    throw new Error("La imagen de referencia es demasiado grande o no es válida.");
-  }
-  return normalized;
-}
-
-async function readOptimizedImageReferenceDataUrl(file = null) {
-  const rawDataUrl = await readDataUrlFromFile(file, {
-    maxChars: MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS * 12,
-    errorMessage: "No se pudo leer la imagen de referencia."
-  });
-  // Forzamos procesamiento para asegurar formato JPEG y limpieza de metadatos/alpha
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const image = await new Promise((resolve, reject) => {
-      const nextImage = new Image();
-      nextImage.onload = () => resolve(nextImage);
-      nextImage.onerror = () => reject(new Error("No se pudo procesar la imagen de referencia."));
-      nextImage.src = objectUrl;
-    });
-    const naturalWidth = Math.max(1, Number(image.naturalWidth || image.width || 0) || 1);
-    const naturalHeight = Math.max(1, Number(image.naturalHeight || image.height || 0) || 1);
-    const scales = [1, 0.92, 0.84, 0.76, 0.68, 0.6, 0.52, 0.44];
-    const qualities = [0.9, 0.82, 0.74, 0.66, 0.58];
-    let smallestCandidate = "";
-    for (const scale of scales) {
-      const width = Math.max(1, Math.round(naturalWidth * scale));
-      const height = Math.max(1, Math.round(naturalHeight * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) continue;
-      ctx.drawImage(image, 0, 0, width, height);
-      for (const quality of qualities) {
-        const candidate = canvas.toDataURL("image/jpeg", quality);
-        if (!smallestCandidate || candidate.length < smallestCandidate.length) {
-          smallestCandidate = candidate;
-        }
-        if (candidate.length <= MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS) {
-          return candidate;
-        }
-      }
-    }
-    throw new Error("La imagen de referencia es demasiado grande. Usa una versión más ligera.");
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-async function readDataUrlFromFile(file = null, { maxChars = Infinity, errorMessage = "No se pudo leer el archivo." } = {}) {
-  if (!(file instanceof File)) throw new Error("No se recibió un archivo válido.");
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || "").trim());
-    reader.onerror = () => reject(new Error(errorMessage));
-    reader.readAsDataURL(file);
-  });
-  if (!dataUrl || dataUrl.length > maxChars) {
-    throw new Error("El archivo es demasiado grande o no es válido.");
-  }
-  return dataUrl;
-}
-
-function isLikelyVideoReferenceFile(file = null) {
-  if (!(file instanceof File)) return false;
-  const type = String(file.type || "").trim().toLowerCase();
-  const name = String(file.name || "").trim().toLowerCase();
-  return type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv|avi|mpeg|mpg)$/i.test(name);
-}
-
-async function readVideoReferenceFromFile(file = null) {
-  if (!(file instanceof File)) throw new Error("No se recibió un video válido.");
-  if (!isLikelyVideoReferenceFile(file)) {
-    throw new Error("El archivo debe ser un video.");
-  }
-  const dataUrl = await readDataUrlFromFile(file, {
-    maxChars: MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS,
-    errorMessage: "No se pudo leer el video de referencia."
-  });
-  const normalized = normalizeReferenceVideoRecord({
-    name: String(file.name || "Referencia de video").trim() || "Referencia de video",
-    dataUrl,
-    mimeType: String(file.type || "video/mp4").trim().toLowerCase() || "video/mp4",
-    updatedAt: nowIso()
-  });
-  if (!normalized) throw new Error("El video de referencia es demasiado grande o no es válido.");
-  return normalized;
-}
-
-function measureVideoFile(file = null) {
-  if (!(file instanceof File)) return Promise.resolve({ durationSec: 0, thumbDataUrl: "" });
-  return new Promise((resolve) => {
-    const video = document.createElement("video");
-    const objectUrl = URL.createObjectURL(file);
-    let done = false;
-    const finish = async () => {
-      if (done) return;
-      done = true;
-      let thumbDataUrl = "";
-      try {
-        thumbDataUrl = await captureVideoFrameDataUrl(video, { timeSec: Math.min(0.25, Number(video.duration || 0) || 0) });
-      } catch (_) {
-        thumbDataUrl = "";
-      }
-      URL.revokeObjectURL(objectUrl);
-      resolve({
-        durationSec: Math.max(0, Number(video.duration || 0) || 0),
-        thumbDataUrl
-      });
-    };
-    video.muted = true;
-    video.preload = "metadata";
-    video.playsInline = true;
-    video.addEventListener("loadedmetadata", finish, { once: true });
-    video.addEventListener("error", finish, { once: true });
-    setTimeout(finish, 4000);
-    video.src = objectUrl;
-  });
-}
-
-async function ensurePanelMusicTrackDuration(kind = "", options = {}) {
-  const trackKind = resolvePanelMusicTrackKind(kind || panelMusicState.selectedTrackKind);
-  if (panelMusicDurationProbePendingKinds.has(trackKind)) {
-    return getPanelMusicTrackByKind(trackKind);
-  }
-  const track = getPanelMusicTrackByKind(trackKind);
-  if (!track) return null;
-  const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
-  if (!options.force && measuredWith === "missing") return track;
-  if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") return track;
-  const src = String(
-    track.localDataUrl
-    || resolveStorageAudioUrl(track.downloadUrl || "", track.storagePath || "")
-    || track.downloadUrl
-    || ""
-  ).trim();
-  if (!src) return track;
-  if (isProxyStoragePathMediaUrl(src)) return track;
-  panelMusicDurationProbePendingKinds.add(trackKind);
-  try {
-    const durationInfo = await measureAudioDurationInfoFromSrc(src);
-    if (String(durationInfo?.method || "").trim().toLowerCase() === "missing") {
-      const nextTrack = {
-        ...track,
-        durationSec: 0,
-        durationMeasuredWith: "missing",
-        updatedAt: nowIso()
-      };
-      setPanelMusicTrack(trackKind, nextTrack, { select: panelMusicState.selectedTrackKind === trackKind });
-      persistPanelMusicSettings();
-      persistPanelMusicToActiveSession();
-      return nextTrack;
-    }
-    const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
-    if (durationSec <= 0.05) return track;
-    const nextTrack = {
-      ...track,
-      durationSec,
-      durationMeasuredWith: String(durationInfo?.method || measuredWith || "").trim().toLowerCase(),
-      updatedAt: nowIso()
-    };
-    setPanelMusicTrack(trackKind, nextTrack, { select: panelMusicState.selectedTrackKind === trackKind });
-    persistPanelMusicSettings();
-    persistPanelMusicToActiveSession();
-    if (options.render !== false) {
-      syncMusicControls();
-      renderPodcastVideoTimeline(getActiveSession());
-    }
-    return nextTrack;
-  } finally {
-    panelMusicDurationProbePendingKinds.delete(trackKind);
-  }
-}
-
-async function ensureAllEnabledUploadedTrackDurations(options = {}) {
-  const tracks = getEnabledPanelMusicUploadedTracks();
-  if (!tracks.length) return tracks;
-  for (let index = 0; index < tracks.length; index += 1) {
-    const track = normalizePanelMusicTrack(tracks[index]);
-    if (!track) continue;
-    const measuredWith = String(track.durationMeasuredWith || "").trim().toLowerCase();
-    if (!options.force && measuredWith === "missing") continue;
-    if (!options.force && getPanelMusicTrackDurationSec(track) > 0.05 && measuredWith === "decode") continue;
-    const src = String(
-      track.localDataUrl
-      || resolveStorageAudioUrl(track.downloadUrl || "", track.storagePath || "")
-      || track.downloadUrl
-      || ""
-    ).trim();
-    if (!src) continue;
-    if (isProxyStoragePathMediaUrl(src)) continue;
-    try {
-      const durationInfo = await measureAudioDurationInfoFromSrc(src);
-      if (String(durationInfo?.method || "").trim().toLowerCase() === "missing") {
-        updateUploadedTrackAt(index, {
-          ...track,
-          durationSec: 0,
-          durationMeasuredWith: "missing",
-          updatedAt: nowIso()
-        }, { selectIndex: index });
-        continue;
-      }
-      const durationSec = Math.max(0, Number(durationInfo?.durationSec || 0) || 0);
-      if (durationSec <= 0.05) continue;
-      updateUploadedTrackAt(index, {
-        ...track,
-        durationSec,
-        durationMeasuredWith: String(durationInfo?.method || measuredWith || "").trim().toLowerCase(),
-        updatedAt: nowIso()
-      }, { selectIndex: index });
-    } catch (_) {
-      // noop
-    }
-  }
-  if (options.render !== false) {
-    syncMusicControls();
-    renderPodcastVideoTimeline(getActiveSession());
-  }
-  return getEnabledPanelMusicUploadedTracks();
-}
-
-function togglePanelMusicLoopMute(loopIndex = 0, kind = "") {
-  const trackKind = resolvePanelMusicTrackKind(kind || panelMusicState.selectedTrackKind);
-  const track = getPanelMusicTrackByKind(trackKind);
-  if (!track) return false;
-  const normalizedLoopIndex = Math.max(0, Math.floor(Number(loopIndex) || 0));
-  const currentMuted = new Set(normalizePanelMusicMutedLoopIndexes(track.mutedLoopIndexes || []));
-  if (currentMuted.has(normalizedLoopIndex)) {
-    currentMuted.delete(normalizedLoopIndex);
-  } else {
-    currentMuted.add(normalizedLoopIndex);
-  }
-  setPanelMusicTrack(trackKind, {
-    ...track,
-    mutedLoopIndexes: Array.from(currentMuted).sort((a, b) => a - b),
-    updatedAt: nowIso()
-  }, { select: panelMusicState.selectedTrackKind === trackKind });
-  persistAudioTrackMixSettings();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-function updatePanelMusicTrack(kind = "", mutator = null, options = {}) {
-  const trackKind = resolvePanelMusicTrackKind(kind || panelMusicState.selectedTrackKind);
-  const track = getPanelMusicTrackByKind(trackKind);
-  if (!track || typeof mutator !== "function") return false;
-  const nextTrack = normalizePanelMusicTrack(mutator({ ...track }));
-  if (!nextTrack) return false;
-  setPanelMusicTrack(trackKind, nextTrack, { select: panelMusicState.selectedTrackKind === trackKind || options.select === true });
-  persistAudioTrackMixSettings();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  return true;
-}
-
-function syncActivePanelMusicTrack(options = {}) {
-  const preferredKind = resolvePanelMusicTrackKind(options.kind || panelMusicState.selectedTrackKind);
-  const availableKinds = getAvailablePanelMusicTrackKinds();
-  const nextKind = availableKinds.includes(preferredKind)
-    ? preferredKind
-    : (availableKinds[0] || "uploaded");
-  panelMusicState.selectedTrackKind = nextKind;
-  panelMusicState.track = getPanelMusicTrackAvailability(nextKind);
-  if (!panelMusicState.track) {
-    panelMusicState.sourceType = "preset";
-  } else if (options.forceTrack === true || panelMusicState.sourceType === "track") {
-    panelMusicState.sourceType = "track";
-  }
-}
-
-function selectPanelMusicTrackKind(kind = "", options = {}) {
-  const trackKind = resolvePanelMusicTrackKind(kind);
-  const exactTrack = getPanelMusicTrackByKind(trackKind);
-  if (!exactTrack) {
-    if (options.notify !== false) {
-      addChatMessage("system", trackKind === "ai"
-        ? "Todavía no hay audio IA disponible para seleccionar."
-        : "Todavía no hay audio cargado disponible para seleccionar.");
-    }
-    return false;
-  }
-  panelMusicState.selectedTrackKind = trackKind;
-  panelMusicState.track = exactTrack;
-  panelMusicState.sourceType = "track";
-  return true;
-}
-
-function selectUploadedPanelMusicTrackByIndex(index = 0) {
-  const trackIndex = Math.max(0, Math.floor(Number(index) || 0));
-  const tracks = getPanelMusicUploadedTracks();
-  const track = normalizePanelMusicTrack(tracks[trackIndex] || null);
-  if (!track) return null;
-  panelMusicState.selectedTrackKind = "uploaded";
-  panelMusicState.track = track;
-  panelMusicState.sourceType = "track";
-  return track;
-}
-
-function setPanelMusicTrack(kind = "", track = null, options = {}) {
-  const trackKind = resolvePanelMusicTrackKind(kind);
-  const normalizedTrack = normalizePanelMusicTrack(track);
-  panelMusicState.trackLibrary[trackKind] = normalizedTrack;
-  if (trackKind === "uploaded" && normalizedTrack) {
-    const uploadedTracks = getPanelMusicUploadedTracks();
-    const selectedSlotLabel = String(normalizedTrack.slotLabel || "").trim();
-    const nextUploadedTracks = uploadedTracks.map((item, index) => {
-      const itemSlotLabel = String(item?.slotLabel || `Audio ${index + 1}`).trim();
-      if (selectedSlotLabel && itemSlotLabel === selectedSlotLabel) {
-        return {
-          ...item,
-          ...normalizedTrack,
-          slotLabel: itemSlotLabel || `Audio ${index + 1}`
-        };
-      }
-      return item;
-    });
-    if (nextUploadedTracks.length) {
-      panelMusicState.trackLibrary.uploadedTracks = normalizePanelMusicTrackList(nextUploadedTracks);
-      panelMusicState.trackLibrary.uploaded = panelMusicState.trackLibrary.uploadedTracks[0] || normalizedTrack;
-    }
-  }
-  if (options.select === true) {
-    selectPanelMusicTrackKind(trackKind, { notify: false });
-    return;
-  }
-  syncActivePanelMusicTrack({
-    kind: panelMusicState.selectedTrackKind,
-    forceTrack: false
-  });
-}
-
-function redirectToIndex() {
-  try {
-    window.location.replace("index.html");
-  } catch (_) {
-    window.location.href = "index.html";
-  }
-}
-
-function loadPanelMusicSettings() {
-  const storageKey = resolvePanelMusicStorageKey();
-  const normalizePanelMusicDuckingWhenGeminiPct = (value, fallback = 60) => {
-    const raw = Number(value);
-    if (!Number.isFinite(raw)) return fallback;
-    if (raw >= 40 && raw <= 100) return raw;
-    if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
-    return fallback;
-  };
-  try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    const preset = ["ambient", "focus", "pulse"].includes(parsed?.preset) ? parsed.preset : "ambient";
-    const volume = Math.max(0, Math.min(100, Number(parsed?.volume ?? 22)));
-    const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
-    const duckingWhenGeminiPct = normalizePanelMusicDuckingWhenGeminiPct(parsed?.duckingWhenGeminiPct, 60);
-    const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
-    const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
-    const legacyTrack = normalizePanelMusicTrack(parsed?.track || null);
-    const trackLibrary = {
-      uploaded: normalizePanelMusicTrack(parsed?.trackLibrary?.uploaded || null),
-      uploadedTracks: normalizePanelMusicTrackList(parsed?.trackLibrary?.uploadedTracks || []),
-      ai: normalizePanelMusicTrack(parsed?.trackLibrary?.ai || null)
-    };
-    if (!trackLibrary.uploadedTracks.length && trackLibrary.uploaded) {
-      trackLibrary.uploadedTracks = [{ ...trackLibrary.uploaded, slotLabel: String(trackLibrary.uploaded.slotLabel || "Audio 1").trim() || "Audio 1", enabledInSession: trackLibrary.uploaded.enabledInSession !== false }];
-    }
-    if (!trackLibrary.uploaded && trackLibrary.uploadedTracks.length) {
-      trackLibrary.uploaded = trackLibrary.uploadedTracks[0];
-    }
-    if (!trackLibrary.uploaded && legacyTrack && !legacyTrack.model) {
-      trackLibrary.uploaded = legacyTrack;
-    }
-    if (!trackLibrary.ai && legacyTrack && legacyTrack.model) {
-      trackLibrary.ai = legacyTrack;
-    }
-    const selectedTrackKind = resolvePanelMusicTrackKind(parsed?.selectedTrackKind || (trackLibrary.ai && !trackLibrary.uploaded ? "ai" : "uploaded"));
-    const availableKinds = [
-      trackLibrary[selectedTrackKind] ? selectedTrackKind : "",
-      trackLibrary.uploaded ? "uploaded" : "",
-      trackLibrary.ai ? "ai" : ""
-    ].filter(Boolean);
-    const track = normalizePanelMusicTrack(trackLibrary[availableKinds[0]] || null);
-    return {
-      preset,
-      volume,
-      montageVolume,
-      duckingWhenGeminiPct,
-      stabilize,
-      sourceType,
-      selectedTrackKind,
-      trackLibrary,
-      track,
-      playing: false
-    };
-  } catch (_) {
-    return {
-      preset: "ambient",
-      volume: 22,
-      montageVolume: 100,
-      duckingWhenGeminiPct: 60,
-      stabilize: false,
-      sourceType: "preset",
-      selectedTrackKind: "uploaded",
-      trackLibrary: {
-        uploaded: null,
-        uploadedTracks: [],
-        ai: null
-      },
-      track: null,
-      playing: false
-    };
-  }
-}
-
-function persistPanelMusicSettings() {
-  const sanitizeTrackForStorage = (track) => {
-    const normalized = normalizePanelMusicTrack(track);
-    if (!normalized) return null;
-    const localDataUrl = String(normalized.localDataUrl || "");
-    return {
-      ...normalized,
-      enabledInSession: normalized.enabledInSession !== false,
-      localDataUrl: localDataUrl.length <= MAX_LOCAL_MUSIC_DATA_URL_CHARS ? localDataUrl : ""
-    };
-  };
-  const payload = {
-    preset: panelMusicState.preset,
-    volume: panelMusicState.volume,
-    montageVolume: panelMusicState.montageVolume,
-    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
-    stabilize: panelMusicState.stabilize === true,
-    sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
-    selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
-    trackLibrary: {
-      uploaded: sanitizeTrackForStorage(panelMusicState.trackLibrary?.uploaded || null),
-      uploadedTracks: getPanelMusicUploadedTracks().map((track) => sanitizeTrackForStorage(track)).filter(Boolean),
-      ai: sanitizeTrackForStorage(panelMusicState.trackLibrary?.ai || null)
-    },
-    track: sanitizeTrackForStorage(panelMusicState.track)
-  };
-  try {
-    localStorage.setItem(resolvePanelMusicStorageKey(), JSON.stringify(payload));
-  } catch (_) {
-    const trimmedPayload = {
-      ...payload,
-      trackLibrary: {
-        uploaded: payload.trackLibrary?.uploaded ? { ...payload.trackLibrary.uploaded, localDataUrl: "" } : null,
-        uploadedTracks: Array.isArray(payload.trackLibrary?.uploadedTracks)
-          ? payload.trackLibrary.uploadedTracks.map((track) => ({ ...track, localDataUrl: "" }))
-          : [],
-        ai: payload.trackLibrary?.ai ? { ...payload.trackLibrary.ai, localDataUrl: "" } : null
-      },
-      track: payload.track ? { ...payload.track, localDataUrl: "" } : null
-    };
-    localStorage.setItem(resolvePanelMusicStorageKey(), JSON.stringify(trimmedPayload));
-  }
-}
-
-function persistPanelMusicToActiveSession() {
-  const session = getActiveSession();
-  if (!session) return;
-  const sanitizeTrackForSession = (track) => {
-    const normalized = normalizePanelMusicTrack(track);
-    if (!normalized) return null;
-    const isPersistedInFirebase = Boolean(String(normalized.storagePath || "").trim() && String(normalized.downloadUrl || "").trim());
-    persistPanelMusicSessionTrackCache(session.id, normalized.model ? "ai" : "uploaded", isPersistedInFirebase ? "" : (normalized.localDataUrl || ""));
-    return {
-      ...normalized,
-      localDataUrl: ""
-    };
-  };
-  const montageCfg = getPanelMontageMusicConfig();
-  upsertActiveSession((current) => ({
-    ...current,
-    panelMusicConfig: {
-      ...montageCfg,
-      trackLibrary: {
-        uploaded: sanitizeTrackForSession(panelMusicState.trackLibrary?.uploaded || null),
-        uploadedTracks: getPanelMusicUploadedTracks().map((track) => sanitizeTrackForSession(track)).filter(Boolean),
-        ai: sanitizeTrackForSession(panelMusicState.trackLibrary?.ai || null)
-      },
-      track: sanitizeTrackForSession(panelMusicState.track)
-    }
-  }), { render: false });
-}
-
-function buildDefaultPanelMusicAiPrompt(session = null) {
-  const activeSession = session || getActiveSession();
-  const hosts = (activeSession?.script?.hosts || []).filter(Boolean);
-  const speakers = hosts.length ? hosts.join(", ") : "dos hosts";
-  const title = String(activeSession?.title || "").trim();
-  const rows = getSessionRows(activeSession);
-  const scenarioHint = String(activeSession?.speakerScenarioMap?.[String(rows[0]?.speaker || "").trim()] || "").replace(/\s+/g, " ").trim();
-  const preset = String(panelMusicState.preset || "ambient").trim().toLowerCase();
-  const styleMap = {
-    ambient: "ambient cinematica suave, pads calidos, piano sutil, texturas etereas",
-    focus: "lofi instrumental enfocada, piano limpio, percusion ligera, sintes suaves",
-    pulse: "electronic ligera, ritmo moderno, bajo limpio, sintetizadores energicos"
-  };
-  return [
-    "Instrumental only. No vocals, no spoken words, no choir, no narration.",
-    "Background music for a conversational podcast studio.",
-    `Mood/style: ${styleMap[preset] || styleMap.ambient}.`,
-    `Hosts: ${speakers}.`,
-    title ? `Podcast title: ${title}.` : "",
-    scenarioHint ? `Scenario inspiration: ${scenarioHint}.` : "",
-    "Keep it polished, loop-friendly, non-intrusive, warm, and supportive under dialogue."
-  ].filter(Boolean).join(" ");
-}
-
-async function generatePanelMusicWithAi(options = {}) {
-  const session = getActiveSession();
-  const sessionId = String(session?.id || "").trim();
-  if (!sessionId) throw new Error("No hay sesión activa.");
-  const promptInput = String(els.panelMusicAiPrompt?.value || "").replace(/\s+/g, " ").trim();
-  const prompt = promptInput || buildDefaultPanelMusicAiPrompt(session);
-  const previousAiTrack = getPanelMusicTrackByKind("ai");
-  let response = null;
-  try {
-    response = await authFetchJson("/api/podcaster/music/generate", {
-      method: "POST",
-      body: {
-        sessionId,
-        prompt,
-        preset: String(panelMusicState.preset || "ambient").trim(),
-        previousStoragePath: String(previousAiTrack?.storagePath || "").trim()
-      }
-    });
-  } catch (error) {
-    const detail = String(error?.message || "").trim().toLowerCase();
-    if (detail.includes("http 404") || detail.includes("not found")) {
-      throw new Error("El backend activo no expone /api/podcaster/music/generate. Reinicia con npm run dev:local o despliega la versión nueva en Render.");
-    }
-    throw error;
-  }
-  const track = response?.track && typeof response.track === "object" ? response.track : null;
-  if (!track) throw new Error("No se recibió track generado.");
-  setPanelMusicTrack("ai", {
-    name: String(track.name || "AI Music").trim() || "AI Music",
-    mimeType: String(track.mimeType || "audio/mpeg").trim() || "audio/mpeg",
-    size: Math.max(0, Number(track.size || 0) || 0),
-    durationSec: Math.max(0, Number(track.durationSec || 0) || 0),
-    localDataUrl: "",
-    downloadUrl: String(track.downloadUrl || "").trim(),
-    storagePath: String(track.storagePath || "").trim(),
-    updatedAt: String(track.updatedAt || nowIso()).trim() || nowIso(),
-    model: String(track.model || "").trim(),
-    prompt: prompt
-  }, { select: true });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
-  syncMusicControls();
-  renderPodcastVideoTimeline(getActiveSession());
-  if (getPanelMusicTrackDurationSec(panelMusicState.track) <= 0.05) {
-    ensurePanelMusicTrackDuration("ai").catch(() => { });
-  }
-  if (panelMusicState.playing) {
-    stopPanelMusic();
-    await startPanelMusic();
-  }
-  return panelMusicState.track;
-}
+// Método de inserción desde librería removido y modularizado en podcaster-public-library.js
 
 function makeId(prefix = "pod") {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -4678,26 +2133,6 @@ function resolveDateIso(date = null) {
 function sleep(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
-
-function estimateInlineDataUrlBytes(dataUrl = "") {
-  const value = String(dataUrl || "").trim();
-  if (!value.startsWith("data:")) return 0;
-  const commaIndex = value.indexOf(",");
-  if (commaIndex < 0) return 0;
-  const header = value.slice(0, commaIndex).toLowerCase();
-  const payload = value.slice(commaIndex + 1).replace(/\s+/g, "");
-  if (!payload) return 0;
-  if (!header.includes(";base64")) return payload.length;
-  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
-}
-
-function normalizeInlineDataUrl(value = "") {
-  const clean = String(value || "").trim();
-  return clean.startsWith("data:") ? clean : "";
-}
-
-
 
 function buildPodcasterApiErrorMessage(error = null, fallback = "") {
   const status = Number(error?.status || 0) || 0;
@@ -5219,101 +2654,6 @@ function getSpeakerPortraitMap(session = null) {
   return normalizeSpeakerPortraitMap(session?.speakerPortraitMap || {});
 }
 
-function normalizeReferenceImageRecord(raw = null) {
-  if (!raw || typeof raw !== "object") return null;
-  const normalized = buildImageReferenceRecordFromMedia(raw, "Referencia");
-  if (!normalized) return null;
-  if (normalized.dataUrl && normalized.dataUrl.length > MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS) return null;
-  return normalized;
-}
-
-function normalizeReferenceImageList(value = null, maxItems = 4) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => normalizeReferenceImageRecord(item))
-    .filter(Boolean)
-    .slice(0, Math.max(1, Math.min(8, Number(maxItems || 4) || 4)));
-}
-
-function normalizeReferenceImageMap(raw = {}) {
-  const next = {};
-  if (!raw || typeof raw !== "object") return next;
-  Object.entries(raw).forEach(([key, value]) => {
-    const cleanKey = String(key || "").trim();
-    const normalized = normalizeReferenceImageRecord(value);
-    if (!cleanKey || !normalized) return;
-    next[cleanKey] = normalized;
-  });
-  return next;
-}
-
-function normalizeReferenceImageListMap(raw = {}, maxEntries = 500, maxItemsPerRow = 4) {
-  const next = {};
-  if (!raw || typeof raw !== "object") return next;
-  Object.entries(raw).slice(0, maxEntries).forEach(([key, value]) => {
-    const cleanKey = String(key || "").trim();
-    const normalizedList = normalizeReferenceImageList(value, maxItemsPerRow);
-    if (!cleanKey || !normalizedList.length) return;
-    next[cleanKey] = normalizedList;
-  });
-  return next;
-}
-
-function normalizeReferenceVideoRecord(raw = null) {
-  if (!raw || typeof raw !== "object") return null;
-  const dataUrl = String(raw.dataUrl || "").trim().slice(0, MAX_LOCAL_REFERENCE_VIDEO_DATA_URL_CHARS);
-  const mediaRef = normalizeMediaReferenceFromRecord(
-    raw,
-    ["downloadUrl", "url", "dataUrl"],
-    ["storagePath", "path"]
-  );
-  const downloadUrl = String(mediaRef.downloadUrl || "").trim();
-  const storagePath = String(mediaRef.storagePath || "").trim();
-  const mimeType = String(raw.mimeType || "video/mp4").trim().toLowerCase() || "video/mp4";
-  const explicitType = String(raw.type || "").trim().toLowerCase();
-  if (!dataUrl.startsWith("data:video/") && !downloadUrl && !storagePath) return null;
-  if (mimeType.startsWith("image/") || explicitType === "image") return null;
-  return {
-    name: String(raw.name || "Referencia de video").trim().slice(0, 180) || "Referencia de video",
-    dataUrl,
-    downloadUrl,
-    storagePath,
-    mimeType,
-    type: explicitType || null,
-    updatedAt: String(raw.updatedAt || nowIso()).trim() || nowIso()
-  };
-}
-
-function normalizeReferenceVideoMap(raw = {}) {
-  const next = {};
-  if (!raw || typeof raw !== "object") return next;
-  Object.entries(raw).forEach(([key, value]) => {
-    const cleanKey = String(key || "").trim();
-    const normalized = normalizeReferenceVideoRecord(value);
-    if (!cleanKey || !normalized) return;
-    next[cleanKey] = normalized;
-  });
-  return next;
-}
-
-function normalizeRowReferenceModeMap(raw = {}, imageMap = {}, videoMap = {}) {
-  const next = {};
-  const source = raw && typeof raw === "object" ? raw : {};
-  const validKeys = new Set([...Object.keys(imageMap || {}), ...Object.keys(videoMap || {})]);
-  Object.entries(source).forEach(([key, value]) => {
-    const cleanKey = String(key || "").trim();
-    if (!cleanKey || !validKeys.has(cleanKey)) return;
-    const mode = String(value || "").trim().toLowerCase() === "video" ? "video" : "image";
-    if (mode === "video" && !videoMap[cleanKey]) return;
-    if (mode === "image" && !imageMap[cleanKey]) return;
-    next[cleanKey] = mode;
-  });
-  Object.keys(videoMap || {}).forEach((key) => {
-    if (!next[key] && !imageMap[key]) next[key] = "video";
-  });
-  return next;
-}
-
 function normalizeVideoImagePrompts(raw = []) {
   const values = Array.isArray(raw)
     ? raw
@@ -5642,7 +2982,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
 
   const rowVisualNotes = preserveExactVisualNotes
     ? effectiveVisualNotes
-    : sanitize(resolveCreativeVisualNotesText({
+    : sanitize(window.resolveCreativeVisualNotesText({
       visualNotes: effectiveVisualNotes || "",
       videoDirective: row?.videoDirective || "",
       visual: row?.visual || "",
@@ -5688,7 +3028,7 @@ function normalizeCreativeRow(row = {}, index = 0, options = {}) {
   const onScreenText = preserveOnScreenText
     ? sanitize(rawOnScreenText || "")
     : (strictValidation
-      ? ensureCompleteSentence(normalizeSimpleText(resolvedOnScreenText))
+      ? window.ensureCompleteSentence(normalizeSimpleText(resolvedOnScreenText))
       : sanitize(buildCreativeOnScreenText(rawOnScreenText || "", {
         voiceOver: voiceOverText,
         sceneDescription,
@@ -5864,194 +3204,6 @@ function hasVideoSceneMetadata(row = {}) {
     String(row?.scenePrompt || "").trim()
     || normalizeVideoImagePrompts(row?.imagePrompts || []).length
   );
-}
-
-function getSpeakerReferenceImageMap(session = null) {
-  return normalizeReferenceImageMap(session?.speakerReferenceImageMap || {});
-}
-
-function getScenarioReferenceImageMap(session = null) {
-  return normalizeReferenceImageMap(session?.scenarioReferenceImageMap || {});
-}
-
-function getRowReferenceImageListMap(session = null) {
-  const normalizedListMap = normalizeReferenceImageListMap(session?.rowReferenceImageListMap || {});
-  const legacyMap = normalizeReferenceImageMap(session?.rowReferenceImageMap || {});
-  Object.entries(legacyMap).forEach(([key, value]) => {
-    if (!normalizedListMap[key]?.length && value) {
-      normalizedListMap[key] = [value];
-    }
-  });
-  return normalizedListMap;
-}
-
-function getRowReferenceImageList(session = null, rowId = "") {
-  const listMap = getRowReferenceImageListMap(session);
-  return listMap[String(rowId || "").trim()] || [];
-}
-
-function getRowReferenceImageMap(session = null) {
-  const listMap = getRowReferenceImageListMap(session);
-  const next = {};
-  Object.entries(listMap).forEach(([key, list]) => {
-    const primary = Array.isArray(list) ? list[0] : null;
-    if (primary) next[key] = primary;
-  });
-  return next;
-}
-
-function getRowReferenceVideoMap(session = null) {
-  return normalizeReferenceVideoMap(session?.rowReferenceVideoMap || {});
-}
-
-function getRowReferenceModeByRowId(session = null) {
-  const imageMap = getRowReferenceImageMap(session);
-  const videoMap = getRowReferenceVideoMap(session);
-  return normalizeRowReferenceModeMap(session?.rowReferenceModeByRowId || {}, imageMap, videoMap);
-}
-
-function resolveRowReferenceAsset(rowId = "", session = null) {
-  const key = String(rowId || "").trim();
-  if (!key) return null;
-  const activeSession = session || getActiveSession();
-  const imageReferences = getRowReferenceImageListMap(activeSession)[key] || [];
-  const imageReference = getRowReferenceImageMap(activeSession)[key] || null;
-  const videoReference = getRowReferenceVideoMap(activeSession)[key] || null;
-  const mode = getRowReferenceModeByRowId(activeSession)[key];
-  const asset = (() => {
-    if (mode === "video" && videoReference) {
-      return { kind: "video", ...videoReference };
-    }
-    if (imageReference) {
-      return { kind: "image", images: imageReferences, imageCount: imageReferences.length, ...imageReference };
-    }
-    if (videoReference) {
-      return { kind: "video", ...videoReference };
-    }
-    return null;
-  })();
-  // console.log("[PodcasterMedia] Resolved asset for row:", key, { mode, hasImg: !!imageReference, hasVid: !!videoReference, resolvedKind: asset?.kind });
-  return asset;
-}
-
-function setSpeakerReferenceImage(speaker = "", reference = null) {
-  const key = normalizeSpeakerLabel(speaker, "");
-  if (!key) return false;
-  const normalized = normalizeReferenceImageRecord(reference);
-  upsertActiveSession((current) => {
-    const nextMap = { ...getSpeakerReferenceImageMap(current) };
-    if (normalized) nextMap[key] = normalized;
-    else delete nextMap[key];
-    return {
-      ...current,
-      speakerReferenceImageMap: nextMap
-    };
-  }, { render: false });
-  renderPodcastPortraitStrip(getActiveSession(), { force: true, reason: "structure" });
-  scheduleSessionLocalPersist("speaker-reference-image");
-  return true;
-}
-
-function setScenarioReferenceImage(scenarioId = "", reference = null) {
-  const key = String(scenarioId || "").trim();
-  if (!key) return false;
-  const normalized = normalizeReferenceImageRecord(reference);
-  upsertActiveSession((current) => {
-    const nextMap = { ...getScenarioReferenceImageMap(current) };
-    if (normalized) nextMap[key] = normalized;
-    else delete nextMap[key];
-    return {
-      ...current,
-      scenarioReferenceImageMap: nextMap
-    };
-  }, { render: false });
-  renderPodcastPortraitStrip(getActiveSession(), { force: true, reason: "structure" });
-  scheduleSessionLocalPersist("scenario-reference-image");
-  return true;
-}
-
-function setRowReferenceImage(rowId = "", reference = null) {
-  return setRowReferenceImages(rowId, reference ? [reference] : []);
-}
-
-function setRowReferenceImages(rowId = "", references = []) {
-  const key = String(rowId || "").trim();
-  if (!key) return false;
-  const normalizedList = normalizeReferenceImageList(references, 4);
-  const primary = normalizedList[0] || null;
-  upsertActiveSession((current) => {
-    const nextMap = { ...getRowReferenceImageMap(current) };
-    const nextListMap = { ...getRowReferenceImageListMap(current) };
-    const nextVideoMap = { ...getRowReferenceVideoMap(current) };
-    const nextModeMap = { ...getRowReferenceModeByRowId(current) };
-    
-    // Set images
-    if (primary) nextMap[key] = primary;
-    else delete nextMap[key];
-    
-    if (normalizedList.length) nextListMap[key] = normalizedList;
-    else delete nextListMap[key];
-    
-    // Clear video if we have images
-    if (normalizedList.length) {
-      delete nextVideoMap[key];
-      nextModeMap[key] = "image";
-    } else if (nextModeMap[key] === "image") {
-      delete nextModeMap[key];
-    }
-    
-    return {
-      ...current,
-      rowReferenceImageMap: nextMap,
-      rowReferenceImageListMap: nextListMap,
-      rowReferenceVideoMap: nextVideoMap,
-      rowReferenceModeByRowId: nextModeMap
-    };
-  }, { render: false });
-  
-  renderScript(getActiveSession());
-  syncPodcastStudioInspector(getActiveSession());
-  scheduleSessionLocalPersist("row-reference-images");
-  return true;
-}
-
-function setRowReferenceVideo(rowId = "", reference = null) {
-  const key = String(rowId || "").trim();
-  if (!key) return false;
-  const normalized = normalizeReferenceVideoRecord(reference);
-  upsertActiveSession((current) => {
-    const nextMap = { ...getRowReferenceVideoMap(current) };
-    const nextImageMap = { ...getRowReferenceImageMap(current) };
-    const nextImageListMap = { ...getRowReferenceImageListMap(current) };
-    const nextModeMap = { ...getRowReferenceModeByRowId(current) };
-    
-    // Set video
-    if (normalized) nextMap[key] = normalized;
-    else delete nextMap[key];
-    
-    // Clear images if we have a video
-    if (normalized) {
-      delete nextImageMap[key];
-      delete nextImageListMap[key];
-      nextModeMap[key] = "video";
-    } else if (nextModeMap[key] === "video") {
-      delete nextModeMap[key];
-    }
-    
-    return {
-      ...current,
-      rowReferenceVideoMap: nextMap,
-      rowReferenceImageMap: nextImageMap,
-      rowReferenceImageListMap: nextImageListMap,
-      rowReferenceModeByRowId: nextModeMap
-    };
-  }, { render: false });
-  
-  renderScript(getActiveSession());
-  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
-  syncPodcastStudioInspector(getActiveSession());
-  scheduleSessionLocalPersist("row-reference-video");
-  return true;
 }
 
 
@@ -6455,238 +3607,80 @@ const PODCAST_ON_SCREEN_TEXT_SIZE_PRESETS = [
   { value: 64, label: "XXL" }
 ];
 
-const PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS = [
-  {
-    value: "studio-clean",
-    label: "Studio Clean",
-    hint: "Editorial limpio y legible",
-    sample: "Texto premium para review y export",
-    settings: {
-      fontFamily: "Sora",
-      fontSizePx: 40,
-      stylePreset: "glow",
-      bgPreset: "none",
-      fontWeight: "bold",
-      fontStyle: "normal",
-      textAlign: "center",
-      textColor: "#f8fafc",
-      strokeColor: "#0f172a",
-      strokeWidthPx: 2,
-      textOpacity: 1,
-      bgOpacity: 0,
-      bgScale: 1,
-      shadowEnabled: true,
-      shadowBlurPx: 12,
-      shadowOffsetXPx: 0,
-      shadowOffsetYPx: 4,
-      shadowOpacity: 0.55
-    }
-  },
-  {
-    value: "headline-glow",
-    label: "Headline Glow",
-    hint: "Más impacto visual",
-    sample: "Titular fuerte con halo editorial",
-    settings: {
-      fontFamily: "Unbounded",
-      fontSizePx: 46,
-      stylePreset: "glow",
-      bgPreset: "none",
-      fontWeight: "bold",
-      fontStyle: "normal",
-      textAlign: "center",
-      textColor: "#f8fafc",
-      strokeColor: "#0f172a",
-      strokeWidthPx: 2.4,
-      textOpacity: 1,
-      bgOpacity: 0,
-      bgScale: 1,
-      shadowEnabled: true,
-      shadowBlurPx: 18,
-      shadowOffsetXPx: 0,
-      shadowOffsetYPx: 5,
-      shadowOpacity: 0.62
-    }
-  },
-  {
-    value: "broadcast-solid",
-    label: "Broadcast",
-    hint: "Subtítulo clásico de alto contraste",
-    sample: "Lectura rápida en cualquier fondo",
-    settings: {
-      fontFamily: "Nunito",
-      fontSizePx: 38,
-      stylePreset: "flat",
-      bgPreset: "solid",
-      fontWeight: "bold",
-      fontStyle: "normal",
-      textAlign: "center",
-      textColor: "#f8fafc",
-      strokeColor: "#0f172a",
-      strokeWidthPx: 2.2,
-      textOpacity: 1,
-      bgOpacity: 0.9,
-      bgScale: 1.12,
-      shadowEnabled: false,
-      shadowBlurPx: 0,
-      shadowOffsetXPx: 0,
-      shadowOffsetYPx: 0,
-      shadowOpacity: 0
-    }
-  },
-  {
-    value: "chrome-lux",
-    label: "Chrome Lux",
-    hint: "Acabado más ornamental",
-    sample: "Look premium con brillo metálico",
-    settings: {
-      fontFamily: "Space Grotesk",
-      fontSizePx: 42,
-      stylePreset: "chrome",
-      bgPreset: "glass",
-      fontWeight: "bold",
-      fontStyle: "normal",
-      textAlign: "center",
-      textColor: "#f8fafc",
-      strokeColor: "#111827",
-      strokeWidthPx: 2,
-      textOpacity: 1,
-      bgOpacity: 0.48,
-      bgScale: 1.08,
-      shadowEnabled: true,
-      shadowBlurPx: 10,
-      shadowOffsetXPx: 0,
-      shadowOffsetYPx: 4,
-      shadowOpacity: 0.4
-    }
-  }
-];
-
 const STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS = 7000;
 const STUDIO_ONSCREEN_TEXT_DEFAULTS_VERSION = 3;
 const STUDIO_ONSCREEN_TEXT_LAYOUT_DEFAULTS_VERSION = 3;
 
-function normalizeOnScreenTextTrackSettings(raw = {}) {
-  return normalizeSharedOnScreenTextTrackSettings
-    ? normalizeSharedOnScreenTextTrackSettings(raw)
-    : (raw && typeof raw === "object" ? { ...raw } : {});
-}
-
 function normalizeOnScreenTextClipItem(raw = {}, rowId = "") {
-  return normalizeSharedOnScreenTextClipItem
-    ? normalizeSharedOnScreenTextClipItem(raw, rowId)
-    : null;
+  return normalizeSharedOnScreenTextClipItem(raw, rowId);
 }
 
 function normalizeOnScreenTextClipsByRowId(raw = {}) {
-  return normalizeSharedOnScreenTextClipsByRowId
-    ? normalizeSharedOnScreenTextClipsByRowId(raw)
-    : {};
+  return normalizeSharedOnScreenTextClipsByRowId(raw);
 }
 
 function normalizeOnScreenTextLayoutItem(raw = {}, rowId = "") {
-  return normalizeSharedOnScreenTextLayoutItem
-    ? normalizeSharedOnScreenTextLayoutItem(raw, rowId)
-    : null;
+  return normalizeSharedOnScreenTextLayoutItem(raw, rowId);
 }
 
 function normalizeOnScreenTextLayoutByRowId(raw = {}) {
-  return normalizeSharedOnScreenTextLayoutByRowId
-    ? normalizeSharedOnScreenTextLayoutByRowId(raw)
-    : {};
+  return normalizeSharedOnScreenTextLayoutByRowId(raw);
 }
 
 function estimateOnScreenTextLayoutHeightPct(text = "", settings = null, widthPct = 0.38) {
   const sourceDims = getOnScreenTextSourceDimensions();
-  return estimateSharedOnScreenTextLayoutHeightPct
-    ? estimateSharedOnScreenTextLayoutHeightPct(text, settings, widthPct, {
-      sourceWidth: sourceDims.width,
-      sourceHeight: sourceDims.height,
-      resolution: getOnScreenTextRenderResolution()
-    })
-    : 0.14;
+  return estimateSharedOnScreenTextLayoutHeightPct(text, settings, widthPct, {
+    sourceWidth: sourceDims.width,
+    sourceHeight: sourceDims.height,
+    resolution: getOnScreenTextRenderResolution()
+  });
 }
 
 function estimateOnScreenTextLayoutWidthPct(text = "", settings = null, options = {}) {
   const sourceDims = getOnScreenTextSourceDimensions();
-  return estimateSharedOnScreenTextLayoutWidthPct
-    ? estimateSharedOnScreenTextLayoutWidthPct(text, settings, {
-      ...options,
-      sourceWidth: sourceDims.width,
-      sourceHeight: sourceDims.height,
-      resolution: getOnScreenTextRenderResolution()
-    })
-    : 0.58;
+  return estimateSharedOnScreenTextLayoutWidthPct(text, settings, {
+    ...options,
+    sourceWidth: sourceDims.width,
+    sourceHeight: sourceDims.height,
+    resolution: getOnScreenTextRenderResolution()
+  });
 }
 
 function buildDefaultOnScreenTextLayoutForRow(row = null, settings = null) {
   const sourceDims = getOnScreenTextSourceDimensions();
-  return buildSharedDefaultOnScreenTextLayoutForRow
-    ? buildSharedDefaultOnScreenTextLayoutForRow(row, settings, {
-      getText: getOnScreenTextClipText,
-      sourceWidth: sourceDims.width,
-      sourceHeight: sourceDims.height,
-      resolution: getOnScreenTextRenderResolution()
-    })
-    : null;
+  return buildSharedDefaultOnScreenTextLayoutForRow(row, settings, {
+    getText: getOnScreenTextClipText,
+    sourceWidth: sourceDims.width,
+    sourceHeight: sourceDims.height,
+    resolution: getOnScreenTextRenderResolution()
+  });
 }
 
 function expandOnScreenTextLayoutToFitText(layout = null, row = null, settings = null) {
   const sourceDims = getOnScreenTextSourceDimensions();
-  return expandSharedOnScreenTextLayoutToFitText
-    ? expandSharedOnScreenTextLayoutToFitText(layout, row, settings, {
-      getText: getOnScreenTextClipText,
-      sourceWidth: sourceDims.width,
-      sourceHeight: sourceDims.height,
-      resolution: getOnScreenTextRenderResolution()
-    })
-    : normalizeOnScreenTextLayoutItem(layout || {}, String(row?.id || layout?.rowId || "").trim());
+  return expandSharedOnScreenTextLayoutToFitText(layout, row, settings, {
+    getText: getOnScreenTextClipText,
+    sourceWidth: sourceDims.width,
+    sourceHeight: sourceDims.height,
+    resolution: getOnScreenTextRenderResolution()
+  });
 }
 
 function shouldRepairLegacyOnScreenTextLayout(layout = null, settings = null) {
-  if (shouldRepairSharedOnScreenTextLayout) {
-    return shouldRepairSharedOnScreenTextLayout(layout, settings);
-  }
-  if (!layout || typeof layout !== "object") return false;
-  const current = normalizeOnScreenTextTrackSettings(settings || {});
-  const xPct = Number(layout?.xPct);
-  const yPct = Number(layout?.yPct);
-  const widthPct = Number(layout?.widthPct);
-  const heightPct = Number(layout?.heightPct);
-  if (![xPct, yPct, widthPct, heightPct].every((value) => Number.isFinite(value))) return false;
-
-  const legacyDefaultX = 0.21;
-  const legacyDefaultY = 0.7;
-  const expectedWidthPct = Math.max(0.08, Math.min(0.92, estimateOnScreenTextLayoutWidthPct("", current, {
-    sourceWidth: getOnScreenTextSourceDimensions().width,
-    sourceHeight: getOnScreenTextSourceDimensions().height,
-    resolution: getOnScreenTextRenderResolution(),
-    minPct: 0.58,
-    maxPct: 0.92,
-    targetLines: 2
-  })));
-  const expectedHeightPct = Math.max(0.05, Math.min(0.6, estimateOnScreenTextLayoutHeightPct("", current, expectedWidthPct)));
-  const closeTo = (a, b, tolerance = 0.02) => Math.abs(Number(a) - Number(b)) <= tolerance;
-
-  return closeTo(xPct, legacyDefaultX, 0.015)
-    && closeTo(yPct, legacyDefaultY, 0.02)
-    && closeTo(widthPct, expectedWidthPct, 0.05)
-    && closeTo(heightPct, expectedHeightPct, 0.05);
+  return shouldRepairSharedOnScreenTextLayout(layout, settings);
 }
 
 function resolveOnScreenTextPreviewLayoutSpec(input = {}) {
   const config = input && typeof input === "object" ? input : {};
   const current = normalizeOnScreenTextTrackSettings(config.settings || {});
   const sourceDims = getOnScreenTextSourceDimensions();
-  return resolveSharedOnScreenTextPreviewLayoutSpec
-    ? resolveSharedOnScreenTextPreviewLayoutSpec({
-      ...config,
-      settings: current,
-      sourceWidth: Math.max(160, Math.round(Number(config.sourceWidth || 0) || sourceDims.width)),
-      sourceHeight: Math.max(90, Math.round(Number(config.sourceHeight || 0) || sourceDims.height)),
-      resolution: config.resolution || getOnScreenTextRenderResolution()
-    })
-    : null;
+  return resolveSharedOnScreenTextPreviewLayoutSpec({
+    ...config,
+    settings: current,
+    sourceWidth: Math.max(160, Math.round(Number(config.sourceWidth || 0) || sourceDims.width)),
+    sourceHeight: Math.max(90, Math.round(Number(config.sourceHeight || 0) || sourceDims.height)),
+    resolution: config.resolution || getOnScreenTextRenderResolution()
+  });
 }
 
 function ensureOnScreenTextLayoutByRowId(session = null, options = {}) {
@@ -6779,25 +3773,15 @@ function getOnScreenTextRenderResolution() {
 }
 
 function buildOnScreenTextPreviewStrokeShadowCss(settings = null, options = {}) {
-  return buildSharedOnScreenTextPreviewStrokeShadowCss
-    ? buildSharedOnScreenTextPreviewStrokeShadowCss(settings, options)
-    : "none";
+  return buildSharedOnScreenTextPreviewStrokeShadowCss(settings, options);
 }
 
 function buildOnScreenTextPreviewShadowCss(settings = null, options = {}) {
-  return buildSharedOnScreenTextPreviewShadowCss
-    ? buildSharedOnScreenTextPreviewShadowCss(settings, options)
-    : "none";
+  return buildSharedOnScreenTextPreviewShadowCss(settings, options);
 }
 
 function wrapOnScreenTextPreviewText(text = "", options = {}) {
-  if (wrapSharedOnScreenTextPreviewText) {
-    return wrapSharedOnScreenTextPreviewText(text, options);
-  }
-  if (wrapSharedOnScreenTextRenderText) {
-    return wrapSharedOnScreenTextRenderText(text, options).replace(/…/g, "...");
-  }
-  return String(text || "");
+  return wrapSharedOnScreenTextPreviewText(text, options);
 }
 
 function resolveOnScreenTextRenderMetrics(settings = null, options = {}) {
@@ -6808,24 +3792,22 @@ function resolveOnScreenTextRenderMetrics(settings = null, options = {}) {
   const heightPct = Math.max(0.05, Math.min(0.6, Number(options?.heightPct || 0.14)));
   const sourceWidth = Math.max(160, Math.round(Number(options?.sourceWidth || 0) || getOnScreenTextSourceDimensions().width));
   const sourceHeight = Math.max(90, Math.round(Number(options?.sourceHeight || 0) || getOnScreenTextSourceDimensions().height));
-  const spec = resolveSharedOnScreenTextRenderSpec
-    ? resolveSharedOnScreenTextRenderSpec({
-      settings: current,
-      layout: {
-        widthPct,
-        heightPct,
-        xPct: Number(options?.xPct || 0),
-        yPct: Number(options?.yPct || 0)
-      },
-      resolution: options?.resolution || getOnScreenTextRenderResolution(),
-      sourceWidth,
-      sourceHeight,
-      previewWidthPx,
-      previewHeightPx,
-      text: String(options?.text || "").trim(),
-      fallback: String(options?.fallback || "").trim()
-    })
-    : null;
+  const spec = resolveSharedOnScreenTextRenderSpec({
+    settings: current,
+    layout: {
+      widthPct,
+      heightPct,
+      xPct: Number(options?.xPct || 0),
+      yPct: Number(options?.yPct || 0)
+    },
+    resolution: options?.resolution || getOnScreenTextRenderResolution(),
+    sourceWidth,
+    sourceHeight,
+    previewWidthPx,
+    previewHeightPx,
+    text: String(options?.text || "").trim(),
+    fallback: String(options?.fallback || "").trim()
+  });
   if (!spec) {
     const fontSizePx = Math.max(16, Math.min(96, Number(current.fontSizePx || 44)));
     const bgPreset = String(current.bgPreset || "none").trim().toLowerCase();
@@ -6879,46 +3861,31 @@ function countWrappedOnScreenTextLines(text = "") {
 }
 
 function resolveOnScreenTextPreviewWrapFromMeasuredWidth(text = "", renderMetrics = null, contentWidthPx = 0) {
-  return resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth
-    ? resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth(text, renderMetrics, contentWidthPx)
-    : String(text || "");
+  return resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth(text, renderMetrics, contentWidthPx);
 }
 
 function buildOnScreenTextBubbleInlineStyle(settings = null, options = {}) {
-  return buildSharedOnScreenTextBubbleInlineStyle
-    ? buildSharedOnScreenTextBubbleInlineStyle(settings, options)
-    : "";
+  return buildSharedOnScreenTextBubbleInlineStyle(settings, options);
 }
 
 function getOnScreenTextResizeHandles(settings = null) {
-  return getSharedOnScreenTextResizeHandles
-    ? getSharedOnScreenTextResizeHandles(settings)
-    : ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+  return getSharedOnScreenTextResizeHandles(settings);
 }
 
 function buildOnScreenTextSelectionFrameHtml(settings = null) {
-  return buildSharedOnScreenTextSelectionFrameHtml
-    ? buildSharedOnScreenTextSelectionFrameHtml(settings)
-    : "";
+  return buildSharedOnScreenTextSelectionFrameHtml(settings);
 }
 
 function inferOnScreenTextLookPreset(settings = null) {
-  const current = normalizeOnScreenTextTrackSettings(settings || {});
-  return PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.find((preset) => {
-    const target = preset.settings || {};
-    return Object.keys(target).every((key) => String(current[key]) === String(target[key]));
-  })?.value || "";
+  return inferSharedOnScreenTextLookPreset(settings || {});
 }
 
 function applyOnScreenTextLookPreset(presetKey = "") {
-  const preset = PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.find((item) => item.value === String(presetKey || "").trim());
-  if (!preset) return;
+  const key = String(presetKey || "").trim();
+  if (!key) return;
   upsertPodcastVideoConfig((cfg) => ({
     ...cfg,
-    onScreenTextTrack: {
-      ...normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {}),
-      ...(preset.settings || {})
-    }
+    onScreenTextTrack: applySharedOnScreenTextLookPresetValue(cfg?.onScreenTextTrack || {}, key)
   }));
   const session = getActiveSession();
   syncPodcastOnScreenTextOverlay(session, {
@@ -6933,21 +3900,15 @@ function applyOnScreenTextLookPreset(presetKey = "") {
 }
 
 function getOnScreenTextFontFamilyCss(fontFamily = "") {
-  return getSharedOnScreenTextFontFamilyCss
-    ? getSharedOnScreenTextFontFamilyCss(fontFamily)
-    : '"Unbounded", system-ui, sans-serif';
+  return getSharedOnScreenTextFontFamilyCss(fontFamily);
 }
 
 function getOnScreenTextStylePresetClass(stylePreset = "") {
-  return getSharedOnScreenTextStylePresetClass
-    ? getSharedOnScreenTextStylePresetClass(stylePreset)
-    : "is-style-3d";
+  return getSharedOnScreenTextStylePresetClass(stylePreset);
 }
 
 function getOnScreenTextBgPresetClass(bgPreset = "") {
-  return getSharedOnScreenTextBgPresetClass
-    ? getSharedOnScreenTextBgPresetClass(bgPreset)
-    : "is-bg-glass";
+  return getSharedOnScreenTextBgPresetClass(bgPreset);
 }
 
 function getOnScreenTextClipEffectiveDurationMs(clip = null) {
@@ -7078,12 +4039,10 @@ function ensureOnScreenTextClipForRowId(session = null, rowId = "", options = {}
 }
 
 function getOnScreenTextClipText(row = null) {
-  return getSharedOnScreenTextClipText
-    ? getSharedOnScreenTextClipText({
-      ...row,
-      onScreenText: normalizeCreativeFieldText(row?.onScreenText, row?.textoPantalla, row?.textoEnPantalla, row?.text)
-    })
-    : normalizeCreativeFieldText(row?.onScreenText, row?.textoPantalla, row?.textoEnPantalla, row?.text);
+  return getSharedOnScreenTextClipText({
+    ...row,
+    onScreenText: normalizeCreativeFieldText(row?.onScreenText, row?.textoPantalla, row?.textoEnPantalla, row?.text)
+  });
 }
 
 function normalizeOnScreenTextClipsToSevenSecondsCentered(session = null, options = {}) {
@@ -7258,6 +4217,7 @@ function copyVoiceOverTextToOnScreenText(rowId = "") {
     }
   }), { render: false });
   syncOnScreenTextClipVisibilityFromRowText(key, voiceOverText, { render: false });
+  expandOnScreenTextLayoutsForRows(getActiveSession(), [key], { persist: true });
   scheduleSessionLocalPersist("script-edit");
   if (podcastVideoState.enabled) {
     renderPodcastVideoShell(getActiveSession());
@@ -7276,6 +4236,7 @@ function copyVoiceOverTextToOnScreenTextAllScenes() {
   if (!rows.length) return false;
   const videoPreset = resolveActiveVideoPreset(session);
   let changedAny = false;
+  const changedRowIds = [];
   upsertActiveSession((current) => ({
     ...current,
     script: {
@@ -7285,6 +4246,7 @@ function copyVoiceOverTextToOnScreenTextAllScenes() {
         const voiceOverText = String(item?.voiceOverText || item?.text || "").replace(/\s+/g, " ").trim();
         if (!voiceOverText) return isCreative ? normalizeCreativeRow(item, index, { videoPreset }) : item;
         changedAny = true;
+        changedRowIds.push(String(item?.id || "").trim());
         return isCreative
           ? normalizeCreativeRow({ ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true }, index, { videoPreset })
           : { ...item, onScreenText: voiceOverText, onScreenTextNoSummarize: true };
@@ -7293,6 +4255,7 @@ function copyVoiceOverTextToOnScreenTextAllScenes() {
   }), { render: false });
   if (!changedAny) return false;
   ensureOnScreenTextClipsByRowId(getActiveSession(), { persist: true });
+  expandOnScreenTextLayoutsForRows(getActiveSession(), changedRowIds, { persist: true });
   scheduleSessionLocalPersist("script-edit");
   if (podcastVideoState.enabled) {
     renderPodcastVideoShell(getActiveSession());
@@ -7300,6 +4263,42 @@ function copyVoiceOverTextToOnScreenTextAllScenes() {
   if (creativeVideoState.enabled) {
     renderCreativeVideoShell(getActiveSession());
   }
+  return true;
+}
+
+function expandOnScreenTextLayoutsForRows(session = null, rowIds = [], options = {}) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return false;
+  const keys = Array.from(new Set((Array.isArray(rowIds) ? rowIds : [rowIds]).map((rowId) => String(rowId || "").trim()).filter(Boolean)));
+  if (!keys.length) return false;
+  const cfg = getPodcastVideoConfig(activeSession);
+  const settings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
+  const rows = getSessionRows(activeSession);
+  const currentLayouts = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
+  const nextLayouts = { ...currentLayouts };
+  let changed = false;
+
+  keys.forEach((rowId, index) => {
+    const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+    if (!row) return;
+    const baseLayout = currentLayouts[rowId] || buildDefaultOnScreenTextLayoutForRow({ ...row, index: index + 1 }, settings);
+    if (!baseLayout) return;
+    const expanded = expandOnScreenTextLayoutToFitText(baseLayout, row, settings);
+    if (!expanded) return;
+    if (JSON.stringify(expanded) !== JSON.stringify(baseLayout)) {
+      nextLayouts[rowId] = expanded;
+      changed = true;
+    }
+  });
+
+  if (!changed) return false;
+  upsertPodcastVideoConfig((baseCfg) => ({
+    ...baseCfg,
+    timelineOnScreenTextLayoutByRowId: nextLayouts
+  }), {
+    autosave: options.autosave !== false,
+    persist: options.persist
+  });
   return true;
 }
 
@@ -8935,15 +5934,14 @@ function buildTimelineRuntimeEntries(session = null) {
     if (!rowId) return null;
     const clip = clipMap[rowId];
     if (!clip) return null;
-    const referenceAsset = resolveRowReferenceAsset(rowId, activeSession);
     const sceneClip = resolveDialogueVideoForRow(activeSession, rowId);
     const primarySegment = resolvePrimaryDialogueVideoSegment(sceneClip, {
       sessionId: String(activeSession?.id || "").trim(),
       rowId
     });
     const videoSrc = resolveStorageVideoUrl(
-      referenceAsset?.downloadUrl || primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
-      referenceAsset?.storagePath || primarySegment?.storagePath || sceneClip?.storagePath || ""
+      primarySegment?.downloadUrl || sceneClip?.downloadUrl || "",
+      primarySegment?.storagePath || sceneClip?.storagePath || ""
     );
     const audioClip = resolveDialogueAudioForRow(activeSession, rowId);
     const audioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl || "", audioClip?.storagePath || "");
@@ -8952,20 +5950,20 @@ function buildTimelineRuntimeEntries(session = null) {
     const isImageClip = (() => {
       // Check mimeType from the scene clip or reference asset
       const mime = String(
-        referenceAsset?.mimeType || sceneClip?.mimeType || primarySegment?.mimeType || ""
+        sceneClip?.mimeType || primarySegment?.mimeType || ""
       ).toLowerCase().trim();
       if (mime.startsWith("image/")) return true;
       // Check the explicit type field (set when user uploads/replaces with an image)
-      const explicitType = String(referenceAsset?.type || sceneClip?.type || "").toLowerCase().trim();
+      const explicitType = String(sceneClip?.type || "").toLowerCase().trim();
       if (explicitType === "image") return true;
       // Fallback: check the raw download URL for image extensions
       const rawUrl = String(
-        referenceAsset?.downloadUrl || primarySegment?.downloadUrl || sceneClip?.downloadUrl || ""
+        primarySegment?.downloadUrl || sceneClip?.downloadUrl || ""
       );
       if (/\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(rawUrl)) return true;
       // Check storagePath extension
       const rawPath = String(
-        referenceAsset?.storagePath || primarySegment?.storagePath || sceneClip?.storagePath || ""
+        primarySegment?.storagePath || sceneClip?.storagePath || ""
       );
       if (/\.(jpg|jpeg|png|webp|gif)$/i.test(rawPath)) return true;
       return false;
@@ -9581,96 +6579,7 @@ function isSameOriginMediaUrl(rawUrl = "") {
   }
 }
 
-async function clonePublicSceneLibraryVideoToSession({
-  sessionId = "",
-  rowId = "",
-  speakerLabel = "Narrador",
-  sourceStoragePath = "",
-  sourceUrl = "",
-  mimeType = "video/mp4"
-} = {}) {
-  const activeSession = getActiveSession();
-  const safeSessionId = String(sessionId || activeSession?.id || "").trim();
-  const safeRowId = String(rowId || "").trim();
-  if (!safeSessionId || !safeRowId) return false;
-  if (!hasAvailableApiBase()) return false;
-  const current = resolveDialogueVideoForRow(activeSession, safeRowId);
-  const currentStoragePath = String(current?.storagePath || resolvePrimaryDialogueVideoSegment(current)?.storagePath || "").trim();
-  // Si ya está en storage de sesión, no clones de nuevo.
-  if (/^podcaster\/sessions\//i.test(currentStoragePath)) return false;
-
-  let response = null;
-  try {
-    response = await authFetchJson("/api/podcaster/scene-library/clone-video", {
-      method: "POST",
-      body: {
-        sessionId: safeSessionId,
-        rowId: safeRowId,
-        speakerLabel: String(speakerLabel || "Narrador").trim() || "Narrador",
-        sourceStoragePath: String(sourceStoragePath || "").trim(),
-        sourceUrl: String(sourceUrl || "").trim(),
-        mimeType: String(mimeType || "video/mp4").trim() || "video/mp4"
-      }
-    });
-  } catch (_) {
-    return false;
-  }
-  const nextStoragePath = String(response?.video?.storagePath || "").trim();
-  const nextDownloadUrl = String(response?.video?.downloadUrl || "").trim();
-  const nextMimeType = String(response?.video?.mimeType || mimeType || "video/mp4").trim() || "video/mp4";
-  if (!nextStoragePath || !nextDownloadUrl) return false;
-
-  upsertActiveSession((base) => {
-    const map = { ...getDialogueVideoMap(base) };
-    const prev = map[safeRowId] || resolveDialogueVideoForRow(base, safeRowId) || null;
-    if (!prev) return base;
-    const segments = resolveDialogueVideoSegments(prev);
-    const primary = resolvePrimaryDialogueVideoSegment(prev);
-    const mergedPrimary = {
-      ...(primary && primary !== prev ? primary : {}),
-      downloadUrl: nextDownloadUrl,
-      storagePath: nextStoragePath,
-      mimeType: nextMimeType,
-      variant: String(prev?.variant || "public").trim() || "public",
-      updatedAt: nowIso()
-    };
-    const nextSegments = segments.length
-      ? segments.map((seg) => ({
-        ...seg,
-        downloadUrl: nextDownloadUrl,
-        storagePath: nextStoragePath,
-        mimeType: nextMimeType
-      }))
-      : [{
-        id: `${safeRowId}-seg-1`,
-        index: 0,
-        durationSec: Number(prev?.durationSec || 0) || VIDEO_SCENE_MIN_SEC,
-        downloadUrl: nextDownloadUrl,
-        storagePath: nextStoragePath,
-        mimeType: nextMimeType,
-        variant: "session-clone",
-        targetSpeechLine: String(prev?.targetSpeechLine || "").trim()
-      }];
-    map[safeRowId] = normalizeDialogueVideoMap({
-      [safeRowId]: {
-        ...prev,
-        mimeType: nextMimeType,
-        model: "public-scene-library-clone",
-        storagePath: nextStoragePath,
-        downloadUrl: nextDownloadUrl,
-        updatedAt: nowIso(),
-        segments: nextSegments
-      }
-    })[safeRowId] || prev;
-    return {
-      ...base,
-      dialogueVideoMap: map
-    };
-  }, { render: false });
-  renderPodcastVideoShell(getActiveSession());
-  scheduleSessionLocalPersist("public-scene-clone");
-  return true;
-}
+// Método de clonación desde librería removido y modularizado en podcaster-public-library.js
 
 async function safeMediaPlay(mediaEl) {
   if (!mediaEl || typeof mediaEl.play !== "function") return false;
@@ -10056,7 +6965,7 @@ function upsertSessionById(sessionId, mutator, options = {}) {
 
 function upsertActiveSession(mutator, options = {}) {
   if (options.recordHistory !== false) {
-    recordPodcastHistory(getActiveSession(), options.autosaveReason || "upsert");
+    podcasterHistoryApi.recordHistory(getActiveSession(), options.autosaveReason || "upsert");
   }
   return upsertSessionById(state.activeSessionId, mutator, options);
 }
@@ -10401,150 +7310,6 @@ function toMarkdownTableCell(value = "") {
     .trim();
 }
 
-function buildPodcastAssistantReply(script = {}, options = {}) {
-  const isRefinement = options?.isRefinement === true;
-  const session = options?.session || null;
-  const episodeTitle = String(script.episodeTitle || "Podcast").trim();
-  const summary = String(script.summary || "").trim();
-  const hosts = Array.isArray(script.hosts) && script.hosts.length
-    ? script.hosts.join(", ")
-    : "Host A, Host B";
-  const rows = normalizeRows(script.rows);
-  const duration = secondsToClock(countTotalDuration(rows));
-  const previewLimit = 24;
-  const isTruncatedPreview = rows.length > previewLimit;
-
-  let currentTime = 0;
-  const previewRows = rows
-    .slice(0, previewLimit)
-    .map((row, index) => {
-      const seconds = Math.max(1, Number(row?.durationSec) || 5);
-      const startTime = secondsToClock(currentTime);
-      currentTime += seconds;
-      const endTime = secondsToClock(currentTime);
-      const timeRange = `${startTime} - ${endTime}`;
-
-      const speaker = resolveSpeakerDisplayName(String(row.speaker || "Host A").trim(), session);
-      const expression = String(row.expression || "Neutral").trim() || "Neutral";
-      const text = replaceHostTokensWithNames(String(row.text || "").trim(), session);
-      const media = String(row?.mediaCue || "Sin media").trim() || "Sin media";
-      const notes = String(row?.notes || "").replace(/\s+/g, " ").trim() || "-";
-      return `| ${timeRange} | ${toMarkdownTableCell(speaker)} | ${toMarkdownTableCell(expression)} | ${toMarkdownTableCell(text)} | ${toMarkdownTableCell(media)} | ${toMarkdownTableCell(notes)} |`;
-    })
-    .join("\n");
-
-  const tableHeader = "| Tiempo | Locutor | Expresión | Guion | Media | Notas |\n| --- | --- | --- | --- | --- | --- |";
-  const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
-
-  const responseLines = [];
-  if (isRefinement) {
-    responseLines.push(`### Guion Actualizado: ${episodeTitle}`);
-  } else {
-    responseLines.push(`### Nuevo Guion: ${episodeTitle}`);
-  }
-
-  if (summary) {
-    responseLines.push(`> ${summary}`);
-  }
-
-  responseLines.push(`**Configuración:** ${hosts} | **Duración:** ${duration} | **Escenas:** ${rows.length}`);
-  responseLines.push("");
-  if (previewTable) {
-    responseLines.push(previewTable);
-  }
-
-  if (isTruncatedPreview) {
-    responseLines.push(`*Mostrando primeras ${previewLimit} escenas. El resto está disponible en el panel de edición.*`);
-  }
-
-  return responseLines.join("\n");
-}
-
-function buildCreativeVideoAssistantReply(script = {}, options = {}) {
-  const isRefinement = options?.isRefinement === true;
-  const isCreative = String(script?.videoPreset || "").trim().toLowerCase() === "creative";
-  const episodeTitle = String(script.episodeTitle || "Video creativo desde una idea").trim();
-  const summary = String(script.summary || "Ya preparé una primera versión del video creativo.").trim();
-  const rows = normalizeRows(script.rows);
-  const duration = secondsToClock(countTotalDuration(rows));
-  const creativeConfig = normalizeCreativeVideoConfig(script?.creativeVideoConfig || getCreativeVideoConfig(options?.session || null));
-  const voiceLabel = String(creativeConfig.globalVoiceName || "Kore").trim() || "Kore";
-  const voiceMimeType = String(creativeConfig.voiceMimeType || "audio/ogg").trim() || "audio/ogg";
-  const voiceFormatLabel = voiceMimeType.replace(/^audio\//i, "").toUpperCase();
-  const previewLimit = 24;
-  const isTruncatedPreview = rows.length > previewLimit;
-  const previewRows = rows
-    .slice(0, previewLimit)
-    .map((row, index) => {
-      const seconds = Math.max(SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC);
-      const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
-      const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
-      const transition = normalizeTransitionForScene(String(row?.transition || "").replace(/\s+/g, " ").trim(), {
-        script: voiceOver,
-        sceneDescription,
-        visual: resolveCreativeVisualNotesText(row),
-        partIndex: index
-      });
-      const visualElement = resolveCreativeVisualNotesText(row)
-        || String(
-          row?.videoDirective
-          || row?.visual
-          || row?.elementoVisual
-          || (Array.isArray(row?.imagePrompts) ? row.imagePrompts[0] : "")
-          || sceneDescription
-          || ""
-        ).replace(/\s+/g, " ").trim()
-        || "Definir elemento visual.";
-      const onScreenText = ensureCompleteSentence(buildOnScreenText(row?.onScreenText || "", {
-        voiceOver,
-        sceneDescription,
-        visual: visualElement
-      }));
-      const startSec = rows
-        .slice(0, index)
-        .reduce((acc, item) => acc + Math.max(SHORT_SCENE_MIN_SEC, Number(item?.durationSec) || SHORT_SCENE_MAX_SEC), 0);
-      const endSec = startSec + seconds;
-      return {
-        time: `${secondsToClock(startSec)}-${secondsToClock(endSec)}`,
-        script: voiceOver || "Definir voz en off de la escena.",
-        sceneDescription: sceneDescription || "Definir descripción de escena.",
-        onScreenText,
-        transition,
-        visual: visualElement
-      };
-    })
-    .map((item) => `| ${item.time} | ${item.script.replace(/\|/g, "\\|")} | ${item.sceneDescription.replace(/\|/g, "\\|")} | ${(item.onScreenText || "").replace(/\|/g, "\\|")} | ${item.transition.replace(/\|/g, "\\|")} | ${item.visual.replace(/\|/g, "\\|")} |`)
-    .join("\n");
-  const tableHeader = "| Tiempo | Guion | Descripción de escena | Texto en pantalla | Transición | Elemento visual |\n| --- | --- | --- | --- | --- | --- |";
-  const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
-
-  return [
-    isRefinement
-      ? `Listo. Actualicé tu guion de video creativo: "${episodeTitle}".`
-      : `Listo. Preparé un primer guion de video creativo para "${episodeTitle}".`,
-    "",
-    `${summary}`,
-    "",
-    `Duración estimada: ${duration}.`,
-    `Escenas creativas generadas: ${rows.length}.`,
-    `Voz global: ${voiceLabel} (${voiceFormatLabel}).`,
-    "",
-    previewTable ? `Guión técnico en tabla${isTruncatedPreview ? " (parcial)" : ""}:\n${previewTable}` : "",
-    isTruncatedPreview ? `Mostrando ${previewLimit} de ${rows.length} escenas. El resto está en la tabla del panel derecho.` : "",
-    "",
-    "Para ver/editar este guion en la tabla del panel derecho, usa el botón \"Conectar guion al panel\" de este mensaje.",
-    "",
-    "Campos del panel creativo: Tiempo, Guion (voz en off), Descripción de escena, Texto en pantalla, Transición y Elemento visual."
-  ].filter(Boolean).join("\n");
-}
-
-function buildScriptAssistantReply(script = {}, options = {}) {
-  const videoMode = options?.videoMode === true || script?.videoMode === true;
-  return videoMode
-    ? buildCreativeVideoAssistantReply(script, options)
-    : buildPodcastAssistantReply(script, options);
-}
-
 function getExpressionVoiceStyle(expression = "") {
   const normalized = String(expression || "").toLowerCase();
   if (normalized.includes("en")) return { rate: 1.08, pitch: 1.08 };
@@ -10872,7 +7637,7 @@ function resolveSpeakerStudioScenarioPrompt(session = null, speaker = "", option
     || isEducationalVideoMode(session);
   const explicitScenario = String(options?.scenario || "").replace(/\s+/g, " ").trim();
   if (explicitScenario) {
-    return creative ? rewriteScenarioPromptForEducationalVideo(explicitScenario) : explicitScenario;
+    return creative ? window.rewriteScenarioPromptForEducationalVideo(explicitScenario) : explicitScenario;
   }
   const selectedGlobalScenario = String(resolveActiveGlobalScenarioVariant(session)?.prompt || "").replace(/\s+/g, " ").trim();
   const activeVariantText = String(resolveActiveScenarioVariant(session, key)?.text || "").replace(/\s+/g, " ").trim();
@@ -10880,8 +7645,8 @@ function resolveSpeakerStudioScenarioPrompt(session = null, speaker = "", option
   const draftScenario = String(draftScenarioMap[key] || "").replace(/\s+/g, " ").trim();
   const speakerScenario = String(getSpeakerScenarioMap(session)?.[key] || "").replace(/\s+/g, " ").trim();
   const hostScenario = activeVariantText || draftScenario || speakerScenario;
-  const nextSelectedScenario = creative ? rewriteScenarioPromptForEducationalVideo(selectedGlobalScenario) : selectedGlobalScenario;
-  const nextHostScenario = creative ? rewriteScenarioPromptForEducationalVideo(hostScenario) : hostScenario;
+  const nextSelectedScenario = creative ? window.rewriteScenarioPromptForEducationalVideo(selectedGlobalScenario) : selectedGlobalScenario;
+  const nextHostScenario = creative ? window.rewriteScenarioPromptForEducationalVideo(hostScenario) : hostScenario;
   if (nextSelectedScenario && nextHostScenario && nextHostScenario !== nextSelectedScenario) {
     return `${nextSelectedScenario}. Variacion obligatoria para ${key}: ${nextHostScenario}. Mantener exactamente el mismo set base y solo variar zona, angulo y bloqueo del locutor dentro de ese escenario.`
       .replace(/\s+/g, " ")
@@ -10931,13 +7696,13 @@ function normalizeGlobalScenarioDeck(raw = null, options = {}) {
     let revision = Math.max(0, Number(rawItem.revision) || 0);
     let prompt = String(rawItem.prompt || buildGlobalScenarioVariantText(index, revision, options)).replace(/\s+/g, " ").trim();
     if (videoMode) {
-      prompt = rewriteScenarioPromptForEducationalVideo(prompt);
+      prompt = window.rewriteScenarioPromptForEducationalVideo(prompt);
     }
     while (!prompt || used.has(prompt)) {
       revision += 1;
       prompt = buildGlobalScenarioVariantText(index, revision, options);
       if (videoMode) {
-        prompt = rewriteScenarioPromptForEducationalVideo(prompt);
+        prompt = window.rewriteScenarioPromptForEducationalVideo(prompt);
       }
     }
     used.add(prompt);
@@ -12182,32 +8947,6 @@ function setGenerationStatus(text, tone = "", options = {}) {
   }
   renderGenerationStatus(getActiveSession());
 }
-
-function addChatMessage(role, text, extra = {}) {
-  const payload = {
-    id: makeId("msg"),
-    role,
-    text,
-    ...(extra && typeof extra === "object" ? extra : {})
-  };
-  upsertActiveSession((session) => ({
-    ...session,
-    chat: [
-      ...(session.chat || []),
-      payload
-    ]
-  }));
-}
-
-function removeChatMessage(messageId = "") {
-  const key = String(messageId || "").trim();
-  if (!key) return;
-  upsertActiveSession((session) => ({
-    ...session,
-    chat: (session.chat || []).filter((message) => String(message?.id || "").trim() !== key)
-  }));
-}
-
 function buildSpeakerMapsForHosts(hosts = [], session = null, snapshots = {}) {
   const voiceSource = { ...getSpeakerVoiceMap(session), ...(snapshots?.speakerVoiceMap || {}) };
   const expressionSource = { ...getSpeakerExpressionMap(session), ...(snapshots?.speakerExpressionMap || {}) };
@@ -12230,7 +8969,7 @@ function buildSpeakerMapsForHosts(hosts = [], session = null, snapshots = {}) {
     expressionMap[key] = EXPRESSIONS.includes(expressionSource[key]) ? expressionSource[key] : "Neutral";
     nameMap[key] = String(nameSource[key] || DEFAULT_SPEAKER_NAME_MAP[key] || key).trim() || key;
     const scenarioValue = String(scenarioSource[key] || DEFAULT_SPEAKER_SCENARIO_MAP[key] || "Cabina premium de podcast").replace(/\s+/g, " ").trim() || "Cabina premium de podcast";
-    scenarioMap[key] = rewriteScenarioPromptForEducationalVideo(scenarioValue);
+    scenarioMap[key] = window.rewriteScenarioPromptForEducationalVideo(scenarioValue);
   });
   return { voiceMap, expressionMap, nameMap, scenarioMap };
 }
@@ -12274,13 +9013,13 @@ function normalizeCreativeVideoScriptForDisplay(script = {}, session = null, opt
     });
   if (!Array.isArray(base?.rows)) return base;
   base.rows = base.rows.map((row, index) => {
-    const scenePrompt = rewriteScenarioPromptForEducationalVideo(
+    const scenePrompt = window.rewriteScenarioPromptForEducationalVideo(
       String(row?.scenePrompt || row?.sceneDescription || "").replace(/\s+/g, " ").trim()
       || `Secuencia ${index + 1}: apoyo visual limpio y creativo en 16:9.`
     );
     const imagePrompts = normalizeVideoImagePrompts(row.imagePrompts || []).map((prompt) => {
       const sanitizedPrompt = sanitizeSpeakerMentionsInDialogue(prompt, session, base.hosts);
-      return rewriteScenarioPromptForEducationalVideo(sanitizedPrompt);
+      return window.rewriteScenarioPromptForEducationalVideo(sanitizedPrompt);
     });
     const sanitizedRow = {
       ...row,
@@ -12303,35 +9042,6 @@ function normalizeCreativeVideoScriptForDisplay(script = {}, session = null, opt
   });
   return base;
 }
-
-function addScriptAssistantMessage(script = {}, options = {}) {
-  const session = options?.session || getActiveSession();
-  const preserveExactRows = options?.preserveExactRows === true;
-  const normalized = normalizeCreativeVideoScriptForDisplay(script, session, {
-    ...options,
-    preserveExactRows
-  });
-  const hosts = Array.isArray(normalized?.hosts) && normalized.hosts.length ? normalized.hosts : getSpeakerOptions(session);
-  const maps = buildSpeakerMapsForHosts(hosts, session, {
-    ...(options?.snapshots || {}),
-    videoMode: normalized?.videoMode === true,
-    videoPreset: normalized?.videoPreset || options?.snapshots?.videoPreset
-  });
-  const text = buildScriptAssistantReply(normalized, {
-    isRefinement: options?.isRefinement === true,
-    session,
-    videoMode: normalized?.videoMode === true
-  });
-  addChatMessage("assistant", text, {
-    scriptSnapshot: normalized,
-    speakerVoiceMapSnapshot: maps.voiceMap,
-    speakerExpressionMapSnapshot: maps.expressionMap,
-    speakerNameMapSnapshot: maps.nameMap,
-    speakerScenarioMapSnapshot: maps.scenarioMap,
-    disfluencyDefaultsSnapshot: normalizeDisfluencyConfig(session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG)
-  });
-}
-
 async function copyTextToClipboard(text = "") {
   const value = String(text || "");
   if (!value) return false;
@@ -12496,57 +9206,6 @@ function applyMontageSceneMixToAllScenes() {
   setGenerationStatus(`Volúmenes globales aplicados: Veo ${veoPct}% · Gemini ${geminiPct}%`, "is-live");
   scheduleSessionLocalPersist("montage-scene-mix");
   setMontageSceneMixOpen(false);
-}
-
-function persistAudioTrackMixSettings() {
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
-  scheduleSessionLocalPersist("background-music");
-  // Background audio refreshed via controller tick
-  playbackController.syncBackgroundMusic(Math.max(0, Number(podcastVideoState.montageCursorMs || 0)), 1);
-}
-
-function setPanelMontageMusicVolume(nextVolume = 22) {
-  const clamped = Math.max(0, Math.min(100, Number(nextVolume) || 0));
-  if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-    panelMusicState.track.montageVolume = clamped;
-    const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex(t => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-    if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].montageVolume = clamped;
-  } else {
-    panelMusicState.montageVolume = clamped;
-  }
-  if (els.audioTrackMontageVolume) els.audioTrackMontageVolume.value = String(clamped);
-  if (els.audioTrackMontageVolumeNumber) els.audioTrackMontageVolumeNumber.value = String(clamped);
-  persistAudioTrackMixSettings();
-}
-
-function setPanelMontageDuckingWhenGeminiPct(nextValue = 60) {
-  const clamped = Math.max(40, Math.min(100, Number(nextValue) || 0));
-  if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-    panelMusicState.track.duckingWhenGeminiPct = clamped;
-    const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex(t => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-    if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].duckingWhenGeminiPct = clamped;
-  } else {
-    panelMusicState.duckingWhenGeminiPct = clamped;
-  }
-  if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(clamped);
-  if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(clamped);
-  persistAudioTrackMixSettings();
-}
-
-function setPanelMontageStabilize(enabled = false) {
-  const isEnabled = enabled === true;
-  if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-    panelMusicState.track.stabilize = isEnabled;
-    const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex(t => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-    if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].stabilize = isEnabled;
-  } else {
-    panelMusicState.stabilize = isEnabled;
-  }
-  if (els.audioTrackStabilizeToggle) {
-    els.audioTrackStabilizeToggle.checked = isEnabled;
-  }
-  persistAudioTrackMixSettings();
 }
 
 function setScriptSetupOpen(isOpen) {
@@ -12982,403 +9641,6 @@ function primeScriptSetupModal() {
   if (els.scriptSetupMaxWords) els.scriptSetupMaxWords.value = String(maxWords);
 }
 
-function syncMusicControls() {
-  if (els.panelMusicPreset) {
-    els.panelMusicPreset.value = panelMusicState.preset;
-  }
-  if (els.panelMusicVolume) {
-    els.panelMusicVolume.value = String(panelMusicState.volume);
-  }
-  if (els.panelMusicTrackInfo) {
-    const uploadedTracks = getPanelMusicUploadedTracks();
-    const track = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
-    if (panelMusicState.sourceType === "track" && track) {
-      const origin = panelMusicState.selectedTrackKind === "ai"
-        ? "IA"
-        : (track.storagePath ? "Firebase" : track.localDataUrl ? "Local" : "Sin origen");
-      els.panelMusicTrackInfo.textContent = panelMusicState.selectedTrackKind === "uploaded" && uploadedTracks.length > 1
-        ? `${uploadedTracks.length} audios cargados · ${origin}`
-        : `${track.slotLabel || track.name || "Audio"} · ${origin}`;
-    } else {
-      els.panelMusicTrackInfo.textContent = "Sin canción seleccionada. Se usará preset.";
-    }
-  }
-  if (els.panelMusicTrackList) {
-    const uploadedTracks = getPanelMusicUploadedTracks();
-    const selectedCount = uploadedTracks.filter((track) => track?.enabledInSession !== false).length;
-    els.panelMusicTrackList.innerHTML = uploadedTracks.length
-      ? uploadedTracks.map((track, index) => {
-        const isSelected = panelMusicState.selectedTrackKind === "uploaded"
-          && !panelMusicState.track?.model
-          && String(panelMusicState.track?.slotLabel || "").trim() === String(track.slotLabel || "").trim();
-        const isEnabledInSession = track.enabledInSession !== false;
-        const origin = track.storagePath ? "Firebase" : (track.localDataUrl ? "Local" : "Sin origen");
-        return `
-          <div class="panel-music-track-item${isSelected ? " is-selected" : ""}${isEnabledInSession ? "" : " is-disabled"}">
-            <span class="panel-music-track-item-copy">
-              <strong>${escapeHtml(track.slotLabel || `Audio ${index + 1}`)}</strong>
-              <span>${escapeHtml(track.name || "Audio")} · ${escapeHtml(origin)} · ${escapeHtml(`${Math.round(getPanelMusicTrackDurationSec(track))}s`)} · ${isEnabledInSession ? "Seleccionado" : "No seleccionado"}</span>
-            </span>
-            <span class="panel-music-track-item-actions">
-              <button class="row-icon-btn" type="button" data-action="toggle-session-audio-enabled" data-track-index="${index}" title="${isEnabledInSession ? "Quitar de esta sesión" : "Seleccionar para esta sesión"}">
-                <i class="fas ${isEnabledInSession ? "fa-check-square" : "fa-square"}"></i>
-              </button>
-              <button class="row-icon-btn" type="button" data-action="select-uploaded-audio-item" data-track-index="${index}" title="Editar este audio">
-                <i class="fas fa-sliders-h"></i>
-              </button>
-              <button class="row-icon-btn" type="button" data-action="remove-session-audio-item" data-track-index="${index}" title="Quitar de esta sesión">
-                <i class="fas fa-times"></i>
-              </button>
-            </span>
-          </div>
-        `;
-      }).join("")
-      : `<div class="music-track-info">Sin audios cargados.</div>`;
-    if (els.selectAllSessionAudiosBtn) {
-      els.selectAllSessionAudiosBtn.disabled = !uploadedTracks.length || selectedCount === uploadedTracks.length;
-    }
-    if (els.clearAllSessionAudiosBtn) {
-      els.clearAllSessionAudiosBtn.disabled = !uploadedTracks.length || selectedCount <= 1;
-    }
-  }
-  if (els.panelMusicGlobalLibraryList) {
-    if (panelMusicGlobalLibraryState.loading) {
-      els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">Cargando biblioteca global...</div>`;
-    } else if (panelMusicGlobalLibraryState.error) {
-      els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">${escapeHtml(panelMusicGlobalLibraryState.error)}</div>`;
-    } else if (panelMusicGlobalLibraryState.items.length) {
-      els.panelMusicGlobalLibraryList.innerHTML = panelMusicGlobalLibraryState.items.map((track) => `
-        <div class="panel-music-track-item">
-          <span class="panel-music-track-item-copy">
-            <strong>${escapeHtml(track.name || "Audio")}</strong>
-            <span>${escapeHtml(`${Math.round(getPanelMusicTrackDurationSec(track))}s`)}${track.ownerEmail ? ` · ${escapeHtml(track.ownerEmail)}` : ""}</span>
-          </span>
-          <span class="panel-music-track-item-actions">
-            <button class="row-icon-btn" type="button" data-action="use-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Añadir a esta sesión">
-              <i class="fas fa-plus"></i>
-            </button>
-            <button class="row-icon-btn" type="button" data-action="delete-global-audio-item" data-library-id="${escapeHtml(track.libraryId)}" title="Eliminar de la biblioteca global">
-              <i class="fas fa-trash"></i>
-            </button>
-          </span>
-        </div>
-      `).join("");
-    } else {
-      els.panelMusicGlobalLibraryList.innerHTML = `<div class="music-track-info">No hay audios globales todavía.</div>`;
-    }
-  }
-  if (els.audioTrackSourceSelect) {
-    const uploadedTrack = getPanelMusicTrackAvailability("uploaded");
-    const aiTrack = getPanelMusicTrackAvailability("ai");
-    els.audioTrackSourceSelect.value = panelMusicState.sourceType === "track"
-      ? resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind)
-      : "preset";
-    const uploadedOption = els.audioTrackSourceSelect.querySelector('option[value="uploaded"]');
-    const aiOption = els.audioTrackSourceSelect.querySelector('option[value="ai"]');
-    if (uploadedOption) uploadedOption.disabled = !uploadedTrack;
-    if (aiOption) aiOption.disabled = !aiTrack;
-  }
-  if (els.audioTrackSourceInfo) {
-    const uploadedTrack = getPanelMusicTrackAvailability("uploaded");
-    const aiTrack = getPanelMusicTrackAvailability("ai");
-    const currentLabel = panelMusicState.sourceType === "track" && panelMusicState.track
-      ? `${panelMusicState.selectedTrackKind === "ai" ? "Usando IA" : "Usando audio cargado"}: ${panelMusicState.track.name || "Audio"}`
-      : "Usando preset del estudio.";
-    const inventory = [
-      uploadedTrack ? `Cargado: ${uploadedTrack.name || "Audio"}` : "Cargado: ninguno",
-      aiTrack ? `IA: ${aiTrack.name || "Audio IA"}` : "IA: ninguno"
-    ].join(" · ");
-    els.audioTrackSourceInfo.textContent = `${currentLabel} ${inventory}`;
-  }
-  if (els.panelMusicAiPrompt && !String(els.panelMusicAiPrompt.value || "").trim()) {
-    els.panelMusicAiPrompt.value = buildDefaultPanelMusicAiPrompt(getActiveSession());
-  }
-  if (els.panelMusicPlayBtn) {
-    els.panelMusicPlayBtn.disabled = panelMusicState.playing;
-  }
-  if (els.panelMusicStopBtn) {
-    els.panelMusicStopBtn.disabled = !panelMusicState.playing;
-  }
-  if (els.clearPanelMusicTrackBtn) {
-    els.clearPanelMusicTrackBtn.disabled = !panelMusicState.track;
-  }
-  if (els.generatePanelMusicAiBtn) {
-    els.generatePanelMusicAiBtn.disabled = panelMusicAiGenerating;
-  }
-  const activeTrack = (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) ? panelMusicState.track : null;
-  const currentVolume = activeTrack ? activeTrack.montageVolume : panelMusicState.montageVolume;
-  const currentDuck = activeTrack ? activeTrack.duckingWhenGeminiPct : panelMusicState.duckingWhenGeminiPct;
-  const currentStabilize = activeTrack ? activeTrack.stabilize : panelMusicState.stabilize;
-
-  if (els.audioTrackMontageVolume) {
-    els.audioTrackMontageVolume.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
-  }
-  if (els.audioTrackMontageVolumeNumber) {
-    els.audioTrackMontageVolumeNumber.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
-  }
-  if (els.audioTrackDuckVolume) {
-    els.audioTrackDuckVolume.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
-  }
-  if (els.audioTrackDuckVolumeNumber) {
-    els.audioTrackDuckVolumeNumber.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
-  }
-  if (els.audioTrackStabilizeToggle) {
-    els.audioTrackStabilizeToggle.checked = currentStabilize === true;
-  }
-}
-
-function syncPanelMusicStateFromSession(session = null) {
-  const cfg = session?.panelMusicConfig && typeof session.panelMusicConfig === "object"
-    ? session.panelMusicConfig
-    : null;
-  if (!cfg) return;
-  const sessionId = String(session?.id || "").trim();
-  const hydrateTrackFromCache = (track, kind) => {
-    const normalized = normalizePanelMusicTrack(track);
-    if (!normalized || String(normalized.localDataUrl || "").trim()) return normalized;
-    const cachedLocalDataUrl = loadPanelMusicSessionTrackCache(sessionId, kind);
-    return cachedLocalDataUrl
-      ? {
-        ...normalized,
-        localDataUrl: cachedLocalDataUrl
-      }
-      : normalized;
-  };
-  const next = {
-    preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
-    volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
-    montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 0))),
-    duckingWhenGeminiPct: (() => {
-      const raw = Number(cfg?.duckingWhenGeminiPct);
-      if (!Number.isFinite(raw)) return 60;
-      if (raw >= 40 && raw <= 100) return raw;
-      if (raw >= 0 && raw < 40) return Math.max(40, 100 - raw);
-      return 60;
-    })(),
-    stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
-    sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
-    selectedTrackKind: resolvePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
-    trackLibrary: {
-      uploaded: hydrateTrackFromCache(cfg?.trackLibrary?.uploaded || null, "uploaded"),
-      uploadedTracks: normalizePanelMusicTrackList((cfg?.trackLibrary?.uploadedTracks || []).map((track) => hydrateTrackFromCache(track, "uploaded"))),
-      ai: hydrateTrackFromCache(cfg?.trackLibrary?.ai || null, "ai")
-    },
-    track: hydrateTrackFromCache(cfg?.track || null, cfg?.track?.model ? "ai" : "uploaded")
-  };
-  if (!next.trackLibrary.uploaded && next.track && !next.track.model) next.trackLibrary.uploaded = next.track;
-  if (!next.trackLibrary.uploadedTracks.length && next.trackLibrary.uploaded) {
-    next.trackLibrary.uploadedTracks = [{ ...next.trackLibrary.uploaded, slotLabel: String(next.trackLibrary.uploaded.slotLabel || "Audio 1").trim() || "Audio 1" }];
-  }
-  if (!next.trackLibrary.ai && next.track && next.track.model) next.trackLibrary.ai = next.track;
-  panelMusicState = {
-    ...panelMusicState,
-    preset: next.preset,
-    volume: next.volume,
-    montageVolume: next.montageVolume,
-    duckingWhenGeminiPct: next.duckingWhenGeminiPct,
-    stabilize: next.stabilize,
-    sourceType: next.sourceType,
-    selectedTrackKind: next.selectedTrackKind,
-    trackLibrary: next.trackLibrary,
-    track: next.track
-  };
-  syncActivePanelMusicTrack({ kind: next.selectedTrackKind });
-  const activeTrack = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
-  const shouldProbeTrackDuration = panelMusicState.sourceType === "track" && (
-    getPanelMusicTrackDurationSec(activeTrack) <= 0.05
-    || String(activeTrack?.durationMeasuredWith || "").trim().toLowerCase() !== "decode"
-  );
-  if (shouldProbeTrackDuration) {
-    ensurePanelMusicTrackDuration(panelMusicState.selectedTrackKind, {
-      render: false,
-      force: getPanelMusicTrackDurationSec(activeTrack) > 0.05
-    }).then(() => {
-      syncMusicControls();
-      renderPodcastVideoTimeline(getActiveSession());
-    }).catch(() => { });
-  }
-  if (getEnabledPanelMusicUploadedTracks().length) {
-    ensureAllEnabledUploadedTrackDurations({
-      render: false,
-      force: false
-    }).then(() => {
-      syncMusicControls();
-      renderPodcastVideoTimeline(getActiveSession());
-    }).catch(() => { });
-  }
-}
-
-function stopPanelMusic() {
-  if (panelMusicAudioEl) {
-    try {
-      panelMusicAudioEl.pause();
-    } catch (_) {
-      // noop
-    }
-    panelMusicAudioEl = null;
-  }
-  panelMusicNodes.forEach((node) => {
-    try {
-      if (node?.stop) node.stop();
-    } catch (_) {
-      // noop
-    }
-    try {
-      if (node?.disconnect) node.disconnect();
-    } catch (_) {
-      // noop
-    }
-  });
-  panelMusicNodes = [];
-  panelMusicState.playing = false;
-  syncMusicControls();
-}
-
-function resolvePanelMusicTrackSrc() {
-  const track = normalizePanelMusicTrack(panelMusicState.track);
-  if (!track) return "";
-  const localDataUrl = String(track.localDataUrl || "").trim();
-  if (localDataUrl) return localDataUrl;
-  const remote = String(track.downloadUrl || "").trim();
-  return resolveStorageAudioUrl(remote);
-}
-
-function getPanelMontageMusicConfig() {
-  const uploadedMode = panelMusicState.selectedTrackKind === "uploaded";
-  const activeTrack = normalizePanelMusicTrack(panelMusicState.track);
-  const uploadedSegments = uploadedMode
-    ? buildUploadedPanelMusicSegments(getActiveSession())
-    : [];
-  // `buildUploadedPanelMusicSegments` usa tracks habilitados (enabledInSession !== false),
-  // por lo que trackIndex/loopIndex deben resolverse contra esa misma lista.
-  const uploadedTracks = uploadedMode ? getPanelMusicUploadedTracks() : [];
-  const sourceItems = uploadedSegments.map((segment) => {
-    const trackIndex = Math.max(0, Math.floor(Number(segment?.trackIndex || 0) || 0));
-    const loopIndex = Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0));
-    const track = uploadedTracks[trackIndex] || null;
-    const mutedLoopIndexes = new Set(normalizePanelMusicMutedLoopIndexes(track?.mutedLoopIndexes || []));
-    return {
-      slotLabel: String(segment?.slotLabel || "").trim(),
-      sourceUrl: String(resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim(),
-      startOffsetMs: Math.max(0, Number(segment?.startMs || 0) || 0),
-      endOffsetMs: Math.max(0, Number(segment?.endMs || 0) || 0),
-      loop: segment?.loop === true,
-      durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
-      trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
-      trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),
-      trackIndex,
-      loopIndex,
-      muted: mutedLoopIndexes.has(loopIndex),
-      volume: track?.montageVolume !== undefined ? track.montageVolume : panelMusicState.montageVolume,
-      duckingWhenGeminiPct: track?.duckingWhenGeminiPct !== undefined ? track.duckingWhenGeminiPct : panelMusicState.duckingWhenGeminiPct,
-      stabilize: track?.stabilize !== undefined ? track.stabilize : panelMusicState.stabilize
-    };
-  }).filter((segment) => segment.sourceUrl);
-
-  // Para "uploaded": el montaje debe seguir sourceItems (segmentos en timeline) y no caer
-  // al `sourceUrl` del track activo, para que enabled/mute por clip funcionen correctamente.
-  const sourceUrl = (!uploadedMode && panelMusicState.sourceType === "track")
-    ? resolvePanelMusicTrackSrc()
-    : "";
-  const sourceType = uploadedMode
-    ? (sourceItems.length ? "track" : "none")
-    : (panelMusicState.sourceType === "track" ? "track" : "none");
-  return {
-    sourceType,
-    preset: ["ambient", "focus", "pulse"].includes(String(panelMusicState.preset || "").trim())
-      ? String(panelMusicState.preset).trim()
-      : "ambient",
-    sourceUrl: String(sourceUrl || "").trim(),
-    sourceItems,
-    volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
-    duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
-    stabilize: panelMusicState.stabilize === true,
-    durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
-    startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
-    trimInMs: Math.max(0, Number(activeTrack?.trimInMs || 0) || 0),
-    trimOutMs: Math.max(0, Number(activeTrack?.trimOutMs || 0) || 0),
-    loopSettings: Array.isArray(activeTrack?.loopSettings)
-      ? activeTrack.loopSettings.map((item) => ({
-        loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
-        trimInMs: Math.max(0, Number(item?.trimInMs || 0) || 0),
-        trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0)
-      }))
-      : [],
-    mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(activeTrack?.mutedLoopIndexes || [])
-  };
-}
-
-async function startPanelMusic() {
-  // Never start the independent panel music player while the montage is active –
-  // the playback controller manages background audio via the timeline chip.
-  if (podcastVideoState.montageActive) return;
-  if (panelMusicState.playing) return;
-  const musicSrc = panelMusicState.sourceType === "track" ? resolvePanelMusicTrackSrc() : "";
-  if (musicSrc) {
-    const audio = new Audio(musicSrc);
-    audio.crossOrigin = "anonymous";
-    audio.loop = true;
-    audio.volume = Math.max(0, Math.min(1, (Number(panelMusicState.volume) || 0) / 100));
-    panelMusicAudioEl = audio;
-    await audio.play();
-    panelMusicState.playing = true;
-    syncMusicControls();
-    return;
-  }
-  if (!panelMusicAudioCtx) {
-    panelMusicAudioCtx = new AudioContext();
-  }
-  if (panelMusicAudioCtx.state === "suspended") {
-    await panelMusicAudioCtx.resume().catch(() => { });
-  }
-  const ctx = panelMusicAudioCtx;
-  const master = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = 900;
-  filter.Q.value = 0.9;
-  master.gain.value = Math.max(0, Math.min(1, (Number(panelMusicState.volume) || 0) / 100 * 0.22));
-  filter.connect(master);
-  master.connect(ctx.destination);
-
-  const pushOsc = (type, freq, gainValue, detune = 0) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    osc.detune.value = detune;
-    gain.gain.value = gainValue;
-    osc.connect(gain);
-    gain.connect(filter);
-    osc.start();
-    panelMusicNodes.push(osc, gain);
-  };
-
-  if (panelMusicState.preset === "focus") {
-    pushOsc("triangle", 180, 0.21);
-    pushOsc("sine", 270, 0.13, 4);
-  } else if (panelMusicState.preset === "pulse") {
-    pushOsc("sawtooth", 92, 0.14);
-    pushOsc("square", 184, 0.08, -3);
-  } else {
-    pushOsc("sine", 146.83, 0.18);
-    pushOsc("sine", 220, 0.11, 6);
-  }
-
-  const lfo = ctx.createOscillator();
-  const lfoGain = ctx.createGain();
-  lfo.type = "sine";
-  lfo.frequency.value = panelMusicState.preset === "pulse" ? 0.22 : 0.08;
-  lfoGain.gain.value = panelMusicState.preset === "pulse" ? 0.04 : 0.02;
-  lfo.connect(lfoGain);
-  lfoGain.connect(master.gain);
-  lfo.start();
-  panelMusicNodes.push(master, filter, lfo, lfoGain);
-
-  panelMusicState.playing = true;
-  syncMusicControls();
-}
-
 function buildCloudSessionPayload(session = null) {
   const source = session || getActiveSession();
   const chat = Array.isArray(source?.chat) ? source.chat : [];
@@ -13421,59 +9683,6 @@ function compactCloudSessionPayload(payload = null) {
     normalizeRows
   });
 }
-async function ensurePanelMusicTrackUploaded(sessionId = "", options = {}) {
-  const silent = options.silent === true;
-  if (panelMusicState.sourceType !== "track" || !panelMusicState.track) return null;
-  if (resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind) !== "uploaded") return panelMusicState.track;
-  const currentTrack = panelMusicState.track;
-  const existingStoragePath = String(currentTrack.storagePath || "").trim();
-  const existingDownloadUrl = String(currentTrack.downloadUrl || "").trim();
-  // Avoid re-uploading tracks that are already persisted in Firebase Storage.
-  if (existingStoragePath && existingDownloadUrl) return currentTrack;
-  const localDataUrl = String(currentTrack.localDataUrl || "").trim();
-  if (!localDataUrl) {
-    throw new Error("No se encontró el archivo local para subir música a Storage.");
-  }
-  if (!silent) setGenerationStatus("Subiendo música a Firebase Storage...", "is-busy");
-  const upload = await authFetchJson("/api/podcaster/music/upload", {
-    method: "POST",
-    body: JSON.stringify({
-      sessionId: String(sessionId || getActiveSession()?.id || "").trim(),
-      fileName: String(currentTrack.name || "podcast-music").trim() || "podcast-music",
-      mimeType: String(currentTrack.mimeType || "audio/mpeg").trim() || "audio/mpeg",
-      durationSec: Math.max(0, Number(currentTrack.durationSec || 0) || 0),
-      audioDataUrl: localDataUrl,
-      previousStoragePath: existingStoragePath
-    })
-  });
-  setPanelMusicTrack("uploaded", {
-    ...currentTrack,
-    durationSec: Math.max(0, Number(upload?.track?.durationSec || currentTrack.durationSec || 0) || 0),
-    startOffsetMs: Math.max(0, Number(currentTrack.startOffsetMs || 0) || 0),
-    durationMeasuredWith: String(currentTrack.durationMeasuredWith || "").trim().toLowerCase(),
-    downloadUrl: String(upload?.track?.downloadUrl || "").trim(),
-    storagePath: String(upload?.track?.storagePath || "").trim(),
-    updatedAt: String(upload?.track?.updatedAt || nowIso()).trim() || nowIso(),
-    localDataUrl: ""
-  }, { select: true });
-  const uploadedTracks = getPanelMusicUploadedTracks();
-  const selectedIndex = Math.max(0, uploadedTracks.findIndex((item) => String(item.slotLabel || "").trim() === String(currentTrack.slotLabel || "").trim()));
-  updateUploadedTrackAt(selectedIndex, {
-    ...currentTrack,
-    durationSec: Math.max(0, Number(upload?.track?.durationSec || currentTrack.durationSec || 0) || 0),
-    startOffsetMs: Math.max(0, Number(currentTrack.startOffsetMs || 0) || 0),
-    durationMeasuredWith: String(currentTrack.durationMeasuredWith || "").trim().toLowerCase(),
-    downloadUrl: String(upload?.track?.downloadUrl || "").trim(),
-    storagePath: String(upload?.track?.storagePath || "").trim(),
-    updatedAt: String(upload?.track?.updatedAt || nowIso()).trim() || nowIso(),
-    localDataUrl: ""
-  }, { selectIndex: selectedIndex });
-  persistPanelMusicSettings();
-  persistPanelMusicToActiveSession();
-  syncMusicControls();
-  return panelMusicState.track;
-}
-
 async function saveSessionToCloud(sessionId = null, options = {}) {
   return sessionStore.saveManual(sessionId, options);
 }
@@ -13690,7 +9899,7 @@ function collectGlobalSpeakerDraft(session = null) {
     expressionMap[host] = EXPRESSIONS.includes(rawExpression) ? rawExpression : (expressionMap[host] || "Neutral");
     nameMap[host] = rawName || nameMap[host] || DEFAULT_SPEAKER_NAME_MAP[host] || host;
     scenarioMap[host] = panelCopy.videoMode
-      ? rewriteScenarioPromptForEducationalVideo(rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast")
+      ? window.rewriteScenarioPromptForEducationalVideo(rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast")
       : rawScenario || scenarioMap[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast";
   }));
   return { voiceMap, expressionMap, nameMap, scenarioMap };
@@ -13888,7 +10097,7 @@ function persistSpeakerIdentityDraft() {
     expressionMap[host] = EXPRESSIONS.includes(draft.expressionMap[host]) ? draft.expressionMap[host] : "Neutral";
     nameMap[host] = String(draft.nameMap?.[host] || DEFAULT_SPEAKER_NAME_MAP[host] || host).trim() || host;
     scenarioMap[host] = panelCopy.videoMode
-      ? rewriteScenarioPromptForEducationalVideo(String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast")
+      ? window.rewriteScenarioPromptForEducationalVideo(String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast")
       : String(draft.scenarioMap?.[host] || DEFAULT_SPEAKER_SCENARIO_MAP[host] || "Cabina premium de podcast").trim() || "Cabina premium de podcast";
   });
   upsertActiveSession((current) => ({
@@ -14606,80 +10815,16 @@ function setTimelineViewMode(nextMode = "tracks") {
 function setOnScreenTextTrackSetting(setting = "fontFamily", value = "", options = {}) {
   const key = String(setting || "").trim();
   if (!key) return;
-  const nextValue = String(value || "").trim();
   upsertPodcastVideoConfig((cfg) => {
-    const current = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
-    if (key === "fontSizePx") {
-      current.fontSizePx = Math.max(16, Math.min(96, Math.round(toFiniteNumber(nextValue, current.fontSizePx))));
-    } else if (key === "stylePreset") {
-      const allowed = new Set(PODCAST_ON_SCREEN_TEXT_STYLE_PRESETS.map((item) => item.value));
-      current.stylePreset = allowed.has(nextValue) ? nextValue : current.stylePreset;
-    } else if (key === "fontFamily") {
-      const allowed = new Set(PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES.map((item) => item.value));
-      current.fontFamily = allowed.has(nextValue) ? nextValue : current.fontFamily;
-    } else if (key === "textColor") {
-      current.textColor = nextValue || current.textColor;
-    } else if (key === "textOpacity") {
-      const numeric = toFiniteNumber(nextValue, Number.NaN);
-      if (Number.isFinite(numeric)) {
-        current.textOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
-      }
-    } else if (key === "bgPreset") {
-      const allowed = new Set(["glass", "solid", "none"]);
-      current.bgPreset = allowed.has(nextValue.toLowerCase()) ? nextValue.toLowerCase() : current.bgPreset;
-    } else if (key === "bgOpacity") {
-      const numeric = toFiniteNumber(nextValue, Number.NaN);
-      if (Number.isFinite(numeric)) {
-        current.bgOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
-      }
-    } else if (key === "bgScale") {
-      const numeric = toFiniteNumber(nextValue, Number.NaN);
-      if (Number.isFinite(numeric)) {
-        const scale = numeric > 3 ? numeric / 100 : numeric;
-        current.bgScale = Math.max(0.6, Math.min(1.8, scale));
-      }
-    } else if (key === "fontVariant") {
-      const selected = PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS.find((item) => item.value === nextValue.toLowerCase()) || PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS[0];
-      const isBold = selected.fontWeight === "bold";
-      const isItalic = selected.fontStyle === "italic";
-      current.fontVariant = selected.value;
-      current.fontWeight = isBold ? "bold" : "normal";
-      current.fontStyle = isItalic ? "italic" : "normal";
-    } else if (key === "fontWeight") {
-      current.fontWeight = nextValue.toLowerCase() === "bold" ? "bold" : "normal";
-    } else if (key === "fontStyle") {
-      current.fontStyle = nextValue.toLowerCase() === "italic" ? "italic" : "normal";
-    } else if (key === "textAlign") {
-      const allowed = new Set(["left", "center", "right", "justify"]);
-      current.textAlign = allowed.has(nextValue.toLowerCase()) ? nextValue.toLowerCase() : current.textAlign;
-    } else if (key === "strokeColor") {
-      current.strokeColor = nextValue || current.strokeColor;
-    } else if (key === "strokeEnabled") {
-      current.strokeEnabled = nextValue !== "false" && nextValue !== "0" && nextValue !== "";
-    } else if (key === "strokeWidthPx") {
-      current.strokeWidthPx = Math.max(0, Math.min(12, toFiniteNumber(nextValue, current.strokeWidthPx)));
-    } else if (key === "shadowEnabled") {
-      current.shadowEnabled = nextValue !== "false" && nextValue !== "0" && nextValue !== "";
-    } else if (key === "shadowBlurPx") {
-      current.shadowBlurPx = Math.max(0, Math.min(32, Math.round(toFiniteNumber(nextValue, current.shadowBlurPx))));
-    } else if (key === "shadowOffsetXPx") {
-      current.shadowOffsetXPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(nextValue, current.shadowOffsetXPx))));
-    } else if (key === "shadowOffsetYPx") {
-      current.shadowOffsetYPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(nextValue, current.shadowOffsetYPx))));
-    } else if (key === "shadowOpacity") {
-      const numeric = toFiniteNumber(nextValue, Number.NaN);
-      if (Number.isFinite(numeric)) {
-        current.shadowOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
-      }
-    } else if (key === "shadowSizePx") {
-      current.shadowSizePx = Math.max(0, Math.min(20, toFiniteNumber(nextValue, current.shadowSizePx)));
-    }
     return {
       ...cfg,
-      onScreenTextTrack: current
+      onScreenTextTrack: applySharedOnScreenTextTrackSettingValue(cfg?.onScreenTextTrack || {}, key, value)
     };
   });
   const session = getActiveSession();
+  if (key === "boxWidthPct") {
+    syncOnScreenTextTrackWidthAcrossLayouts(session);
+  }
   if (options?.renderShell === true) {
     renderPodcastVideoShell(session);
   }
@@ -14695,6 +10840,45 @@ function setOnScreenTextTrackSetting(setting = "fontFamily", value = "", options
   if (options?.autosave !== false) {
     scheduleSessionLocalPersist("inspector");
   }
+}
+
+function syncOnScreenTextTrackWidthAcrossLayouts(session = null) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return false;
+  const cfg = getPodcastVideoConfig(activeSession);
+  const settings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
+  const nextWidthPct = Math.max(0.22, Math.min(0.92, Number(settings.boxWidthPct || 0.58)));
+  const rows = getSessionRows(activeSession);
+  const currentLayouts = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
+  const nextLayouts = { ...currentLayouts };
+  let changed = false;
+  rows.forEach((row, index) => {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId) return;
+    const baseLayout = currentLayouts[rowId] || buildDefaultOnScreenTextLayoutForRow({ ...row, index: index + 1 }, settings);
+    if (!baseLayout) return;
+    const prevWidthPct = Math.max(0.08, Math.min(0.96, Number(baseLayout.widthPct || nextWidthPct)));
+    const centerXPct = Math.max(0, Math.min(1, Number(baseLayout.xPct || 0) + (prevWidthPct / 2)));
+    const nextHeightPct = estimateOnScreenTextLayoutHeightPct(getOnScreenTextClipText(row), settings, nextWidthPct);
+    const normalized = normalizeOnScreenTextLayoutItem({
+      ...baseLayout,
+      widthPct: nextWidthPct,
+      heightPct: Math.max(0.05, Math.min(0.6, nextHeightPct)),
+      xPct: Math.max(0, Math.min(1 - nextWidthPct, centerXPct - (nextWidthPct / 2))),
+      yPct: Math.max(0, Math.min(1 - Math.max(0.05, Math.min(0.6, nextHeightPct)), Number(baseLayout.yPct || 0)))
+    }, rowId);
+    if (!normalized) return;
+    if (JSON.stringify(normalized) !== JSON.stringify(baseLayout)) {
+      nextLayouts[rowId] = normalized;
+      changed = true;
+    }
+  });
+  if (!changed) return false;
+  upsertPodcastVideoConfig((baseCfg) => ({
+    ...baseCfg,
+    timelineOnScreenTextLayoutByRowId: nextLayouts
+  }));
+  return true;
 }
 
 function syncOnScreenTextTrackToggleBtn(session = null) {
@@ -14742,197 +10926,7 @@ function renderOnScreenTextTrackModal(session = null) {
   if (!els.onScreenTextTrackModalBody) return;
   const activeSession = session || getActiveSession();
   const settings = getOnScreenTextTrackSettings(activeSession);
-  const activeLookPreset = inferOnScreenTextLookPreset(settings);
-  const textOpacityPct = Math.round(Math.max(0, Math.min(1, Number(settings.textOpacity ?? 1))) * 100);
-  const strokeWidthPx = Math.max(0, Math.min(12, Number(settings.strokeWidthPx ?? 0)));
-  const shadowOpacityPct = Math.round(Math.max(0, Math.min(1, Number(settings.shadowOpacity ?? 0.55))) * 100);
-  const shadowBlurPx = Math.max(0, Math.min(32, Math.round(Number(settings.shadowBlurPx ?? 12))));
-  const shadowOffsetXPx = Math.max(-24, Math.min(24, Math.round(Number(settings.shadowOffsetXPx ?? 0))));
-  const shadowOffsetYPx = Math.max(-24, Math.min(24, Math.round(Number(settings.shadowOffsetYPx ?? 4))));
-  const shadowSizePx = Math.max(0, Math.min(20, Math.round(Number(settings.shadowSizePx ?? 0))));
-  const bgOpacityPct = Math.round(Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 1))) * 100);
-  const bgScalePct = Math.round(Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1))) * 100);
-  const alignmentOptions = [
-    { value: "left", label: "Izq." },
-    { value: "center", label: "Centro" },
-    { value: "right", label: "Der." },
-    { value: "justify", label: "Just." }
-  ];
-  const bgOptions = [
-    { value: "none", label: "Sin fondo" },
-    { value: "glass", label: "Cristal" },
-    { value: "solid", label: "Sólido" }
-  ];
-  els.onScreenTextTrackModalBody.innerHTML = `
-    <section class="onscreen-text-inspector-shell">
-      <section class="onscreen-text-inspector-rail">
-        <div class="onscreen-text-inspector-titlebar">
-          <span class="onscreen-text-inspector-kicker">Carácter</span>
-          <div class="onscreen-text-inspector-title-copy">
-            <strong>Inspector de texto</strong>
-            <span>Familia, escala, contorno y sombra con controles compactos.</span>
-          </div>
-        </div>
-        <div class="onscreen-text-mini-presets">
-          ${PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.map((preset) => `
-            <button
-              type="button"
-              class="onscreen-text-mini-preset${preset.value === activeLookPreset ? " is-active" : ""}"
-              data-action="onscreen-text-look-preset"
-              data-preset="${escapeHtml(preset.value)}"
-              aria-pressed="${preset.value === activeLookPreset ? "true" : "false"}"
-              title="${escapeHtml(preset.hint)}"
-            >
-              ${escapeHtml(preset.label)}
-            </button>
-          `).join("")}
-        </div>
-      </section>
-      <section class="onscreen-text-inspector-panel is-character">
-        <div class="onscreen-text-inspector-panel-head"><strong>Carácter</strong></div>
-        <div class="onscreen-text-inline-fields is-quad">
-          <label class="row-field">
-            <span>Familia</span>
-            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="fontFamily" aria-label="Tipografía del texto en pantalla">
-              ${PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === settings.fontFamily ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-            </select>
-          </label>
-          <label class="row-field">
-            <span>Estilo</span>
-            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="fontVariant" aria-label="Peso y estilo del texto">
-              ${PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === settings.fontVariant ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-            </select>
-          </label>
-          <label class="row-field">
-            <span>Variante</span>
-            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="stylePreset" aria-label="Efecto visual del texto">
-              ${PODCAST_ON_SCREEN_TEXT_STYLE_PRESETS.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === settings.stylePreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-            </select>
-          </label>
-          <label class="row-field">
-            <span>Alineación</span>
-            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="textAlign" aria-label="Alineación del texto">
-              ${alignmentOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === settings.textAlign ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-            </select>
-          </label>
-        </div>
-        <label class="row-field wide">
-          <span>Tamaño</span>
-          <div class="studio-volume-control">
-            <input type="range" min="16" max="96" step="1" value="${escapeHtml(String(settings.fontSizePx || 44))}" data-action="onscreen-text-track-setting" data-setting="fontSizePx" aria-label="Tamaño del texto en pantalla">
-            <input type="number" min="16" max="96" step="1" value="${escapeHtml(String(settings.fontSizePx || 44))}" data-action="onscreen-text-track-setting" data-setting="fontSizePx" inputmode="numeric" aria-label="Tamaño del texto numérico">
-          </div>
-        </label>
-      </section>
-      <section class="onscreen-text-inspector-panel is-appearance">
-        <div class="onscreen-text-inspector-panel-head"><strong>Apariencia</strong></div>
-        <div class="onscreen-text-inline-row">
-          <label class="row-field onscreen-text-swatch-field">
-            <span>Relleno</span>
-            <input type="color" value="${escapeHtml(String(settings.textColor || "#f8fafc"))}" data-action="onscreen-text-track-setting" data-setting="textColor" aria-label="Color del texto en pantalla">
-          </label>
-          <label class="row-field onscreen-text-metric-field">
-            <span>Opacidad</span>
-            <div class="studio-volume-control">
-              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(textOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="textOpacity" aria-label="Opacidad del texto en pantalla">
-              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(textOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="textOpacity" inputmode="numeric" aria-label="Opacidad del texto numérica">
-            </div>
-          </label>
-        </div>
-      </section>
-      <section class="onscreen-text-inspector-panel is-stroke">
-        <div class="onscreen-text-inspector-panel-head"><strong>Contorno</strong></div>
-        <label class="row-field">
-          <span>Activar</span>
-          <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="strokeEnabled" aria-label="Activar contorno del texto">
-            <option value="true"${settings.strokeEnabled !== false ? " selected" : ""}>Sí</option>
-            <option value="false"${settings.strokeEnabled === false ? " selected" : ""}>No</option>
-          </select>
-        </label>
-        <div class="onscreen-text-inline-row">
-          <label class="row-field onscreen-text-swatch-field">
-            <span>Color</span>
-            <input type="color" value="${escapeHtml(String(settings.strokeColor || "#0f172a"))}" data-action="onscreen-text-track-setting" data-setting="strokeColor" aria-label="Color del contorno del texto">
-          </label>
-          <label class="row-field onscreen-text-metric-field">
-            <span>Grosor</span>
-            <div class="studio-volume-control">
-              <input type="range" min="0" max="12" step="0.1" value="${escapeHtml(String(strokeWidthPx))}" data-action="onscreen-text-track-setting" data-setting="strokeWidthPx" aria-label="Grosor del contorno del texto">
-              <input type="number" min="0" max="12" step="0.1" value="${escapeHtml(String(strokeWidthPx))}" data-action="onscreen-text-track-setting" data-setting="strokeWidthPx" inputmode="decimal" aria-label="Grosor del contorno numérico">
-            </div>
-          </label>
-        </div>
-      </section>
-      <section class="onscreen-text-inspector-panel is-shadow">
-        <div class="onscreen-text-inspector-panel-head"><strong>Sombra</strong></div>
-        <label class="row-field">
-          <span>Activar</span>
-          <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="shadowEnabled" aria-label="Activar sombra del texto">
-            <option value="true"${settings.shadowEnabled !== false ? " selected" : ""}>Sí</option>
-            <option value="false"${settings.shadowEnabled === false ? " selected" : ""}>No</option>
-          </select>
-        </label>
-        <label class="row-field wide">
-          <span>Opacidad</span>
-          <div class="studio-volume-control">
-            <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(shadowOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="shadowOpacity" aria-label="Opacidad de sombra">
-            <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(shadowOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="shadowOpacity" inputmode="numeric" aria-label="Opacidad de sombra numérica">
-          </div>
-        </label>
-        <label class="row-field wide">
-          <span>Tamaño</span>
-          <div class="studio-volume-control">
-            <input type="range" min="0" max="20" step="1" value="${escapeHtml(String(shadowSizePx))}" data-action="onscreen-text-track-setting" data-setting="shadowSizePx" aria-label="Tamaño de la sombra">
-            <input type="number" min="0" max="20" step="1" value="${escapeHtml(String(shadowSizePx))}" data-action="onscreen-text-track-setting" data-setting="shadowSizePx" inputmode="numeric" aria-label="Tamaño de la sombra numérico">
-          </div>
-        </label>
-        <label class="row-field wide">
-          <span>Desenfoque</span>
-          <div class="studio-volume-control">
-            <input type="range" min="0" max="32" step="1" value="${escapeHtml(String(shadowBlurPx))}" data-action="onscreen-text-track-setting" data-setting="shadowBlurPx" aria-label="Blur de la sombra">
-            <input type="number" min="0" max="32" step="1" value="${escapeHtml(String(shadowBlurPx))}" data-action="onscreen-text-track-setting" data-setting="shadowBlurPx" inputmode="numeric" aria-label="Blur de sombra numérico">
-          </div>
-        </label>
-        <label class="row-field wide">
-          <span>Offset X</span>
-          <div class="studio-volume-control">
-            <input type="range" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetXPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetXPx" aria-label="Desplazamiento horizontal de sombra">
-            <input type="number" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetXPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetXPx" inputmode="numeric" aria-label="Desplazamiento horizontal de sombra numérico">
-          </div>
-        </label>
-        <label class="row-field wide">
-          <span>Offset Y</span>
-          <div class="studio-volume-control">
-            <input type="range" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetYPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetYPx" aria-label="Desplazamiento vertical de sombra">
-            <input type="number" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetYPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetYPx" inputmode="numeric" aria-label="Desplazamiento vertical de sombra numérico">
-          </div>
-        </label>
-      </section>
-      <section class="onscreen-text-inspector-panel is-background">
-        <div class="onscreen-text-inspector-panel-head"><strong>Fondo</strong></div>
-        <label class="row-field">
-          <span>Tipo</span>
-          <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="bgPreset" aria-label="Tipo de fondo del texto">
-            ${bgOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === settings.bgPreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="row-field wide">
-          <span>Opacidad</span>
-          <div class="studio-volume-control">
-            <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" aria-label="Opacidad de fondo">
-            <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" inputmode="numeric" aria-label="Opacidad de fondo numérica">
-          </div>
-        </label>
-        <label class="row-field wide">
-          <span>Escala</span>
-          <div class="studio-volume-control">
-            <input type="range" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" aria-label="Escala de fondo">
-            <input type="number" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" inputmode="numeric" aria-label="Escala de fondo numérica">
-          </div>
-        </label>
-      </section>
-    </section>
-  `.trim();
+  els.onScreenTextTrackModalBody.innerHTML = buildSharedOnScreenTextTrackModalMarkup(settings);
 }
 
 function setOnScreenTextTrackModalOpen(open = false) {
@@ -16287,7 +12281,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
             </div>
             <div class="podcast-video-scene-actions">
               <button class="row-icon-btn" type="button" data-action="timeline-play-scene-video" data-row-id="${escapeHtml(rowId)}" title="Reproducir escena"><i class="fas fa-play"></i></button>
-              <button class="row-icon-btn${isBulkRegenAll ? " is-loading" : ""}" type="button" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video"${isBulkRegenAll ? " disabled" : ""}><i class="fas ${isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}"></i></button>
+              <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video"${isGenerating || isBulkRegenAll ? " disabled" : ""}><i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}"></i></button>
               <button class="row-icon-btn" type="button" data-action="timeline-delete-scene-video" data-row-id="${escapeHtml(rowId)}" title="Eliminar video"${videoSrc ? "" : " disabled"}><i class="fas fa-trash"></i></button>
             </div>
           </article>
@@ -16570,16 +12564,15 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
       </div>
       <div class="podcast-video-track-lane" data-track-id="${escapeHtml(trackId)}" data-track-index="${trackIndex}"${laneHeightAttr}>
         ${trackItems.map(({ row, rowId, index, timelineClip, clipLeftPx, clipWidthPx }) => {
-          const referenceAsset = resolveRowReferenceAsset(rowId, activeSession);
           const generatedClip = dialogueMap[rowId] || null;
           const primarySegment = resolvePrimaryDialogueVideoSegment(generatedClip);
           const videoSrc = resolveStorageVideoUrl(
-            referenceAsset?.downloadUrl || primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
-            referenceAsset?.storagePath || primarySegment?.storagePath || generatedClip?.storagePath || "",
+            primarySegment?.downloadUrl || generatedClip?.downloadUrl || "",
+            primarySegment?.storagePath || generatedClip?.storagePath || "",
             {
               updatedAt: generatedClip?.updatedAt || "",
-              type: referenceAsset?.type || referenceAsset?.kind || primarySegment?.type || generatedClip?.type || "",
-              mimeType: referenceAsset?.mimeType || primarySegment?.mimeType || generatedClip?.mimeType || ""
+              type: primarySegment?.type || generatedClip?.type || "",
+              mimeType: primarySegment?.mimeType || generatedClip?.mimeType || ""
             }
           );
           const portrait = resolvePortraitForSpeaker(activeSession, row?.speaker);
@@ -16637,11 +12630,11 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
                     <button class="row-icon-btn" type="button" role="menuitem" data-action="publish-scene-to-library" data-row-id="${escapeHtml(rowId)}" title="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}" aria-label="${String(row?.publicSceneLibraryId || "").trim() ? "Actualizar escena pública" : "Publicar escena"}">
                       <i class="fas fa-globe" aria-hidden="true"></i>
                     </button>
-                    <button class="row-icon-btn${isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video" aria-label="${videoSrc ? "Regenerar video" : "Generar video"}"${isBulkRegenAll ? " disabled" : ""}>
-                      <i class="fas ${isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}" aria-hidden="true"></i>
+                    <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-generate-scene-video" data-row-id="${escapeHtml(rowId)}" title="${videoSrc ? "Regenerar" : "Generar"} video" aria-label="${videoSrc ? "Regenerar video" : "Generar video"}"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
+                      <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : (videoSrc ? "fa-sync-alt" : "fa-film")}" aria-hidden="true"></i>
                     </button>
-                    <button class="row-icon-btn${isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-regenerate-scene-video-hq" data-row-id="${escapeHtml(rowId)}" title="Regenerar mejorando calidad desde el clip actual" aria-label="Regenerar mejorando calidad"${isBulkRegenAll ? " disabled" : ""}>
-                      <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                    <button class="row-icon-btn${isGenerating || isBulkRegenAll ? " is-loading" : ""}" type="button" role="menuitem" data-action="timeline-regenerate-scene-video-hq" data-row-id="${escapeHtml(rowId)}" title="Regenerar mejorando calidad desde el clip actual" aria-label="Regenerar mejorando calidad"${isGenerating || isBulkRegenAll ? " disabled" : ""}>
+                      <i class="fas ${isGenerating || isBulkRegenAll ? "fa-spinner spinner-icon" : "fa-wand-magic-sparkles"}" aria-hidden="true"></i>
                     </button>
                      <button class="row-icon-btn" type="button" role="menuitem" data-action="timeline-edit-stylized-text" data-row-id="${escapeHtml(rowId)}" title="Editar Texto Estilizado" aria-label="Editar Texto Estilizado">
                       <i class="fas fa-font" aria-hidden="true"></i>
@@ -16657,7 +12650,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
                 </div>
                 <button class="podcast-video-clip-preview${isGenerating ? " is-generating" : ""}" type="button" data-action="timeline-select-scene" data-row-id="${escapeHtml(rowId)}" title="Seleccionar escena ${index + 1}">
                   ${videoSrc
-              ? (isLikelyImageMediaRecord(referenceAsset || primarySegment || generatedClip)
+              ? (isLikelyImageMediaRecord(primarySegment || generatedClip)
                 ? `<img src="${escapeHtml(videoSrc)}" alt="Preview" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`
                 : `<video data-preview-src="${escapeHtml(videoSrc)}" preload="none" muted playsinline crossorigin="anonymous" poster="${escapeHtml(previewPosterSrc)}"></video>`)
               : portraitSrc
@@ -17279,10 +13272,27 @@ function findTimelineActionButton(action = "", rowId = "") {
     .find((node) => String(node.dataset.rowId || "").trim() === key) || null;
 }
 
+function requirePodcasterGenerationApi() {
+  const api = window.PodcasterGeneration;
+  if (!api || typeof api !== "object") {
+    throw new Error("PodcasterGeneration no está disponible. Revisa la carga de podcaster-video-generator.js.");
+  }
+  if (typeof api.buildTimelineSceneGenerationKey !== "function") {
+    throw new Error("PodcasterGeneration.buildTimelineSceneGenerationKey no está disponible.");
+  }
+  if (!(api.timelineSceneVideoGenerationPending instanceof Set)) {
+    throw new Error("PodcasterGeneration.timelineSceneVideoGenerationPending no está disponible.");
+  }
+  if (!(api.timelineSceneVideoGenerationStatus instanceof Map)) {
+    throw new Error("PodcasterGeneration.timelineSceneVideoGenerationStatus no está disponible.");
+  }
+  return api;
+}
+
 function isTimelineSceneVideoGenerating(session = null, rowId = "") {
-  if (typeof window.PodcasterGeneration?.buildTimelineSceneGenerationKey !== "function") return false;
-  const generationKey = window.PodcasterGeneration.buildTimelineSceneGenerationKey(session, rowId);
-  return Boolean(generationKey) && window.PodcasterGeneration.timelineSceneVideoGenerationPending.has(generationKey);
+  const generationApi = requirePodcasterGenerationApi();
+  const generationKey = generationApi.buildTimelineSceneGenerationKey(session, rowId);
+  return Boolean(generationKey) && generationApi.timelineSceneVideoGenerationPending.has(generationKey);
 }
 
 function syncTimelineEphemeralState(session = null) {
@@ -17346,11 +13356,11 @@ function syncTimelineEphemeralState(session = null) {
 
     const regenBtns = itemEl.querySelectorAll("[data-action='timeline-generate-scene-video']");
     regenBtns.forEach((regenBtn) => {
-      regenBtn.classList.toggle("is-loading", isBulkRegenAll);
-      regenBtn.disabled = isBulkRegenAll;
+      regenBtn.classList.toggle("is-loading", isGenerating || isBulkRegenAll);
+      regenBtn.disabled = isGenerating || isBulkRegenAll;
       const icon = regenBtn.querySelector("i");
       if (icon) {
-        if (isBulkRegenAll) {
+        if (isGenerating || isBulkRegenAll) {
           icon.className = "fas fa-spinner spinner-icon";
         } else {
           const videoClip = dialogueMap[rowId] || null;
@@ -17362,9 +13372,9 @@ function syncTimelineEphemeralState(session = null) {
 }
 
 function getTimelineSceneVideoGenerationStatus(session = null, rowId = "") {
-  if (typeof window.PodcasterGeneration?.buildTimelineSceneGenerationKey !== "function") return null;
-  const generationKey = window.PodcasterGeneration.buildTimelineSceneGenerationKey(session, rowId);
-  return generationKey ? (window.PodcasterGeneration.timelineSceneVideoGenerationStatus?.get(generationKey) || null) : null;
+  const generationApi = requirePodcasterGenerationApi();
+  const generationKey = generationApi.buildTimelineSceneGenerationKey(session, rowId);
+  return generationKey ? (generationApi.timelineSceneVideoGenerationStatus.get(generationKey) || null) : null;
 }
 
 function updateTimelineClipForRow(rowId = "", mutator = null, options = {}) {
@@ -19171,6 +15181,11 @@ function syncPodcastStudioInspector(session = null) {
   if (els.generateDialogueAudioBtn) {
     const key = `${activeSession?.id || ""}:${String(activeRow?.id || "").trim()}`;
     els.generateDialogueAudioBtn.disabled = !activeRow || podcastVideoState.busy || window.PodcasterGeneration?.dialogueAudioGenerationPending?.has(key);
+    if (activeRow?.id) {
+      els.generateDialogueAudioBtn.dataset.rowId = activeRow.id;
+    } else {
+      delete els.generateDialogueAudioBtn.dataset.rowId;
+    }
     const label = hasAudio ? "Regenerar voz de la escena activa" : "Generar voz de la escena activa";
     const icon = els.generateDialogueAudioBtn.querySelector("i");
     els.generateDialogueAudioBtn.title = label;
@@ -19333,19 +15348,16 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
     updatePodcastVideoTransportUi();
     return;
   }
-  const referenceAsset = resolveRowReferenceAsset(key, activeSession);
   const clip = resolveDialogueVideoForRow(activeSession, key);
   const firstSegment = resolvePrimaryDialogueVideoSegment(clip, { sessionId, rowId: key });
   const staleBaseClip = isStaleDialogueVideoSource(sessionId, key, clip);
-  const isReferenceVideo = referenceAsset?.kind === "video";
-  const isReferenceImage = referenceAsset?.kind === "image";
   const src = resolveStorageVideoUrl(
-    firstSegment?.downloadUrl || ((isReferenceVideo || isReferenceImage) ? referenceAsset?.downloadUrl : "") || (staleBaseClip ? "" : (clip?.downloadUrl || "")),
-    firstSegment?.storagePath || ((isReferenceVideo || isReferenceImage) ? referenceAsset?.storagePath : "") || (staleBaseClip ? "" : (clip?.storagePath || "")),
+    firstSegment?.downloadUrl || (staleBaseClip ? "" : (clip?.downloadUrl || "")),
+    firstSegment?.storagePath || (staleBaseClip ? "" : (clip?.storagePath || "")),
     {
       updatedAt: clip?.updatedAt || "",
-      type: firstSegment?.type || referenceAsset?.type || referenceAsset?.kind || clip?.type || "",
-      mimeType: firstSegment?.mimeType || referenceAsset?.mimeType || clip?.mimeType || ""
+      type: firstSegment?.type || clip?.type || "",
+      mimeType: firstSegment?.mimeType || clip?.mimeType || ""
     }
   );
 
@@ -19354,9 +15366,9 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
   const isSpeaking = podcastVideoState.speaking === true;
   const mediaSignature = [
     String(src || "").trim(),
-    String(referenceAsset?.storagePath || firstSegment?.storagePath || clip?.storagePath || "").trim(),
-    String(referenceAsset?.downloadUrl || firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
-    String(referenceAsset?.kind || referenceAsset?.type || firstSegment?.type || clip?.type || "").trim().toLowerCase()
+    String(firstSegment?.storagePath || clip?.storagePath || "").trim(),
+    String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim(),
+    String(firstSegment?.type || clip?.type || "").trim().toLowerCase()
   ].join("|");
   const stateKey = `${sessionId}_${key}_${isSpeaking}_${playbackActive}_${podcastVideoState.montageActive}_${mediaSignature}`;
   if (!options.force && podcastVideoState.lastSyncedStageKey === stateKey) return;
@@ -19372,12 +15384,11 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
   const visualLayoutMode = normalizeTimelineClipVisualLayoutMode(clipCfg?.visualLayoutMode);
   const mediaScale = normalizeTimelineClipMediaScale(clipCfg?.mediaScale);
   applySceneMediaScaleToStage({ rowId: key, mediaScale, visualLayoutMode });
-  const isImageStageClip = isLikelyImageMediaRecord(firstSegment || referenceAsset || clip || null);
-  const downloadUrl = String(referenceAsset?.downloadUrl || firstSegment?.downloadUrl || clip?.downloadUrl || "").trim();
+  const isImageStageClip = isLikelyImageMediaRecord(firstSegment || clip || null);
+  const downloadUrl = String(firstSegment?.downloadUrl || clip?.downloadUrl || "").trim();
   // console.log("[PodcasterMedia] syncStageMedia image check:", { key, isImageStageClip, hasAsset: !!referenceAsset, downloadUrl });
   if (isImageStageClip) {
-    const swapFn = window.PodcasterMediaReplacement?.swapStageToImagePreview || window.swapStageToImagePreview;
-    if (swapFn && swapFn(src, {
+    if (swapStageToImagePreview(src, {
       session: activeSession,
       rowId: key,
       fallbackUrl: downloadUrl,
@@ -19549,160 +15560,7 @@ function syncPodcastVideoStageMedia(session = null, rowId = "", options = {}) {
   );
 }
 
-
-
-
-function removeDialogueAudioForRow(rowId = "", options = {}) {
-  const key = String(rowId || "").trim();
-  if (!key) return;
-  const silent = options.silent === true;
-  upsertActiveSession((current) => {
-    const nextMap = { ...getDialogueAudioMap(current) };
-    delete nextMap[key];
-    return {
-      ...current,
-      dialogueAudioMap: nextMap
-    };
-  }, { render: false });
-  if (!silent) {
-    setGenerationStatus(`Voz eliminada de escena ${resolveSceneNumberByRowId(key, getActiveSession())}`, "is-live");
-  }
-  syncGeminiDialogueTrackWithRuntime({ render: false });
-  syncPodcastStudioInspector(getActiveSession());
-}
-
-
-
-
-
-
-
-function beginConnectScriptPanelGeneration(messageId = "") {
-  const cleanMessageId = String(messageId || "").trim();
-  if (connectScriptPanelGenerationState.abortController) {
-    connectScriptPanelGenerationState.abortController.abort();
-  }
-  connectScriptPanelGenerationState.active = true;
-  connectScriptPanelGenerationState.messageId = cleanMessageId;
-  connectScriptPanelGenerationState.abortController = new AbortController();
-  connectScriptPanelGenerationState.token = Date.now();
-  renderChat(getActiveSession());
-  return {
-    token: connectScriptPanelGenerationState.token,
-    signal: connectScriptPanelGenerationState.abortController.signal
-  };
-}
-
-async function cancelConnectScriptPanelGeneration(options = {}) {
-  if (!connectScriptPanelGenerationState.active) return false;
-  connectScriptPanelGenerationState.abortController?.abort();
-  connectScriptPanelGenerationState.active = false;
-  connectScriptPanelGenerationState.messageId = "";
-  connectScriptPanelGenerationState.abortController = null;
-  connectScriptPanelGenerationState.token = 0;
-  stopRowAudio();
-  await stopGeminiLiveSession().catch(() => { });
-  renderChat(getActiveSession());
-  if (options.silent !== true) {
-    setGenerationStatus("Generación detenida", "is-live");
-    addChatMessage("system", "Se detuvo la conexión del guión al panel y la generación de audios.");
-  }
-  return true;
-}
-
-async function generateDialogueAudioForConnectedScript(session = null, options = {}) {
-  const currentSession = session || getActiveSession();
-  const rows = Array.isArray(currentSession?.script?.rows) ? currentSession.script.rows : [];
-  if (!currentSession || !rows.length) return { generated: 0, failed: 0 };
-  let generated = 0;
-  let failed = 0;
-  const activeToken = Number(options?.token || 0);
-  for (const row of rows) {
-    if (activeToken && activeToken !== connectScriptPanelGenerationState.token) {
-      throw new DOMException("Conexión cancelada", "AbortError");
-    }
-    if (options?.signal?.aborted) {
-      throw new DOMException("Conexión cancelada", "AbortError");
-    }
-    const rowId = String(row?.id || "").trim();
-    if (!rowId) continue;
-    try {
-      const clip = await window.PodcasterGeneration.generateDialogueAudioForRow(rowId, {
-        regenerate: options.regenerate === true,
-        silent: true,
-        signal: options?.signal
-      });
-      if (clip && hasStoredMediaSource(clip)) {
-        generated += 1;
-      } else {
-        failed += 1;
-      }
-      setGenerationStatus(`Generando audios de escenas (${generated + failed}/${rows.length})...`, "is-busy");
-    } catch (error) {
-      if (error?.name === "AbortError") {
-        throw error;
-      }
-      failed += 1;
-      addChatMessage("system", `No se pudo generar el audio de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
-    }
-  }
-  return { generated, failed };
-}
-
-function getRegenerableGeminiAudioRows(session = null) {
-  const activeSession = session || getActiveSession();
-  const rows = getSessionRows(activeSession);
-  return rows.filter((row) => {
-    const rowId = String(row?.id || "").trim();
-    if (!rowId) return false;
-    const speakerLabel = String(row?.speaker || "").trim();
-    if (!speakerLabel) return false;
-    const targetSpeechLine = String(buildTargetSpeechLine(row, activeSession) || row?.text || "").trim();
-    return Boolean(targetSpeechLine);
-  });
-}
-
-async function regenerateAllGeminiDialogueAudios(session = null) {
-  await refreshRuntimeFeatureCapabilities();
-  const activeSession = session || getActiveSession();
-  if (!activeSession) return { total: 0, generated: 0, failed: 0 };
-  const sessionId = String(activeSession?.id || "").trim();
-  const rows = getRegenerableGeminiAudioRows(activeSession);
-  const total = rows.length;
-  if (!total) {
-    setGenerationStatus("No hay escenas válidas para regenerar audios Gemini.", "");
-    return { total: 0, generated: 0, failed: 0 };
-  }
-  if (runtimeFeatureState.dialogueAudioUnavailable) {
-    setGenerationStatus("El backend actual no permite generar audios por escena.", "");
-    return { total, generated: 0, failed: total };
-  }
-  let generated = 0;
-  let failed = 0;
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    const rowId = String(row?.id || "").trim();
-    if (!rowId) continue;
-    const step = index + 1;
-    setGenerationStatus(`Regenerando audios Gemini (${step}/${total})...`, "is-busy", { sessionId });
-    try {
-      const clip = await window.PodcasterGeneration.generateDialogueAudioForRow(rowId, { regenerate: true, silent: true });
-      if (clip && hasStoredMediaSource(clip)) {
-        generated += 1;
-      } else {
-        failed += 1;
-      }
-    } catch (_) {
-      failed += 1;
-    }
-  }
-  if (generated === total) {
-    setGenerationStatus(`Audios Gemini regenerados (${generated}/${total}).`, "is-live", { sessionId });
-  } else {
-    setGenerationStatus(`Regeneración Gemini completada (${generated}/${total}, fallidas: ${failed}).`, failed > 0 ? "" : "is-live", { sessionId });
-  }
-  return { total, generated, failed };
-}
+// Note: Dialogue audio and connected script generation functions have been modularized to podcaster-audioGemini-timeline.js
 
 const sessionStore = createPodcasterSessionStore({
   STORAGE_KEY_BASE,
@@ -19742,8 +15600,6 @@ const sessionStore = createPodcasterSessionStore({
   getDialogueAudioMap,
   logPodcastRenderDebug,
   formatDate,
-  addChatMessage,
-  setGenerationStatus,
   render
 });
 
@@ -22358,6 +18214,10 @@ async function openPodcastVideoModalWithLoader() {
     if (el) el.checked = session?.publicar === true;
   });
 
+  if (typeof window.preloadAllDialogueAudios === "function") {
+    window.preloadAllDialogueAudios(openedSession);
+  }
+
   setPodcastVideoStatus(getPanelModeCopy(getActiveSession()).videoMode ? "Video creativo activado" : "Video activado");
   setPodcastVideoLoaderOpen(false);
 }
@@ -22874,6 +18734,11 @@ function updatePodcastPlayerUi() {
     const rowId = resolveTargetVideoRowId(session);
     const key = `${session?.id || ""}:${rowId || ""}`;
     els.generateDialogueVideoBtn.disabled = podcastVideoState.busy || !rowId || window.PodcasterGeneration.dialogueVideoGenerationPending.has(key);
+    if (rowId) {
+      els.generateDialogueVideoBtn.dataset.rowId = rowId;
+    } else {
+      delete els.generateDialogueVideoBtn.dataset.rowId;
+    }
   }
   if (els.generateAllDialogueVideosBtn) {
     const rows = getActiveSession()?.script?.rows || [];
@@ -22902,6 +18767,11 @@ function updatePodcastPlayerUi() {
     const rowId = resolveTargetVideoRowId(session);
     const key = `${session?.id || ""}:${rowId || ""}`;
     els.generateDialogueAudioBtn.disabled = podcastVideoState.busy || !rowId || window.PodcasterGeneration?.dialogueAudioGenerationPending?.has(key);
+    if (rowId) {
+      els.generateDialogueAudioBtn.dataset.rowId = rowId;
+    } else {
+      delete els.generateDialogueAudioBtn.dataset.rowId;
+    }
     const hasAudio = hasStoredMediaSource(resolveDialogueAudioForRow(session, String(rowId || "").trim()));
     const label = hasAudio ? "Regenerar voz de la escena activa" : "Generar voz de la escena activa";
     const icon = els.generateDialogueAudioBtn.querySelector("i");
@@ -23292,157 +19162,6 @@ async function applyGlobalConfig() {
     console.error("[podcaster] Error persisting video quality setting:", e);
   }
 }
-
-function sanitizeChatHtml(input = "") {
-  const source = String(input || "").trim();
-  if (!source) return "";
-  const allowedTags = new Set(["TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "P", "DIV", "SPAN", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI"]);
-  const allowedAttrs = new Set(["style", "colspan", "rowspan", "align", "valign", "bgcolor", "width", "height"]);
-  const sanitizeStyle = (styleValue = "") => String(styleValue || "")
-    .replace(/expression\s*\([^)]*\)/gi, "")
-    .replace(/url\s*\(\s*['"]?\s*javascript:[^)]+\)/gi, "")
-    .replace(/behavior\s*:[^;]+;?/gi, "")
-    .trim();
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
-    const root = doc.body.firstElementChild;
-    if (!root) return "";
-    const walk = (node) => {
-      if (!(node instanceof Element)) return;
-      const tag = String(node.tagName || "").toUpperCase();
-      if (!allowedTags.has(tag)) {
-        const text = doc.createTextNode(node.textContent || "");
-        node.replaceWith(text);
-        return;
-      }
-      Array.from(node.attributes).forEach((attr) => {
-        const name = String(attr.name || "").toLowerCase();
-        if (name.startsWith("on") || !allowedAttrs.has(name)) {
-          node.removeAttribute(attr.name);
-          return;
-        }
-        if (name === "style") {
-          const safeStyle = sanitizeStyle(attr.value);
-          if (safeStyle) node.setAttribute("style", safeStyle);
-          else node.removeAttribute("style");
-        }
-      });
-      Array.from(node.children).forEach((child) => walk(child));
-    };
-    Array.from(root.children).forEach((child) => walk(child));
-    return root.innerHTML.trim();
-  } catch (_) {
-    return "";
-  }
-}
-
-function splitMarkdownTableCells(line = "") {
-  const source = String(line || "").trim();
-  if (!source.includes("|")) return [];
-  const normalized = source.startsWith("|") ? source.slice(1) : source;
-  const tailTrimmed = normalized.endsWith("|") ? normalized.slice(0, -1) : normalized;
-  return tailTrimmed.split("|").map((cell) => String(cell || "").trim());
-}
-
-function isMarkdownDividerCell(cell = "") {
-  return /^:?-{3,}:?$/.test(String(cell || "").trim());
-}
-
-function convertMarkdownTableAt(lines = [], startIndex = 0) {
-  const headerCells = splitMarkdownTableCells(lines[startIndex] || "");
-  const dividerCells = splitMarkdownTableCells(lines[startIndex + 1] || "");
-  if (!headerCells.length || !dividerCells.length) return null;
-  if (headerCells.length !== dividerCells.length) return null;
-  if (!dividerCells.every((cell) => isMarkdownDividerCell(cell))) return null;
-
-  const rows = [];
-  let index = startIndex + 2;
-  while (index < lines.length) {
-    const rowLine = String(lines[index] || "");
-    if (!rowLine.includes("|")) break;
-    const rowCells = splitMarkdownTableCells(rowLine);
-    if (rowCells.length !== headerCells.length) break;
-    rows.push(rowCells);
-    index += 1;
-  }
-
-  if (!rows.length) return null;
-  const headHtml = `<thead><tr>${headerCells.map((cell) => `<th>${escapeHtml(cell)}</th>`).join("")}</tr></thead>`;
-  const bodyHtml = `<tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  return {
-    html: `<table>${headHtml}${bodyHtml}</table>`,
-    nextIndex: index
-  };
-}
-
-function renderChatTextWithMarkdownTables(text = "") {
-  const source = String(text || "").replace(/\r\n?/g, "\n");
-  if (!source.trim()) return "";
-  const lines = source.split("\n");
-  const htmlChunks = [];
-  const textBuffer = [];
-  const flushTextBuffer = () => {
-    if (!textBuffer.length) return;
-    htmlChunks.push(escapeHtml(textBuffer.join("\n")).replace(/\n/g, "<br>"));
-    textBuffer.length = 0;
-  };
-
-  let index = 0;
-  while (index < lines.length) {
-    const parsed = convertMarkdownTableAt(lines, index);
-    if (parsed) {
-      flushTextBuffer();
-      htmlChunks.push(parsed.html);
-      index = parsed.nextIndex;
-      continue;
-    }
-    textBuffer.push(lines[index]);
-    index += 1;
-  }
-  flushTextBuffer();
-  return htmlChunks.join("<br>");
-}
-
-function renderChatMessageBody(message = {}) {
-  const html = sanitizeChatHtml(message?.html || "");
-  if (html) return html;
-  return renderChatTextWithMarkdownTables(String(message?.text || ""));
-}
-
-function renderChat(session) {
-  const messages = session.chat || [];
-  const visibleMessages = messages.filter((message, index) => {
-    if (index === 0 && message.role === "assistant" && messages.length === 1) return false;
-    return true;
-  });
-  const target = els.chatFeedMessages || els.chatFeed;
-  target.innerHTML = visibleMessages.map((message) => `
-    <article class="chat-message ${message.role === "user" || message.role === "system" ? escapeHtml(message.role) : "assistant"}" data-message-id="${escapeHtml(message.id || "")}">
-      <div class="chat-message-body">${renderChatMessageBody(message)}</div>
-      <div class="chat-message-actions">
-        ${message.role === "assistant"
-      ? (() => {
-        const isConnectGenerating = connectScriptPanelGenerationState.active && String(connectScriptPanelGenerationState.messageId || "").trim() === String(message?.id || "").trim();
-        const action = isConnectGenerating ? "stop-connect-script-panel" : "connect-script-panel";
-        const title = isConnectGenerating ? "Detener conexión y generación de audios" : "Conectar guión al panel";
-        const icon = isConnectGenerating ? "fa-stop" : "fa-link";
-        return `<button class="chat-connect-btn${isConnectGenerating ? " is-stop" : ""}" type="button" data-action="${action}" title="${title}" aria-label="${title}"${message?.scriptSnapshot || isConnectGenerating ? "" : " disabled"}><i class="fas ${icon}"></i></button>`;
-      })()
-      : ""}
-        ${message.role === "system" || message.role === "assistant"
-      ? `<button class="chat-delete-btn" type="button" data-action="delete-chat-message" title="Eliminar mensaje" aria-label="Eliminar mensaje"><i class="fas fa-trash"></i></button>`
-      : ""}
-        <button class="chat-copy-btn" type="button" data-action="copy-chat-message" title="Copiar texto" aria-label="Copiar texto">
-          <i class="fas fa-copy"></i>
-        </button>
-      </div>
-    </article>
-  `).join("");
-  els.chatStage?.classList.toggle("has-messages", visibleMessages.length > 0);
-  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
-}
-
 function renderScript(session) {
   const script = session.script || {};
   const rows = normalizeRows(script.rows);
@@ -23736,7 +19455,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
   const scenario = resolveScenarioForVideoMode(session, host);
   const imagePrompts = normalizeVideoImagePrompts(row?.imagePrompts || []).map((prompt) => (
     isEducationalVideoMode(session)
-      ? rewriteScenarioPromptForEducationalVideo(prompt)
+      ? window.rewriteScenarioPromptForEducationalVideo(prompt)
       : prompt
   ));
   return `
@@ -23753,7 +19472,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
         </label>
         <label class="row-field wide">
           <span>${escapeHtml(panelCopy.videoDirectiveLabel)}</span>
-          <textarea rows="2" data-field="videoDirective" data-row-id="${escapeHtml(row.id)}" placeholder="${escapeHtml(panelCopy.videoDirectivePlaceholder)}">${escapeHtml(isEducationalVideoMode(session) ? rewriteScenarioPromptForEducationalVideo(row.videoDirective || "") : (row.videoDirective || ""))}</textarea>
+          <textarea rows="2" data-field="videoDirective" data-row-id="${escapeHtml(row.id)}" placeholder="${escapeHtml(panelCopy.videoDirectivePlaceholder)}">${escapeHtml(isEducationalVideoMode(session) ? window.rewriteScenarioPromptForEducationalVideo(row.videoDirective || "") : (row.videoDirective || ""))}</textarea>
         </label>
         <label class="row-field wide">
           <span>${escapeHtml(panelCopy.imagePromptsLabel)}</span>
@@ -23940,8 +19659,8 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
         ? `<div class="inspector-row-reference-preview">${rowReference.kind === "video"
           ? `<video src="${escapeHtml(rowReference.dataUrl || resolveStorageVideoUrl(rowReference.downloadUrl, rowReference.storagePath))}" muted playsinline controls preload="metadata"></video>`
           : rowReferenceImages.length > 1
-            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<img src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}">`).join("")}</div>`
-            : `<img src="${escapeHtml(rowReference.dataUrl)}" alt="${escapeHtml(rowReference.name)}">`
+            ? `<div class="inspector-row-reference-gallery">${rowReferenceImages.map((image, imageIndex) => `<img src="${escapeHtml(resolveReferenceImagePreviewUrl(image))}" alt="${escapeHtml(image.name || `Referencia ${imageIndex + 1}`)}">`).join("")}</div>`
+            : `<img src="${escapeHtml(resolveReferenceImagePreviewUrl(rowReference))}" alt="${escapeHtml(rowReference.name)}">`
         }</div>`
         : `<div class="inspector-row-reference-empty">Adjunta una imagen o video para guiar el video de esta escena.</div>`}
           </div>
@@ -24027,14 +19746,6 @@ function setupPodcastStudioInspectorResize() {
 
 function setPodcastVideoStageMaxHeight(nextHeightPx = null, options = {}) {
   PodcasterResize.setPodcastVideoStageMaxHeight(nextHeightPx, { ...options, els, upsertUiState: upsertPodcastStudioUiState });
-}
-
-function setPodcastVideoStageWidthRatio(nextRatio, options = {}) {
-  setPodcastVideoStageMaxHeight(PodcasterResize.podcastStageMaxHeightPx, options);
-}
-
-function applyPodcastVideoStageWidthFromSavedRatio() {
-  setPodcastVideoStageMaxHeight(PodcasterResize.podcastStageMaxHeightPx, { persist: false });
 }
 
 function setupPodcastVideoStageResize() {
@@ -24509,9 +20220,9 @@ function buildEducationalVideoSceneTimeRange(index = 0) {
 
 function buildCompactEducationalSentence(source = "", maxWords = 16) {
   const topic = trimWords(normalizeSimpleText(source) || "la idea principal", Math.max(3, Math.min(8, maxWords - 6)));
-  let sentence = ensureCompleteSentence(`Explicamos ${topic} con un ejemplo claro`);
+  let sentence = window.ensureCompleteSentence(`Explicamos ${topic} con un ejemplo claro`);
   if (countWords(sentence) > maxWords) {
-    sentence = ensureCompleteSentence(`Explicamos ${trimWords(topic, Math.max(2, maxWords - 2))}`);
+    sentence = window.ensureCompleteSentence(`Explicamos ${trimWords(topic, Math.max(2, maxWords - 2))}`);
   }
   return sentence;
 }
@@ -24524,8 +20235,8 @@ function splitScriptIntoSceneChunks(text = "", options = {}) {
   const maxWords = Math.max(10, Number(options?.maxWords) || 24);
   const clean = normalizeSimpleText(stripLeadingStageDirection(text));
   if (!clean) return [];
-  const sentences = splitTextIntoSentences(clean).map((part) => ensureCompleteSentence(part)).filter(Boolean);
-  if (!sentences.length) return [ensureCompleteSentence(clean)];
+  const sentences = splitTextIntoSentences(clean).map((part) => window.ensureCompleteSentence(part)).filter(Boolean);
+  if (!sentences.length) return [window.ensureCompleteSentence(clean)];
   const chunks = [];
   let bucket = "";
   sentences.forEach((sentence) => {
@@ -24538,10 +20249,10 @@ function splitScriptIntoSceneChunks(text = "", options = {}) {
       bucket = candidate;
       return;
     }
-    chunks.push(ensureCompleteSentence(bucket));
+    chunks.push(window.ensureCompleteSentence(bucket));
     bucket = sentence;
   });
-  if (bucket) chunks.push(ensureCompleteSentence(bucket));
+  if (bucket) chunks.push(window.ensureCompleteSentence(bucket));
   return chunks.filter(Boolean);
 }
 
@@ -24553,11 +20264,11 @@ function normalizeSingleSentenceForVideoScene(text = "", options = {}) {
     return buildCompactEducationalSentence(fallbackSeed || "la idea principal", 16);
   }
   if (countWords(clean) <= maxWords) {
-    return ensureCompleteSentence(clean);
+    return window.ensureCompleteSentence(clean);
   }
   const chunks = splitScriptIntoSceneChunks(clean, { maxWords });
   if (chunks.length) return chunks[0];
-  return ensureCompleteSentence(trimWords(clean, maxWords));
+  return window.ensureCompleteSentence(trimWords(clean, maxWords));
 }
 
 function normalizeOnScreenTextStrict(value = "", options = {}) {
@@ -24565,7 +20276,7 @@ function normalizeOnScreenTextStrict(value = "", options = {}) {
   const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
   const visual = normalizeSimpleText(options?.visual || "");
   const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual, { maxWords: 8 });
-  let text = buildOnScreenText(value, { voiceOver, sceneDescription, visual }) || fallback || "";
+  let text = window.buildOnScreenText(value, { voiceOver, sceneDescription, visual }) || fallback || "";
   text = normalizeSimpleText(text);
   if (countWords(text) > 12) text = normalizeSimpleText(trimWords(text, 12));
   const danglingWords = new Set(["de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"]);
@@ -24992,12 +20703,12 @@ function buildEducationalVideoRowsFromNarrativeText(text = "") {
     const parsedChunks = splitScriptIntoSceneChunks(block, { maxWords: 24 });
     if (parsedChunks.length) {
       parsedChunks.forEach((chunk) => {
-        const clean = ensureCompleteSentence(chunk);
+        const clean = window.ensureCompleteSentence(chunk);
         if (clean) chunks.push(clean);
       });
       return;
     }
-    const clean = ensureCompleteSentence(block);
+    const clean = window.ensureCompleteSentence(block);
     if (clean) chunks.push(clean);
   });
   const uniqueChunks = chunks.filter(Boolean);
@@ -25363,2667 +21074,7 @@ function render() {
   autoResizePrompt();
 }
 
-function estimateSpeechDurationSec(text = "") {
-  const words = String(text || "").trim().split(/\s+/).filter(Boolean).length;
-  if (!words) return SHORT_SCENE_MIN_SEC;
-  return words / SPEECH_WORDS_PER_SEC;
-}
-
-function countWords(text = "") {
-  return String(text || "").trim().split(/\s+/).filter(Boolean).length;
-}
-
-function splitByMaxWords(text = "", maxWords = 20) {
-  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  const chunks = [];
-  for (let i = 0; i < words.length; i += maxWords) {
-    chunks.push(words.slice(i, i + maxWords).join(" "));
-  }
-  return chunks;
-}
-
-function splitTextIntoSentences(text = "") {
-  const clean = String(text || "").replace(/\s+/g, " ").trim();
-  if (!clean) return [];
-  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
-  return sentences.map((part) => String(part || "").trim()).filter(Boolean);
-}
-
-function enforceVideoSceneRows(rows = [], options = {}) {
-  const targetDialogueSec = Math.max(1, Number(options?.targetDialogueSec) || VIDEO_DIALOGUE_MAX_SEC);
-  const splitLongSentenceSec = Math.max(targetDialogueSec + 0.8, Number(options?.splitLongSentenceSec) || (targetDialogueSec + 0.8));
-  const maxWordsPerChunk = Math.max(6, Math.round(targetDialogueSec * SPEECH_WORDS_PER_SEC));
-  const output = [];
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const speaker = String(row?.speaker || "").trim() || "Host A";
-    const expression = EXPRESSIONS.includes(row?.expression) ? row.expression : "Neutral";
-    const mediaCue = MEDIA_CUES.includes(row?.mediaCue) ? row.mediaCue : "Sin media";
-    const notes = String(row?.notes || "").trim();
-    const sentences = splitTextIntoSentences(row?.text || "");
-    if (!sentences.length) return;
-    let firstChunkForRow = true;
-    const pushScene = (text = "", keepMedia = false) => {
-      const cleanText = ensureCompleteSentence(text);
-      if (!cleanText) return;
-      output.push({
-        id: makeId("row"),
-        speaker,
-        expression,
-        durationSec: VIDEO_SCENE_MAX_SEC,
-        mediaCue: keepMedia ? mediaCue : "Sin media",
-        text: cleanText,
-        notes,
-        disfluencyConfig: normalizeDisfluencyConfig(row?.disfluencyConfig || {})
-      });
-      firstChunkForRow = false;
-    };
-    sentences.forEach((sentence) => {
-      const cleanSentence = ensureCompleteSentence(sentence);
-      if (!cleanSentence) return;
-      const sentenceSec = estimateSpeechDurationSec(cleanSentence);
-      if (sentenceSec <= splitLongSentenceSec) {
-        pushScene(cleanSentence, firstChunkForRow);
-        return;
-      }
-      const chunks = splitLongSentenceIntoChunks(cleanSentence, maxWordsPerChunk);
-      if (!chunks.length) {
-        pushScene(cleanSentence, firstChunkForRow);
-        return;
-      }
-      chunks.forEach((chunk, chunkIndex) => {
-        pushScene(chunk, firstChunkForRow && chunkIndex === 0);
-      });
-    });
-  });
-  return output;
-}
-
-function enforceSceneWordBounds(rows = [], options = {}) {
-  const minWords = Math.max(1, Math.min(200, Number(options?.minWords) || 0));
-  const maxWords = Math.max(minWords, Math.min(260, Number(options?.maxWords) || 0));
-  if (!minWords || !maxWords) return rows;
-  const expanded = [];
-  rows.forEach((row) => {
-    const text = String(row?.text || "").trim();
-    if (!text) return;
-    const chunks = splitByMaxWords(text, maxWords);
-    if (!chunks.length) return;
-    chunks.forEach((chunk, index) => {
-      expanded.push({
-        ...row,
-        id: makeId("row"),
-        text: chunk,
-        mediaCue: index === 0 ? row.mediaCue : "Sin media"
-      });
-    });
-  });
-
-  const merged = [];
-  expanded.forEach((row) => {
-    const text = String(row?.text || "").trim();
-    if (!text) return;
-    const words = countWords(text);
-    const prev = merged[merged.length - 1];
-    if (words < minWords && prev) {
-      const prevWords = countWords(prev.text);
-      const combinedWords = prevWords + words;
-      if (combinedWords <= maxWords && String(prev.speaker || "") === String(row.speaker || "")) {
-        prev.text = `${String(prev.text || "").trim()} ${text}`.trim();
-        return;
-      }
-    }
-    merged.push({
-      ...row,
-      durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Math.round(estimateSpeechDurationSec(text))))
-    });
-  });
-  return merged;
-}
-
-function splitRowTextForSceneCount(row = {}, options = {}) {
-  const text = String(row?.text || "").trim();
-  if (!text) return [row];
-  const minWords = Math.max(1, Math.min(200, Number(options?.minWords) || 1));
-  const maxWords = Math.max(minWords, Math.min(260, Number(options?.maxWords) || 260));
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= 1) return [row];
-  const splitAt = Math.max(1, Math.min(words.length - 1, Math.floor(words.length / 2)));
-  const leftWords = words.slice(0, splitAt);
-  const rightWords = words.slice(splitAt);
-  if (!leftWords.length || !rightWords.length) return [row];
-  const leftText = leftWords.join(" ").trim();
-  const rightText = rightWords.join(" ").trim();
-  if (!leftText || !rightText) return [row];
-  const makePart = (partText, keepMedia = false) => ({
-    ...row,
-    id: makeId("row"),
-    text: partText,
-    mediaCue: keepMedia ? row.mediaCue : "Sin media",
-    durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Math.round(estimateSpeechDurationSec(partText))))
-  });
-  const parts = [makePart(leftText, true), makePart(rightText, false)];
-  const bounded = enforceSceneWordBounds(parts, { minWords, maxWords });
-  return bounded.length ? bounded : parts;
-}
-
-function enforceExactSceneCount(rows = [], targetCount = 0, options = {}) {
-  const safeTarget = Math.max(0, Math.min(220, Number(targetCount) || 0));
-  if (!safeTarget) return rows;
-  let working = Array.isArray(rows) ? rows.map((row) => ({ ...row })) : [];
-  if (!working.length) return working;
-
-  while (working.length < safeTarget) {
-    let splitIndex = -1;
-    let splitScore = -1;
-    for (let i = 0; i < working.length; i += 1) {
-      const score = countWords(working[i]?.text || "");
-      if (score > splitScore) {
-        splitScore = score;
-        splitIndex = i;
-      }
-    }
-    if (splitIndex < 0) break;
-    const candidate = working[splitIndex];
-    const parts = splitRowTextForSceneCount(candidate, options);
-    if (parts.length < 2) {
-      working.push({
-        ...candidate,
-        id: makeId("row"),
-        mediaCue: "Sin media",
-        notes: `${String(candidate.notes || "").trim()} · Continuación.`.trim()
-      });
-    } else {
-      working.splice(splitIndex, 1, ...parts);
-    }
-    if (working.length > 420) break;
-  }
-
-  while (working.length > safeTarget) {
-    let mergeIndex = -1;
-    for (let i = 1; i < working.length; i += 1) {
-      const prev = working[i - 1];
-      const curr = working[i];
-      if (String(prev?.speaker || "") === String(curr?.speaker || "")) {
-        mergeIndex = i;
-        break;
-      }
-    }
-    if (mergeIndex < 0) mergeIndex = working.length - 1;
-    const leftIdx = Math.max(0, mergeIndex - 1);
-    const left = working[leftIdx] || {};
-    const right = working[mergeIndex] || {};
-    const mergedText = [String(left.text || "").trim(), String(right.text || "").trim()].filter(Boolean).join(" ").trim();
-    working.splice(leftIdx, 2, {
-      ...left,
-      id: makeId("row"),
-      text: mergedText || String(left.text || right.text || "").trim(),
-      durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Math.round(estimateSpeechDurationSec(mergedText)))),
-      notes: [String(left.notes || "").trim(), String(right.notes || "").trim()].filter(Boolean).join(" · ")
-    });
-    if (!working.length) break;
-  }
-  return working;
-}
-
-function coerceRowsToHosts(rows = [], hosts = []) {
-  const allowedHosts = Array.isArray(hosts) && hosts.length ? hosts : [...DEFAULT_HOSTS];
-  const aliasMap = buildSpeakerAliasMap(allowedHosts, { nameMap: getDefaultSpeakerNameMap() });
-  let previous = allowedHosts[0] || "Host A";
-  return (Array.isArray(rows) ? rows : []).map((row) => {
-    const resolved = resolveSpeakerFromAliases(row?.speaker, {
-      hosts: allowedHosts,
-      fallback: previous,
-      aliasMap
-    });
-    previous = resolved;
-    return {
-      ...row,
-      speaker: resolved
-    };
-  });
-}
-
-function applyScriptGenerationConstraints(script = {}, constraints = {}, session = null) {
-  const videoMode = constraints?.videoMode === true;
-  const hasHostCount = Number.isFinite(Number(constraints?.hostCount)) && Number(constraints.hostCount) > 0;
-  const hasSceneCount = Number.isFinite(Number(constraints?.sceneCount)) && Number(constraints.sceneCount) > 0;
-  const hasWordBounds = Number.isFinite(Number(constraints?.minWords)) || Number.isFinite(Number(constraints?.maxWords));
-  if (!hasHostCount && !hasSceneCount && !hasWordBounds) return script;
-  const explicitHosts = Array.isArray(constraints?.hosts) && constraints.hosts.length
-    ? constraints.hosts.map((host) => normalizeSpeakerLabel(host, "")).filter(Boolean)
-    : [];
-  const forcedHosts = explicitHosts.length
-    ? explicitHosts
-    : hasHostCount
-      ? hostsForCount(constraints.hostCount)
-      : (Array.isArray(script?.hosts) && script.hosts.length ? script.hosts : getSpeakerOptions(session));
-  let rows = normalizeRows(script?.rows).map((row) => ({ ...row }));
-  rows = coerceRowsToHosts(rows, forcedHosts);
-  if (hasWordBounds) {
-    rows = videoMode
-      ? enforceVideoSceneRows(rows, {
-        minWords: Number(constraints?.minWords) || 12,
-        maxWords: Number(constraints?.maxWords) || 15
-      })
-      : enforceSceneWordBounds(rows, {
-        minWords: Number(constraints?.minWords) || 1,
-        maxWords: Number(constraints?.maxWords) || 260
-      });
-  }
-  if (hasSceneCount) {
-    rows = videoMode
-      ? rows.slice(0, Math.max(1, Number(constraints.sceneCount) || rows.length))
-      : enforceExactSceneCount(rows, Number(constraints.sceneCount), {
-        minWords: Number(constraints?.minWords) || 1,
-        maxWords: Number(constraints?.maxWords) || 260
-      });
-  }
-  rows = coerceRowsToHosts(rows, forcedHosts);
-  return normalizeScriptPayload({
-    ...(script || {}),
-    hosts: forcedHosts,
-    rows
-  }, { session });
-}
-
-function optimizeRowsForShortScenes(rows = [], options = {}) {
-  const maxSec = Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Number(options.maxSec) || SHORT_SCENE_MAX_SEC));
-  const minSec = Math.max(1, Math.min(maxSec, Number(options.minSec) || SHORT_SCENE_MIN_SEC));
-  const mergeMaxSec = Math.max(minSec, Math.min(maxSec, Number(options.mergeMaxSec) || maxSec));
-  const hosts = Array.isArray(options.hosts) && options.hosts.length ? options.hosts : [];
-  const output = [];
-  rows.forEach((row) => {
-    const baseSpeaker = normalizeSpeakerLabel(
-      row?.speaker,
-      output[output.length - 1]?.speaker || hosts[0] || "Host A"
-    );
-    const text = String(row?.text || row?.voiceOverText || row?.guion || row?.script || "").trim();
-    if (!text) return;
-    const readingSec = Math.max(minSec, estimateSpeechDurationSec(text));
-    const splitThresholdSec = maxSec * 1.22;
-    const segmentCount = Math.max(1, Math.ceil(readingSec / splitThresholdSec));
-    const textSegments = splitDialogueTextIntoSegments(text, segmentCount).filter(Boolean);
-    const effectiveCount = Math.max(1, textSegments.length);
-    const defaultSegmentSec = Math.max(minSec, Math.min(maxSec, Math.round(readingSec / effectiveCount)));
-    textSegments.forEach((segmentText, segmentIndex) => {
-      const isFirst = segmentIndex === 0;
-      const continuationNote = !isFirst ? "Continuación de escena anterior." : "";
-      const notesBase = String(row?.notes || "").trim();
-      output.push({
-        id: makeId("row"),
-        speaker: baseSpeaker,
-        expression: EXPRESSIONS.includes(row?.expression) ? row.expression : "Neutral",
-        durationSec: defaultSegmentSec,
-        mediaCue: isFirst
-          ? (MEDIA_CUES.includes(row?.mediaCue) ? row.mediaCue : "Sin media")
-          : "Sin media",
-        text: String(segmentText || "").trim(),
-        voiceOverText: String(row?.voiceOverText || row?.text || row?.guion || row?.script || segmentText || "").trim(),
-        notes: [notesBase, continuationNote].filter(Boolean).join(" · "),
-        disfluencyConfig: normalizeDisfluencyConfig(row?.disfluencyConfig || {}),
-        ttsDirectionConfig: normalizeTtsDirectionConfig(row?.ttsDirectionConfig || {})
-      });
-    });
-    if (!textSegments.length) {
-      output.push({
-        id: makeId("row"),
-        speaker: baseSpeaker,
-        expression: EXPRESSIONS.includes(row?.expression) ? row.expression : "Neutral",
-        durationSec: Math.max(minSec, Math.min(maxSec, Math.round(readingSec))),
-        mediaCue: MEDIA_CUES.includes(row?.mediaCue) ? row.mediaCue : "Sin media",
-        text,
-        voiceOverText: String(row?.voiceOverText || row?.text || row?.guion || row?.script || text || "").trim(),
-        notes: String(row?.notes || "").trim(),
-        disfluencyConfig: normalizeDisfluencyConfig(row?.disfluencyConfig || {}),
-        ttsDirectionConfig: normalizeTtsDirectionConfig(row?.ttsDirectionConfig || {})
-      });
-    }
-  });
-  const merged = [];
-  output.forEach((row) => {
-    const current = { ...row };
-    const prev = merged[merged.length - 1];
-    if (!prev) {
-      merged.push(current);
-      return;
-    }
-    const sameSpeaker = String(prev.speaker || "") === String(current.speaker || "");
-    const sameExpression = String(prev.expression || "") === String(current.expression || "");
-    const prevDur = Math.max(minSec, Number(prev.durationSec) || minSec);
-    const currDur = Math.max(minSec, Number(current.durationSec) || minSec);
-    const prevText = String(prev.text || prev.voiceOverText || "").trim();
-    const currentText = String(current.text || current.voiceOverText || "").trim();
-    const mergedText = `${prevText} ${currentText}`.replace(/\s+/g, " ").trim();
-    const mergedReadingSec = Math.max(minSec, estimateSpeechDurationSec(mergedText));
-    if (!sameSpeaker || !sameExpression || mergedReadingSec > mergeMaxSec || (prevDur + currDur) > mergeMaxSec * 1.15) {
-      merged.push(current);
-      return;
-    }
-    const notes = [String(prev.notes || "").trim(), String(current.notes || "").trim()]
-      .filter(Boolean)
-      .join(" · ");
-    merged[merged.length - 1] = {
-      ...prev,
-      text: mergedText,
-      voiceOverText: `${String(prev.voiceOverText || prev.text || "").trim()} ${String(current.voiceOverText || current.text || "").trim()}`.replace(/\s+/g, " ").trim(),
-      durationSec: Math.max(minSec, Math.min(mergeMaxSec, Math.round(mergedReadingSec))),
-      notes
-    };
-  });
-  return merged.slice(0, 400);
-}
-
-function rowNeedsCompaction(row = {}) {
-  const text = String(row?.text || "").trim();
-  if (!text) return true;
-  const estimatedSec = estimateSpeechDurationSec(text);
-  if (estimatedSec > SHORT_SCENE_MAX_SEC * 1.15) return true;
-  if (estimatedSec < SHORT_SCENE_MIN_SEC * 0.9 || text.length < 26) return true;
-  return false;
-}
-
-function scriptNeedsCompaction(script = {}) {
-  const rows = normalizeRows(script?.rows);
-  if (!rows.length) return false;
-  return rows.some((row) => rowNeedsCompaction(row));
-}
-
-function compactScriptForPanelConnection(script = {}, session = null) {
-  const videoMode = isCurrentModeVideo();
-  return normalizeCreativeVideoScriptForDisplay(script, session, {
-    preserveExactRows: true,
-    videoMode: videoMode
-  });
-}
-
-function applyDisfluencyDefaultsToScriptRows(script = {}, disfluencyDefaults = DEFAULT_DISFLUENCY_CONFIG) {
-  const normalizedDefaults = normalizeDisfluencyConfig(disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG);
-  const rows = normalizeRows(script?.rows);
-  return {
-    ...(script || {}),
-    rows: rows.map((row) => ({
-      ...row,
-      disfluencyConfig: normalizeDisfluencyConfig(normalizedDefaults)
-    }))
-  };
-}
-
-function setButtonLoadingState(button = null, busy = false, options = {}) {
-  if (!button) return;
-  const spinnerHtml = `<i class="fas fa-spinner spinner-icon" aria-hidden="true"></i>`;
-  if (busy) {
-    if (!button.dataset.prevHtml) button.dataset.prevHtml = button.innerHTML;
-    if (!button.dataset.prevTooltip) {
-      button.dataset.prevTooltip = String(button.getAttribute("data-tooltip") || button.getAttribute("title") || "");
-    }
-    button.disabled = true;
-    button.classList.add("is-loading");
-    const label = String(options.loadingLabel || "").trim();
-    if (label) {
-      button.innerHTML = `${spinnerHtml}${label}`;
-    } else {
-      button.innerHTML = spinnerHtml;
-    }
-    if (options.loadingTitle) {
-      const tooltip = String(options.loadingTitle);
-      button.setAttribute("data-tooltip", tooltip);
-      if (!button.getAttribute("aria-label")) {
-        button.setAttribute("aria-label", tooltip);
-      }
-    }
-    if (button.hasAttribute("title")) {
-      button.removeAttribute("title");
-    }
-    return;
-  }
-  button.disabled = false;
-  button.classList.remove("is-loading");
-  if (button.dataset.prevHtml) {
-    button.innerHTML = button.dataset.prevHtml;
-    delete button.dataset.prevHtml;
-  }
-  if (button.dataset.prevTooltip !== undefined) {
-    const tooltip = String(button.dataset.prevTooltip || "").trim();
-    if (tooltip) {
-      button.setAttribute("data-tooltip", tooltip);
-      if (!button.getAttribute("aria-label")) {
-        button.setAttribute("aria-label", tooltip);
-      }
-    } else {
-      button.removeAttribute("data-tooltip");
-    }
-    delete button.dataset.prevTooltip;
-  }
-  if (button.hasAttribute("title")) {
-    button.removeAttribute("title");
-  }
-}
-
-function normalizeScriptPayload(raw = {}, options = {}) {
-  const optionHosts = Array.isArray(options?.hosts) ? options.hosts : [];
-  const sourceSession = options?.session || null;
-  const resolvedVideoContentType = (() => {
-    const explicitType = normalizeVideoContentType(
-      options?.videoContentType
-      || raw?.videoContentType
-      || sourceSession?.script?.videoContentType
-      || sourceSession?.videoContentType
-    );
-    if (explicitType !== "none") return explicitType;
-    if (options?.videoMode === true) return "creative";
-    if (options?.videoMode === false) return "none";
-    if (raw?.videoMode === true) return "creative";
-    return "none";
-  })();
-  const videoMode = resolvedVideoContentType === "creative";
-  const videoPreset = videoMode
-    ? normalizeVideoPreset(
-      options?.videoPreset
-      || raw?.videoPreset
-      || sourceSession?.script?.videoPreset
-      || sourceSession?.videoPreset
-      || "creative"
-    )
-    : null;
-  const defaultDisfluencyConfig = normalizeDisfluencyConfig(
-    options?.disfluencyDefaults || raw?.disfluencyDefaults || sourceSession?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG
-  );
-  const sourceNameMap = {
-    ...(sourceSession?.speakerNameMap || {}),
-    ...(options?.speakerNameMap || {})
-  };
-  const hosts = Array.isArray(raw.hosts) && raw.hosts.length
-    ? Array.from(new Set(raw.hosts
-      .map((host) => normalizeSpeakerLabel(host, ""))
-      .filter(Boolean)))
-    : optionHosts
-      .map((host) => normalizeSpeakerLabel(host, ""))
-      .filter(Boolean);
-  const normalizedHosts = videoMode
-    ? ["Narrador"]
-    : (hosts.length ? hosts : ["Host A", "Host B"]);
-  const strictVideoValidation = videoMode && options?.strictVideoValidation === true;
-  const validationStage = String(options?.validationStage || (videoMode ? "video creativo" : "podcast")).trim() || "video creativo";
-  const fallbackRows = strictVideoValidation
-    ? []
-    : createDefaultRows(videoMode, options?.prompt || raw?.prompt || raw?.episodeTitle || raw?.summary || "");
-  const normalizedNameMap = buildSpeakerNameMap(normalizedHosts, sourceNameMap);
-  const aliasMap = buildSpeakerAliasMap(normalizedHosts, { nameMap: normalizedNameMap });
-  const hasExplicitRows = Array.isArray(raw.rows);
-  if (strictVideoValidation && (!hasExplicitRows || !raw.rows.length)) {
-    throw buildCreativeVideoValidationError(validationStage, "Gemini no devolvió filas válidas.");
-  }
-  const baseRows = hasExplicitRows
-    ? (raw.rows.length
-      ? raw.rows.map((row, index) => {
-        const rawText = String(row?.text || "").trim();
-        const prefixMatch = rawText.match(/^([^:\n]{1,40})\s*:\s*(.+)$/);
-        const prefixedSpeaker = String(prefixMatch?.[1] || "").trim();
-        const previousSpeaker = normalizeSpeakerLabel(raw?.rows?.[Math.max(0, index - 1)]?.speaker, normalizedHosts[0] || "Host A");
-        const normalizedSpeaker = resolveSpeakerFromAliases(row?.speaker || prefixedSpeaker, {
-          hosts: normalizedHosts,
-          fallback: previousSpeaker,
-          aliasMap,
-          nameMap: normalizedNameMap
-        });
-        const normalizedText = prefixMatch && resolveSpeakerFromAliases(prefixedSpeaker, {
-          hosts: normalizedHosts,
-          fallback: "",
-          aliasMap,
-          nameMap: normalizedNameMap
-        })
-          ? String(prefixMatch[2] || "").trim()
-          : rawText;
-        return {
-          id: makeId("row"),
-          speaker: videoMode ? "Narrador" : normalizedSpeaker,
-          expression: EXPRESSIONS.includes(row?.expression) ? row.expression : "Neutral",
-          durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(row?.durationSec) || SHORT_SCENE_MAX_SEC)),
-          mediaCue: MEDIA_CUES.includes(row?.mediaCue) ? row.mediaCue : "Sin media",
-          voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
-          text: sanitizeSpeakerMentionsInDialogue(
-            strictVideoValidation
-              ? (normalizedText || String(row?.voiceOverText || row?.text || "").trim())
-              : (normalizedText || fallbackRows[index % Math.max(1, fallbackRows.length)].text),
-            sourceSession,
-            normalizedHosts
-          ),
-          notes: sanitizeSpeakerMentionsInDialogue(String(row?.notes || "").trim(), sourceSession, normalizedHosts),
-          voiceOverText: videoMode
-            ? String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim()
-            : "",
-          voiceOverOriginalText: String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim(),
-          sceneDescription: String(row?.sceneDescription || row?.scenePrompt || row?.descripcionEscena || row?.descripcionDeEscena || row?.scene || "").replace(/\s+/g, " ").trim(),
-          onScreenText: String(row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "").replace(/\s+/g, " ").trim(),
-          transition: String(row?.transition || row?.visualNotes || row?.visual || row?.notes || "").replace(/\s+/g, " ").trim(),
-          visualNotes: String(row?.visualNotes || row?.visual || row?.elementoVisual || row?.elemento_visual || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "").replace(/\s+/g, " ").trim(),
-          videoDirective: String(row?.videoDirective || row?.visualNotes || row?.visual || row?.elementoVisual || row?.elemento_visual || row?.direccionVideo || row?.direcciónVideo || "").replace(/\s+/g, " ").trim(),
-          scenePrompt: String(row?.scenePrompt || row?.sceneDescription || "").replace(/\s+/g, " ").trim(),
-          imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
-          disfluencyConfig: normalizeDisfluencyConfig(
-            row?.disfluencyConfig
-            || defaultDisfluencyConfig
-            || fallbackRows[index % Math.max(1, fallbackRows.length)]?.disfluencyConfig
-            || {}
-          ),
-          ttsDirectionConfig: normalizeTtsDirectionConfig(
-            row?.ttsDirectionConfig || raw?.ttsDirectionDefaults || sourceSession?.ttsDirectionDefaults || DEFAULT_TTS_DIRECTION_CONFIG
-          )
-        };
-      })
-      : [])
-    : fallbackRows;
-  const rows = options?.skipOptimize
-    ? baseRows
-    : optimizeRowsForShortScenes(baseRows, {
-      maxSec: SHORT_SCENE_MAX_SEC,
-      minSec: SHORT_SCENE_MIN_SEC,
-      hosts: normalizedHosts
-    });
-  const normalizedRows = videoMode
-    ? rows.map((row, index) => {
-      if (validationStage === "video/create") {
-        logVideoCreateDebug("normalize-row-input", {
-          index,
-          keys: Object.keys(row || {}).slice(0, 20),
-          voiceOverText: String(row?.voiceOverText || row?.text || "").slice(0, 120),
-          sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").slice(0, 120),
-          visualNotes: String(row?.visualNotes || row?.visual || "").slice(0, 120),
-          videoDirective: String(row?.videoDirective || "").slice(0, 120)
-        });
-      }
-      try {
-        return normalizeCreativeRow(row, index, {
-          videoPreset,
-          prompt: options?.prompt || raw?.prompt || sourceSession?.prompt || "",
-          strictVideoValidation,
-          validationStage
-        });
-      } catch (error) {
-        if (validationStage === "video/create") {
-          logVideoCreateDebug("normalize-row-error", {
-            index,
-            message: String(error?.message || error || ""),
-            keys: Object.keys(row || {}).slice(0, 20),
-            voiceOverText: String(row?.voiceOverText || row?.text || "").slice(0, 120),
-            sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").slice(0, 120),
-            visualNotes: String(row?.visualNotes || row?.visual || "").slice(0, 120),
-            videoDirective: String(row?.videoDirective || "").slice(0, 120)
-          });
-        }
-        throw error;
-      }
-    })
-    : rows;
-  const distinctVideoRows = videoMode
-    ? normalizedRows.map((row, index, array) => {
-      const previousVisualNotes = index > 0 ? String(array[index - 1]?.visualNotes || array[index - 1]?.videoDirective || "") : "";
-      const visualNotes = buildDistinctCreativeVisualNotes(
-        row,
-        index,
-        previousVisualNotes,
-        options?.prompt || raw?.prompt || sourceSession?.prompt || ""
-      );
-      const resolvedVisualNotes = normalizeSimpleText(visualNotes);
-      return {
-        ...row,
-        visualNotes: resolvedVisualNotes,
-        notes: resolvedVisualNotes || row?.notes || "",
-        videoDirective: row?.videoDirective || resolvedVisualNotes,
-        imagePrompts: Array.isArray(row?.imagePrompts) && row.imagePrompts.length
-          ? row.imagePrompts
-          : [resolvedVisualNotes || row?.sceneDescription || row?.scenePrompt || ""].filter(Boolean)
-      };
-    })
-    : normalizedRows;
-
-  return {
-    episodeTitle: String(raw.episodeTitle || (videoMode
-      ? "Video creativo desde una idea"
-      : "Podcast desde una idea"
-    )).trim(),
-    summary: String(raw.summary || "").trim(),
-    videoPreset,
-    videoContentType: resolvedVideoContentType === "none" ? null : resolvedVideoContentType,
-    videoMode,
-    hosts: normalizedHosts,
-    rows: distinctVideoRows,
-    creativeVideoConfig: normalizeCreativeVideoConfig(raw?.creativeVideoConfig || sourceSession?.creativeVideoConfig || {})
-  };
-}
-
-function buildChatContext(session = {}) {
-  return (session.chat || [])
-    .filter((message, index, arr) => !(index === 0 && message.role === "assistant" && arr.length === 1))
-    .slice(-6)
-    .map((message) => `${message.role === "user" ? "Usuario" : message.role === "system" ? "Sistema" : "Asistente"}: ${String(message.text || "").trim()}`)
-    .join("\n");
-}
-
-function buildScriptContext(script = {}) {
-  const rows = normalizeRows(script.rows);
-  const videoType = resolveVideoContentType({ script });
-  const videoMode = videoType === "creative";
-  return [
-    `Tipo de contenido: ${videoMode ? "Video creativo" : (videoType === "videopodcast" ? "Video podcast" : "Podcast")}`,
-    `Titulo actual: ${String(script.episodeTitle || "Sin titulo").trim()}`,
-    `Resumen actual: ${String(script.summary || "Sin resumen").trim()}`,
-    videoMode
-      ? `Voz en off global actual: ${String(script?.creativeVideoConfig?.globalVoiceName || getCreativeVideoConfig()?.globalVoiceName || "Kore")}`
-      : `Hosts actuales: ${Array.isArray(script.hosts) && script.hosts.length ? script.hosts.join(", ") : "Host A, Host B"}`,
-    "Guion actual:",
-    rows.map((row, index) => (
-      videoMode
-        ? `${index + 1}. [${row.durationSec}s] VO: ${String(row?.voiceOverText || row?.text || "").trim()}${String(row?.sceneDescription || row?.scenePrompt || "").trim() ? `\n   Escena: ${String(row?.sceneDescription || row?.scenePrompt || "").trim()}` : ""}${String(row?.transition || "").trim() ? `\n   Transición: ${String(row?.transition || "").trim()}` : ""}${String(row?.onScreenText || "").trim() ? `\n   Texto en pantalla: ${String(row?.onScreenText || "").trim()}` : ""}${String(row?.visualNotes || row?.notes || "").trim() ? `\n   Notas visuales: ${String(row?.visualNotes || row?.notes || "").trim()}` : ""}`
-        : `${index + 1}. [${row.speaker} | ${row.expression} | ${row.durationSec}s | ${row.mediaCue}] ${row.text}${row.notes ? ` (${row.notes})` : ""}${row.scenePrompt ? `\n   Escena visual: ${row.scenePrompt}` : ""}${row.videoDirective ? `\n   Dirección manual: ${row.videoDirective}` : ""}${normalizeVideoImagePrompts(row.imagePrompts || []).length ? `\n   Prompts de imagen: ${normalizeVideoImagePrompts(row.imagePrompts || []).join(" || ")}` : ""}`
-    )).join("\n")
-  ].join("\n");
-}
-
-function hasMeaningfulScript(session = {}) {
-  return normalizeRows(session.script?.rows).length > 0;
-}
-
-function isShortenRequest(prompt = "") {
-  const clean = String(prompt || "").toLowerCase();
-  return /acorta|resum|más corto|mas corto|reduce|recorta|sintetiza/.test(clean);
-}
-
-function isRebuildRequest(prompt = "") {
-  const clean = String(prompt || "").toLowerCase();
-  return /desde cero|nuevo guion|nuevo guión|rehaz|reinicia|reescribe completo|crear uno nuevo|crea el guion|crea el guión|crea un guion|crea un guión|genera el guion|genera el guión|haz el guion|haz el guión|escribe el guion|escribe el guión|escribe un guion|escribe un guión/.test(clean);
-}
-
-function extractRequestedMinDurationSec(prompt = "") {
-  const text = String(prompt || "").toLowerCase();
-  let target = 0;
-
-  const minutesMatches = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*(minuto|minutos|min)\b/g)];
-  minutesMatches.forEach((match) => {
-    const value = Number(String(match[1] || "0").replace(",", "."));
-    if (Number.isFinite(value) && value > 0) {
-      target = Math.max(target, Math.round(value * 60));
-    }
-  });
-
-  const secondsMatches = [...text.matchAll(/(\d+)\s*(segundo|segundos|sec|s)\b/g)];
-  secondsMatches.forEach((match) => {
-    const value = Number(match[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      target = Math.max(target, value);
-    }
-  });
-
-  return target;
-}
-
-function extractRequestedSceneRange(prompt = "") {
-  const text = String(prompt || "").toLowerCase();
-  let minRows = 0;
-  let maxRows = 0;
-
-  const rangeMatch = text.match(/(\d{1,3})\s*(?:a|-|hasta)\s*(\d{1,3})\s*(?:escena|escenas|segmento|segmentos|bloque|bloques)\b/);
-  if (rangeMatch) {
-    const left = Number(rangeMatch[1] || 0);
-    const right = Number(rangeMatch[2] || 0);
-    if (Number.isFinite(left) && Number.isFinite(right) && left > 0 && right > 0) {
-      minRows = Math.min(left, right);
-      maxRows = Math.max(left, right);
-    }
-  }
-
-  const minMatch = text.match(/(?:mínimo|minimo|al menos|cuando menos)\s*(\d{1,3})\s*(?:escena|escenas|segmento|segmentos|bloque|bloques)\b/);
-  if (minMatch) {
-    const value = Number(minMatch[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      minRows = Math.max(minRows, value);
-      if (!maxRows) maxRows = Math.max(value, 220);
-    }
-  }
-
-  const exactMatch = text.match(/(?:de|con|en)\s*(\d{1,3})\s*(?:escena|escenas|segmento|segmentos|bloque|bloques)\b/);
-  if (exactMatch && !rangeMatch) {
-    const value = Number(exactMatch[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      minRows = Math.max(minRows, value);
-      maxRows = maxRows ? Math.max(maxRows, value) : value;
-    }
-  }
-  const exactForcedMatch = text.match(/exactamente\s*(\d{1,3})\s*(?:escena|escenas|segmento|segmentos|bloque|bloques)\b/);
-  if (exactForcedMatch) {
-    const value = Number(exactForcedMatch[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      minRows = value;
-      maxRows = value;
-    }
-  }
-
-  if (!minRows && !maxRows) return null;
-  const boundedMin = Math.max(1, Math.min(220, Number(minRows) || 1));
-  const boundedMax = Math.max(boundedMin, Math.min(220, Number(maxRows) || boundedMin));
-  return { minRows: boundedMin, maxRows: boundedMax };
-}
-
-function extractRequestedSceneWordRange(prompt = "") {
-  const text = String(prompt || "").toLowerCase();
-  let minWords = 0;
-  let maxWords = 0;
-  const betweenMatch = text.match(/entre\s*(\d{1,3})\s*y\s*(\d{1,3})\s*palabras/);
-  if (betweenMatch) {
-    const left = Number(betweenMatch[1] || 0);
-    const right = Number(betweenMatch[2] || 0);
-    if (Number.isFinite(left) && Number.isFinite(right) && left > 0 && right > 0) {
-      minWords = Math.min(left, right);
-      maxWords = Math.max(left, right);
-    }
-  }
-  const minMatch = text.match(/(?:mínimo|minimo|al menos)\s*(\d{1,3})\s*palabras/);
-  if (minMatch) {
-    const value = Number(minMatch[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      minWords = Math.max(minWords, value);
-      if (!maxWords) maxWords = Math.max(value, 200);
-    }
-  }
-  const maxMatch = text.match(/(?:máximo|maximo|hasta)\s*(\d{1,3})\s*palabras/);
-  if (maxMatch) {
-    const value = Number(maxMatch[1] || 0);
-    if (Number.isFinite(value) && value > 0) {
-      maxWords = maxWords ? Math.min(maxWords, value) : value;
-      if (!minWords) minWords = 1;
-    }
-  }
-  if (!minWords && !maxWords) return null;
-  const boundedMin = Math.max(1, Math.min(200, minWords || 1));
-  const boundedMax = Math.max(boundedMin, Math.min(260, maxWords || boundedMin));
-  return { minWords: boundedMin, maxWords: boundedMax };
-}
-
-function parseSecondsToken(value = "") {
-  const token = String(value || "").trim().toLowerCase().replace(/[^\d:.,]/g, "");
-  if (!token) return 0;
-  const normalized = token.replace(",", ".");
-  if (normalized.includes(":")) {
-    const parts = normalized.split(":").map((part) => Number(part) || 0);
-    if (parts.some((part) => !Number.isFinite(part))) return 0;
-    if (parts.length === 3) return Math.max(0, (parts[0] * 3600) + (parts[1] * 60) + parts[2]);
-    if (parts.length === 2) return Math.max(0, (parts[0] * 60) + parts[1]);
-  }
-  return Math.max(0, Number(normalized) || 0);
-}
-
-function parseDurationSecFromRangeLabel(value = "", fallback = SHORT_SCENE_MAX_SEC) {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(fallback) || SHORT_SCENE_MAX_SEC));
-  const rangeMatch = text.match(/(\d[\d:.,]*)\s*(?:-|–|—|a|hasta)\s*(\d[\d:.,]*)/i);
-  if (rangeMatch) {
-    const start = parseSecondsToken(rangeMatch[1]);
-    const end = parseSecondsToken(rangeMatch[2]);
-    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-      return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(end - start)));
-    }
-  }
-  const singleMatch = text.match(/(\d[\d:.,]*)\s*(?:s|seg|secs|segundos?)?/i);
-  if (singleMatch) {
-    const duration = parseSecondsToken(singleMatch[1]);
-    if (Number.isFinite(duration) && duration > 0) {
-      return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Math.round(duration)));
-    }
-  }
-  return Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(fallback) || SHORT_SCENE_MAX_SEC));
-}
-
-function isLikelyCreativeVideoTableHeader(header = []) {
-  const labels = (Array.isArray(header) ? header : []).map((cell) => String(cell || "").toLowerCase());
-  const hasTime = labels.some((label) => /tiempo|duraci[oó]n|time/.test(label));
-  const hasScript = labels.some((label) => /gui[oó]n|voz en off|narraci[oó]n|guion|voice.?over/.test(label));
-  const hasVisual = labels.some((label) => /elemento visual|visual|escena|descripci[oó]n|imagen/.test(label));
-  return hasTime && hasScript && hasVisual;
-}
-
-function extractCreativeVideoTableColumns(header = []) {
-  const labels = (Array.isArray(header) ? header : []).map((cell) => String(cell || "").toLowerCase());
-  const findIndex = (regexp) => labels.findIndex((label) => regexp.test(label));
-  return {
-    time: findIndex(/tiempo|duraci[oó]n|time/),
-    script: findIndex(/gui[oó]n|voz en off|narraci[oó]n|guion|voice.?over/),
-    transition: findIndex(/transici[oó]n|transicion|transition/),
-    visual: findIndex(/elemento visual|escena|visual|descripci[oó]n|imagen/),
-    onScreenText: findIndex(/texto en pantalla|on.?screen|subt[ií]tulo|caption/)
-  };
-}
-
-function deriveMediaCueFromTransition(transition = "") {
-  const clean = String(transition || "").toLowerCase();
-  if (!clean) return "Sin media";
-  if (clean.includes("cta") || clean.includes("final")) return "CTA final";
-  if (clean.includes("trans")) return "Transición";
-  if (clean.includes("intro")) return "Intro musical";
-  if (clean.includes("efecto")) return "Efecto sutil";
-  return "Sin media";
-}
-
-function normalizeSimpleText(value = "") {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeCreativeFieldText(...values) {
-  for (const value of values) {
-    const text = normalizeSimpleText(value);
-    if (text) return text;
-  }
-  return "";
-}
-
-function resolveCreativeVisualNotesText(row = {}) {
-  return normalizeCreativeFieldText(
-    row?.visualNotes,
-    row?.["Elemento visual"],
-    row?.["Elemento Visual"],
-    row?.visual,
-    row?.elementoVisual,
-    row?.elemento_visual,
-    row?.visualElement,
-    row?.visualElemento,
-    row?.videoDirective,
-    row?.notes
-  );
-}
-
-function normalizeComparableCreativeText(value = "") {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function summarizeOnScreenTextFromVoiceOver(text = "", options = {}) {
-  const maxWords = Math.max(4, Number(options?.maxWords) || 8);
-  const source = normalizeSimpleText(text)
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/[¡!¿?"“”]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!source) return "";
-  const firstSentence = String((source.match(/[^.!?]+/) || [source])[0] || source).trim();
-  const words = firstSentence.split(/\s+/).filter(Boolean);
-  if (!words.length) return "";
-  const picked = words.slice(0, maxWords);
-  const danglingWords = new Set([
-    "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
-  ]);
-  const leadingConnectors = new Set(["pero", "y", "o", "aunque", "sin", "entonces", "ademas", "además"]);
-  while (picked.length > 4 && leadingConnectors.has(String(picked[0] || "").toLowerCase())) {
-    picked.shift();
-  }
-  while (picked.length > 4 && danglingWords.has(String(picked[picked.length - 1] || "").toLowerCase())) {
-    picked.pop();
-  }
-  const summary = picked.join(" ").replace(/[.,;:!?]+$/g, "").trim();
-  return summary;
-}
-
-function isWeakOnScreenText(value = "") {
-  const text = normalizeSimpleText(value);
-  if (!text) return true;
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length < 3) return true;
-  const trailing = String(words[words.length - 1] || "").toLowerCase();
-  const danglingWords = new Set([
-    "de", "del", "la", "las", "el", "los", "y", "o", "u", "que", "a", "en", "con", "por", "para", "al"
-  ]);
-  if (danglingWords.has(trailing)) return true;
-  if (/[,;:]\s*$/.test(text)) return true;
-  return false;
-}
-
-async function enhanceEducationalVideoOnScreenTextWithGemini(rows = [], sessionSnapshot = null) {
-  const normalizedRows = normalizeEducationalVideoTableRows(
-    (Array.isArray(rows) ? rows : []).map((row) => [row.time, row.script, row.sceneDescription, row.onScreenText, row.transition, row.visual])
-  );
-  if (!normalizedRows.length) return normalizedRows;
-  const responseSchema = {
-    type: "object",
-    properties: {
-      rows: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            index: { type: "number" },
-            onScreenText: { type: "string" }
-          },
-          required: ["index", "onScreenText"]
-        }
-      }
-    },
-    required: ["rows"]
-  };
-  const compactRows = normalizedRows.map((row, index) => ({
-    index,
-    guion: row.script,
-    descripcionEscena: row.sceneDescription,
-    transicion: row.transition,
-    elementoVisual: row.visual,
-    textoPantallaActual: row.onScreenText
-  }));
-  const conversationContext = sessionSnapshot ? buildChatContext(sessionSnapshot) : "";
-  const payload = {
-    systemInstruction: {
-      parts: [{
-        text: "Eres editor de guion técnico de video creativo. Reescribe SOLO texto en pantalla por fila con estilo claro y coherente. Debe ser una frase breve de 4 a 9 palabras, completa, y NO debe duplicar literalmente la descripción de escena, transición ni elemento visual. Responde solo JSON válido."
-      }]
-    },
-    contents: [{
-      role: "user",
-      parts: [{
-        text: [
-          conversationContext ? `Conversación reciente:\n${conversationContext}` : "",
-          `Filas a corregir:\n${JSON.stringify(compactRows)}`
-        ].filter(Boolean).join("\n\n")
-      }]
-    }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: responseSchema
-    }
-  };
-  const data = await authFetchJson("/api/gemini/generate", {
-    method: "POST",
-    body: JSON.stringify({
-      model: els.scriptModelSelect.value,
-      payload
-    })
-  });
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  const parsed = JSON.parse(rawText);
-  const mapped = new Map();
-  (Array.isArray(parsed?.rows) ? parsed.rows : []).forEach((item) => {
-    const index = Number(item?.index);
-    if (!Number.isFinite(index) || index < 0) return;
-    mapped.set(index, String(item?.onScreenText || "").trim());
-  });
-  return normalizedRows.map((row, index) => ({
-    ...row,
-    onScreenText: buildOnScreenText(mapped.get(index) || row.onScreenText || "", {
-      voiceOver: row.script || "",
-      sceneDescription: row.sceneDescription || "",
-      visual: row.visual || ""
-    })
-  }));
-}
-
-function buildOnScreenText(value = "", options = {}) {
-  const explicit = normalizeSimpleText(value);
-  const voiceOver = normalizeSimpleText(options?.voiceOver || options?.voiceOverText || "");
-  const sceneDescription = normalizeSimpleText(options?.sceneDescription || "");
-  const visual = normalizeSimpleText(options?.visual || options?.visualNotes || "");
-  const fallback = summarizeOnScreenTextFromVoiceOver(voiceOver || sceneDescription || visual);
-  if (!explicit) return fallback;
-  if (looksLikeTransitionOnly(explicit)) return fallback;
-  if (isWeakOnScreenText(explicit)) return fallback || explicit;
-  const explicitNorm = normalizeComparableCreativeText(explicit);
-  const visualNorm = normalizeComparableCreativeText(visual);
-  const sceneNorm = normalizeComparableCreativeText(sceneDescription);
-  if (explicitNorm && (explicitNorm === visualNorm || explicitNorm === sceneNorm)) {
-    return fallback || explicit;
-  }
-  if (countWords(explicit) > 12) {
-    return summarizeOnScreenTextFromVoiceOver(explicit) || fallback || explicit;
-  }
-  return explicit;
-}
-
-function looksLikeTransitionOnly(text = "") {
-  const clean = normalizeSimpleText(text).toLowerCase();
-  if (!clean) return true;
-  if (clean.length <= 24) {
-    if (/^(corte|corte rápido|corte rapido|disolvencia|fundido|barrido|zoom|paneo|fade|match cut|jump cut)/.test(clean)) {
-      return true;
-    }
-  }
-  return /\b(corte|disolvencia|fundido|barrido|zoom|paneo|fade|transici[oó]n)\b/.test(clean) && clean.length <= 36;
-}
-
-function ensureCompleteSentence(text = "") {
-  const clean = normalizeSimpleText(text);
-  if (!clean) return "";
-  if (/[.!?]$/.test(clean)) return clean;
-  return `${clean}.`;
-}
-
-function splitLongSentenceIntoChunks(sentence = "", maxWords = 14) {
-  const source = normalizeSimpleText(sentence);
-  if (!source) return [];
-  const safeMaxWords = Math.max(4, Number(maxWords) || 14);
-  const words = source.split(/\s+/).filter(Boolean);
-  if (words.length <= safeMaxWords) {
-    return [ensureCompleteSentence(source)];
-  }
-  const clauses = source.split(/(?<=[,;:])\s+/).map((item) => normalizeSimpleText(item)).filter(Boolean);
-  if (clauses.length > 1) {
-    const output = [];
-    let bucket = "";
-    let bucketWords = 0;
-    clauses.forEach((clause) => {
-      const clauseWords = countWords(clause);
-      if (!bucket) {
-        bucket = clause;
-        bucketWords = clauseWords;
-        return;
-      }
-      if ((bucketWords + clauseWords) <= safeMaxWords) {
-        bucket = `${bucket} ${clause}`.replace(/\s+/g, " ").trim();
-        bucketWords += clauseWords;
-        return;
-      }
-      output.push(ensureCompleteSentence(bucket));
-      bucket = clause;
-      bucketWords = clauseWords;
-    });
-    if (bucket) output.push(ensureCompleteSentence(bucket));
-    if (output.length) return output;
-  }
-  return [buildCompactEducationalSentence(source, safeMaxWords)].filter(Boolean);
-}
-
-function splitNarrationIntoCompleteScenes(text = "", options = {}) {
-  const source = normalizeSimpleText(text);
-  if (!source) return [];
-  const targetDialogueSec = Math.max(1, Number(options?.targetDialogueSec) || VIDEO_DIALOGUE_MAX_SEC);
-  const splitLongSentenceSec = Math.max(targetDialogueSec + 0.8, Number(options?.splitLongSentenceSec) || (targetDialogueSec + 0.8));
-  const maxWordsPerChunk = Math.max(6, Math.round(targetDialogueSec * SPEECH_WORDS_PER_SEC));
-  const sentences = splitTextIntoSentences(source);
-  if (!sentences.length) {
-    return splitLongSentenceIntoChunks(source, maxWordsPerChunk);
-  }
-  const output = [];
-  sentences.forEach((sentence) => {
-    const cleanSentence = ensureCompleteSentence(sentence);
-    if (!cleanSentence) return;
-    if (estimateSpeechDurationSec(cleanSentence) <= splitLongSentenceSec) {
-      output.push(cleanSentence);
-      return;
-    }
-    const chunks = splitLongSentenceIntoChunks(cleanSentence, maxWordsPerChunk);
-    if (!chunks.length) {
-      output.push(cleanSentence);
-      return;
-    }
-    output.push(...chunks.map((chunk) => ensureCompleteSentence(chunk)).filter(Boolean));
-  });
-  return output.length ? output : [ensureCompleteSentence(source)];
-}
-
-function splitCreativeVideoVoiceOverIntoChunks(text = "") {
-  const source = normalizeSimpleText(text);
-  if (!source) return [];
-  return splitNarrationIntoCompleteScenes(source, {
-    targetDialogueSec: 7,
-    splitLongSentenceSec: 7
-  })
-    .map((chunk) => ensureCompleteSentence(chunk))
-    .filter(Boolean);
-}
-
-function expandCreativeVideoRowsForTiming(rows = [], options = {}) {
-  const sourceRows = Array.isArray(rows) ? rows : [];
-  const expanded = [];
-  sourceRows.forEach((row, rowIndex) => {
-    const voiceOverText = normalizeSimpleText(row?.voiceOverText || row?.text || "");
-    const chunks = splitCreativeVideoVoiceOverIntoChunks(voiceOverText);
-    if (chunks.length <= 1 && countWords(voiceOverText) <= 17) {
-      expanded.push(row);
-      return;
-    }
-    const sourceVisualNotes = resolveCreativeVisualNotesText(row);
-    const sourceSceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
-    chunks.forEach((chunk, chunkIndex) => {
-      const nextRow = {
-        ...row,
-        id: makeId("row"),
-        durationSec: VIDEO_SCENE_MAX_SEC,
-        voiceOverText: chunk,
-        text: chunk,
-        sceneDescription: sourceSceneDescription || String(row?.sceneDescription || row?.scenePrompt || "").trim(),
-        scenePrompt: sourceSceneDescription || String(row?.scenePrompt || row?.sceneDescription || "").trim(),
-        onScreenText: chunkIndex === 0
-          ? String(row?.onScreenText || "").trim()
-          : buildCreativeOnScreenText(chunk, {
-            voiceOver: chunk,
-            sceneDescription: sourceSceneDescription,
-            visual: sourceVisualNotes,
-            prompt: options?.prompt || ""
-          }),
-        visualNotes: sourceVisualNotes,
-        videoDirective: String(row?.videoDirective || sourceVisualNotes || "").trim(),
-        notes: chunkIndex === 0
-          ? String(row?.notes || "").trim()
-          : String(row?.notes || "").trim(),
-        imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || [])
-      };
-      expanded.push(normalizeCreativeRow(nextRow, expanded.length, {
-        videoPreset: "creative",
-        strictVideoValidation: true,
-        validationStage: options?.validationStage || "video/create",
-        prompt: options?.prompt || ""
-      }));
-    });
-  });
-  return expanded;
-}
-
-function buildFallbackSceneDescriptionFromVoiceOver(voiceOver = "", transition = "", index = 0) {
-  return buildFallbackCreativeSceneDescriptionFromVoiceOver(voiceOver, transition, index);
-}
-
-function buildFallbackCreativeSceneDescriptionFromVoiceOver(voiceOver = "", transition = "", index = 0) {
-  const narration = normalizeSimpleText(voiceOver);
-  const transitionHint = normalizeSimpleText(transition);
-  const topic = trimWords(narration || `secuencia ${index + 1}`, 14);
-  const parts = [
-    `Escena cinematográfica en 16:9 que muestra: ${topic}.`,
-    "Priorizar atmósfera, acción clara y un beat visual memorable (sin estilo didáctico).",
-    transitionHint ? `Transición sugerida: ${transitionHint}.` : ""
-  ].filter(Boolean);
-  return parts.join(" ");
-}
-
-function buildFallbackCreativeVoiceOverFromSceneDescription(sceneDescription = "", transition = "", index = 0) {
-  const scene = trimWords(normalizeSimpleText(sceneDescription) || `una secuencia creativa ${index + 1}`, 16);
-  const transitionHint = trimWords(normalizeSimpleText(transition), 10);
-  const sentence = transitionHint
-    ? `La secuencia ${index + 1} muestra ${scene} y avanza con ${transitionHint}.`
-    : `La secuencia ${index + 1} muestra ${scene} con ritmo cinematográfico.`;
-  return ensureCompleteSentence(sentence);
-}
-
-function extractCreativeLocationQualifier(rawText = "") {
-  const source = normalizeSimpleText(rawText);
-  if (!source) return "";
-  const namedMatch = source.match(/\b(?:de|del)\s+(?:la|el|los|las)?\s*((?:doña|don)\s+[\p{L}\p{N}'’.-]+(?:\s+[\p{L}\p{N}'’.-]+){0,2})/iu)
-    || source.match(/\b(?:de|del)\s+([\p{L}\p{N}'’.-]+(?:\s+[\p{L}\p{N}'’.-]+){0,2})\b/iu);
-  if (namedMatch?.[1]) return normalizeSimpleText(namedMatch[1]);
-  const adjectiveHints = [];
-  if (/\b(desordenad[oa]|ca[oó]tic[oa]|suci[oa])\b/i.test(source)) adjectiveHints.push("desordenada");
-  if (/\b(oscur[oa]|nocturn[oa])\b/i.test(source)) adjectiveHints.push("oscura");
-  if (/\b(reluciente|brillante|impecable)\b/i.test(source)) adjectiveHints.push("reluciente");
-  return adjectiveHints[0] || "";
-}
-
-function refineCreativeLocationLabel(baseLabel = "", qualifier = "") {
-  const base = normalizeSimpleText(baseLabel);
-  const extra = normalizeSimpleText(qualifier);
-  if (!base || !extra) return base;
-  if (/^(de|del|de la|de las|de los)\b/i.test(extra)) {
-    return normalizeSimpleText(`${base} ${extra}`);
-  }
-  if (/\b(doña|don)\b/i.test(extra) || /^[A-ZÁÉÍÓÚÑ]/.test(extra)) {
-    return normalizeSimpleText(`${base} de ${extra}`);
-  }
-  return normalizeSimpleText(`${base} ${extra}`);
-}
-
-function buildCreativeLocationDescription(source = "", index = 0, contextPrompt = "") {
-  const rawCombined = [source, contextPrompt].filter(Boolean).join(" ");
-  const text = normalizeComparableCreativeText(rawCombined);
-  const qualifier = extractCreativeLocationQualifier(rawCombined);
-  if (!text) return `Exterior cinematográfico ${index + 1}`;
-  const keywordMap = [
-    [/\b(apartamento|depto|departamento|piso)\b/, qualifier ? `Interior de un apartamento ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de un apartamento"],
-    [/\b(cocina|comedor)\b/, qualifier ? `Interior de la cocina ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de una cocina"],
-    [/\b(restaurante|restaurant|bar|cafeteria|cafetería)\b/, qualifier ? `Interior de un restaurante ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de un restaurante"],
-    [/\b(casa|hogar|habitacion|habitación|sala|cuarto)\b/, qualifier ? `Interior de una casa ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de una casa"],
-    [/\b(montana|sierra|cerro|roca|acantilado|pico|cima)\b/, qualifier ? `Exterior de una montaña ${normalizeSimpleText(`de ${qualifier}`)}` : "Exterior de una montaña"],
-    [/\b(cueva|gruta|tunnel|tunel|pasadizo)\b/, qualifier ? `Interior de una cueva ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de una cueva"],
-    [/\b(bosque|selva|jungle|jungla)\b/, qualifier ? `Exterior de un bosque ${normalizeSimpleText(`de ${qualifier}`)}` : "Exterior de un bosque"],
-    [/\b(ciudad|calle|avenida|barrio|pueblo|aldea|mercado)\b/, qualifier ? `Exterior urbano ${normalizeSimpleText(`de ${qualifier}`)}` : "Exterior urbano"],
-    [/\b(laboratorio|taller|fabrica|fábrica|almacen|almacén)\b/, qualifier ? `Interior de un taller ${normalizeSimpleText(`de ${qualifier}`)}` : "Interior de un taller"],
-    [/\b(playa|mar|costa|puerto)\b/, qualifier ? `Exterior costero ${normalizeSimpleText(`de ${qualifier}`)}` : "Exterior costero"],
-    [/\b(desierto|arena)\b/, qualifier ? `Exterior desértico ${normalizeSimpleText(`de ${qualifier}`)}` : "Exterior desértico"],
-  ];
-  const hasNightTone = /\b(noche|oscuro|oscuridad)\b/.test(text);
-  for (const [pattern, label] of keywordMap) {
-    if (pattern.test(text)) {
-      let enriched = label;
-      if (qualifier) enriched = refineCreativeLocationLabel(enriched, qualifier);
-      if (hasNightTone && !/oscuro|nocturn/i.test(enriched)) {
-        enriched = `${enriched} oscuro`;
-      }
-      return normalizeSimpleText(enriched);
-    }
-  }
-  if (/\binterior\b/.test(text)) {
-    const fallback = qualifier
-      ? refineCreativeLocationLabel("Interior cinematográfico", qualifier)
-      : (hasNightTone ? "Interior oscuro" : "Interior cinematográfico");
-    return normalizeSimpleText(fallback);
-  }
-  if (/\bexterior\b/.test(text)) {
-    const fallback = qualifier
-      ? refineCreativeLocationLabel("Exterior cinematográfico", qualifier)
-      : (hasNightTone ? "Exterior nocturno" : "Exterior cinematográfico");
-    return normalizeSimpleText(fallback);
-  }
-  if (hasNightTone) return "Interior de un lugar oscuro";
-  return normalizeSimpleText(qualifier ? refineCreativeLocationLabel(`Interior cinematográfico ${index + 1}`, qualifier) : `Interior cinematográfico ${index + 1}`);
-}
-
-function buildCreativeVisualElementDescription(source = "", sceneDescription = "", index = 0, contextPrompt = "") {
-  const sourceText = normalizeComparableCreativeText([source, contextPrompt].filter(Boolean).join(" "));
-  const sceneText = normalizeComparableCreativeText(sceneDescription);
-  const joined = sourceText || sceneText;
-  if (!joined) return `Elemento visual central de la secuencia ${index + 1}`;
-  const subjectMap = [
-    [/\bfumigador\b/, "fumigador con mochila fumigadora"],
-    [/\bcucaracha\b/, "cucaracha gigante"],
-    [/\bmonstruo\b/, "antagonista monstruoso"],
-    [/\bprotagonista\b/, "protagonista en acción"],
-    [/\benergia limpia|energia limpia|energía limpia\b/, "fuente de energía limpia"],
-    [/\brobot\b/, "robot o dispositivo tecnológico"],
-    [/\bcarretera|camino|sendero\b/, "camino en movimiento"],
-    [/\btrampa\b/, "trampa improvisada"],
-    [/\bhumo|humo\b/, "humo o neblina"],
-  ];
-  const actionMap = [
-    [/\b(avanza|camina|corre|huye|entra|sale|sube|baja|apunta|rocia|rocía|ataca|se enfrenta|observa|esconde|negocia|traiciona|planea)\b/, "en movimiento"],
-    [/\b(amenaza|conflicto|giro|revela|aparece|encuentra|descubre)\b/, "con tensión narrativa"],
-    [/\b(dialogo|diálogo|habla|mira|reacciona)\b/, "con reacción visible"]
-  ];
-  const subject = subjectMap.find(([pattern]) => pattern.test(joined))?.[1] || "";
-  const action = actionMap.find(([pattern]) => pattern.test(joined))?.[1] || "";
-  const trimmed = trimWords(joined, 18);
-  const base = [subject, action].filter(Boolean).join(" ").trim();
-  if (base) return base;
-  return trimmed && trimmed !== sceneText ? trimmed : `Detalle visual de la secuencia ${index + 1}`;
-}
-
-function buildCreativeOnScreenText(value = "", options = {}) {
-  const explicit = normalizeSimpleText(value);
-  const source = explicit || options?.voiceOver || options?.sceneDescription || options?.visual || options?.prompt || "";
-  const summary = summarizeOnScreenTextFromVoiceOver(source, { maxWords: 5 });
-  const clean = normalizeSimpleText(summary || explicit);
-  if (!clean) return "";
-  return trimWords(clean, 5);
-}
-
-function isGenericCreativeVisualText(text = "") {
-  const normalized = normalizeSimpleText(text).toLowerCase();
-  if (!normalized) return true;
-  return [
-    /^detalle visual de la secuencia\s+\d+$/i,
-    /^elemento visual central de la secuencia\s+\d+$/i,
-    /^definir elemento visual\.?$/i,
-    /^visual\s+gen[eé]rico$/i,
-    /^prompts?\s+visual(es)?$/i
-  ].some((pattern) => pattern.test(normalized));
-}
-
-const CREATIVE_VISUAL_SHOT_HINTS = [
-  "plano abierto",
-  "primer plano",
-  "plano medio",
-  "contrapicado",
-  "travelling lateral",
-  "paneo lento",
-  "cámara en mano",
-  "zoom dramático"
-];
-
-function buildDistinctCreativeVisualNotes(row = {}, index = 0, previousVisualNotes = "", prompt = "") {
-  const sceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
-  const voiceOverText = normalizeSimpleText(row?.voiceOverText || row?.text || row?.notes || "");
-  const videoDirective = normalizeSimpleText(row?.videoDirective || "");
-  const explicitVisualCandidates = [
-    row?.videoDirective,
-    row?.visualNotes,
-    row?.visual,
-    row?.elementoVisual,
-    row?.elemento_visual,
-    row?.visualElement,
-    row?.visualElemento
-  ]
-    .map((value) => normalizeSimpleText(value))
-    .filter(Boolean)
-    .filter((value) => !isGenericCreativeVisualText(value));
-  if (explicitVisualCandidates.length) {
-    const explicitVisual = explicitVisualCandidates[0];
-    const previousKey = normalizeComparableCreativeText(previousVisualNotes);
-    const explicitKey = normalizeComparableCreativeText(explicitVisual);
-    if (explicitKey && previousKey && explicitKey === previousKey) {
-      const shotHint = CREATIVE_VISUAL_SHOT_HINTS[index % CREATIVE_VISUAL_SHOT_HINTS.length];
-      return normalizeSimpleText(`${explicitVisual}, ${shotHint}`);
-    }
-    return explicitVisual;
-  }
-  const source = [videoDirective, voiceOverText, sceneDescription, prompt].filter(Boolean).join(" ");
-  return normalizeSimpleText(buildCreativeVisualElementDescription(
-    source || voiceOverText || sceneDescription || `Detalle visual de la secuencia ${index + 1}`,
-    sceneDescription,
-    index,
-    prompt
-  ));
-}
-
-const CREATIVE_VIDEO_GENERIC_VOICEOVER_PATTERNS = [
-  /video educativo/i,
-  /escena did[aá]ctica/i,
-  /conversaci[oó]n u[íi]til y accionable/i,
-  /\bbienvenid[oa]s?\b.*\bvideo\b/i,
-  /\bbienvenid[oa]s?\s+a\s+este\s+video\b/i,
-  /\bvamos a tomar una idea\b/i,
-  /\babrimos la historia\b/i,
-  /\bel protagonista avanza\b/i,
-  /\bla historia escala\b/i,
-  /\bcerramos con una imagen\b/i,
-  /describe lugar, acción y atmósfera/i,
-  /describe lugar, accion y atmosfera/i,
-  /\bsecuencia\s+\d+\s*:\s*describe lugar/i
-];
-
-function buildCreativeVideoValidationError(stage = "video creativo", message = "", rowIndex = null) {
-  const label = String(stage || "video creativo").trim() || "video creativo";
-  const rowSuffix = Number.isFinite(rowIndex) ? ` (fila ${rowIndex + 1})` : "";
-  return new Error(`${label}: ${String(message || "salida inválida").trim()}${rowSuffix}`);
-}
-
-function isCreativeVoiceOverGeneric(text = "") {
-  const normalized = normalizeSimpleText(text).toLowerCase();
-  if (!normalized) return true;
-  return CREATIVE_VIDEO_GENERIC_VOICEOVER_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function validateCreativeVideoScriptOutput(script = {}, options = {}) {
-  const stage = String(options?.stage || "video creativo").trim() || "video creativo";
-  const rows = normalizeRows(script?.rows);
-  if (stage === "video/create") {
-    logVideoCreateDebug("validate", {
-      rows: rows.length,
-      genericTemplate: isLikelyEducationalTemplateForCreativeVideo(script),
-      sampleVoiceOver: String(rows[0]?.voiceOverText || rows[0]?.text || "").slice(0, 180),
-      sampleSceneDescription: String(rows[0]?.sceneDescription || rows[0]?.scenePrompt || rows[0]?.descripcionEscena || "").slice(0, 180),
-      sampleVisualNotes: String(rows[0]?.visualNotes || rows[0]?.visual || rows[0]?.elementoVisual || "").slice(0, 180),
-      sampleVideoDirective: String(rows[0]?.videoDirective || rows[0]?.direccionVideo || rows[0]?.direcciónVideo || "").slice(0, 180)
-    });
-  }
-  if (!rows.length) {
-    throw buildCreativeVideoValidationError(stage, "Gemini no devolvió filas válidas.");
-  }
-  if (isLikelyEducationalTemplateForCreativeVideo(script)) {
-    throw buildCreativeVideoValidationError(stage, "Gemini devolvió una plantilla genérica en lugar de un guion creativo.");
-  }
-  rows.forEach((row, index) => {
-    const voiceOverText = normalizeSimpleText(row?.voiceOverText || row?.text || "");
-    const sceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
-    const visualNotes = normalizeSimpleText(row?.visualNotes || row?.visual || "");
-    const videoDirective = normalizeSimpleText(row?.videoDirective || "");
-    const onScreenText = normalizeSimpleText(row?.onScreenText || "");
-
-    if (!voiceOverText) {
-      throw buildCreativeVideoValidationError(stage, "la columna Guion/voz en off está vacía.", index);
-    }
-    if (isCreativeVoiceOverGeneric(voiceOverText)) {
-      throw buildCreativeVideoValidationError(stage, "la columna Guion parece una plantilla genérica y no una voz en off real.", index);
-    }
-    if (countWords(voiceOverText) > 17 || estimateSpeechDurationSec(voiceOverText) > VIDEO_SCENE_MAX_SEC) {
-      throw buildCreativeVideoValidationError(stage, "la voz en off es demasiado larga y debe dividirse en escenas más cortas.", index);
-    }
-    if (!sceneDescription) {
-      throw buildCreativeVideoValidationError(stage, "falta la descripción de escena.", index);
-    }
-    if (/^escenario(?:\s+creativo)?\s+\d+$/i.test(sceneDescription) || /^(interior|exterior)\s+cinematogr[aá]fico(?:\s+\d+)?$/i.test(sceneDescription)) {
-      throw buildCreativeVideoValidationError(stage, "la descripción de escena es genérica.", index);
-    }
-    if (!visualNotes) {
-      throw buildCreativeVideoValidationError(stage, "falta el elemento visual.", index);
-    }
-    if (/^(detalle visual de la secuencia|elemento visual central de la secuencia)\s+\d+$/i.test(visualNotes)) {
-      throw buildCreativeVideoValidationError(stage, "el elemento visual es demasiado genérico.", index);
-    }
-    if (!videoDirective) {
-      throw buildCreativeVideoValidationError(stage, "falta la dirección de video.", index);
-    }
-    if (sceneDescription.toLowerCase() === voiceOverText.toLowerCase()) {
-      throw buildCreativeVideoValidationError(stage, "la descripción de escena repite la voz en off.", index);
-    }
-    if (onScreenText && onScreenText.length > 60) {
-      throw buildCreativeVideoValidationError(stage, "el texto en pantalla es demasiado largo.", index);
-    }
-    if (onScreenText && countWords(onScreenText) < 2) {
-      throw buildCreativeVideoValidationError(stage, "el texto en pantalla es demasiado corto.", index);
-    }
-  });
-  return script;
-}
-
-async function buildCreativeVideoScriptFromPromptTable(prompt = "", session = null) {
-  const composed = await composeEducationalVideoTable({
-    text: prompt,
-    html: ""
-  }, session, {
-    useGeminiStructure: false,
-    useGeminiSceneSplit: true,
-    failOnSplitError: true,
-    useGeminiOnScreen: false
-  });
-  const canonicalRows = Array.isArray(composed?.rows) ? composed.rows : [];
-  if (!canonicalRows.length) {
-    throw buildCreativeVideoValidationError("video/compose", "no se pudieron extraer filas del guion de entrada.");
-  }
-
-  const creativeRows = canonicalRows.map((row, index) => {
-    const scriptText = normalizeSimpleText(row?.script || row?.voiceOverText || row?.text || "");
-    const transition = normalizeSimpleText(row?.transition || "");
-    const sceneDescription = normalizeSimpleText(row?.sceneDescription || row?.scenePrompt || "");
-    const visualElement = normalizeSimpleText(row?.visual || row?.elementoVisual || row?.visualNotes || "");
-    const videoDirective = normalizeSimpleText(row?.videoDirective || "");
-    if (!scriptText) {
-      throw buildCreativeVideoValidationError("video/compose", "la columna Guion/voz en off está vacía.", index);
-    }
-    if (!sceneDescription) {
-      throw buildCreativeVideoValidationError("video/compose", "falta la descripción de escena.", index);
-    }
-    if (!visualElement) {
-      throw buildCreativeVideoValidationError("video/compose", "falta el elemento visual.", index);
-    }
-    if (!videoDirective) {
-      throw buildCreativeVideoValidationError("video/compose", "falta la dirección de video.", index);
-    }
-    return normalizeCreativeRow({
-      id: makeId("row"),
-      durationSec: VIDEO_SCENE_MAX_SEC,
-      voiceOverText: scriptText,
-      sceneDescription,
-      onScreenText: buildCreativeOnScreenText(String(row?.onScreenText || "").trim(), {
-        voiceOver: scriptText,
-        sceneDescription,
-        visual: visualElement
-      }),
-      transition,
-      visualNotes: visualElement,
-      mediaCue: deriveMediaCueFromTransition(transition),
-      videoDirective,
-      scenePrompt: sceneDescription,
-      imagePrompts: [visualElement || sceneDescription]
-    }, index, { videoPreset: "creative", strictVideoValidation: true, validationStage: "video/compose" });
-  });
-
-  const expandedRows = expandCreativeVideoRowsForTiming(creativeRows, {
-    validationStage: "video/compose"
-  });
-  validateCreativeVideoScriptOutput({ rows: expandedRows }, { stage: "video/compose" });
-  const topic = trimWords(String(expandedRows[0]?.voiceOverText || expandedRows[0]?.sceneDescription || "Video creativo"), 8);
-  const sessionVoice = getCreativeVideoConfig(session)?.globalVoiceName || "Kore";
-  return validateCreativeVideoScriptOutput(normalizeScriptPayload({
-    videoMode: true,
-    videoPreset: "creative",
-    episodeTitle: `Guion técnico desde tabla: ${topic}`,
-    summary: "Tabla convertida automáticamente al formato del panel creativo.",
-    hosts: ["Narrador"],
-    creativeVideoConfig: normalizeCreativeVideoConfig({
-      ...(session?.creativeVideoConfig || {}),
-      globalVoiceName: sessionVoice,
-      voiceMimeType: "audio/ogg"
-    }),
-    rows: expandedRows
-  }, {
-    session,
-    videoMode: true,
-    videoPreset: "creative",
-    strictVideoValidation: true,
-    validationStage: "video/compose"
-  }), { stage: "video/compose" });
-}
-
-function parseGeminiResponseJson(data) {
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  try {
-    return JSON.parse(rawText.replace(/```json\n?|```/g, "").trim());
-  } catch (_) {
-    return {};
-  }
-}
-
-async function buildPodcastScriptFromPromptTable(prompt = "", session = null) {
-  const schema = buildScriptGenerationResponseSchema({ videoMode: false });
-  const systemInstruction = [
-    "Eres un experto productor de podcasts.",
-    "El usuario te proporcionará un texto que puede contener una tabla (Excel/Word) o una idea narrativa.",
-    "Tu tarea es extraer o generar una estructura de podcast y devolver un JSON válido siguiendo el esquema.",
-    "Mapea las columnas correctamente: Locutor/Personaje -> speaker, Guion/Diálogo/Texto -> text, Expresión -> expression, Media/Audio -> mediaCue, Notas -> notes.",
-    "Si el texto es narrativo, divídelo en escenas conversacionales naturales.",
-    "Si faltan tiempos (durationSec), asume 15-20 segundos por fila.",
-    "Responde SOLO JSON válido siguiendo estrictamente el esquema proporcionado. PROHIBIDO incluir markdown, bloques de código o texto explicativo."
-  ].join("\n");
-
-  const payload = {
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: schema
-    }
-  };
-
-  const data = await authFetchJson("/api/gemini/generate", {
-    method: "POST",
-    body: JSON.stringify({
-      model: els.scriptModelSelect.value,
-      payload
-    })
-  });
-
-  const script = parseGeminiResponseJson(data);
-  const normalized = normalizeScriptPayload(script, { session, videoMode: false });
-  const topic = trimWords(String(normalized?.rows?.[0]?.text || "Podcast desde tabla"), 8);
-
-  return {
-    ...normalized,
-    episodeTitle: `Podcast desde tabla: ${topic}`,
-    summary: `Podcast estructurado a partir de entrada del usuario.`
-  };
-}
-
-function applyAuthoritativeCreativeTableToScript(script = {}, tableScript = null, session = null) {
-  const baseScript = normalizeScriptPayload(script || {}, {
-    session,
-    videoMode: true,
-    skipOptimize: true,
-    strictVideoValidation: true,
-    validationStage: "video/compose"
-  });
-  const videoPreset = normalizeVideoPreset(tableScript?.videoPreset || baseScript?.videoPreset || "creative");
-  const authoritativeRows = Array.isArray(tableScript?.rows) ? tableScript.rows : [];
-  if (!authoritativeRows.length) return baseScript;
-  const mergedRows = authoritativeRows.map((tableRow, index) => {
-    const voiceOverText = normalizeSimpleText(tableRow?.voiceOverText || tableRow?.text || "");
-    const sceneDescription = normalizeSimpleText(tableRow?.sceneDescription || tableRow?.scenePrompt || "");
-    const visualNotes = normalizeSimpleText(tableRow?.visualNotes || tableRow?.visual || tableRow?.elementoVisual || "");
-    const videoDirective = normalizeSimpleText(tableRow?.videoDirective || "");
-    const onScreenText = normalizeSimpleText(tableRow?.onScreenText || "");
-    if (!voiceOverText) {
-      throw buildCreativeVideoValidationError("video/compose", "la columna Guion/voz en off está vacía.", index);
-    }
-    if (!sceneDescription) {
-      throw buildCreativeVideoValidationError("video/compose", "falta la descripción de escena.", index);
-    }
-    if (!visualNotes) {
-      throw buildCreativeVideoValidationError("video/compose", "falta el elemento visual.", index);
-    }
-    if (!videoDirective) {
-      throw buildCreativeVideoValidationError("video/compose", "falta la dirección de video.", index);
-    }
-    const merged = normalizeCreativeRow({
-      ...tableRow,
-      durationSec: Number(tableRow?.durationSec || SHORT_SCENE_MAX_SEC),
-      voiceOverText,
-      sceneDescription,
-      transition: String(tableRow?.transition || tableRow?.visualNotes || tableRow?.notes || "").trim(),
-      onScreenText,
-      visualNotes,
-      scenePrompt: String(tableRow?.sceneDescription || tableRow?.scenePrompt || "").trim(),
-      imagePrompts: Array.isArray(tableRow?.imagePrompts) ? tableRow.imagePrompts : []
-    }, index, { videoPreset, strictVideoValidation: true, validationStage: "video/compose" });
-    merged.durationSec = VIDEO_SCENE_MAX_SEC;
-    return merged;
-  });
-  return validateCreativeVideoScriptOutput(normalizeScriptPayload({
-    ...baseScript,
-    videoMode: true,
-    hosts: ["Narrador"],
-    rows: mergedRows,
-    summary: String(baseScript?.summary || "Guion técnico ajustado desde tabla proporcionada por el usuario.").trim(),
-    creativeVideoConfig: normalizeCreativeVideoConfig({
-      ...(baseScript?.creativeVideoConfig || {}),
-      ...(tableScript?.creativeVideoConfig || {})
-    })
-  }, {
-    session,
-    videoMode: true,
-    skipOptimize: true,
-    strictVideoValidation: true,
-    validationStage: "video/compose"
-  }), { stage: "video/compose" });
-}
-
-function rewritePromptForEducationalVideo(prompt = "") {
-  const text = String(prompt || "").trim();
-  if (!text) return "";
-  return text
-    .replace(/\bpodcast\b/gi, "video creativo")
-    .replace(/\bpodcasts\b/gi, "videos creativos")
-    .replace(/\bepisodio\b/gi, "escena")
-    .replace(/\bepisodios\b/gi, "escenas")
-    .replace(/\bhost\b/gi, "narrador")
-    .replace(/\bhosts\b/gi, "narradores")
-    .replace(/\bconversacional\b/gi, "cinematográfico");
-}
-
-function rewriteScenarioPromptForEducationalVideo(prompt = "") {
-  const text = String(prompt || "").trim();
-  if (!text) return "";
-  return rewritePromptForEducationalVideo(text)
-    .replace(/\bcabina premium de podcast\b/gi, "set cinematográfico premium")
-    .replace(/\bcabina de radio premium\b/gi, "set cinematográfico premium")
-    .replace(/\bcabina de radio\b/gi, "set cinematográfico")
-    .replace(/\bcabina de podcast\b/gi, "set cinematográfico")
-    .replace(/\bestudio (?:premium )?de radio\b/gi, "entorno visual creativo premium")
-    .replace(/\bestudio (?:premium )?de podcast\b/gi, "entorno visual creativo premium")
-    .replace(/\bestudio editorial premium para podcast\/video podcast\b/gi, "entorno editorial creativo premium")
-    .replace(/\bpodcast\/video podcast\b/gi, "video creativo")
-    .replace(/\bpodcast\b/gi, "video creativo");
-}
-
-function enforceScriptMinimums(baseScript = {}, options = {}) {
-  const minRows = Math.max(0, Number(options.minRows || 0));
-  const minDurationSec = Math.max(0, Number(options.minDurationSec || 0));
-  const hosts = Array.isArray(baseScript?.hosts) && baseScript.hosts.length
-    ? baseScript.hosts
-    : ["Host A", "Host B"];
-  const rows = Array.isArray(baseScript?.rows) ? baseScript.rows.map((row) => ({ ...row })) : [];
-  if (!rows.length) return baseScript;
-  const seedRows = rows.map((row) => ({ ...row }));
-
-  while (rows.length < minRows) {
-    const source = seedRows[rows.length % seedRows.length] || rows[0];
-    rows.push({
-      ...source,
-      id: makeId("row"),
-      speaker: source.speaker || hosts[0] || "Host A",
-      durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Number(source.durationSec) || SHORT_SCENE_MAX_SEC)),
-      notes: `${String(source.notes || "").trim()} ${String(source.notes || "").trim() ? "· " : ""}Expandir con ejemplo adicional.`.trim()
-    });
-  }
-
-  let total = countTotalDuration(rows);
-  if (minDurationSec > total) {
-    let guard = 0;
-    while (total < minDurationSec && guard < 3000) {
-      let progressed = false;
-      for (let i = 0; i < rows.length && total < minDurationSec; i += 1) {
-        const current = Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, Number(rows[i].durationSec) || SHORT_SCENE_MAX_SEC));
-        if (current >= SHORT_SCENE_MAX_SEC) continue;
-        const delta = Math.min(1, SHORT_SCENE_MAX_SEC - current, minDurationSec - total);
-        rows[i].durationSec = current + delta;
-        total += delta;
-        progressed = true;
-      }
-      if (!progressed && total < minDurationSec) {
-        const seed = rows[rows.length - 1] || rows[0];
-        rows.push({
-          ...seed,
-          id: makeId("row"),
-          speaker: seed.speaker || hosts[0] || "Host A",
-          durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(SHORT_SCENE_MAX_SEC, minDurationSec - total)),
-          mediaCue: "Sin media",
-          notes: `${String(seed.notes || "").trim()} ${String(seed.notes || "").trim() ? "· " : ""}Bloque extra para alcanzar duración objetivo.`.trim()
-        });
-        total = countTotalDuration(rows);
-      }
-      guard += 1;
-    }
-  }
-
-  return {
-    ...baseScript,
-    rows: optimizeRowsForShortScenes(rows, {
-      maxSec: SHORT_SCENE_MAX_SEC,
-      minSec: SHORT_SCENE_MIN_SEC,
-      hosts
-    })
-  };
-}
-
-function mergeWithPreviousScript(generated = {}, previous = {}, options = {}) {
-  const preserveStructure = options?.preserveStructure === true;
-  const videoMode = options?.videoMode === true || generated?.videoMode === true || previous?.videoMode === true;
-  const generatedRows = Array.isArray(generated?.rows) ? generated.rows : [];
-  const previousRows = Array.isArray(previous?.rows) ? previous.rows : [];
-  if (!previousRows.length) return generated;
-  if (!preserveStructure) return generated;
-
-  const targetCount = previousRows.length;
-  const mergedRows = [];
-  for (let i = 0; i < targetCount; i += 1) {
-    const prev = previousRows[i] || previousRows[previousRows.length - 1] || {};
-    const next = generatedRows[i] || null;
-    if (!next) {
-      mergedRows.push({
-        ...prev,
-        id: makeId("row"),
-        text: String(prev.text || "").trim(),
-        notes: String(prev.notes || "").trim()
-      });
-      continue;
-    }
-    mergedRows.push({
-      ...prev,
-      ...next,
-      id: makeId("row"),
-      speaker: normalizeSpeakerLabel(next.speaker || prev.speaker || "Host A", prev.speaker || "Host A"),
-      expression: EXPRESSIONS.includes(next.expression) ? next.expression : (prev.expression || "Neutral"),
-      durationSec: Math.max(SHORT_SCENE_MIN_SEC, Math.min(180, Number(next.durationSec) || Number(prev.durationSec) || SHORT_SCENE_MAX_SEC)),
-      mediaCue: MEDIA_CUES.includes(next.mediaCue) ? next.mediaCue : (prev.mediaCue || "Sin media"),
-      text: String(next.text || prev.text || "").trim() || String(prev.text || "").trim(),
-      notes: String(next.notes || prev.notes || "").trim()
-    });
-  }
-
-  return {
-    ...generated,
-    episodeTitle: String(generated?.episodeTitle || previous?.episodeTitle || (videoMode ? "Video creativo" : "Podcast")).trim(),
-    summary: String(generated?.summary || previous?.summary || "").trim(),
-    hosts: Array.isArray(generated?.hosts) && generated.hosts.length ? generated.hosts : (previous.hosts || ["Host A", "Host B"]),
-    rows: optimizeRowsForShortScenes(mergedRows, {
-      maxSec: SHORT_SCENE_MAX_SEC,
-      minSec: SHORT_SCENE_MIN_SEC,
-      hosts: Array.isArray(generated?.hosts) && generated.hosts.length ? generated.hosts : (previous.hosts || ["Host A", "Host B"])
-    })
-  };
-}
-
-function buildScriptGenerationResponseSchema(options = {}) {
-  const videoMode = options?.videoMode === true;
-  const rowProperties = {
-    speaker: { type: "string" },
-    expression: { type: "string" },
-    durationSec: { type: "number" },
-    mediaCue: { type: "string" },
-    text: { type: "string" },
-    notes: { type: "string" },
-    voiceOverText: { type: "string" },
-    sceneDescription: { type: "string" },
-    onScreenText: { type: "string" },
-    transition: { type: "string" },
-    visualNotes: { type: "string" },
-    videoDirective: { type: "string" },
-    scenePrompt: { type: "string" },
-    imagePrompts: {
-      type: "array",
-      items: { type: "string" }
-    }
-  };
-  const rowRequired = videoMode
-    ? ["durationSec", "voiceOverText", "sceneDescription", "onScreenText", "transition", "visualNotes", "videoDirective", "scenePrompt", "imagePrompts"]
-    : ["speaker", "text", "durationSec"];
-  return {
-    type: "object",
-    properties: {
-      episodeTitle: { type: "string" },
-      summary: { type: "string" },
-      hosts: {
-        type: "array",
-        items: { type: "string" }
-      },
-      rows: {
-        type: "array",
-        minItems: videoMode ? 1 : undefined,
-        items: {
-          type: "object",
-          properties: rowProperties,
-          ...(rowRequired.length ? { required: rowRequired } : {})
-        }
-      }
-    }
-  };
-}
-
-function enforceEducationalVideoSemantics(script = {}, sessionSnapshot = null) {
-  const base = normalizeScriptPayload(script || {}, {
-    session: sessionSnapshot,
-    videoMode: true,
-    skipOptimize: true
-  });
-  const rows = Array.isArray(base?.rows) ? base.rows : [];
-  const normalizedRows = [];
-  rows.forEach((row, index) => {
-    const narration = normalizeSimpleText(row?.voiceOverText || row?.text || "");
-    const notes = String(row?.visualNotes || row?.notes || "").replace(/\s+/g, " ").trim();
-    const transition = String(row?.transition || "").replace(/\s+/g, " ").trim()
-      || (String(row?.mediaCue || "").trim() && String(row?.mediaCue || "").trim() !== "Sin media"
-        ? String(row?.mediaCue || "").trim()
-        : "Corte limpio");
-    const objective = notes || `Desarrollar la idea principal de la secuencia ${index + 1}.`;
-    const sourceDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
-    const sceneDescription = !sourceDescription || looksLikeTransitionOnly(sourceDescription)
-      ? buildFallbackSceneDescriptionFromVoiceOver(narration, notes || row?.videoDirective || "", index)
-      : sourceDescription;
-    const scenePrompt = rewriteScenarioPromptForEducationalVideo(
-      String(row?.scenePrompt || sceneDescription).replace(/\s+/g, " ").trim()
-    );
-    const directiveBase = String(row?.videoDirective || "").replace(/\s+/g, " ").trim();
-    const videoDirective = rewriteScenarioPromptForEducationalVideo(
-      directiveBase || `Objetivo creativo: ${objective}.`
-    );
-    const imagePrompts = normalizeVideoImagePrompts(
-      row?.imagePrompts?.length ? row.imagePrompts : buildVideoSceneImagePrompts({ ...row, scenePrompt }, sessionSnapshot)
-    ).map((prompt) => rewriteScenarioPromptForEducationalVideo(prompt));
-    const sceneSegments = splitNarrationIntoCompleteScenes(
-      narration || `Explica la idea clave de la secuencia ${index + 1} con lenguaje claro.`,
-      { targetDialogueSec: VIDEO_DIALOGUE_MAX_SEC }
-    );
-    sceneSegments.forEach((segment, segmentIndex) => {
-      const resolvedText = ensureCompleteSentence(segment) || `Explica la idea clave de la secuencia ${index + 1}.`;
-      const segmentObjective = segmentIndex === 0
-        ? objective
-        : `${objective} Continuación de la secuencia ${index + 1}.`;
-      normalizedRows.push({
-        ...row,
-        id: makeId("row"),
-        speaker: (Array.isArray(sessionSnapshot?.script?.hosts) && sessionSnapshot.script.hosts.length)
-          ? sessionSnapshot.script.hosts[0]
-          : "Narrador",
-        expression: "Neutral",
-        durationSec: VIDEO_SCENE_MAX_SEC,
-        voiceOverText: resolvedText,
-        sceneDescription: sceneDescription || scenePrompt,
-        onScreenText: buildOnScreenText(row?.onScreenText || "", {
-          voiceOver: resolvedText,
-          sceneDescription: sceneDescription || scenePrompt,
-          visual: String(row?.visualNotes || row?.visual || "").replace(/\s+/g, " ").trim()
-        }),
-        transition: segmentIndex === 0 ? transition : "Corte limpio",
-        visualNotes: segmentObjective,
-        notes: segmentObjective,
-        text: resolvedText,
-        scenePrompt,
-        videoDirective,
-        imagePrompts
-      });
-    });
-  });
-  return normalizeScriptPayload({
-    ...base,
-    videoMode: true,
-    hosts: ["Narrador"],
-    rows: normalizedRows
-  }, {
-    session: sessionSnapshot,
-    videoMode: true,
-    skipOptimize: true
-  });
-}
-
-function isLikelyEducationalTemplateForCreativeVideo(script = {}) {
-  const rows = normalizeRows(script?.rows);
-  const sample = rows.slice(0, 6).map((row) => String(row?.voiceOverText || row?.text || "").toLowerCase()).join("\n");
-  if (!sample) return false;
-  return (
-    sample.includes("video educativo") ||
-    sample.includes("escena didáctica") ||
-    sample.includes("escena didactica") ||
-    sample.includes("conversación útil y accionable") ||
-    sample.includes("conversacion util y accionable") ||
-    sample.includes("módulo claro") ||
-    sample.includes("modulo claro") ||
-    sample.includes("bienvenidos a este video educativo") ||
-    sample.includes("bienvenidos a este video") ||
-    sample.includes("vamos a tomar una idea y convertirla") ||
-    sample.includes("describe lugar, acción y atmósfera") ||
-    sample.includes("describe lugar, accion y atmosfera") ||
-    /secuencia\s+\d+\s*:\s*describe lugar/.test(sample)
-  );
-}
-
-async function generateScriptWithGeminiCore(prompt, sessionSnapshot = null, constraints = null, pipeline = "podcast") {
-  const videoMode = pipeline === "video";
-  const videoPreset = videoMode ? "creative" : null;
-  const forceNewScript = constraints?.forceNewScript === true;
-  const constrainedHosts = Array.isArray(constraints?.hosts) && constraints.hosts.length
-    ? constraints.hosts.map((host) => normalizeSpeakerLabel(host, "")).filter(Boolean)
-    : [];
-  const preferredSpeakers = constrainedHosts.length
-    ? constrainedHosts
-    : Array.from(new Set([
-      ...getSpeakerOptions(sessionSnapshot || {}),
-      ...DEFAULT_HOSTS
-    ])).slice(0, Math.min(VOICES.length, 10));
-  const hasExistingScript = hasMeaningfulScript(sessionSnapshot || {});
-  const existingRowsCount = Math.max(0, Number(sessionSnapshot?.script?.rows?.length || 0));
-  const requestedMinDurationSec = extractRequestedMinDurationSec(prompt);
-  const requestedSceneRange = extractRequestedSceneRange(prompt);
-  const forcedSceneCount = Number(constraints?.sceneCount) || 0;
-  const forcedHostCount = Number(constraints?.hostCount) || constrainedHosts.length || 0;
-  const forcedMinWords = Number(constraints?.minWords) || 0;
-  const forcedMaxWords = Number(constraints?.maxWords) || 0;
-  const isVideoPodcast = !videoMode && resolveVideoContentType(sessionSnapshot) === "videopodcast";
-  const isCreativePodcast = !videoMode && resolveVideoContentType(sessionSnapshot) === "creative";
-  const contentModeLabel = videoMode
-    ? "video creativo"
-    : (resolveVideoContentType(sessionSnapshot, { videoMode: false }) === "videopodcast" ? "video podcast" : "podcast");
-  const effectivePrompt = prompt;
-  const strictAlternationRule = videoMode
-    ? (videoPreset === "creative"
-      ? "Puedes repetir el mismo locutor en escenas consecutivas cuando ayude al ritmo narrativo."
-      : "Puedes repetir el mismo locutor en escenas consecutivas cuando ayude a la progresión pedagógica.")
-    : (forcedHostCount > 1
-      ? "Balancea la conversación alternando locutores (Host A, Host B, Host A, Host B...). Solo repite el mismo locutor en escenas consecutivas si es estrictamente necesario para la explicación."
-      : "La secuencia de locutores NO tiene que alternar de forma fija; puede repetirse el mismo locutor en escenas consecutivas cuando el contenido lo requiera.");
-  const shortenRequested = isShortenRequest(prompt);
-  const rebuildRequested = isRebuildRequest(prompt);
-  const isRefinement = hasExistingScript && !rebuildRequested && !forceNewScript;
-  const speakerNameMap = getSpeakerNameMap(sessionSnapshot || {});
-  const speakerVoiceMap = getSpeakerVoiceMap(sessionSnapshot || {});
-  const speakerVoiceLines = preferredSpeakers.map((host) => `${host} = ${normalizeLiveVoiceName(speakerVoiceMap[host], resolveSpeakerVoiceName(host, sessionSnapshot))}`);
-  const dynamicMinRows = isRefinement && !shortenRequested
-    ? Math.max(4, Math.min(120, existingRowsCount))
-    : 4;
-  const dynamicMaxRowsBase = isRefinement && !shortenRequested && !rebuildRequested && existingRowsCount > 0
-    ? Math.max(dynamicMinRows, existingRowsCount)
-    : Math.min(220, Math.max(dynamicMinRows, existingRowsCount || 40));
-  const requestedMinRows = requestedSceneRange?.minRows || 0;
-  const requestedMaxRows = requestedSceneRange?.maxRows || 0;
-  const dynamicMinRowsFinal = requestedMinRows
-    ? Math.max(dynamicMinRows, requestedMinRows)
-    : dynamicMinRows;
-  const dynamicMaxRowsFinal = requestedMaxRows
-    ? Math.max(dynamicMinRowsFinal, requestedMaxRows)
-    : Math.max(dynamicMinRowsFinal, dynamicMaxRowsBase);
-  const responseSchema = buildScriptGenerationResponseSchema({ videoMode });
-  const validationStage = String(constraints?.validationStage || (videoMode ? "video creativo" : "podcast")).trim() || "video creativo";
-  if (videoMode) {
-    logVideoCreateDebug("start", {
-      pipeline,
-      preset: String(videoPreset || ""),
-      stage: validationStage,
-      prompt: String(prompt || "").slice(0, 260),
-      sessionId: String(sessionSnapshot?.id || "").trim(),
-      existingRows: Number(sessionSnapshot?.script?.rows?.length || 0),
-      responseSchemaRowsRequired: true
-    });
-  }
-  const contextualInstructions = [
-    isRefinement
-      ? (videoMode
-        ? "Refina y mejora el guion actual usando el contexto de la conversación y el guion existente. Mantén el enfoque de video corto creativo para redes sociales."
-        : "Refina y mejora el guion actual usando el contexto de la conversacion y el guion existente.")
-      : (videoMode
-        ? "Genera un guion nuevo de video corto creativo para redes sociales a partir de la idea del usuario."
-        : "Genera un guion nuevo de podcast a partir de la idea del usuario."),
-    videoMode
-      ? "Entrega una estructura lista para UI tabular de video corto creativo. No uses framing de podcast ni didáctico por defecto."
-      : "Entrega una estructura lista para UI tabular de podcast.",
-    videoMode
-      ? "Cada fila debe avanzar una mini-historia clara con gag/beat visual y ritmo ágil."
-      : "Cada fila debe ser util para produccion y contener texto conversacional natural.",
-    videoMode
-      ? "Prohibido usar plantillas educativas. No escribas frases tipo: 'Bienvenidos a este video educativo', 'Hoy abrimos una conversación útil y accionable' o 'Vamos a tomar una idea y convertirla...'. Entra directo a la historia."
-      : (isCreativePodcast ? "IMPORTANTE: Aunque el enfoque sea creativo/narrativo/dramático, el formato DEBE ser un podcast conversacional con interacción fluida entre los locutores. PROHIBIDO usar estilo de narrador o voz en off descriptiva. Haz que los personajes hablen entre sí sobre lo que sucede, reaccionen y mantengan la dinámica de un programa de radio o podcast premium." : ""),
-    videoMode
-      ? "Obligatorio: en la escena 1 menciona al menos 2 detalles específicos del prompt del usuario (personajes, lugar, amenaza, objetivo, etc.)."
-      : "",
-    videoMode
-      ? "Organiza mentalmente cada escena como fila de tabla con estas columnas: Tiempo, Guion, Descripción de escena, Texto en pantalla, Transición y Elemento visual."
-      : "",
-    videoMode
-      ? (constrainedHosts.length > 0
-        ? `Locutores preferidos para esta narración de video: ${constrainedHosts.join(", ")}.`
-        : "Usa voz en off narrativa única (Narrador). Puedes mencionar personajes/acciones en la voz en off y en la descripción de escena.")
-      : [
-        `Locutores preferidos para este episodio: ${preferredSpeakers.join(", ")}.`,
-        ...preferredSpeakers.map(h => {
-          const roleId = String(h || "").trim();
-          const roleBase = roleId.replace(/\s+\d+$/, "").trim();
-          const desc = SPEAKER_ROLE_DESCRIPTIONS[roleBase];
-          return desc ? `Personalidad de ${roleId}: ${desc}` : "";
-        }).filter(Boolean)
-      ].join("\n"),
-    videoMode ? "Define cada escena con: durationSec, voiceOverText, sceneDescription y transition." : (constrainedHosts.length ? `Locutores obligatorios para este episodio: ${constrainedHosts.join(", ")}.` : ""),
-    videoMode ? "Mapeo obligatorio: Tiempo=durationSec, Guion=voiceOverText, Descripción de escena=sceneDescription (solo ubicación breve del lugar), Texto en pantalla=onScreenText, Transición=transition, Elemento visual=visualNotes." : "",
-    videoMode ? "Opcional por escena: onScreenText y visualNotes." : `Si necesitas locutores extra, usa solo este catálogo: ${VOICES.join(", ")}.`,
-    videoMode ? "La voz en off global se configura en el panel; no pidas voz por locutor." : "Los IDs de locutor (Host A, Host B, etc.) son solo metadatos internos para asignar turnos.",
-    videoMode ? "" : "No menciones nombres propios de locutores dentro del diálogo.",
-    videoMode ? "" : "No hagas que los locutores se llamen por su nombre entre ellos salvo que el usuario lo pida explícitamente.",
-    videoMode ? "" : `Asignación de voz por locutor (no la mezcles): ${speakerVoiceLines.join(" | ")}.`,
-    videoMode ? "" : "No escribas literalmente 'Host A', 'Host B', etc., dentro de los textos hablados.",
-    videoMode
-      ? "Evita entrevista, mesa redonda, conducción radial o cualquier estructura de podcast. Escribe como guion técnico de video creativo."
-      : (isCreativePodcast ? "PROHIBIDO usar estilo de narrador o voz en off. Los locutores deben vivir la escena conversando e interactuando de forma dinámica." : "Haz que interactúen entre sí de forma natural sin usar nombres, etiquetas ni vocativos de identidad."),
-    videoMode
-      ? `Objetivo operativo: cada escena dura ${VIDEO_SCENE_MAX_SEC} segundos con narración de ~${VIDEO_DIALOGUE_MAX_SEC} segundos y debe contener una frase completa (sin cortar oraciones).`
-      : `Objetivo operativo: escenas cortas, entre ${SHORT_SCENE_MIN_SEC} y ${SHORT_SCENE_MAX_SEC} segundos aprox. Si un diálogo es largo, divídelo en más escenas consecutivas.`,
-    videoMode ? "IMPORTANTE: cada escena debe tener un dialogo o guion de no más de 17 palabras, pueden ser menos pero no más." : "",
-    videoMode ? "IMPORTANTE: la descripción de escena puede ser breve o más descriptiva, pero debe ser específica y concreta. Evita etiquetas vacías como 'Interior de una cocina' sin detalle adicional." : "",
-    videoMode ? "" : strictAlternationRule,
-    videoMode ? "" : `Usa solo estas expresiones cuando sea posible: ${EXPRESSIONS.join(", ")}.`,
-    videoMode ? "" : `Usa solo estas media cues cuando sea posible: ${MEDIA_CUES.join(", ")}.`,
-    isRefinement && !shortenRequested ? `No reduzcas número de escenas por debajo de ${dynamicMinRowsFinal}, a menos que el usuario pida resumir.` : "",
-    isRefinement && !shortenRequested && !rebuildRequested && existingRowsCount > 0 && !requestedSceneRange && forcedSceneCount <= 0
-      ? `Mantén exactamente ${existingRowsCount} escenas y preserva la estructura/base del guion actual, mejorando claridad y profundidad sin reiniciarlo desde cero.`
-      : "",
-    requestedSceneRange
-      ? `El usuario pidió un rango de escenas entre ${requestedSceneRange.minRows} y ${requestedSceneRange.maxRows}. Devuelve una cantidad dentro de ese rango.`
-      : "",
-    forcedSceneCount > 0 ? `Regla obligatoria: devuelve exactamente ${forcedSceneCount} escenas.` : "",
-    !videoMode && forcedHostCount > 0 ? `Regla obligatoria: usa exactamente ${Math.max(1, Math.min(VOICES.length, forcedHostCount))} locutores del catálogo permitido.` : "",
-    forcedMinWords > 0 || forcedMaxWords > 0
-      ? `Regla obligatoria: cada escena debe tener entre ${Math.max(1, forcedMinWords || 1)} y ${Math.max(Math.max(1, forcedMinWords || 1), forcedMaxWords || Math.max(1, forcedMinWords || 1))} palabras.`
-      : "",
-    videoMode ? "Regla obligatoria: si necesitas ampliar, crea más escenas del mismo locutor en lugar de cortar frases a la mitad." : "",
-    videoMode ? `Regla obligatoria: cada escena debe durar ${VIDEO_SCENE_MAX_SEC} segundos y la voz en off por escena debe rondar ${VIDEO_DIALOGUE_MAX_SEC} segundos.` : "",
-    videoMode ? "Regla obligatoria: no cortar frases; segmenta solo por oraciones completas." : "",
-    videoMode ? "Regla obligatoria: cada escena debe terminar con frase completa (sin cortes)." : "",
-    videoMode ? "Regla obligatoria: devuelve voiceOverText en cada escena." : "",
-    videoMode ? "Regla obligatoria: devuelve sceneDescription en cada escena." : "",
-    videoMode ? "Regla obligatoria: devuelve transition en cada escena (ej: corte rápido, disolvencia, barrido)." : "",
-    videoMode ? "Regla obligatoria: devuelve scenePrompt e imagePrompts para cada escena." : "",
-    videoMode ? "Regla obligatoria: sceneDescription debe ser solo una ubicación breve del lugar (ej. interior de una casa, calle nocturna, sótano, cocina, apartamento)." : "",
-    videoMode ? "Regla obligatoria: visualNotes/videoDirective debe describir con detalle el lugar, personajes, acción, cámara, luz y estilo visual; es el prompt de VEO específico y distinto por fila. No reutilices el mismo texto." : "",
-    videoMode ? "Regla obligatoria: onScreenText debe ser una frase corta completa, de 2 a 6 palabras, clave para la escena." : "",
-    videoMode
-      ? (videoPreset === "creative"
-        ? "Regla obligatoria: devuelve videoDirective en cada escena con acción creativa concreta (bloqueo, gag, tensión, sorpresa, etc.)."
-        : "Regla obligatoria: devuelve videoDirective en cada escena con acción pedagógica concreta.")
-      : "",
-    videoMode
-      ? (videoPreset === "creative"
-        ? "Regla obligatoria: cada escena debe avanzar la historia/gag y apoyarse en un beat visual sugerido."
-        : "Regla obligatoria: cada escena debe explicar o enseñar algo concreto y apoyarse en imagen o gráfico sugerido.")
-      : "",
-    requestedMinDurationSec > 0 ? `La duración total debe ser como mínimo ${secondsToClock(requestedMinDurationSec)}.` : "",
-    isRefinement ? "Conserva lo valioso del guion actual y modifica lo necesario segun la nueva instruccion." : ""
-  ].filter(Boolean).join("\n");
-
-  const conversationContext = (sessionSnapshot && isRefinement) ? buildChatContext(sessionSnapshot) : "";
-  const scriptContext = (sessionSnapshot && isRefinement) ? buildScriptContext(sessionSnapshot.script || {}) : "";
-
-  const payload = {
-    systemInstruction: {
-      parts: [{
-        text: videoMode
-          ? "Eres un guionista y productor senior de videos cortos creativos para redes sociales. Convierte la idea del usuario en un guion técnico para un editor visual. No uses podcast ni formato de locución radial. Devuelve escenas con durationSec, voiceOverText, sceneDescription y transition; además scenePrompt, imagePrompts y videoDirective para producción visual. Opcionalmente devuelve onScreenText y visualNotes. IMPORTANTE: sceneDescription puede ser breve o más descriptiva, pero debe ser específica y concreta; evita etiquetas vacías. Mientras que visualNotes/videoDirective debe describir en detalle el lugar, personajes y acción. IMPORTANTE: cada escena debe tener un dialogo o guion de no más de 17 palabras, pueden ser menos pero no más. Mantén el tono/estilo del usuario (comedia, terror, acción, etc.). Si el usuario envía mensajes posteriores, revisa y mejora el guion existente. Responde solo JSON válido, sin markdown. PROHIBIDO incluir metadatos o instrucciones en los campos de texto."
-          : "Eres un productor senior de podcasts. Convierte la idea del usuario en una estructura profesional para un editor tipo studio creator. Prioriza siempre el diálogo interactivo, natural y fluido entre los locutores sobre la narración estática o descriptiva. Organiza cada escena como una fila con estas columnas: Locutor (speaker), Expresión (expression), Tiempo (durationSec), Media Cue (mediaCue), Guion (text) y Notas (notes). Si el usuario envia mensajes posteriores, debes revisar y mejorar el guion existente, no responder de forma aislada. Responde SOLO JSON válido, sin markdown. IMPORTANTE: El campo 'text' debe contener ÚNICAMENTE el diálogo del locutor; está terminantemente PROHIBIDO incluir instrucciones técnicas, nombres de voces, parámetros del sistema o fragmentos del prompt en el contenido del diálogo."
-      }]
-    },
-    contents: [{
-      role: "user",
-      parts: [{
-        text: [
-          contextualInstructions,
-          conversationContext ? `Conversacion reciente:\n${conversationContext}` : "",
-          scriptContext ? `Guion actual editable:\n${scriptContext}` : "",
-          `Nueva instruccion del usuario (${contentModeLabel}): ${effectivePrompt}`
-        ].join("\n")
-      }]
-    }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: responseSchema,
-      ...(videoMode && videoPreset === "creative" ? { temperature: 0.85 } : {})
-    }
-  };
-
-  let data = null;
-  try {
-    data = await authFetchJson("/api/gemini/generate", {
-      method: "POST",
-      body: JSON.stringify({
-        model: els.scriptModelSelect.value,
-        payload
-      })
-    });
-    if (videoMode) {
-      logVideoCreateDebug("gemini-response", {
-        hasCandidates: Array.isArray(data?.candidates),
-        candidateCount: Array.isArray(data?.candidates) ? data.candidates.length : 0,
-        promptFeedback: data?.promptFeedback ? {
-          blockReason: String(data?.promptFeedback?.blockReason || ""),
-          blockReasonMessage: String(data?.promptFeedback?.blockReasonMessage || ""),
-          safetyRatings: Array.isArray(data?.promptFeedback?.safetyRatings) ? data.promptFeedback.safetyRatings.length : 0
-        } : null
-      });
-    }
-  } catch (error) {
-    const message = String(error?.message || "").toLowerCase();
-    const schemaStateOverflow = message.includes("too many states")
-      || message.includes("schema produces a constraint");
-    if (!schemaStateOverflow) throw error;
-    const fallbackPayload = {
-      ...payload,
-      generationConfig: {
-        ...(payload.generationConfig || {}),
-        responseMimeType: "application/json"
-      }
-    };
-    delete fallbackPayload.generationConfig.responseJsonSchema;
-    data = await authFetchJson("/api/gemini/generate", {
-      method: "POST",
-      body: JSON.stringify({
-        model: els.scriptModelSelect.value,
-        payload: fallbackPayload
-      })
-    });
-    if (videoMode) {
-      logVideoCreateDebug("gemini-response-fallback", {
-        hasCandidates: Array.isArray(data?.candidates),
-        candidateCount: Array.isArray(data?.candidates) ? data.candidates.length : 0
-      });
-    }
-  }
-
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  if (videoMode) {
-    logVideoCreateDebug("raw-text", {
-      length: String(rawText || "").length,
-      preview: String(rawText || "").slice(0, 260)
-    });
-  }
-  let parsed = null;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (parseError) {
-    if (videoMode) {
-      logVideoCreateDebug("parse-error", {
-        message: String(parseError?.message || parseError || ""),
-        rawTextPreview: String(rawText || "").slice(0, 260)
-      });
-    }
-    throw parseError;
-  }
-  if (videoMode) {
-    logVideoCreateDebug("parsed", {
-      topLevelKeys: Object.keys(parsed || {}).slice(0, 20),
-      rowsLength: Array.isArray(parsed?.rows) ? parsed.rows.length : 0
-    });
-  }
-  let normalized = null;
-  try {
-    normalized = normalizeScriptPayload(parsed, {
-      session: sessionSnapshot,
-      skipOptimize: videoMode || Number(constraints?.sceneCount) > 0,
-      videoMode,
-      videoPreset,
-      prompt,
-      strictVideoValidation: videoMode,
-      validationStage
-    });
-  } catch (normalizeError) {
-    if (videoMode) {
-      logVideoCreateDebug("normalize-error", {
-        message: String(normalizeError?.message || normalizeError || ""),
-        topLevelKeys: Object.keys(parsed || {}).slice(0, 20),
-        rowsLength: Array.isArray(parsed?.rows) ? parsed.rows.length : 0,
-        firstRowKeys: Array.isArray(parsed?.rows) && parsed.rows[0] && typeof parsed.rows[0] === "object"
-          ? Object.keys(parsed.rows[0]).slice(0, 20)
-          : [],
-        firstRowVoiceOver: String(parsed?.rows?.[0]?.voiceOverText || parsed?.rows?.[0]?.text || parsed?.rows?.[0]?.guion || parsed?.rows?.[0]?.script || "").slice(0, 180),
-        firstRowScene: String(parsed?.rows?.[0]?.sceneDescription || parsed?.rows?.[0]?.scenePrompt || parsed?.rows?.[0]?.descripcionEscena || "").slice(0, 180),
-        firstRowVisual: String(parsed?.rows?.[0]?.visualNotes || parsed?.rows?.[0]?.visual || parsed?.rows?.[0]?.elementoVisual || "").slice(0, 180),
-        firstRowDirective: String(parsed?.rows?.[0]?.videoDirective || parsed?.rows?.[0]?.direccionVideo || parsed?.rows?.[0]?.direcciónVideo || "").slice(0, 180)
-      });
-    }
-    throw normalizeError;
-  }
-  if (videoMode) {
-    logVideoCreateDebug("normalized", {
-      rows: Array.isArray(normalized?.rows) ? normalized.rows.length : 0,
-      firstVoiceOver: String(normalized?.rows?.[0]?.voiceOverText || normalized?.rows?.[0]?.text || "").slice(0, 180),
-      firstSceneDescription: String(normalized?.rows?.[0]?.sceneDescription || normalized?.rows?.[0]?.scenePrompt || "").slice(0, 180)
-    });
-  }
-  if (videoMode && videoPreset === "creative" && Array.isArray(normalized?.rows)) {
-    normalized = {
-      ...normalized,
-      rows: expandCreativeVideoRowsForTiming(normalized.rows, {
-        prompt,
-        validationStage
-      })
-    };
-  }
-  if (videoMode) {
-    validateCreativeVideoScriptOutput(normalized, { stage: validationStage });
-  }
-  if (videoMode) {
-    logVideoCreateDebug("validated", {
-      rows: Array.isArray(normalized?.rows) ? normalized.rows.length : 0
-    });
-  }
-  if (videoMode && Array.isArray(normalized?.rows)) {
-    // console.log("[podcaster-video] normalize-result", {
-    //   rows: normalized.rows.length,
-    //   firstText: String(normalized.rows[0]?.voiceOverText || normalized.rows[0]?.text || "").slice(0, 120),
-    //   firstScene: String(normalized.rows[0]?.sceneDescription || normalized.rows[0]?.scenePrompt || "").slice(0, 120)
-    // });
-  }
-  if (Array.isArray(normalized?.rows)) {
-    normalized.rows = normalized.rows.map((row) => ({
-      ...row,
-      text: sanitizeSpeakerMentionsInDialogue(row.text, sessionSnapshot, normalized.hosts),
-      notes: sanitizeSpeakerMentionsInDialogue(row.notes, sessionSnapshot, normalized.hosts),
-      videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
-      scenePrompt: normalizeVideoScenePrompt(row?.scenePrompt || "", row, sessionSnapshot),
-      imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || [])
-    }));
-  }
-  return normalized;
-}
-
-async function generatePodcastScript(prompt, sessionSnapshot = null, constraints = null) {
-  const safeConstraints = {
-    ...(constraints && typeof constraints === "object" ? constraints : {}),
-    videoMode: false
-  };
-  return generateScriptWithGeminiCore(prompt, sessionSnapshot, safeConstraints, "podcast");
-}
-
-async function generateVideoScript(prompt, sessionSnapshot = null, constraints = null) {
-  const effectivePrompt = rewritePromptForEducationalVideo(prompt);
-  const safeConstraints = {
-    ...(constraints && typeof constraints === "object" ? constraints : {}),
-    videoMode: true,
-    videoPreset: "creative",
-    validationStage: "video/create"
-  };
-  logVideoCreateDebug("generateVideoScript", {
-    prompt: String(effectivePrompt || "").slice(0, 220),
-    sessionId: String(sessionSnapshot?.id || "").trim()
-  });
-  const generated = await generateScriptWithGeminiCore(effectivePrompt, sessionSnapshot, safeConstraints, "video");
-  return {
-    ...generated,
-    videoMode: true,
-    videoPreset: "creative"
-  };
-}
-
-async function generateEducationalVideoScript(prompt, sessionSnapshot = null, constraints = null) {
-  return generateVideoScript(prompt, sessionSnapshot, {
-    ...(constraints && typeof constraints === "object" ? constraints : {}),
-    videoMode: true,
-    videoPreset: "creative"
-  });
-}
-
-function generateFallbackScript(prompt, options = {}) {
-  const cleanPrompt = String(prompt || "")
-    .replace(/--- CONFIGURACIÓN TÉCNICA OBLIGATORIA[\s\S]*?--- FIN DE CONFIGURACIÓN ---/gi, "")
-    .replace(/INSTRUCCIÓN DEL USUARIO:\s*/gi, "")
-    .trim();
-  const topic = cleanPrompt
-    .replace(/^(?:genera(?:r)?|crea|haz|escribe(?:r)?)\s+(?:un\s+)?(?:video educativo|video|guion nuevo de video educativo|guion nuevo de podcast|guion)\s+(?:sobre|para|a partir de la idea del usuario[:.]?)\s*/i, "")
-    .replace(/^escribe(?:r)?\s+(?:un\s+)?guion\s+para\s+el\s+podcast\s+sobre/i, "")
-    .replace(/^nueva instrucción del usuario(?:\s*\([^)]+\))?:\s*/i, "")
-    .trim() || "una idea nueva";
-  const videoMode = options?.videoMode === true;
-  const videoPreset = videoMode ? normalizeVideoPreset(options?.videoPreset || "creative") : null;
-  if (videoMode) {
-    throw new Error("Video creativo sin fallback: Gemini falló y la tabla demo está deshabilitada.");
-  }
-  return normalizeScriptPayload({
-    prompt,
-    episodeTitle: `Podcast sobre ${topic.slice(0, 42)}`,
-    summary: `Episodio construido en modo demo alrededor de ${topic}.`,
-    hosts: ["Host A", "Host B"],
-    rows: [
-      {
-        speaker: "Host A",
-        expression: "Cálido",
-        durationSec: 16,
-        mediaCue: "Intro musical",
-        text: `Bienvenidos. Hoy vamos a explorar ${topic} con un enfoque claro y útil.`,
-        notes: "Abrir con promesa de valor."
-      },
-      {
-        speaker: "Host B",
-        expression: "Curioso",
-        durationSec: 22,
-        mediaCue: "Sin media",
-        text: `Partamos de una pregunta simple: por qué ${topic} importa ahora mismo para nuestra audiencia.`,
-        notes: "Tono conversacional."
-      },
-      {
-        speaker: "Host A",
-        expression: "Inspirador",
-        durationSec: 28,
-        mediaCue: "Transición",
-        text: `Vamos a desglosarlo en tres ideas accionables para que este episodio no se quede solo en teoría.`,
-        notes: "Introducir bloques."
-      },
-      {
-        speaker: "Host B",
-        expression: "Serio",
-        durationSec: 24,
-        mediaCue: "Efecto sutil",
-        text: `También vamos a revisar errores comunes, lenguaje recomendado y cómo aterrizarlo en un caso real.`,
-        notes: "Preparar desarrollo."
-      },
-      {
-        speaker: "Host A",
-        expression: "Enérgico",
-        durationSec: 18,
-        mediaCue: "CTA final",
-        text: "Si este enfoque te sirve, guarda esta sesión, ajusta el guión y conviértelo en producción.",
-        notes: "Cerrar con CTA."
-      }
-    ]
-  }, { videoMode: false, prompt });
-}
-
-function isNetworkFetchFailure(error = null) {
-  const text = String(error?.message || error || "").toLowerCase();
-  return text.includes("failed to fetch")
-    || text.includes("networkerror")
-    || text.includes("load failed")
-    || text.includes("network request failed");
-}
-
-async function isLocalApiReachable() {
-  if (!hasAvailableApiBase()) return false;
-  let timeout = 0;
-  try {
-    const controller = new AbortController();
-    timeout = setTimeout(() => controller.abort(), 2600);
-    const response = await fetch(buildApiUrl("/api/health"), {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal
-    });
-    return response.ok;
-  } catch (_) {
-    return false;
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
-function connectScriptSnapshotToPanel(scriptSnapshot = {}, options = {}) {
-  const session = options?.session || getActiveSession();
-  if (!session) return null;
-  const reason = String(options?.reason || "auto-connect").trim() || "auto-connect";
-  try {
-    stopPodcastPlayback();
-    stopRowAudio();
-    stopGeminiLiveSession().catch(() => { });
-  } catch (_) {
-    // best-effort
-  }
-  backgroundDialogueAudioWarmupToken = 0;
-
-  const activeDisfluencyDefaults = normalizeDisfluencyConfig(session?.disfluencyDefaults || DEFAULT_DISFLUENCY_CONFIG);
-  const connectedScript = compactScriptForPanelConnection(scriptSnapshot || {}, session);
-  const nextScript = applyDisfluencyDefaultsToScriptRows(connectedScript, activeDisfluencyDefaults);
-  const updatedSession = upsertActiveSession((current) => {
-    const hosts = Array.isArray(nextScript.hosts) && nextScript.hosts.length ? nextScript.hosts : getSpeakerOptions(current);
-    const maps = buildSpeakerMapsForHosts(hosts, current, {
-      ...(options?.snapshots || {}),
-      videoMode: options?.videoMode === true,
-      videoPreset: nextScript?.videoPreset
-    });
-    return {
-      ...current,
-      videoMode: options?.videoMode === true,
-      videoContentType: options?.videoMode === true ? "creative" : "none",
-      script: nextScript,
-      speakerVoiceMap: maps.voiceMap,
-      speakerExpressionMap: maps.expressionMap,
-      speakerNameMap: maps.nameMap,
-      speakerScenarioMap: maps.scenarioMap,
-      disfluencyDefaults: normalizeDisfluencyConfig(activeDisfluencyDefaults),
-      dialogueVideoMap: {},
-      dialogueAudioMap: {}
-    };
-  });
-
-  logPodcasterLiveDebug("script-connected", {
-    reason,
-    videoMode: options?.videoMode === true,
-    preset: String(nextScript?.videoPreset || ""),
-    rows: Number(nextScript?.rows?.length || 0)
-  });
-
-  resetPodcastStudioSessionUiState(updatedSession);
-  renderPodcastVideoShell(getActiveSession());
-  syncPodcastStudioInspector(getActiveSession());
-  if (options?.openSidepanel === true) {
-    setSidepanelOpen(true);
-  }
-  return updatedSession;
-}
-
-async function handleGenerate(prompt, options = {}) {
-  const displayPrompt = String(options?.displayPrompt || prompt || "").trim();
-  const generationPrompt = String(options?.generationPrompt || prompt || "").trim();
-  const userMessageText = String(options?.userMessageText || displayPrompt || generationPrompt).trim();
-  const userMessageHtml = String(options?.userMessageHtml || "").trim();
-  if (!generationPrompt) return;
-  const sessionBeforeUpdate = getActiveSession();
-  const generationSessionId = String(sessionBeforeUpdate?.id || state.activeSessionId || "").trim();
-  const explicitConstraints = normalizeGenerationConstraints(options?.constraints || {
-    videoMode: isCurrentModeVideo()
-  });
-  const tableMode = String(options?.tableMode || "").trim().toLowerCase();
-  explicitConstraints.validationStage = explicitConstraints.videoMode === true
-    ? (tableMode === "compose" ? "video/compose" : "video/create")
-    : (tableMode === "compose" ? "podcast/compose" : "podcast");
-  const shortenRequested = isShortenRequest(generationPrompt);
-  const rebuildRequested = isRebuildRequest(generationPrompt);
-  const wantsNewCreativeVideoScript = explicitConstraints.videoMode === true
-    && explicitConstraints.videoPreset === "creative"
-    && (tableMode === "create" || tableMode === "create-from-table");
-  if (wantsNewCreativeVideoScript && !shortenRequested && !rebuildRequested) {
-    explicitConstraints.forceNewScript = true;
-  }
-  const effectiveGenerationPrompt = (explicitConstraints.videoMode === true && explicitConstraints.videoPreset !== "creative")
-    ? rewritePromptForEducationalVideo(generationPrompt)
-    : generationPrompt;
-  const chatDisplayPrompt = String(userMessageText || displayPrompt || generationPrompt)
-    .replace(/--- CONFIGURACIÓN TÉCNICA OBLIGATORIA[\s\S]*?--- FIN DE CONFIGURACIÓN ---/gi, "")
-    .replace(/INSTRUCCIÓN DEL USUARIO:\s*/gi, "")
-    .trim();
-  addChatMessage("user", chatDisplayPrompt, userMessageHtml ? { html: userMessageHtml } : {});
-  setGenerationStatus("Paso 3/3: Generando contenido...", "is-busy", { sessionId: generationSessionId });
-
-  try {
-    let script = null;
-    const strictConfigMode = explicitConstraints.sceneCount > 0;
-    const isRefinement = hasMeaningfulScript(sessionBeforeUpdate || {});
-    const requestedMinDurationSec = extractRequestedMinDurationSec(effectiveGenerationPrompt);
-    const requestedSceneRange = extractRequestedSceneRange(effectiveGenerationPrompt);
-    const requestedSceneWordRange = extractRequestedSceneWordRange(effectiveGenerationPrompt);
-    const effectiveSceneRange = explicitConstraints.sceneCount > 0
-      ? { minRows: explicitConstraints.sceneCount, maxRows: explicitConstraints.sceneCount }
-      : requestedSceneRange;
-    const effectiveWordRange = explicitConstraints.videoMode === true
-      ? null
-      : (explicitConstraints.minWords > 0 || explicitConstraints.maxWords > 0)
-        ? { minWords: explicitConstraints.minWords || 1, maxWords: explicitConstraints.maxWords || Math.max(1, explicitConstraints.minWords || 1) }
-        : requestedSceneWordRange;
-    const preserveStructure = isRefinement
-      && !strictConfigMode
-      && !shortenRequested
-      && !rebuildRequested
-      && !effectiveSceneRange
-      && explicitConstraints.forceNewScript !== true;
-    const previousRowsCount = Number(sessionBeforeUpdate?.script?.rows?.length || 0);
-    const previousDuration = countTotalDuration(sessionBeforeUpdate?.script?.rows || []);
-    const fallbackMinRows = !shortenRequested
-      ? Math.max(4, previousRowsCount || 0, Number(effectiveSceneRange?.minRows || 0))
-      : Math.max(4, Number(effectiveSceneRange?.minRows || 0));
-    const fallbackMaxRows = Math.max(fallbackMinRows, Number(effectiveSceneRange?.maxRows || 220));
-    const fallbackMinDuration = shortenRequested ? requestedMinDurationSec : Math.max(requestedMinDurationSec, previousDuration || 0);
-    try {
-      if (tableMode === "compose") {
-        if (explicitConstraints.videoMode === true) {
-          script = await buildCreativeVideoScriptFromPromptTable(effectiveGenerationPrompt, sessionBeforeUpdate);
-        } else {
-          script = await buildPodcastScriptFromPromptTable(effectiveGenerationPrompt, sessionBeforeUpdate);
-        }
-      } else if (strictConfigMode) {
-        setGenerationStatus("Paso 2/3: Analizando configuración + chat...", "is-busy", { sessionId: generationSessionId });
-        const strictResult = await generateWithGeminiStrictConstraints(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints);
-        script = strictResult.script;
-        if (strictResult.issues?.length) {
-          addChatMessage("system", `No se pudo cumplir al 100% la configuración tras 3 intentos: ${strictResult.issues.join(" | ")}`);
-        }
-      } else {
-        if (explicitConstraints.videoMode === true) {
-          script = await generateVideoScript(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints);
-        } else {
-          script = await generatePodcastScript(effectiveGenerationPrompt, sessionBeforeUpdate, explicitConstraints);
-          script = mergeWithPreviousScript(script, sessionBeforeUpdate?.script || {}, {
-            preserveStructure,
-            videoMode: explicitConstraints.videoMode === true
-          });
-          if (Array.isArray(script?.rows) && script.rows.length > fallbackMaxRows) {
-            script = {
-              ...script,
-              rows: script.rows.slice(0, fallbackMaxRows)
-            };
-          }
-          script = enforceScriptMinimums(script, {
-            minRows: fallbackMinRows,
-            minDurationSec: fallbackMinDuration
-          });
-          script = {
-            ...script,
-            rows: optimizeRowsForShortScenes(script?.rows || [], {
-              maxSec: SHORT_SCENE_MAX_SEC,
-              minSec: SHORT_SCENE_MIN_SEC,
-              hosts: script?.hosts || getSpeakerOptions(sessionBeforeUpdate || {})
-            })
-          };
-          if (effectiveWordRange) {
-            script = {
-              ...script,
-              rows: enforceSceneWordBounds(script?.rows || [], effectiveWordRange)
-            };
-          }
-        }
-      }
-      if (explicitConstraints.videoMode === true) {
-        validateCreativeVideoScriptOutput(script, { stage: explicitConstraints.validationStage });
-      }
-      addScriptAssistantMessage(script, {
-        isRefinement: isRefinement && !rebuildRequested && explicitConstraints.forceNewScript !== true,
-        session: sessionBeforeUpdate,
-        preserveExactRows: strictConfigMode || explicitConstraints.videoMode === true,
-        videoMode: explicitConstraints.videoMode === true
-      });
-      if (options?.connectToPanel !== false) {
-        connectScriptSnapshotToPanel(script, {
-          session: sessionBeforeUpdate,
-          reason: "generate-success",
-          videoMode: explicitConstraints.videoMode === true,
-          openSidepanel: explicitConstraints.videoMode === true
-        });
-      }
-    } catch (error) {
-      if (explicitConstraints.videoMode === true) {
-        throw error;
-      }
-      if (sessionBeforeUpdate?.script?.rows?.length) {
-        if (strictConfigMode) {
-          script = forceHostsAndAlternation(sessionBeforeUpdate.script, explicitConstraints, sessionBeforeUpdate);
-        } else {
-          script = enforceScriptMinimums(sessionBeforeUpdate.script, {
-            minRows: fallbackMinRows,
-            minDurationSec: fallbackMinDuration
-          });
-          script = {
-            ...script,
-            rows: optimizeRowsForShortScenes(script?.rows || [], {
-              maxSec: SHORT_SCENE_MAX_SEC,
-              minSec: SHORT_SCENE_MIN_SEC,
-              hosts: script?.hosts || getSpeakerOptions(sessionBeforeUpdate || {})
-            })
-          };
-          if (effectiveWordRange) {
-            script = {
-              ...script,
-              rows: enforceSceneWordBounds(script?.rows || [], effectiveWordRange)
-            };
-          }
-        }
-        if (explicitConstraints.videoMode === true && hasMeaningfulScript(sessionBeforeUpdate)) {
-          validateCreativeVideoScriptOutput(script, { stage: explicitConstraints.validationStage });
-        }
-        let detail = `Gemini falló (${error.message}). Conservé tu guion actual y apliqué ajuste de duración/escenas en lugar de reemplazarlo por un demo corto.`;
-        if (isNetworkFetchFailure(error)) {
-          const apiUp = await isLocalApiReachable();
-          detail = apiUp
-            ? "Gemini falló por un problema de red/CORS temporal. Conservé tu guion actual y apliqué ajuste de duración/escenas."
-            : "Gemini falló porque el backend local no responde (API 8787 caída). Conservé tu guion actual. Reinicia con `npm run dev:local`.";
-        }
-        addChatMessage(
-          "system",
-          detail
-        );
-      } else {
-        if (explicitConstraints.videoMode === true) {
-          throw error;
-        }
-        script = generateFallbackScript(effectiveGenerationPrompt, {
-          videoMode: explicitConstraints.videoMode === true,
-          videoPreset: explicitConstraints.videoPreset
-        });
-        if (strictConfigMode) {
-          script = forceHostsAndAlternation(script, explicitConstraints, sessionBeforeUpdate);
-        } else {
-          script = enforceScriptMinimums(script, {
-            minRows: Math.max(6, fallbackMinRows),
-            minDurationSec: Math.max(240, fallbackMinDuration)
-          });
-          script = {
-            ...script,
-            rows: optimizeRowsForShortScenes(script?.rows || [], {
-              maxSec: SHORT_SCENE_MAX_SEC,
-              minSec: SHORT_SCENE_MIN_SEC,
-              hosts: script?.hosts || getSpeakerOptions(sessionBeforeUpdate || {})
-            })
-          };
-          if (effectiveWordRange) {
-            script = {
-              ...script,
-              rows: enforceSceneWordBounds(script?.rows || [], effectiveWordRange)
-            };
-          }
-        }
-        if (explicitConstraints.videoMode === true) {
-          validateCreativeVideoScriptOutput(script, { stage: explicitConstraints.validationStage });
-        }
-        addChatMessage("system", explicitConstraints.videoMode === true
-          ? `No se pudo usar Gemini (${error.message}).`
-          : `No se pudo usar Gemini (${error.message}). Generé un borrador extendido para que sigas editando.`);
-      }
-      addScriptAssistantMessage(script, {
-        isRefinement: Boolean(sessionBeforeUpdate?.script?.rows?.length),
-        session: sessionBeforeUpdate,
-        preserveExactRows: true,
-        videoMode: explicitConstraints.videoMode === true
-      });
-      if (options?.connectToPanel !== false) {
-        connectScriptSnapshotToPanel(script, {
-          session: sessionBeforeUpdate,
-          reason: "generate-fallback",
-          videoMode: explicitConstraints.videoMode === true,
-          openSidepanel: explicitConstraints.videoMode === true
-        });
-      }
-    }
-
-    upsertActiveSession((session) => ({
-      ...session,
-      prompt: displayPrompt || generationPrompt,
-      title: buildShortSessionTitle(script?.episodeTitle || displayPrompt || generationPrompt)
-    }));
-
-    const connected = options?.connectToPanel !== false;
-    setGenerationStatus(
-      explicitConstraints.videoMode === true
-        ? (connected ? "Guión creativo de video conectado al panel" : "Guión creativo de video listo en el chat")
-        : (connected ? "Guion conectado al panel" : "Guion listo en el chat"),
-      "is-live",
-      { sessionId: generationSessionId }
-    );
-  } catch (error) {
-    addChatMessage("system", `Fallo al generar el guion: ${error.message}`);
-    setGenerationStatus("Error", "", { sessionId: generationSessionId });
-  }
-}
+// [Gemini Script Generator Code Extracted to podcaster-script-generator.js]
 
 async function connectLive() {
   if (els.connectLiveBtn) els.connectLiveBtn.disabled = true;
@@ -28239,7 +21290,7 @@ async function rewriteVoiceOverTextWithGemini(rowId = "", options = {}) {
   };
   try {
     if (triggerBtn) {
-      setButtonLoadingState(triggerBtn, true, { loadingTitle: "Reformulando guion con Gemini..." });
+      window.setButtonLoadingState(triggerBtn, true, { loadingTitle: "Reformulando guion con Gemini..." });
     }
     setGenerationStatus(`Reformulando guion de escena ${rowIndex + 1}...`, "is-busy", { sessionId });
     const data = await authFetchJson("/api/gemini/generate", {
@@ -28261,7 +21312,7 @@ async function rewriteVoiceOverTextWithGemini(rowId = "", options = {}) {
     }
     const normalizedRewrite = videoPreset === "creative"
       ? normalizeSimpleText(rewritten)
-      : rewriteScenarioPromptForEducationalVideo(rewritten);
+      : window.rewriteScenarioPromptForEducationalVideo(rewritten);
     const originalBackup = String(row?.voiceOverOriginalText || "").replace(/\s+/g, " ").trim() || currentText;
     upsertActiveSession((current) => ({
       ...current,
@@ -28287,7 +21338,7 @@ async function rewriteVoiceOverTextWithGemini(rowId = "", options = {}) {
     return false;
   } finally {
     if (triggerBtn) {
-      setButtonLoadingState(triggerBtn, false);
+      window.setButtonLoadingState(triggerBtn, false);
     }
   }
 }
@@ -28397,7 +21448,7 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
 
   try {
     if (triggerBtn) {
-      setButtonLoadingState(triggerBtn, true, { loadingTitle: "Regenerando elemento visual con Gemini..." });
+      window.setButtonLoadingState(triggerBtn, true, { loadingTitle: "Regenerando elemento visual con Gemini..." });
     }
     setGenerationStatus(`Regenerando elemento visual de escena ${rowIndex + 1}...`, "is-busy", { sessionId });
     const data = await authFetchJson("/api/gemini/generate", {
@@ -28419,7 +21470,7 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
     }
     const normalizedRewrite = videoPreset === "creative"
       ? normalizeSimpleText(rewritten)
-      : rewriteScenarioPromptForEducationalVideo(rewritten);
+      : window.rewriteScenarioPromptForEducationalVideo(rewritten);
     upsertActiveSession((current) => ({
       ...current,
       script: {
@@ -28446,7 +21497,7 @@ async function rewriteVisualNotesWithGemini(rowId = "", options = {}) {
     return false;
   } finally {
     if (triggerBtn) {
-      setButtonLoadingState(triggerBtn, false);
+      window.setButtonLoadingState(triggerBtn, false);
     }
   }
 }
@@ -28662,7 +21713,7 @@ function handleScriptFieldUpdate(event) {
             ? {
               ...row,
               scenePrompt: isEducationalVideoMode(current)
-                ? rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
+                ? window.rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
                 : String(target.value || "").replace(/\s+/g, " ").trim()
             }
             : row
@@ -28681,7 +21732,7 @@ function handleScriptFieldUpdate(event) {
             ? {
               ...row,
               videoDirective: isEducationalVideoMode(current)
-                ? rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
+                ? window.rewriteScenarioPromptForEducationalVideo(String(target.value || "").replace(/\s+/g, " ").trim())
                 : String(target.value || "").replace(/\s+/g, " ").trim()
             }
             : row
@@ -28694,7 +21745,7 @@ function handleScriptFieldUpdate(event) {
     const videoPreset = resolveActiveVideoPreset(session);
     const prompts = normalizeVideoImagePrompts(target.value || "").map((prompt) => (
       videoPreset !== "creative" && isEducationalVideoMode(session)
-        ? rewriteScenarioPromptForEducationalVideo(prompt)
+        ? window.rewriteScenarioPromptForEducationalVideo(prompt)
         : prompt
     ));
     upsertActiveSession((current) => ({
@@ -28791,7 +21842,7 @@ function handleScriptFieldUpdate(event) {
         speakerScenarioMap: {
           ...getSpeakerScenarioMap(current),
           [value]: resolveActiveVideoPreset(current) !== "creative" && isEducationalVideoMode(current)
-            ? rewriteScenarioPromptForEducationalVideo(getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast")
+            ? window.rewriteScenarioPromptForEducationalVideo(getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast")
             : getSpeakerScenarioMap(current)[value] || DEFAULT_SPEAKER_SCENARIO_MAP[value] || "Cabina premium de podcast"
         }
       }
@@ -29201,8 +22252,8 @@ function attachEvents() {
     const session = getActiveSession();
     if (!session) return;
     
-    setButtonLoadingState(els.saveSessionBtn, true);
-    setButtonLoadingState(els.saveSessionFloatingBtn, true);
+    window.setButtonLoadingState(els.saveSessionBtn, true);
+    window.setButtonLoadingState(els.saveSessionFloatingBtn, true);
     
     try {
       await sessionStore.saveManual(session.id, { render: false });
@@ -29211,8 +22262,8 @@ function attachEvents() {
       addChatMessage("system", `No se pudo guardar en Firebase (${error.message}).`);
       setGenerationStatus("Error al guardar", "is-error");
     } finally {
-      setButtonLoadingState(els.saveSessionBtn, false);
-      setButtonLoadingState(els.saveSessionFloatingBtn, false);
+      window.setButtonLoadingState(els.saveSessionBtn, false);
+      window.setButtonLoadingState(els.saveSessionFloatingBtn, false);
     }
   };
 
@@ -29508,9 +22559,6 @@ function attachEvents() {
   if (els.panelMusicVolume) {
     els.panelMusicVolume.addEventListener("input", async () => {
       panelMusicState.volume = Math.max(0, Math.min(100, Number(els.panelMusicVolume.value || 0)));
-      if (panelMusicAudioEl) {
-        panelMusicAudioEl.volume = Math.max(0, Math.min(1, panelMusicState.volume / 100));
-      }
       persistPanelMusicSettings();
       persistPanelMusicToActiveSession();
       if (panelMusicState.playing) {
@@ -29627,9 +22675,9 @@ function attachEvents() {
   }
   if (els.generatePanelMusicAiBtn) {
     els.generatePanelMusicAiBtn.addEventListener("click", async () => {
-      if (panelMusicAiGenerating) return;
-      panelMusicAiGenerating = true;
-      setButtonLoadingState(els.generatePanelMusicAiBtn, true, {
+      if (getPanelMusicAiGenerating()) return;
+      setPanelMusicAiGenerating(true);
+      window.setButtonLoadingState(els.generatePanelMusicAiBtn, true, {
         loadingTitle: "Generando música con IA..."
       });
       syncMusicControls();
@@ -29641,8 +22689,8 @@ function attachEvents() {
         addChatMessage("system", `No se pudo generar música con IA (${error.message}).`);
         setGenerationStatus("Error", "");
       } finally {
-        panelMusicAiGenerating = false;
-        setButtonLoadingState(els.generatePanelMusicAiBtn, false);
+        setPanelMusicAiGenerating(false);
+        window.setButtonLoadingState(els.generatePanelMusicAiBtn, false);
         syncMusicControls();
       }
     });
@@ -30304,7 +23352,7 @@ function attachEvents() {
       const sessionSlug = String(session.id || session.slug || "").trim();
       if (!sessionSlug) return;
 
-      setButtonLoadingState(els.autoLinkStorageVideosBtn, true, { loadingTitle: "Restableciendo..." });
+      window.setButtonLoadingState(els.autoLinkStorageVideosBtn, true, { loadingTitle: "Restableciendo..." });
       addChatMessage("system", "Iniciando recuperación profunda de la sesión y vinculación de medios...");
 
       try {
@@ -30412,7 +23460,7 @@ function attachEvents() {
         console.error("Error en restablecimiento profundo:", error);
         addChatMessage("system", `Error al restablecer: ${error.message}`);
       } finally {
-        setButtonLoadingState(els.autoLinkStorageVideosBtn, false);
+        window.setButtonLoadingState(els.autoLinkStorageVideosBtn, false);
       }
     });
   }
@@ -30501,14 +23549,14 @@ function attachEvents() {
   if (els.regenerateAllPortraitsBtn) {
     els.regenerateAllPortraitsBtn.addEventListener("click", async () => {
       if (podcastVideoState.busy) return;
-      setButtonLoadingState(els.regenerateAllPortraitsBtn, true, {
+      window.setButtonLoadingState(els.regenerateAllPortraitsBtn, true, {
         loadingTitle: "Regenerando retratos..."
       });
       try {
         await regenerateAllSpeakerPortraits();
         renderPodcastVideoShell(getActiveSession());
       } finally {
-        setButtonLoadingState(els.regenerateAllPortraitsBtn, false);
+        window.setButtonLoadingState(els.regenerateAllPortraitsBtn, false);
       }
     });
   }
@@ -30542,7 +23590,7 @@ function attachEvents() {
         return;
       }
       podcastVideoState.busy = true;
-      setButtonLoadingState(els.regenerateAllGeminiAudiosBtn, true, {
+      window.setButtonLoadingState(els.regenerateAllGeminiAudiosBtn, true, {
         loadingTitle: "Regenerando audios Gemini..."
       });
       updatePodcastPlayerUi();
@@ -30556,7 +23604,7 @@ function attachEvents() {
         setGenerationStatus("Error", "");
         addChatMessage("system", `No se pudieron regenerar todos los audios Gemini (${String(error?.message || "error desconocido")}).`);
       } finally {
-        setButtonLoadingState(els.regenerateAllGeminiAudiosBtn, false);
+        window.setButtonLoadingState(els.regenerateAllGeminiAudiosBtn, false);
         podcastVideoState.busy = false;
         updatePodcastPlayerUi();
       }
@@ -31004,46 +24052,11 @@ function attachEvents() {
         setAudioTrackMixOpen(true);
         return;
       }
-      const selectAudioLoopChip = event.target.closest("[data-action='timeline-select-audio-loop']");
-      if (selectAudioLoopChip) {
-        const trackIndex = Number(selectAudioLoopChip.dataset.trackIndex);
-        const trackKind = resolvePanelMusicTrackKind(selectAudioLoopChip.dataset.trackKind || panelMusicState.selectedTrackKind);
-        const loopIndex = Math.max(0, Math.floor(Number(selectAudioLoopChip.dataset.loopIndex || 0) || 0));
-        if (trackKind === "uploaded" && Number.isFinite(trackIndex)) {
-          const key = `u:${Math.max(0, Math.floor(trackIndex || 0))}:${loopIndex}`;
-          const multi = event.metaKey || event.ctrlKey;
-          if (multi) {
-            if (podcastVideoState.timelineAudioSelection.uploadedKeys.has(key)) {
-              podcastVideoState.timelineAudioSelection.uploadedKeys.delete(key);
-            } else {
-              podcastVideoState.timelineAudioSelection.uploadedKeys.add(key);
-            }
-          } else {
-            podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
-            podcastVideoState.timelineAudioSelection.uploadedKeys.add(key);
-          }
-        }
-        if (Number.isFinite(trackIndex)) {
-          selectUploadedPanelMusicTrackByIndex(trackIndex);
-        } else if (trackKind !== panelMusicState.selectedTrackKind) {
-          selectPanelMusicTrackKind(trackKind, { notify: false });
-        }
-        podcastAudioTrackUiState.activeLoopIndex = loopIndex;
-        renderPodcastVideoTimeline(getActiveSession());
+      if (handleTimelineSelectAudioLoopChip(event.target, event)) {
         return;
       }
-      const toggleAudioLoopMuteBtn = event.target.closest("[data-action='timeline-toggle-audio-loop-mute']");
-      if (toggleAudioLoopMuteBtn) {
+      if (handleTimelineToggleAudioLoopMute(event.target)) {
         event.preventDefault();
-        const trackIndex = Number(toggleAudioLoopMuteBtn.dataset.trackIndex);
-        const trackKind = resolvePanelMusicTrackKind(toggleAudioLoopMuteBtn.dataset.trackKind || panelMusicState.selectedTrackKind);
-        if (Number.isFinite(trackIndex)) {
-          selectUploadedPanelMusicTrackByIndex(trackIndex);
-        } else if (trackKind !== panelMusicState.selectedTrackKind) {
-          selectPanelMusicTrackKind(trackKind, { notify: false });
-        }
-        const loopIndex = Math.max(0, Math.floor(Number(toggleAudioLoopMuteBtn.dataset.loopIndex || 0) || 0));
-        togglePanelMusicLoopMute(loopIndex, trackKind);
         return;
       }
       const toggleUploadedTrackEnabledBtn = event.target.closest("[data-action='timeline-toggle-uploaded-track-enabled']");
@@ -31159,8 +24172,7 @@ function attachEvents() {
       if (replaceBtn) {
         const rowId = String(replaceBtn.dataset.rowId || "").trim();
         if (!rowId) return;
-        console.log("[SceneReplacement] trigger:timeline-row-menu", { rowId, action: "replace-scene-video-from-storage" });
-        window.PodcasterMediaReplacement?.openSceneVideoSelectorModal?.(rowId, { triggerSource: "timeline-row-menu" });
+        openSceneVideoSelectorModal(rowId, { triggerSource: "timeline-row-menu" });
         return;
       }
       const duplicateBtn = event.target.closest("[data-action='duplicate-row']");
@@ -31207,10 +24219,7 @@ function attachEvents() {
       const attachSpeakerReferenceBtn = event.target.closest("[data-action='attach-speaker-reference-image']");
       if (attachSpeakerReferenceBtn) {
         const speaker = String(attachSpeakerReferenceBtn.dataset.speaker || "").trim();
-        if (speaker && els.speakerReferenceImageInput) {
-          els.speakerReferenceImageInput.dataset.speaker = speaker;
-          els.speakerReferenceImageInput.click();
-        }
+        if (speaker) promptSpeakerReferenceSelection(speaker);
         return;
       }
       const clearSpeakerReferenceBtn = event.target.closest("[data-action='clear-speaker-reference-image']");
@@ -31222,10 +24231,7 @@ function attachEvents() {
       const attachScenarioReferenceBtn = event.target.closest("[data-action='attach-scenario-reference-image']");
       if (attachScenarioReferenceBtn) {
         const scenarioId = String(attachScenarioReferenceBtn.dataset.scenarioId || "").trim();
-        if (scenarioId && els.scenarioReferenceImageInput) {
-          els.scenarioReferenceImageInput.dataset.scenarioId = scenarioId;
-          els.scenarioReferenceImageInput.click();
-        }
+        if (scenarioId) promptScenarioReferenceSelection(scenarioId);
         return;
       }
       const clearScenarioReferenceBtn = event.target.closest("[data-action='clear-scenario-reference-image']");
@@ -31299,7 +24305,7 @@ function attachEvents() {
       const speaker = String(actionBtn.dataset.speaker || "").trim();
       if (!speaker) return;
       podcastVideoState.busy = true;
-      setButtonLoadingState(actionBtn, true, {
+      window.setButtonLoadingState(actionBtn, true, {
         loadingTitle: "Regenerando retrato..."
       });
       updatePodcastPlayerUi();
@@ -31311,76 +24317,13 @@ function attachEvents() {
         addChatMessage("system", `No se pudo regenerar retrato de ${resolveSpeakerDisplayName(speaker, getActiveSession())} (${error.message}).`);
         setGenerationStatus("Error", "");
       } finally {
-        setButtonLoadingState(actionBtn, false);
+        window.setButtonLoadingState(actionBtn, false);
         podcastVideoState.busy = false;
         updatePodcastPlayerUi();
       }
     });
   }
-  if (els.speakerReferenceImageInput) {
-    els.speakerReferenceImageInput.addEventListener("change", async () => {
-      const speaker = String(els.speakerReferenceImageInput.dataset.speaker || "").trim();
-      const file = els.speakerReferenceImageInput.files?.[0] || null;
-      els.speakerReferenceImageInput.value = "";
-      els.speakerReferenceImageInput.dataset.speaker = "";
-      if (!speaker || !file) return;
-      try {
-        const reference = await readImageReferenceFromFile(file);
-        setSpeakerReferenceImage(speaker, reference);
-        setGenerationStatus(`Referencia actualizada para ${resolveSpeakerDisplayName(speaker, getActiveSession())}`, "is-live");
-      } catch (error) {
-        addChatMessage("system", `No se pudo adjuntar referencia para ${resolveSpeakerDisplayName(speaker, getActiveSession())} (${error.message}).`);
-      }
-    });
-  }
-  if (els.scenarioReferenceImageInput) {
-    els.scenarioReferenceImageInput.addEventListener("change", async () => {
-      const scenarioId = String(els.scenarioReferenceImageInput.dataset.scenarioId || "").trim();
-      const file = els.scenarioReferenceImageInput.files?.[0] || null;
-      els.scenarioReferenceImageInput.value = "";
-      els.scenarioReferenceImageInput.dataset.scenarioId = "";
-      if (!scenarioId || !file) return;
-      try {
-        const reference = await readImageReferenceFromFile(file);
-        setScenarioReferenceImage(scenarioId, reference);
-        setGenerationStatus("Referencia de escenario actualizada", "is-live");
-      } catch (error) {
-        addChatMessage("system", `No se pudo adjuntar referencia de escenario (${error.message}).`);
-      }
-    });
-  }
-  if (els.rowReferenceImageInput) {
-    els.rowReferenceImageInput.addEventListener("change", async () => {
-      const rowId = String(els.rowReferenceImageInput.dataset.rowId || "").trim();
-      const files = Array.from(els.rowReferenceImageInput.files || []);
-      const file = files[0] || null;
-      els.rowReferenceImageInput.value = "";
-      els.rowReferenceImageInput.dataset.rowId = "";
-      if (!rowId || !file) return;
-      try {
-        const hasVideo = files.some((item) => isLikelyVideoReferenceFile(item));
-        if (files.length > 1 && hasVideo) {
-          throw new Error("Puedes elegir varias imagenes o un solo video, pero no mezclarlos.");
-        }
-        if (files.length === 1 && isLikelyVideoReferenceFile(file)) {
-          const reference = await readVideoReferenceFromFile(file);
-          setRowReferenceVideo(rowId, reference);
-          setGenerationStatus(`Video de referencia actualizado para escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
-        } else {
-          const references = await Promise.all(files.map((item) => readImageReferenceFromFile(item)));
-          setRowReferenceImages(rowId, references);
-          setGenerationStatus(
-            references.length > 1
-              ? `${references.length} referencias actualizadas para escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`
-              : `Referencia actualizada para escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`,
-            "is-live"
-          );
-        }
-      } catch (error) {
-        addChatMessage("system", `No se pudo adjuntar referencia para la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
-      }
-    });
-  }
+  bindMediaReferenceInputEvents();
   if (els.podcastSceneLibraryLocalVideoInput) {
     els.podcastSceneLibraryLocalVideoInput.addEventListener("change", async () => {
       const file = els.podcastSceneLibraryLocalVideoInput.files?.[0] || null;
@@ -31801,7 +24744,7 @@ function attachEvents() {
       if (!message?.scriptSnapshot) return;
       const confirmed = window.confirm("Se conectará este guión al panel y se borrará la conexión activa actual. ¿Deseas continuar?");
       if (!confirmed) return;
-      setButtonLoadingState(connectBtn, true, {
+      window.setButtonLoadingState(connectBtn, true, {
         loadingTitle: "Conectando guion al panel..."
       });
       setGenerationStatus("Conectando guion al panel...", "is-busy", { sessionId });
@@ -31870,7 +24813,7 @@ function attachEvents() {
         connectScriptPanelGenerationState.abortController = null;
         connectScriptPanelGenerationState.token = 0;
         renderChat(getActiveSession());
-        setButtonLoadingState(connectBtn, false);
+        window.setButtonLoadingState(connectBtn, false);
       }
       return;
     }
@@ -32122,24 +25065,21 @@ function attachEvents() {
       if (replaceBtn) {
         const rowId = String(replaceBtn.dataset.rowId || "").trim();
         if (!rowId) return;
-        console.log("[SceneReplacement] trigger:inspector-row-editor", { rowId, action: "replace-scene-video-from-storage" });
-        window.PodcasterMediaReplacement?.openSceneVideoSelectorModal?.(rowId, { triggerSource: "inspector-row-editor" });
+        openSceneVideoSelectorModal(rowId, { triggerSource: "inspector-row-editor" });
         return;
       }
       const attachRefBtn = event.target.closest("[data-action='attach-row-reference-image'][data-row-id]");
       if (attachRefBtn) {
         const rowId = String(attachRefBtn.dataset.rowId || "").trim();
-        if (!rowId || !els.rowReferenceImageInput) return;
-        els.rowReferenceImageInput.dataset.rowId = rowId;
-        els.rowReferenceImageInput.click();
+        if (!rowId) return;
+        promptRowReferenceSelection(rowId);
         return;
       }
       const clearRefBtn = event.target.closest("[data-action='clear-row-reference-image'][data-row-id]");
       if (clearRefBtn) {
         const rowId = String(clearRefBtn.dataset.rowId || "").trim();
         if (!rowId) return;
-        setRowReferenceImage(rowId, null);
-        setRowReferenceVideo(rowId, null);
+        clearRowReference(rowId);
         setGenerationStatus(`Referencia quitada de escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
         return;
       }
@@ -32253,20 +25193,17 @@ function attachEvents() {
     }
     if (actionBtn.dataset.action === "replace-scene-video-from-storage") {
       if (!rowId) return;
-      console.log("[SceneReplacement] trigger:script-row-action", { rowId, action: "replace-scene-video-from-storage" });
-      window.PodcasterMediaReplacement?.openSceneVideoSelectorModal?.(rowId, { triggerSource: "script-row-action" });
+      openSceneVideoSelectorModal(rowId, { triggerSource: "script-row-action" });
       return;
     }
     if (actionBtn.dataset.action === "attach-row-reference-image") {
-      if (!rowId || !els.rowReferenceImageInput) return;
-      els.rowReferenceImageInput.dataset.rowId = String(rowId || "").trim();
-      els.rowReferenceImageInput.click();
+      if (!rowId) return;
+      promptRowReferenceSelection(String(rowId || "").trim());
       return;
     }
     if (actionBtn.dataset.action === "clear-row-reference-image") {
       if (!rowId) return;
-      setRowReferenceImage(rowId, null);
-      setRowReferenceVideo(rowId, null);
+      clearRowReference(rowId);
       setGenerationStatus(`Referencia quitada de escena ${resolveSceneNumberByRowId(rowId, getActiveSession())}`, "is-live");
       return;
     }
@@ -32324,8 +25261,7 @@ function init() {
     }
     currentStorageScopeUid = nextUid;
     stopPanelMusic();
-    panelMusicState = loadPanelMusicSettings();
-    syncActivePanelMusicTrack({ kind: panelMusicState.selectedTrackKind });
+    loadPanelMusicSettingsIntoState();
     syncMusicControls();
     let finalSessions = [];
     try {
@@ -32404,105 +25340,14 @@ function updateTimelineClipSourceDurationIfGreater(rowId = "", durationMs = 0) {
   }
 }
 
-/**
- * SISTEMA DE HISTORIAL (UNDO/REDO)
- */
-function recordPodcastHistory(session = null, reason = "action") {
-  const activeSession = session || getActiveSession();
-  if (!activeSession) return;
-
-  // Clonar el estado actual de la sesión (solo lo relevante para el montaje)
-  // Guardamos un snapshot JSON para evitar referencias mutables
-  const snapshot = JSON.stringify({
-    script: activeSession.script,
-    config: activeSession.podcastVideoConfig || {}
-  });
-
-  // Si el último estado es igual, no duplicar
-  if (podcastVideoState.undoStack.length > 0 && podcastVideoState.undoStack[podcastVideoState.undoStack.length - 1] === snapshot) {
-    return;
-  }
-
-  podcastVideoState.undoStack.push(snapshot);
-
-  // Limitar historial a 50 pasos
-  if (podcastVideoState.undoStack.length > 50) {
-    podcastVideoState.undoStack.shift();
-  }
-
-  // Al realizar una nueva acción, limpiamos el redo
-  if (reason !== "undo" && reason !== "redo") {
-    podcastVideoState.redoStack = [];
-  }
-}
-
-function undoPodcastAction() {
-  if (podcastVideoState.undoStack.length < 2) {
-    setGenerationStatus("Nada que deshacer", "");
-    return;
-  }
-
-  // El tope actual es el estado presente, lo pasamos a redo
-  const currentSnapshot = podcastVideoState.undoStack.pop();
-  podcastVideoState.redoStack.push(currentSnapshot);
-
-  // El nuevo tope es el estado anterior
-  const previousSnapshot = podcastVideoState.undoStack[podcastVideoState.undoStack.length - 1];
-  applyPodcastHistorySnapshot(previousSnapshot, "undo");
-}
-
-function redoPodcastAction() {
-  if (podcastVideoState.redoStack.length === 0) {
-    setGenerationStatus("Nada que rehacer", "");
-    return;
-  }
-
-  const nextSnapshot = podcastVideoState.redoStack.pop();
-  podcastVideoState.undoStack.push(nextSnapshot);
-  applyPodcastHistorySnapshot(nextSnapshot, "redo");
-}
-
-function applyPodcastHistorySnapshot(snapshotJson, reason = "undo") {
-  try {
-    const data = JSON.parse(snapshotJson);
-    const session = getActiveSession();
-    if (!session || !data) return;
-
-    upsertActiveSession((current) => ({
-      ...current,
-      script: data.script,
-      podcastVideoConfig: data.config
-    }), {
-      render: true,
-      force: true,
-      autosaveReason: `history-${reason}`
-    });
-
-    setGenerationStatus(reason === "undo" ? "Deshacer: Hecho" : "Rehacer: Hecho", "is-live");
-
-    // Forzar renderizado de todo el shell para sincronizar
-    renderPodcastVideoShell(getActiveSession());
-  } catch (err) {
-    console.error("[History] Failed to apply snapshot:", err);
-  }
-}
-
-// Global undo/redo keyboard shortcuts
-window.addEventListener("keydown", (event) => {
-  const isZ = event.key.toLowerCase() === "z";
-  const isY = event.key.toLowerCase() === "y";
-  const isMod = event.ctrlKey || event.metaKey;
-  const isShift = event.shiftKey;
-
-  if (isMod && isZ) {
-    if (isShift) redoPodcastAction();
-    else undoPodcastAction();
-    event.preventDefault();
-  } else if (isMod && isY) {
-    redoPodcastAction();
-    event.preventDefault();
-  }
+const podcasterHistoryApi = createPodcasterHistoryApi({
+  getPodcastVideoState: () => podcastVideoState,
+  getActiveSession,
+  setGenerationStatus,
+  upsertActiveSession,
+  renderPodcastVideoShell
 });
+podcasterHistoryApi.bindGlobalShortcuts();
 
 const podcastThumbnailBlobCache = new Map();
 async function resolveThumbnailBlob(url) {
@@ -32566,8 +25411,8 @@ window.PodcasterUI = {
   syncStageMedia: (rowId = "", options = {}) => syncPodcastVideoStageMedia(getActiveSession(), rowId, options)
 };
 
-// Expose internals for modularized generation logic (podcaster-video-generator.js)
-Object.assign(window, {
+// Explicit runtime API for modularized generation logic.
+const podcasterGenerationRuntimeApi = {
   getActiveSession,
   resolveSceneNumberByRowId,
   getPanelModeCopy,
@@ -32575,12 +25420,11 @@ Object.assign(window, {
   resolveTargetVideoRowId,
   hasStoredMediaSource,
   getDialogueAudioMap,
+  getDialogueVideoMap,
   upsertActiveSession,
   syncGeminiDialogueTrackWithRuntime,
   logPodcastBatchDebug,
   setGenerationStatus,
-  getRowReferenceImageListMap,
-  getRowReferenceImageMap,
   buildTimelineRuntimeEntries,
   resolveDialogueVideoForRow,
   resolveDialogueVideoSegments,
@@ -32593,10 +25437,8 @@ Object.assign(window, {
   syncPodcastStudioInspector,
   updatePodcastPlayerUi,
   buildPodcasterApiErrorMessage,
-  addChatMessage,
   setPodcastVideoStatus,
   isEducationalVideoMode,
-  getRowReferenceImageList,
   resolveDialogueAudioForRow,
   selectTimelineSceneRow,
   setPodcastVideoRow,
@@ -32614,8 +25456,120 @@ Object.assign(window, {
   getSessionRows,
   resolveConfiguredSpeakerVoiceForGeneration,
   resolveStorageVideoUrl,
-  setButtonLoadingState,
   sleep,
   refreshRuntimeFeatureCapabilities,
-  runtimeFeatureState
-});
+  runtimeFeatureState,
+  getSpeakerNameMap,
+  getSpeakerOptions,
+  resolvePortraitForSpeaker,
+  resolveSpeakerStudioScenarioPrompt,
+  updateTimelineClipForRow,
+  getPodcastVideoConfig,
+  isCurrentModeVideo,
+  resolveStorageAudioUrl,
+  stopRowAudio,
+  stopGeminiLiveSession,
+  ensureTimelineClipsByRowId,
+  getTimelineClipEffectiveDurationMs,
+  generateDialogueAudioForRow
+};
+
+// Explicit runtime API for modularized chat assistant logic.
+const podcasterChatRuntimeApi = {
+  normalizeRows,
+  countTotalDuration,
+  resolveSpeakerDisplayName,
+  replaceHostTokensWithNames,
+  toMarkdownTableCell,
+  normalizeCreativeVideoConfig,
+  getCreativeVideoConfig,
+  normalizeTransitionForScene,
+  SHORT_SCENE_MIN_SEC,
+  SHORT_SCENE_MAX_SEC,
+  VIDEO_SCENE_MIN_SEC,
+  VIDEO_SCENE_MAX_SEC,
+  normalizeCreativeVideoScriptForDisplay,
+  buildSpeakerMapsForHosts,
+  DEFAULT_DISFLUENCY_CONFIG,
+  DEFAULT_TTS_DIRECTION_CONFIG,
+  EXPRESSIONS,
+  DEFAULT_SPEAKER_NAME_MAP,
+  DEFAULT_SPEAKER_SCENARIO_MAP,
+  resolveSpeakerVoiceName,
+  normalizeLiveVoiceName,
+  normalizeDisfluencyConfig,
+  getSpeakerVoiceMap,
+  getSpeakerExpressionMap,
+  getSpeakerScenarioMap,
+  normalizeVideoPreset,
+  addChatMessage,
+  removeChatMessage,
+  addScriptAssistantMessage,
+  renderChat
+};
+
+// Explicit runtime API for modularized public library logic.
+const podcasterPublicLibraryRuntimeApi = {
+  escapeHtml,
+  secondsToClock,
+  toFiniteNumber,
+  trimWords,
+  nowIso,
+  els,
+  normalizePodcastSceneLibraryItem,
+  attachPodcastLibraryThumbnailLoading,
+  closePodcastTimelineClipMenu,
+  normalizeTimelineTracks,
+  buildDefaultTimelineTracks,
+  normalizeTimelineClipsByRowId,
+  getTimelineClipEndMs,
+  resolveTimelineDefaultTrackIdForSpeaker,
+  buildTimelineVariantTrackDescriptor,
+  getRowSourceDurationMs,
+  normalizeTimelineClipItem,
+  normalizePodcastVideoConfig,
+  ensureOnScreenTextClipForRowId,
+  ensureOnScreenTextClipsByRowId,
+  setTimelineViewMode,
+  buildPublicSceneRowFromLibraryItem,
+  getSceneInsertIndexForLibraryItem,
+  captureVideoFrameDataUrl,
+  readDataUrlFromFile,
+  measureVideoFile,
+  resolvePrimaryDialogueVideoSegment,
+  renderPodcastVideoShell,
+  setRowDisfluencyModalOpen,
+  setTimelineClipDurationModalOpen,
+  safeMediaPlay,
+  resolveActiveVideoPreset,
+  getActiveStageVideoEl,
+  addChatMessage,
+  resolveSceneNumberByRowId,
+  resolveDialogueVideoForRow,
+  resolveDialogueVideoSegments,
+  resolveStorageVideoUrl,
+  getDialogueVideoMap,
+  normalizeDialogueVideoMap,
+  upsertActiveSession,
+  setGenerationStatus,
+  setPodcastVideoStatus,
+  setPodcastVideoRow,
+  stopRowAudio,
+  stopGeminiLiveSession,
+  syncGeminiDialogueTrackWithRuntime,
+  logPodcastBatchDebug,
+  render,
+  scheduleSessionLocalPersist,
+  setButtonLoadingState
+};
+
+window.PodcasterGenerationRuntime = podcasterGenerationRuntimeApi;
+window.PodcasterChatRuntime = podcasterChatRuntimeApi;
+window.PodcasterPublicLibraryRuntime = podcasterPublicLibraryRuntimeApi;
+
+Object.assign(
+  window,
+  podcasterGenerationRuntimeApi,
+  podcasterChatRuntimeApi,
+  podcasterPublicLibraryRuntimeApi
+);

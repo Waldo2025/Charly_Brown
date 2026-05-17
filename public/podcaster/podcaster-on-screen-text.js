@@ -50,6 +50,113 @@
     { value: "bold-italic", label: "Bold Italic", fontWeight: "bold", fontStyle: "italic" }
   ];
 
+  const PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS = [
+    {
+      value: "studio-clean",
+      label: "Studio Clean",
+      hint: "Editorial limpio y legible",
+      settings: {
+        fontFamily: "Sora",
+        fontSizePx: 40,
+        stylePreset: "glow",
+        bgPreset: "none",
+        fontWeight: "bold",
+        fontStyle: "normal",
+        textAlign: "center",
+        textColor: "#f8fafc",
+        strokeColor: "#0f172a",
+        strokeWidthPx: 2,
+        textOpacity: 1,
+        bgOpacity: 0,
+        bgScale: 1,
+        shadowEnabled: true,
+        shadowBlurPx: 12,
+        shadowOffsetXPx: 0,
+        shadowOffsetYPx: 4,
+        shadowOpacity: 0.55,
+        boxWidthPct: 0.58
+      }
+    },
+    {
+      value: "headline-glow",
+      label: "Headline Glow",
+      hint: "Más impacto visual",
+      settings: {
+        fontFamily: "Unbounded",
+        fontSizePx: 46,
+        stylePreset: "glow",
+        bgPreset: "none",
+        fontWeight: "bold",
+        fontStyle: "normal",
+        textAlign: "center",
+        textColor: "#f8fafc",
+        strokeColor: "#0f172a",
+        strokeWidthPx: 2.4,
+        textOpacity: 1,
+        bgOpacity: 0,
+        bgScale: 1,
+        shadowEnabled: true,
+        shadowBlurPx: 18,
+        shadowOffsetXPx: 0,
+        shadowOffsetYPx: 5,
+        shadowOpacity: 0.62,
+        boxWidthPct: 0.56
+      }
+    },
+    {
+      value: "broadcast-solid",
+      label: "Broadcast",
+      hint: "Subtítulo clásico de alto contraste",
+      settings: {
+        fontFamily: "Nunito",
+        fontSizePx: 38,
+        stylePreset: "flat",
+        bgPreset: "solid",
+        fontWeight: "bold",
+        fontStyle: "normal",
+        textAlign: "center",
+        textColor: "#f8fafc",
+        strokeColor: "#0f172a",
+        strokeWidthPx: 2.2,
+        textOpacity: 1,
+        bgOpacity: 0.9,
+        bgScale: 1.12,
+        shadowEnabled: false,
+        shadowBlurPx: 0,
+        shadowOffsetXPx: 0,
+        shadowOffsetYPx: 0,
+        shadowOpacity: 0,
+        boxWidthPct: 0.62
+      }
+    },
+    {
+      value: "chrome-lux",
+      label: "Chrome Lux",
+      hint: "Acabado más ornamental",
+      settings: {
+        fontFamily: "Space Grotesk",
+        fontSizePx: 42,
+        stylePreset: "chrome",
+        bgPreset: "glass",
+        fontWeight: "bold",
+        fontStyle: "normal",
+        textAlign: "center",
+        textColor: "#f8fafc",
+        strokeColor: "#111827",
+        strokeWidthPx: 2,
+        textOpacity: 1,
+        bgOpacity: 0.48,
+        bgScale: 1.08,
+        shadowEnabled: true,
+        shadowBlurPx: 10,
+        shadowOffsetXPx: 0,
+        shadowOffsetYPx: 4,
+        shadowOpacity: 0.4,
+        boxWidthPct: 0.6
+      }
+    }
+  ];
+
   const STUDIO_TIMELINE_MIN_CLIP_MS = 100;
   const STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT = 0.58;
   const STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT = 0.14;
@@ -67,6 +174,15 @@
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return fallback;
     return Math.max(min, Math.min(max, numeric));
+  }
+
+  function escapeHtml(value = "") {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function normalizeResolutionKey(value) {
@@ -194,9 +310,77 @@
       shadowOffsetYPx,
       shadowOpacity,
       shadowSizePx,
+      boxWidthPct: clampNumber(source.boxWidthPct, 0.22, 0.92, STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT),
       overlayXPct: clampNumber(source.overlayXPct, 0, 1, 0.5),
       overlayYPct: clampNumber(source.overlayYPct, 0, 1, 0.86)
     };
+  }
+
+  function applyOnScreenTextTrackSettingValue(settings = null, setting = "fontFamily", value = "") {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const key = String(setting || "").trim();
+    const nextValue = String(value || "").trim();
+    if (!key) return current;
+    if (key === "fontSizePx") {
+      current.fontSizePx = Math.max(16, Math.min(96, Math.round(toFiniteNumber(nextValue, current.fontSizePx))));
+    } else if (key === "stylePreset") {
+      const allowed = new Set(PODCAST_ON_SCREEN_TEXT_STYLE_PRESETS.map((item) => item.value));
+      current.stylePreset = allowed.has(nextValue) ? nextValue : current.stylePreset;
+    } else if (key === "fontFamily") {
+      const allowed = new Set(PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES.map((item) => item.value));
+      current.fontFamily = allowed.has(nextValue) ? nextValue : current.fontFamily;
+    } else if (key === "textColor") {
+      current.textColor = nextValue || current.textColor;
+    } else if (key === "textOpacity") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) current.textOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+    } else if (key === "bgPreset") {
+      const allowed = new Set(["glass", "solid", "none"]);
+      current.bgPreset = allowed.has(nextValue.toLowerCase()) ? nextValue.toLowerCase() : current.bgPreset;
+    } else if (key === "bgOpacity") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) current.bgOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+    } else if (key === "bgScale") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) {
+        const scale = numeric > 3 ? numeric / 100 : numeric;
+        current.bgScale = Math.max(0.6, Math.min(1.8, scale));
+      }
+    } else if (key === "fontVariant") {
+      const selected = PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS.find((item) => item.value === nextValue.toLowerCase()) || PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS[0];
+      current.fontVariant = selected.value;
+      current.fontWeight = selected.fontWeight;
+      current.fontStyle = selected.fontStyle;
+    } else if (key === "textAlign") {
+      const allowed = new Set(["left", "center", "right", "justify"]);
+      current.textAlign = allowed.has(nextValue.toLowerCase()) ? nextValue.toLowerCase() : current.textAlign;
+    } else if (key === "strokeColor") {
+      current.strokeColor = nextValue || current.strokeColor;
+    } else if (key === "strokeEnabled") {
+      current.strokeEnabled = nextValue !== "false" && nextValue !== "0" && nextValue !== "";
+    } else if (key === "strokeWidthPx") {
+      current.strokeWidthPx = Math.max(0, Math.min(12, toFiniteNumber(nextValue, current.strokeWidthPx)));
+    } else if (key === "shadowEnabled") {
+      current.shadowEnabled = nextValue !== "false" && nextValue !== "0" && nextValue !== "";
+    } else if (key === "shadowBlurPx") {
+      current.shadowBlurPx = Math.max(0, Math.min(32, Math.round(toFiniteNumber(nextValue, current.shadowBlurPx))));
+    } else if (key === "shadowOffsetXPx") {
+      current.shadowOffsetXPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(nextValue, current.shadowOffsetXPx))));
+    } else if (key === "shadowOffsetYPx") {
+      current.shadowOffsetYPx = Math.max(-24, Math.min(24, Math.round(toFiniteNumber(nextValue, current.shadowOffsetYPx))));
+    } else if (key === "shadowOpacity") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) current.shadowOpacity = Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+    } else if (key === "shadowSizePx") {
+      current.shadowSizePx = Math.max(0, Math.min(20, toFiniteNumber(nextValue, current.shadowSizePx)));
+    } else if (key === "boxWidthPct") {
+      const numeric = toFiniteNumber(nextValue, Number.NaN);
+      if (Number.isFinite(numeric)) {
+        const pct = numeric > 1 ? numeric / 100 : numeric;
+        current.boxWidthPct = Math.max(0.22, Math.min(0.92, pct));
+      }
+    }
+    return normalizeOnScreenTextTrackSettings(current);
   }
 
   function getOnScreenTextStylePresetClass(stylePreset = "") {
@@ -337,12 +521,7 @@
     const getText = typeof options?.getText === "function" ? options.getText : getOnScreenTextClipText;
     const rowId = String(options?.rowId || row?.id || "").trim();
     const text = getText(row);
-    const widthPct = estimateOnScreenTextLayoutWidthPct(text, current, {
-      ...options,
-      minPct: 0.58,
-      maxPct: 0.92,
-      targetLines: 2
-    });
+    const widthPct = clampNumber(options?.widthPct, 0.22, 0.92, current.boxWidthPct || STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT);
     const heightPct = estimateOnScreenTextLayoutHeightPct(text, current, widthPct, options);
     const defaults = buildCanonicalOnScreenTextLayoutBounds(widthPct, heightPct, current);
     return normalizeOnScreenTextLayoutItem({
@@ -397,13 +576,8 @@
       }
     }
     if (estimatedLines <= 2) return baseLayout;
-    const recommendedWidthPct = estimateOnScreenTextLayoutWidthPct(text, current, {
-      ...options,
-      minPct: 0.58,
-      maxPct: 0.92,
-      targetLines: 2
-    });
-    const nextWidthPct = Math.max(currentWidthPct, recommendedWidthPct);
+    const preferredWidthPct = clampNumber(options?.widthPct, 0.22, 0.92, current.boxWidthPct || STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT);
+    const nextWidthPct = Math.max(currentWidthPct, preferredWidthPct);
     const nextHeightPct = Math.max(
       Math.max(0.07, Number(baseLayout.heightPct || 0.14)),
       estimateOnScreenTextLayoutHeightPct(text, current, nextWidthPct, options)
@@ -777,6 +951,226 @@
     );
   }
 
+  function inferOnScreenTextLookPreset(settings = null) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    return PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.find((preset) => {
+      const target = preset.settings || {};
+      return Object.keys(target).every((key) => String(current[key]) === String(target[key]));
+    })?.value || "";
+  }
+
+  function applyOnScreenTextLookPresetValue(settings = null, presetKey = "") {
+    const preset = PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.find((item) => item.value === String(presetKey || "").trim());
+    if (!preset) return normalizeOnScreenTextTrackSettings(settings || {});
+    return normalizeOnScreenTextTrackSettings({
+      ...normalizeOnScreenTextTrackSettings(settings || {}),
+      ...(preset.settings || {})
+    });
+  }
+
+  function buildOnScreenTextTrackModalMarkup(settings = null) {
+    const current = normalizeOnScreenTextTrackSettings(settings || {});
+    const activeLookPreset = inferOnScreenTextLookPreset(current);
+    const textOpacityPct = Math.round(Math.max(0, Math.min(1, Number(current.textOpacity ?? 1))) * 100);
+    const strokeWidthPx = Math.max(0, Math.min(12, Number(current.strokeWidthPx ?? 0)));
+    const shadowOpacityPct = Math.round(Math.max(0, Math.min(1, Number(current.shadowOpacity ?? 0.55))) * 100);
+    const shadowBlurPx = Math.max(0, Math.min(32, Math.round(Number(current.shadowBlurPx ?? 12))));
+    const shadowOffsetXPx = Math.max(-24, Math.min(24, Math.round(Number(current.shadowOffsetXPx ?? 0))));
+    const shadowOffsetYPx = Math.max(-24, Math.min(24, Math.round(Number(current.shadowOffsetYPx ?? 4))));
+    const shadowSizePx = Math.max(0, Math.min(20, Math.round(Number(current.shadowSizePx ?? 0))));
+    const bgOpacityPct = Math.round(Math.max(0, Math.min(1, Number(current.bgOpacity ?? 1))) * 100);
+    const bgScalePct = Math.round(Math.max(0.6, Math.min(1.8, Number(current.bgScale ?? 1))) * 100);
+    const boxWidthPct = Math.round(Math.max(0.22, Math.min(0.92, Number(current.boxWidthPct ?? STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT))) * 100);
+    const alignmentOptions = [
+      { value: "left", label: "Izq." },
+      { value: "center", label: "Centro" },
+      { value: "right", label: "Der." },
+      { value: "justify", label: "Just." }
+    ];
+    const bgOptions = [
+      { value: "none", label: "Sin fondo" },
+      { value: "glass", label: "Cristal" },
+      { value: "solid", label: "Sólido" }
+    ];
+    return `
+      <section class="onscreen-text-inspector-shell">
+        <section class="onscreen-text-inspector-rail">
+          <div class="onscreen-text-inspector-titlebar">
+            <span class="onscreen-text-inspector-kicker">Carácter</span>
+            <div class="onscreen-text-inspector-title-copy">
+              <strong>Inspector de texto</strong>
+              <span>Tipografía, ancho del subtítulo, contorno y sombra.</span>
+            </div>
+          </div>
+          <div class="onscreen-text-mini-presets">
+            ${PODCAST_ON_SCREEN_TEXT_LOOK_PRESETS.map((preset) => `
+              <button
+                type="button"
+                class="onscreen-text-mini-preset${preset.value === activeLookPreset ? " is-active" : ""}"
+                data-action="onscreen-text-look-preset"
+                data-preset="${escapeHtml(preset.value)}"
+                aria-pressed="${preset.value === activeLookPreset ? "true" : "false"}"
+                title="${escapeHtml(preset.hint)}"
+              >
+                ${escapeHtml(preset.label)}
+              </button>
+            `).join("")}
+          </div>
+        </section>
+        <section class="onscreen-text-inspector-panel is-character">
+          <div class="onscreen-text-inspector-panel-head"><strong>Carácter</strong></div>
+          <div class="onscreen-text-inline-fields is-quad">
+            <label class="row-field">
+              <span>Familia</span>
+              <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="fontFamily" aria-label="Tipografía del texto en pantalla">
+                ${PODCAST_ON_SCREEN_TEXT_FONT_FAMILIES.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.fontFamily ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="row-field">
+              <span>Estilo</span>
+              <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="fontVariant" aria-label="Peso y estilo del texto">
+                ${PODCAST_ON_SCREEN_TEXT_FONT_VARIANTS.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.fontVariant ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="row-field">
+              <span>Variante</span>
+              <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="stylePreset" aria-label="Efecto visual del texto">
+                ${PODCAST_ON_SCREEN_TEXT_STYLE_PRESETS.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.stylePreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="row-field">
+              <span>Alineación</span>
+              <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="textAlign" aria-label="Alineación del texto">
+                ${alignmentOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.textAlign ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <label class="row-field wide">
+            <span>Tamaño</span>
+            <div class="studio-volume-control">
+              <input type="range" min="16" max="96" step="1" value="${escapeHtml(String(current.fontSizePx || 44))}" data-action="onscreen-text-track-setting" data-setting="fontSizePx" aria-label="Tamaño del texto en pantalla">
+              <input type="number" min="16" max="96" step="1" value="${escapeHtml(String(current.fontSizePx || 44))}" data-action="onscreen-text-track-setting" data-setting="fontSizePx" inputmode="numeric" aria-label="Tamaño del texto numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Ancho del subtítulo</span>
+            <div class="studio-volume-control">
+              <input type="range" min="22" max="92" step="1" value="${escapeHtml(String(boxWidthPct))}" data-action="onscreen-text-track-setting" data-setting="boxWidthPct" aria-label="Ancho del subtítulo">
+              <input type="number" min="22" max="92" step="1" value="${escapeHtml(String(boxWidthPct))}" data-action="onscreen-text-track-setting" data-setting="boxWidthPct" inputmode="numeric" aria-label="Ancho del subtítulo numérico">
+            </div>
+          </label>
+        </section>
+        <section class="onscreen-text-inspector-panel is-appearance">
+          <div class="onscreen-text-inspector-panel-head"><strong>Apariencia</strong></div>
+          <div class="onscreen-text-inline-row">
+            <label class="row-field onscreen-text-swatch-field">
+              <span>Relleno</span>
+              <input type="color" value="${escapeHtml(String(current.textColor || "#f8fafc"))}" data-action="onscreen-text-track-setting" data-setting="textColor" aria-label="Color del texto en pantalla">
+            </label>
+            <label class="row-field onscreen-text-metric-field">
+              <span>Opacidad</span>
+              <div class="studio-volume-control">
+                <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(textOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="textOpacity" aria-label="Opacidad del texto en pantalla">
+                <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(textOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="textOpacity" inputmode="numeric" aria-label="Opacidad del texto numérica">
+              </div>
+            </label>
+          </div>
+        </section>
+        <section class="onscreen-text-inspector-panel is-stroke">
+          <div class="onscreen-text-inspector-panel-head"><strong>Contorno</strong></div>
+          <label class="row-field">
+            <span>Activar</span>
+            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="strokeEnabled" aria-label="Activar contorno del texto">
+              <option value="true"${current.strokeEnabled !== false ? " selected" : ""}>Sí</option>
+              <option value="false"${current.strokeEnabled === false ? " selected" : ""}>No</option>
+            </select>
+          </label>
+          <div class="onscreen-text-inline-row">
+            <label class="row-field onscreen-text-swatch-field">
+              <span>Color</span>
+              <input type="color" value="${escapeHtml(String(current.strokeColor || "#0f172a"))}" data-action="onscreen-text-track-setting" data-setting="strokeColor" aria-label="Color del contorno del texto">
+            </label>
+            <label class="row-field onscreen-text-metric-field">
+              <span>Grosor</span>
+              <div class="studio-volume-control">
+                <input type="range" min="0" max="12" step="0.1" value="${escapeHtml(String(strokeWidthPx))}" data-action="onscreen-text-track-setting" data-setting="strokeWidthPx" aria-label="Grosor del contorno del texto">
+                <input type="number" min="0" max="12" step="0.1" value="${escapeHtml(String(strokeWidthPx))}" data-action="onscreen-text-track-setting" data-setting="strokeWidthPx" inputmode="decimal" aria-label="Grosor del contorno numérico">
+              </div>
+            </label>
+          </div>
+        </section>
+        <section class="onscreen-text-inspector-panel is-shadow">
+          <div class="onscreen-text-inspector-panel-head"><strong>Sombra</strong></div>
+          <label class="row-field">
+            <span>Activar</span>
+            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="shadowEnabled" aria-label="Activar sombra del texto">
+              <option value="true"${current.shadowEnabled !== false ? " selected" : ""}>Sí</option>
+              <option value="false"${current.shadowEnabled === false ? " selected" : ""}>No</option>
+            </select>
+          </label>
+          <label class="row-field wide">
+            <span>Opacidad</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(shadowOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="shadowOpacity" aria-label="Opacidad de sombra">
+              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(shadowOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="shadowOpacity" inputmode="numeric" aria-label="Opacidad de sombra numérica">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Tamaño</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="20" step="1" value="${escapeHtml(String(shadowSizePx))}" data-action="onscreen-text-track-setting" data-setting="shadowSizePx" aria-label="Tamaño de la sombra">
+              <input type="number" min="0" max="20" step="1" value="${escapeHtml(String(shadowSizePx))}" data-action="onscreen-text-track-setting" data-setting="shadowSizePx" inputmode="numeric" aria-label="Tamaño de la sombra numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Desenfoque</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="32" step="1" value="${escapeHtml(String(shadowBlurPx))}" data-action="onscreen-text-track-setting" data-setting="shadowBlurPx" aria-label="Blur de la sombra">
+              <input type="number" min="0" max="32" step="1" value="${escapeHtml(String(shadowBlurPx))}" data-action="onscreen-text-track-setting" data-setting="shadowBlurPx" inputmode="numeric" aria-label="Blur de sombra numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Offset X</span>
+            <div class="studio-volume-control">
+              <input type="range" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetXPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetXPx" aria-label="Desplazamiento horizontal de sombra">
+              <input type="number" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetXPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetXPx" inputmode="numeric" aria-label="Desplazamiento horizontal de sombra numérico">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Offset Y</span>
+            <div class="studio-volume-control">
+              <input type="range" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetYPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetYPx" aria-label="Desplazamiento vertical de sombra">
+              <input type="number" min="-24" max="24" step="1" value="${escapeHtml(String(shadowOffsetYPx))}" data-action="onscreen-text-track-setting" data-setting="shadowOffsetYPx" inputmode="numeric" aria-label="Desplazamiento vertical de sombra numérico">
+            </div>
+          </label>
+        </section>
+        <section class="onscreen-text-inspector-panel is-background">
+          <div class="onscreen-text-inspector-panel-head"><strong>Fondo</strong></div>
+          <label class="row-field">
+            <span>Tipo</span>
+            <select class="podcast-text-track-select" data-action="onscreen-text-track-setting" data-setting="bgPreset" aria-label="Tipo de fondo del texto">
+              ${bgOptions.map((item) => `<option value="${escapeHtml(item.value)}"${item.value === current.bgPreset ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="row-field wide">
+            <span>Opacidad</span>
+            <div class="studio-volume-control">
+              <input type="range" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" aria-label="Opacidad de fondo">
+              <input type="number" min="0" max="100" step="1" value="${escapeHtml(String(bgOpacityPct))}" data-action="onscreen-text-track-setting" data-setting="bgOpacity" inputmode="numeric" aria-label="Opacidad de fondo numérica">
+            </div>
+          </label>
+          <label class="row-field wide">
+            <span>Escala</span>
+            <div class="studio-volume-control">
+              <input type="range" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" aria-label="Escala de fondo">
+              <input type="number" min="60" max="180" step="1" value="${escapeHtml(String(bgScalePct))}" data-action="onscreen-text-track-setting" data-setting="bgScale" inputmode="numeric" aria-label="Escala de fondo numérica">
+            </div>
+          </label>
+        </section>
+      </section>
+    `.trim();
+  }
+
   function getOnScreenTextResizeHandles() {
     return ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
   }
@@ -819,7 +1213,11 @@
     buildOnScreenTextPreviewShadowCss,
     wrapOnScreenTextPreviewText,
     resolveOnScreenTextPreviewWrapFromMeasuredWidth,
+    applyOnScreenTextTrackSettingValue,
+    applyOnScreenTextLookPresetValue,
+    buildOnScreenTextTrackModalMarkup,
     buildOnScreenTextBubbleInlineStyle,
+    inferOnScreenTextLookPreset,
     resolveOnScreenTextPreviewLayoutSpec,
     shouldRepairLegacyOnScreenTextLayout,
     getOnScreenTextResizeHandles,
