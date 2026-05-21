@@ -746,7 +746,7 @@ body.is-resizing-podcast-stage {
       rgba(248, 250, 252, 1) 100%);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 0 24px 28px;
+  padding: 4px 24px 12px;
   transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -846,9 +846,9 @@ body.is-resizing-podcast-stage {
   margin: 0 auto;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 24px;
+  border-radius: 20px;
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.03);
-  padding: 12px 16px;
+  padding: 8px 12px;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
@@ -868,7 +868,7 @@ body.is-resizing-podcast-stage {
 }
 
 .composer-topline {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .composer-switches-wrapper {
@@ -1052,9 +1052,9 @@ body.is-resizing-podcast-stage {
   display: block;
   background: rgba(15, 23, 42, 0.03);
   border: 1px solid var(--pod-border);
-  border-radius: 16px;
-  padding: 10px 16px;
-  margin-bottom: 12px;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
   transition: all 0.25s ease;
 }
 
@@ -1074,7 +1074,7 @@ body.is-resizing-podcast-stage {
   line-height: 1.5;
   min-height: 34px;
   max-height: 180px;
-  padding: 8px 2px;
+  padding: 4px 2px;
   tab-size: 2;
   overflow-x: hidden;
   white-space: pre-wrap;
@@ -4687,6 +4687,20 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   text-overflow: ellipsis;
   cursor: pointer;
   padding-right: 38px;
+  box-sizing: border-box;
+}
+
+.podcast-montage-audio-chip.is-narrow {
+  padding-left: 2px !important;
+  padding-right: 2px !important;
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+.podcast-montage-audio-chip.is-narrow > span,
+.podcast-montage-audio-chip.is-narrow > i,
+.podcast-montage-audio-chip.is-narrow .podcast-montage-audio-chip-speed-btn {
+  display: none !important;
 }
 
 .podcast-montage-audio-chip>span {
@@ -6176,6 +6190,96 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   border-top: 1px solid color-mix(in srgb, var(--pod-border) 72%, transparent 28%);
   padding-top: 10px;
   align-content: start;
+  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1), gap 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.podcast-studio-footer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--pod-border) 60%, transparent 40%);
+}
+
+.podcast-studio-footer-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pod-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 1;
+}
+
+.podcast-studio-footer-title i {
+  color: var(--pod-accent);
+  font-size: 12px;
+}
+
+.podcast-studio-footer-toggle-btn {
+  background: color-mix(in srgb, var(--pod-accent) 10%, transparent 90%);
+  border: 1px solid color-mix(in srgb, var(--pod-accent) 35%, transparent 65%);
+  color: var(--pod-accent);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.podcast-studio-footer-toggle-btn:hover {
+  color: #fff;
+  background: var(--pod-accent);
+  border-color: var(--pod-accent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--pod-accent) 40%, transparent 60%);
+}
+
+.podcast-studio-footer-toggle-btn i {
+  font-size: 11px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.podcast-studio-footer.is-footer-collapsed .podcast-studio-footer-toggle-btn i {
+  transform: rotate(180deg);
+}
+
+.podcast-studio-footer.is-footer-collapsed {
+  gap: 0;
+  padding-bottom: 4px;
+}
+
+.podcast-portrait-strip,
+.podcast-studio-note {
+  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, margin 0.3s ease, padding 0.3s ease;
+  max-height: 250px;
+  opacity: 1;
+}
+
+.podcast-studio-footer.is-footer-collapsed .podcast-portrait-strip {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.podcast-studio-footer.is-footer-collapsed .podcast-studio-note {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin-top: 0 !important;
+  padding: 0 !important;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .podcast-studio-note {
@@ -8481,3 +8585,177 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+/* Custom Interface Font Size Adjustments */
+.podcaster-app,
+.floating-panel-modal,
+.podcast-modal-container,
+.disfluency-modal-card,
+.pme-modal-container,
+.pme-modal-overlay {
+  --app-font-size: 11px !important;
+  font-size: var(--app-font-size) !important;
+}
+
+.podcaster-app strong,
+.podcaster-app h3,
+.podcaster-app th,
+.podcaster-app h4,
+.podcaster-app h5,
+.podcaster-app h6,
+.podcaster-app .script-row-head,
+.podcaster-app .script-row-head th,
+.podcaster-app .script-row strong,
+.podcaster-app .row-chip,
+.podcaster-app .composer-mode-label,
+.podcaster-app .activity-text,
+.floating-panel-modal strong,
+.floating-panel-modal h3,
+.floating-panel-modal th,
+.floating-panel-modal h4,
+.floating-panel-modal h5,
+.floating-panel-modal h6,
+.podcast-modal-container strong,
+.podcast-modal-container h3,
+.podcast-modal-container th,
+.disfluency-modal-card strong,
+.disfluency-modal-card h3,
+.disfluency-modal-card th,
+.pme-modal-container strong,
+.pme-modal-container h3,
+.pme-modal-container th,
+.pme-modal-overlay strong,
+.pme-modal-overlay h3,
+.pme-modal-overlay th,
+.pme-modal-overlay h4,
+.pme-modal-overlay h5,
+.pme-modal-overlay h6 {
+  font-size: 13px !important;
+}
+
+.podcaster-app td,
+.podcaster-app p,
+.podcaster-app textarea,
+.podcaster-app span,
+.podcaster-app input,
+.podcaster-app select,
+.podcaster-app label,
+.podcaster-app button,
+.podcaster-app li,
+.podcaster-app .prompt-editor,
+.podcaster-app .chat-message-body,
+.podcaster-app .chat-message-body *,
+.podcaster-app .script-row-body,
+.podcaster-app .script-row-body *,
+.podcaster-app .inspector-row-reference *,
+.podcaster-app .prompt-editor *,
+.floating-panel-modal td,
+.floating-panel-modal p,
+.floating-panel-modal textarea,
+.floating-panel-modal span,
+.floating-panel-modal input,
+.floating-panel-modal select,
+.floating-panel-modal label,
+.floating-panel-modal button,
+.floating-panel-modal li,
+.floating-panel-modal .prompt-editor,
+.podcast-modal-container td,
+.podcast-modal-container p,
+.podcast-modal-container textarea,
+.podcast-modal-container span,
+.podcast-modal-container input,
+.podcast-modal-container select,
+.podcast-modal-container label,
+.podcast-modal-container button,
+.podcast-modal-container li,
+.podcast-modal-container .prompt-editor,
+.disfluency-modal-card td,
+.disfluency-modal-card p,
+.disfluency-modal-card textarea,
+.disfluency-modal-card span,
+.disfluency-modal-card input,
+.disfluency-modal-card select,
+.disfluency-modal-card label,
+.disfluency-modal-card button,
+.disfluency-modal-card li,
+.disfluency-modal-card .prompt-editor,
+.pme-modal-container td,
+.pme-modal-container p,
+.pme-modal-container textarea,
+.pme-modal-container span,
+.pme-modal-container input,
+.pme-modal-container select,
+.pme-modal-container label,
+.pme-modal-container button,
+.pme-modal-container li,
+.pme-modal-container .prompt-editor,
+.pme-modal-overlay td,
+.pme-modal-overlay p,
+.pme-modal-overlay textarea,
+.pme-modal-overlay span,
+.pme-modal-overlay input,
+.pme-modal-overlay select,
+.pme-modal-overlay label,
+.pme-modal-overlay button,
+.pme-modal-overlay li,
+.pme-modal-overlay .prompt-editor {
+  font-size: var(--app-font-size) !important;
+}
+
+/* Specific Panel Toolbar Copy Header Size */
+.podcaster-app .panel-toolbar-copy h3,
+.floating-panel-modal .panel-toolbar-copy h3,
+.podcast-modal-container .panel-toolbar-copy h3,
+.disfluency-modal-card .panel-toolbar-copy h3,
+.pme-modal-container .panel-toolbar-copy h3,
+.pme-modal-overlay .panel-toolbar-copy h3 {
+  font-size: 12px !important;
+}
+
+/* Specific 10px Font Size Overrides */
+.podcaster-app .dialog-editor,
+.podcaster-app .chat-message-body table,
+.podcaster-app .podcast-player-meta span,
+.podcaster-app .field span,
+.podcaster-app .panel-toolbar-copy p,
+.podcaster-app .sessions-count,
+.podcaster-app a,
+.floating-panel-modal .dialog-editor,
+.floating-panel-modal .chat-message-body table,
+.floating-panel-modal .podcast-player-meta span,
+.floating-panel-modal .field span,
+.floating-panel-modal .panel-toolbar-copy p,
+.floating-panel-modal .sessions-count,
+.floating-panel-modal a,
+.podcast-modal-container .dialog-editor,
+.podcast-modal-container .chat-message-body table,
+.podcast-modal-container .podcast-player-meta span,
+.podcast-modal-container .field span,
+.podcast-modal-container .panel-toolbar-copy p,
+.podcast-modal-container .sessions-count,
+.podcast-modal-container a,
+.disfluency-modal-card .dialog-editor,
+.disfluency-modal-card .chat-message-body table,
+.disfluency-modal-card .podcast-player-meta span,
+.disfluency-modal-card .field span,
+.disfluency-modal-card .panel-toolbar-copy p,
+.disfluency-modal-card .sessions-count,
+.disfluency-modal-card a,
+.pme-modal-container .dialog-editor,
+.pme-modal-container .chat-message-body table,
+.pme-modal-container .podcast-player-meta span,
+.pme-modal-container .field span,
+.pme-modal-container .panel-toolbar-copy p,
+.pme-modal-container .sessions-count,
+.pme-modal-container a,
+.pme-modal-overlay .dialog-editor,
+.pme-modal-overlay .chat-message-body table,
+.pme-modal-overlay .podcast-player-meta span,
+.pme-modal-overlay .field span,
+.pme-modal-overlay .panel-toolbar-copy p,
+.pme-modal-overlay .sessions-count,
+.pme-modal-overlay a {
+  font-size: 10px !important;
+}
+
+

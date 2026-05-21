@@ -575,6 +575,7 @@ const els = {
   generateDialogueAudioBtn: document.querySelector("[data-action='timeline-generate-scene-audio']"),
   playDialogueAudioBtn: document.getElementById("playDialogueAudioBtn"),
   deleteDialogueAudioBtn: document.getElementById("deleteDialogueAudioBtn"),
+  togglePodcastStudioFooterBtn: document.getElementById("togglePodcastStudioFooterBtn"),
   podcastPortraitStrip: document.getElementById("podcastPortraitStrip"),
   podcastPortraitViewer: document.getElementById("podcastPortraitViewer"),
   podcastPortraitViewerBackdrop: document.getElementById("podcastPortraitViewerBackdrop"),
@@ -989,6 +990,7 @@ let podcastVideoState = {
   lastTimelineClipsUpdatedAt: "",
   cachedTimelineClips: null
 };
+window.podcastVideoState = podcastVideoState;
 
 function scheduleSessionLocalPersist(reason = "") {
   const session = getActiveSession();
@@ -7200,13 +7202,89 @@ function getSpeakerVoiceMap(session = null) {
 }
 
 function getSpeakerOptions(session = null) {
-  const hosts = Array.isArray(session?.script?.hosts) ? session.script.hosts : [];
-  const normalized = hosts
-    .map((item) => String(item || "").trim())
-    .filter(Boolean)
-    .map((speaker) => VOICES.find((candidate) => candidate.toLowerCase() === speaker.toLowerCase()) || "")
+  const candidates = new Set();
+
+  // 1. Obtener de session.script.hosts
+  if (Array.isArray(session?.script?.hosts)) {
+    session.script.hosts.forEach((h) => {
+      const name = String(h || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 2. Obtener de session.hosts
+  if (Array.isArray(session?.hosts)) {
+    session.hosts.forEach((h) => {
+      const name = String(h || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 3. Obtener de los rows/escenas en el script a través de getSessionRows (Timeline y Montaje)
+  const rows = getSessionRows(session);
+  if (Array.isArray(rows)) {
+    rows.forEach((row) => {
+      const name = String(row.speaker || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 4. Obtener de session.rows (por si acaso no fue cubierto)
+  if (Array.isArray(session?.rows)) {
+    session.rows.forEach((row) => {
+      const name = String(row.speaker || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 5. Obtener de los mapas de configuración de la sesión
+  if (session?.speakerVoiceMap && typeof session.speakerVoiceMap === "object") {
+    Object.keys(session.speakerVoiceMap).forEach((key) => {
+      const name = String(key || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+  if (session?.speakerExpressionMap && typeof session.speakerExpressionMap === "object") {
+    Object.keys(session.speakerExpressionMap).forEach((key) => {
+      const name = String(key || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+  if (session?.speakerNameMap && typeof session.speakerNameMap === "object") {
+    Object.keys(session.speakerNameMap).forEach((key) => {
+      const name = String(key || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 6. Obtener de los audios de diálogo generados (session.dialogueAudioMap)
+  if (session?.dialogueAudioMap && typeof session.dialogueAudioMap === "object") {
+    Object.values(session.dialogueAudioMap).forEach((audio) => {
+      const name = String(audio?.speaker || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // 7. Obtener de los segmentos del track de diálogo de video (podcastVideoConfig.geminiDialogueTrack.segments)
+  const segments = session?.podcastVideoConfig?.geminiDialogueTrack?.segments;
+  if (Array.isArray(segments)) {
+    segments.forEach((seg) => {
+      const name = String(seg.speaker || seg.speakerName || "").trim();
+      if (name) candidates.add(name);
+    });
+  }
+
+  // Normalizar: usar la versión en VOICES si coincide (case-insensitive), o conservar el nombre original
+  const normalized = Array.from(candidates)
+    .map((speaker) => {
+      const canonical = VOICES.find((candidate) => candidate.toLowerCase() === speaker.toLowerCase());
+      return canonical || speaker;
+    })
     .filter(Boolean);
-  if (normalized.length) return Array.from(new Set(normalized));
+
+  if (normalized.length) {
+    return Array.from(new Set(normalized));
+  }
   return [...DEFAULT_HOSTS];
 }
 
@@ -11729,36 +11807,7 @@ function renderPodcastVideoTimeline(session = null, options = {}) {
 }
 
 function syncTimelineGeminiSegmentDragPreview(session = null) {
-  const activeSession = session || getActiveSession();
-  if (!activeSession || !els.podcastVideoTimeline) return;
-  const minAudioLoopPx = getStudioAudioTrackMinLoopPx(activeSession);
-  const track = normalizeGeminiDialogueTrack(getPodcastVideoConfig(activeSession)?.geminiDialogueTrack || {});
-  if (!track.enabled || !Array.isArray(track.segments) || !track.segments.length) return;
-  const segmentByRowId = new Map(
-    track.segments
-      .map((segment) => [String(segment?.rowId || "").trim(), segment])
-      .filter(([rowId]) => rowId)
-  );
-  els.podcastVideoTimeline.querySelectorAll(".podcast-montage-audio-chip[data-row-id][data-audio-align='segment']").forEach((chip) => {
-    const rowId = String(chip?.dataset?.rowId || "").trim();
-    const segment = segmentByRowId.get(rowId) || null;
-    if (!rowId || !segment) return;
-    const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
-    const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
-    const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
-    const rawVisibleMs = Math.max(
-      STUDIO_TIMELINE_MIN_CLIP_MS,
-      (trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0)
-      || Number(segment?.durationMs || 0)
-      || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
-      || STUDIO_TIMELINE_MIN_CLIP_MS
-    );
-    const playbackRate = Math.max(0.5, Number(resolveDialogueAudioPlaybackRate(activeSession, rowId) || 1) || 1);
-    const visibleDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(rawVisibleMs / playbackRate));
-    const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(visibleDurationMs, activeSession) - 4);
-    chip.style.left = `${leftPx.toFixed(3)}px`;
-    chip.style.width = `${widthPx.toFixed(3)}px`;
-  });
+  return podcasterTimelineUiApi.syncTimelineGeminiSegmentDragPreview(session);
 }
 
 function syncPodcastTimelineSelectionUi(session = null) {
@@ -17060,6 +17109,36 @@ function deleteSceneRowById(rowId = "") {
 
 function attachEvents() {
   setupGlobalTooltipPortal();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (typeof playbackController?.pause === "function") {
+        playbackController.pause();
+      }
+      if (typeof exportPreviewController?.pause === "function") {
+        exportPreviewController.pause();
+      }
+      if (typeof stopStudioDialoguePreviewAudio === "function") {
+        stopStudioDialoguePreviewAudio();
+      }
+      if (typeof stopPanelMusic === "function") {
+        stopPanelMusic();
+      }
+    }
+  });
+  window.addEventListener("blur", () => {
+    if (typeof playbackController?.pause === "function") {
+      playbackController.pause();
+    }
+    if (typeof exportPreviewController?.pause === "function") {
+      exportPreviewController.pause();
+    }
+    if (typeof stopStudioDialoguePreviewAudio === "function") {
+      stopStudioDialoguePreviewAudio();
+    }
+    if (typeof stopPanelMusic === "function") {
+      stopPanelMusic();
+    }
+  });
   els.promptForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const prompt = getPromptInputPlainText();
@@ -19509,6 +19588,24 @@ function attachEvents() {
   if (els.podcastTimelineTracksModeBtn) {
     els.podcastTimelineTracksModeBtn.addEventListener("click", () => {
       setTimelineViewMode("tracks");
+    });
+  }
+  if (els.togglePodcastStudioFooterBtn) {
+    // Restaurar estado preferido por el usuario al cargar
+    const isCollapsed = localStorage.getItem("podcaster-footer-collapsed") === "true";
+    const footer = els.podcastPortraitStrip?.closest(".podcast-studio-footer");
+    if (footer && isCollapsed) {
+      footer.classList.add("is-footer-collapsed");
+      els.togglePodcastStudioFooterBtn.setAttribute("aria-expanded", "false");
+      els.togglePodcastStudioFooterBtn.title = "Expandir panel";
+    }
+
+    els.togglePodcastStudioFooterBtn.addEventListener("click", () => {
+      if (!footer) return;
+      const willCollapse = footer.classList.toggle("is-footer-collapsed");
+      localStorage.setItem("podcaster-footer-collapsed", willCollapse);
+      els.togglePodcastStudioFooterBtn.setAttribute("aria-expanded", !willCollapse);
+      els.togglePodcastStudioFooterBtn.title = willCollapse ? "Expandir panel" : "Colapsar panel";
     });
   }
   if (els.podcastPortraitStrip) {
