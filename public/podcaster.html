@@ -760,6 +760,74 @@
       </div>
     </section>
   </div>
+  <div id="sessionAcademicDataModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-session-academic-data-modal"
+      aria-label="Cerrar asignación de datos"></button>
+    <section class="floating-panel-card session-academic-data-panel" role="dialog" aria-modal="true"
+      aria-label="Asignar datos a la sesión">
+      <header class="timeline-clip-duration-head">
+        <h3>Asignar datos</h3>
+        <button id="closeSessionAcademicDataBtn" class="row-icon-btn" type="button" title="Cerrar">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <form id="sessionAcademicDataForm" class="session-academic-data-form">
+        <label class="row-field">
+          <span>Nivel</span>
+          <select id="sessionAcademicLevelSelect" aria-label="Nivel">
+            <option value="">Selecciona un nivel</option>
+            <option value="Preescolar">Preescolar</option>
+            <option value="Primaria">Primaria</option>
+            <option value="Secundaria">Secundaria</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span>Grado</span>
+          <select id="sessionAcademicGradeSelect" aria-label="Grado">
+            <option value="">Selecciona un grado</option>
+            <option value="Primero">Primero</option>
+            <option value="Segundo">Segundo</option>
+            <option value="Tercero">Tercero</option>
+            <option value="Cuarto">Cuarto</option>
+            <option value="Quinto">Quinto</option>
+            <option value="Sexto">Sexto</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span>Trimestre</span>
+          <select id="sessionAcademicTermSelect" aria-label="Trimestre">
+            <option value="">Selecciona un trimestre</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label class="row-field">
+          <span>Unidad</span>
+          <select id="sessionAcademicUnitSelect" aria-label="Unidad">
+            <option value="">Selecciona una unidad</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+          </select>
+        </label>
+        <div class="timeline-clip-duration-actions">
+          <button id="cancelSessionAcademicDataBtn"
+            class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
+            type="button">Cancelar</button>
+          <button id="saveSessionAcademicDataBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+            type="submit">Guardar</button>
+        </div>
+      </form>
+    </section>
+  </div>
   <div id="geminiAudioSpeedModal" class="floating-panel-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-gemini-audio-speed-modal"
       aria-label="Cerrar ajuste de velocidad Gemini"></button>
@@ -1106,14 +1174,14 @@
                 </div>
                 <div class="composer-mode-switch podcast-studio-video-mode-switch" role="group"
                   aria-label="Modo podcast o podcast con video">
-                  <span class="composer-mode-label">Podcast</span>
+                  <span class="composer-mode-label">Sin video</span>
                   <label class="composer-switch" for="podcastVideoModeToggle">
                     <input id="podcastVideoModeToggle" type="checkbox" aria-label="Activar podcast con video">
                     <span class="composer-switch-track" aria-hidden="true">
                       <span class="composer-switch-thumb"></span>
                     </span>
                   </label>
-                  <span class="composer-mode-label">Podcast con video</span>
+                  <span class="composer-mode-label">Con video</span>
                 </div>
               </div>
               <div class="podcast-studio-track-head-right">

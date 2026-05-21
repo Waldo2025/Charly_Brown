@@ -5113,6 +5113,36 @@ function renderUserItemList(container, items, type) {
       const session = item.session || item;
       const ui = session?.podcastStudioUiState || {};
       const clipMap = session?.timelineClipMap || ui.timelineClipsByRowId || {};
+      const nivel = String(session?.nivel || item?.nivel || "").trim();
+      const grado = String(session?.grado || item?.grado || "").trim();
+      const trimestre = String(session?.trimestre || item?.trimestre || "").trim();
+      const unidad = String(session?.unidad || item?.unidad || "").trim();
+      const academicDetailItems = [
+        nivel ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Nivel</span>
+              <span class="multimedia-detail-value">${escapeHtml(nivel)}</span>
+            </div>
+        ` : "",
+        grado ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Grado</span>
+              <span class="multimedia-detail-value">${escapeHtml(grado)}</span>
+            </div>
+        ` : "",
+        trimestre ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Trimestre</span>
+              <span class="multimedia-detail-value">${escapeHtml(trimestre)}</span>
+            </div>
+        ` : "",
+        unidad ? `
+            <div class="multimedia-detail-item">
+              <span class="multimedia-detail-label">Unidad</span>
+              <span class="multimedia-detail-value">${escapeHtml(unidad)}</span>
+            </div>
+        ` : ""
+      ].join("");
 
       let previewUrl = "";
       const firstVideoClip = Object.values(clipMap).find(c => c.videoSrc);
@@ -5167,6 +5197,7 @@ function renderUserItemList(container, items, type) {
               <span class="multimedia-detail-label">Estado</span>
               <span class="multimedia-detail-value"><span class="workbench-tag is-status">Publicado</span></span>
             </div>
+            ${academicDetailItems}
             ${hasAnyProposal ? `
                 <div class="multimedia-detail-item">
                   <span class="multimedia-detail-label">Propuestas</span>

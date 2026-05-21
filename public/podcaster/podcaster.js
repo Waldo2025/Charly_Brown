@@ -173,6 +173,10 @@ const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
 // 0 = sin timeout de polling (seguimiento indefinido del export).
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_DEVTOOLS_LOG_ENABLED = false;
+const SESSION_ACADEMIC_LEVEL_OPTIONS = Object.freeze(["Preescolar", "Primaria", "Secundaria"]);
+const SESSION_ACADEMIC_GRADE_OPTIONS = Object.freeze(["Primero", "Segundo", "Tercero", "Cuarto", "Quinto", "Sexto"]);
+const SESSION_ACADEMIC_TERM_OPTIONS = Object.freeze(["1", "2", "3"]);
+const SESSION_ACADEMIC_UNIT_OPTIONS = Object.freeze(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
 
 const VOICES = ["Host A", "Host B", "Host C", "Host D", "Narrador", "Invitado", "Patrocinador", "Analista", "Experto", "Co-host", "Entrevistador", "Moderador", "Cuentacuentos", "Profundizar en tema", "Debatiente", "Testigo"];
 const DEFAULT_HOSTS = Object.freeze(["Host A", "Host B"]);
@@ -609,6 +613,14 @@ const els = {
   resetTimelineClipDurationBtn: document.getElementById("resetTimelineClipDurationBtn"),
   cancelTimelineClipDurationBtn: document.getElementById("cancelTimelineClipDurationBtn"),
   applyTimelineClipDurationBtn: document.getElementById("applyTimelineClipDurationBtn"),
+  sessionAcademicDataModal: document.getElementById("sessionAcademicDataModal"),
+  closeSessionAcademicDataBtn: document.getElementById("closeSessionAcademicDataBtn"),
+  cancelSessionAcademicDataBtn: document.getElementById("cancelSessionAcademicDataBtn"),
+  sessionAcademicDataForm: document.getElementById("sessionAcademicDataForm"),
+  sessionAcademicLevelSelect: document.getElementById("sessionAcademicLevelSelect"),
+  sessionAcademicGradeSelect: document.getElementById("sessionAcademicGradeSelect"),
+  sessionAcademicTermSelect: document.getElementById("sessionAcademicTermSelect"),
+  sessionAcademicUnitSelect: document.getElementById("sessionAcademicUnitSelect"),
   geminiAudioSpeedModal: document.getElementById("geminiAudioSpeedModal"),
   closeGeminiAudioSpeedModalBtn: document.getElementById("closeGeminiAudioSpeedModalBtn"),
   geminiAudioSpeedModalTitle: document.getElementById("geminiAudioSpeedModalTitle"),
@@ -6220,6 +6232,10 @@ function createSession(overrides = {}) {
     title: "Nueva sesión de podcast",
     prompt: "",
     archived: false,
+    nivel: "",
+    grado: "",
+    trimestre: "",
+    unidad: "",
     updatedAt: nowIso(),
     podcastStudioUiState: normalizePodcastStudioUiState({ composerGenerationMode }),
     chat: [
@@ -6294,6 +6310,22 @@ function buildShortSessionTitle(input = "") {
 function normalizeSessionTitle(input = "") {
   const cleaned = String(input || "").replace(/\s+/g, " ").trim();
   return cleaned || "Nueva sesión";
+}
+
+function normalizeSessionAcademicField(input = "", allowedValues = []) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  return allowedValues.includes(raw) ? raw : "";
+}
+
+function getSessionAcademicMetadata(session = null) {
+  const source = session && typeof session === "object" ? session : {};
+  return {
+    nivel: normalizeSessionAcademicField(source.nivel, SESSION_ACADEMIC_LEVEL_OPTIONS),
+    grado: normalizeSessionAcademicField(source.grado, SESSION_ACADEMIC_GRADE_OPTIONS),
+    trimestre: normalizeSessionAcademicField(source.trimestre, SESSION_ACADEMIC_TERM_OPTIONS),
+    unidad: normalizeSessionAcademicField(source.unidad, SESSION_ACADEMIC_UNIT_OPTIONS)
+  };
 }
 
 function getActiveSession() {
@@ -15121,11 +15153,11 @@ function renderPodcastPortraitStrip(session = null, options = {}) {
         <div class="podcast-portrait-meta">
           <div class="podcast-portrait-copy">
             <strong>${escapeHtml(item.title)}</strong>
-            <span>Escenario global para todos los locutores</span>
+            <span>Escenario</span>
             <div class="podcast-portrait-tags">
               ${reference ? `<span class="row-chip">${escapeHtml(`Referencia: ${reference.name}`)}</span>` : ""}
               ${isGenerating ? `<span class="row-chip">Generando imagen...</span>` : ""}
-              ${!hasGeneratedImage && !isGenerating && !hasError ? `<span class="row-chip row-chip-warning">Sin imagen real generada</span>` : ""}
+              ${!hasGeneratedImage && !isGenerating && !hasError ? `<span class="row-chip row-chip-warning">Sin imagen.</span>` : ""}
               ${hasError ? `<span class="row-chip row-chip-warning">${escapeHtml(String(item.errorMessage || "Fallo al generar imagen").slice(0, 90))}</span>` : ""}
             </div>
           </div>
@@ -16270,6 +16302,7 @@ function renderSessions() {
           <div class="session-menu" hidden>
             <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
             <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
+            <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
             <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
             <button type="button" data-action="archive-session" data-session-id="${escapeHtml(session.id)}">Archivar</button>
             <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
@@ -16488,6 +16521,76 @@ function closeSessionMenus() {
   els.sessionList.querySelectorAll(".session-menu-btn").forEach((btn) => {
     btn.setAttribute("aria-expanded", "false");
   });
+}
+
+function setSessionAcademicDataModalOpen(sessionId = "") {
+  if (!els.sessionAcademicDataModal) return;
+  const cleanId = String(sessionId || "").trim();
+  const isOpen = Boolean(cleanId);
+  const targetSession = isOpen
+    ? state.sessions.find((session) => String(session?.id || "").trim() === cleanId) || null
+    : null;
+  const metadata = getSessionAcademicMetadata(targetSession);
+  els.sessionAcademicDataModal.hidden = !isOpen;
+  els.sessionAcademicDataModal.dataset.sessionId = cleanId;
+  if (els.sessionAcademicLevelSelect) els.sessionAcademicLevelSelect.value = metadata.nivel;
+  if (els.sessionAcademicGradeSelect) els.sessionAcademicGradeSelect.value = metadata.grado;
+  if (els.sessionAcademicTermSelect) els.sessionAcademicTermSelect.value = metadata.trimestre;
+  if (els.sessionAcademicUnitSelect) els.sessionAcademicUnitSelect.value = metadata.unidad;
+}
+
+async function saveSessionAcademicData(sessionId = "") {
+  const cleanId = String(sessionId || "").trim() || String(els.sessionAcademicDataModal?.dataset.sessionId || "").trim();
+  if (!cleanId) return;
+  const nextMetadata = {
+    nivel: normalizeSessionAcademicField(els.sessionAcademicLevelSelect?.value, SESSION_ACADEMIC_LEVEL_OPTIONS),
+    grado: normalizeSessionAcademicField(els.sessionAcademicGradeSelect?.value, SESSION_ACADEMIC_GRADE_OPTIONS),
+    trimestre: normalizeSessionAcademicField(els.sessionAcademicTermSelect?.value, SESSION_ACADEMIC_TERM_OPTIONS),
+    unidad: normalizeSessionAcademicField(els.sessionAcademicUnitSelect?.value, SESSION_ACADEMIC_UNIT_OPTIONS)
+  };
+  const updatedSession = upsertSessionById(cleanId, (current) => ({
+    ...current,
+    ...nextMetadata
+  }), {
+    render: cleanId === state.activeSessionId,
+    persist: true,
+    markDirty: true,
+    autosaveReason: "session-academic-data"
+  });
+  if (!updatedSession) return;
+  const cloudMeta = updatedSession?.cloudMeta || {};
+  const canPatchCloud = !updatedSession?.isStub
+    && Boolean(resolveCurrentUid())
+    && (
+      String(cloudMeta?.savedAt || "").trim()
+      || String(cloudMeta?.ownerId || "").trim()
+    );
+  if (!canPatchCloud) {
+    setSessionAcademicDataModalOpen("");
+    setGenerationStatus("Datos asignados", "Guarda la sesión para subirlos a Firebase.");
+    return;
+  }
+  const sessionUpdatedAt = String(updatedSession.updatedAt || nowIso()).trim() || nowIso();
+  try {
+    await updateDoc(doc(firestoreDb, "podcaster_sessions", cleanId), {
+      ...nextMetadata,
+      sessionUpdatedAt,
+      updatedAt: serverTimestamp(),
+      "session.nivel": nextMetadata.nivel,
+      "session.grado": nextMetadata.grado,
+      "session.trimestre": nextMetadata.trimestre,
+      "session.unidad": nextMetadata.unidad,
+      "session.updatedAt": sessionUpdatedAt
+    });
+    if (updatedSession?.cloudMeta && typeof updatedSession.cloudMeta === "object") {
+      updatedSession.cloudMeta.savedAt = sessionUpdatedAt;
+    }
+    setSessionAcademicDataModalOpen("");
+    setGenerationStatus("Datos asignados", "is-live");
+  } catch (error) {
+    addChatMessage("system", `No se pudieron guardar los datos académicos (${error.message}).`);
+    setGenerationStatus("Error", "");
+  }
 }
 
 function resolveCreativeRowMeta(session = null, rowId = "") {
@@ -17550,6 +17653,34 @@ function attachEvents() {
         await savePodcastSceneLibraryEdit();
       } catch (error) {
         addChatMessage("system", `No se pudo guardar la edición (${error.message}).`);
+      }
+    });
+  }
+  if (els.sessionAcademicDataModal) {
+    els.sessionAcademicDataModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-session-academic-data-modal']");
+      if (closeBtn || event.target === els.sessionAcademicDataModal) {
+        setSessionAcademicDataModalOpen("");
+      }
+    });
+  }
+  if (els.closeSessionAcademicDataBtn) {
+    els.closeSessionAcademicDataBtn.addEventListener("click", () => {
+      setSessionAcademicDataModalOpen("");
+    });
+  }
+  if (els.cancelSessionAcademicDataBtn) {
+    els.cancelSessionAcademicDataBtn.addEventListener("click", () => {
+      setSessionAcademicDataModalOpen("");
+    });
+  }
+  if (els.sessionAcademicDataForm) {
+    els.sessionAcademicDataForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await saveSessionAcademicData();
+      } catch (error) {
+        addChatMessage("system", `No se pudieron asignar los datos (${error.message}).`);
       }
     });
   }
@@ -20150,6 +20281,12 @@ function attachEvents() {
       event.stopPropagation();
       closeSessionMenus();
       renameSession(sessionId);
+    }
+    if (action.dataset.action === "assign-session-data") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSessionMenus();
+      setSessionAcademicDataModalOpen(sessionId);
     }
     if (action.dataset.action === "archive-session") {
       event.preventDefault();
