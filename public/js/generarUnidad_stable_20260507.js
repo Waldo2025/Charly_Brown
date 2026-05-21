@@ -748,6 +748,7 @@ const UNIDAD_PERSIST_FIELD_IDS = [
   ...UNIDAD_TEXT_FIELD_IDS
 ];
 const GEMINI_MODELOS_HABILITADOS = [
+  "gemini-3.5-flash",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3-pro-preview",
@@ -758,7 +759,8 @@ const GEMINI_MODELOS_HABILITADOS = [
 const GEMINI_MODELOS_PRIORIDAD_ESTABLE = [
   "gemini-2.5-flash-lite",
   "gemini-2.5-flash",
-  "gemini-2.5-pro"
+  "gemini-2.5-pro",
+  "gemini-3.5-flash"
 ];
 const GEMINI_MODELOS_PREVIEW_SECUNDARIOS = [
   "gemini-3-flash-preview",
@@ -776,7 +778,7 @@ let unidadSeriesCatalogoPromise = null;
 function isUnidadSupportedGeminiTextModelName(model = "") {
   const name = normalizeGeminiModel(model);
   if (!name) return false;
-  if (!/^gemini-(2\.5|3(?:\.1)?)/i.test(name)) return false;
+  if (!/^gemini-(2\.5|3(?:\.(?:1|5))?)/i.test(name)) return false;
   if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
   if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
   return true;
@@ -797,6 +799,7 @@ function formatUnidadGeminiModelOptionLabel(model = "") {
     "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
     "gemini-2.5-flash": "Gemini 2.5 Flash",
     "gemini-2.5-pro": "Gemini 2.5 Pro",
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
     "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
     "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
     "gemini-3.1-pro-preview": "Gemini 3.1 Pro (Preview)",

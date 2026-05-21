@@ -19,6 +19,22 @@
 
   injectConfigScript("js/runtime-config.js", "runtime");
   if (shouldLoadLocalOverride) {
-    injectConfigScript("js/config.local.js", "local");
+    (async () => {
+      const localCandidates = [
+        "js/config.local.js",
+        "./config.local.js",
+        "/config.local.js"
+      ];
+      for (const src of localCandidates) {
+        try {
+          const probe = await fetch(src, { method: "GET", cache: "no-store" });
+          if (!probe.ok) continue;
+          injectConfigScript(src, "local");
+          break;
+        } catch (_) {
+          // try next candidate
+        }
+      }
+    })();
   }
 })();

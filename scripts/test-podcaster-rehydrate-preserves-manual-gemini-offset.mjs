@@ -14,7 +14,7 @@ assert.match(
 
 assert.match(
   source,
-  /const hasManualStartMs = hasManualGeminiSegmentOffset\(existingSegment, delayedStartMsDefault\);/,
+  /const hasManualStartMs = hasManualGeminiSegmentOffset\(existingSegment, automaticStartMs\);/,
   "La reconciliación debe reutilizar el helper de offset manual antes de recalcular startMs."
 );
 

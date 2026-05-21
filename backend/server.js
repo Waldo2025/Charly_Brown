@@ -46,12 +46,12 @@ let GoogleGenAI = null;
 try {
   admin = require("firebase-admin");
 } catch (_) {
-  admin = require(path.resolve(__dirname, "..", "functions", "node_modules", "firebase-admin"));
+  throw new Error("Missing dependency: firebase-admin. Run npm install at the repo root.");
 }
 try {
-  ({ GoogleGenAI } = require(path.resolve(__dirname, "..", "functions", "node_modules", "@google", "genai")));
-} catch (_) {
   ({ GoogleGenAI } = require("@google/genai"));
+} catch (_) {
+  throw new Error("Missing dependency: @google/genai. Run npm install at the repo root.");
 }
 
 
@@ -164,7 +164,8 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
 ]);
 const PODCASTER_VIDEO_MODEL_CANDIDATES = Object.freeze([
   "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview"
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-lite-generate-preview"
 ]);
 const GEMINI_LIVE_ALLOWED_VOICE_NAMES = new Set([
   "Zephyr", "Kore", "Orus", "Autonoe", "Umbriel", "Erinome",
@@ -1482,45 +1483,62 @@ function buildBackendPodcasterStudioScenePrompt({
   singleSubjectOnly = false,
   contentMode = "podcast",
 }) {
-  const educational = String(contentMode || "").trim().toLowerCase() === "educational";
+  const isReel = String(contentMode || "").trim().toLowerCase() === "reel";
+  const educational = isReel || String(contentMode || "").trim().toLowerCase() === "educational";
   const speakerIndex = normalizePodcasterSpeakerSlotIndex(speakerLabel);
-  const stageZones = educational
-    ? [
-      "zona izquierda del encuadre, junto a un recurso visual de apoyo",
-      "zona derecha del encuadre, con composición didáctica limpia",
-      "zona central con profundidad de campo suave y apoyo gráfico",
-      "zona lateral secundaria con ángulo alterno del mismo entorno educativo",
-    ]
-    : [
-      "zona izquierda del escenario, cerca del micrófono principal izquierdo",
-      "zona derecha del escenario, cerca del micrófono principal derecho",
-      "zona central ligeramente al fondo, junto a la consola o mesa principal",
-      "zona lateral secundaria con un ángulo alterno del mismo set",
+
+  let stageZones;
+  let eyelineDirection;
+
+  if (isReel) {
+    stageZones = [
+      "zona central del encuadre, centrado en medio de la pantalla (layout vertical de red social)",
     ];
-  const eyelineDirections = [
-    {
-      bodyAngle: "cuerpo en tres cuartos orientado hacia la derecha del set",
-      gaze: "mirada dirigida lateralmente hacia la derecha del set",
-      cameraAngle: "cámara desde su lado izquierdo para evitar frontalidad total",
-    },
-    {
-      bodyAngle: "cuerpo en tres cuartos orientado hacia la izquierda del set",
-      gaze: "mirada dirigida lateralmente hacia la izquierda del set",
-      cameraAngle: "cámara desde su lado derecho para evitar frontalidad total",
-    },
-    {
-      bodyAngle: "cuerpo en tres cuartos orientado hacia el interlocutor principal",
-      gaze: "mirada desviada hacia un punto fuera de cámara, nunca al lente",
-      cameraAngle: "ángulo lateral suave para mantener una conversación creíble",
-    },
-    {
-      bodyAngle: "cuerpo en tres cuartos con leve giro hacia el centro del set",
-      gaze: "mirada hacia el centro conversacional del estudio, sin mirar al lente",
-      cameraAngle: "ángulo alterno lateral para reforzar continuidad entre locutores",
-    },
-  ];
+    eyelineDirection = {
+      bodyAngle: "cuerpo de frente, posicionado simétricamente en el centro del encuadre",
+      gaze: "mirada fija y directa al lente de la cámara, estableciendo contacto visual magnético y dinámico con la audiencia",
+      cameraAngle: "cámara frontal a la altura de los ojos, encuadre vertical ideal para Reels/Shorts (9:16)"
+    };
+  } else {
+    stageZones = educational
+      ? [
+        "zona izquierda del encuadre, junto a un recurso visual de apoyo",
+        "zona derecha del encuadre, con composición didáctica limpia",
+        "zona central con profundidad de campo suave y apoyo gráfico",
+        "zona lateral secundaria con ángulo alterno del mismo entorno educativo",
+      ]
+      : [
+        "zona izquierda del escenario, cerca del micrófono principal izquierdo",
+        "zona derecha del escenario, cerca del micrófono principal derecho",
+        "zona central ligeramente al fondo, junto a la consola o mesa principal",
+        "zona lateral secundaria con un ángulo alterno del mismo set",
+      ];
+    const eyelineDirections = [
+      {
+        bodyAngle: "cuerpo en tres cuartos orientado hacia la derecha del set",
+        gaze: "mirada dirigida lateralmente hacia la derecha del set",
+        cameraAngle: "cámara desde su lado izquierdo para evitar frontalidad total",
+      },
+      {
+        bodyAngle: "cuerpo en tres cuartos orientado hacia la izquierda del set",
+        gaze: "mirada dirigida lateralmente hacia la izquierda del set",
+        cameraAngle: "cámara desde su lado derecho para evitar frontalidad total",
+      },
+      {
+        bodyAngle: "cuerpo en tres cuartos orientado hacia el interlocutor principal",
+        gaze: "mirada desviada hacia un punto fuera de cámara, nunca al lente",
+        cameraAngle: "ángulo lateral suave para mantener una conversación creíble",
+      },
+      {
+        bodyAngle: "cuerpo en tres cuartos con leve giro hacia el centro del set",
+        gaze: "mirada hacia el centro conversacional del estudio, sin mirar al lente",
+        cameraAngle: "ángulo alterno lateral para reforzar continuidad entre locutores",
+      },
+    ];
+    eyelineDirection = eyelineDirections[speakerIndex % eyelineDirections.length];
+  }
+
   const zoneLabel = stageZones[speakerIndex % stageZones.length];
-  const eyelineDirection = eyelineDirections[speakerIndex % eyelineDirections.length];
   const cleanScenario = String(scenarioPrompt || "Cabina de radio premium").replace(/\s+/g, " ").trim() || "Cabina de radio premium";
   const lines = [
     educational
@@ -1540,11 +1558,17 @@ function buildBackendPodcasterStudioScenePrompt({
     `Bloqueo corporal obligatorio: ${eyelineDirection.bodyAngle}.`,
     `Eyeline obligatorio: ${eyelineDirection.gaze}.`,
     `Ángulo de cámara sugerido: ${eyelineDirection.cameraAngle}.`,
-    "Evitar pose frontal de presentador y evitar contacto visual directo con la cámara.",
+    isReel
+      ? "Directiva frontal de YouTuber: postura enérgica orientada al frente, mirando directamente a la cámara. Expresarse dinámicamente con manos y gestos entusiastas."
+      : "Evitar pose frontal de presentador y evitar contacto visual directo con la cámara.",
     "Mostrar un solo locutor claramente identificable en cuadro.",
     "Composición obligatoria de sujeto único: foreground y background limpios de personas.",
-    "La cámara nunca debe convertirse en el interlocutor principal; mantener la atención del locutor en la conversación.",
-    "Encuadre medio corto, cámara a la altura de los ojos, fondo elegante, profundidad de campo ligera.",
+    isReel
+      ? "La cámara es el interlocutor principal; el presentador habla directamente al espectador a través del lente."
+      : "La cámara nunca debe convertirse en el interlocutor principal; mantener la atención del locutor en la conversación.",
+    isReel
+      ? "Encuadre vertical (9:16), plano medio corto (MCU) o primer plano del presentador centrado, fondo de estudio estético y moderno, profundidad de campo ligera."
+      : "Encuadre medio corto, cámara a la altura de los ojos, fondo elegante, profundidad de campo ligera.",
     `La puesta en escena debe acompañar una actitud ${expression}.`,
     "Mantener continuidad visual entre escenas: misma cabina, mismo set, misma dirección de luz, mismo estilo de vestuario.",
   ];
@@ -1552,23 +1576,31 @@ function buildBackendPodcasterStudioScenePrompt({
     lines.push(
       "Retrato de sujeto único estricto: no agregar ninguna otra persona en el escenario.",
       "Prohibido segunda figura humana visible o parcial: no espalda, no hombro, no cabeza desenfocada, no perfil, no reflejo, no sombra humana.",
-      educational
-        ? "La imagen debe parecer un retrato editorial limpio del personaje activo dentro del set educativo."
-        : "La imagen debe parecer un retrato editorial limpio del locutor activo dentro del set."
+      isReel
+        ? "La imagen debe parecer un retrato vertical de alta calidad de un youtuber/creador de contenido de redes sociales posando al frente."
+        : (educational
+          ? "La imagen debe parecer un retrato editorial limpio del personaje activo dentro del set educativo."
+          : "La imagen debe parecer un retrato editorial limpio del locutor activo dentro del set.")
     );
   } else {
     lines.push(
-      educational
-        ? "La escena debe sentirse como explicación didáctica; el personaje atiende al contenido o a un recurso visual, no al espectador."
-        : "La escena debe sentirse como conversación entre locutores; el personaje atiende al interlocutor, no al espectador.",
+      isReel
+        ? "La escena debe sentirse como un creador de contenido dinámico (YouTuber) explicando un tema directamente a su audiencia."
+        : (educational
+          ? "La escena debe sentirse como explicación didáctica; el personaje atiende al contenido o a un recurso visual, no al espectador."
+          : "La escena debe sentirse como conversación entre locutores; el personaje atiende al interlocutor, no al espectador."),
       counterpartSpeakerName
-        ? educational
-          ? `La mirada debe sugerir atención a un recurso o co-presentador fuera de cuadro, sin frontalidad directa.`
-          : `La mirada debe sugerir escucha activa hacia ${counterpartSpeakerName}, pero siempre con el interlocutor completamente fuera de cuadro.`
+        ? (isReel
+          ? "Aunque haya otros personajes, cada escena de reel muestra únicamente al youtuber centrado en su propio encuadre, interactuando con la audiencia."
+          : (educational
+            ? `La mirada debe sugerir atención a un recurso o co-presentador fuera de cuadro, sin frontalidad directa.`
+            : `La mirada debe sugerir escucha activa hacia ${counterpartSpeakerName}, pero siempre con el interlocutor completamente fuera de cuadro.`))
         : "",
-      educational
-        ? "Priorizar miradas laterales, reacción didáctica y microgestos que ayuden a explicar el contenido."
-        : "Priorizar miradas laterales, reacción conversacional y microgestos que indiquen escucha activa entre locutores."
+      isReel
+        ? "Priorizar gestos expresivos con las manos, actitud entusiasta y contacto visual directo con la lente."
+        : (educational
+          ? "Priorizar miradas laterales, reacción didáctica y microgestos que ayuden a explicar el contenido."
+          : "Priorizar miradas laterales, reacción conversacional y microgestos que indiquen escucha activa entre locutores.")
     );
   }
   return lines.filter(Boolean).join(" ");
@@ -1716,6 +1748,9 @@ function sanitizePodcasterSession(raw = {}) {
     nextRow.sceneDescription = clampText(row?.sceneDescription || row?.description || row?.Descripción || row?.scenePrompt || "", 5000);
     nextRow.onScreenText = clampText(row?.onScreenText || row?.["Texto en pantalla"] || row?.["Texto en Pantalla"] || "", 1600);
     nextRow.visualNotes = clampText(row?.visualNotes || row?.visualElement || row?.["Elemento visual"] || row?.["Elemento Visual"] || "", 5000);
+    nextRow.visualNotesProposal = clampText(row?.visualNotesProposal || "", 5000);
+    nextRow.visualNotesProposals = normalizeProposalList(row?.visualNotesProposals);
+    nextRow.visualNotesResolvedProposals = normalizeProposalList(row?.visualNotesResolvedProposals);
     
     // Sanitizar otros campos conocidos si existen
     if (nextRow.notes) nextRow.notes = clampText(nextRow.notes, 5000);
@@ -4559,8 +4594,8 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const sessionId = clampText(req.body?.sessionId || "", 140);
-    const speakerLabel = clampText(req.body?.speakerLabel || "", 80);
-    const speakerName = clampText(req.body?.speakerName || "", 120) || speakerLabel || "Locutor";
+    const speakerLabel = clampText(req.body?.speakerLabel || req.body?.speaker || "", 80);
+    const speakerName = clampText(req.body?.speakerName || req.body?.speaker || "", 120) || speakerLabel || "Locutor";
     const voiceName = clampText(req.body?.voiceName || "", 80);
     const genderGroup = clampText(req.body?.genderGroup || "", 40);
     const expression = clampText(req.body?.expression || "Neutral", 80) || "Neutral";
@@ -4578,6 +4613,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       ...requestedCandidates.map((item) => normalizeModel(item || "")),
       ...PODCASTER_IMAGE_MODEL_CANDIDATES
     ].filter(Boolean)));
+    const contentMode = clampText(req.body?.contentMode || "podcast", 80) || "podcast";
 
     if (!sessionId) {
       return res.status(400).json({ error: "Falta sessionId." });
@@ -4602,6 +4638,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       voiceName,
       genderGroup,
       expression,
+      contentMode
     });
     const studioScenePrompt = buildBackendPodcasterStudioScenePrompt({
       speakerLabel,
@@ -4609,6 +4646,7 @@ app.post("/api/podcaster/speaker-portraits/generate", async (req, res) => {
       scenarioPrompt,
       expression,
       singleSubjectOnly: true,
+      contentMode
     });
     const scenarioReference = await loadOptionalImageReference({
       storagePath: scenarioImageStoragePath,
@@ -5049,7 +5087,8 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     const videoDirective = clampText(req.body?.videoDirective || "", 1400);
     const scenePrompt = clampText(req.body?.scenePrompt || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
-    const educationalVideo = req.body?.educationalVideo === true || req.body?.videoMode === true || contentMode === "educational";
+    const isReel = contentMode === "reel" || req.body?.isReel === true;
+    const educationalVideo = req.body?.educationalVideo === true || req.body?.videoMode === true || contentMode === "educational" || isReel;
     const rewriteScenarioPromptForEducationalVideo = (prompt = "") => {
       const text = String(prompt || "").replace(/\s+/g, " ").trim();
       if (!text) return "";
@@ -5135,10 +5174,30 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       ...requestedCandidates.map((item) => normalizeModel(item || "")),
       ...PODCASTER_VIDEO_MODEL_CANDIDATES
     ].filter(Boolean)));
-    const canPreferFastModel = !strictIdentity && !portraitUrl && !portraitStoragePath;
-    const filteredModels = strictIdentity
-      ? mergedModels.filter((modelName) => !/fast/i.test(String(modelName || "")))
-      : mergedModels;
+    const hasExplicitSceneReferenceInput = Boolean(
+      referenceImageDataUrls.length
+      || referenceImageDataUrl
+      || referenceVideoDataUrl
+      || continuityReferenceImageDataUrl
+    );
+    const traceReferenceVideo = (step = "", details = {}) => {
+      if (!hasExplicitSceneReferenceInput) return;
+      try {
+        console.info(`[backend][scene-video-ref][${String(step || "").trim() || "event"}]`, {
+          requestDebugTag,
+          sessionId,
+          rowId,
+          referenceMode,
+          ...details
+        });
+      } catch (_) { }
+    };
+    const canPreferFastModel = !strictIdentity && !portraitUrl && !portraitStoragePath && !hasExplicitSceneReferenceInput;
+    const filteredModels = mergedModels.filter((modelName) => {
+      const lowerModelName = String(modelName || "").toLowerCase();
+      if ((strictIdentity || hasExplicitSceneReferenceInput) && /lite/i.test(lowerModelName)) return false;
+      return true;
+    });
     const prioritizedModels = strictIdentity
       ? filteredModels
       : filteredModels.slice().sort((a, b) => {
@@ -5382,7 +5441,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
     }
 
-    console.info(`[backend][${requestDebugTag}] request`, {
+    traceReferenceVideo("request-summary", {
       strictIdentity,
       educationalVideo,
       hasPortraitAsset,
@@ -5395,7 +5454,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       hasPortraitUrl: Boolean(portraitUrl),
       hasPortraitStoragePath: Boolean(portraitStoragePath),
       textLength: String(text || "").length,
-      modelCandidates: videoModels
+      requestedModel,
+      mergedModels,
+      effectiveModelCandidates: videoModels,
+      imageReferenceNames: referenceImageNames,
+      referenceImageName,
+      referenceVideoName,
+      inlineBudgetBytes: Number(inlineReferenceBudget?.totalInlineBytes || 0) || 0
     });
     let inferredAudioDurationSec = audioDurationSecInput;
     if (!inferredAudioDurationSec && dialogueAudioStoragePath) {
@@ -5413,7 +5478,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       : (inferredAudioDurationSec > 0
         ? Math.round(clampNumber(inferredAudioDurationSec, 5, 8, 8))
         : 8));
-    const characterPrompt = educationalVideo
+    const characterPrompt = (educationalVideo && !isReel)
       ? ""
       : buildBackendPodcasterCharacterPrompt({
         speakerLabel,
@@ -5422,9 +5487,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         genderGroup,
         expression,
         counterpartSpeakerName,
-        contentMode: "podcast"
+        contentMode
       });
-    const studioScenePrompt = educationalVideo
+    const studioScenePrompt = (educationalVideo && !isReel)
       ? ""
       : buildBackendPodcasterStudioScenePrompt({
         speakerLabel,
@@ -5432,7 +5497,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         counterpartSpeakerName,
         scenarioPrompt,
         expression,
-        contentMode: "podcast"
+        contentMode
       });
     const timelineScenePromptBundle = buildDialogueVideoPromptBundle({
       promptProfile,
@@ -5468,7 +5533,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       referenceImageName,
       hasSceneReferenceVideo,
       referenceVideoName,
-      regenerationAnalysis: null
+      regenerationAnalysis: null,
+      isReel,
+      contentMode
     });
     const sceneVisualPrompt = timelineScenePromptBundle?.sceneVisualPrompt || (scenePrompt || [
       educationalVideo ? "Escena educativa basada en guion técnico." : `Escena de ${speakerName}.`,
@@ -5693,7 +5760,9 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         referenceType: "asset"
       }
       : null;
-    const referenceDurationSec = inferredTargetDurationSec;
+    const referenceDurationSec = (sceneReferenceAssets.length || continuityReferenceImage || hasPortraitAsset)
+      ? 8
+      : inferredTargetDurationSec;
 
     if (sceneReferenceAssets.length && derivedUseSceneReferenceAsInitImage) {
       requestVariants.push(
@@ -5880,15 +5949,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "text-only+aspect+duration",
           body: {
-            instances: [{
-              prompt,
-              ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
-                referenceImages: [
-                  ...sceneReferenceAssets,
-                  ...(continuityReferenceImage ? [continuityReferenceImage] : [])
-                ]
-              } : {})
-            }],
+            instances: [{ prompt }],
             parameters: {
               aspectRatio: "16:9",
               durationSeconds: inferredTargetDurationSec
@@ -5898,15 +5959,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         {
           label: "text-only+aspect",
           body: {
-            instances: [{
-              prompt,
-              ...((sceneReferenceAssets.length || continuityReferenceImage) ? {
-                referenceImages: [
-                  ...sceneReferenceAssets,
-                  ...(continuityReferenceImage ? [continuityReferenceImage] : [])
-                ]
-              } : {})
-            }],
+            instances: [{ prompt }],
             parameters: {
               aspectRatio: "16:9"
             }
@@ -6012,6 +6065,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
       return null;
     };
+    if (isReel) {
+      for (const variant of requestVariants) {
+        if (variant?.body?.parameters) {
+          variant.body.parameters.aspectRatio = "9:16";
+        }
+      }
+    }
     const requestedMaxVariantAttempts = Math.max(1, Math.min(
       requestVariants.length || 1,
       Math.floor(clampNumber(req.body?.maxVariantAttempts, 1, requestVariants.length || 1, requestVariants.length || 1))
@@ -6025,10 +6085,22 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       videoModels.length || 1,
       Math.floor(clampNumber(req.body?.maxModelAttempts, 1, videoModels.length || 1, videoModels.length || 1))
     )));
+    traceReferenceVideo("execution-plan", {
+      requestedMaxVariantAttempts,
+      requestedMaxOperationPollAttempts,
+      effectiveVideoModels,
+      effectiveVariants: effectiveRequestVariants.map((variant) => String(variant?.label || "").trim())
+    });
 
     for (const videoModel of effectiveVideoModels) {
       let modelReturnedDoneWithoutMedia = false;
       for (const [variantIndex, variant] of effectiveRequestVariants.entries()) {
+        traceReferenceVideo("variant-start", {
+          model: videoModel,
+          variant: String(variant?.label || "").trim(),
+          variantIndex: variantIndex + 1,
+          variantCount: effectiveRequestVariants.length
+        });
         updateDialogueVideoJob({
           status: "running",
           stage: "request_variant",
@@ -6063,6 +6135,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           attemptErrors.push(lastErrorDetail);
           continue;
         }
+        traceReferenceVideo("variant-operation-created", {
+          model: videoModel,
+          variant: String(variant?.label || "").trim(),
+          operationName
+        });
 
         let operationDone = null;
         try {
@@ -6074,6 +6151,15 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             postDoneGraceAttempts: 6,
             postDoneGraceDelayMs: 2500,
             onPoll: ({ attempt, maxAttempts }) => {
+              if (attempt === 1 || attempt % 5 === 0) {
+                traceReferenceVideo("variant-poll", {
+                  model: videoModel,
+                  variant: String(variant?.label || "").trim(),
+                  operationName,
+                  attempt,
+                  maxAttempts
+                });
+              }
               logHeavyWorkMemory("dialogue_video", "poll_operation", {
                 jobId,
                 sessionId,
@@ -6104,6 +6190,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
         const resolved = resolveVeoVideoResult(operationDone);
         const videoUri = String(resolved?.uri || "").trim();
         if (!videoUri && resolved?.inlineData?.data) {
+          traceReferenceVideo("variant-inline-video", {
+            model: videoModel,
+            variant: String(variant?.label || "").trim(),
+            operationName,
+            mimeType: String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4"
+          });
           const mimeType = String(resolved.inlineData.mimeType || "video/mp4").trim() || "video/mp4";
           const downloadedBuffer = Buffer.from(String(resolved.inlineData.data || ""), "base64");
           if (!downloadedBuffer.length || downloadedBuffer.length > MAX_DIALOGUE_VIDEO_BYTES) {
@@ -6129,9 +6221,10 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
             variantIndex,
             variantCount: effectiveRequestVariants.length
           });
-          console.warn(`[backend][${requestDebugTag}] variant-finished-without-media`, {
+          traceReferenceVideo("variant-finished-without-media", {
             model: videoModel,
             variant: String(variant?.label || "").trim(),
+            operationName,
             remainingVariants: fallbackDecision.remainingVariants,
             continueCurrentModel: fallbackDecision.continueCurrentModel,
             logReason: fallbackDecision.logReason
@@ -6141,6 +6234,12 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           }
           break;
         }
+        traceReferenceVideo("variant-video-uri", {
+          model: videoModel,
+          variant: String(variant?.label || "").trim(),
+          operationName,
+          videoUri
+        });
 
         // eslint-disable-next-line no-await-in-loop
         const videoResponse = await fetchCompat(videoUri, {
@@ -6185,7 +6284,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
       if (finalVideoBuffer) break;
       if (modelReturnedDoneWithoutMedia) {
-        console.warn(`[backend][${requestDebugTag}] switching-video-model-after-empty-media`, {
+        traceReferenceVideo("switch-model-after-empty-media", {
           failedModel: videoModel,
           nextCandidates: effectiveVideoModels.filter((candidate) => String(candidate || "").trim() !== String(videoModel || "").trim()),
           attemptedVariants: effectiveRequestVariants.length,
@@ -6202,7 +6301,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
     }
 
     if (!finalVideoBuffer) {
-      console.warn(`[backend][${requestDebugTag}] generation failed`, {
+      traceReferenceVideo("generation-failed", {
         strictIdentity,
         educationalVideo,
         hasPortraitAsset,
@@ -6266,6 +6365,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       inputDuration: String(transcodeMeta?.inputProbe?.duration || "").trim() || null,
       outputDuration: String(transcodeMeta?.outputProbe?.duration || "").trim() || null,
       sourceBytes: sourceVideoBytes,
+      outputBytes: Number(finalVideoBuffer?.length || 0)
+    });
+    traceReferenceVideo("generation-succeeded", {
+      model: resolvedModel,
+      variant: resolvedVariant,
+      sourceVideoMimeType,
+      outputMimeType: finalVideoMimeType,
       outputBytes: Number(finalVideoBuffer?.length || 0)
     });
 
@@ -6439,7 +6545,7 @@ function buildGeminiTtsPrompt({
   ].filter(Boolean).join("\n");
 }
 
-app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
+app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-audios/generate"], async (req, res) => {
   if (!ensureGeminiKey(res)) return;
   try {
     const uid = String(req.authContext?.uid || "").trim();
@@ -6456,7 +6562,7 @@ app.post("/api/podcaster/dialogue-audio/generate", async (req, res) => {
     const speechRateHint = Math.max(0.5, Math.min(1.85, Number(req.body?.speechRateHint || 1) || 1));
     const originalText = clampText(req.body?.originalText || "", 2000);
     const disfluencyInstruction = clampText(req.body?.disfluencyInstruction || "", 1800);
-    const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || {});
+    const ttsDirection = normalizeGeminiTtsDirectionConfig(req.body?.ttsDirection || req.body?.ttsDirectionConfig || {});
     const notes = clampText(req.body?.notes || "", 1200);
     const contentMode = String(req.body?.contentMode || "").trim().toLowerCase();
     const educationalAudio = req.body?.videoMode === true || contentMode === "educational" || contentMode === "creative";
@@ -9945,5 +10051,6 @@ module.exports = {
   montageExportJobStore,
   executeMontageExportPipeline,
   buildMontageSceneFailure,
-  getBackendPublicBaseUrl
+  getBackendPublicBaseUrl,
+  buildBackendPodcasterStudioScenePrompt
 };

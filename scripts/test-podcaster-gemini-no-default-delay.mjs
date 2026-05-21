@@ -7,7 +7,7 @@ if (!/const STUDIO_GEMINI_SCENE_DELAY_MS = 0;/.test(source)) {
 }
 
 const fnMatch = source.match(
-  /function resolveGeminiSegmentStartWithinScene\(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS\) \{[\s\S]*?return Math\.max\(0, safeSceneStartMs \+ STUDIO_GEMINI_SCENE_DELAY_MS\);[\s\S]*?\}/m
+  /function resolveGeminiSegmentStartWithinScene\(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS\) \{[\s\S]*?return Math\.max\(0, safeSceneStartMs \+ offsetMs \+ STUDIO_GEMINI_SCENE_DELAY_MS\);[\s\S]*?\}/m
 );
 
 if (!fnMatch) {

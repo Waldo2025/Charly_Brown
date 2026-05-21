@@ -118,7 +118,7 @@ export function setupPodcastVideoStageResize(els = {}, upsertUiState = () => {})
     handle.setPointerCapture?.(event.pointerId);
     document.body.classList.add("is-resizing-podcast-stage");
 
-    const previewEl = stage.querySelector(".podcast-video-preview-shell") || stage.querySelector(".podcast-video-preview");
+    const previewEl = stage.querySelector(".podcast-video-preview") || stage.querySelector(".podcast-video-preview-shell");
     const previewRect = previewEl?.getBoundingClientRect?.();
     const startY = event.clientY;
     const startHeight = previewRect?.height || 320;

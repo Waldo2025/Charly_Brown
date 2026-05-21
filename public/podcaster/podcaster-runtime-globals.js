@@ -1,6 +1,16 @@
 (function initPodcasterRuntimeGlobals(global) {
   if (!global) return;
 
+  function defineRuntimeNumber(name, fallback) {
+    const current = Number(global[name]);
+    const value = Number.isFinite(current) ? current : fallback;
+    global[name] = value;
+    if (typeof globalThis !== "undefined") {
+      globalThis[name] = value;
+    }
+    return value;
+  }
+
   function readDataUrlFromFile(file, options) {
     const settings = options && typeof options === "object" ? options : {};
     const maxChars = Number(settings.maxChars || 0);
@@ -36,8 +46,7 @@
   }
 
   async function generateDialogueAudioForRow() {
-    const impl = global.__podcasterAudioGeminiGenerateDialogueAudioForRow
-      || global.PodcasterGeneration?.generateDialogueAudioForRow;
+    const impl = global.__podcasterAudioGeminiGenerateDialogueAudioForRow;
     if (typeof impl !== "function") {
       throw new Error("generateDialogueAudioForRow no está disponible todavía.");
     }
@@ -164,6 +173,16 @@
       else target.removeAttribute("title");
     }
   }
+
+  defineRuntimeNumber("STUDIO_TIMELINE_VERSION", 3);
+  defineRuntimeNumber("STUDIO_TIMELINE_TRACK_VERSION", 1);
+  defineRuntimeNumber("STUDIO_TIMELINE_PIXELS_PER_SEC", 52);
+  defineRuntimeNumber("STUDIO_TIMELINE_SNAP_MS", 10);
+  defineRuntimeNumber("STUDIO_TIMELINE_MIN_CLIP_MS", 500);
+  defineRuntimeNumber("STUDIO_TIMELINE_MIN_CLIP_PX", 96);
+  defineRuntimeNumber("STUDIO_AUDIO_TRACK_MIN_LOOP_PX", 24);
+  defineRuntimeNumber("STUDIO_GEMINI_SCENE_DELAY_MS", 0);
+  defineRuntimeNumber("VIDEO_SCENE_MAX_SEC", 8);
 
   global.readDataUrlFromFile = readDataUrlFromFile;
   global.generateDialogueAudioForRow = generateDialogueAudioForRow;

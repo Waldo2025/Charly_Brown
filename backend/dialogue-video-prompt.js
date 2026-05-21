@@ -16,7 +16,8 @@ function buildDialogueVideoPromptBundle(options = {}) {
     return null;
   }
 
-  const educationalVideo = options?.educationalVideo === true;
+  const isReel = options?.isReel === true || String(options?.contentMode || "").trim().toLowerCase() === "reel";
+  const educationalVideo = options?.educationalVideo === true || isReel;
   const sceneDescription = String(options?.sceneDescription || options?.scenePrompt || "").replace(/\s+/g, " ").trim();
   const visualNotes = String(options?.visualNotes || options?.videoDirective || "").replace(/\s+/g, " ").trim();
   const scenePrompt = String(options?.scenePrompt || "").replace(/\s+/g, " ").trim();
@@ -43,14 +44,20 @@ function buildDialogueVideoPromptBundle(options = {}) {
   ].filter(Boolean).join(" ").trim();
 
   const sceneImagePromptList = imagePrompts.length ? imagePrompts : (sceneVisualPrompt ? [
-    `${sceneVisualPrompt} Variación horizontal 16:9 enfocada en el contenido principal.`,
-    `${sceneVisualPrompt} Toma alternativa de apoyo que preserve la intención visual.`
+    isReel
+      ? `${sceneVisualPrompt} Variación vertical 9:16 de youtuber/presentador en primer plano centrado, enfocado en el contenido principal.`
+      : `${sceneVisualPrompt} Variación horizontal 16:9 enfocada en el contenido principal.`,
+    isReel
+      ? `${sceneVisualPrompt} Toma alternativa vertical de apoyo youtuber centrado que preserve la intención visual.`
+      : `${sceneVisualPrompt} Toma alternativa de apoyo que preserve la intención visual.`
   ] : []);
 
   const prompt = [
-    educationalVideo
-      ? "Genera un video educativo corto, claro y realista."
-      : "Genera un video cinematográfico corto y realista.",
+    isReel
+      ? "Genera un video corto de redes sociales (Short/Reel) en formato vertical, claro, enérgico y realista."
+      : (educationalVideo
+        ? "Genera un video educativo corto, claro y realista."
+        : "Genera un video cinematográfico corto y realista."),
     sceneDescription ? `Usa exactamente esta descripción de escena como base del plano/entorno: ${ensureSentence(sceneDescription)}` : "",
     visualNotes ? `Usa exactamente este elemento visual como contenido principal del clip: ${ensureSentence(visualNotes)}` : "",
     relateWithPreviousScene
@@ -96,14 +103,22 @@ function buildDialogueVideoPromptBundle(options = {}) {
         ? "La referencia de continuidad aplica obligatoriamente al primer fotograma; después cambia con rapidez hacia la nueva escena solicitada."
         : "La referencia de continuidad aplica obligatoriamente al primer fotograma para evitar un corte visible.")
       : "",
-    educationalVideo
-      ? "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del guion técnico."
-      : "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del clip.",
-    educationalVideo
-      ? "Puedes mostrar escenas sin personas si el recurso visual lo pide."
-      : "Si la escena no necesita personas, evita introducirlas.",
-    "Prohibido texto incrustado, subtítulos, overlays o elementos de interfaz.",
-    "Composición horizontal 16:9, limpia y coherente con el contenido solicitado."
+    isReel
+      ? "La prioridad es representar al youtuber centrado de frente explicando con entusiasmo la Descripción de escena y el Elemento visual."
+      : (educationalVideo
+        ? "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del guion técnico."
+        : "La prioridad es representar fielmente la Descripción de escena y el Elemento visual del clip."),
+    isReel
+      ? "El presentador debe permanecer visible y centrado en el medio de la pantalla vertical."
+      : (educationalVideo
+        ? "Puedes mostrar escenas sin personas si el recurso visual lo pide."
+        : "Si la escena no necesita personas, evita introducirlas."),
+    isReel
+      ? "Prohibido texto incrustado, subtítulos, overlays complejos o elementos de interfaz. Se permiten únicamente símbolos o diagramas didácticos limpios flotando sutilmente a los lados del presentador si el tema lo requiere."
+      : "Prohibido texto incrustado, subtítulos, overlays o elementos de interfaz.",
+    isReel
+      ? "Composición vertical de YouTuber en 9:16, limpia, con el presentador posicionado de frente exactamente en el centro de la pantalla, mirando directamente a la lente de la cámara, coherente con el contenido solicitado."
+      : "Composición horizontal 16:9, limpia y coherente con el contenido solicitado."
   ].filter(Boolean).join("\n");
 
   return {

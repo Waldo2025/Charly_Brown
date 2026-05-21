@@ -1,9 +1,7 @@
 import { authFetchJson, hasAvailableApiBase } from "../js/api-client.js";
+import { requirePodcasterPublicLibraryRuntime } from "./podcaster-runtime-registry.js";
 
-const runtime = globalThis.PodcasterPublicLibraryRuntime;
-if (!runtime || typeof runtime !== "object") {
-  throw new Error("PodcasterPublicLibraryRuntime no está disponible. Revisa la carga de podcaster.js.");
-}
+const runtime = requirePodcasterPublicLibraryRuntime();
 
 // --- State ---
 const podcastSceneLibraryState = {

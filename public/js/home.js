@@ -15,6 +15,8 @@ import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebas
 import { authFetchJson, buildApiUrl, hasAvailableApiBase } from "./api-client.js";
 import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.1.34";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
+import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
+import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -2505,6 +2507,56 @@ function resolveDashboardRowOnScreenText(row = null) {
   ).trim();
 }
 
+function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntries = []) {
+  const activeSession = session || currentMultimediaSession;
+  if (!activeSession) return { settings: { enabled: false }, segments: [] };
+  const rows = extractDashboardSessionRows(activeSession) || [];
+  const cfg = getPodcastVideoConfig(activeSession) || {};
+  const settings = typeof window.normalizeOnScreenTextTrackSettings === 'function'
+    ? window.normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {})
+    : { enabled: true, showTrack: true };
+  if (!settings.enabled || settings.showTrack === false) return { settings, segments: [] };
+
+  const clipMap = cfg.timelineOnScreenTextClipsByRowId || {};
+  const layoutMap = cfg.timelineOnScreenTextLayoutByRowId || {};
+  const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
+  
+  const segments = rows.map((row, index) => {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId) return null;
+    const clip = clipMap[rowId] || null;
+    if (clip && clip.hidden === true) return null;
+    const text = typeof window.getOnScreenTextClipText === 'function'
+      ? window.getOnScreenTextClipText(row)
+      : resolveDashboardRowOnScreenText(row);
+    if (!text) return null;
+    const runtime = runtimeByRowId.get(rowId) || null;
+    const startMs = Math.max(0, Math.round(Number(clip?.startMs ?? runtime?.startMs ?? 0) || 0));
+    const durationMs = Math.max(
+      800,
+      Math.round((typeof window.getOnScreenTextClipEffectiveDurationMs === 'function'
+        ? window.getOnScreenTextClipEffectiveDurationMs(clip)
+        : Number(clip?.trimOutMs || clip?.sourceDurationMs || 0) - Number(clip?.trimInMs || 0)) || runtime?.durationMs || 1000)
+    );
+    const layout = layoutMap[rowId] || (typeof window.buildDefaultOnScreenTextLayoutForRow === 'function'
+      ? window.buildDefaultOnScreenTextLayoutForRow({ ...row, index: index + 1 }, settings)
+      : { yPct: 0.92, widthPct: 0.85, heightPct: 0.14, xPct: 0 });
+    return {
+      id: `${rowId}-onscreen`,
+      rowId,
+      sceneIndex: index + 1,
+      text,
+      startMs,
+      durationMs,
+      trimInMs: Math.max(0, Math.round(Number(clip?.trimInMs || 0) || 0)),
+      trimOutMs: Math.max(0, Math.round(Number(clip?.trimOutMs || 0) || 0)),
+      zIndex: Math.max(1, Math.round(Number(clip?.zIndex || index + 1) || index + 1)),
+      layout
+    };
+  }).filter(Boolean);
+  return { settings, segments };
+}
+
 function resolveDashboardRowVisualNotes(row = null) {
   return String(
     row?.visualNotes
@@ -2679,12 +2731,22 @@ async function mutateDashboardProposalSession(activeRowId = "", mutator = null) 
           rowIndex = idx;
           if (mutator(rowsCopy, idx, sSession) === true) {
             const proposalRows = buildDashboardProposalShallowRows(rowsCopy);
-            writeOps.push(updateDoc(sessionRef, {
+            const payload = {
               [sRowsPath]: proposalRows,
               "session.updatedAt": now,
               sessionUpdatedAt: now,
               updatedAt: now
-            }));
+            };
+            if (sSession.rowReferenceImageMap) {
+              payload["session.rowReferenceImageMap"] = sSession.rowReferenceImageMap;
+            }
+            if (sSession.rowReferenceImageListMap) {
+              payload["session.rowReferenceImageListMap"] = sSession.rowReferenceImageListMap;
+            }
+            if (sSession.rowReferenceModeByRowId) {
+              payload["session.rowReferenceModeByRowId"] = sSession.rowReferenceModeByRowId;
+            }
+            writeOps.push(updateDoc(sessionRef, payload));
           }
         }
       }
@@ -2882,7 +2944,13 @@ function normalizeHomePanelMusicLoopSettings(value = [], sourceDurationMs = 0) {
     const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(item.trimInMs || 0) || 0)));
     const rawTrimOutMs = Math.round(Number(item.trimOutMs || maxDurationMs) || maxDurationMs);
     const trimOutMs = Math.max(trimInMs + HOME_TIMELINE_MIN_CLIP_MS, Math.min(maxDurationMs, rawTrimOutMs));
-    map.set(loopIndex, { loopIndex, trimInMs, trimOutMs });
+    map.set(loopIndex, {
+      loopIndex,
+      trimInMs,
+      trimOutMs,
+      fadeInMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeInMs || 0) || 0))),
+      fadeOutMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeOutMs || 0) || 0)))
+    });
   });
   return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
 }
@@ -3016,6 +3084,8 @@ function normalizeHomePanelMusicSourceItems(sourceItems = [], cfg = null, option
       durationSec: Math.max(0, Number(item?.durationSec || durationMs / 1000) || 0),
       trimInMs: Math.max(0, Math.round(Number(item?.trimInMs || 0) || 0)),
       trimOutMs: Math.max(0, Math.round(Number(item?.trimOutMs || 0) || 0)),
+      fadeInMs: Math.max(0, Math.round(Number(item?.fadeInMs || 0) || 0)),
+      fadeOutMs: Math.max(0, Math.round(Number(item?.fadeOutMs || 0) || 0)),
       trackIndex,
       loopIndex,
       muted: item?.muted === true || mutedLoopIndexes.has(loopIndex),
@@ -3125,6 +3195,8 @@ function buildHomeUploadedPanelMusicSegments(session = null, options = {}) {
         durationSec: getHomePanelMusicTrackDurationSec(single),
         trimInMs,
         trimOutMs,
+        fadeInMs: Math.max(0, Math.min(trimOutMs - trimInMs, Number(loopSetting?.fadeInMs || 0) || 0)),
+        fadeOutMs: Math.max(0, Math.min(trimOutMs - trimInMs, Number(loopSetting?.fadeOutMs || 0) || 0)),
         loop: false,
         loopIndex
       });
@@ -3162,6 +3234,8 @@ function buildHomeUploadedPanelMusicSegments(session = null, options = {}) {
       durationSec: getHomePanelMusicTrackDurationSec(track),
       trimInMs: 0,
       trimOutMs: visibleDurationMs,
+      fadeInMs: Math.max(0, Math.min(visibleDurationMs, Number(track?.loopSettings?.find?.((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === 0)?.fadeInMs || 0) || 0)),
+      fadeOutMs: Math.max(0, Math.min(visibleDurationMs, Number(track?.loopSettings?.find?.((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === 0)?.fadeOutMs || 0) || 0)),
       loop: false,
       loopIndex: 0
     });
@@ -3232,6 +3306,8 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
         durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
         trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
         trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),
+        fadeInMs: Math.max(0, Number(segment?.fadeInMs || 0) || 0),
+        fadeOutMs: Math.max(0, Number(segment?.fadeOutMs || 0) || 0),
         trackIndex,
         loopIndex,
         muted: mutedLoopIndexes.has(loopIndex),
@@ -3262,11 +3338,65 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
       ? activeTrack.loopSettings.map((item) => ({
         loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
         trimInMs: Math.max(0, Number(item?.trimInMs || 0) || 0),
-        trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0)
+        trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0),
+        fadeInMs: Math.max(0, Number(item?.fadeInMs || 0) || 0),
+        fadeOutMs: Math.max(0, Number(item?.fadeOutMs || 0) || 0)
       }))
       : [],
     mutedLoopIndexes: normalizeHomePanelMusicMutedLoopIndexes(activeTrack?.mutedLoopIndexes || []),
     enabled: sourceType !== "none" && (!!sourceUrl || sourceItems.length > 0)
+  };
+}
+
+function resolveHomeTimelineRuntimeOverlapPairAtMs(session = null, currentMs = 0, runtimeEntries = null) {
+  const entries = Array.isArray(runtimeEntries) ? runtimeEntries : [];
+  const activeEntries = entries
+    .filter((entry) => {
+      const startMs = Math.max(0, Number(entry?.startMs || 0) || 0);
+      const endMs = Math.max(startMs, Number(entry?.endMs || startMs) || startMs);
+      return currentMs >= startMs && currentMs < endMs;
+    })
+    .sort((a, b) =>
+      Number(a?.startMs || 0) - Number(b?.startMs || 0)
+      || Number(a?.zIndex || 0) - Number(b?.zIndex || 0)
+      || Number(a?.index || 0) - Number(b?.index || 0)
+    );
+  if (activeEntries.length < 2) {
+    return {
+      activeEntries,
+      backEntry: null,
+      frontEntry: null,
+      overlapStartMs: 0,
+      overlapEndMs: 0,
+      overlapDurationMs: 0,
+      progress: 1,
+      isOverlapActive: false
+    };
+  }
+  const backEntry = activeEntries[activeEntries.length - 2] || null;
+  const frontEntry = activeEntries[activeEntries.length - 1] || null;
+  const overlapStartMs = Math.max(
+    0,
+    Number(backEntry?.startMs || 0),
+    Number(frontEntry?.startMs || 0)
+  );
+  const overlapEndMs = Math.min(
+    Math.max(overlapStartMs, Number(backEntry?.endMs || overlapStartMs)),
+    Math.max(overlapStartMs, Number(frontEntry?.endMs || overlapStartMs))
+  );
+  const overlapDurationMs = Math.max(0, overlapEndMs - overlapStartMs);
+  const progress = overlapDurationMs > 0
+    ? Math.max(0, Math.min(1, (Math.max(0, Number(currentMs || 0)) - overlapStartMs) / overlapDurationMs))
+    : 1;
+  return {
+    activeEntries,
+    backEntry,
+    frontEntry,
+    overlapStartMs,
+    overlapEndMs,
+    overlapDurationMs,
+    progress,
+    isOverlapActive: overlapDurationMs > 0
   };
 }
 
@@ -3368,52 +3498,39 @@ const multimediaPlaybackDeps = {
       return cachedRuntimeEntries;
     }
 
-
     const rows = extractDashboardSessionRows(s);
     const videoConfig = s?.podcastVideoConfig || s?.script?.podcastVideoConfig || {};
     const ui = s?.podcastStudioUiState || {};
-
     const clipMap = s?.timelineClipMap || videoConfig.timelineClipsByRowId || ui.timelineClipsByRowId || {};
     const videoMap = s?.dialogueVideoMap || ui.dialogueVideosByRowId || {};
     const audioMap = s?.dialogueAudioMap || ui.dialogueAudiosByRowId || {};
-
-    let currentMs = 0;
-    const entries = rows.map((row, index) => {
-      const rowId = row.id || `row_${index}`;
-      if (!row.id) row.id = rowId;
-      let clip = clipMap[rowId];
-
+    const baseEntries = buildAugmentedTimelineRuntimeEntries({
+      ...s,
+      script: {
+        ...(s?.script || {}),
+        rows
+      },
+      podcastVideoConfig: {
+        ...videoConfig,
+        timelineClipsByRowId: clipMap
+      }
+    }, {
+      clipMap
+    });
+    const entries = baseEntries.map((baseEntry, index) => {
+      const rowId = String(baseEntry?.rowId || rows[index]?.id || `row_${index}`).trim();
       const sceneClip = videoMap[rowId];
       const audioClip = audioMap[rowId];
       const clipPlaybackRate = resolveDialogueAudioPlaybackRate(s, rowId);
-      const effectiveAudioDurationMs = Math.round((Number(audioClip?.durationSec || 0) * 1000) / clipPlaybackRate);
-
-      if (!sceneClip && !audioClip) return null;
-
-      if (!clip) {
-        const durationSec = Math.max(0.5, effectiveAudioDurationMs > 0 ? (effectiveAudioDurationMs / 1000) : Number(audioClip?.durationSec || 8));
-        clip = {
-          rowId,
-          startMs: currentMs,
-          durationMs: durationSec * 1000,
-          trimInMs: 0,
-          trimOutMs: 0,
-          zIndex: index + 1
-        };
-      }
-
       const videoSrc = resolveStorageVideoUrl(sceneClip?.downloadUrl, sceneClip?.storagePath);
       const audioSrc = resolveStorageAudioUrl(audioClip?.downloadUrl, audioClip?.storagePath);
-
-      const entry = {
+      return {
+        ...baseEntry,
         rowId,
-        index,
-        clip,
-        startMs: Number(clip.startMs) || currentMs,
-        endMs: 0,
-        effectiveDurationMs: 0,
+        index: Number(baseEntry?.index ?? index),
         videoSrc,
         audioSrc,
+        durationMs: Number(baseEntry?.effectiveDurationMs || 0),
         video: {
           storagePath: String(sceneClip?.storagePath || "").trim(),
           url: String(sceneClip?.downloadUrl || "").trim(),
@@ -3425,34 +3542,9 @@ const multimediaPlaybackDeps = {
           mimeType: "audio/wav"
         },
         audioDurationMs: Math.round((Number(audioClip?.durationSec || 0) * 1000) / clipPlaybackRate),
-        zIndex: Number(clip.zIndex || index + 1)
+        zIndex: Number(baseEntry?.clip?.zIndex || index + 1)
       };
-
-      let rawDur = Number(clip.durationMs || clip.sourceDurationMs || 0);
-      if (rawDur > 0 && rawDur < 100) rawDur *= 1000;
-
-      if (rawDur <= 0) {
-        rawDur = effectiveAudioDurationMs;
-      }
-
-      if (rawDur <= 0) rawDur = 3000;
-
-      const trimIn = Number(clip.trimInMs || 0);
-      let trimOut = Number(clip.trimOutMs || rawDur);
-      if (trimOut > 0 && trimOut < 100) trimOut *= 1000;
-
-      if (trimOut <= trimIn) trimOut = trimIn + rawDur;
-
-      const durationMs = Math.max(500, trimOut - trimIn);
-
-      entry.startMs = currentMs;
-      entry.durationMs = durationMs;
-      entry.effectiveDurationMs = durationMs;
-      entry.endMs = entry.startMs + durationMs;
-
-      currentMs = entry.endMs;
-      return entry;
-    }).filter(Boolean);
+    }).filter((entry) => entry.videoSrc || entry.audioSrc);
 
     const finalEntries = entries.sort((a, b) => a.startMs - b.startMs);
     cachedRuntimeEntries = finalEntries;
@@ -3540,6 +3632,16 @@ const multimediaPlaybackDeps = {
   setActiveStageVideoSlot: (slot) => { homePlaybackState.stageVideoSlot = slot; },
   podcastVideoState: homePlaybackState,
   isDashboard: true,
+  getTransitionForEdge: (session, fromRowId, toRowId) => getTransitionForEdge(session, fromRowId, toRowId),
+  resolveTimelineRuntimeOverlapPairAtMs: (session, currentMs, runtimeEntries) => {
+    return resolveHomeTimelineRuntimeOverlapPairAtMs(session, currentMs, runtimeEntries);
+  },
+  resolveSceneSourceStateAtTimelineMs: (entry, currentMs) => {
+    if (typeof window.resolveSceneSourceStateAtTimelineMs === "function") {
+      return window.resolveSceneSourceStateAtTimelineMs(entry, currentMs);
+    }
+    return { sourceMs: Math.max(0, Number(entry?.clip?.trimInMs || 0)), isHoldActive: false, playbackRate: 1 };
+  },
   getPlaybackSpeed: () => Number(currentMultimediaSession?.podcastVideoConfig?.playbackSpeed || 1),
   getPodcastVideoConfig: (s) => {
     if (!s) return {};
@@ -3575,6 +3677,9 @@ const multimediaPlaybackDeps = {
     if (!cfg.onScreenTextTrack) {
       cfg.onScreenTextTrack = { enabled: true, showTrack: true, stylePreset: 'glow' };
     }
+    // Asegurar que enabled y showTrack estén habilitados para visualización garantizada en el Dashboard
+    cfg.onScreenTextTrack.enabled = true;
+    cfg.onScreenTextTrack.showTrack = true;
     cfg.onScreenTextTrack = normalizeSharedTrack(cfg.onScreenTextTrack);
 
     const existingOnScreenTextClips = normalizeSharedClipMap(s?.timelineOnScreenTextClipsByRowId
@@ -3590,44 +3695,45 @@ const multimediaPlaybackDeps = {
       || s?.podcastStudioUiState?.timelineOnScreenTextLayoutByRowId
       || {});
 
-    if (!cfg.timelineOnScreenTextClipsByRowId) {
-      const textClips = {};
-      const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
-      entries.forEach(entry => {
-        const allRows = extractDashboardSessionRows(s);
-        const row = allRows.find(r => r.id === entry.rowId);
-        const dialogueText = row?.onScreenText || row?.text || "";
-        const savedClip = existingOnScreenTextClips?.[entry.rowId] || null;
-        if (dialogueText) {
-          const clip = normalizeSharedClipItem({
-            rowId: entry.rowId,
-            startMs: entry.startMs,
-            sourceDurationMs: entry.durationMs,
-            trimInMs: 0,
-            trimOutMs: entry.durationMs,
-            hidden: savedClip?.hidden === true,
-            autoHidden: savedClip?.autoHidden === true,
-            zIndex: Math.max(1, Number(entry.zIndex || entry.index || 1) || 1)
-          }, entry.rowId);
-          if (clip) textClips[entry.rowId] = clip;
-        }
-      });
-      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(textClips);
-    } else if (existingOnScreenTextClips && Object.keys(existingOnScreenTextClips).length) {
-      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(Object.fromEntries(
-        Object.entries(cfg.timelineOnScreenTextClipsByRowId || {}).map(([rowId, clip]) => {
-          const savedClip = existingOnScreenTextClips?.[rowId] || null;
-          const normalized = normalizeSharedClipItem(savedClip ? {
-            ...clip,
-            hidden: savedClip?.hidden === true,
-            autoHidden: savedClip?.autoHidden === true
-          } : clip, rowId);
-          return [rowId, normalized];
-        })
-      ));
-    } else {
-      cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(cfg.timelineOnScreenTextClipsByRowId || {});
-    }
+    // Construir clips para cada entrada que tenga texto de diálogo usando el extractor unificado
+    const textClips = {};
+    const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(s);
+    entries.forEach(entry => {
+      const allRows = extractDashboardSessionRows(s);
+      const row = allRows.find(r => r.id === entry.rowId);
+      const dialogueText = resolveDashboardRowOnScreenText(row);
+      const savedClip = existingOnScreenTextClips?.[entry.rowId] 
+        || cfg.timelineOnScreenTextClipsByRowId?.[entry.rowId] 
+        || null;
+
+      if (dialogueText) {
+        const audioDur = Math.max(500, Number(entry.audioDurationMs || entry.effectiveDurationMs || entry.durationMs || 0) || 1000);
+        const baseClip = savedClip ? { ...savedClip } : {};
+        
+        // Preservar trimInMs y trimOutMs personalizados de la base de datos si existen
+        const trimIn = Math.max(0, Number(savedClip?.trimInMs ?? 0));
+        const trimOut = Math.max(trimIn + 500, Number(savedClip?.trimOutMs ?? audioDur));
+        const duration = Math.max(500, trimOut - trimIn);
+        const startMs = entry.startMs + trimIn;
+
+        const clip = normalizeSharedClipItem({
+          ...baseClip,
+          rowId: entry.rowId,
+          startMs: startMs,
+          sourceDurationMs: audioDur,
+          trimInMs: trimIn,
+          trimOutMs: trimOut,
+          durationMs: duration,
+          effectiveDurationMs: duration,
+          hidden: savedClip?.hidden === true,
+          autoHidden: savedClip?.autoHidden === true,
+          zIndex: Math.max(1, Number(savedClip?.zIndex || entry.zIndex || entry.index || 1) || 1)
+        }, entry.rowId);
+        if (clip) textClips[entry.rowId] = clip;
+      }
+    });
+
+    cfg.timelineOnScreenTextClipsByRowId = normalizeSharedClipMap(textClips);
     if (!cfg.timelineOnScreenTextLayoutByRowId && existingOnScreenTextLayouts && Object.keys(existingOnScreenTextLayouts).length) {
       cfg.timelineOnScreenTextLayoutByRowId = JSON.parse(JSON.stringify(existingOnScreenTextLayouts));
     } else {
@@ -3692,6 +3798,67 @@ const multimediaPlaybackDeps = {
               visualEl.innerHTML = `<span class="proposal-badge is-pending" style="margin-bottom: 4px;">PROPUESTA ACTIVA</span><br>${activeProposal}<br><small style="color: #64748b; font-size: 9px; display: block; margin-top: 4px;">Original: ${visualNotes || "--"}</small>`;
             } else {
               visualEl.textContent = visualNotes || "--";
+            }
+          }
+
+          // Referencia Visual
+          const refEl = document.getElementById("infoSceneReference");
+          if (refEl) {
+            const rowId = activeEntry.rowId;
+            const activeSession = currentMultimediaSession || {};
+            const activeSessionInner = activeSession.session || activeSession;
+            const refMap = activeSessionInner.rowReferenceImageMap || {};
+            const refImg = refMap[rowId];
+            if (refImg && refImg.dataUrl) {
+              refEl.innerHTML = `
+                <div class="inspector-row-reference" style="border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 8px;">
+                  <div class="inspector-row-reference-head" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; color: #94a3b8;">
+                    <span class="inspector-row-reference-name" style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 80%;">${escapeHtml(refImg.name || "Referencia")}</span>
+                    <button type="button" id="btnDeleteSceneReference" class="btn-clear-reference" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 2px;" title="Quitar referencia">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                  <div class="inspector-row-reference-preview" style="border-radius: 4px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; max-height: 120px;">
+                    <img src="${escapeHtml(refImg.dataUrl)}" style="max-width: 100%; max-height: 120px; object-fit: contain;">
+                  </div>
+                </div>
+              `;
+
+              // Bind delete event
+              const delBtn = document.getElementById("btnDeleteSceneReference");
+              if (delBtn) {
+                delBtn.addEventListener("click", async () => {
+                  if (confirm("¿Estás seguro de que quieres quitar la imagen de referencia de esta escena?")) {
+                    try {
+                      const delResult = await mutateDashboardProposalSession(rowId, (rCopy, rIndex, sSession) => {
+                        if (!sSession.rowReferenceImageMap) sSession.rowReferenceImageMap = {};
+                        if (!sSession.rowReferenceImageListMap) sSession.rowReferenceImageListMap = {};
+                        if (!sSession.rowReferenceModeByRowId) sSession.rowReferenceModeByRowId = {};
+
+                        delete sSession.rowReferenceImageMap[rowId];
+                        delete sSession.rowReferenceImageListMap[rowId];
+                        delete sSession.rowReferenceModeByRowId[rowId];
+                        return true;
+                      });
+                      if (delResult.ok) {
+                        const activeSessionInner = currentMultimediaSession.session || currentMultimediaSession;
+                        if (activeSessionInner.rowReferenceImageMap) delete activeSessionInner.rowReferenceImageMap[rowId];
+                        if (activeSessionInner.rowReferenceImageListMap) delete activeSessionInner.rowReferenceImageListMap[rowId];
+                        if (activeSessionInner.rowReferenceModeByRowId) delete activeSessionInner.rowReferenceModeByRowId[rowId];
+                        multimediaPlaybackController.sync(currentMultimediaSession);
+                      }
+                    } catch (err) {
+                      console.error("Error clearing reference image:", err);
+                    }
+                  }
+                });
+              }
+            } else {
+              refEl.innerHTML = `
+                <div class="inspector-row-reference-empty" style="color: #64748b; font-size: 11px; font-style: italic; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 12px; text-align: center;">
+                  Sin imagen de referencia
+                </div>
+              `;
             }
           }
 
@@ -3836,8 +4003,9 @@ const multimediaPlaybackDeps = {
   normalizeOnScreenTextTrackSettings: (s) => window.normalizeOnScreenTextTrackSettings ? window.normalizeOnScreenTextTrackSettings(s) : { enabled: true, showTrack: true },
   getOnScreenTextClipText: (row) => window.getOnScreenTextClipText
     ? window.getOnScreenTextClipText(row)
-    : (row.onScreenText || row.text || ""),
+    : resolveDashboardRowOnScreenText(row),
   resolveOnScreenTextRenderMetrics: (s, o) => window.resolveOnScreenTextRenderMetrics ? window.resolveOnScreenTextRenderMetrics(s, o) : {},
+  resolveOnScreenTextPreviewLayoutSpec: (cfg) => window.resolveOnScreenTextPreviewLayoutSpec ? window.resolveOnScreenTextPreviewLayoutSpec(cfg) : null,
   getOnScreenTextStylePresetClass: (p) => window.getOnScreenTextStylePresetClass ? window.getOnScreenTextStylePresetClass(p) : "",
   getOnScreenTextBgPresetClass: (p) => window.getOnScreenTextBgPresetClass ? window.getOnScreenTextBgPresetClass(p) : "",
   getOnScreenTextLayoutForRow: (s, rowId) => {
@@ -3935,32 +4103,91 @@ function initMultimediaPlayer() {
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      const clips = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session);
-      if (!clips.length) {
+      const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(session) || [];
+      if (!entries.length) {
         alert("No hay escenas con video/audio para exportar.");
+        btn.disabled = false;
+        btn.innerHTML = originalIcon;
         return;
       }
       const effectivePanelMusicConfig = multimediaPlaybackDeps.getPanelMontageMusicConfig(session);
+      const rows = extractDashboardSessionRows(session) || [];
+      const onScreenTextTimeline = buildDashboardMontageOnScreenTextSegments(session, entries);
+
+      const mappedEntries = entries.map((entry, index) => {
+        const rowId = String(entry?.rowId || "").trim();
+        const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+        const video = entry.video || null;
+        const videoStoragePath = String(video?.storagePath || "").trim();
+        const videoDownloadUrl = String(video?.url || "").trim();
+        const videoMimeType = String(video?.mimeType || "video/mp4").trim();
+        const isImageAsset = String(video?.mediaKind || video?.type || "").trim().toLowerCase() === "image"
+          || videoMimeType.startsWith("image/");
+        const durationMs = Math.max(500, Number(entry?.effectiveDurationMs || entry?.durationMs || 0) || 1000);
+        const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs || entry?.trimInMs || 0) || 0);
+
+        const audio = entry.audio || entry.dialogueAudio || null;
+        const audioStoragePath = String(audio?.storagePath || "").trim();
+        const audioDownloadUrl = String(audio?.url || "").trim();
+        const audioMimeType = String(audio?.mimeType || "audio/ogg").trim();
+
+        return {
+          rowId,
+          sceneIndex: index + 1,
+          speaker: String(row?.speaker || "").trim(),
+          sceneLabel: `Escena ${index + 1}`,
+          zIndex: Math.max(1, Number(entry?.zIndex || index + 1) || (index + 1)),
+          timelineStartMs: Math.max(0, Number(entry?.startMs || 0) || 0),
+          timelineEndMs: Math.max(0, Number(entry?.endMs || 0) || 0),
+          trimInMs,
+          durationMs,
+          voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
+          sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+          onScreenText: resolveDashboardRowOnScreenText(row),
+          visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
+          videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+          video: {
+            storagePath: videoStoragePath || "",
+            url: videoDownloadUrl || "",
+            mimeType: videoMimeType,
+            type: isImageAsset ? "image" : "video",
+            mediaKind: isImageAsset ? "image" : "video"
+          },
+          audio: (audioStoragePath || audioDownloadUrl) ? {
+            storagePath: audioStoragePath || "",
+            url: audioDownloadUrl || "",
+            mimeType: audioMimeType
+          } : null,
+          useNativeVideoAudio: false
+        };
+      });
 
       const payload = {
         sessionId: session.id,
-        entries: clips,
-        format: "mp4_h264",
+        title: session.title || "Export Dashboard",
         resolution: resolveEffectiveExportResolution("source", session.podcastVideoConfig?.reelModeEnabled),
+        bitrateSettings: {
+          mode: "custom",
+          maxBitrateMbps: 5,
+          minBitrateCrf: 23
+        },
+        format: "mp4_h264",
         qualityPreset: "balanced",
-        bitrateMode: "vbr",
-        includeReviewExcel: false,
-        filename: `Export_${session.title || session.id}`.replace(/\s+/g, '_'),
-        onscreenTextSettings: session.podcastVideoConfig?.onscreenTextSettings || session.podcastStudioUiState?.onscreenTextSettings || {},
-        panelMusicConfig: {
-          ...(session.panelMusicConfig || session.podcastStudioUiState?.panelMusicConfig || {}),
-          ...effectivePanelMusicConfig
-        }
+        includeBackgroundMusic: true,
+        entries: mappedEntries,
+        backgroundMusic: effectivePanelMusicConfig || null,
+        audioTimeline: {
+          enabled: true,
+          backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
+        },
+        onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
+          enabled: true,
+          settings: onScreenTextTimeline.settings,
+          segments: onScreenTextTimeline.segments
+        } : null
       };
 
-
-
-      const result = await authFetchJson("/podcaster/montage/export", {
+      const result = await authFetchJson("/api/podcaster/montage/export", {
         method: "POST",
         body: payload
       });
@@ -4131,13 +4358,32 @@ async function abrirReproductorMultimedia(session) {
         try {
           btn.disabled = true;
           btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
-          const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex) => {
+          const result = await mutateDashboardProposalSession(window._currentActiveRowId, (rows, rowIndex, sessionData) => {
             rows[rowIndex].visualNotesProposal = proposalText;
             if (!Array.isArray(rows[rowIndex].visualNotesProposals)) {
               rows[rowIndex].visualNotesProposals = [];
             }
             if (!rows[rowIndex].visualNotesProposals.includes(proposalText)) {
               rows[rowIndex].visualNotesProposals.push(proposalText);
+            }
+
+            // Si hay una imagen temporal adjunta, guardarla en el mapa de la sesión
+            if (window._tempProposalReferenceImage) {
+              if (!sessionData.rowReferenceImageMap) sessionData.rowReferenceImageMap = {};
+              if (!sessionData.rowReferenceImageListMap) sessionData.rowReferenceImageListMap = {};
+              if (!sessionData.rowReferenceModeByRowId) sessionData.rowReferenceModeByRowId = {};
+
+              const rowId = window._currentActiveRowId;
+              const imgRecord = {
+                name: window._tempProposalReferenceImage.name,
+                dataUrl: window._tempProposalReferenceImage.dataUrl,
+                mimeType: window._tempProposalReferenceImage.mimeType,
+                updatedAt: new Date().toISOString()
+              };
+
+              sessionData.rowReferenceImageMap[rowId] = imgRecord;
+              sessionData.rowReferenceImageListMap[rowId] = [imgRecord];
+              sessionData.rowReferenceModeByRowId[rowId] = "image";
             }
             return true;
           });
@@ -4146,6 +4392,11 @@ async function abrirReproductorMultimedia(session) {
             alert("No se encontró la escena actual en el documento original. Por favor, asegúrate de que el ID coincide.");
             return;
           }
+          // Limpiar el preview temporal después del guardado
+          window._tempProposalReferenceImage = null;
+          if (proposalPreviewContainer) proposalPreviewContainer.style.display = "none";
+          if (proposalFileInput) proposalFileInput.value = "";
+
           await notifyActivity("está añadiendo una propuesta nueva", result.rowIndex);
           multimediaPlaybackController.sync(currentMultimediaSession);
           multimediaPlaybackDeps.updatePodcastVideoTransportUi();
@@ -4158,6 +4409,89 @@ async function abrirReproductorMultimedia(session) {
           btn.innerHTML = originalText;
         }
       });
+    }
+
+    // Resetear variables temporales de propuesta
+    window._tempProposalReferenceImage = null;
+    const proposalPreviewContainer = document.getElementById("proposalReferencePreviewContainer");
+    if (proposalPreviewContainer) proposalPreviewContainer.style.display = "none";
+    const proposalFileInput = document.getElementById("proposalReferenceFileInput");
+    if (proposalFileInput) proposalFileInput.value = "";
+
+    // Adjuntar imagen de referencia
+    const btnAttachRef = document.getElementById("btnAttachProposalReference");
+    if (btnAttachRef && proposalFileInput) {
+      btnAttachRef.onclick = () => {
+        proposalFileInput.click();
+      };
+
+      proposalFileInput.onchange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+          // Leer y comprimir imagen a max 800x800, JPEG 0.7
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement("canvas");
+                const MAX_WIDTH = 800;
+                const MAX_HEIGHT = 800;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                  if (width > MAX_WIDTH) {
+                    height = Math.round((height * MAX_WIDTH) / width);
+                    width = MAX_WIDTH;
+                  }
+                } else {
+                  if (height > MAX_HEIGHT) {
+                    width = Math.round((width * MAX_HEIGHT) / height);
+                    height = MAX_HEIGHT;
+                  }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL("image/jpeg", 0.7));
+              };
+              img.onerror = () => reject(new Error("Error al cargar imagen."));
+              img.src = event.target.result;
+            };
+            reader.onerror = () => reject(new Error("Error al leer archivo."));
+            reader.readAsDataURL(file);
+          });
+
+          window._tempProposalReferenceImage = {
+            name: file.name,
+            dataUrl,
+            mimeType: "image/jpeg"
+          };
+
+          const previewImg = document.getElementById("proposalReferencePreviewImg");
+          if (previewImg && proposalPreviewContainer) {
+            previewImg.src = dataUrl;
+            proposalPreviewContainer.style.display = "block";
+          }
+        } catch (err) {
+          console.error("Error compressing image:", err);
+          alert("Error al cargar la imagen: " + err.message);
+        }
+      };
+    }
+
+    const btnRemoveRef = document.getElementById("btnRemoveProposalReference");
+    if (btnRemoveRef) {
+      btnRemoveRef.onclick = () => {
+        window._tempProposalReferenceImage = null;
+        if (proposalPreviewContainer) proposalPreviewContainer.style.display = "none";
+        if (proposalFileInput) proposalFileInput.value = "";
+      };
     }
 
     // Resetear botón de play
@@ -4488,12 +4822,61 @@ async function startMontageExport() {
     btnConfirm?.classList.add("btn-export-loading");
     btnConfirm.disabled = true;
 
-    // Construir payload simplificado basado en lo que el backend espera
+    // Construir payload completo basado en lo que el backend espera
     // Reusamos la lógica de persistencia para obtener los sourceItems correctos
-    const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession);
+    const entries = multimediaPlaybackDeps.buildTimelineRuntimeEntries(currentMultimediaSession) || [];
     const effectivePanelMusicConfig = multimediaPlaybackDeps.getPanelMontageMusicConfig(currentMultimediaSession);
+    const rows = extractDashboardSessionRows(currentMultimediaSession) || [];
+    const onScreenTextTimeline = buildDashboardMontageOnScreenTextSegments(currentMultimediaSession, entries);
 
-    // El backend espera una estructura específica que normalizeMontageExportRequestBody procesa
+    const mappedEntries = entries.map((entry, index) => {
+      const rowId = String(entry?.rowId || "").trim();
+      const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+      const video = entry.video || null;
+      const videoStoragePath = String(video?.storagePath || "").trim();
+      const videoDownloadUrl = String(video?.url || "").trim();
+      const videoMimeType = String(video?.mimeType || "video/mp4").trim();
+      const isImageAsset = String(video?.mediaKind || video?.type || "").trim().toLowerCase() === "image"
+        || videoMimeType.startsWith("image/");
+      const durationMs = Math.max(500, Number(entry?.effectiveDurationMs || entry?.durationMs || 0) || 1000);
+      const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs || entry?.trimInMs || 0) || 0);
+
+      const audio = entry.audio || entry.dialogueAudio || null;
+      const audioStoragePath = String(audio?.storagePath || "").trim();
+      const audioDownloadUrl = String(audio?.url || "").trim();
+      const audioMimeType = String(audio?.mimeType || "audio/ogg").trim();
+
+      return {
+        rowId,
+        sceneIndex: index + 1,
+        speaker: String(row?.speaker || "").trim(),
+        sceneLabel: `Escena ${index + 1}`,
+        zIndex: Math.max(1, Number(entry?.zIndex || index + 1) || (index + 1)),
+        timelineStartMs: Math.max(0, Number(entry?.startMs || 0) || 0),
+        timelineEndMs: Math.max(0, Number(entry?.endMs || 0) || 0),
+        trimInMs,
+        durationMs,
+        voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
+        sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+        onScreenText: resolveDashboardRowOnScreenText(row),
+        visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
+        videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+        video: {
+          storagePath: videoStoragePath || "",
+          url: videoDownloadUrl || "",
+          mimeType: videoMimeType,
+          type: isImageAsset ? "image" : "video",
+          mediaKind: isImageAsset ? "image" : "video"
+        },
+        audio: (audioStoragePath || audioDownloadUrl) ? {
+          storagePath: audioStoragePath || "",
+          url: audioDownloadUrl || "",
+          mimeType: audioMimeType
+        } : null,
+        useNativeVideoAudio: false
+      };
+    });
+
     const payload = {
       sessionId: currentMultimediaSession.id,
       title: currentMultimediaSession.title || "Export Dashboard",
@@ -4502,28 +4885,22 @@ async function startMontageExport() {
       format: "mp4_h264",
       qualityPreset: "balanced",
       includeBackgroundMusic: true,
-      entries: entries.map(e => ({
-        rowId: e.rowId,
-        video: e.video,
-        dialogueAudio: e.dialogueAudio,
-        startMs: e.startMs,
-        durationMs: e.durationMs,
-        trimInMs: e.trimInMs,
-        trimOutMs: e.trimOutMs,
-        onScreenText: e.onScreenText
-      })),
+      entries: mappedEntries,
       backgroundMusic: effectivePanelMusicConfig || null,
       audioTimeline: {
         enabled: true,
         backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
-      }
+      },
+      onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
+        enabled: true,
+        settings: onScreenTextTimeline.settings,
+        segments: onScreenTextTimeline.segments
+      } : null
     };
-
-
 
     const response = await authFetchJson("/api/podcaster/montage/export", {
       method: "POST",
-      body: JSON.stringify({ input: payload })
+      body: payload
     });
 
     if (response.jobId) {

@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getFirestore, doc, updateDoc, getDoc, serverTimestamp, deleteField } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import { getFirestore, doc, updateDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import { firebaseWebConfig } from "../js/firebase-web-config.js";
 import { buildApiUrl, getAuthHeaders, authFetchJson } from "../js/api-client.js";
 
@@ -507,20 +507,8 @@ function setupEventListeners() {
                 segments: null,
                 variants: null
             };
-            const imageReferenceData = isImageMedia ? {
-                id: currentEditingRowId,
-                rowId: currentEditingRowId,
-                name: selectedLibrary?.name || 'Referencia de escena',
-                downloadUrl: mediaUrl,
-                storagePath: finalStoragePath,
-                mimeType: selectedLibrary?.mimeType || 'image/jpeg',
-                type: 'image',
-                updatedAt: new Date().toISOString()
-            } : null;
-
             const updatePayload = {
                 [`session.dialogueVideoMap.${currentEditingRowId}`]: mediaData,
-                [`session.rowReferenceModeByRowId.${currentEditingRowId}`]: isImageMedia ? 'image' : 'video',
                 [`session.podcastVideoConfig.timelineClipsByRowId.${currentEditingRowId}.type`]: mediaType,
                 [`session.script.rows`]: rows,
                 [`session.updatedAt`]: serverTimestamp(),
@@ -535,14 +523,8 @@ function setupEventListeners() {
             });
             
             if (isImageMedia) {
-                updatePayload[`session.rowReferenceImageMap.${currentEditingRowId}`] = imageReferenceData;
-                updatePayload[`session.rowReferenceImageListMap.${currentEditingRowId}`] = [imageReferenceData];
-                updatePayload[`session.rowReferenceVideoMap.${currentEditingRowId}`] = deleteField();
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = effects;
             } else {
-                updatePayload[`session.rowReferenceVideoMap.${currentEditingRowId}`] = mediaData;
-                updatePayload[`session.rowReferenceImageMap.${currentEditingRowId}`] = deleteField();
-                updatePayload[`session.rowReferenceImageListMap.${currentEditingRowId}`] = deleteField();
                 updatePayload[`session.visualEffectsMap.${currentEditingRowId}`] = null;
             }
             
@@ -562,10 +544,6 @@ function setupEventListeners() {
                     
                     next.dialogueVideoMap = { ...(next.dialogueVideoMap || {}) };
                     next.visualEffectsMap = { ...(next.visualEffectsMap || {}) };
-                    next.rowReferenceModeByRowId = { ...(next.rowReferenceModeByRowId || {}) };
-                    next.rowReferenceVideoMap = { ...(next.rowReferenceVideoMap || {}) };
-                    next.rowReferenceImageMap = { ...(next.rowReferenceImageMap || {}) };
-                    next.rowReferenceImageListMap = { ...(next.rowReferenceImageListMap || {}) };
                     next.podcastVideoConfig = { ...(next.podcastVideoConfig || {}) };
                     next.podcastVideoConfig.timelineClipsByRowId = { ...(next.podcastVideoConfig.timelineClipsByRowId || {}) };
                     next.script = {
@@ -586,17 +564,8 @@ function setupEventListeners() {
                     };
                     
                     if (isImageMedia) {
-                        const localImageRef = { ...imageReferenceData, updatedAt: now };
-                        next.rowReferenceModeByRowId[currentEditingRowId] = "image";
-                        next.rowReferenceImageMap[currentEditingRowId] = localImageRef;
-                        next.rowReferenceImageListMap[currentEditingRowId] = [localImageRef];
-                        delete next.rowReferenceVideoMap[currentEditingRowId];
                         next.visualEffectsMap[currentEditingRowId] = effects;
                     } else {
-                        next.rowReferenceModeByRowId[currentEditingRowId] = "video";
-                        next.rowReferenceVideoMap[currentEditingRowId] = localMediaData;
-                        delete next.rowReferenceImageMap[currentEditingRowId];
-                        delete next.rowReferenceImageListMap[currentEditingRowId];
                         next.visualEffectsMap[currentEditingRowId] = null;
                     }
                     

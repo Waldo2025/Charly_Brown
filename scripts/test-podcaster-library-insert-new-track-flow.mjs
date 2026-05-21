@@ -6,7 +6,7 @@ if (!/function insertLibrarySceneIntoSession\(item = null, options = \{\}\) \{/.
   throw new Error("Falta insertLibrarySceneIntoSession para validar insercion en track nuevo.");
 }
 
-if (!/if \(insertIntoNewTrack\) \{[\s\S]*assignedTrackId = (makeId\("track"\)|variantTrack\.id);[\s\S]*nextTracks\.splice\([\s\S]*nextTracks = (window\.)?normalizeTimelineTracks\(nextTracks\);/m.test(source)) {
+if (!/if \(insertIntoNewTrack\) \{[\s\S]*assignedTrackId = variantTrack\.id;[\s\S]*nextTracks\.splice\([\s\S]*nextTracks = runtime\.normalizeTimelineTracks\(nextTracks\);/m.test(source)) {
   throw new Error("Insertar desde biblioteca en track nuevo debe crear y normalizar un track nuevo.");
 }
 

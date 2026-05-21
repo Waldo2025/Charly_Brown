@@ -16,9 +16,63 @@ document.addEventListener("DOMContentLoaded", () => {
     const listaResultados = document.getElementById("listaSubcategoriasIA");
     const ingestaSubcatCount = document.getElementById("ingestaSubcatCount");
     const ingestaSelectionLabel = document.getElementById("ingestaSelectionLabel");
+    const fileInput = document.getElementById("fileIngestaDoc");
 
     let analisisActual = null;
     let categoriaContexto = "";
+
+    txtIngesta?.addEventListener("input", () => {
+        analisisActual = null;
+    });
+
+    fileInput?.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        if (file.name.endsWith(".docx")) {
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                if (typeof mammoth !== "undefined") {
+                    if (window.mostrarNotificacion) {
+                        window.mostrarNotificacion("📄 Procesando archivo Word...", "info");
+                    }
+                    mammoth.convertToHtml({ arrayBuffer: arrayBuffer })
+                        .then(function(result) {
+                            txtIngesta.innerHTML = result.value;
+                            analisisActual = null;
+                            txtIngesta.dispatchEvent(new Event("input", { bubbles: true }));
+                            if (window.mostrarNotificacion) {
+                                window.mostrarNotificacion("✅ Archivo Word cargado con estilos", "success");
+                            }
+                        })
+                        .catch(function(err) {
+                            console.error("Error al procesar Word con Mammoth:", err);
+                            alert("No se pudo extraer la información del archivo Word.");
+                        });
+                } else {
+                    alert("El motor Mammoth.js no está cargado.");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (file.name.endsWith(".txt")) {
+            reader.onload = function(event) {
+                txtIngesta.innerHTML = event.target.result
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/\n/g, "<br>");
+                analisisActual = null;
+                txtIngesta.dispatchEvent(new Event("input", { bubbles: true }));
+                if (window.mostrarNotificacion) {
+                    window.mostrarNotificacion("✅ Archivo de texto cargado", "success");
+                }
+            };
+            reader.readAsText(file);
+        } else {
+            alert("Por favor selecciona un archivo .docx o .txt");
+        }
+    });
 
     async function openModalAndLoadOptions() {
         modal.style.display = "flex";
@@ -153,33 +207,25 @@ document.addEventListener("DOMContentLoaded", () => {
             const prompt = `
             Eres un experto en normalización de actividades escolares al formato ASC.
             Analiza el siguiente texto y SOLO organízalo en HTML ASC, sin inventar, ampliar, resumir ni cambiar el contenido pedagógico.
-            Tu trabajo es decidir, a partir del texto fuente:
-            - qué línea funciona como título principal (especialmente busca texto con la clase "0100TITULO" o similar)
-            - qué bloques son actividades principales
-            - qué líneas son subinstrucciones o pasos
-            - qué fragmentos son respuestas esperadas o "respuesta personal"
-            - dónde debe quedar cada respuesta: SIEMPRE debajo de su pregunta o subinstrucción correspondiente
-
+            
+            Tu trabajo es decidir y estructurar, a partir del texto fuente:
+            1. Título principal: Identifica el título de la lectura o del subtema. A veces viene precedido de la palabra "Título:", "Title:", "0100TITULO" o simplemente es la primera línea del texto que resalta. Conviértela SIEMPRE en una etiqueta <h3>...</h3> al inicio del HTML.
+            2. Actividades principales: Envuelve cada actividad principal identificada en un elemento <div class="activity">.
+            3. Instrucción principal: La instrucción de cada actividad debe estar en un párrafo en negrita: <p><strong>...</strong></p>.
+            4. Pasos o subinstrucciones: Si la actividad contiene incisos, pasos, preguntas secundarias o listados, organízalos obligatoriamente en una única lista ordenada continua: <ol class="steps" type="a"><li>...</li></ol>. No crees múltiples listas <ol> separadas para la misma actividad, todo debe pertenecer a la misma lista continua.
+            5. Respuestas esperadas: Si hay respuestas en el texto (por ejemplo, al lado de la pregunta o debajo de ella, o etiquetadas como "Respuesta: ...", "Respuesta personal", "R. ejemplo: ...", etc.), colócalas en un bloque <div class="answer"><span style="color:mediumvioletred;">...</span></div> obligatoriamente anidado y ubicado DENTRO del mismo elemento <li> de ese paso (es decir, justo al final del contenido del <li>, antes de la etiqueta de cierre </li>). NUNCA cierres la etiqueta </ol> ni rompas la lista para colocar la respuesta fuera de ella. Toda la lista debe ser continua con las respuestas dentro de sus respectivos incisos.
+            6. Habilidad cognitiva asociada: Si en el texto original se especifica la habilidad cognitiva (por ejemplo, una línea con "DUM", "ERS", "DCS" o similar), consérvala intacta al principio del texto de salida de forma visible, por ejemplo: "Habilidad cognitiva asociada: DUM", de tal forma que el analizador la encuentre fácilmente. ¡NUNCA omitas, cambies o ignores esta habilidad!
+            
             Reglas absolutas:
             - NO inventes texto nuevo.
-            - NO cambies el sentido, orden ni redacción sustantiva de ninguna actividad.
-            - NO agregues nuevas actividades.
-            - NO conviertas el contenido en otro tema.
-            - SI el texto trae un título (o líneas con clase "0100TITULO", "titulo", etc.), conviértelas siempre a etiquetas <h3>...</h3> para el formato ASC.
-            - SI detectas actividades, envuélvelas en <div class="activity">.
-            - La instrucción principal debe ir en <p><strong>...</strong></p>.
-            - Los pasos o subinstrucciones deben ir en <ol class="steps" type="a"><li>...</li></ol> cuando aplique.
-            - Si una subinstrucción trae [1 PLECA], [2 PLECAS], etc., CONSÉRVALO dentro de esa subinstrucción.
-            - La respuesta debe ir en <div class="answer"><span style="color:mediumvioletred;">...</span></div> justo debajo de la pregunta o subinstrucción a la que corresponde.
-            - Si una línea dice "Respuesta personal", consérvala como respuesta personal, no la reemplaces.
-            - NO metas las respuestas al final de toda la actividad si pertenecen a una subinstrucción específica.
-            - Si una línea empieza con "Además," o "También," y solo amplía la instrucción anterior con un recurso como recortable, anexo, ficha o video, NO la conviertas en una actividad nueva ni en un bloque separado: debe quedar unida al mismo párrafo principal de la actividad anterior.
-            - El resultado debe quedar listo para renderizarse como contenido del alumno.
+            - NO omitas ninguna instrucción, pregunta ni respuesta del texto fuente.
+            - Conserva todas las actividades originales exactamente.
+            - Respeta estrictamente el orden físico y cronológico original de las actividades y preguntas. La Actividad 1 debe ir primero, luego la Actividad 2, luego la Actividad 3. NUNCA reordenes las actividades físicamente de forma diferente a como aparecen en el texto original.
+            - Si una línea empieza con "Además," o "También," y solo amplía la instrucción anterior con un recurso como recortable, anexo, ficha o video, no la conviertas en una actividad nueva ni en un bloque separado: debe quedar unida al mismo párrafo principal de la actividad anterior.
+            - Devuelve ÚNICAMENTE el bloque HTML resultante (sin bloques delimitadores de markdown \`\`\`html o similares).
             
             TEXTO A ANALIZAR:
             ${textHtml}
-            
-            Responde ÚNICAMENTE con el bloque HTML organizado (sin bloques delimitadores de markdown).
             `;
 
             const rawResponse = await _llamarGeminiSimplificado(prompt);

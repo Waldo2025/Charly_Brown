@@ -414,16 +414,51 @@
   function normalizeOnScreenTextClipItem(raw = {}, rowId = "") {
     const key = String(rowId || raw?.rowId || "").trim();
     if (!key) return null;
-    const sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw?.sourceDurationMs, raw?.durationMs ?? 8000)));
-    const trimInMs = Math.max(0, Math.min(sourceDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw?.trimInMs, 0))));
+
+    // Support seconds/milliseconds start fallbacks
+    let startMs = 0;
+    if (raw?.startMs !== undefined) {
+      startMs = Math.round(toFiniteNumber(raw.startMs, 0));
+    } else if (raw?.start !== undefined) {
+      startMs = Math.round(toFiniteNumber(raw.start, 0) * 1000);
+    }
+
+    // Support seconds/milliseconds end/duration fallbacks
+    let sourceDurationMs = 8000;
+    if (raw?.sourceDurationMs !== undefined) {
+      sourceDurationMs = Math.round(toFiniteNumber(raw.sourceDurationMs, 8000));
+    } else if (raw?.durationMs !== undefined) {
+      sourceDurationMs = Math.round(toFiniteNumber(raw.durationMs, 8000));
+    } else if (raw?.durationSec !== undefined) {
+      sourceDurationMs = Math.round(toFiniteNumber(raw.durationSec, 8) * 1000);
+    } else if (raw?.end !== undefined && raw?.start !== undefined) {
+      sourceDurationMs = Math.round((toFiniteNumber(raw.end, 0) - toFiniteNumber(raw.start, 0)) * 1000);
+    }
+    sourceDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, sourceDurationMs);
+
+    let trimInMs = 0;
+    if (raw?.trimInMs !== undefined) {
+      trimInMs = Math.round(toFiniteNumber(raw.trimInMs, 0));
+    } else if (raw?.trimIn !== undefined) {
+      trimInMs = Math.round(toFiniteNumber(raw.trimIn, 0) * 1000);
+    }
+    trimInMs = Math.max(0, Math.min(sourceDurationMs - STUDIO_TIMELINE_MIN_CLIP_MS, trimInMs));
+
     const fallbackTrimOut = sourceDurationMs;
-    const trimOutMs = Math.max(
+    let trimOutMs = fallbackTrimOut;
+    if (raw?.trimOutMs !== undefined) {
+      trimOutMs = Math.round(toFiniteNumber(raw.trimOutMs, fallbackTrimOut));
+    } else if (raw?.trimOut !== undefined) {
+      trimOutMs = Math.round(toFiniteNumber(raw.trimOut, 0) * 1000);
+    }
+    trimOutMs = Math.max(
       trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.min(sourceDurationMs, Math.round(toFiniteNumber(raw?.trimOutMs, raw?.durationMs ?? fallbackTrimOut)))
+      Math.min(sourceDurationMs, trimOutMs)
     );
+
     return {
       rowId: key,
-      startMs: Math.max(0, Math.round(toFiniteNumber(raw?.startMs, 0))),
+      startMs: Math.max(0, startMs),
       sourceDurationMs,
       trimInMs,
       trimOutMs,

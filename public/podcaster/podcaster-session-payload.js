@@ -101,6 +101,8 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
         if (Array.isArray(nextRow.visualNotesResolvedProposals)) nextRow.visualNotesResolvedProposals = nextRow.visualNotesResolvedProposals.slice(0, 100);
         if (typeof nextRow.scenePrompt === "string") nextRow.scenePrompt = nextRow.scenePrompt.slice(0, 4000);
         if (typeof nextRow.videoDirective === "string") nextRow.videoDirective = nextRow.videoDirective.slice(0, 4000);
+        if (typeof nextRow.voiceName === "string") nextRow.voiceName = nextRow.voiceName.slice(0, 120);
+        nextRow.voiceNameSource = String(nextRow.voiceNameSource || "").trim().toLowerCase() === "row" ? "row" : "host";
 
         return nextRow;
       })
@@ -281,20 +283,13 @@ export function compactCloudSessionPayload(payload = null, deps = {}) {
   let strippedReferenceMedia = false;
   let trimmedChat = false;
 
-  const hasReferenceMedia = Boolean(
+  const hasGlobalReferenceMedia = Boolean(
     Object.keys(next?.speakerReferenceImageMap || {}).length
     || Object.keys(next?.scenarioReferenceImageMap || {}).length
-    || Object.keys(next?.rowReferenceImageListMap || {}).length
-    || Object.keys(next?.rowReferenceImageMap || {}).length
-    || Object.keys(next?.rowReferenceVideoMap || {}).length
   );
-  if (hasReferenceMedia) {
+  if (hasGlobalReferenceMedia) {
     next.speakerReferenceImageMap = {};
     next.scenarioReferenceImageMap = {};
-    next.rowReferenceImageListMap = {};
-    next.rowReferenceImageMap = {};
-    next.rowReferenceVideoMap = {};
-    next.rowReferenceModeByRowId = {};
     strippedReferenceMedia = true;
   }
 
@@ -322,6 +317,24 @@ export function compactCloudSessionPayload(payload = null, deps = {}) {
     }));
     bytes = measureJsonUtf8Bytes(next);
   }
+
+  if (bytes <= targetBytes) {
+    return { payload: next, bytes, strippedReferenceMedia, trimmedChat };
+  }
+
+  const hasRowReferenceMedia = Boolean(
+    Object.keys(next?.rowReferenceImageListMap || {}).length
+    || Object.keys(next?.rowReferenceImageMap || {}).length
+    || Object.keys(next?.rowReferenceVideoMap || {}).length
+  );
+  if (hasRowReferenceMedia) {
+    next.rowReferenceImageListMap = {};
+    next.rowReferenceImageMap = {};
+    next.rowReferenceVideoMap = {};
+    next.rowReferenceModeByRowId = {};
+    strippedReferenceMedia = true;
+  }
+  bytes = measureJsonUtf8Bytes(next);
 
   return { payload: next, bytes, strippedReferenceMedia, trimmedChat };
 }

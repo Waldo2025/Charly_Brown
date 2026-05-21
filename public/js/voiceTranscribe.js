@@ -4076,9 +4076,10 @@ ${dialogPreview}`;
                         "gemini-2.5-flash-lite",  // Primera opción - más barato
                         "gemini-2.5-flash",       // Fallback 1
                         "gemini-2.5-pro",         // Fallback 2 (más potente)
-                        "gemini-3-flash-preview", // Fallback 3 (preview)
-                        "gemini-2.0-flash",       // Fallback 4
-                        "gemini-2.0-flash-lite"   // Fallback 5
+                        "gemini-3.5-flash",       // Fallback 3
+                        "gemini-3-flash-preview", // Fallback 4 (preview)
+                        "gemini-2.0-flash",       // Fallback 5
+                        "gemini-2.0-flash-lite"   // Fallback 6
                     ];
 
                     let result = null;
@@ -4508,9 +4509,10 @@ ${dialogPreview}`;
                     "gemini-2.5-flash-lite",              // fallback 1
                     "gemini-2.5-flash",                   // fallback 2
                     "gemini-2.5-pro",                     // fallback 3
-                    "gemini-3-flash-preview",             // fallback 4
-                    "gemini-2.0-flash",                   // fallback 5
-                    "gemini-2.0-flash-lite"               // fallback 6
+                    "gemini-3.5-flash",                   // fallback 4
+                    "gemini-3-flash-preview",             // fallback 5
+                    "gemini-2.0-flash",                   // fallback 6
+                    "gemini-2.0-flash-lite"               // fallback 7
                 ];
 
                 const body = {
@@ -4554,6 +4556,7 @@ ${dialogPreview}`;
                         "gemini-2.5-flash-lite",
                         "gemini-2.5-flash",
                         "gemini-2.5-pro",
+                        "gemini-3.5-flash",
                         "gemini-3-flash-preview",
                         "gemini-2.0-flash",
                         "gemini-2.0-flash-lite"

@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../public/home.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
 
 function extractConst(name) {
   const match = source.match(new RegExp(`const ${name} = [^;]+;`));
   if (!match) {
-    throw new Error(`No se encontró la constante ${name} en public/home.js`);
+    throw new Error(`No se encontró la constante ${name} en public/js/home.js`);
   }
   return match[0];
 }
@@ -15,7 +15,7 @@ function extractFunction(name) {
   const signature = `function ${name}`;
   const start = source.indexOf(signature);
   if (start === -1) {
-    throw new Error(`No se encontró ${name} en public/home.js`);
+    throw new Error(`No se encontró ${name} en public/js/home.js`);
   }
   let parenDepth = 0;
   let braceStart = -1;

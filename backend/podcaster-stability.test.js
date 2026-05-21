@@ -40,8 +40,8 @@ test("validateDialogueVideoInlineReferenceBudget trims useful image references t
     referenceImageDataUrls: [
       "data:image/png;base64,QUJDRA==",
       "",
-      "data:image/png;base64,QUJDRA==",
-      "data:image/png;base64,QUJDRA=="
+      "data:image/png;base64,QUJDREU=",
+      "data:image/png;base64,QUJDREVG"
     ],
     referenceVideoDataUrl: "",
     continuityReferenceImageDataUrl: ""
@@ -95,5 +95,17 @@ test("validateDialogueVideoInlineReferenceBudget includes single referenceImageD
   });
 
   assert.equal(result.referenceImageDataUrls.length, 1);
+  assert.equal(result.counts.imageReferences, 1);
+});
+
+test("validateDialogueVideoInlineReferenceBudget deduplicates repeated single-image fallback already present in the list", () => {
+  const result = validateDialogueVideoInlineReferenceBudget({
+    referenceImageDataUrls: ["data:image/png;base64,QUJDRA=="],
+    referenceImageDataUrl: "data:image/png;base64,QUJDRA==",
+    referenceVideoDataUrl: "",
+    continuityReferenceImageDataUrl: ""
+  });
+
+  assert.deepEqual(result.referenceImageDataUrls, ["data:image/png;base64,QUJDRA=="]);
   assert.equal(result.counts.imageReferences, 1);
 });

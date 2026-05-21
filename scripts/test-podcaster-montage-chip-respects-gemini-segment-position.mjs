@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-ui.js",
   "utf8"
 );
 
@@ -14,7 +14,7 @@ assert.match(
 
 assert.match(
   source,
-  /const durationMs = alignMode === "segment"\s*\?\s*Math\.max\(STUDIO_TIMELINE_MIN_CLIP_MS, Number\(segment\?\.durationMs \|\| 0\)/,
+  /const durationMs = alignMode === "segment"\s*\?\s*resolveGeminiSegmentVisibleDurationMs\(segment\)\s*:\s*resolveMontageAudioChipDurationMs\(timelineClip, adjustedAudioDurationSec\);/,
   "El ancho del chip Gemini debe respetar la duración del segmento cuando existe."
 );
 

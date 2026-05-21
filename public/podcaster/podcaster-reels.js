@@ -41,6 +41,11 @@ export function resolveEffectiveExportResolution(resolution = "source", isReel =
  */
 export function syncReelModeUi(session) {
   const isReel = isReelModeEnabled(session);
+
+  // Update switch checkboxes (header and footer)
+  document.querySelectorAll("[id^='reelModeToggle']").forEach(el => {
+    if (el) el.checked = isReel;
+  });
   
   // Update main studio shell
   const shell = document.getElementById("podcastVideoShell");

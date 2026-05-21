@@ -1,7 +1,9 @@
 import { authFetchJson } from "../js/api-client.js";
 
 // --- State ---
-const dialogueAudioGenerationPending = new Set();
+import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
+
+const dialogueAudioGenerationPending = podcasterGenerationShared.dialogueAudioGenerationPending;
 
 /**
  * Preloads all dialogue audio metadata in the background to ensure timeline chips render at full width.
@@ -58,18 +60,23 @@ function preloadAllDialogueAudios(session = null) {
  * Generates a single dialogue audio clip for a given row.
  */
 async function generateDialogueAudioForRow(rowId = "", options = {}) {
+  try {
+    window.flushScriptEditorVoiceDraftsToSession?.();
+  } catch (_) {
+    // best-effort
+  }
   const key = String(rowId || "").trim();
   const session = window.getActiveSession();
   const sessionId = String(session?.id || "").trim();
   if (!sessionId || !key) return null;
-  const rows = session?.script?.rows || [];
+  const rows = window.getSessionRows(session);
   const row = rows.find((item) => String(item?.id || "").trim() === key);
   if (!row) return null;
 
   const pendingKey = `${sessionId}:${key}`;
   if (dialogueAudioGenerationPending.has(pendingKey)) return null;
 
-  const voiceName = window.resolveConfiguredSpeakerVoiceForGeneration(session, row.speaker);
+  const voiceName = window.resolveConfiguredSpeakerVoiceForGeneration(row, session);
   const text = window.buildTargetSpeechLine(row);
   const regenerate = options.regenerate === true;
   const silent = options.silent === true;
@@ -82,14 +89,18 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       sessionId,
       rowId: key,
       speaker: String(row?.speaker || "").trim(),
+      speakerLabel: String(row?.speaker || "").trim(),
+      speakerName: window.resolveSpeakerDisplayName(row?.speaker, session),
       voiceName,
       text,
+      targetSpeechLine: text,
       regenerate,
       disfluencyConfig: row?.disfluencyConfig || null,
-      ttsDirectionConfig: row?.ttsDirectionConfig || null
+      ttsDirectionConfig: row?.ttsDirectionConfig || null,
+      ttsDirection: row?.ttsDirectionConfig || {}
     };
 
-    const resp = await authFetchJson("/api/podcaster/dialogue-audios/generate", {
+    const resp = await authFetchJson("/api/podcaster/dialogue-audio/generate", {
       method: "POST",
       body: JSON.stringify(body)
     });
@@ -104,6 +115,19 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
         [key]: finalAudio
       }
     }), { render: !options.deferTimelineRender });
+    if (typeof window.upsertPodcastVideoConfig === "function") {
+      window.upsertPodcastVideoConfig((cfg) => {
+        const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+        if (!Array.isArray(track.excludedRowIds) || !track.excludedRowIds.includes(key)) return cfg;
+        return {
+          ...cfg,
+          geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
+            ...track,
+            excludedRowIds: track.excludedRowIds.filter((rowId) => String(rowId || "").trim() !== key)
+          })
+        };
+      }, { autosave: true });
+    }
 
     // Evacuar referencias del reproductor viejas
     if (typeof window.playbackController?.invalidateRowAudioCache === "function") {
@@ -143,8 +167,13 @@ function getRegenerableGeminiAudioRows(session = null) {
 }
 
 async function regenerateAllGeminiDialogueAudios(session = null) {
+  try {
+    window.flushScriptEditorVoiceDraftsToSession?.();
+  } catch (_) {
+    // best-effort
+  }
   await window.refreshRuntimeFeatureCapabilities();
-  const activeSession = session || window.getActiveSession();
+  const activeSession = window.getActiveSession() || session;
   if (!activeSession) return { total: 0, generated: 0, failed: 0 };
   const sessionId = String(activeSession?.id || "").trim();
   const rows = getRegenerableGeminiAudioRows(activeSession);
@@ -166,7 +195,7 @@ async function regenerateAllGeminiDialogueAudios(session = null) {
     const step = index + 1;
     window.setGenerationStatus(`Regenerando audios Gemini (${step}/${total})...`, "is-busy", { sessionId });
     try {
-      const clip = await window.PodcasterGeneration.generateDialogueAudioForRow(rowId, { regenerate: true, silent: true });
+      const clip = await podcasterGenerationShared.generateDialogueAudioForRow(rowId, { regenerate: true, silent: true });
       if (clip && window.hasStoredMediaSource(clip)) {
         generated += 1;
       } else {
@@ -185,8 +214,13 @@ async function regenerateAllGeminiDialogueAudios(session = null) {
 }
 
 async function generateDialogueAudioForConnectedScript(session = null, options = {}) {
+  try {
+    window.flushScriptEditorVoiceDraftsToSession?.();
+  } catch (_) {
+    // best-effort
+  }
   const currentSession = session || window.getActiveSession();
-  const rows = Array.isArray(currentSession?.script?.rows) ? currentSession.script.rows : [];
+  const rows = window.getSessionRows(currentSession);
   if (!currentSession || !rows.length) return { generated: 0, failed: 0 };
   let generated = 0;
   let failed = 0;
@@ -201,7 +235,7 @@ async function generateDialogueAudioForConnectedScript(session = null, options =
     const rowId = String(row?.id || "").trim();
     if (!rowId) continue;
     try {
-      const clip = await window.PodcasterGeneration.generateDialogueAudioForRow(rowId, {
+      const clip = await podcasterGenerationShared.generateDialogueAudioForRow(rowId, {
         regenerate: options.regenerate === true,
         silent: true,
         signal: options?.signal
@@ -219,6 +253,12 @@ async function generateDialogueAudioForConnectedScript(session = null, options =
       failed += 1;
       window.addChatMessage("system", `No se pudo generar el audio de la escena ${window.resolveSceneNumberByRowId(rowId, window.getActiveSession())} (${error.message}).`);
     }
+  }
+  try {
+    window.reflowTimelineClipsByScriptOrder?.(window.getActiveSession(), { persist: true, render: false });
+    window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+  } catch (_) {
+    // best-effort
   }
   return { generated, failed };
 }
@@ -268,10 +308,29 @@ function removeDialogueAudioForRow(rowId = "", options = {}) {
       dialogueAudioMap: nextMap
     };
   }, { render: false });
+  if (typeof window.upsertPodcastVideoConfig === "function") {
+    window.upsertPodcastVideoConfig((cfg) => {
+      const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+      const nextExcludedRowIds = Array.from(new Set([...(track.excludedRowIds || []), key]));
+      const nextSegments = Array.isArray(track.segments)
+        ? track.segments.filter((segment) => String(segment?.rowId || "").trim() !== key)
+        : [];
+      return {
+        ...cfg,
+        geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
+          ...track,
+          enabled: nextSegments.length > 0,
+          segments: nextSegments,
+          excludedRowIds: nextExcludedRowIds
+        })
+      };
+    }, { autosave: true });
+  }
   if (!silent) {
     window.setGenerationStatus(`Voz eliminada de escena ${window.resolveSceneNumberByRowId(key, window.getActiveSession())}`, "is-live");
   }
   window.syncGeminiDialogueTrackWithRuntime({ render: false });
+  window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "structure" });
   window.syncPodcastStudioInspector(window.getActiveSession());
 }
 
@@ -284,8 +343,8 @@ window.beginConnectScriptPanelGeneration = beginConnectScriptPanelGeneration;
 window.cancelConnectScriptPanelGeneration = cancelConnectScriptPanelGeneration;
 window.removeDialogueAudioForRow = removeDialogueAudioForRow;
 
-if (!window.PodcasterGeneration) {
-  window.PodcasterGeneration = {};
-}
 window.__podcasterAudioGeminiGenerateDialogueAudioForRow = generateDialogueAudioForRow;
-window.PodcasterGeneration.generateDialogueAudioForRow = generateDialogueAudioForRow;
+registerPodcasterGenerationShared({
+  dialogueAudioGenerationPending,
+  generateDialogueAudioForRow
+});

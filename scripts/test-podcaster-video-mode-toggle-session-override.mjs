@@ -72,18 +72,20 @@ context.activeSession = podcastSession;
 context.composerVideoEnabled = true;
 
 const panelCopy = context.getPanelModeCopy(podcastSession);
-if (panelCopy.videoMode !== true) {
-  throw new Error("El switch manual de video debe forzar el render de script-row en modo video creativo aunque la sesión guardada venga como videopodcast.");
-}
-
-if (panelCopy.videoContentType !== "creative") {
-  throw new Error("El modo efectivo del panel debe resolverse como creative cuando el switch de video está activo.");
+if (panelCopy.videoMode !== false || panelCopy.videoContentType !== "videopodcast") {
+  throw new Error("Una sesión videopodcast no debe colapsar al modo creativo aunque haya video activo en el composer.");
 }
 
 context.composerVideoEnabled = false;
 const podcastPanelCopy = context.getPanelModeCopy(podcastSession);
 if (podcastPanelCopy.videoMode !== false || podcastPanelCopy.videoContentType !== "videopodcast") {
   throw new Error("Al desactivar el switch, una sesión videopodcast debe volver a renderizarse fuera del modo creativo.");
+}
+
+context.composerVideoEnabled = true;
+const videoPodcastPanelCopy = context.getPanelModeCopy(podcastSession);
+if (videoPodcastPanelCopy.videoMode !== false || videoPodcastPanelCopy.videoContentType !== "videopodcast") {
+  throw new Error("Una sesión videopodcast debe conservarse como videopodcast y no colapsar al modo creativo.");
 }
 
 console.log("Podcaster video mode toggle session override OK.");

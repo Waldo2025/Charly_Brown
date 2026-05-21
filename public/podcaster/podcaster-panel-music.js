@@ -117,7 +117,13 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(item.trimInMs || 0) || 0)));
       const rawTrimOutMs = Math.round(Number(item.trimOutMs || maxDurationMs) || maxDurationMs);
       const trimOutMs = Math.max(trimInMs + minClipMs, Math.min(maxDurationMs, rawTrimOutMs));
-      map.set(loopIndex, { loopIndex, trimInMs, trimOutMs });
+      map.set(loopIndex, {
+        loopIndex,
+        trimInMs,
+        trimOutMs,
+        fadeInMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeInMs || 0) || 0))),
+        fadeOutMs: Math.max(0, Math.min(trimOutMs - trimInMs, Math.round(Number(item.fadeOutMs || 0) || 0)))
+      });
     });
     return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
   }
@@ -242,7 +248,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return {
       loopIndex: key,
       trimInMs: defaultTrimInMs,
-      trimOutMs: defaultTrimOutMs
+      trimOutMs: defaultTrimOutMs,
+      fadeInMs: Math.max(0, Math.min(defaultTrimOutMs - defaultTrimInMs, Math.round(Number(normalized.fadeInMs || 0) || 0))),
+      fadeOutMs: Math.max(0, Math.min(defaultTrimOutMs - defaultTrimInMs, Math.round(Number(normalized.fadeOutMs || 0) || 0)))
     };
   }
 
@@ -254,7 +262,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     filtered.push({
       loopIndex: key,
       trimInMs: Math.max(0, Math.round(Number(nextValue?.trimInMs || 0) || 0)),
-      trimOutMs: Math.max(0, Math.round(Number(nextValue?.trimOutMs || 0) || 0))
+      trimOutMs: Math.max(0, Math.round(Number(nextValue?.trimOutMs || 0) || 0)),
+      fadeInMs: Math.max(0, Math.round(Number(nextValue?.fadeInMs || 0) || 0)),
+      fadeOutMs: Math.max(0, Math.round(Number(nextValue?.fadeOutMs || 0) || 0))
     });
     return filtered.sort((a, b) => Number(a.loopIndex || 0) - Number(b.loopIndex || 0));
   }
@@ -470,6 +480,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           trimInMs + minClipMs,
           Math.min(sceneBatchDurationMs, Number(loopSetting?.trimOutMs || sceneBatchDurationMs) || sceneBatchDurationMs)
         );
+        const visibleDurationMs = Math.max(minClipMs, trimOutMs - trimInMs);
         segments.push({
           ...single,
           slotLabel: String(single.slotLabel || "Audio 1").trim() || "Audio 1",
@@ -479,6 +490,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           durationSec: getPanelMusicTrackDurationSec(single),
           trimInMs,
           trimOutMs,
+          fadeInMs: Math.max(0, Math.min(visibleDurationMs, Number(loopSetting?.fadeInMs || 0) || 0)),
+          fadeOutMs: Math.max(0, Math.min(visibleDurationMs, Number(loopSetting?.fadeOutMs || 0) || 0)),
           loop: false,
           loopIndex
         });
@@ -516,6 +529,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         durationSec: getPanelMusicTrackDurationSec(track),
         trimInMs: 0,
         trimOutMs: visibleDurationMs,
+        fadeInMs: 0,
+        fadeOutMs: 0,
         loop: false,
         loopIndex: 0
       });
@@ -568,7 +583,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         startMs: cursorMs,
         trimInMs: Math.max(0, Number(loopSetting?.trimInMs || 0) || 0),
         trimOutMs: Math.max(minClipMs, Number(loopSetting?.trimOutMs || sourceDurationMs) || sourceDurationMs),
-        effectiveLoopMs
+        effectiveLoopMs,
+        fadeInMs: Math.max(0, Math.min(effectiveLoopMs, Number(loopSetting?.fadeInMs || 0) || 0)),
+        fadeOutMs: Math.max(0, Math.min(effectiveLoopMs, Number(loopSetting?.fadeOutMs || 0) || 0))
       });
       cursorMs += effectiveLoopMs;
       loopIndex += 1;
@@ -909,6 +926,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         durationSec: Math.max(0, Number(segment?.durationSec || 0) || 0),
         trimInMs: Math.max(0, Number(segment?.trimInMs || 0) || 0),
         trimOutMs: Math.max(0, Number(segment?.trimOutMs || 0) || 0),
+        fadeInMs: Math.max(0, Number(segment?.fadeInMs || 0) || 0),
+        fadeOutMs: Math.max(0, Number(segment?.fadeOutMs || 0) || 0),
         trackIndex,
         loopIndex,
         muted: mutedLoopIndexes.has(loopIndex),
@@ -939,7 +958,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         ? activeTrack.loopSettings.map((item) => ({
           loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
           trimInMs: Math.max(0, Number(item?.trimInMs || 0) || 0),
-          trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0)
+          trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0),
+          fadeInMs: Math.max(0, Number(item?.fadeInMs || 0) || 0),
+          fadeOutMs: Math.max(0, Number(item?.fadeOutMs || 0) || 0)
         }))
         : [],
       mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(activeTrack?.mutedLoopIndexes || [])
@@ -1619,10 +1640,15 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const trackIndex = Number(chip.dataset.trackIndex);
     const trackKind = resolvePanelMusicTrackKind(chip.dataset.trackKind || panelMusicState.selectedTrackKind);
     const loopIndex = Math.max(0, Math.floor(Number(chip.dataset.loopIndex || 0) || 0));
+    const selectionState = podcastVideoState()?.timelineAudioSelection || null;
+    const buildSelectionKey = (kind = "", loop = 0) => `${resolvePanelMusicTrackKind(kind)}:${Math.max(0, Math.floor(Number(loop || 0) || 0))}`;
+    if (selectionState) {
+      selectionState.geminiRowIds?.clear?.();
+    }
     if (trackKind === "uploaded" && Number.isFinite(trackIndex)) {
       const key = `u:${Math.max(0, Math.floor(trackIndex || 0))}:${loopIndex}`;
       const multi = event?.metaKey || event?.ctrlKey;
-      const selection = podcastVideoState()?.timelineAudioSelection?.uploadedKeys;
+      const selection = selectionState?.uploadedKeys;
       if (selection instanceof Set) {
         if (multi) {
           if (selection.has(key)) selection.delete(key);
@@ -1632,6 +1658,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           selection.add(key);
         }
       }
+      if (selectionState) {
+        selectionState.panelLoopKey = "";
+      }
+    } else if (selectionState) {
+      selectionState.uploadedKeys?.clear?.();
+      selectionState.panelLoopKey = buildSelectionKey(trackKind, loopIndex);
     }
     if (Number.isFinite(trackIndex)) {
       selectUploadedPanelMusicTrackByIndex(trackIndex);

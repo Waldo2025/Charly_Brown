@@ -106,3 +106,20 @@ test("timeline scene profile adds continuity instruction only when relateWithPre
   assert.match(result.prompt, /La continuidad con la escena anterior es obligatoria solo como punto de arranque del clip;/);
   assert.match(result.prompt, /Tras el primer fotograma, prioriza el nuevo Elemento visual/);
 });
+
+test("timeline scene profile structures prompt correctly when isReel is on", () => {
+  const result = buildDialogueVideoPromptBundle(createFixture({
+    isReel: true,
+    imagePrompts: []
+  }));
+
+  assert.match(result.prompt, /Genera un video corto de redes sociales \(Short\/Reel\) en formato vertical, claro, enérgico y realista\./);
+  assert.match(result.prompt, /La prioridad es representar al youtuber centrado de frente explicando con entusiasmo la Descripción de escena y el Elemento visual\./);
+  assert.match(result.prompt, /El presentador debe permanecer visible y centrado en el medio de la pantalla vertical\./);
+  assert.match(result.prompt, /Prohibido texto incrustado, subtítulos, overlays complejos o elementos de interfaz\. Se permiten únicamente símbolos o diagramas didácticos limpios flotando sutilmente/);
+  assert.match(result.prompt, /Composición vertical de YouTuber en 9:16, limpia, con el presentador posicionado de frente exactamente en el centro de la pantalla, mirando directamente a la lente de la cámara/);
+
+  assert.ok(result.sceneImagePromptList.length >= 2);
+  assert.match(result.sceneImagePromptList[0], /Variación vertical 9:16 de youtuber\/presentador en primer plano centrado/);
+  assert.match(result.sceneImagePromptList[1], /Toma alternativa vertical de apoyo youtuber centrado/);
+});

@@ -1,0 +1,31 @@
+# Dependencias (¡El consumidor #1 de tokens!)
+node_modules/
+venv/
+.venv/
+env/
+packages/
+
+# Carpetas de compilación y caché
+dist/
+build/
+.next/
+.nuxt/
+out/
+.cache/
+
+# Archivos multimedia y binarios pesados
+*.mp4
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.zip
+*.tar.gz
+
+# Bases de datos locales y logs
+*.log
+*.sqlite
+*.db
+.env
+.env.local

@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 
 const generatorSource = readFileSync(new URL("../public/podcaster/podcaster-video-generator.js", import.meta.url), "utf8");
+const sharedSource = readFileSync(new URL("../public/podcaster/podcaster-generation-shared.js", import.meta.url), "utf8");
 
-if (!/window\.PodcasterGeneration\s*=\s*\{[\s\S]*buildTimelineSceneGenerationKey[\s\S]*\};/m.test(generatorSource)) {
-  throw new Error("PodcasterGeneration debe exponer buildTimelineSceneGenerationKey para que el timeline renderice el spinner de escena.");
+if (!/registerPodcasterGenerationShared\(\{[\s\S]*buildTimelineSceneGenerationKey,[\s\S]*\}\);/m.test(generatorSource)) {
+  throw new Error("La generación de video debe registrar buildTimelineSceneGenerationKey en el shared registry.");
+}
+
+if (!/export const podcasterGenerationShared = \{[\s\S]*timelineSceneVideoGenerationPending:\s*new Set\(\),[\s\S]*timelineSceneVideoGenerationStatus:\s*new Map\(\),/m.test(sharedSource)) {
+  throw new Error("podcaster-generation-shared.js debe exponer el estado compartido para el spinner de escena.");
 }
 
 if (!/const rowReferenceVideo = getRowReferenceVideoMap\(session\)\[key\] \|\| null;/.test(generatorSource)) {

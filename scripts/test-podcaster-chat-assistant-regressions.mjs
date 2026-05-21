@@ -41,7 +41,6 @@ const requiredExposures = [
   "normalizeRows",
   "countTotalDuration",
   "resolveSpeakerDisplayName",
-  "replaceHostTokensWithNames",
   "toMarkdownTableCell",
   "normalizeCreativeVideoConfig",
   "getCreativeVideoConfig",

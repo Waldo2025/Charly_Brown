@@ -24,7 +24,7 @@ if (!syncAudio.includes("const offsetSec = this.resolveSegmentSourceOffsetSec(cu
   throw new Error("syncAudio no calcula el seek del audio Gemini usando la velocidad real del clip.");
 }
 
-if (!syncAudio.includes("audio.playbackRate = this.clampPlaybackRate(speed * clipPlaybackRate);")) {
+if (!syncAudio.includes("const effectiveRate = this.clampPlaybackRate(speed * clipPlaybackRate);")) {
   throw new Error("syncAudio debe aplicar la velocidad del clip Gemini con un helper centralizado.");
 }
 

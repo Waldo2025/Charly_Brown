@@ -10,6 +10,10 @@ const publicSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
+const timelineUiSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-ui.js",
+  "utf8"
+);
 
 const playbackControllerSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-playback-controller.js",
@@ -23,7 +27,7 @@ assert.match(
 );
 
 assert.match(
-  publicSource,
+  timelineUiSource,
   /data-action="open-gemini-audio-speed-modal"/,
   "Cada chip de audio Gemini guardado debe renderizar un botón para abrir el modal de velocidad."
 );
@@ -42,7 +46,7 @@ assert.match(
 
 assert.match(
   publicSource,
-  /data-action='open-gemini-audio-speed-modal'/,
+  /\[data-action='open-gemini-audio-speed-modal'\]\[data-row-id\]/,
   "El timeline debe reconocer clicks del botón para abrir el modal de velocidad."
 );
 
@@ -54,7 +58,7 @@ assert.match(
 
 assert.match(
   playbackControllerSource,
-  /audio\.playbackRate = this\.clampPlaybackRate\(speed \* clipPlaybackRate\);/,
+  /const effectiveRate = this\.clampPlaybackRate\(speed \* clipPlaybackRate\);[\s\S]*audio\.playbackRate = effectiveRate;/,
   "La reproducción Gemini debe aplicar la velocidad específica del clip además de la velocidad global del player."
 );
 

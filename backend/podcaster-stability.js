@@ -112,9 +112,15 @@ function normalizeInlineDataUrl(value = "") {
 function validateDialogueVideoInlineReferenceBudget(body = {}) {
   const rawImages = Array.isArray(body?.referenceImageDataUrls) ? body.referenceImageDataUrls : [];
   const singleImageFallback = normalizeInlineDataUrl(body?.referenceImageDataUrl || "");
+  const seenReferenceImages = new Set();
   const referenceImageDataUrls = [...rawImages, singleImageFallback]
     .map((item) => normalizeInlineDataUrl(item))
     .filter(Boolean)
+    .filter((item) => {
+      if (seenReferenceImages.has(item)) return false;
+      seenReferenceImages.add(item);
+      return true;
+    })
     .slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
   const referenceVideoDataUrl = normalizeInlineDataUrl(body?.referenceVideoDataUrl || "");
   const continuityReferenceImageDataUrl = normalizeInlineDataUrl(body?.continuityReferenceImageDataUrl || "");

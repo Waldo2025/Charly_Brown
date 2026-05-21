@@ -758,6 +758,7 @@ const UNIDAD_PERSIST_FIELD_IDS = [
   ...UNIDAD_TEXT_FIELD_IDS
 ];
 const GEMINI_MODELOS_HABILITADOS = [
+  "gemini-3.5-flash",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3-pro-preview",
@@ -768,7 +769,8 @@ const GEMINI_MODELOS_HABILITADOS = [
 const GEMINI_MODELOS_PRIORIDAD_ESTABLE = [
   "gemini-2.5-flash-lite",
   "gemini-2.5-flash",
-  "gemini-2.5-pro"
+  "gemini-2.5-pro",
+  "gemini-3.5-flash"
 ];
 const GEMINI_MODELOS_PREVIEW_SECUNDARIOS = [
   "gemini-3-flash-preview",
@@ -786,7 +788,7 @@ let unidadSeriesCatalogoPromise = null;
 function isUnidadSupportedGeminiTextModelName(model = "") {
   const name = normalizeGeminiModel(model);
   if (!name) return false;
-  if (!/^gemini-(2\.5|3(?:\.1)?)/i.test(name)) return false;
+  if (!/^gemini-(2\.5|3(?:\.(?:1|5))?)/i.test(name)) return false;
   if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
   if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
   return true;
@@ -807,6 +809,7 @@ function formatUnidadGeminiModelOptionLabel(model = "") {
     "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
     "gemini-2.5-flash": "Gemini 2.5 Flash",
     "gemini-2.5-pro": "Gemini 2.5 Pro",
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
     "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
     "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
     "gemini-3.1-pro-preview": "Gemini 3.1 Pro (Preview)",
@@ -19324,6 +19327,13 @@ async function _resolverLecturaPorId(idOrTitle = "") {
   const queryText = String(idOrTitle).trim();
   const queryLower = queryText.toLowerCase();
 
+  if (!window._cbCacheLecturasPorId) {
+    window._cbCacheLecturasPorId = {};
+  }
+  if (window._cbCacheLecturasPorId[queryText]) {
+    return window._cbCacheLecturasPorId[queryText];
+  }
+
   // 1. Asegurar que los pools locales estén hidratados
   _hidratarLecturasUnidadDesdeCacheLocal();
 
@@ -19334,7 +19344,7 @@ async function _resolverLecturaPorId(idOrTitle = "") {
     const ctitle = String(lecturaCache.titulo || lecturaCache.tema || "").trim().toLowerCase();
     const tieneContenido = !!(lecturaCache.contenidoCompleto || lecturaCache.contenidoPlano || lecturaCache.texto || lecturaCache.content || lecturaCache.contenidoHTML);
     if ((cid === queryText || ctitle === queryLower) && tieneContenido) {
-      return {
+      const res = {
         id: lecturaCache.id,
         titulo: lecturaCache.titulo,
         tema: lecturaCache.tema || lecturaCache.sinopsis || lecturaCache.titulo,
@@ -19358,6 +19368,8 @@ async function _resolverLecturaPorId(idOrTitle = "") {
         rawData: lecturaCache.rawData || lecturaCache,
         campos: lecturaCache.campos || lecturaCache.rawData || {}
       };
+      window._cbCacheLecturasPorId[queryText] = res;
+      return res;
     }
   }
 
@@ -19375,7 +19387,10 @@ async function _resolverLecturaPorId(idOrTitle = "") {
     return id === queryText || title === queryLower;
   });
 
-  if (lectura) return lectura;
+  if (lectura) {
+    window._cbCacheLecturasPorId[queryText] = lectura;
+    return lectura;
+  }
 
   // 4. Fallback: Firestore (solo si parece un ID de Firebase y no se ha encontrado localmente)
   if (queryText.length > 5 && !queryText.includes(" ")) {
@@ -19384,14 +19399,16 @@ async function _resolverLecturaPorId(idOrTitle = "") {
       try {
         const snap = await getDoc(doc(db, colName, queryText));
         if (snap.exists()) {
-        const data = snap.data();
-          return {
+          const data = snap.data();
+          const resolved = {
             id: snap.id,
             sourceCollection: colName,
             coleccion: colName,
             ...data,
             tipo: colName === "lecturasASC" ? "asc" : "principal"
           };
+          window._cbCacheLecturasPorId[queryText] = resolved;
+          return resolved;
         }
       } catch (_) { }
     }
@@ -19639,6 +19656,29 @@ async function actualizarLecturasASC() {
   const gradoNumero = gradoMap[gradoTexto];
   if (!nivel || !gradoNumero) return;
 
+  if (!window._cbCacheLecturasASC) {
+    window._cbCacheLecturasASC = {};
+  }
+  const cacheKey = `${nivel}_${gradoNumero}`;
+  if (window._cbCacheLecturasASC[cacheKey]) {
+    lecturasASC = window._cbCacheLecturasASC[cacheKey];
+    window.lecturasASCFiltradas = lecturasASC;
+
+    selectTemaASC.innerHTML = "<option value=''>Selecciona lectura ASC</option>";
+    lecturasASC.forEach(l => {
+      const option = document.createElement("option");
+      option.value = l.id;
+      const titulo = l.tema || l.titulo || "Sin título";
+      const lvl = l.nivel || "N/A";
+      const grd = l.grado || "N/A";
+      const trim = l.trimestre || "N/A";
+      const uni = (l.unidad ?? "N/A");
+      option.textContent = `${titulo} [${lvl}, ${grd}, T${trim}, U${uni}]`;
+      selectTemaASC.appendChild(option);
+    });
+    return;
+  }
+
   try {
     const q = query(
       collection(db, "lecturasASC"),
@@ -19651,6 +19691,8 @@ async function actualizarLecturasASC() {
       id: doc.id,
       ...doc.data()
     }));
+
+    window._cbCacheLecturasASC[cacheKey] = lecturasASC;
 
     // Mantén la lista global completa para el modal/buscador; esta vista usa solo la filtrada.
     window.lecturasASCFiltradas = lecturasASC;
@@ -22020,22 +22062,60 @@ async function verificarSecuencia() {
     };
     const materiaObjetivo = _obtenerMateriaSeleccionadaUnidad();
 
-    // Query a Firestore
-    const q = query(
-      collection(db, "secuenciaAlcance"),
-      where("nivel", "==", nivel),
-      where("grado", "==", grado),
-      where("trimestre", "==", trimestre),
-      where("unidad", "==", unidad)
-    );
-    const snap = await getDocs(q);
+    // Caché en memoria para evitar consultas redundantes de secuenciaAlcance
+    if (!window._cbCacheSecuencias) {
+      window._cbCacheSecuencias = {};
+    }
+    const cacheKey = `${nivel}_${grado}_${trimestre}_${unidad}`;
+    let snap;
+    if (window._cbCacheSecuencias[cacheKey]) {
+      snap = window._cbCacheSecuencias[cacheKey];
+    } else {
+      const q = query(
+        collection(db, "secuenciaAlcance"),
+        where("nivel", "==", nivel),
+        where("grado", "==", grado),
+        where("trimestre", "==", trimestre),
+        where("unidad", "==", unidad)
+      );
+      const realSnap = await getDocs(q);
+      snap = {
+        empty: realSnap.empty,
+        docs: realSnap.docs.map((d) => ({
+          data: () => d.data()
+        }))
+      };
+      window._cbCacheSecuencias[cacheKey] = snap;
+    }
 
     // Limpia contenedor de controles
     contenedorCamposSecuencia.innerHTML = "";
 
     // Decide fuente de secuencia
     if (snap.empty) {
-      secuenciaActual = await proponerSecuenciaIA(nivel, grado, trimestre, unidad, categorias);
+      // 🚀 Carga instantánea: usar fallback local para evitar bloquear la UI
+      const categoriasSinProyectos = Object.fromEntries(
+        Object.entries(categorias).filter(([cat]) => cat !== "Proyectos")
+      );
+      secuenciaActual = _crearPropuestaFallback(nivel, grado, trimestre, unidad, categoriasSinProyectos);
+      
+      // ⚡ Generar la propuesta pedagógica de IA en segundo plano de manera asíncrona
+      (async () => {
+        try {
+          console.info("[unidad][IA] Solicitando secuencia pedagógica sugerida por IA en segundo plano...");
+          const iaSecuencia = await proponerSecuenciaIA(nivel, grado, trimestre, unidad, categorias);
+          if (iaSecuencia && Object.keys(iaSecuencia).length > 0) {
+            // Combinar con la secuencia actual (respetando cualquier edición o valor ya existente)
+            secuenciaActual = { ...secuenciaActual, ...iaSecuencia };
+            window.secuenciaActual = secuenciaActual;
+            _unidadResetSyaRuntimeCaches();
+            console.info("[unidad][IA] Secuencia pedagógica sugerida por IA cargada con éxito en segundo plano.");
+            mostrarNotificacion("✨ Propuesta pedagógica generada por IA cargada con éxito para esta unidad.", "success");
+          }
+        } catch (error) {
+          console.warn("[unidad][IA] Error o timeout al generar la secuencia sugerida por IA (usando fallback local):", error);
+        }
+      })();
     } else {
       const candidatos = snap.docs.map((d) => d.data() || {});
       const mejor = _seleccionarMejorSecuenciaDoc(candidatos, categorias, materiaObjetivo);
@@ -22974,17 +23054,17 @@ FORMATO DE SALIDA:
 - Usa HTML limpio.
 - Cada actividad principal debe ir en <div class="activity">.
 - La instrucción principal debe ir en un <p> con <strong>.
-- Los pasos internos deben ir en <ol class="steps" type="a"> cuando existan pasos o subinstrucciones identificables.
-- La respuesta esperada, solo si ya existe o es claramente deducible del texto base, debe ir en <div class="answer"><span style="color:mediumvioletred;">Respuesta: ...</span></div>.
+- Los pasos internos deben ir en una única lista ordenada continua: <ol class="steps" type="a"> cuando existan pasos o subinstrucciones identificables. NUNCA rompas la lista ni crees múltiples etiquetas <ol> para una misma actividad.
+- La respuesta esperada, solo si ya existe o es claramente deducible del texto base, debe ir en un bloque <div class="answer"><span style="color:mediumvioletred;">Respuesta: ...</span></div> obligatoriamente anidado DENTRO del elemento <li> de la pregunta correspondiente (al final de su texto, antes de cerrar el </li>). Jamás cierres la lista <ol> ni la rompas para colocar la respuesta fuera de ella.
 - No uses bloques markdown.
 - No incluyas comentarios.
 
 CONTRATO DE FIDELIDAD:
 - Debes mantener la misma cantidad de actividades detectadas en el texto fuente.
-- Debes mantener el mismo orden de aparición.
+- Debes mantener el mismo orden de aparición original. Bajo ninguna circunstancia reordenes o mezcles las actividades (por ejemplo, la Actividad 3 nunca debe aparecer físicamente antes de la Actividad 2; deben ir estrictamente en orden 1, 2, 3...).
 - Debes mantener las mismas ideas centrales y ejemplos.
 - Tu trabajo es SOLO normalizar el formato a ASC.
-- Si alteras el contenido de fondo, tu respuesta es incorrecta.
+- Si alteras el contenido de fondo o desordenas las actividades, tu respuesta es incorrecta.
 
 CONTENIDO FUENTE A TRANSFORMAR:
 ${fuente}
@@ -23002,33 +23082,41 @@ function _unidadExtractImportedOwnTitle(payload = null, fallback = "") {
     try {
       const parser = new DOMParser();
       const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
-      const titleNode = Array.from(doc.body.firstElementChild?.children || []).find((node) => {
-        if (!(node instanceof Element)) return false;
-        if (!/^H[1-4]$/.test(node.tagName || "")) return false;
-        const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
-        if (!text) return false;
-        if (/^\d+\.\s+/.test(text)) return false;
-        if (/^\[IC[^\]]*\]/i.test(text)) return false;
-        return true;
-      });
-      const titleText = String(titleNode?.textContent || "").replace(/\s+/g, " ").trim();
-      if (titleText && titleText.length <= 120) return titleText;
+      const root = doc.body.firstElementChild || doc.body;
+
+      // 1. Primero buscar etiquetas H1-H4 en cualquier lugar de la estructura
+      const hNode = root.querySelector("h1, h2, h3, h4");
+      if (hNode) {
+        const text = String(hNode.textContent || "").replace(/\s+/g, " ").trim();
+        if (text && text.length <= 120 && !/^\d+\.\s+/.test(text) && !/^\[IC[^\]]*\]/i.test(text)) {
+          return text;
+        }
+      }
+
+      // 2. Buscar elementos con clases comunes de título
+      const titleClassNode = root.querySelector(".0100TITULO, .titulo, .title, .subtema-titulo");
+      if (titleClassNode) {
+        const text = String(titleClassNode.textContent || "").replace(/\s+/g, " ").trim();
+        if (text && text.length <= 120) return text;
+      }
     } catch (_) {
       // noop
     }
   }
 
+  // Fallback a texto plano
   const plain = source.replace(/<[^>]*>/g, "\n");
   const lines = plain.split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
+
   const candidate = lines.find((line) => {
     if (line.length > 120) return false;
     if (/^\[.*\]$/.test(line)) return false;
-    if (/^[A-Z0-9_ -]{12,}$/.test(line)) return false;
     if (/^(categoria|subcat|campo formativo|eje articulador|habilidad|competencia)\b/i.test(line)) return false;
     return true;
   });
+
   return candidate || fallbackTitle;
 }
 
@@ -23039,15 +23127,21 @@ function _unidadImportedPayloadHasOwnHeading(payload = null) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
     const root = doc.body.firstElementChild || doc.body;
-    return Array.from(root.children || []).some((node) => {
-      if (!(node instanceof Element)) return false;
-      if (!/^H[1-4]$/.test(node.tagName || "")) return false;
-      const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
-      if (!text) return false;
-      if (/^\d+\.\s+/.test(text)) return false;
-      if (/^\[IC[^\]]*\]/i.test(text)) return false;
-      return true;
-    });
+    
+    // Primero, buscar cualquier etiqueta H1-H4
+    const hNode = root.querySelector("h1, h2, h3, h4");
+    if (hNode) {
+      const text = String(hNode.textContent || "").replace(/\s+/g, " ").trim();
+      if (text && text.length <= 120 && !/^\d+\.\s+/.test(text) && !/^\[IC[^\]]*\]/i.test(text)) {
+        return true;
+      }
+    }
+    
+    // También clases comunes
+    const titleClassNode = root.querySelector(".0100TITULO, .titulo, .title, .subtema-titulo");
+    if (titleClassNode) return true;
+    
+    return false;
   } catch (_) {
     return false;
   }
@@ -23286,11 +23380,71 @@ function _unidadNormalizeImportedAscHtml(html = "", options = {}) {
   const root = doc.body.firstElementChild || doc.body;
   if (!(root instanceof Element)) return source;
 
-  const fallbackTitle = String(options?.fallbackTitle || "").trim();
   let changed = false;
 
+  // Remover primer encabezado o elemento de título para evitar duplicación visual
+  const firstChild = root.firstElementChild;
+  if (firstChild && (
+    /^H[1-4]$/.test(firstChild.tagName || "") ||
+    firstChild.classList.contains("0100TITULO") ||
+    firstChild.classList.contains("titulo")
+  )) {
+    firstChild.remove();
+    changed = true;
+  }
+
+  const fallbackTitle = String(options?.fallbackTitle || "").trim();
+
   const activityNodes = Array.from(root.querySelectorAll(":scope > .activity"));
-  if (!activityNodes.length) return source;
+  if (!activityNodes.length) {
+    return changed ? root.innerHTML.trim() : source;
+  }
+
+  // ⚡ ORDENACIÓN FÍSICA: Asegurar que las actividades queden ordenadas numéricamente (1, 2, 3...)
+  // y que no se revuelvan/desordenen en el HTML final.
+  if (activityNodes.length > 1) {
+    const getActivityOriginalNumber = (act) => {
+      const p = act.querySelector(":scope > p");
+      const text = String(p?.querySelector("strong")?.textContent || p?.textContent || "").trim();
+      const match = text.match(/^Actividad\s+(\d+)/i) || 
+                    text.match(/^(\d+)\s*[\.:-]/) || 
+                    text.match(/^[a-z]?\)\s*Actividad\s+(\d+)/i);
+      return match ? parseInt(match[1], 10) : null;
+    };
+
+    const activitiesWithOrder = activityNodes.map((act, idx) => ({
+      node: act,
+      origNum: getActivityOriginalNumber(act),
+      originalIndex: idx
+    }));
+
+    // Ordenar por el número original extraído, usando la posición original como fallback
+    activitiesWithOrder.sort((a, b) => {
+      if (a.origNum !== null && b.origNum !== null) {
+        return a.origNum - b.origNum;
+      }
+      if (a.origNum !== null) return -1;
+      if (b.origNum !== null) return 1;
+      return a.originalIndex - b.originalIndex;
+    });
+
+    const parent = activityNodes[0].parentNode;
+    if (parent) {
+      const placeholder = doc.createTextNode("");
+      parent.insertBefore(placeholder, activityNodes[0]);
+      
+      activityNodes.forEach(act => act.remove());
+      
+      let currentRef = placeholder;
+      activitiesWithOrder.forEach(item => {
+        parent.insertBefore(item.node, currentRef.nextSibling);
+        currentRef = item.node;
+      });
+      
+      placeholder.remove();
+      changed = true;
+    }
+  }
 
   const normalizeComparable = (text = "") => String(text || "")
     .replace(/\s+/g, " ")
@@ -23332,8 +23486,11 @@ function _unidadNormalizeImportedAscHtml(html = "", options = {}) {
 
     const strongText = String(strong.textContent || "").replace(/\s+/g, " ").trim();
     if (!strongText) return;
-    if (!/^\d+\.\s+/.test(strongText)) {
-      strong.textContent = `${index + 1}. ${strongText}`;
+    // Extraer el texto quitando cualquier número inicial erróneo como "1. ", "3. " para forzar secuencia estricta
+    const cleanText = strongText.replace(/^\d+\.\s*/, "");
+    const targetText = `${index + 1}. ${cleanText}`;
+    if (strongText !== targetText) {
+      strong.textContent = targetText;
       changed = true;
     }
   });
@@ -25710,7 +25867,66 @@ function _unidadRenderCompetenciaPrimariaHTML(subtema = "", categoria = "", opti
   `;
 }
 
+function _unidadExtraerHabilidadCognitivaDeTexto(texto = "") {
+  if (!texto) return null;
+
+  const validProcesos = ["C", "M", "E", "N", "D"];
+  const validProductos = ["U", "C", "R", "S", "T", "I"];
+  const validContenidos = ["F", "S", "M"];
+
+  const isValidCode = (code) => {
+    if (!code || code.length !== 3) return false;
+    return (
+      validProcesos.includes(code[0]) &&
+      validProductos.includes(code[1]) &&
+      validContenidos.includes(code[2])
+    );
+  };
+
+  // 1. Intentar buscar primero con prefijos explícitos "habilidad cognitiva..."
+  const explicitRegexes = [
+    /habilidad\s+cognitiva(?:\s+asociada)?\s*:\s*([a-z]{3})/gi,
+    /habilidad\s+cognitiva(?:\s+asociada)?\s+([a-z]{3})/gi
+  ];
+
+  for (const regex of explicitRegexes) {
+    const matches = texto.matchAll(regex);
+    for (const match of matches) {
+      if (match && match[1]) {
+        const code = match[1].toUpperCase();
+        if (isValidCode(code)) return code;
+      }
+    }
+  }
+
+  // 2. Si no se encontró de forma explícita, buscar cualquier código de 3 letras válido en todo el texto
+  const codeRegex = /\b([a-z]{3})\b/gi;
+  const matches = texto.matchAll(codeRegex);
+  for (const match of matches) {
+    if (match && match[1]) {
+      const code = match[1].toUpperCase();
+      if (isValidCode(code)) return code;
+    }
+  }
+
+  return null;
+}
+
 function _unidadHabilidadCognitivaPorSubtema(subtema = "", categoria = "", { lectura = false } = {}) {
+  // Intentar extraer de la ingesta de texto primero
+  try {
+    const payload = _unidadGetImportedTextSourceForSubtema(categoria, subtema);
+    if (payload) {
+      const sourceText = String(
+        payload.plainText || payload.structuredHtml || payload.originalHtml || ""
+      ).trim();
+      const ext = _unidadExtraerHabilidadCognitivaDeTexto(sourceText);
+      if (ext) return ext;
+    }
+  } catch (err) {
+    console.error("Error al extraer habilidad de texto importado:", err);
+  }
+
   if (lectura) return "ERM";
   const normalized = _unidadNormalizarSubtemaKey(subtema);
   const mapa = {
@@ -27402,7 +27618,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const generarFichas = !!chkFicha?.checked;
 
       const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
-      const cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema, scope);
+      let cantidad = _unidadResolveCantidadActividades(subtema, objetivosDelSubtema, scope);
       const statusId = `spinner-${categoria}-${subtema}`;
       const bloqueId = `bloque-${categoria}-${subtema}`;
       const objetivoT = objetivosDelSubtema.find(o => o.tipo === "T")?.descripcion || "N/A";
@@ -27443,6 +27659,14 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value;
       const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
       const importedTextPayload = _unidadGetImportedTextSourceForSubtema(categoria, subtema);
+      if (importedTextPayload) {
+        const parser = new DOMParser();
+        const tempDoc = parser.parseFromString(`<div>${importedTextPayload.structuredHtml || importedTextPayload.originalHtml || ""}</div>`, "text/html");
+        const count = tempDoc.querySelectorAll(".activity").length;
+        if (count > 0) {
+          cantidad = count;
+        }
+      }
       const importedHasOwnHeading = !!importedTextPayload && _unidadImportedPayloadHasOwnHeading(importedTextPayload);
       const importedUsesOwnHeading = importedHasOwnHeading;
       const importedOwnTitle = importedTextPayload
@@ -29057,14 +29281,20 @@ function _unidadInjectResourceIconsInActivities(html = "", options = {}) {
   activities.forEach((activity) => {
     activity.innerHTML = _unidadNormalizeMalformedIcTokens(activity.innerHTML || "");
     const blockText = activity.textContent || "";
-    const catalogAscChips = _unidadCompetenciasAscPorSubtema(options?.subtema || "", options?.categoria || "", options);
-    const explicitAscChips = _unidadExtractExplicitAscChips(activity.innerHTML || blockText).filter((chip) => {
-      const normalizedChip = String(chip || "").replace(/\s+/g, " ").trim().toUpperCase();
-      return catalogAscChips.some((catalogChip) => String(catalogChip || "").replace(/\s+/g, " ").trim().toUpperCase() === normalizedChip);
-    });
+    const subtema = options?.subtema || "";
+    const categoria = options?.categoria || "";
+    const isImported = !!options?.isImported || (typeof _unidadGetImportedTextSourceForSubtema === "function" && !!_unidadGetImportedTextSourceForSubtema(categoria, subtema));
+
+    const catalogAscChips = _unidadCompetenciasAscPorSubtema(subtema, categoria, options);
+    const explicitAscChips = isImported
+      ? _unidadExtractExplicitAscChips(activity.innerHTML || blockText)
+      : _unidadExtractExplicitAscChips(activity.innerHTML || blockText).filter((chip) => {
+          const normalizedChip = String(chip || "").replace(/\s+/g, " ").trim().toUpperCase();
+          return catalogAscChips.some((catalogChip) => String(catalogChip || "").replace(/\s+/g, " ").trim().toUpperCase() === normalizedChip);
+        });
     const ascChips = explicitAscChips.length
       ? explicitAscChips
-      : catalogAscChips;
+      : (isImported ? [] : catalogAscChips);
     const detected = ICONS.filter(ic => ic.regex.test(blockText));
     const detectedModality = MODALITY_BADGES.find((badge) => badge.regex.test(blockText));
     if (!detected.length && !detectedModality && !ascChips.length) return;

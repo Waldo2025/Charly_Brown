@@ -2,6 +2,10 @@
  * Podcaster Studio - Chat Assistant Module
  * Handles all states, builders, formatting, and rendering of the Snoopy Chat Assistant.
  */
+import { requirePodcasterScriptGeneratorApiFunction } from "./podcaster-script-generator-registry.js";
+import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
+import { replaceHostTokensWithNames as replaceHostTokensWithNamesShared } from "./podcaster-speaker-text.js";
+import { toMarkdownTableCell } from "./podcaster-markdown-table.js";
 
 // --- Global Chat Generation State ---
 const connectScriptPanelGenerationState = {
@@ -20,12 +24,35 @@ const escapeHtml = typeof window.escapeHtml === "function"
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const buildSpeakerMapsForHosts = (hosts = [], session = null, snapshots = {}) => buildSpeakerMapsForHostsShared(hosts, session, snapshots, {
+  getSpeakerVoiceMap: window.getSpeakerVoiceMap,
+  getSpeakerExpressionMap: window.getSpeakerExpressionMap,
+  getSpeakerNameMap: window.getSpeakerNameMap,
+  getSpeakerScenarioMap: window.getSpeakerScenarioMap,
+  normalizeLiveVoiceName: window.normalizeLiveVoiceName,
+  resolveSpeakerVoiceName: window.resolveSpeakerVoiceName,
+  EXPRESSIONS: window.EXPRESSIONS,
+  DEFAULT_SPEAKER_NAME_MAP: window.DEFAULT_SPEAKER_NAME_MAP,
+  DEFAULT_SPEAKER_SCENARIO_MAP: window.DEFAULT_SPEAKER_SCENARIO_MAP,
+  rewriteScenarioPromptForEducationalVideo: requirePodcasterScriptGeneratorApiFunction("rewriteScenarioPromptForEducationalVideo")
+});
+const replaceHostTokensWithNames = (text = "", session = null) => replaceHostTokensWithNamesShared(text, session, {
+  getSpeakerNameMap: window.getSpeakerNameMap
+});
+
 // --- Chat State Modification API ---
 function addChatMessage(role, text, extra = {}) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const normalizedText = String(text || "").trim();
+  if (normalizedRole === "system") {
+    const logMethod = /error|fallo|no se pudo|no disponible/i.test(normalizedText) ? "error" : "log";
+    console[logMethod]("[podcaster][chat:system]", normalizedText, extra && typeof extra === "object" ? extra : {});
+    return null;
+  }
   const payload = {
     id: window.makeId("msg"),
-    role,
-    text,
+    role: normalizedRole || "assistant",
+    text: normalizedText,
     ...(extra && typeof extra === "object" ? extra : {})
   };
   window.upsertActiveSession((session) => ({
@@ -70,16 +97,17 @@ function buildPodcastAssistantReply(script = {}, options = {}) {
       const endTime = window.secondsToClock(currentTime);
       const timeRange = `${startTime} - ${endTime}`;
 
-      const speaker = window.resolveSpeakerDisplayName(String(row.speaker || "Host A").trim(), session);
+      const speaker = String(row.speaker || "Host A").trim() || "Host A";
+      const speakerName = window.resolveSpeakerDisplayName(String(row.speaker || "Host A").trim(), session);
       const expression = String(row.expression || "Neutral").trim() || "Neutral";
-      const text = window.replaceHostTokensWithNames(String(row.text || "").trim(), session);
+      const text = replaceHostTokensWithNames(String(row.text || "").trim(), session);
       const media = String(row?.mediaCue || "Sin media").trim() || "Sin media";
       const notes = String(row?.notes || "").replace(/\s+/g, " ").trim() || "-";
-      return `| ${timeRange} | ${window.toMarkdownTableCell(speaker)} | ${window.toMarkdownTableCell(expression)} | ${window.toMarkdownTableCell(text)} | ${window.toMarkdownTableCell(media)} | ${window.toMarkdownTableCell(notes)} |`;
+      return `| ${timeRange} | ${toMarkdownTableCell(speaker)} | ${toMarkdownTableCell(speakerName)} | ${toMarkdownTableCell(expression)} | ${toMarkdownTableCell(text)} | ${toMarkdownTableCell(media)} | ${toMarkdownTableCell(notes)} |`;
     })
     .join("\n");
 
-  const tableHeader = "| Tiempo | Locutor | Expresión | Guion | Media | Notas |\n| --- | --- | --- | --- | --- | --- |";
+  const tableHeader = "| Tiempo | Locutor | Nombre del locutor | Expresión | Guion | Media | Notas |\n| --- | --- | --- | --- | --- | --- | --- |";
   const previewTable = previewRows ? `${tableHeader}\n${previewRows}` : "";
 
   const responseLines = [];
@@ -125,13 +153,13 @@ function buildCreativeVideoAssistantReply(script = {}, options = {}) {
       const seconds = Math.max(window.SHORT_SCENE_MIN_SEC, Number(row?.durationSec) || window.SHORT_SCENE_MAX_SEC);
       const voiceOver = String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim();
       const sceneDescription = String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim();
-      const transition = window.normalizeTransitionForScene(String(row?.transition || "").replace(/\s+/g, " ").trim(), {
+      const transition = requirePodcasterScriptGeneratorApiFunction("normalizeTransitionForScene")(String(row?.transition || "").replace(/\s+/g, " ").trim(), {
         script: voiceOver,
         sceneDescription,
-        visual: window.resolveCreativeVisualNotesText(row),
+        visual: requirePodcasterScriptGeneratorApiFunction("resolveCreativeVisualNotesText")(row),
         partIndex: index
       });
-      const visualElement = window.resolveCreativeVisualNotesText(row)
+      const visualElement = requirePodcasterScriptGeneratorApiFunction("resolveCreativeVisualNotesText")(row)
         || String(
           row?.videoDirective
           || row?.visual
@@ -141,7 +169,7 @@ function buildCreativeVideoAssistantReply(script = {}, options = {}) {
           || ""
         ).replace(/\s+/g, " ").trim()
         || "Definir elemento visual.";
-      const onScreenText = window.ensureCompleteSentence(window.buildOnScreenText(row?.onScreenText || "", {
+      const onScreenText = requirePodcasterScriptGeneratorApiFunction("ensureCompleteSentence")(requirePodcasterScriptGeneratorApiFunction("buildOnScreenText")(row?.onScreenText || "", {
         voiceOver,
         sceneDescription,
         visual: visualElement
@@ -199,7 +227,7 @@ function addScriptAssistantMessage(script = {}, options = {}) {
     preserveExactRows
   });
   const hosts = Array.isArray(normalized?.hosts) && normalized.hosts.length ? normalized.hosts : window.getSpeakerOptions(session);
-  const maps = window.buildSpeakerMapsForHosts(hosts, session, {
+  const maps = buildSpeakerMapsForHosts(hosts, session, {
     ...(options?.snapshots || {}),
     videoMode: normalized?.videoMode === true,
     videoPreset: normalized?.videoPreset || options?.snapshots?.videoPreset
@@ -215,7 +243,9 @@ function addScriptAssistantMessage(script = {}, options = {}) {
     speakerExpressionMapSnapshot: maps.expressionMap,
     speakerNameMapSnapshot: maps.nameMap,
     speakerScenarioMapSnapshot: maps.scenarioMap,
-    disfluencyDefaultsSnapshot: window.normalizeDisfluencyConfig(session?.disfluencyDefaults || window.DEFAULT_DISFLUENCY_CONFIG)
+    disfluencyDefaultsSnapshot: window.normalizeDisfluencyConfig(session?.disfluencyDefaults || window.DEFAULT_DISFLUENCY_CONFIG),
+    originalPrompt: options?.originalPrompt || null,
+    originalOptions: options?.originalOptions || null
   });
 }
 
@@ -337,11 +367,22 @@ function renderChatMessageBody(message = {}) {
   return renderChatTextWithMarkdownTables(String(message?.text || ""));
 }
 
+function isConsoleOnlyAssistantMessage(message = {}) {
+  if (String(message?.role || "").trim().toLowerCase() !== "assistant") return false;
+  const text = String(message?.text || "").trim();
+  return text.startsWith("Sesion guardada en Firebase (")
+    || text.startsWith("Sesión guardada en Firebase (")
+    || text === "Reajusté el guión con Gemini para equilibrar los nuevos locutores."
+    || text === "Gemini Live quedó conectado para reproducir voces por escena desde el panel derecho.";
+}
+
 // --- Render Chat Flow ---
 function renderChat(session) {
   const messages = session.chat || [];
   const visibleMessages = messages.filter((message, index) => {
     if (index === 0 && message.role === "assistant" && messages.length === 1) return false;
+    if (String(message?.role || "").trim().toLowerCase() === "system") return false;
+    if (isConsoleOnlyAssistantMessage(message)) return false;
     return true;
   });
   const target = window.els.chatFeedMessages || window.els.chatFeed;
@@ -355,7 +396,10 @@ function renderChat(session) {
         const action = isConnectGenerating ? "stop-connect-script-panel" : "connect-script-panel";
         const title = isConnectGenerating ? "Detener conexión y generación de audios" : "Conectar guión al panel";
         const icon = isConnectGenerating ? "fa-stop" : "fa-link";
-        return `<button class="chat-connect-btn${isConnectGenerating ? " is-stop" : ""}" type="button" data-action="${action}" title="${title}" aria-label="${title}"${message?.scriptSnapshot || isConnectGenerating ? "" : " disabled"}><i class="fas ${icon}"></i></button>`;
+        return `
+          <button class="chat-connect-btn${isConnectGenerating ? " is-stop" : ""}" type="button" data-action="${action}" title="${title}" aria-label="${title}"${message?.scriptSnapshot || isConnectGenerating ? "" : " disabled"}><i class="fas ${icon}"></i></button>
+          <button class="chat-regenerate-btn" type="button" data-action="regenerate-chat-message" title="Regenerar propuesta de guion alternativa" aria-label="Regenerar propuesta de guion alternativa"${isConnectGenerating ? " disabled" : ""}><i class="fas fa-sync-alt"></i></button>
+        `;
       })()
       : ""}
         ${message.role === "system" || message.role === "assistant"

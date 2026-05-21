@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8") +
+  "\n" +
+  readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
 if (!/const isImageStageClip =/.test(source)) {
   throw new Error("syncPodcastVideoStageMedia debe detectar explícitamente escenas de imagen.");

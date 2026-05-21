@@ -277,7 +277,7 @@ function normalizeGeminiModelName(model = "") {
 function isMoodleSupportedGeminiTextModelName(model = "") {
     const name = normalizeGeminiModelName(model);
     if (!name) return false;
-    if (!/^gemini-(2\.5|3(?:\.1)?)/i.test(name)) return false;
+    if (!/^gemini-(2\.5|3(?:\.(?:1|5))?)/i.test(name)) return false;
     if (/(image|audio|tts|live|embedding|embed|vision|aqa|transcribe|computer|computer-use|cu-)/i.test(name)) return false;
     if (/(?:^|[-])(exp|experimental)(?:[-]|$)/i.test(name)) return false;
     return true;
@@ -301,6 +301,7 @@ function formatGeminiModelOptionLabel(model = "") {
         "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
         "gemini-2.5-flash": "Gemini 2.5 Flash",
         "gemini-2.5-pro": "Gemini 2.5 Pro",
+        "gemini-3.5-flash": "Gemini 3.5 Flash",
         "gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
         "gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
         "gemini-3.1-pro-preview": "Gemini 3.1 Pro (Preview)",

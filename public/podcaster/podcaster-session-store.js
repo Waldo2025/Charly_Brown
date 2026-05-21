@@ -64,6 +64,18 @@ function writeJsonArrayStorage(storageAdapter, key = "", value = []) {
   storageAdapter?.writeJson?.(String(key || "").trim(), Array.isArray(value) ? value : []);
 }
 
+function resolveStorageUidCandidates(uid = "", deps = {}) {
+  const candidates = [
+    uid,
+    deps.resolveCurrentUid?.(),
+    deps.getStorageScopeUid?.()
+  ];
+  const normalized = candidates
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return normalized.length ? Array.from(new Set(normalized)) : [""];
+}
+
 function loadDeletedSessionIds(uid = "", deps = {}, storageAdapter = null) {
   const nextStorage = storageAdapter || createLocalStorageSessionAdapter(deps);
   return Array.from(new Set(
@@ -161,11 +173,14 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
   const nextStorage = storageAdapter || createLocalStorageSessionAdapter(deps);
   const forceCloud = deps.forceCloud === true;
   if (forceCloud) return [];
-  const storageKey = resolveSessionStorageKey(uid, deps);
-  const deletedSessionIds = new Set(loadDeletedSessionIds(uid, deps, nextStorage));
-  const scopedSessions = readJsonArrayStorage(nextStorage, storageKey)
-    .filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
-  if (scopedSessions.length) return scopedSessions;
+  const storageCandidates = resolveStorageUidCandidates(uid, deps);
+  for (const candidateUid of storageCandidates) {
+    const storageKey = resolveSessionStorageKey(candidateUid, deps);
+    const deletedSessionIds = new Set(loadDeletedSessionIds(candidateUid, deps, nextStorage));
+    const scopedSessions = readJsonArrayStorage(nextStorage, storageKey)
+      .filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
+    if (scopedSessions.length) return scopedSessions;
+  }
   const base = String(deps.STORAGE_KEY_BASE || "cb_podcaster_sessions_v2").trim() || "cb_podcaster_sessions_v2";
   const legacyKey = String(deps.LEGACY_STORAGE_KEY || "cb_podcaster_sessions_v1").trim() || "cb_podcaster_sessions_v1";
   const mergeSessionsById = deps.mergeSessionsById || ((primary = [], secondary = []) => [...primary, ...secondary]);
@@ -188,16 +203,21 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
 
 function persistSessionsToLocalCache(uid = "", sessions = [], deps = {}, storageAdapter = null) {
   const nextStorage = storageAdapter || createLocalStorageSessionAdapter(deps);
-  const storageKey = resolveSessionStorageKey(uid, deps);
-  nextStorage?.writeJson?.(storageKey, Array.isArray(sessions) ? sessions : []);
+  const nextList = Array.isArray(sessions) ? sessions : [];
+  resolveStorageUidCandidates(uid, deps).forEach((candidateUid) => {
+    const storageKey = resolveSessionStorageKey(candidateUid, deps);
+    nextStorage?.writeJson?.(storageKey, nextList);
+  });
   const list = Array.isArray(sessions) ? sessions : [];
   list.forEach((session) => {
     const sessionId = String(session?.id || "").trim();
     if (!sessionId) return;
-    persistSessionSyncMeta(uid, sessionId, {
-      localFingerprint: computeSessionFingerprint(session, deps),
-      lastLocalPersistAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()
-    }, deps, nextStorage);
+    resolveStorageUidCandidates(uid, deps).forEach((candidateUid) => {
+      persistSessionSyncMeta(candidateUid, sessionId, {
+        localFingerprint: computeSessionFingerprint(session, deps),
+        lastLocalPersistAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()
+      }, deps, nextStorage);
+    });
   });
   return list;
 }
@@ -284,13 +304,14 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const localSession = id ? localById.get(id) : null;
     if (id) localById.delete(id);
     if (!localSession) return cloudSession;
-    const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
-    const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
-    const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     const localRows = Array.isArray(localSession?.script?.rows) ? localSession.script.rows : [];
     const cloudRows = Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : [];
-    const resolvedRows = mergeSessionRowsWithFallback(cloudRows, localRows);
     const isShallow = cloudSession.isStub === true || !cloudSession.dialogueVideoMap || Object.keys(cloudSession.dialogueVideoMap).length === 0;
+    const hasConcreteCloudRows = cloudSession.isStub !== true && cloudRows.length > 0;
+    const resolvedRows = mergeSessionRowsWithFallback(cloudRows, localRows);
+    const finalRows = hasConcreteCloudRows
+      ? cloudRows
+      : resolvedRows;
     
     return {
       ...localSession,
@@ -313,12 +334,12 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
       script: {
         ...(localSession?.script || {}),
         ...(cloudSession?.script || {}),
-        rows: resolvedRows
+        rows: finalRows
       },
-      podcastVideoConfig: preferLocalVideoConfig
+      podcastVideoConfig: cloudSession.isStub === true
         ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
         : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {}),
-      rows: resolvedRows,
+      rows: finalRows,
       isStub: cloudSession.isStub === true
     };
   });
@@ -343,6 +364,41 @@ function replaceLocalSessionFromCloud(uid = "", cloudSession = null, deps = {}, 
     lastKnownCloudUpdatedAt: String(cloudSession?.updatedAt || "").trim()
   }, deps, nextStorage);
   return next;
+}
+
+async function saveSessionDirectToCloud(payload = null, deps = {}) {
+  const uid = String(deps.resolveCurrentUid?.() || "").trim();
+  if (!uid) throw new Error("AUTH_REQUIRED");
+  const sanitized = payload && typeof payload === "object" ? payload : null;
+  if (!sanitized?.id) {
+    throw new Error("La sesión no tiene un ID válido.");
+  }
+  const sessionRef = deps.doc(deps.firestoreDb, "podcaster_sessions", sanitized.id);
+  const existingSnap = await deps.getDoc(sessionRef);
+  const existing = existingSnap.exists() ? (existingSnap.data() || {}) : null;
+  if (existing && String(existing.ownerId || "").trim() !== uid) {
+    throw new Error("No puedes sobrescribir una sesión de otro usuario.");
+  }
+  const sessionUpdatedAt = String(sanitized.updatedAt || deps.nowIso?.() || new Date().toISOString()).trim()
+    || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
+  await deps.setDoc(sessionRef, {
+    ownerId: uid,
+    title: sanitized.title,
+    archived: sanitized.archived === true,
+    publicar: sanitized.publicar === true,
+    sessionUpdatedAt,
+    session: sanitized,
+    sharedWithIds: Array.isArray(existing?.sharedWithIds) ? existing.sharedWithIds : [],
+    sharedWith: Array.isArray(existing?.sharedWith) ? existing.sharedWith : [],
+    createdAt: existing?.createdAt || deps.serverTimestamp(),
+    updatedAt: deps.serverTimestamp()
+  }, { merge: true });
+  return {
+    ok: true,
+    sessionId: sanitized.id,
+    ownerId: uid,
+    savedAt: typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString()
+  };
 }
 
 async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {}, storageAdapter = null) {
@@ -389,7 +445,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
       method: "POST",
       body: JSON.stringify({ session: payload })
     })
-    : await deps.saveSessionToCloudDirect(payload);
+    : await saveSessionDirectToCloud(payload, deps);
   const savedAt = String(response?.savedAt || deps.nowIso?.() || new Date().toISOString()).trim()
     || (typeof deps.nowIso === "function" ? deps.nowIso() : new Date().toISOString());
   const nextSessions = getSessions().map((session) => (
@@ -419,7 +475,10 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
     dialogueAudioKeys: Object.keys(deps.getDialogueAudioMap?.(payload) || {}).length
   });
   if (!silent) {
-    window.addChatMessage?.("assistant", `Sesión guardada en Firebase (${deps.formatDate?.(savedAt) || savedAt}).`);
+    console.log("[podcaster][session-store] Sesión guardada en Firebase", {
+      savedAt: deps.formatDate?.(savedAt) || savedAt,
+      sessionId: String(target?.id || "").trim()
+    });
     if (compacted.strippedReferenceMedia || compacted.trimmedChat) {
       const notes = [];
       if (compacted.strippedReferenceMedia) notes.push("referencias locales pesadas omitidas del guardado cloud");
@@ -444,14 +503,43 @@ async function bootstrapSessions(uid = "", deps = {}, storageAdapter = null) {
   } catch (_) {
     cloudSessions = [];
   }
-  
-  // mergeCloudVsLocalSessions handles cloud priority by spreading cloudSession over localSession
-  // and using mergeSessionRowsWithFallback (cloud rows win if they exist).
+
+  const localFingerprint = JSON.stringify(
+    (Array.isArray(localSessions) ? localSessions : [])
+      .map((session) => sanitizeSessionForFingerprint(session, deps))
+      .sort((a, b) => String(a?.id || "").localeCompare(String(b?.id || "")))
+  );
+  const cloudFingerprint = JSON.stringify(
+    (Array.isArray(cloudSessions) ? cloudSessions : [])
+      .map((session) => sanitizeSessionForFingerprint(session, deps))
+      .sort((a, b) => String(a?.id || "").localeCompare(String(b?.id || "")))
+  );
+  const localUpdatedAt = (Array.isArray(localSessions) ? localSessions : [])
+    .map((session) => String(session?.updatedAt || "").trim())
+    .sort()
+    .join("|");
+  const cloudUpdatedAt = (Array.isArray(cloudSessions) ? cloudSessions : [])
+    .map((session) => String(session?.updatedAt || "").trim())
+    .sort()
+    .join("|");
+
+  if (localFingerprint && cloudFingerprint && localFingerprint === cloudFingerprint && localUpdatedAt === cloudUpdatedAt) {
+    persistSessionsToLocalCache(uid, localSessions, deps, nextStorage);
+    return {
+      sessions: localSessions,
+      useLocal: true
+    };
+  }
+
   const resolvedSessions = mergeCloudVsLocalSessions(cloudSessions, localSessions, deps);
-  
-  // Persist the resolved state back to local cache to ensure they are in sync
-  persistSessionsToLocalCache(uid, resolvedSessions, deps, nextStorage);
-  
+  if (cloudSessions.length) {
+    cloudSessions.forEach((session) => {
+      replaceLocalSessionFromCloud(uid, session, deps, nextStorage);
+    });
+  } else {
+    persistSessionsToLocalCache(uid, resolvedSessions, deps, nextStorage);
+  }
+
   return {
     sessions: resolvedSessions,
     useLocal: !cloudSessions.length
@@ -513,6 +601,7 @@ export {
   markSessionDirty,
   saveSessionManuallyToCloud,
   replaceLocalSessionFromCloud,
+  saveSessionDirectToCloud,
   bootstrapSessions,
   createPodcasterSessionStore
 };
