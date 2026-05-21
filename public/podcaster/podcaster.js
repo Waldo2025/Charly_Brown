@@ -7202,89 +7202,25 @@ function getSpeakerVoiceMap(session = null) {
 }
 
 function getSpeakerOptions(session = null) {
-  const candidates = new Set();
+  // Fuente de verdad: solo los locutores configurados en el panel del guión (script.hosts).
+  // Fallback a session.hosts por compatibilidad legacy.
+  const hosts = Array.isArray(session?.script?.hosts) && session.script.hosts.length
+    ? session.script.hosts
+    : (Array.isArray(session?.hosts) && session.hosts.length ? session.hosts : null);
 
-  // 1. Obtener de session.script.hosts
-  if (Array.isArray(session?.script?.hosts)) {
-    session.script.hosts.forEach((h) => {
-      const name = String(h || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // 2. Obtener de session.hosts
-  if (Array.isArray(session?.hosts)) {
-    session.hosts.forEach((h) => {
-      const name = String(h || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // 3. Obtener de los rows/escenas en el script a través de getSessionRows (Timeline y Montaje)
-  const rows = getSessionRows(session);
-  if (Array.isArray(rows)) {
-    rows.forEach((row) => {
-      const name = String(row.speaker || "").trim();
-      if (name) candidates.add(name);
-    });
+  if (hosts) {
+    const normalized = hosts
+      .map((h) => {
+        const name = String(h || "").trim();
+        if (!name) return null;
+        // Normalizar casing si coincide con un nombre canónico en VOICES
+        const canonical = VOICES.find((v) => v.toLowerCase() === name.toLowerCase());
+        return canonical || name;
+      })
+      .filter(Boolean);
+    if (normalized.length) return Array.from(new Set(normalized));
   }
 
-  // 4. Obtener de session.rows (por si acaso no fue cubierto)
-  if (Array.isArray(session?.rows)) {
-    session.rows.forEach((row) => {
-      const name = String(row.speaker || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // 5. Obtener de los mapas de configuración de la sesión
-  if (session?.speakerVoiceMap && typeof session.speakerVoiceMap === "object") {
-    Object.keys(session.speakerVoiceMap).forEach((key) => {
-      const name = String(key || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-  if (session?.speakerExpressionMap && typeof session.speakerExpressionMap === "object") {
-    Object.keys(session.speakerExpressionMap).forEach((key) => {
-      const name = String(key || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-  if (session?.speakerNameMap && typeof session.speakerNameMap === "object") {
-    Object.keys(session.speakerNameMap).forEach((key) => {
-      const name = String(key || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // 6. Obtener de los audios de diálogo generados (session.dialogueAudioMap)
-  if (session?.dialogueAudioMap && typeof session.dialogueAudioMap === "object") {
-    Object.values(session.dialogueAudioMap).forEach((audio) => {
-      const name = String(audio?.speaker || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // 7. Obtener de los segmentos del track de diálogo de video (podcastVideoConfig.geminiDialogueTrack.segments)
-  const segments = session?.podcastVideoConfig?.geminiDialogueTrack?.segments;
-  if (Array.isArray(segments)) {
-    segments.forEach((seg) => {
-      const name = String(seg.speaker || seg.speakerName || "").trim();
-      if (name) candidates.add(name);
-    });
-  }
-
-  // Normalizar: usar la versión en VOICES si coincide (case-insensitive), o conservar el nombre original
-  const normalized = Array.from(candidates)
-    .map((speaker) => {
-      const canonical = VOICES.find((candidate) => candidate.toLowerCase() === speaker.toLowerCase());
-      return canonical || speaker;
-    })
-    .filter(Boolean);
-
-  if (normalized.length) {
-    return Array.from(new Set(normalized));
-  }
   return [...DEFAULT_HOSTS];
 }
 
