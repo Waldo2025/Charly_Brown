@@ -883,8 +883,9 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       const drift = Math.abs(audio.currentTime - offsetSec);
       const isFirstSync = audio.dataset.initialized === "false";
+      const driftToleranceSec = isFirstSync ? 0.01 : 0.12;
       
-      if (isFirstSync || drift > 0.25) {
+      if (isFirstSync || drift > driftToleranceSec) {
         if (isFirstSync || drift > 0.5) {
            // console.log(`[Playback:Audio] Sincronizando tiempo para ${rowId}: ${audio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s (Drift: ${drift.toFixed(3)}s)`);
         }

@@ -979,7 +979,6 @@ let podcastVideoState = {
 };
 
 function scheduleSessionLocalPersist(reason = "") {
-  if (PODCAST_SESSION_MANUAL_SAVE_ONLY === true) return;
   const session = getActiveSession();
   if (!session?.id) return;
   if (cloudAutosaveTimeout) clearTimeout(cloudAutosaveTimeout);
@@ -995,7 +994,6 @@ function scheduleSessionLocalPersist(reason = "") {
 }
 
 function flushSessionLocalPersistNow(sessionId = "", reason = "") {
-  if (PODCAST_SESSION_MANUAL_SAVE_ONLY === true) return Promise.resolve();
   const cleanSessionId = String(sessionId || getActiveSession()?.id || "").trim();
   if (!cleanSessionId) return Promise.resolve();
   if (cloudAutosaveTimeout) {
@@ -5149,7 +5147,7 @@ function constrainOnScreenTextClipToTimelineRange(textClip = null, rangeStartMs 
   }, key);
 }
 
-function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = null) {
+function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = null, options = {}) {
   const sessionBefore = beforeSession || getActiveSession();
   const sessionAfter = afterSession || getActiveSession();
   const beforeTrack = normalizeGeminiDialogueTrack(getPodcastVideoConfig(sessionBefore)?.geminiDialogueTrack || {});
@@ -5157,6 +5155,9 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
   if (!beforeTrack.enabled || !beforeTrack.segments.length) {
     return { track: afterTrack, changed: false };
   }
+  const forceCompactSceneAnchors = options.forceCompactSceneAnchors === true
+    || isAudioOnlyPodcastStudioMode(sessionAfter);
+  const interSegmentGapMs = Math.max(0, Math.round(Number(options.interSegmentGapMs || 0) || 0));
   const beforeRuntimeByRowId = new Map(
     (buildTimelineRuntimeEntries(sessionBefore) || [])
       .map((entry) => [String(entry?.rowId || "").trim(), entry])
@@ -5169,6 +5170,7 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
   );
   const rowsAfter = Array.isArray(sessionAfter?.script?.rows) ? sessionAfter.script.rows : [];
   const rowIndexById = new Map(rowsAfter.map((row, index) => [String(row?.id || "").trim(), index]));
+  let sequentialCursorMs = 0;
   const nextSegments = beforeTrack.segments.map((segment) => {
     const rowId = String(segment?.rowId || "").trim();
     const beforeRuntime = rowId ? beforeRuntimeByRowId.get(rowId) || null : null;
@@ -5190,20 +5192,30 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
       )
     );
     const maxStartMs = Math.max(sceneStartMs, sceneStartMs + sceneDurationMs - durationMs);
-    const startMs = Math.max(sceneStartMs, Math.min(maxStartMs, desiredStartMs));
+    const compactSceneStartMs = Math.max(
+      sceneStartMs,
+      Math.min(maxStartMs, Math.max(sceneStartMs, sequentialCursorMs))
+    );
+    const startMs = forceCompactSceneAnchors
+      ? compactSceneStartMs
+      : Math.max(sceneStartMs, Math.min(maxStartMs, desiredStartMs));
     const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
     const sceneIndex = Math.max(1, Number(rowIndexById.get(rowId) || 0) + 1);
-    return normalizeGeminiDialogueTrackSegment({
+    const normalized = normalizeGeminiDialogueTrackSegment({
       ...segment,
       rowId,
       sceneIndex,
       startMs,
-      anchorStartMs: sceneStartMs,
+      anchorStartMs: forceCompactSceneAnchors ? startMs : sceneStartMs,
       durationMs,
       trimInMs,
       trimOutMs: trimInMs + durationMs,
       endMs: startMs + durationMs
     }, sceneIndex - 1);
+    sequentialCursorMs = normalized
+      ? Math.max(sequentialCursorMs, Number(normalized.startMs || 0) + Number(normalized.durationMs || 0) + interSegmentGapMs)
+      : sequentialCursorMs;
+    return normalized;
   }).filter(Boolean);
   const nextTrack = normalizeGeminiDialogueTrack({
     ...beforeTrack,
@@ -5414,7 +5426,10 @@ function reorderTimelineClipsByTracks() {
     podcastVideoConfig: nextBaseConfig
   };
   nextBaseConfig.timelineTracks = ensureTimelineTracks(nextSession, { persist: false });
-  const reorderGemini = buildReorderedGeminiDialogueTrack(beforeSession, nextSession);
+  const reorderGemini = buildReorderedGeminiDialogueTrack(beforeSession, nextSession, {
+    forceCompactSceneAnchors: isAudioOnlyPodcastStudioMode(nextSession),
+    interSegmentGapMs: 0
+  });
   const nextSessionWithGemini = {
     ...nextSession,
     podcastVideoConfig: {
@@ -5461,7 +5476,12 @@ function reorderTimelineClipsByTracks() {
     timelineOnScreenTextClipsByRowId: reorderText.clips,
     ...(reorderLayouts.changed ? { timelineOnScreenTextLayoutByRowId: reorderLayouts.layouts } : {})
   });
-  setGenerationStatus("Timeline reordenado (huecos eliminados y chips vinculados).", "is-live");
+  setGenerationStatus(
+    isAudioOnlyPodcastStudioMode(refreshedSession)
+      ? "Timeline reordenado (voces Gemini compactadas sin huecos)."
+      : "Timeline reordenado (huecos eliminados y chips vinculados).",
+    "is-live"
+  );
   return true;
 }
 
@@ -11636,6 +11656,34 @@ function syncPodcastTimelineLaneOffsetFromDom(session = null) {
   return podcasterTimelineUiApi.syncPodcastTimelineLaneOffsetFromDom(session);
 }
 
+function applyTimelineZoomPreservingPlayhead(session = null, nextZoom = 1) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) return false;
+  const clampedZoom = Math.max(0.25, Math.min(1, toFiniteNumber(nextZoom, 1)));
+  const prevCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
+  const prevOffsetPx = Math.max(0, Number(prevCanvas?.dataset?.playheadOffset || 0));
+  const prevScrollLeft = Math.max(0, Number(els.podcastVideoTimeline?.scrollLeft || 0));
+  const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(activeSession));
+  const cursorMs = Math.max(0, Math.min(totalMs, Number(podcastVideoState.montageCursorMs || 0)));
+  const prevCursorX = prevOffsetPx + timelineMsToPx(cursorMs, activeSession);
+  const prevCursorViewportX = prevCursorX - prevScrollLeft;
+
+  podcastVideoState.timelineZoom = clampedZoom;
+  renderPodcastVideoTimeline(activeSession, { force: true, reason: "structure" });
+
+  const nextCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
+  const nextOffsetPx = Math.max(0, Number(nextCanvas?.dataset?.playheadOffset || 0));
+  const nextCursorX = nextOffsetPx + timelineMsToPx(cursorMs, activeSession);
+  const nextScrollLeft = Math.max(0, nextCursorX - prevCursorViewportX);
+  try {
+    if (els.podcastVideoTimeline) els.podcastVideoTimeline.scrollLeft = nextScrollLeft;
+    if (els.podcastTimelineRuler) els.podcastTimelineRuler.scrollLeft = nextScrollLeft;
+  } catch (_) { }
+  syncPodcastTimelineLaneOffsetFromDom(activeSession);
+  syncPodcastTimelinePlayhead(activeSession);
+  return true;
+}
+
 function getPodcastTimelineClipMenuPortal() {
   return podcasterTimelineUiApi.getPodcastTimelineClipMenuPortal();
 }
@@ -11663,7 +11711,7 @@ function syncTimelineGeminiSegmentDragPreview(session = null) {
     const rowId = String(chip?.dataset?.rowId || "").trim();
     const segment = segmentByRowId.get(rowId) || null;
     if (!rowId || !segment) return;
-    const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+    const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
     const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
     const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
     const rawVisibleMs = Math.max(
@@ -14000,6 +14048,7 @@ const sessionStore = createPodcasterSessionStore({
   normalizeCreativeVideoConfig,
   normalizePodcastStudioUiState,
   panelMusicState,
+  persistPanelMusicToActiveSession,
   ensurePanelMusicTrackUploaded,
   buildCloudSessionPayload,
   compactCloudSessionPayload,
@@ -18359,26 +18408,7 @@ function attachEvents() {
       const session = getActiveSession();
       if (!session) return;
       const nextZoom = Math.max(0.25, Math.min(1, toFiniteNumber(target.value, 1)));
-      podcastVideoState.timelineZoom = nextZoom;
-      const prevPxPerSec = getStudioTimelinePixelsPerSec(session);
-      const prevCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
-      const prevOffsetPx = Math.max(0, Number(prevCanvas?.dataset?.playheadOffset || 0));
-      const prevScrollLeft = Math.max(0, Number(els.podcastVideoTimeline?.scrollLeft || 0));
-      const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
-      const cursorMs = Math.max(0, Math.min(totalMs, Number(podcastVideoState.montageCursorMs || 0)));
-      const prevCursorX = prevOffsetPx + timelineMsToPx(cursorMs, session);
-      const prevCursorViewportX = prevCursorX - prevScrollLeft;
-      renderPodcastVideoTimeline(session, { force: true, reason: "structure" });
-      const nextPxPerSec = getStudioTimelinePixelsPerSec(session);
-      const nextCanvas = els.podcastVideoTimeline?.querySelector?.(".podcast-video-timeline-canvas") || null;
-      const nextOffsetPx = Math.max(0, Number(nextCanvas?.dataset?.playheadOffset || 0));
-      const nextCursorX = nextOffsetPx + timelineMsToPx(cursorMs, session);
-      const scaledScroll = Math.max(0, nextCursorX - prevCursorViewportX);
-      try {
-        if (els.podcastVideoTimeline) els.podcastVideoTimeline.scrollLeft = scaledScroll;
-        if (els.podcastTimelineRuler) els.podcastTimelineRuler.scrollLeft = scaledScroll;
-      } catch (_) { }
-      syncPodcastTimelinePlayhead(session);
+      applyTimelineZoomPreservingPlayhead(session, nextZoom);
     });
     els.podcastStudioTrackHead.addEventListener("change", (event) => {
       const target = event?.target || null;
@@ -18386,7 +18416,15 @@ function attachEvents() {
       const session = getActiveSession();
       if (!session) return;
       const enableVideoPodcast = target.checked === true;
-      upsertActiveSession((current) => withSessionVideoContentType(current, enableVideoPodcast ? "videopodcast" : "none"), { render: false });
+      upsertActiveSession(
+        (current) => withSessionVideoContentType(current, enableVideoPodcast ? "videopodcast" : "none"),
+        {
+          render: false,
+          persist: true,
+          markDirty: true,
+          autosaveReason: "video-content-type"
+        }
+      );
       if (enableVideoPodcast) {
         setPodcastStudioInspectorCollapsed(false);
       } else {
@@ -18796,6 +18834,15 @@ function attachEvents() {
         if (!finalizeLinkedGeminiTimelineDrag({ dragMode, dragKind })) {
           syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
         }
+      }
+      if (
+        dragMode === "audio-trim-start"
+        || dragMode === "audio-trim-end"
+        || dragMode === "audio-fadein"
+        || dragMode === "audio-fadeout"
+        || dragMode === "audio-move"
+      ) {
+        flushSessionLocalPersistNow("", "background-music").catch(() => { });
       }
       clearPodcastTimelineDragUi();
       const session = getActiveSession();
@@ -20535,7 +20582,7 @@ function init() {
   attachEvents();
   setupPodcastStudioInspectorResize();
   setupPodcastVideoStageResize();
-  setSidepanelOpen(false);
+  setSidepanelOpen(true);
   setMusicConfigOpen(false);
   setAudioTrackMixOpen(false);
   setGlobalConfigOpen(false);

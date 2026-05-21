@@ -2257,7 +2257,10 @@ function sanitizePodcasterSession(raw = {}) {
                 const loopIndex = Math.max(0, Math.floor(Number(item.loopIndex) || 0));
                 const trimInMs = clampNumber(item.trimInMs, 0, 1800 * 1000, 0);
                 const trimOutMs = clampNumber(item.trimOutMs, 0, 1800 * 1000, 0);
-                return [loopIndex, { loopIndex, trimInMs, trimOutMs }];
+                const visibleDurationMs = Math.max(0, trimOutMs - trimInMs);
+                const fadeInMs = clampNumber(item.fadeInMs, 0, visibleDurationMs, 0);
+                const fadeOutMs = clampNumber(item.fadeOutMs, 0, visibleDurationMs, 0);
+                return [loopIndex, { loopIndex, trimInMs, trimOutMs, fadeInMs, fadeOutMs }];
               })
           ).values()).sort((a, b) => a.loopIndex - b.loopIndex)
           : [],

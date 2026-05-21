@@ -128,9 +128,22 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return Array.from(map.values()).sort((a, b) => a.loopIndex - b.loopIndex);
   }
 
+  function resolvePanelMusicEffectiveSourceDurationMs(track = null) {
+    const source = track && typeof track === "object" ? track : {};
+    const durationFromSec = Math.max(0, Math.round((Number(source.durationSec || 0) || 0) * 1000));
+    const durationFromTrim = Math.max(0, Math.round(Number(source.trimOutMs || 0) || 0));
+    const durationFromLoops = Array.isArray(source.loopSettings)
+      ? source.loopSettings.reduce((max, item) => {
+        const trimOutMs = Math.max(0, Math.round(Number(item?.trimOutMs || 0) || 0));
+        return Math.max(max, trimOutMs);
+      }, 0)
+      : 0;
+    return Math.max(durationFromSec, durationFromTrim, durationFromLoops);
+  }
+
   function normalizePanelMusicTrack(track = null) {
     if (!track || typeof track !== "object") return null;
-    const sourceDurationMs = Math.max(0, Math.round((Number(track.durationSec || 0) || 0) * 1000));
+    const sourceDurationMs = resolvePanelMusicEffectiveSourceDurationMs(track);
     const startOffsetMs = Math.max(0, Math.round(Number(track.startOffsetMs || 0) || 0));
     const maxTrimInMs = Math.max(0, sourceDurationMs - minClipMs);
     const trimInMs = Math.max(0, Math.min(maxTrimInMs, Math.round(Number(track.trimInMs || 0) || 0)));
@@ -191,6 +204,107 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     }));
   }
 
+  function serializePanelMusicTrackForStorage(track = null, options = {}) {
+    const normalized = normalizePanelMusicTrack(track);
+    if (!normalized) return null;
+    const includePrompt = options.includePrompt !== false;
+    return {
+      libraryId: normalized.libraryId,
+      slotLabel: normalized.slotLabel,
+      enabledInSession: normalized.enabledInSession !== false,
+      name: normalized.name,
+      mimeType: normalized.mimeType,
+      size: normalized.size,
+      durationSec: normalized.durationSec,
+      startOffsetMs: normalized.startOffsetMs,
+      trimInMs: normalized.trimInMs,
+      trimOutMs: normalized.trimOutMs,
+      localDataUrl: "",
+      downloadUrl: normalized.downloadUrl,
+      storagePath: normalized.storagePath,
+      updatedAt: normalized.updatedAt,
+      model: normalized.model,
+      prompt: includePrompt ? normalized.prompt : "",
+      durationMeasuredWith: normalized.durationMeasuredWith,
+      montageVolume: normalized.montageVolume,
+      duckingWhenGeminiPct: normalized.duckingWhenGeminiPct,
+      stabilize: normalized.stabilize === true,
+      loopSettings: Array.isArray(normalized.loopSettings)
+        ? normalized.loopSettings.map((item) => ({
+          loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
+          trimInMs: Math.max(0, Number(item?.trimInMs || 0) || 0),
+          trimOutMs: Math.max(0, Number(item?.trimOutMs || 0) || 0),
+          fadeInMs: Math.max(0, Number(item?.fadeInMs || 0) || 0),
+          fadeOutMs: Math.max(0, Number(item?.fadeOutMs || 0) || 0)
+        }))
+        : [],
+      mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes(normalized.mutedLoopIndexes || []),
+      segmentStartOverrides: Array.isArray(normalized.segmentStartOverrides)
+        ? normalized.segmentStartOverrides.map((item) => ({
+          loopIndex: Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)),
+          startMs: Math.max(0, Number(item?.startMs || 0) || 0)
+        }))
+        : []
+    };
+  }
+
+  function buildPanelMusicStorageTrackRef(track = null) {
+    const normalized = normalizePanelMusicTrack(track);
+    if (!normalized) return null;
+    return {
+      kind: normalized.model ? "ai" : "uploaded",
+      libraryId: normalized.libraryId,
+      slotLabel: normalized.slotLabel,
+      model: normalized.model,
+      name: normalized.name
+    };
+  }
+
+  function resolveStoredPanelMusicTrack(trackLibrary = {}, ref = null, fallbackKind = "uploaded") {
+    const kind = resolvePanelMusicTrackKind(ref?.kind || fallbackKind);
+    if (kind === "ai") return normalizePanelMusicTrack(trackLibrary.ai || null);
+    const uploadedTracks = normalizePanelMusicTrackList(trackLibrary.uploadedTracks || []);
+    const libraryId = String(ref?.libraryId || "").trim();
+    const slotLabel = String(ref?.slotLabel || "").trim();
+    const model = String(ref?.model || "").trim();
+    const name = String(ref?.name || "").trim().toLowerCase();
+    const exact = uploadedTracks.find((track) => {
+      if (model && String(track?.model || "").trim() !== model) return false;
+      if (libraryId && String(track?.libraryId || "").trim() === libraryId) return true;
+      if (slotLabel && String(track?.slotLabel || "").trim() === slotLabel) return true;
+      if (name && String(track?.name || "").trim().toLowerCase() === name) return true;
+      return false;
+    });
+    return normalizePanelMusicTrack(exact || uploadedTracks[0] || null);
+  }
+
+  function buildPanelMusicStoragePayload(options = {}) {
+    const includePrompt = options.includePrompt !== false;
+    const uploadedTracks = getPanelMusicUploadedTracks().map((track) => serializePanelMusicTrackForStorage(track, { includePrompt })).filter(Boolean);
+    const aiTrack = serializePanelMusicTrackForStorage(panelMusicState.trackLibrary?.ai || null, { includePrompt });
+    return {
+      version: 2,
+      preset: panelMusicState.preset,
+      volume: panelMusicState.volume,
+      montageVolume: panelMusicState.montageVolume,
+      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
+      stabilize: panelMusicState.stabilize === true,
+      sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
+      selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
+      selectedTrackRef: buildPanelMusicStorageTrackRef(panelMusicState.track),
+      trackLibrary: {
+        uploadedTracks,
+        ai: aiTrack
+      }
+    };
+  }
+
+  function writePanelMusicStoragePayload(payload = null) {
+    const storageKey = resolvePanelMusicStorageKey();
+    const serialized = JSON.stringify(payload || {});
+    localStorage.setItem(storageKey, serialized);
+  }
+
   function getPanelMusicUploadedTracks() {
     const list = normalizePanelMusicTrackList(panelMusicState.trackLibrary?.uploadedTracks || []);
     if (list.length) return list;
@@ -206,6 +320,10 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const normalized = normalizePanelMusicTrack(track);
     const directDurationSec = Math.max(0, Number(normalized?.durationSec || 0) || 0);
     if (directDurationSec > 0.05) return directDurationSec;
+    const effectiveDurationSec = Math.max(0, resolvePanelMusicEffectiveSourceDurationMs(normalized) / 1000);
+    if (effectiveDurationSec > 0.05) {
+      return Number(effectiveDurationSec.toFixed(3));
+    }
     const sizeBytes = Math.max(0, Number(normalized?.size || 0) || 0);
     if (sizeBytes <= 0) return 0;
     const mimeType = String(normalized?.mimeType || "").trim().toLowerCase();
@@ -252,6 +370,13 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       fadeInMs: Math.max(0, Math.min(defaultTrimOutMs - defaultTrimInMs, Math.round(Number(normalized.fadeInMs || 0) || 0))),
       fadeOutMs: Math.max(0, Math.min(defaultTrimOutMs - defaultTrimInMs, Math.round(Number(normalized.fadeOutMs || 0) || 0)))
     };
+  }
+
+  function getPanelMusicLoopVisibleDurationMs(track = null, loopIndex = 0) {
+    const loopSetting = getPanelMusicLoopSetting(track, loopIndex);
+    const trimInMs = Math.max(0, Number(loopSetting?.trimInMs || 0) || 0);
+    const trimOutMs = Math.max(trimInMs + minClipMs, Number(loopSetting?.trimOutMs || trimInMs + minClipMs) || trimInMs + minClipMs);
+    return Math.max(minClipMs, trimOutMs - trimInMs);
   }
 
   function upsertPanelMusicLoopSetting(loopSettings = [], loopIndex = 0, nextValue = {}) {
@@ -454,17 +579,17 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     if (uploadedTracks.length === 1) {
       const single = uploadedTracks[0];
       const fullTrackIndex = resolveFullTrackIndex(single, 0);
-      const durationMs = Math.max(minClipMs, Math.round(getPanelMusicTrackDurationSec(single) * 1000));
       const segments = [];
       let sceneCursor = 0;
       let loopIndex = 0;
       while (sceneCursor < sceneEntries.length && loopIndex < 120) {
+        const loopVisibleDurationMs = getPanelMusicLoopVisibleDurationMs(single, loopIndex);
         const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
         let endSceneCursor = sceneCursor;
         let segmentEndMs = Math.max(startMs, Number(sceneEntries[sceneCursor]?.endMs || startMs) || startMs);
         while (endSceneCursor + 1 < sceneEntries.length) {
           const candidateEndMs = Math.max(segmentEndMs, Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs);
-          if ((candidateEndMs - startMs) > durationMs + 1) break;
+          if ((candidateEndMs - startMs) > loopVisibleDurationMs + 1) break;
           endSceneCursor += 1;
           segmentEndMs = candidateEndMs;
         }
@@ -505,7 +630,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     uploadedTracks.forEach((track, index) => {
       if (sceneCursor >= sceneEntries.length) return;
       const fullTrackIndex = resolveFullTrackIndex(track, index);
-      const trackDurationMs = Math.max(minClipMs, Math.round(getPanelMusicTrackDurationSec(track) * 1000));
+      const trackVisibleDurationMs = getPanelMusicLoopVisibleDurationMs(track, 0);
       const remainingTracksAfterCurrent = Math.max(0, uploadedTracks.length - index - 1);
       const startMs = Math.max(0, Number(sceneEntries[sceneCursor]?.startMs || 0) || 0);
       let endSceneCursor = sceneCursor;
@@ -514,12 +639,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         const remainingScenesAfterCandidate = Math.max(0, sceneEntries.length - (endSceneCursor + 2));
         if (remainingScenesAfterCandidate < remainingTracksAfterCurrent) break;
         const candidateEndMs = Math.max(segmentEndMs, Number(sceneEntries[endSceneCursor + 1]?.endMs || segmentEndMs) || segmentEndMs);
-        if ((candidateEndMs - startMs) > trackDurationMs + 1) break;
+        if ((candidateEndMs - startMs) > trackVisibleDurationMs + 1) break;
         endSceneCursor += 1;
         segmentEndMs = candidateEndMs;
       }
       const availableDurationMs = Math.max(minClipMs, totalDurationMs - startMs);
-      const visibleDurationMs = Math.max(minClipMs, Math.min(trackDurationMs, availableDurationMs));
+      const visibleDurationMs = Math.max(minClipMs, Math.min(trackVisibleDurationMs, availableDurationMs));
       segments.push({
         ...track,
         slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
@@ -864,46 +989,19 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   }
 
   function persistPanelMusicSettings() {
-    const sanitizeTrackForStorage = (track) => {
-      const normalized = normalizePanelMusicTrack(track);
-      if (!normalized) return null;
-      const localDataUrl = String(normalized.localDataUrl || "");
-      return {
-        ...normalized,
-        enabledInSession: normalized.enabledInSession !== false,
-        localDataUrl: localDataUrl.length <= maxLocalMusicDataUrlChars ? localDataUrl : ""
-      };
-    };
-    const payload = {
-      preset: panelMusicState.preset,
-      volume: panelMusicState.volume,
-      montageVolume: panelMusicState.montageVolume,
-      duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
-      stabilize: panelMusicState.stabilize === true,
-      sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
-      selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
-      trackLibrary: {
-        uploaded: sanitizeTrackForStorage(panelMusicState.trackLibrary?.uploaded || null),
-        uploadedTracks: getPanelMusicUploadedTracks().map((track) => sanitizeTrackForStorage(track)).filter(Boolean),
-        ai: sanitizeTrackForStorage(panelMusicState.trackLibrary?.ai || null)
-      },
-      track: sanitizeTrackForStorage(panelMusicState.track)
-    };
     try {
-      localStorage.setItem(resolvePanelMusicStorageKey(), JSON.stringify(payload));
+      writePanelMusicStoragePayload(buildPanelMusicStoragePayload({ includePrompt: true }));
     } catch (_) {
-      const trimmedPayload = {
-        ...payload,
-        trackLibrary: {
-          uploaded: payload.trackLibrary?.uploaded ? { ...payload.trackLibrary.uploaded, localDataUrl: "" } : null,
-          uploadedTracks: Array.isArray(payload.trackLibrary?.uploadedTracks)
-            ? payload.trackLibrary.uploadedTracks.map((track) => ({ ...track, localDataUrl: "" }))
-            : [],
-          ai: payload.trackLibrary?.ai ? { ...payload.trackLibrary.ai, localDataUrl: "" } : null
-        },
-        track: payload.track ? { ...payload.track, localDataUrl: "" } : null
-      };
-      localStorage.setItem(resolvePanelMusicStorageKey(), JSON.stringify(trimmedPayload));
+      try {
+        localStorage.removeItem(resolvePanelMusicStorageKey());
+      } catch (_) {
+        // noop
+      }
+      try {
+        writePanelMusicStoragePayload(buildPanelMusicStoragePayload({ includePrompt: false }));
+      } catch (storageError) {
+        console.warn("[podcaster-panel-music] No se pudo persistir la configuración local de música.", storageError);
+      }
     }
   }
 
@@ -1177,12 +1275,10 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       if (!trackLibrary.uploaded && legacyTrack && !legacyTrack.model) trackLibrary.uploaded = legacyTrack;
       if (!trackLibrary.ai && legacyTrack && legacyTrack.model) trackLibrary.ai = legacyTrack;
       const selectedTrackKind = resolvePanelMusicTrackKind(parsed?.selectedTrackKind || (trackLibrary.ai && !trackLibrary.uploaded ? "ai" : "uploaded"));
-      const availableKinds = [
-        trackLibrary[selectedTrackKind] ? selectedTrackKind : "",
-        trackLibrary.uploaded ? "uploaded" : "",
-        trackLibrary.ai ? "ai" : ""
-      ].filter(Boolean);
-      const track = normalizePanelMusicTrack(trackLibrary[availableKinds[0]] || null);
+      const selectedTrackRef = parsed?.selectedTrackRef && typeof parsed.selectedTrackRef === "object"
+        ? parsed.selectedTrackRef
+        : buildPanelMusicStorageTrackRef(parsed?.track || null);
+      const track = resolveStoredPanelMusicTrack(trackLibrary, selectedTrackRef, selectedTrackKind);
       return {
         preset,
         volume,

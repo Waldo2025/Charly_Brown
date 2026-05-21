@@ -14,6 +14,19 @@ export function cloneSerializable(value = null) {
   }
 }
 
+function resolvePanelMusicPayloadSourceDurationMs(track = null) {
+  const source = track && typeof track === "object" ? track : {};
+  const durationFromSec = Math.max(0, Math.round((Number(source.durationSec || 0) || 0) * 1000));
+  const durationFromTrim = Math.max(0, Math.round(Number(source.trimOutMs || 0) || 0));
+  const durationFromLoops = Array.isArray(source.loopSettings)
+    ? source.loopSettings.reduce((max, item) => {
+      const trimOutMs = Math.max(0, Math.round(Number(item?.trimOutMs || 0) || 0));
+      return Math.max(max, trimOutMs);
+    }, 0)
+    : 0;
+  return Math.max(durationFromSec, durationFromTrim, durationFromLoops);
+}
+
 export function buildCloudSessionPayload(source = null, panelMusicState = {}, chatState = [], deps = {}) {
   if (!source || typeof source !== "object") return null;
 
@@ -68,6 +81,16 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     },
     track: panelMusicState.track || null
   };
+  const resolvedVideoContentType = (() => {
+    const rawType = String(
+      source?.script?.videoContentType
+      || source?.videoContentType
+      || ""
+    ).trim().toLowerCase();
+    if (rawType === "creative") return "creative";
+    if (rawType === "videopodcast" || rawType === "video-podcast" || rawType === "video_podcast") return "videopodcast";
+    return null;
+  })();
 
   return {
     id: String(source.id || "").trim() || makeId?.("session"),
@@ -75,6 +98,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     prompt: String(source.prompt || "").slice(0, 4000),
     archived: source.archived === true,
     publicar: source.publicar === true,
+    videoContentType: resolvedVideoContentType,
     updatedAt: nowIso?.() || new Date().toISOString(),
     podcastStudioUiState: normalizePodcastStudioUiState?.(source.podcastStudioUiState || null, source) || {},
     chat: chat.slice(-220).map((msg) => ({
@@ -85,6 +109,8 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     script: {
       episodeTitle: String(source?.script?.episodeTitle || "Podcast").slice(0, 220),
       summary: String(source?.script?.summary || "").slice(0, 5000),
+      videoContentType: resolvedVideoContentType,
+      videoMode: resolvedVideoContentType === "creative",
       hosts: isCreativeVideoMode?.(source) ? ["Narrador"] : (getSpeakerOptions?.(source) || []).slice(0, 10),
       rows: rows.slice(0, 400).map((row) => {
         const nextRow = { ...row };
@@ -138,7 +164,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             durationMeasuredWith: String(panelMusicConfig.trackLibrary.uploaded.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               panelMusicConfig.trackLibrary.uploaded.loopSettings || [],
-              Math.round(Math.max(0, Number(panelMusicConfig.trackLibrary.uploaded.durationSec || 0) || 0) * 1000)
+              resolvePanelMusicPayloadSourceDurationMs(panelMusicConfig.trackLibrary.uploaded)
             ) || [],
             segmentStartOverrides: Array.isArray(panelMusicConfig.trackLibrary.uploaded.segmentStartOverrides)
               ? panelMusicConfig.trackLibrary.uploaded.segmentStartOverrides.map((item) => ({
@@ -167,7 +193,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             durationMeasuredWith: String(track?.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               track?.loopSettings || [],
-              Math.round(Math.max(0, Number(track?.durationSec || 0) || 0) * 1000)
+              resolvePanelMusicPayloadSourceDurationMs(track)
             ) || [],
             segmentStartOverrides: Array.isArray(track?.segmentStartOverrides)
               ? track.segmentStartOverrides.map((item) => ({
@@ -193,7 +219,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             durationMeasuredWith: String(panelMusicConfig.trackLibrary.ai.durationMeasuredWith || "").trim().toLowerCase(),
             loopSettings: normalizePanelMusicLoopSettings?.(
               panelMusicConfig.trackLibrary.ai.loopSettings || [],
-              Math.round(Math.max(0, Number(panelMusicConfig.trackLibrary.ai.durationSec || 0) || 0) * 1000)
+              resolvePanelMusicPayloadSourceDurationMs(panelMusicConfig.trackLibrary.ai)
             ) || [],
             segmentStartOverrides: Array.isArray(panelMusicConfig.trackLibrary.ai.segmentStartOverrides)
               ? panelMusicConfig.trackLibrary.ai.segmentStartOverrides.map((item) => ({
@@ -224,7 +250,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
           durationMeasuredWith: String(panelMusicConfig.track.durationMeasuredWith || "").trim().toLowerCase(),
           loopSettings: normalizePanelMusicLoopSettings?.(
             panelMusicConfig.track.loopSettings || [],
-            Math.round(Math.max(0, Number(panelMusicConfig.track.durationSec || 0) || 0) * 1000)
+            resolvePanelMusicPayloadSourceDurationMs(panelMusicConfig.track)
           ) || [],
           segmentStartOverrides: Array.isArray(panelMusicConfig.track.segmentStartOverrides)
             ? panelMusicConfig.track.segmentStartOverrides.map((item) => ({

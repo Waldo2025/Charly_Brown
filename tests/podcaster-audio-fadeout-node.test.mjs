@@ -32,6 +32,7 @@ test("audio fade nodes start their own drag modes and preserve trim behavior", (
   assert.match(podcasterSource, /const audioFadeinHandle = event\.target\.closest\("\[data-action='timeline-audio-fadein-handle'\]"\);[\s\S]*?beginTimelineAudioTrimDrag\("audio-fadein", event\);/m);
   assert.match(podcasterSource, /const audioFadeoutHandle = event\.target\.closest\("\[data-action='timeline-audio-fadeout-handle'\]"\);[\s\S]*?beginTimelineAudioTrimDrag\("audio-fadeout", event\);/m);
   assert.match(podcasterSource, /if \(drag\.mode === "audio-trim-start" \|\| drag\.mode === "audio-trim-end" \|\| drag\.mode === "audio-fadein" \|\| drag\.mode === "audio-fadeout"\) \{/m);
+  assert.match(podcasterSource, /dragMode === "audio-fadein"[\s\S]*?dragMode === "audio-fadeout"[\s\S]*?dragMode === "audio-move"[\s\S]*?flushSessionLocalPersistNow\("", "background-music"\)\.catch\(\(\) => \{ \}\);/m);
 });
 
 test("background music playback applies fadein and fadeout within the active segment", () => {

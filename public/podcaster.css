@@ -4121,7 +4121,6 @@ body.is-resizing-podcast-stage {
 .podcast-video-shell.podcast-video-shell--audio-only #copyVoiceoverToOnscreenTextAllBtn,
 .podcast-video-shell.podcast-video-shell--audio-only #toggleOnScreenTextTrackBtn,
 .podcast-video-shell.podcast-video-shell--audio-only #podcastVideoZoomBtn,
-.podcast-video-shell.podcast-video-shell--audio-only #reorderTimelineTracksBtn,
 .podcast-video-shell.podcast-video-shell--audio-only #autoLinkStorageVideosBtn,
 .podcast-video-shell.podcast-video-shell--audio-only [data-action="timeline-generate-scene-video-batch"],
 .podcast-video-shell.podcast-video-shell--audio-only [data-action="timeline-regenerate-scene-video-batch-hq"],

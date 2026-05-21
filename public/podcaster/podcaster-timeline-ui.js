@@ -400,7 +400,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (alignMode === "segment") {
           const segment = currentGeminiSegmentByRowId.get(rowId) || null;
           if (!segment) return;
-          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
           const durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
           const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
           chip.style.left = `${leftPx}px`;
@@ -821,7 +821,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const startMs = alignMode === "segment"
           ? Math.max(0, Number(segment?.startMs || 0) || 0)
           : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
-        const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
         const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
         const speakerLabel = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
         const sceneIndex = Math.max(

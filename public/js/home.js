@@ -3772,7 +3772,9 @@ const multimediaPlaybackDeps = {
         if (activeEntry) {
           const rows = extractDashboardSessionRows(currentMultimediaSession);
           const row = resolveDashboardActiveRow(rows, activeEntry);
+          const activeSceneIndex = Math.max(0, entries.findIndex((entry) => entry === activeEntry));
 
+          const sceneNumberEl = document.getElementById("infoSceneNumber");
           const scriptEl = document.getElementById("infoSceneScript");
           const descEl = document.getElementById("infoSceneDesc");
           const ostEl = document.getElementById("infoSceneOST");
@@ -3783,6 +3785,7 @@ const multimediaPlaybackDeps = {
           // Guardar el ID actual para el guardado
           window._currentActiveRowId = activeEntry.rowId;
 
+          if (sceneNumberEl) sceneNumberEl.textContent = `Escena ${activeSceneIndex + 1}`;
           if (scriptEl) scriptEl.textContent = resolveDashboardRowScript(row) || "--";
           if (descEl) descEl.textContent = resolveDashboardRowSceneDescription(row) || "--";
           if (ostEl) ostEl.textContent = resolveDashboardRowOnScreenText(row) || "--";
@@ -5128,6 +5131,14 @@ function renderUserItemList(container, items, type) {
         const pending = proposals.some(p => !resolved.includes(p));
         return pending || !!r.visualNotesProposal;
       });
+      const hasRealized = hasAnyProposal && rows.some((row) => {
+        const visualNotes = resolveDashboardRowVisualNotes(row);
+        if (row?.visualNotesOriginalStored === true && row?.visualNotesOriginalText !== visualNotes) {
+          return true;
+        }
+        const resolved = Array.isArray(row?.visualNotesResolvedProposals) ? row.visualNotesResolvedProposals : [];
+        return resolved.length > 0;
+      });
 
       card.className = `workbench-item workbench-item-multimedia accordion-item`;
       card.innerHTML = `
@@ -5138,6 +5149,7 @@ function renderUserItemList(container, items, type) {
           <div class="workbench-item-title">
             ${escapeHtml(displayTitle)}
             ${hasPending ? `<span class="proposal-badge is-pending" style="margin-left: 10px; vertical-align: middle;">PROPUESTA</span>` : ""}
+            ${hasRealized ? `<span class="proposal-badge is-realized" style="margin-left: 10px; vertical-align: middle;">REALIZADA</span>` : ""}
           </div>
           <i class="fas fa-chevron-down multimedia-accordion-icon"></i>
         </div>

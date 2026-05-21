@@ -407,6 +407,7 @@ async function saveSessionManuallyToCloud(sessionId = "", options = {}, deps = {
   const setSessions = deps.setSessions || (() => {});
   const getActiveSession = deps.getActiveSession || (() => null);
   const silent = options?.silent === true;
+  deps.persistPanelMusicToActiveSession?.();
   const initialTarget = sessionId
     ? getSessions().find((session) => String(session?.id || "").trim() === String(sessionId || "").trim()) || null
     : getActiveSession();
