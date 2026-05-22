@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.46">
+  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.42">
   <!-- FilePond -->
   <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet">
   <link href="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.css"
@@ -863,6 +863,42 @@
       </div>
     </section>
   </div>
+  <div id="geminiTrackVolumeModal" class="floating-panel-modal" hidden>
+    <button class="floating-panel-backdrop" type="button" data-action="close-gemini-track-volume-modal"
+      aria-label="Cerrar ajuste de volumen Gemini"></button>
+    <section class="timeline-clip-duration-panel floating-panel-card gemini-audio-speed-panel" role="dialog"
+      aria-modal="true" aria-label="Ajustar volumen general de Gemini">
+      <header class="timeline-clip-duration-head">
+        <h3 id="geminiTrackVolumeModalTitle">Volumen general Gemini</h3>
+        <button id="closeGeminiTrackVolumeModalBtn" class="row-icon-btn" type="button" title="Cerrar"
+          data-action="close-gemini-track-volume-modal">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <p id="geminiTrackVolumeModalHint" class="timeline-clip-duration-label">Ajusta el volumen general del track de voz Gemini.</p>
+      <label class="row-field">
+        <span>Volumen %</span>
+        <div class="studio-volume-control">
+          <input id="geminiTrackVolumeRange" type="range" min="0" max="100" step="1" value="100">
+          <input id="geminiTrackVolumeNumber" type="number" min="0" max="100" step="1" value="100" inputmode="numeric"
+            aria-label="Volumen general del track Gemini">
+        </div>
+      </label>
+      <small class="timeline-clip-duration-hint">Se aplica a toda la voz Gemini del timeline, salvo overrides por escena.</small>
+      <div class="timeline-clip-duration-actions">
+        <button id="resetGeminiTrackVolumeBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-reset-btn" type="button">
+          <i class="fas fa-undo-alt" aria-hidden="true"></i>
+          <span>Restablecer</span>
+        </button>
+        <button id="cancelGeminiTrackVolumeBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn" type="button"
+          data-action="close-gemini-track-volume-modal">Cancelar</button>
+        <button id="applyGeminiTrackVolumeBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+          type="button">Aplicar</button>
+      </div>
+    </section>
+  </div>
   <div id="timelineFrameHoldModal" class="floating-panel-modal" hidden>
     <button class="floating-panel-backdrop" type="button" data-action="close-timeline-frame-hold-modal"
       aria-label="Cerrar congelado de frame"></button>
@@ -1670,14 +1706,32 @@
     <button class="floating-panel-backdrop" type="button" data-action="close-audio-track-mix-modal"
       aria-label="Cerrar mezcla de audio"></button>
     <section id="audioTrackMixPanel" class="music-config-panel floating-panel-card"
-      aria-label="Mezcla de audio de fondo">
+      aria-label="Mezcla general de audio">
       <div class="music-config-head">
-        <h3>Audio track</h3>
+        <h3>Mezcla general</h3>
         <button id="closeAudioTrackMixBtn" class="row-icon-btn" type="button" title="Cerrar mezcla de audio">
           <i class="fas fa-times"></i>
         </button>
       </div>
       <div class="music-config-grid">
+        <div id="audioTrackMixInfo" class="music-track-info">Ajusta aquí la mezcla maestra del audio de la sesión.</div>
+        <label class="row-field wide">
+          <span>Volumen general de la sesión</span>
+          <div class="studio-volume-control">
+            <input id="audioTrackMontageVolume" type="range" min="0" max="100" step="1" value="100">
+            <input id="audioTrackMontageVolumeNumber" type="number" min="0" max="100" step="1" value="100"
+              inputmode="numeric" aria-label="Volumen general de la sesión">
+          </div>
+        </label>
+        <label class="global-check-row wide">
+          <input id="audioTrackStabilizeToggle" type="checkbox">
+          <span>Estabilizar mezcla general</span>
+        </label>
+        <label class="global-check-row wide">
+          <input id="audioTrackLimiterToggle" type="checkbox">
+          <span>Usar limitador en la mezcla final</span>
+        </label>
+        <div class="music-track-info">Música de fondo</div>
         <label class="row-field wide">
           <span>Fuente del track</span>
           <select id="audioTrackSourceSelect">
@@ -1688,14 +1742,6 @@
         </label>
         <div id="audioTrackSourceInfo" class="music-track-info">Sin track disponible. Se usará preset.</div>
         <label class="row-field wide">
-          <span>Volumen en montaje</span>
-          <div class="studio-volume-control">
-            <input id="audioTrackMontageVolume" type="range" min="0" max="100" step="1" value="0">
-            <input id="audioTrackMontageVolumeNumber" type="number" min="0" max="100" step="1" value="0"
-              inputmode="numeric" aria-label="Volumen de audio de fondo">
-          </div>
-        </label>
-        <label class="row-field wide">
           <span>Volumen del fondo cuando Gemini habla</span>
           <div class="studio-volume-control">
             <input id="audioTrackDuckVolume" type="range" min="40" max="100" step="1" value="60">
@@ -1703,10 +1749,13 @@
               inputmode="numeric" aria-label="Volumen del audio de fondo cuando Gemini habla">
           </div>
         </label>
-        <label class="global-check-row wide">
-          <input id="audioTrackStabilizeToggle" type="checkbox">
-          <span>Estabilizar audio (limitar picos de ganancia)</span>
-        </label>
+      </div>
+      <div class="timeline-clip-duration-actions">
+        <button id="cancelAudioTrackMixBtn"
+          class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn" type="button"
+          data-action="close-audio-track-mix-modal">Cancelar</button>
+        <button id="saveAudioTrackMixBtn" class="row-icon-btn dialogue-video-directive-action is-primary"
+          type="button">Guardar configuración</button>
       </div>
     </section>
   </div>

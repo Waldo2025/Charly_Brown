@@ -1,3 +1,8 @@
+import {
+  getPodcasterLocalMediaDataUrl,
+  putPodcasterLocalMediaDataUrl
+} from "./podcaster-local-media-cache.js";
+
 export function createPodcasterPanelMusicApi(deps = {}) {
   const panelMusicState = {
     preset: "ambient",
@@ -5,6 +10,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     montageVolume: 100,
     duckingWhenGeminiPct: 60,
     stabilize: false,
+    limiterEnabled: false,
     playing: false,
     sourceType: "preset",
     selectedTrackKind: "uploaded",
@@ -43,6 +49,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   const nowIso = () => deps.nowIso?.() || new Date().toISOString();
   const logPodcastRenderDebug = (...args) => deps.logPodcastRenderDebug?.(...args);
   const syncPodcastStudioInspector = (...args) => deps.syncPodcastStudioInspector?.(...args);
+  const getPodcastVideoConfig = (session = null) => deps.getPodcastVideoConfig?.(session || getActiveSession()) || {};
+  const upsertPodcastVideoConfig = (...args) => deps.upsertPodcastVideoConfig?.(...args);
   const addChatMessage = (...args) => deps.addChatMessage?.(...args);
   const setGenerationStatus = (...args) => deps.setGenerationStatus?.(...args);
   const renderPodcastVideoTimeline = (...args) => deps.renderPodcastVideoTimeline?.(...args);
@@ -57,6 +65,30 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   const minClipMs = Math.max(1, Number(deps.studioTimelineMinClipMs || 500) || 500);
   const maxLocalMusicDataUrlChars = Math.max(1000, Number(deps.maxLocalMusicDataUrlChars || 1_800_000) || 1_800_000);
   const panelMusicStorageKeyBase = String(deps.panelMusicStorageKeyBase || "cb_podcaster_panel_music_v1").trim() || "cb_podcaster_panel_music_v1";
+
+  function getGlobalAudioMixState(session = null) {
+    const cfg = getPodcastVideoConfig(session);
+    return {
+      masterVolume: Math.max(0, Math.min(100, Number(cfg?.masterVolume ?? 100) || 100)),
+      stabilize: cfg?.audioMasterStabilize === true,
+      limiterEnabled: cfg?.audioMasterLimiterEnabled === true
+    };
+  }
+
+  function persistGlobalAudioMixState(patch = {}) {
+    const nextPatch = patch && typeof patch === "object" ? patch : {};
+    upsertPodcastVideoConfig((cfg) => ({
+      ...cfg,
+      ...nextPatch
+    }), { autosaveReason: "audio-mix" });
+    scheduleSessionLocalPersist("audio-mix");
+    const session = getActiveSession();
+    const config = getPodcastVideoConfig(session);
+    playbackController()?.sync?.(session, config);
+    const currentMs = Math.max(0, Number(podcastVideoState()?.montageCursorMs || 0));
+    const speed = Number(config?.playbackSpeed || 1) || 1;
+    playbackController()?.syncBackgroundMusic?.(currentMs, speed);
+  }
 
   function resolvePanelMusicTrackKind(value = "") {
     return String(value || "").trim() === "ai" ? "ai" : "uploaded";
@@ -73,27 +105,82 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     return `${panelMusicStorageKeyBase}:cache:${safeUid}:${safeSessionId}:${safeKind}`;
   }
 
+  function cleanupLegacyPanelMusicSessionStorageCaches(uid = resolveCurrentUid()) {
+    const prefix = `${panelMusicStorageKeyBase}:cache:${String(uid || "").trim() || "auth_required"}:`;
+    try {
+      const keys = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = String(localStorage.key(index) || "").trim();
+        if (key.startsWith(prefix)) keys.push(key);
+      }
+      keys.forEach((key) => {
+        try { localStorage.removeItem(key); } catch (_) { }
+      });
+    } catch (_) {
+      // noop
+    }
+  }
+
   function persistPanelMusicSessionTrackCache(sessionId = "", kind = "", localDataUrl = "") {
     const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
     const value = String(localDataUrl || "").trim();
     if (!value) {
-      localStorage.removeItem(key);
       return;
     }
-    try {
-      localStorage.setItem(key, value.slice(0, maxLocalMusicDataUrlChars));
-    } catch (_) {
-      try {
-        localStorage.removeItem(key);
-      } catch (_) {
-        // noop
-      }
-    }
+    void putPodcasterLocalMediaDataUrl(key, value.slice(0, maxLocalMusicDataUrlChars), { kind: resolvePanelMusicTrackKind(kind) }).catch(() => { });
   }
 
   function loadPanelMusicSessionTrackCache(sessionId = "", kind = "") {
-    const key = resolvePanelMusicSessionCacheKey(sessionId, kind);
-    return String(localStorage.getItem(key) || "").trim();
+    void sessionId;
+    void kind;
+    return "";
+  }
+
+  async function hydratePanelMusicLocalCaches(session = null) {
+    const activeSession = session || getActiveSession();
+    const sessionId = String(activeSession?.id || "").trim();
+    if (!activeSession || !sessionId) return false;
+    cleanupLegacyPanelMusicSessionStorageCaches();
+    const hydrateTrack = async (track, kind) => {
+      const normalized = normalizePanelMusicTrack(track);
+      if (!normalized || String(normalized.localDataUrl || "").trim() || normalized.storagePath || normalized.downloadUrl) return normalized;
+      try {
+        const localDataUrl = await getPodcasterLocalMediaDataUrl(resolvePanelMusicSessionCacheKey(sessionId, kind));
+        return localDataUrl ? { ...normalized, localDataUrl } : normalized;
+      } catch (_) {
+        return normalized;
+      }
+    };
+    const cfg = activeSession?.panelMusicConfig;
+    if (!cfg || typeof cfg !== "object") return false;
+    let changed = false;
+    const uploadedTracks = Array.isArray(cfg.trackLibrary?.uploadedTracks) ? cfg.trackLibrary.uploadedTracks : [];
+    const hydratedUploadedTracks = [];
+    for (const track of uploadedTracks) {
+      const hydrated = await hydrateTrack(track, "uploaded");
+      hydratedUploadedTracks.push(hydrated);
+      if (String(track?.localDataUrl || "").trim() !== String(hydrated?.localDataUrl || "").trim()) changed = true;
+    }
+    const hydratedUploaded = await hydrateTrack(cfg.trackLibrary?.uploaded || null, "uploaded");
+    const hydratedAi = await hydrateTrack(cfg.trackLibrary?.ai || null, "ai");
+    const hydratedTrack = await hydrateTrack(cfg.track || null, cfg?.track?.model ? "ai" : "uploaded");
+    if (String(cfg.trackLibrary?.uploaded?.localDataUrl || "").trim() !== String(hydratedUploaded?.localDataUrl || "").trim()) changed = true;
+    if (String(cfg.trackLibrary?.ai?.localDataUrl || "").trim() !== String(hydratedAi?.localDataUrl || "").trim()) changed = true;
+    if (String(cfg.track?.localDataUrl || "").trim() !== String(hydratedTrack?.localDataUrl || "").trim()) changed = true;
+    activeSession.panelMusicConfig = {
+      ...cfg,
+      trackLibrary: {
+        ...(cfg.trackLibrary || {}),
+        uploadedTracks: hydratedUploadedTracks,
+        uploaded: hydratedUploadedTracks[0] || hydratedUploaded || null,
+        ai: hydratedAi
+      },
+      track: hydratedTrack
+    };
+    if (panelMusicState.selectedTrackKind) {
+      syncPanelMusicStateFromSession(activeSession);
+    }
+    return changed;
   }
 
   function normalizePanelMusicMutedLoopIndexes(value = []) {
@@ -289,6 +376,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       montageVolume: panelMusicState.montageVolume,
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicState.stabilize === true,
+      limiterEnabled: panelMusicState.limiterEnabled === true,
       sourceType: panelMusicState.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
       selectedTrackRef: buildPanelMusicStorageTrackRef(panelMusicState.track),
@@ -1040,14 +1128,17 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       : (panelMusicState.sourceType === "track" ? "track" : "none");
     return {
       sourceType,
+      selectedTrackKind: resolvePanelMusicTrackKind(panelMusicState.selectedTrackKind),
       preset: ["ambient", "focus", "pulse"].includes(String(panelMusicState.preset || "").trim())
         ? String(panelMusicState.preset).trim()
         : "ambient",
       sourceUrl: String(sourceUrl || "").trim(),
       sourceItems,
       volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
+      montageVolume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicState.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicState.stabilize === true,
+      limiterEnabled: panelMusicState.limiterEnabled === true,
       durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
       startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
       trimInMs: Math.max(0, Number(activeTrack?.trimInMs || 0) || 0),
@@ -1261,6 +1352,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
       const montageVolume = Math.max(0, Math.min(100, Number(parsed?.montageVolume ?? 0)));
       const duckingWhenGeminiPct = normalizeDucking(parsed?.duckingWhenGeminiPct, 60);
       const stabilize = parsed?.stabilize === true || String(parsed?.stabilize || "").trim().toLowerCase() === "true";
+      const limiterEnabled = parsed?.limiterEnabled === true || String(parsed?.limiterEnabled || "").trim().toLowerCase() === "true";
       const sourceType = parsed?.sourceType === "track" ? "track" : "preset";
       const legacyTrack = normalizePanelMusicTrack(parsed?.track || null);
       const trackLibrary = {
@@ -1285,6 +1377,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         montageVolume,
         duckingWhenGeminiPct,
         stabilize,
+        limiterEnabled,
         sourceType,
         selectedTrackKind,
         trackLibrary,
@@ -1298,6 +1391,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         montageVolume: 100,
         duckingWhenGeminiPct: 60,
         stabilize: false,
+        limiterEnabled: false,
         sourceType: "preset",
         selectedTrackKind: "uploaded",
         trackLibrary: { uploaded: null, uploadedTracks: [], ai: null },
@@ -1584,14 +1678,20 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     if (els.clearPanelMusicTrackBtn) els.clearPanelMusicTrackBtn.disabled = !panelMusicState.track;
     if (els.generatePanelMusicAiBtn) els.generatePanelMusicAiBtn.disabled = panelMusicAiGenerating;
     const activeTrack = (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) ? panelMusicState.track : null;
-    const currentVolume = activeTrack ? activeTrack.montageVolume : panelMusicState.montageVolume;
+    const globalAudioMix = getGlobalAudioMixState();
+    const currentVolume = globalAudioMix.masterVolume;
     const currentDuck = activeTrack ? activeTrack.duckingWhenGeminiPct : panelMusicState.duckingWhenGeminiPct;
-    const currentStabilize = activeTrack ? activeTrack.stabilize : panelMusicState.stabilize;
+    const currentStabilize = globalAudioMix.stabilize;
+    const currentLimiterEnabled = globalAudioMix.limiterEnabled;
     if (els.audioTrackMontageVolume) els.audioTrackMontageVolume.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
     if (els.audioTrackMontageVolumeNumber) els.audioTrackMontageVolumeNumber.value = String(Math.max(0, Math.min(100, Number(currentVolume) || 0)));
     if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
     if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(Math.max(40, Math.min(100, Number(currentDuck) || 60)));
     if (els.audioTrackStabilizeToggle) els.audioTrackStabilizeToggle.checked = currentStabilize === true;
+    if (els.audioTrackLimiterToggle) els.audioTrackLimiterToggle.checked = currentLimiterEnabled;
+    if (els.audioTrackMixInfo) {
+      els.audioTrackMixInfo.textContent = `Volumen general ${Math.round(Number(currentVolume) || 0)}% · ${currentStabilize ? "Estabilización activa" : "Sin estabilización"} · ${currentLimiterEnabled ? "Limitador activo" : "Sin limitador"}`;
+    }
   }
 
   function syncPanelMusicStateFromSession(session = null) {
@@ -1607,7 +1707,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const next = {
       preset: ["ambient", "focus", "pulse"].includes(String(cfg?.preset || "").trim()) ? String(cfg.preset).trim() : "ambient",
       volume: Math.max(0, Math.min(100, Number(cfg?.volume) || 22)),
-      montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 0))),
+      montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? cfg?.volume ?? 0))),
       duckingWhenGeminiPct: (() => {
         const raw = Number(cfg?.duckingWhenGeminiPct);
         if (!Number.isFinite(raw)) return 60;
@@ -1616,6 +1716,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         return 60;
       })(),
       stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
+      limiterEnabled: cfg?.limiterEnabled === true || String(cfg?.limiterEnabled || "").trim().toLowerCase() === "true",
       sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
       trackLibrary: {
@@ -1656,25 +1757,38 @@ export function createPodcasterPanelMusicApi(deps = {}) {
 
   function setPanelMontageMusicVolume(nextVolume = 22) {
     const clamped = Math.max(0, Math.min(100, Number(nextVolume) || 0));
-    if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-      panelMusicState.track.montageVolume = clamped;
-      const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex((t) => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-      if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].montageVolume = clamped;
-    } else {
-      panelMusicState.montageVolume = clamped;
-    }
+    panelMusicState.montageVolume = clamped;
+    persistGlobalAudioMixState({ masterVolume: clamped });
     const els = getEls();
     if (els.audioTrackMontageVolume) els.audioTrackMontageVolume.value = String(clamped);
     if (els.audioTrackMontageVolumeNumber) els.audioTrackMontageVolumeNumber.value = String(clamped);
     persistAudioTrackMixSettings();
+    syncMusicControls();
   }
 
   function setPanelMontageDuckingWhenGeminiPct(nextValue = 60) {
     const clamped = Math.max(40, Math.min(100, Number(nextValue) || 0));
     if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-      panelMusicState.track.duckingWhenGeminiPct = clamped;
-      const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex((t) => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-      if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].duckingWhenGeminiPct = clamped;
+      const currentTrack = normalizePanelMusicTrack(panelMusicState.track);
+      const currentSlotLabel = String(currentTrack?.slotLabel || "").trim();
+      const currentLibraryId = String(currentTrack?.libraryId || "").trim();
+      const idx = getPanelMusicUploadedTracks().findIndex((track) => {
+        const trackSlotLabel = String(track?.slotLabel || "").trim();
+        const trackLibraryId = String(track?.libraryId || "").trim();
+        if (currentSlotLabel && trackSlotLabel === currentSlotLabel) return true;
+        if (currentLibraryId && trackLibraryId === currentLibraryId) return true;
+        return false;
+      });
+      const nextTrack = {
+        ...(currentTrack || {}),
+        duckingWhenGeminiPct: clamped,
+        updatedAt: nowIso()
+      };
+      if (idx >= 0) {
+        updateUploadedTrackAt(idx, nextTrack, { selectIndex: idx });
+      } else {
+        setPanelMusicTrack("uploaded", nextTrack, { select: true });
+      }
     } else {
       panelMusicState.duckingWhenGeminiPct = clamped;
     }
@@ -1682,20 +1796,27 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(clamped);
     if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(clamped);
     persistAudioTrackMixSettings();
+    syncMusicControls();
   }
 
   function setPanelMontageStabilize(enabled = false) {
     const isEnabled = enabled === true;
-    if (panelMusicState.selectedTrackKind === "uploaded" && panelMusicState.track) {
-      panelMusicState.track.stabilize = isEnabled;
-      const idx = panelMusicState.trackLibrary.uploadedTracks.findIndex((t) => t === panelMusicState.track || t.slotLabel === panelMusicState.track.slotLabel);
-      if (idx >= 0) panelMusicState.trackLibrary.uploadedTracks[idx].stabilize = isEnabled;
-    } else {
-      panelMusicState.stabilize = isEnabled;
-    }
+    panelMusicState.stabilize = isEnabled;
+    persistGlobalAudioMixState({ audioMasterStabilize: isEnabled });
     const els = getEls();
     if (els.audioTrackStabilizeToggle) els.audioTrackStabilizeToggle.checked = isEnabled;
     persistAudioTrackMixSettings();
+    syncMusicControls();
+  }
+
+  function setPanelMontageLimiterEnabled(enabled = false) {
+    const isEnabled = enabled === true;
+    panelMusicState.limiterEnabled = isEnabled;
+    persistGlobalAudioMixState({ audioMasterLimiterEnabled: isEnabled });
+    const els = getEls();
+    if (els.audioTrackLimiterToggle) els.audioTrackLimiterToggle.checked = isEnabled;
+    persistAudioTrackMixSettings();
+    syncMusicControls();
   }
 
   function togglePanelMusicLoopMute(loopIndex = 0, kind = "") {
@@ -1846,6 +1967,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     resolvePanelMusicSessionCacheKey,
     persistPanelMusicSessionTrackCache,
     loadPanelMusicSessionTrackCache,
+    hydratePanelMusicLocalCaches,
     normalizePanelMusicMutedLoopIndexes,
     normalizePanelMusicLoopSettings,
     normalizePanelMusicTrack,
@@ -1893,6 +2015,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     setPanelMontageMusicVolume,
     setPanelMontageDuckingWhenGeminiPct,
     setPanelMontageStabilize,
+    setPanelMontageLimiterEnabled,
     stopPanelMusic,
     startPanelMusic,
     resolvePanelMusicTrackSrc,

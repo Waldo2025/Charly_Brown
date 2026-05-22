@@ -155,6 +155,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
       downloadUrl,
       storagePath,
       mimeType,
+      localMediaCacheKey: String(raw?.localMediaCacheKey || "").trim(),
       updatedAt: String(raw?.updatedAt || deps.nowIso?.()).trim() || deps.nowIso?.() || new Date().toISOString()
     };
   }

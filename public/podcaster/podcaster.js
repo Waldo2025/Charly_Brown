@@ -369,6 +369,9 @@ const els = {
   musicConfigPanel: document.getElementById("musicConfigPanel"),
   audioTrackMixModal: document.getElementById("audioTrackMixModal"),
   closeAudioTrackMixBtn: document.getElementById("closeAudioTrackMixBtn"),
+  cancelAudioTrackMixBtn: document.getElementById("cancelAudioTrackMixBtn"),
+  saveAudioTrackMixBtn: document.getElementById("saveAudioTrackMixBtn"),
+  audioTrackMixInfo: document.getElementById("audioTrackMixInfo"),
   audioTrackSourceSelect: document.getElementById("audioTrackSourceSelect"),
   audioTrackSourceInfo: document.getElementById("audioTrackSourceInfo"),
   audioTrackMontageVolume: document.getElementById("audioTrackMontageVolume"),
@@ -376,6 +379,7 @@ const els = {
   audioTrackDuckVolume: document.getElementById("audioTrackDuckVolume"),
   audioTrackDuckVolumeNumber: document.getElementById("audioTrackDuckVolumeNumber"),
   audioTrackStabilizeToggle: document.getElementById("audioTrackStabilizeToggle"),
+  audioTrackLimiterToggle: document.getElementById("audioTrackLimiterToggle"),
   scriptSetupModal: document.getElementById("scriptSetupModal"),
   closeScriptSetupBtn: document.getElementById("closeScriptSetupBtn"),
   scriptSetupForm: document.getElementById("scriptSetupForm"),
@@ -631,6 +635,15 @@ const els = {
   resetGeminiAudioSpeedBtn: document.getElementById("resetGeminiAudioSpeedBtn"),
   cancelGeminiAudioSpeedBtn: document.getElementById("cancelGeminiAudioSpeedBtn"),
   applyGeminiAudioSpeedBtn: document.getElementById("applyGeminiAudioSpeedBtn"),
+  geminiTrackVolumeModal: document.getElementById("geminiTrackVolumeModal"),
+  closeGeminiTrackVolumeModalBtn: document.getElementById("closeGeminiTrackVolumeModalBtn"),
+  geminiTrackVolumeModalTitle: document.getElementById("geminiTrackVolumeModalTitle"),
+  geminiTrackVolumeModalHint: document.getElementById("geminiTrackVolumeModalHint"),
+  geminiTrackVolumeRange: document.getElementById("geminiTrackVolumeRange"),
+  geminiTrackVolumeNumber: document.getElementById("geminiTrackVolumeNumber"),
+  resetGeminiTrackVolumeBtn: document.getElementById("resetGeminiTrackVolumeBtn"),
+  cancelGeminiTrackVolumeBtn: document.getElementById("cancelGeminiTrackVolumeBtn"),
+  applyGeminiTrackVolumeBtn: document.getElementById("applyGeminiTrackVolumeBtn"),
   timelineFrameHoldModal: document.getElementById("timelineFrameHoldModal"),
   closeTimelineFrameHoldModalBtn: document.getElementById("closeTimelineFrameHoldModalBtn"),
   timelineFrameHoldModalTitle: document.getElementById("timelineFrameHoldModalTitle"),
@@ -918,6 +931,10 @@ let dialogueVideoDirectiveRequest = null;
 let geminiAudioSpeedModalState = {
   rowId: "",
   playbackRate: 1
+};
+let geminiTrackVolumeModalState = {
+  open: false,
+  volumePct: 100
 };
 let timelineFrameHoldModalState = {
   rowId: "",
@@ -1214,6 +1231,7 @@ const {
   getRowReferenceModeByRowId,
   resolveRowReferenceAsset,
   resolveReferenceImagePreviewUrl,
+  hydrateSessionReferenceMedia,
   persistRowReferencesPatchToCloud,
   setSpeakerReferenceImage,
   setScenarioReferenceImage,
@@ -1365,6 +1383,8 @@ const podcasterPanelMusicApi = createPodcasterPanelMusicApi({
   resolveStorageAudioUrl,
   scheduleSessionLocalPersist,
   getPlaybackController: () => playbackController,
+  getPodcastVideoConfig,
+  upsertPodcastVideoConfig,
   getPodcastVideoState: () => podcastVideoState,
   getTimelineTotalDurationMs,
   buildTimelineRuntimeEntries,
@@ -1425,9 +1445,11 @@ const {
   generatePanelMusicWithAi,
   syncMusicControls,
   syncPanelMusicStateFromSession,
+  hydratePanelMusicLocalCaches,
   setPanelMontageMusicVolume,
   setPanelMontageDuckingWhenGeminiPct,
   setPanelMontageStabilize,
+  setPanelMontageLimiterEnabled,
   stopPanelMusic,
   startPanelMusic,
   resolvePanelMusicTrackSrc,
@@ -2847,6 +2869,32 @@ function isPodcastMode(session = null) {
 
 function isAudioOnlyPodcastStudioMode(session = null) {
   return isPodcastMode(session) && !isEducationalVideoMode(session) && !isVideoPodcastMode(session);
+}
+
+function setPodcastVideoModeEnabled(enableVideoPodcast = false, options = {}) {
+  const session = getActiveSession();
+  if (!session) return false;
+  const nextType = enableVideoPodcast === true ? "videopodcast" : "none";
+  const currentType = normalizeVideoContentType(session?.script?.videoContentType || session?.videoContentType);
+  if (currentType === nextType && options.force !== true) {
+    if (els.podcastVideoModeToggle) {
+      els.podcastVideoModeToggle.checked = enableVideoPodcast === true;
+    }
+    return false;
+  }
+  upsertActiveSession(
+    (current) => withSessionVideoContentType(current, nextType),
+    {
+      render: options.render !== false,
+      persist: true,
+      markDirty: true,
+      autosaveReason: options.reason || "video-content-type"
+    }
+  );
+  if (els.podcastVideoModeToggle) {
+    els.podcastVideoModeToggle.checked = enableVideoPodcast === true;
+  }
+  return true;
 }
 
 function getPanelModeCopy(session = null) {
@@ -4818,6 +4866,7 @@ function normalizeGeminiDialogueTrack(raw = {}) {
   ));
   return {
     enabled: raw?.enabled === true && segments.length > 0,
+    volumePct: Math.max(0, Math.min(100, Math.round(toFiniteNumber(raw?.volumePct, 100)))),
     updatedAt: String(raw?.updatedAt || "").trim(),
     segments: segments
       .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.sceneIndex || 0) - Number(b.sceneIndex || 0)),
@@ -5184,7 +5233,7 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
   );
   const rowsAfter = Array.isArray(sessionAfter?.script?.rows) ? sessionAfter.script.rows : [];
   const rowIndexById = new Map(rowsAfter.map((row, index) => [String(row?.id || "").trim(), index]));
-  let sequentialCursorMs = 0;
+  const sequencingCursorByKey = new Map();
   const nextSegments = beforeTrack.segments.map((segment) => {
     const rowId = String(segment?.rowId || "").trim();
     const beforeRuntime = rowId ? beforeRuntimeByRowId.get(rowId) || null : null;
@@ -5208,7 +5257,7 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
     const maxStartMs = Math.max(sceneStartMs, sceneStartMs + sceneDurationMs - durationMs);
     const compactSceneStartMs = Math.max(
       sceneStartMs,
-      Math.min(maxStartMs, Math.max(sceneStartMs, sequentialCursorMs))
+      Math.min(maxStartMs, Math.max(sceneStartMs, Number(sequencingCursorByKey.get(resolveGeminiSegmentSequencingKey(sessionAfter, afterRuntime)) || 0)))
     );
     const startMs = forceCompactSceneAnchors
       ? compactSceneStartMs
@@ -5226,9 +5275,14 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
       trimOutMs: trimInMs + durationMs,
       endMs: startMs + durationMs
     }, sceneIndex - 1);
-    sequentialCursorMs = normalized
-      ? Math.max(sequentialCursorMs, Number(normalized.startMs || 0) + Number(normalized.durationMs || 0) + interSegmentGapMs)
-      : sequentialCursorMs;
+    if (normalized) {
+      const sequencingKey = resolveGeminiSegmentSequencingKey(sessionAfter, afterRuntime);
+      const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
+      sequencingCursorByKey.set(
+        sequencingKey,
+        Math.max(currentCursorMs, Number(normalized.startMs || 0) + Number(normalized.durationMs || 0) + interSegmentGapMs)
+      );
+    }
     return normalized;
   }).filter(Boolean);
   const nextTrack = normalizeGeminiDialogueTrack({
@@ -5570,6 +5624,12 @@ function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, tole
   return Math.abs(startMs - anchorStartMs) > Math.max(1, Math.round(Number(toleranceMs || 0) || 0));
 }
 
+function resolveGeminiSegmentSequencingKey(session = null, runtimeEntry = null) {
+  if (!isAudioOnlyPodcastStudioMode(session)) return "__global__";
+  const trackId = String(runtimeEntry?.clip?.trackId || "").trim();
+  return trackId || "__global__";
+}
+
 function buildGeminiDialogueTimelineTrack(session = null) {
   const activeSession = session || getActiveSession();
   const runtimeEntries = buildTimelineRuntimeEntries(activeSession);
@@ -5582,7 +5642,7 @@ function buildGeminiDialogueTimelineTrack(session = null) {
       .filter(Boolean)
   );
   const missingRowIds = [];
-  let sequentialCursorMs = 0;
+  const sequencingCursorByKey = new Map();
   const segments = runtimeEntries.map((entry, timelineIndex) => {
     const rowId = String(entry?.rowId || "").trim();
     if (!rowId) return null;
@@ -5617,7 +5677,9 @@ function buildGeminiDialogueTimelineTrack(session = null) {
       Number(entry?.effectiveDurationMs || 0),
       durationMs
     );
-    const automaticStartMs = Math.max(delayedStartMsDefault, sequentialCursorMs);
+    const sequencingKey = resolveGeminiSegmentSequencingKey(activeSession, entry);
+    const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
+    const automaticStartMs = Math.max(delayedStartMsDefault, currentCursorMs);
     const hasManualStartMs = existingSegment
       ? hasManualGeminiSegmentOffset(existingSegment, automaticStartMs)
       : false;
@@ -5641,9 +5703,12 @@ function buildGeminiDialogueTimelineTrack(session = null) {
       trimOutMs,
       durationMs
     }, timelineIndex);
-    sequentialCursorMs = normalizedSegment
-      ? Math.max(sequentialCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
-      : sequentialCursorMs;
+    if (normalizedSegment) {
+      sequencingCursorByKey.set(
+        sequencingKey,
+        Math.max(currentCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
+      );
+    }
     return normalizedSegment;
   }).filter(Boolean);
   return normalizeGeminiDialogueTrack({
@@ -5668,7 +5733,7 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
   const preserveStartMs = options?.preserveStartMs !== false;
   const forceDurationFromAudio = options?.forceDurationFromAudio === true;
   const missingRowIds = [];
-  let sequentialCursorMs = 0;
+  const sequencingCursorByKey = new Map();
   const nextSegments = runtimeEntries.map((entry, timelineIndex) => {
     const rowId = String(entry?.rowId || "").trim();
     if (!rowId) return null;
@@ -5700,7 +5765,9 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     const expectedSegmentDuration = audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs;
 
     const delayedStartMsDefault = resolveGeminiSegmentStartWithinScene(sceneStartMs, sceneDurationMs, expectedSegmentDuration);
-    const automaticStartMs = Math.max(delayedStartMsDefault, sequentialCursorMs);
+    const sequencingKey = resolveGeminiSegmentSequencingKey(activeSession, entry);
+    const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
+    const automaticStartMs = Math.max(delayedStartMsDefault, currentCursorMs);
     const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, automaticStartMs);
 
     // Calcular el desplazamiento exacto del inicio de la escena para preservar el offset relativo del audio
@@ -5764,9 +5831,12 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       trimOutMs: segmentTrimOutMs,
       durationMs
     }, timelineIndex);
-    sequentialCursorMs = normalizedSegment
-      ? Math.max(sequentialCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
-      : sequentialCursorMs;
+    if (normalizedSegment) {
+      sequencingCursorByKey.set(
+        sequencingKey,
+        Math.max(currentCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
+      );
+    }
     return normalizedSegment;
   }).filter(Boolean);
 
@@ -6271,8 +6341,16 @@ function createSession(overrides = {}) {
       preset: "ambient",
       volume: 22,
       montageVolume: 100,
+      duckingWhenGeminiPct: 60,
       stabilize: false,
+      limiterEnabled: false,
       sourceType: "preset",
+      selectedTrackKind: "uploaded",
+      trackLibrary: {
+        uploaded: null,
+        uploadedTracks: [],
+        ai: null
+      },
       track: null
     },
     speakerPortraitMap: {},
@@ -6286,7 +6364,10 @@ function createSession(overrides = {}) {
     dialogueAudioMap: {},
     podcastVideoConfig: normalizePodcastVideoConfig({
       enabled: false,
-      editorEnabled: true
+      editorEnabled: true,
+      masterVolume: 100,
+      audioMasterStabilize: false,
+      audioMasterLimiterEnabled: false
     }),
     creativeVideoConfig: normalizeCreativeVideoConfig({
       enabled: false,
@@ -6814,6 +6895,15 @@ async function setActiveSession(sessionId) {
     // noop
   } finally {
     suppressPodcastStudioUiStateSync = false;
+  }
+  try {
+    const refsHydrated = await hydrateSessionReferenceMedia(nextSession);
+    const musicHydrated = await hydratePanelMusicLocalCaches(nextSession);
+    if (refsHydrated || musicHydrated) {
+      persistSessions();
+    }
+  } catch (_) {
+    // noop
   }
   if (typeof playbackController?.sync === "function") {
     playbackController.sync(nextSession, getPodcastVideoConfig(nextSession));
@@ -9343,6 +9433,8 @@ function compactCloudSessionPayload(payload = null) {
   });
 }
 async function saveSessionToCloud(sessionId = null, options = {}) {
+  persistPanelMusicSettings();
+  persistPanelMusicToActiveSession();
   return sessionStore.saveManual(sessionId, options);
 }
 
@@ -10115,6 +10207,57 @@ function syncGeminiAudioSpeedModalInputs(source = "") {
   }
 }
 
+function setGeminiTrackVolumeModalOpen(isOpen = false) {
+  geminiTrackVolumeModalState.open = isOpen === true;
+  if (els.geminiTrackVolumeModal) {
+    els.geminiTrackVolumeModal.hidden = !geminiTrackVolumeModalState.open;
+  }
+  if (geminiTrackVolumeModalState.open) {
+    syncGeminiTrackVolumeModal(getActiveSession());
+  }
+}
+
+function syncGeminiTrackVolumeModal(session = null) {
+  if (!els.geminiTrackVolumeModal || geminiTrackVolumeModalState.open !== true) return;
+  const activeSession = session || getActiveSession();
+  const cfg = getPodcastVideoConfig(activeSession);
+  const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+  const volumePct = Math.max(0, Math.min(100, Math.round(Number(track?.volumePct ?? 100) || 100)));
+  geminiTrackVolumeModalState.volumePct = volumePct;
+  if (els.geminiTrackVolumeModalTitle) {
+    els.geminiTrackVolumeModalTitle.textContent = "Volumen general Gemini";
+  }
+  if (els.geminiTrackVolumeModalHint) {
+    els.geminiTrackVolumeModalHint.textContent = `Track de voz Gemini · ${volumePct}%`;
+  }
+  if (els.geminiTrackVolumeRange) {
+    els.geminiTrackVolumeRange.value = String(volumePct);
+  }
+  if (els.geminiTrackVolumeNumber) {
+    els.geminiTrackVolumeNumber.value = String(volumePct);
+  }
+}
+
+function syncGeminiTrackVolumeModalInputs(source = "") {
+  if (geminiTrackVolumeModalState.open !== true) return;
+  let nextValue = geminiTrackVolumeModalState.volumePct;
+  if (source === "range") {
+    nextValue = Math.round(Math.max(0, Math.min(100, Number(els.geminiTrackVolumeRange?.value || 0) || 0)));
+  } else if (source === "number") {
+    nextValue = Math.round(Math.max(0, Math.min(100, Number(els.geminiTrackVolumeNumber?.value || 0) || 0)));
+  }
+  geminiTrackVolumeModalState.volumePct = nextValue;
+  if (els.geminiTrackVolumeRange && source !== "range") {
+    els.geminiTrackVolumeRange.value = String(nextValue);
+  }
+  if (els.geminiTrackVolumeNumber && source !== "number") {
+    els.geminiTrackVolumeNumber.value = String(nextValue);
+  }
+  if (els.geminiTrackVolumeModalHint) {
+    els.geminiTrackVolumeModalHint.textContent = `Track de voz Gemini · ${nextValue}%`;
+  }
+}
+
 function applyGeminiAudioSpeedModal(options = {}) {
   const rowId = String(geminiAudioSpeedModalState.rowId || "").trim();
   if (!rowId) return false;
@@ -10170,6 +10313,41 @@ function applyGeminiAudioSpeedModal(options = {}) {
   scheduleSessionLocalPersist("gemini-audio-speed");
   setGenerationStatus(`Velocidad Gemini ajustada a ${nextPlaybackRate.toFixed(2)}x`, "is-live");
   return true;
+}
+
+function setGeminiDialogueTrackVolumePct(nextVolumePct = 100) {
+  const activeSession = getActiveSession();
+  if (!activeSession) return false;
+  const normalizedPct = Math.max(0, Math.min(100, Math.round(toFiniteNumber(nextVolumePct, 100))));
+  let changed = false;
+  upsertPodcastVideoConfig((cfg) => {
+    const currentTrack = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+    if (Math.round(Number(currentTrack?.volumePct ?? 100)) === normalizedPct) return cfg;
+    changed = true;
+    return {
+      ...cfg,
+      geminiDialogueTrack: window.normalizeGeminiDialogueTrack({
+        ...currentTrack,
+        volumePct: normalizedPct,
+        updatedAt: nowIso()
+      })
+    };
+  }, { autosaveReason: "gemini-track-volume" });
+  if (!changed) return false;
+  invalidateStudioRuntimeCache();
+  renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
+  playbackController.sync(getActiveSession(), getPodcastVideoConfig(getActiveSession()));
+  setGenerationStatus(`Volumen general Gemini ajustado a ${normalizedPct}%`, "is-live");
+  return true;
+}
+
+function applyGeminiTrackVolumeModal(options = {}) {
+  const nextVolumePct = Math.round(Math.max(0, Math.min(100, Number(geminiTrackVolumeModalState.volumePct || 0) || 0)));
+  const changed = setGeminiDialogueTrackVolumePct(nextVolumePct);
+  if (options.close !== false) {
+    setGeminiTrackVolumeModalOpen(false);
+  }
+  return changed;
 }
 
 function getCurrentTimelineRuntimeEntry(rowId = "", session = null) {
@@ -11614,9 +11792,22 @@ function buildPodcastTimelineStructureKey(session = null, mode = "") {
   });
 }
 
+function getPodcastPortraitStripHosts(session = null) {
+  const activeSession = session || getActiveSession();
+  const configuredHosts = getSpeakerOptions(activeSession);
+  if (!isVideoPodcastMode(activeSession)) return configuredHosts;
+  const rows = getSessionRows(activeSession);
+  const rowHosts = Array.from(new Set(
+    rows
+      .map((row) => String(row?.speaker || "").trim())
+      .filter(Boolean)
+  ));
+  return rowHosts.length ? rowHosts : configuredHosts;
+}
+
 function buildPodcastPortraitStripStructureKey(session = null) {
   const activeSession = session || getActiveSession();
-  const hosts = getSpeakerOptions(activeSession);
+  const hosts = getPodcastPortraitStripHosts(activeSession);
   const deck = getGlobalScenarioDeck(activeSession);
   const voiceMap = getSpeakerVoiceMap(activeSession);
   const expressionMap = getSpeakerExpressionMap(activeSession);
@@ -15065,7 +15256,7 @@ function renderPodcastPortraitStrip(session = null, options = {}) {
     syncPodcastPortraitStripActiveStates(activeSession);
     return;
   }
-  const hosts = getSpeakerOptions(activeSession);
+  const hosts = getPodcastPortraitStripHosts(activeSession);
   const globalScenarioDeck = getGlobalScenarioDeck(activeSession);
   const draft = collectGlobalSpeakerDraft(activeSession);
   const voiceMap = draft?.voiceMap || getSpeakerVoiceMap(activeSession);
@@ -17436,6 +17627,8 @@ function attachEvents() {
     window.setButtonLoadingState(els.saveSessionFloatingBtn, true);
 
     try {
+      persistPanelMusicSettings();
+      persistPanelMusicToActiveSession();
       await sessionStore.saveManual(session.id, { render: false });
     } catch (error) {
       console.error("[podcaster] Manual save failed:", error);
@@ -17709,6 +17902,33 @@ function attachEvents() {
       setAudioTrackMixOpen(false);
     });
   }
+  if (els.podcastVideoModeToggle) {
+    els.podcastVideoModeToggle.addEventListener("change", () => {
+      const enableVideoPodcast = els.podcastVideoModeToggle.checked === true;
+      setPodcastVideoModeEnabled(enableVideoPodcast, { render: false, reason: "video-content-type-direct" });
+      if (enableVideoPodcast) {
+        setPodcastStudioInspectorCollapsed(false);
+      } else {
+        setTimelineViewMode("tracks");
+      }
+      renderPodcastVideoShell(getActiveSession());
+      render();
+    });
+  }
+  if (els.cancelAudioTrackMixBtn) {
+    els.cancelAudioTrackMixBtn.addEventListener("click", () => {
+      setAudioTrackMixOpen(false);
+    });
+  }
+  if (els.saveAudioTrackMixBtn) {
+    els.saveAudioTrackMixBtn.addEventListener("click", () => {
+      persistPanelMusicSettings();
+      persistPanelMusicToActiveSession();
+      scheduleSessionLocalPersist("audio-mix");
+      setAudioTrackMixOpen(false);
+      setGenerationStatus("Configuración de audio guardada", "is-live");
+    });
+  }
   if (els.audioTrackMontageVolume) {
     els.audioTrackMontageVolume.addEventListener("input", () => {
       setPanelMontageMusicVolume(els.audioTrackMontageVolume.value);
@@ -17736,6 +17956,12 @@ function attachEvents() {
   if (els.audioTrackStabilizeToggle) {
     els.audioTrackStabilizeToggle.addEventListener("change", () => {
       setPanelMontageStabilize(Boolean(els.audioTrackStabilizeToggle.checked));
+      renderPodcastVideoTimeline(getActiveSession());
+    });
+  }
+  if (els.audioTrackLimiterToggle) {
+    els.audioTrackLimiterToggle.addEventListener("change", () => {
+      setPanelMontageLimiterEnabled(Boolean(els.audioTrackLimiterToggle.checked));
       renderPodcastVideoTimeline(getActiveSession());
     });
   }
@@ -17783,49 +18009,6 @@ function attachEvents() {
         stopPanelMusic();
         await startPanelMusic();
       }
-    });
-  }
-
-  // --- Background Music (Montage) Controls ---
-  const syncAndPersistMontageMusic = () => {
-    persistPanelMusicSettings();
-    persistPanelMusicToActiveSession();
-    try {
-      const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
-      playbackController.syncBackgroundMusic(Math.max(0, Number(podcastVideoState.montageCursorMs || 0)), speed);
-    } catch (_) { }
-  };
-
-  if (els.audioTrackMontageVolume) {
-    els.audioTrackMontageVolume.addEventListener("input", () => {
-      const val = Math.max(0, Math.min(100, Number(els.audioTrackMontageVolume.value) || 0));
-      panelMusicState.montageVolume = val;
-      if (els.audioTrackMontageVolumeNumber) els.audioTrackMontageVolumeNumber.value = String(val);
-      syncAndPersistMontageMusic();
-    });
-  }
-  if (els.audioTrackMontageVolumeNumber) {
-    els.audioTrackMontageVolumeNumber.addEventListener("input", () => {
-      const val = Math.max(0, Math.min(100, Number(els.audioTrackMontageVolumeNumber.value) || 0));
-      panelMusicState.montageVolume = val;
-      if (els.audioTrackMontageVolume) els.audioTrackMontageVolume.value = String(val);
-      syncAndPersistMontageMusic();
-    });
-  }
-  if (els.audioTrackDuckVolume) {
-    els.audioTrackDuckVolume.addEventListener("input", () => {
-      const val = Math.max(0, Math.min(100, Number(els.audioTrackDuckVolume.value) || 60));
-      panelMusicState.duckingWhenGeminiPct = val;
-      if (els.audioTrackDuckVolumeNumber) els.audioTrackDuckVolumeNumber.value = String(val);
-      syncAndPersistMontageMusic();
-    });
-  }
-  if (els.audioTrackDuckVolumeNumber) {
-    els.audioTrackDuckVolumeNumber.addEventListener("input", () => {
-      const val = Math.max(0, Math.min(100, Number(els.audioTrackDuckVolumeNumber.value) || 60));
-      panelMusicState.duckingWhenGeminiPct = val;
-      if (els.audioTrackDuckVolume) els.audioTrackDuckVolume.value = String(val);
-      syncAndPersistMontageMusic();
     });
   }
   if (els.panelMusicFileInput) {
@@ -18559,18 +18742,8 @@ function attachEvents() {
     els.podcastStudioTrackHead.addEventListener("change", (event) => {
       const target = event?.target || null;
       if (!target || String(target.id || "") !== "podcastVideoModeToggle") return;
-      const session = getActiveSession();
-      if (!session) return;
       const enableVideoPodcast = target.checked === true;
-      upsertActiveSession(
-        (current) => withSessionVideoContentType(current, enableVideoPodcast ? "videopodcast" : "none"),
-        {
-          render: false,
-          persist: true,
-          markDirty: true,
-          autosaveReason: "video-content-type"
-        }
-      );
+      setPodcastVideoModeEnabled(enableVideoPodcast, { render: false, reason: "video-content-type" });
       if (enableVideoPodcast) {
         setPodcastStudioInspectorCollapsed(false);
       } else {
@@ -19327,6 +19500,13 @@ function attachEvents() {
         setMontageSceneMixOpen(true);
         return;
       }
+      const setGeminiTrackVolumeBtn = event.target.closest("[data-action='timeline-set-gemini-track-volume']");
+      if (setGeminiTrackVolumeBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        setGeminiTrackVolumeModalOpen(true);
+        return;
+      }
       const openAudioTrackMixBtn = event.target.closest("[data-action='open-audio-track-mix']");
       if (openAudioTrackMixBtn) {
         setAudioTrackMixOpen(true);
@@ -19555,7 +19735,7 @@ function attachEvents() {
       const clearSpeakerReferenceBtn = event.target.closest("[data-action='clear-speaker-reference-image']");
       if (clearSpeakerReferenceBtn) {
         const speaker = String(clearSpeakerReferenceBtn.dataset.speaker || "").trim();
-        if (speaker) setSpeakerReferenceImage(speaker, null);
+        if (speaker) await setSpeakerReferenceImage(speaker, null);
         return;
       }
       const attachScenarioReferenceBtn = event.target.closest("[data-action='attach-scenario-reference-image']");
@@ -19567,7 +19747,7 @@ function attachEvents() {
       const clearScenarioReferenceBtn = event.target.closest("[data-action='clear-scenario-reference-image']");
       if (clearScenarioReferenceBtn) {
         const scenarioId = String(clearScenarioReferenceBtn.dataset.scenarioId || "").trim();
-        if (scenarioId) setScenarioReferenceImage(scenarioId, null);
+        if (scenarioId) await setScenarioReferenceImage(scenarioId, null);
         return;
       }
       const openPortraitBtn = event.target.closest("[data-action='open-portrait-viewer']");
@@ -19697,6 +19877,16 @@ function attachEvents() {
       const closeBtn = event.target.closest("[data-action='close-gemini-audio-speed-modal']");
       if (closeBtn) {
         setGeminiAudioSpeedModalOpen("");
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+  }
+  if (els.geminiTrackVolumeModal) {
+    els.geminiTrackVolumeModal.addEventListener("click", (event) => {
+      const closeBtn = event.target.closest("[data-action='close-gemini-track-volume-modal']");
+      if (closeBtn) {
+        setGeminiTrackVolumeModalOpen(false);
         event.preventDefault();
         event.stopPropagation();
       }
@@ -19869,6 +20059,41 @@ function attachEvents() {
   if (els.applyGeminiAudioSpeedBtn) {
     els.applyGeminiAudioSpeedBtn.addEventListener("click", () => {
       applyGeminiAudioSpeedModal();
+    });
+  }
+  if (els.closeGeminiTrackVolumeModalBtn) {
+    els.closeGeminiTrackVolumeModalBtn.addEventListener("click", () => {
+      setGeminiTrackVolumeModalOpen(false);
+    });
+  }
+  if (els.cancelGeminiTrackVolumeBtn) {
+    els.cancelGeminiTrackVolumeBtn.addEventListener("click", () => {
+      setGeminiTrackVolumeModalOpen(false);
+    });
+  }
+  if (els.resetGeminiTrackVolumeBtn) {
+    els.resetGeminiTrackVolumeBtn.addEventListener("click", () => {
+      geminiTrackVolumeModalState.volumePct = 100;
+      syncGeminiTrackVolumeModalInputs();
+      applyGeminiTrackVolumeModal({ close: false });
+    });
+  }
+  if (els.applyGeminiTrackVolumeBtn) {
+    els.applyGeminiTrackVolumeBtn.addEventListener("click", () => {
+      applyGeminiTrackVolumeModal();
+    });
+  }
+  if (els.geminiTrackVolumeRange) {
+    els.geminiTrackVolumeRange.addEventListener("input", () => {
+      syncGeminiTrackVolumeModalInputs("range");
+    });
+  }
+  if (els.geminiTrackVolumeNumber) {
+    els.geminiTrackVolumeNumber.addEventListener("input", () => {
+      syncGeminiTrackVolumeModalInputs("number");
+    });
+    els.geminiTrackVolumeNumber.addEventListener("change", () => {
+      syncGeminiTrackVolumeModalInputs("number");
     });
   }
   if (els.closeTimelineFrameHoldModalBtn) {
@@ -20548,7 +20773,7 @@ function attachEvents() {
       if (clearSpeakerReferenceBtn) {
         const speaker = String(clearSpeakerReferenceBtn.dataset.speaker || "").trim();
         if (!speaker) return;
-        setSpeakerReferenceImage(speaker, null);
+        await setSpeakerReferenceImage(speaker, null);
         return;
       }
       const attachScenarioReferenceBtn = event.target.closest("[data-action='attach-scenario-reference-image']");
@@ -20562,7 +20787,7 @@ function attachEvents() {
       if (clearScenarioReferenceBtn) {
         const scenarioId = String(clearScenarioReferenceBtn.dataset.scenarioId || "").trim();
         if (!scenarioId) return;
-        setScenarioReferenceImage(scenarioId, null);
+        await setScenarioReferenceImage(scenarioId, null);
         return;
       }
       const replaceBtn = event.target.closest("[data-action='replace-scene-video-from-storage'][data-row-id]");
@@ -21055,6 +21280,8 @@ const podcasterGenerationRuntimeApi = {
   runtimeFeatureState,
   getSpeakerNameMap,
   getSpeakerOptions,
+  getSpeakerReferenceImageMap,
+  getScenarioReferenceImageMap,
   normalizeVideoPreset,
   normalizeCreativeVideoConfig,
   getCreativeVideoConfig,
@@ -21062,6 +21289,7 @@ const podcasterGenerationRuntimeApi = {
   buildSpeakerNameMap,
   buildShortSessionTitle,
   resolvePortraitForSpeaker,
+  resolveActiveGlobalScenarioAsset,
   resolveSpeakerStudioScenarioPrompt,
   updateTimelineClipForRow,
   getPodcastVideoConfig,

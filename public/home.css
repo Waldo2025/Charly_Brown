@@ -851,7 +851,7 @@ body:not(.sidebar-collapsed) .home-wrapper {
   display: block;
   margin-top: 0.18rem;
   color: #fff;
-  font-size: clamp(1.15rem, 1.75vw, 1.4rem);
+  font-size: clamp(1.15rem, 1.3vw, 1.2rem);
   line-height: 1.1;
   font-weight: 900;
 }

@@ -90,6 +90,19 @@ function sanitizeSessionForFingerprint(session = null, deps = {}) {
   const normalizePodcastVideoConfig = deps.normalizePodcastVideoConfig || ((value) => value || {});
   const normalizeCreativeVideoConfig = deps.normalizeCreativeVideoConfig || ((value) => value || {});
   const normalizePodcastStudioUiState = deps.normalizePodcastStudioUiState || ((value) => value || {});
+  const stripDataUrl = (record = null) => {
+    if (!record || typeof record !== "object") return record;
+    const next = { ...record };
+    if ("dataUrl" in next) next.dataUrl = "";
+    if ("localDataUrl" in next) next.localDataUrl = "";
+    return next;
+  };
+  const stripRecordMap = (value = {}) => Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, item]) => [key, stripDataUrl(item)])
+  );
+  const stripRecordListMap = (value = {}) => Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, list]) => [key, Array.isArray(list) ? list.map((item) => stripDataUrl(item)) : []])
+  );
   return {
     id: String(source.id || "").trim(),
     title: String(source.title || "").trim(),
@@ -105,12 +118,23 @@ function sanitizeSessionForFingerprint(session = null, deps = {}) {
     globalScenarioDeck: source.globalScenarioDeck || null,
     disfluencyDefaults: source.disfluencyDefaults || null,
     ttsDirectionDefaults: source.ttsDirectionDefaults || null,
-    panelMusicConfig: source.panelMusicConfig || null,
+    panelMusicConfig: source.panelMusicConfig ? {
+      ...source.panelMusicConfig,
+      trackLibrary: {
+        ...(source.panelMusicConfig.trackLibrary || {}),
+        uploaded: stripDataUrl(source.panelMusicConfig.trackLibrary?.uploaded || null),
+        uploadedTracks: Array.isArray(source.panelMusicConfig.trackLibrary?.uploadedTracks)
+          ? source.panelMusicConfig.trackLibrary.uploadedTracks.map((track) => stripDataUrl(track))
+          : [],
+        ai: stripDataUrl(source.panelMusicConfig.trackLibrary?.ai || null)
+      },
+      track: stripDataUrl(source.panelMusicConfig.track || null)
+    } : null,
     dialogueVideoMap: source.dialogueVideoMap || {},
     dialogueAudioMap: source.dialogueAudioMap || {},
-    rowReferenceImageMap: source.rowReferenceImageMap || {},
-    rowReferenceImageListMap: source.rowReferenceImageListMap || {},
-    rowReferenceVideoMap: source.rowReferenceVideoMap || {},
+    rowReferenceImageMap: stripRecordMap(source.rowReferenceImageMap || {}),
+    rowReferenceImageListMap: stripRecordListMap(source.rowReferenceImageListMap || {}),
+    rowReferenceVideoMap: stripRecordMap(source.rowReferenceVideoMap || {}),
     rowReferenceModeByRowId: source.rowReferenceModeByRowId || {},
     podcastVideoConfig: normalizePodcastVideoConfig(source.podcastVideoConfig || {}),
     creativeVideoConfig: normalizeCreativeVideoConfig(source.creativeVideoConfig || {}),
@@ -121,6 +145,44 @@ function sanitizeSessionForFingerprint(session = null, deps = {}) {
 }
 
 const sessionFingerprintCache = new WeakMap();
+
+function sanitizeSessionForLocalCache(session = null) {
+  const source = session && typeof session === "object" ? session : {};
+  let clone = null;
+  try {
+    clone = JSON.parse(JSON.stringify(source));
+  } catch (_) {
+    clone = { ...source };
+  }
+  const stripDataUrl = (record = null) => {
+    if (!record || typeof record !== "object") return;
+    if ("dataUrl" in record) record.dataUrl = "";
+    if ("localDataUrl" in record) record.localDataUrl = "";
+  };
+  const stripRecordMap = (value = {}) => {
+    Object.values(value && typeof value === "object" ? value : {}).forEach((item) => stripDataUrl(item));
+  };
+  const stripRecordListMap = (value = {}) => {
+    Object.values(value && typeof value === "object" ? value : {}).forEach((list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((item) => stripDataUrl(item));
+    });
+  };
+  stripRecordMap(clone.speakerReferenceImageMap || {});
+  stripRecordMap(clone.scenarioReferenceImageMap || {});
+  stripRecordMap(clone.rowReferenceImageMap || {});
+  stripRecordMap(clone.rowReferenceVideoMap || {});
+  stripRecordListMap(clone.rowReferenceImageListMap || {});
+  if (clone.panelMusicConfig && typeof clone.panelMusicConfig === "object") {
+    stripDataUrl(clone.panelMusicConfig.track || null);
+    stripDataUrl(clone.panelMusicConfig.trackLibrary?.uploaded || null);
+    stripDataUrl(clone.panelMusicConfig.trackLibrary?.ai || null);
+    if (Array.isArray(clone.panelMusicConfig.trackLibrary?.uploadedTracks)) {
+      clone.panelMusicConfig.trackLibrary.uploadedTracks.forEach((track) => stripDataUrl(track));
+    }
+  }
+  return clone;
+}
 
 function computeSessionFingerprint(session = null, deps = {}) {
   if (!session || typeof session !== "object") return "";
@@ -203,7 +265,7 @@ function loadSessionsFromLocalCache(uid = "", deps = {}, storageAdapter = null) 
 
 function persistSessionsToLocalCache(uid = "", sessions = [], deps = {}, storageAdapter = null) {
   const nextStorage = storageAdapter || createLocalStorageSessionAdapter(deps);
-  const nextList = Array.isArray(sessions) ? sessions : [];
+  const nextList = Array.isArray(sessions) ? sessions.map((session) => sanitizeSessionForLocalCache(session)) : [];
   resolveStorageUidCandidates(uid, deps).forEach((candidateUid) => {
     const storageKey = resolveSessionStorageKey(candidateUid, deps);
     nextStorage?.writeJson?.(storageKey, nextList);

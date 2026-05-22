@@ -1,3 +1,8 @@
+import {
+  createPodcasterFinalLimiterNode,
+  normalizePodcasterFinalLimiterSettings
+} from "./podcaster-audio-limiter.js";
+
 /**
  * PodcasterPlaybackController.js
  * Unified Playback Controller for Podcaster Studio
@@ -52,6 +57,10 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSource = null;
     this.backgroundGain = null;
     this.backgroundCompressor = null;
+    this.backgroundFinalLimiter = null;
+    this.backgroundStabilizeEnabled = null;
+    this.backgroundLimiterEnabled = null;
+    this.backgroundLimiterSettings = normalizePodcasterFinalLimiterSettings();
     this.backgroundDuckFactor = 1.0;
     this.backgroundSrc = "";
 
@@ -113,6 +122,19 @@ export class PodcasterPlaybackController extends EventEmitter {
     const timelineOffsetMs = Math.max(0, Number(currentMs || 0) - Math.max(0, Number(segmentStartMs || 0)));
     const sourceOffsetMs = safeTrimInMs + (timelineOffsetMs * this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25));
     return sourceOffsetMs / 1000;
+  }
+  resolveSegmentTimelineDurationMs(segment = null, clipPlaybackRate = 1) {
+    const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
+    const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
+    const trimmedVisibleMs = trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0;
+    const rawVisibleMs = Math.max(
+      500,
+      trimmedVisibleMs
+      || Number(segment?.durationMs || 0)
+      || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
+      || 500
+    );
+    return Math.max(500, Math.round(rawVisibleMs / this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25)));
   }
   isImageStageEntry(entry = null) {
     if (!entry) return false;
@@ -790,11 +812,19 @@ export class PodcasterPlaybackController extends EventEmitter {
         };
       });
     }
-    const activeSegments = segments.filter(s => currentMs >= s.startMs && currentMs < (s.startMs + s.durationMs));
+    const activeSegments = segments.filter((segment) => {
+      const rowId = String(segment?.rowId || "").trim();
+      const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
+      const visibleDurationMs = this.resolveSegmentTimelineDurationMs(segment, clipPlaybackRate);
+      return currentMs >= segment.startMs && currentMs < (segment.startMs + visibleDurationMs);
+    });
     const activeRowIds = new Set(activeSegments.map(s => s.rowId));
 
     // Upcoming pre-load
-    const upcoming = segments.filter(s => s.startMs > currentMs && (s.startMs - currentMs) < 3000);
+    const upcoming = segments.filter((segment) => {
+      const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      return segmentStartMs > currentMs && (segmentStartMs - currentMs) < 3000;
+    });
     upcoming.forEach(s => {
       const clip = this.deps?.resolveDialogueAudioForRow?.(session, s.rowId);
       const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
@@ -876,14 +906,22 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       
       const mix = this.deps?.resolveTimelineClipMix?.(session, rowId) || { voiceVolume: 1 };
-      audio.volume = this.clamp01(mix.voiceVolume);
+      const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+      const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
+      audio.volume = this.clamp01((mix.voiceVolume ?? 1) * masterVolumeFactor);
 
       const segmentTrimInMs = Math.max(0, Number(segment?.trimInMs || 0));
       const offsetSec = this.resolveSegmentSourceOffsetSec(currentMs, segment.startMs, segmentTrimInMs, clipPlaybackRate);
 
       const drift = Math.abs(audio.currentTime - offsetSec);
       const isFirstSync = audio.dataset.initialized === "false";
-      const driftToleranceSec = isFirstSync ? 0.01 : 0.12;
+      const isPaused = audio.paused === true || this.state.isPlaying !== true;
+      // En Studio, re-seekear la voz Gemini con una tolerancia muy baja en cada tick
+      // provoca microcortes audibles. Mientras está sonando, solo corregimos cuando el
+      // desfase ya es claramente perceptible o después de un seek/arranque inicial.
+      const driftToleranceSec = isFirstSync
+        ? 0.01
+        : (isPaused ? 0.08 : 0.35);
       
       if (isFirstSync || drift > driftToleranceSec) {
         if (isFirstSync || drift > 0.5) {
@@ -1004,15 +1042,22 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.backgroundDuckFactor = hasVoice ? (duckPct / 100) : 1.0;
       const finalVolume = (baseVolume / 100) * this.backgroundDuckFactor * sceneBackgroundFactor * fadeInFactor * fadeOutFactor;
 
+      const sessionConfig = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+      const masterVolumeFactor = this.clamp01(this.toFiniteNumber(sessionConfig?.masterVolume, 100) / 100);
+      const stabilizeEnabled = sessionConfig?.audioMasterStabilize === true || (activeSegment && activeSegment.stabilize !== undefined
+        ? activeSegment.stabilize === true
+        : panelCfg.stabilize === true);
+      const limiterEnabled = sessionConfig?.audioMasterLimiterEnabled === true || panelCfg.limiterEnabled === true;
+
       if (this.audioCtx) {
-        this.ensureBackgroundChain();
+        this.ensureBackgroundChain(stabilizeEnabled, limiterEnabled);
         if (this.backgroundGain) {
-          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume), this.audioCtx.currentTime, 0.05);
+          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, 0.05);
         } else {
-          this.backgroundAudio.volume = this.clamp01(finalVolume);
+          this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
         }
       } else {
-        this.backgroundAudio.volume = this.clamp01(finalVolume);
+        this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
       }
 
       this.backgroundAudio.playbackRate = speed;
@@ -1041,13 +1086,55 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
   }
 
-  ensureBackgroundChain() {
-    if (!this.audioCtx || this.backgroundGain || !this.backgroundAudio) return;
+  ensureBackgroundChain(stabilizeEnabled = false, limiterEnabled = false) {
+    if (!this.audioCtx || !this.backgroundAudio) return;
     try {
-      this.backgroundSource = this.audioCtx.createMediaElementSource(this.backgroundAudio);
+      const wantsStabilize = stabilizeEnabled === true;
+      const wantsLimiter = limiterEnabled === true;
+      const needsBuild = !this.backgroundSource
+        || !this.backgroundGain
+        || this.backgroundStabilizeEnabled !== wantsStabilize
+        || this.backgroundLimiterEnabled !== wantsLimiter;
+      if (!needsBuild) return;
+      if (!this.backgroundSource) {
+        this.backgroundSource = this.audioCtx.createMediaElementSource(this.backgroundAudio);
+      } else {
+        try { this.backgroundSource.disconnect(); } catch (_) { }
+      }
+      if (this.backgroundCompressor) {
+        try { this.backgroundCompressor.disconnect(); } catch (_) { }
+      }
+      if (this.backgroundGain) {
+        try { this.backgroundGain.disconnect(); } catch (_) { }
+      }
+      if (this.backgroundFinalLimiter) {
+        try { this.backgroundFinalLimiter.disconnect(); } catch (_) { }
+      }
       this.backgroundGain = this.audioCtx.createGain();
-      this.backgroundSource.connect(this.backgroundGain);
-      this.backgroundGain.connect(this.audioCtx.destination);
+      this.backgroundFinalLimiter = wantsLimiter
+        ? createPodcasterFinalLimiterNode(this.audioCtx, this.backgroundLimiterSettings)
+        : null;
+      if (wantsStabilize) {
+        this.backgroundCompressor = this.audioCtx.createDynamicsCompressor();
+        this.backgroundCompressor.threshold.value = -24;
+        this.backgroundCompressor.knee.value = 18;
+        this.backgroundCompressor.ratio.value = 4;
+        this.backgroundCompressor.attack.value = 0.003;
+        this.backgroundCompressor.release.value = 0.2;
+        this.backgroundSource.connect(this.backgroundCompressor);
+        this.backgroundCompressor.connect(this.backgroundGain);
+      } else {
+        this.backgroundCompressor = null;
+        this.backgroundSource.connect(this.backgroundGain);
+      }
+      if (this.backgroundFinalLimiter) {
+        this.backgroundGain.connect(this.backgroundFinalLimiter);
+        this.backgroundFinalLimiter.connect(this.audioCtx.destination);
+      } else {
+        this.backgroundGain.connect(this.audioCtx.destination);
+      }
+      this.backgroundStabilizeEnabled = wantsStabilize;
+      this.backgroundLimiterEnabled = wantsLimiter;
     } catch (e) { }
   }
 
@@ -1067,7 +1154,14 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.backgroundSrc = "";
     if (this.backgroundSource) { try { this.backgroundSource.disconnect(); } catch (_) { } }
     this.backgroundSource = null;
+    if (this.backgroundGain) { try { this.backgroundGain.disconnect(); } catch (_) { } }
     this.backgroundGain = null;
+    if (this.backgroundCompressor) { try { this.backgroundCompressor.disconnect(); } catch (_) { } }
+    this.backgroundCompressor = null;
+    if (this.backgroundFinalLimiter) { try { this.backgroundFinalLimiter.disconnect(); } catch (_) { } }
+    this.backgroundFinalLimiter = null;
+    this.backgroundStabilizeEnabled = null;
+    this.backgroundLimiterEnabled = null;
   }
 
   // --- Video ---
@@ -1471,6 +1565,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
       const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
+      const masterVolumeFactor = this.clamp01(this.toFiniteNumber(config?.masterVolume, 100) / 100);
       const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
       
       let effectiveVideoVolume = mix.videoVolume ?? 1.0;
@@ -1483,7 +1578,7 @@ export class PodcasterPlaybackController extends EventEmitter {
         effectiveVideoVolume = 0;
       }
 
-      activeEl.volume = this.clamp01(masterClipVolume * effectiveVideoVolume);
+      activeEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * effectiveVideoVolume);
       activeEl.muted = activeEl.volume <= 0.0001;
       
       this.syncBackdrop(entry, activeSlot, targetOffsetSec);
@@ -1574,9 +1669,10 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         const config = this.deps?.getPodcastVideoConfig?.(this.state.session) || {};
         const masterClipVolume = Number(config.clipVolume ?? 100) / 100;
+        const masterVolumeFactor = this.clamp01(this.toFiniteNumber(config?.masterVolume, 100) / 100);
         const mix = this.deps?.resolveTimelineClipMix?.(this.state.session, entry.rowId) || { videoVolume: 1 };
         
-        inactiveEl.volume = this.clamp01(masterClipVolume * (mix.videoVolume ?? 1.0));
+        inactiveEl.volume = this.clamp01(masterClipVolume * masterVolumeFactor * (mix.videoVolume ?? 1.0));
         inactiveEl.muted = inactiveEl.volume <= 0.0001;
 
         this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
@@ -1817,7 +1913,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const audio = new Audio(audioSrc);
     audio.preload = "auto";
-    audio.volume = options.volume ?? 1.0;
+    audio.volume = this.clamp01(options.volume ?? 1.0);
     audio.playbackRate = options.playbackRate ?? 1.0;
     this.state.standaloneAudio = audio;
 
@@ -2459,10 +2555,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       const keepVideoAudioAudible = educationalMode || useNativeVideoAudio;
       const mix = resolveMix?.(activeSession, key) || { videoVolume: 1 };
       const masterClipVolume = Number(cfg.clipVolume ?? 100) / 100;
+      const masterVolumeFactor = this.clamp01(this.toFiniteNumber(cfg?.masterVolume, 100) / 100);
       const sceneAudioClip = resolveDialogueAudio?.(activeSession, key);
       const sceneAudioSrc = resolveUrl?.(sceneAudioClip?.downloadUrl || "", sceneAudioClip?.storagePath || "");
 
-      stageVideo.volume = Math.max(0, Math.min(1, masterClipVolume * (mix.videoVolume ?? 1.0)));
+      stageVideo.volume = Math.max(0, Math.min(1, masterClipVolume * masterVolumeFactor * (mix.videoVolume ?? 1.0)));
       stageVideo.muted = stageVideo.volume <= 0.0001;
       
       const logRender = this.deps?.logPodcastRenderDebug || window.logPodcastRenderDebug;

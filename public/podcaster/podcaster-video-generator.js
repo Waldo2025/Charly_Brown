@@ -313,8 +313,21 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const speakerLabel = String(row?.speaker || "").trim();
   const educationalMode = isEducationalVideoMode(session);
   const rowReferenceImages = getRowReferenceImageList(session, key);
-  const rowReferenceImage = rowReferenceImages[0] || getRowReferenceImageMap(session)[key] || null;
   const rowReferenceVideo = getRowReferenceVideoMap(session)[key] || null;
+  const speakerReferenceImage = typeof runtime.getSpeakerReferenceImageMap === "function"
+    ? (runtime.getSpeakerReferenceImageMap(session)[speakerLabel] || null)
+    : null;
+  const activeScenarioAsset = typeof runtime.resolveActiveGlobalScenarioAsset === "function"
+    ? (runtime.resolveActiveGlobalScenarioAsset(session) || null)
+    : null;
+  const scenarioReferenceImage = activeScenarioAsset && typeof runtime.getScenarioReferenceImageMap === "function"
+    ? (runtime.getScenarioReferenceImageMap(session)[String(activeScenarioAsset?.id || "").trim()] || null)
+    : null;
+  const fallbackReferenceImages = [speakerReferenceImage, scenarioReferenceImage].filter(Boolean);
+  const effectiveReferenceImages = rowReferenceImages.length || rowReferenceVideo
+    ? rowReferenceImages
+    : fallbackReferenceImages;
+  const rowReferenceImage = effectiveReferenceImages[0] || getRowReferenceImageMap(session)[key] || speakerReferenceImage || scenarioReferenceImage || null;
   const referenceMode = rowReferenceVideo ? "video" : "image";
   const pendingKey = `${sessionId}:${key}`;
 
@@ -404,9 +417,9 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       const sceneDescription = String(row?.sceneDescription || "").trim();
       const strictIdentity = !isVideoStyle && Boolean(portraitUrl || portraitStoragePath);
 
-      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(rowReferenceImages, rowReferenceVideo, continuityReferenceImageDataUrl);
+      const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget(effectiveReferenceImages, rowReferenceVideo, continuityReferenceImageDataUrl);
       const traceMeta = buildVisualReferenceTraceMeta({
-        referenceImages: rowReferenceImages,
+        referenceImages: effectiveReferenceImages,
         referenceVideo: rowReferenceVideo,
         continuityReferenceImageDataUrl,
         inlineReferenceBudget
@@ -457,7 +470,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         referenceMode,
         referenceImageDataUrls: inlineReferenceBudget.referenceImageDataUrls,
         referenceImageDataUrl: String(rowReferenceImage?.dataUrl || "").trim(),
-        referenceImageNames: rowReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
+        referenceImageNames: effectiveReferenceImages.map((item) => String(item?.name || "").trim()).filter(Boolean).slice(0, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT),
         referenceImageName: String(rowReferenceImage?.name || "").trim(),
         referenceVideoDataUrl: inlineReferenceBudget.referenceVideoDataUrl,
         referenceVideoName: String(rowReferenceVideo?.name || "").trim(),
@@ -611,7 +624,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         sessionId,
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
-        hasReferenceImage: rowReferenceImages.length > 0,
+        hasReferenceImage: effectiveReferenceImages.length > 0,
         hasReferenceVideo: Boolean(rowReferenceVideo)
       });
       updatePodcastPlayerUi();
@@ -697,7 +710,18 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     selectRow,
     shouldPromptDirective,
     hasExistingVideo: hasStoredMediaSource(resolveDialogueVideoForRow(session, key)),
-    hasReferenceImage: getRowReferenceImageList(session, key).length > 0,
+    hasReferenceImage: (getRowReferenceImageList(session, key).length > 0)
+      || Boolean((typeof runtime.getSpeakerReferenceImageMap === "function" ? runtime.getSpeakerReferenceImageMap(session)[String(row?.speaker || "").trim()] : null))
+      || (() => {
+        const activeScenarioAsset = typeof runtime.resolveActiveGlobalScenarioAsset === "function"
+          ? (runtime.resolveActiveGlobalScenarioAsset(session) || null)
+          : null;
+        return Boolean(
+          activeScenarioAsset
+          && typeof runtime.getScenarioReferenceImageMap === "function"
+          && runtime.getScenarioReferenceImageMap(session)[String(activeScenarioAsset?.id || "").trim()]
+        );
+      })(),
     hasReferenceVideo: Boolean(getRowReferenceVideoMap(session)[key] || null)
   });
 
@@ -709,7 +733,18 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
       generationKey,
       rowId: key,
       sceneNumber: resolveSceneNumberByRowId(key, session),
-      hasReferenceImage: getRowReferenceImageList(session, key).length > 0,
+      hasReferenceImage: (getRowReferenceImageList(session, key).length > 0)
+        || Boolean((typeof runtime.getSpeakerReferenceImageMap === "function" ? runtime.getSpeakerReferenceImageMap(session)[String(row?.speaker || "").trim()] : null))
+        || (() => {
+          const activeScenarioAsset = typeof runtime.resolveActiveGlobalScenarioAsset === "function"
+            ? (runtime.resolveActiveGlobalScenarioAsset(session) || null)
+            : null;
+          return Boolean(
+            activeScenarioAsset
+            && typeof runtime.getScenarioReferenceImageMap === "function"
+            && runtime.getScenarioReferenceImageMap(session)[String(activeScenarioAsset?.id || "").trim()]
+          );
+        })(),
       hasReferenceVideo: Boolean(getRowReferenceVideoMap(session)[key] || null)
     });
   }

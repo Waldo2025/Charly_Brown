@@ -3256,6 +3256,7 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
     montageVolume: Math.max(0, Math.min(100, Number(cfg?.montageVolume ?? 100) || 0)),
     duckingWhenGeminiPct: normalizeHomePanelMusicDuckingWhenGeminiPct(cfg?.duckingWhenGeminiPct ?? cfg?.duckingPct, 60),
     stabilize: cfg?.stabilize === true || String(cfg?.stabilize || "").trim().toLowerCase() === "true",
+    limiterEnabled: cfg?.limiterEnabled === true || String(cfg?.limiterEnabled || "").trim().toLowerCase() === "true",
     sourceType: String(cfg?.sourceType || "").trim() === "track" ? "track" : "preset",
     selectedTrackKind: resolveHomePanelMusicTrackKind(cfg?.selectedTrackKind || "uploaded"),
     trackLibrary: {
@@ -3330,6 +3331,7 @@ function buildHomePanelMontageMusicConfig(session = null, options = {}) {
     volume: normalized.montageVolume,
     duckingWhenGeminiPct: normalized.duckingWhenGeminiPct,
     stabilize: normalized.stabilize,
+    limiterEnabled: normalized.limiterEnabled,
     durationSec: Math.max(0, Number(activeTrack?.durationSec || 0) || 0),
     startOffsetMs: Math.max(0, Number(activeTrack?.startOffsetMs || 0) || 0),
     trimInMs: Math.max(0, Number(activeTrack?.trimInMs || 0) || 0),
@@ -3447,6 +3449,7 @@ function resolveTimelineClipMix(session = null, rowId = "") {
   if (!session) return { videoVolume: 1, voiceVolume: 1, backgroundVolume: 1 };
   const key = String(rowId || "").trim();
   const videoConfig = session.podcastVideoConfig || session.script?.podcastVideoConfig || {};
+  const geminiTrack = videoConfig?.geminiDialogueTrack || {};
   
   // Obtener clips (pueden estar en varias rutas según el origen de la sesión)
   const clipMap = session.timelineClipMap 
@@ -3458,7 +3461,7 @@ function resolveTimelineClipMix(session = null, rowId = "") {
   
   // Valores base por defecto
   const fallbackVeoPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultVeoVolumePct ?? 100)));
-  const fallbackGeminiPct = Math.max(0, Math.min(100, Number(videoConfig.montageDefaultGeminiVolumePct ?? 100)));
+  const fallbackGeminiPct = Math.max(0, Math.min(100, Number(geminiTrack?.volumePct ?? videoConfig.montageDefaultGeminiVolumePct ?? 100)));
   
   // Overrides específicos del clip (seteados en el modal de duración/volumen del Studio)
   const veoOverride = clip?.veoVolumeOverridePct;
@@ -3671,7 +3674,12 @@ const multimediaPlaybackDeps = {
           });
         }
       });
-      cfg.geminiDialogueTrack = { enabled: true, segments };
+      cfg.geminiDialogueTrack = { enabled: true, volumePct: 100, segments };
+    } else if (!Number.isFinite(Number(cfg.geminiDialogueTrack?.volumePct))) {
+      cfg.geminiDialogueTrack = {
+        ...cfg.geminiDialogueTrack,
+        volumePct: 100
+      };
     }
 
     if (!cfg.onScreenTextTrack) {

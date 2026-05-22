@@ -1073,7 +1073,7 @@ function buildMontageExportPayload(session = null) {
   const buildGeminiTimelineSegments = () => {
     const track = window.normalizeGeminiDialogueTrack(videoCfg?.geminiDialogueTrack || {});
     if (!(track.enabled === true) || !Array.isArray(track.segments) || !track.segments.length) return [];
-    const baseGeminiVolumePct = normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100);
+    const baseGeminiVolumePct = normalizeLegacyPct(track?.volumePct, normalizeLegacyPct(videoCfg?.montageDefaultGeminiVolumePct, 100));
     return track.segments
       .map((segment, idx) => {
         const rowId = String(segment?.rowId || "").trim();

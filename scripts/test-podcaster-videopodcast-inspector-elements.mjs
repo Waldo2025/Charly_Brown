@@ -25,9 +25,10 @@ if (!/\(panelCopy\.videoMode \|\| panelCopy\.videoPodcastMode\)\s*\?\s*`\s*<div 
   throw new Error("El inspector Snoopy debe mostrar la previsualización de referencia de fila tanto en videoMode como en videoPodcastMode.");
 }
 
-// 5. Verify that buildPodcastReferenceSectionsMarkup is rendered unconditionally in buildInspectorScriptRowMarkup
-if (!/\${buildPodcastReferenceSectionsMarkup\(session, speaker\)}/.test(editorSource)) {
-  throw new Error("El inspector Snoopy debe renderizar buildPodcastReferenceSectionsMarkup incondicionalmente para todos los modos.");
+// 5. Verify that buildPodcastReferenceSectionsMarkup is still rendered in podcast inspector mode
+if (!/const podcastReferenceSections = !isVideo\s*\?\s*buildPodcastReferenceSectionsMarkup\(session,\s*speaker\)\s*:\s*"";/.test(editorSource)
+  || !/\$\{podcastReferenceSections\}/.test(editorSource)) {
+  throw new Error("El inspector Snoopy debe seguir renderizando las referencias globales de locutor y escenario en modo podcast.");
 }
 
 // 6. Verify that row-chip-public is checked in both modes

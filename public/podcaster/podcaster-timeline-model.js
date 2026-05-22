@@ -437,6 +437,7 @@ function normalizeGeminiDialogueTrack(raw = {}) {
   ));
   return {
     enabled: raw?.enabled === true && segments.length > 0,
+    volumePct: Math.max(0, Math.min(100, Math.round(toFiniteNumber(raw?.volumePct, 100)))),
     updatedAt: String(raw?.updatedAt || "").trim(),
     segments: segments
       .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.sceneIndex || 0) - Number(b.sceneIndex || 0)),
@@ -726,6 +727,8 @@ function normalizePodcastVideoConfig(raw = {}) {
   const timelineViewMode = String(raw?.timelineViewMode || "").trim().toLowerCase();
   const masterVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.masterVolume, 100)));
   const clipVolume = Math.max(0, Math.min(100, toFiniteNumber(raw?.clipVolume, 100)));
+  const audioMasterStabilize = raw?.audioMasterStabilize === true;
+  const audioMasterLimiterEnabled = raw?.audioMasterLimiterEnabled === true;
   const normalizedAudioMode = audioMode === "veo-native-audio" ? "veo-native-audio" : "gemini-live-per-scene";
   const montageDefaultVeoVolumePct = Math.max(
     0,
@@ -790,6 +793,8 @@ function normalizePodcastVideoConfig(raw = {}) {
     audioMode: normalizedAudioMode,
     masterVolume,
     clipVolume,
+    audioMasterStabilize,
+    audioMasterLimiterEnabled,
     montageDefaultVeoVolumePct,
     montageDefaultGeminiVolumePct,
     playbackSpeed: Math.max(0.5, Math.min(2.0, toFiniteNumber(raw?.playbackSpeed, 1.0))),
@@ -1495,17 +1500,19 @@ function resolveTimelineClipMix(session = null, rowId = "") {
   ensureMontageDefaultVolumesPersisted(activeSession);
   const key = String(rowId || "").trim();
   const clip = key ? ensureTimelineClipsByRowId(activeSession, { persist: false })[key] : null;
+  const dialogueTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
   const masterPct = Math.max(0, Math.min(100, toFiniteNumber(cfg.masterVolume, 100)));
   const fallbackVeoPct = Math.max(
     0,
     Math.min(100, toFiniteNumber(cfg.montageDefaultVeoVolumePct, resolveEffectiveNativeVeoVolumePct(activeSession)))
   );
-  const fallbackGeminiPct = Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)));
+  const fallbackGeminiPct = Math.max(
+    0,
+    Math.min(100, toFiniteNumber(dialogueTrack?.volumePct, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, 100)))
+  );
   const veoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
   const geminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
   let veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
-
-  const dialogueTrack = cfg?.geminiDialogueTrack || { segments: [], enabled: true };
   const hasGeminiSegment = (dialogueTrack.enabled !== false) && (dialogueTrack.segments || []).some(s => String(s.rowId || "").trim() === key);
 
   if (hasGeminiSegment && !Number.isFinite(veoOverride)) {
@@ -1536,11 +1543,13 @@ function resolveTimelineClipVoiceVolume(session = null, rowId = "") {
   ensureMontageDefaultVolumesPersisted(activeSession);
   const key = String(rowId || "").trim();
   const clip = key ? ensureTimelineClipsByRowId(activeSession, { persist: false })[key] : null;
+  const dialogueTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
   const override = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
   const pct = Number.isFinite(override)
     ? Math.max(0, Math.min(100, Math.round(override)))
-    : Math.max(0, Math.min(100, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, toFiniteNumber(cfg.masterVolume, 100))));
-  return Math.max(0, Math.min(1, pct / 100));
+    : Math.max(0, Math.min(100, toFiniteNumber(dialogueTrack?.volumePct, toFiniteNumber(cfg.montageDefaultGeminiVolumePct, toFiniteNumber(cfg.masterVolume, 100)))));
+  const masterFactor = Math.max(0, Math.min(1, toFiniteNumber(cfg.masterVolume, 100) / 100));
+  return Math.max(0, Math.min(1, (pct / 100) * masterFactor));
 }
 
 function getTimelineClipRestoreTarget(clip = null) {

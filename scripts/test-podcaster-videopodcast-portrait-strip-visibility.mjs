@@ -85,6 +85,7 @@ vm.createContext(context);
   "getPanelModeCopy",
   "isEducationalVideoMode",
   "isVideoPodcastMode",
+  "getPodcastPortraitStripHosts",
   "renderPodcastPortraitStrip"
 ].forEach((name) => {
   vm.runInContext(`${extractFunction(name)};`, context);
@@ -129,6 +130,7 @@ context.activeSession = videoSession;
 
 // Mock the rest of dependencies called if it doesn't early return
 context.getSpeakerOptions = () => [];
+context.getSessionRows = () => [];
 context.getGlobalScenarioDeck = () => ({ items: [], activeId: null });
 context.collectGlobalSpeakerDraft = () => ({});
 context.getSpeakerVoiceMap = () => ({});

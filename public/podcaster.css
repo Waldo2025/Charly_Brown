@@ -219,6 +219,7 @@ body.is-resizing-podcast-stage {
 .podcaster-shell,
 .podcaster-layout {
   height: 100%;
+  min-height: 0;
 }
 
 .podcaster-layout {
@@ -234,6 +235,7 @@ body.is-resizing-podcast-stage {
 
 .sessions-rail {
   height: 100%;
+  min-height: 0;
   border-right: 1px solid var(--pod-border);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--pod-surface) 86%, white 14%) 0%, color-mix(in srgb, var(--pod-surface-2) 92%, white 8%) 100%);
@@ -241,6 +243,7 @@ body.is-resizing-podcast-stage {
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 344px;
   padding: 20px 18px;
+  overflow: hidden;
 }
 
 .sessions-rail-header {
@@ -513,7 +516,7 @@ body.is-resizing-podcast-stage {
   min-height: 0;
   max-height: 100%;
   overflow: auto;
-  padding: 24px 0 168px;
+  padding: 24px 0 70vh !important;
   display: grid;
   gap: 10px;
   align-content: start;
@@ -738,14 +741,9 @@ body.is-resizing-podcast-stage {
 }
 
 .composer-shell {
+  position: fixed;
   bottom: 0;
   z-index: 5;
-  background: linear-gradient(180deg,
-      rgba(248, 250, 252, 0) 0%,
-      rgba(248, 250, 252, 0.85) 25%,
-      rgba(248, 250, 252, 1) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   padding: 4px 24px 12px;
   transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -844,7 +842,7 @@ body.is-resizing-podcast-stage {
 .prompt-form {
   width: min(880px, 100%);
   margin: 0 auto;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgb(255, 255, 255);
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 20px;
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.03);
@@ -874,7 +872,7 @@ body.is-resizing-podcast-stage {
 .composer-switches-wrapper {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-left: auto;
@@ -923,8 +921,8 @@ body.is-resizing-podcast-stage {
 .composer-mode-switch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 3px 8px;
   border: 1px solid var(--pod-border);
   border-radius: 999px;
   background: var(--pod-surface-2);
@@ -944,7 +942,7 @@ body.is-resizing-podcast-stage {
 }
 
 .composer-mode-label {
-  font-size: 10px !important;
+  font-size: 9px !important;
   color: var(--pod-muted);
   font-weight: 500;
   line-height: 1;
@@ -966,7 +964,7 @@ body.is-resizing-podcast-stage {
   color: var(--pod-accent);
   opacity: 1;
   font-weight: 600;
-  font-size: 10px !important;
+  font-size: 9px !important;
 }
 
 .composer-switch {
@@ -983,8 +981,8 @@ body.is-resizing-podcast-stage {
 
 .composer-switch-track {
   position: relative;
-  width: 24px;
-  height: 12px;
+  width: 20px;
+  height: 10px;
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.5);
   transition: background .2s ease;
@@ -993,9 +991,9 @@ body.is-resizing-podcast-stage {
 .composer-switch-thumb {
   position: absolute;
   top: 0px;
-  left: -4px;
-  width: 12px;
-  height: 12px;
+  left: -3px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.28);
@@ -1007,7 +1005,7 @@ body.is-resizing-podcast-stage {
 }
 
 .composer-switch input:checked+.composer-switch-track .composer-switch-thumb {
-  transform: translateX(20px);
+  transform: translateX(16px);
 }
 
 .composer-chip.is-busy {
@@ -4782,6 +4780,10 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   z-index: 2147483647;
 }
 
+#geminiTrackVolumeModal.floating-panel-modal {
+  z-index: 2147483647;
+}
+
 .podcast-audio-timeline-chip {
   position: absolute;
   top: 10px;
@@ -6290,11 +6292,11 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-portrait-strip {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 280px);
-  gap: 8px;
+  grid-auto-columns: minmax(190px, 228px);
+  gap: 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 2px;
+  padding-bottom: 1px;
   scrollbar-width: none;
 }
 
@@ -6305,21 +6307,21 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .podcast-portrait-card {
   border: 1px solid var(--pod-border);
-  border-radius: 12px;
-  padding: 7px;
+  border-radius: 10px;
+  padding: 6px;
   background: color-mix(in srgb, var(--pod-surface) 90%, #0f172a 10%);
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .podcast-scenario-card {
   border: 1px solid var(--pod-border);
-  border-radius: 12px;
-  padding: 7px;
+  border-radius: 10px;
+  padding: 6px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--pod-surface) 86%, #0f172a 14%), color-mix(in srgb, var(--pod-surface-2) 82%, #062c30 18%));
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -6345,8 +6347,8 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .podcast-portrait-image-wrap {
   width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 10px;
+  aspect-ratio: 16 / 9.4;
+  border-radius: 8px;
   overflow: hidden;
   background: color-mix(in srgb, var(--pod-surface-2) 78%, #0b1020 22%);
   border: 0;
@@ -6372,16 +6374,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-family: "Font Awesome 5 Free";
   font-weight: 900;
   position: absolute;
-  right: 10px;
-  bottom: 10px;
-  width: 32px;
-  height: 32px;
+  right: 8px;
+  bottom: 8px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   display: grid;
   place-items: center;
   background: rgba(15, 23, 42, 0.72);
   color: #f8fafc;
-  font-size: 13px;
+  font-size: 11px;
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 140ms ease, transform 140ms ease;
@@ -6397,8 +6399,8 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-scenario-visual {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 10px;
+  aspect-ratio: 16 / 9.4;
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, #0f766e 26%, var(--pod-border) 74%);
 }
@@ -6406,12 +6408,12 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-scenario-card.is-generating .podcast-scenario-visual::after {
   content: "Generando con Gemini...";
   position: absolute;
-  inset: auto 10px 44px 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  inset: auto 8px 36px 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.72);
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.01em;
   z-index: 2;
@@ -6430,17 +6432,17 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .podcast-scenario-visual-copy {
   position: absolute;
-  inset: auto 10px 10px 10px;
+  inset: auto 8px 8px 8px;
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: 5px 8px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.68);
   backdrop-filter: blur(8px);
 }
 
 .podcast-scenario-visual-copy span {
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(226, 232, 240, 0.84);
@@ -6449,13 +6451,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-scenario-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .podcast-portrait-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -6470,9 +6472,9 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .podcast-scenario-prompt {
   border-top: 1px solid color-mix(in srgb, var(--pod-border) 72%, transparent 28%);
-  padding-top: 8px;
-  font-size: 12px;
-  line-height: 1.35;
+  padding-top: 6px;
+  font-size: 10px;
+  line-height: 1.3;
   color: var(--pod-muted);
   white-space: pre-wrap;
 }
@@ -6482,7 +6484,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   height: 100%;
   display: grid;
   place-items: center;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: color-mix(in srgb, var(--pod-accent) 74%, var(--pod-text) 26%);
 }
@@ -6491,22 +6493,22 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .podcast-portrait-copy {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .podcast-portrait-meta strong {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.2;
 }
 
 .podcast-portrait-copy span {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--pod-muted);
   line-height: 1.1;
 }
@@ -6514,7 +6516,12 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .podcast-portrait-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
+}
+
+#podcastPortraitStrip .row-chip {
+  padding: 3px 7px;
+  font-size: 9px;
 }
 
 .podcast-portrait-viewer {
@@ -8013,18 +8020,20 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .session-card-header.has-pending-proposal .session-menu-btn:hover {
   background: rgba(120, 53, 15, 0.06);
   color: #78350f;
+    border-top-width: medium;
 }
 
 .session-card-header.has-reviewed-proposals {
   background: transparent;
   border-color: #10b981;
   color: #065f46;
+    border-top-width: medium;
 }
 
 .session-card-header.has-reviewed-proposals strong,
 .session-card-header.has-reviewed-proposals .session-card-folder-icon,
 .session-card-header.has-reviewed-proposals .session-menu-btn {
-  color: #065f46;
+  font-size: 11px !important;
 }
 
 .session-card-header.has-reviewed-proposals .session-menu-btn:hover {
@@ -8630,7 +8639,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .pme-modal-overlay h4,
 .pme-modal-overlay h5,
 .pme-modal-overlay h6 {
-  font-size: 13px !important;
+  font-size: 10px !important;
 }
 
 .podcaster-app td,
@@ -8757,5 +8766,3 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .pme-modal-overlay a {
   font-size: 10px !important;
 }
-
-

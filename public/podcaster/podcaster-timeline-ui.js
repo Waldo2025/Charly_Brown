@@ -400,7 +400,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (alignMode === "segment") {
           const segment = currentGeminiSegmentByRowId.get(rowId) || null;
           if (!segment) return;
-          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+          const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession));
           const durationMs = resolveGeminiSegmentVisibleDurationMs(segment);
           const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(durationMs, activeSession) - 4);
           chip.style.left = `${leftPx}px`;
@@ -821,7 +821,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const startMs = alignMode === "segment"
           ? Math.max(0, Number(segment?.startMs || 0) || 0)
           : Math.max(0, Number(timelineClip?.startMs || 0) || 0);
-        const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const leftPx = Math.max(0, timelineMsToPx(startMs, activeSession));
         const remainingWidthPx = Math.max(0, canvasWidthPx - 4 - leftPx);
         const speakerLabel = resolveSpeakerDisplayName(String(row?.speaker || "").trim(), activeSession);
         const sceneIndex = Math.max(
@@ -848,9 +848,17 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       }).join("");
       if (!chipsHtml) return "";
       const laneId = `montage-audio:${trackId}`;
+      const geminiTrackVolumePct = Math.max(0, Math.min(100, Number(montageGeminiTrack?.volumePct ?? 100)));
       return `
         <section class="podcast-video-track-row podcast-montage-audio-subtrack-row" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
-          <div class="podcast-video-track-label is-subtrack"><span>${escapeHtml(laneLabel)}</span></div>
+          <div class="podcast-video-track-label is-subtrack">
+            <span>${escapeHtml(laneLabel)}</span>
+            <div class="podcast-track-label-actions">
+              <button class="row-icon-btn" type="button" data-action="timeline-set-gemini-track-volume" title="${escapeHtml(`Volumen general Gemini: ${Math.round(geminiTrackVolumePct)}%`)}" aria-label="${escapeHtml(`Volumen general Gemini ${Math.round(geminiTrackVolumePct)} por ciento`)}">
+                <i class="fas fa-volume-up" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
           <div class="podcast-video-track-lane podcast-montage-audio-lane" data-track-id="${escapeHtml(laneId)}" data-track-index="-1">
             ${chipsHtml}
           </div>

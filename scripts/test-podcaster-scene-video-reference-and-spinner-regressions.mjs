@@ -19,8 +19,8 @@ if (!/const referenceMode = rowReferenceVideo \? "video" : "image";/.test(genera
   throw new Error("La generación de video debe decidir entre referencia de imagen o video.");
 }
 
-if (!/const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget\(rowReferenceImages, rowReferenceVideo, continuityReferenceImageDataUrl\);/.test(generatorSource)) {
-  throw new Error("El presupuesto inline debe incluir el video de referencia cuando exista.");
+if (!/const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget\(effectiveReferenceImages,\s*rowReferenceVideo,\s*continuityReferenceImageDataUrl\);/.test(generatorSource)) {
+  throw new Error("El presupuesto inline debe incluir las referencias efectivas de imagen y el video de referencia cuando existan.");
 }
 
 if (!/referenceMode,/.test(generatorSource)) {
@@ -31,8 +31,8 @@ if (!/referenceImageDataUrls:\s*inlineReferenceBudget\.referenceImageDataUrls,/.
   throw new Error("El request body debe incluir las imágenes de referencia inline.");
 }
 
-if (!/referenceImageNames:\s*rowReferenceImages\.map\(\(item\) => String\(item\?\.name \|\| ""\)\.trim\(\)\)\.filter\(Boolean\)\.slice\(0,\s*DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT\),/.test(generatorSource)) {
-  throw new Error("El request body debe incluir los nombres de las imágenes de referencia.");
+if (!/referenceImageNames:\s*effectiveReferenceImages\.map\(\(item\) => String\(item\?\.name \|\| ""\)\.trim\(\)\)\.filter\(Boolean\)\.slice\(0,\s*DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT\),/.test(generatorSource)) {
+  throw new Error("El request body debe incluir los nombres de las imágenes de referencia efectivas.");
 }
 
 if (!/referenceVideoDataUrl:\s*inlineReferenceBudget\.referenceVideoDataUrl,/.test(generatorSource)) {

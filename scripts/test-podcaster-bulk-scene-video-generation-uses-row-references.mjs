@@ -21,16 +21,16 @@ if (!/const rowReferenceImages = getRowReferenceImageList\(session, key\);/.test
   throw new Error("La generación por escena debe cargar las imágenes de referencia usando el rowId activo.");
 }
 
-if (!/const rowReferenceImage = rowReferenceImages\[0\] \|\| getRowReferenceImageMap\(session\)\[key\] \|\| null;/.test(source)) {
-  throw new Error("La generación por escena debe resolver la imagen principal de referencia usando el rowId activo.");
+if (!/const rowReferenceImage = effectiveReferenceImages\[0\] \|\| getRowReferenceImageMap\(session\)\[key\] \|\| speakerReferenceImage \|\| scenarioReferenceImage \|\| null;/.test(source)) {
+  throw new Error("La generación por escena debe resolver la imagen principal de referencia con fallback por fila, locutor y escenario.");
 }
 
 if (!/referenceImageDataUrl: String\(rowReferenceImage\?\.dataUrl \|\| ""\)\.trim\(\),/.test(source)) {
   throw new Error("El payload debe incluir la imagen principal de referencia de esa escena.");
 }
 
-if (!/referenceImageNames: rowReferenceImages\.map\(\(item\) => String\(item\?\.name \|\| ""\)\.trim\(\)\)\.filter\(Boolean\)\.slice\(0,\s*DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT\),/.test(source)) {
-  throw new Error("El payload debe incluir los nombres de las referencias de esa escena.");
+if (!/referenceImageNames: effectiveReferenceImages\.map\(\(item\) => String\(item\?\.name \|\| ""\)\.trim\(\)\)\.filter\(Boolean\)\.slice\(0,\s*DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT\),/.test(source)) {
+  throw new Error("El payload debe incluir los nombres de las referencias efectivas de esa escena.");
 }
 
 console.log("Podcaster bulk scene video generation uses row references OK.");

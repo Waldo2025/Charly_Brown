@@ -1,3 +1,9 @@
+import {
+  buildPodcasterLocalMediaKey,
+  getPodcasterLocalMediaDataUrl,
+  putPodcasterLocalMediaDataUrl
+} from "./podcaster-local-media-cache.js";
+
 let latestPodcasterMediaReferenceApi = null;
 
 export function createPodcasterMediaReferenceApi(deps = {}) {
@@ -5,6 +11,14 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   const getActiveSession = () => deps.getActiveSession?.() || null;
   const nowIso = () => deps.nowIso?.() || new Date().toISOString();
   let pendingRowReferenceSelectionRowId = "";
+
+  function buildReferenceMediaCacheKey(scope = "", id = "", mediaKind = "image") {
+    const sessionId = String(getActiveSession()?.id || "").trim() || "session";
+    const cleanScope = String(scope || "").trim() || "reference";
+    const cleanId = String(id || "").trim() || `${Date.now()}`;
+    const cleanKind = String(mediaKind || "").trim() || "image";
+    return buildPodcasterLocalMediaKey(`podcaster:${sessionId}:${cleanScope}:${cleanKind}`, cleanId);
+  }
 
   function compressImageToDataUrl(file, maxWidth = 800, maxHeight = 800, quality = 0.7) {
     return new Promise((resolve, reject) => {
@@ -86,10 +100,19 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       name: String(file.name || "Referencia").trim() || "Referencia",
       dataUrl,
       mimeType: String(dataUrl.match(/^data:([^;,]+)/i)?.[1] || file.type || "image/jpeg").trim().toLowerCase() || "image/jpeg",
-      updatedAt: nowIso()
+      updatedAt: nowIso(),
+      localMediaCacheKey: buildReferenceMediaCacheKey("temp", file.name, "image")
     });
     if (!normalized) {
       throw new Error("La imagen de referencia es demasiado grande o no es válida.");
+    }
+    try {
+      await putPodcasterLocalMediaDataUrl(normalized.localMediaCacheKey, normalized.dataUrl, {
+        mimeType: normalized.mimeType,
+        name: normalized.name
+      });
+    } catch (_) {
+      // noop
     }
     return normalized;
   }
@@ -114,9 +137,18 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       name: String(file.name || "Referencia de video").trim() || "Referencia de video",
       dataUrl,
       mimeType: String(file.type || "video/mp4").trim().toLowerCase() || "video/mp4",
-      updatedAt: nowIso()
+      updatedAt: nowIso(),
+      localMediaCacheKey: buildReferenceMediaCacheKey("temp", file.name, "video")
     });
     if (!normalized) throw new Error("El video de referencia es demasiado grande o no es válido.");
+    try {
+      await putPodcasterLocalMediaDataUrl(normalized.localMediaCacheKey, normalized.dataUrl, {
+        mimeType: normalized.mimeType,
+        name: normalized.name
+      });
+    } catch (_) {
+      // noop
+    }
     return normalized;
   }
 
@@ -125,7 +157,10 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     const normalized = deps.buildImageReferenceRecordFromMedia?.(raw, "Referencia") || null;
     if (!normalized) return null;
     if (normalized.dataUrl && normalized.dataUrl.length > deps.MAX_LOCAL_REFERENCE_IMAGE_DATA_URL_CHARS) return null;
-    return normalized;
+    return {
+      ...normalized,
+      localMediaCacheKey: String(raw.localMediaCacheKey || normalized.localMediaCacheKey || "").trim()
+    };
   }
 
   function normalizeReferenceImageList(value = null, maxItems = 4) {
@@ -181,8 +216,85 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       storagePath,
       mimeType,
       type: explicitType || null,
-      updatedAt: String(raw.updatedAt || nowIso()).trim() || nowIso()
+      updatedAt: String(raw.updatedAt || nowIso()).trim() || nowIso(),
+      localMediaCacheKey: String(raw.localMediaCacheKey || "").trim()
     };
+  }
+
+  async function persistReferenceMediaRecord(reference = null, options = {}) {
+    const normalized = options.kind === "video"
+      ? normalizeReferenceVideoRecord(reference)
+      : normalizeReferenceImageRecord(reference);
+    const dataUrl = String(normalized?.dataUrl || "").trim();
+    if (!normalized || !dataUrl.startsWith("data:")) return normalized;
+    const cacheKey = String(
+      normalized.localMediaCacheKey
+      || buildReferenceMediaCacheKey(options.scope, options.id || normalized.name, options.kind || "image")
+    ).trim();
+    try {
+      await putPodcasterLocalMediaDataUrl(cacheKey, dataUrl, {
+        mimeType: normalized.mimeType,
+        name: normalized.name
+      });
+      return {
+        ...normalized,
+        localMediaCacheKey: cacheKey
+      };
+    } catch (_) {
+      return normalized;
+    }
+  }
+
+  async function hydrateReferenceRecord(reference = null, kind = "image") {
+    const normalized = kind === "video"
+      ? normalizeReferenceVideoRecord(reference)
+      : normalizeReferenceImageRecord(reference);
+    if (!normalized) return null;
+    if (String(normalized.dataUrl || "").trim()) return normalized;
+    const cacheKey = String(normalized.localMediaCacheKey || "").trim();
+    if (!cacheKey) return normalized;
+    try {
+      const dataUrl = await getPodcasterLocalMediaDataUrl(cacheKey);
+      return dataUrl ? { ...normalized, dataUrl } : normalized;
+    } catch (_) {
+      return normalized;
+    }
+  }
+
+  async function hydrateSessionReferenceMedia(session = null) {
+    const activeSession = session || getActiveSession();
+    if (!activeSession || typeof activeSession !== "object") return false;
+    let changed = false;
+    const hydrateMap = async (source = {}, kind = "image") => {
+      const next = {};
+      const entries = Object.entries(source && typeof source === "object" ? source : {});
+      for (const [key, value] of entries) {
+        const hydrated = await hydrateReferenceRecord(value, kind);
+        next[key] = hydrated;
+        if (String(value?.dataUrl || "").trim() !== String(hydrated?.dataUrl || "").trim()) changed = true;
+      }
+      return next;
+    };
+    const hydrateListMap = async (source = {}) => {
+      const next = {};
+      const entries = Object.entries(source && typeof source === "object" ? source : {});
+      for (const [key, value] of entries) {
+        const list = Array.isArray(value) ? value : [];
+        const hydratedList = [];
+        for (const item of list) {
+          hydratedList.push(await hydrateReferenceRecord(item, "image"));
+        }
+        next[key] = hydratedList.filter(Boolean);
+        if (JSON.stringify(list.map((item) => String(item?.dataUrl || ""))) !== JSON.stringify(hydratedList.map((item) => String(item?.dataUrl || "")))) changed = true;
+      }
+      return next;
+    };
+    activeSession.speakerReferenceImageMap = await hydrateMap(activeSession.speakerReferenceImageMap, "image");
+    activeSession.scenarioReferenceImageMap = await hydrateMap(activeSession.scenarioReferenceImageMap, "image");
+    activeSession.rowReferenceImageMap = await hydrateMap(activeSession.rowReferenceImageMap, "image");
+    activeSession.rowReferenceImageListMap = await hydrateListMap(activeSession.rowReferenceImageListMap);
+    activeSession.rowReferenceVideoMap = await hydrateMap(activeSession.rowReferenceVideoMap, "video");
+    return changed;
   }
 
   function normalizeReferenceVideoMap(raw = {}) {
@@ -327,15 +439,21 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     if (!String(cloudMeta?.savedAt || "").trim() && !String(cloudMeta?.ownerId || "").trim()) {
       return { ok: false, skipped: true, reason: "local-only-session" };
     }
+    const stripInlineMap = (value = {}) => Object.fromEntries(
+      Object.entries(value && typeof value === "object" ? value : {}).map(([key, item]) => [key, item && typeof item === "object" ? { ...item, dataUrl: "" } : item])
+    );
+    const stripInlineListMap = (value = {}) => Object.fromEntries(
+      Object.entries(value && typeof value === "object" ? value : {}).map(([key, list]) => [key, Array.isArray(list) ? list.map((item) => item && typeof item === "object" ? { ...item, dataUrl: "" } : item) : []])
+    );
     const sessionRef = deps.doc?.(deps.firestoreDb, "podcaster_sessions", sessionId);
     const sessionUpdatedAt = String(activeSession?.updatedAt || nowIso()).trim() || nowIso();
     const updatePayload = {
       sessionUpdatedAt,
       updatedAt: deps.serverTimestamp?.(),
       "session.updatedAt": sessionUpdatedAt,
-      "session.rowReferenceImageMap": getRowReferenceImageMap(activeSession),
-      "session.rowReferenceImageListMap": getRowReferenceImageListMap(activeSession),
-      "session.rowReferenceVideoMap": getRowReferenceVideoMap(activeSession),
+      "session.rowReferenceImageMap": stripInlineMap(getRowReferenceImageMap(activeSession)),
+      "session.rowReferenceImageListMap": stripInlineListMap(getRowReferenceImageListMap(activeSession)),
+      "session.rowReferenceVideoMap": stripInlineMap(getRowReferenceVideoMap(activeSession)),
       "session.rowReferenceModeByRowId": getRowReferenceModeByRowId(activeSession)
     };
     try {
@@ -371,10 +489,10 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     }
   }
 
-  function setSpeakerReferenceImage(speaker = "", reference = null) {
+  async function setSpeakerReferenceImage(speaker = "", reference = null) {
     const key = deps.normalizeSpeakerLabel?.(speaker, "") || "";
     if (!key) return false;
-    const normalized = normalizeReferenceImageRecord(reference);
+    const normalized = await persistReferenceMediaRecord(reference, { scope: "speaker", id: key, kind: "image" });
     deps.upsertActiveSession?.((current) => {
       const nextMap = { ...getSpeakerReferenceImageMap(current) };
       if (normalized) nextMap[key] = normalized;
@@ -387,10 +505,10 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     return true;
   }
 
-  function setScenarioReferenceImage(scenarioId = "", reference = null) {
+  async function setScenarioReferenceImage(scenarioId = "", reference = null) {
     const key = String(scenarioId || "").trim();
     if (!key) return false;
-    const normalized = normalizeReferenceImageRecord(reference);
+    const normalized = await persistReferenceMediaRecord(reference, { scope: "scenario", id: key, kind: "image" });
     deps.upsertActiveSession?.((current) => {
       const nextMap = { ...getScenarioReferenceImageMap(current) };
       if (normalized) nextMap[key] = normalized;
@@ -407,11 +525,16 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     return setRowReferenceImages(rowId, reference ? [reference] : []);
   }
 
-  function setRowReferenceImages(rowId = "", references = []) {
+  async function setRowReferenceImages(rowId = "", references = []) {
     const key = String(rowId || "").trim();
     if (!key) return false;
-    const normalizedList = normalizeReferenceImageList(references, 4);
-    const primary = normalizedList[0] || null;
+    const normalizedList = [];
+    for (let index = 0; index < (Array.isArray(references) ? references.length : 0); index += 1) {
+      const normalized = await persistReferenceMediaRecord(references[index], { scope: "row-image", id: `${key}:${index}`, kind: "image" });
+      if (normalized) normalizedList.push(normalized);
+    }
+    const limitedList = normalizeReferenceImageList(normalizedList, 4);
+    const primary = limitedList[0] || null;
     deps.upsertActiveSession?.((current) => {
       const {
         nextImageMap,
@@ -421,9 +544,9 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
       } = buildMutableRowReferenceState(current);
       if (primary) nextImageMap[key] = primary;
       else delete nextImageMap[key];
-      if (normalizedList.length) nextListMap[key] = normalizedList;
+      if (limitedList.length) nextListMap[key] = limitedList;
       else delete nextListMap[key];
-      if (normalizedList.length) {
+      if (limitedList.length) {
         delete nextVideoMap[key];
         nextModeMap[key] = "image";
       } else if (nextModeMap[key] === "image") {
@@ -447,10 +570,10 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     return true;
   }
 
-  function setRowReferenceVideo(rowId = "", reference = null) {
+  async function setRowReferenceVideo(rowId = "", reference = null) {
     const key = String(rowId || "").trim();
     if (!key) return false;
-    const normalized = normalizeReferenceVideoRecord(reference);
+    const normalized = await persistReferenceMediaRecord(reference, { scope: "row-video", id: key, kind: "video" });
     deps.upsertActiveSession?.((current) => {
       const {
         nextImageMap,
@@ -523,8 +646,8 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   function clearRowReference(rowId = "") {
     const key = String(rowId || "").trim();
     if (!key) return false;
-    setRowReferenceImage(key, null);
-    setRowReferenceVideo(key, null);
+    void setRowReferenceImage(key, null);
+    void setRowReferenceVideo(key, null);
     return true;
   }
 
@@ -540,7 +663,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
         if (!speaker || !file) return;
         try {
           const reference = await readImageReferenceFromFile(file);
-          setSpeakerReferenceImage(speaker, reference);
+          await setSpeakerReferenceImage(speaker, reference);
           window.setGenerationStatus?.(`Referencia actualizada para ${deps.resolveSpeakerDisplayName?.(speaker, getActiveSession())}`, "is-live");
         } catch (error) {
           window.addChatMessage?.("system", `No se pudo adjuntar referencia para ${deps.resolveSpeakerDisplayName?.(speaker, getActiveSession())} (${error.message}).`);
@@ -557,7 +680,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
         if (!scenarioId || !file) return;
         try {
           const reference = await readImageReferenceFromFile(file);
-          setScenarioReferenceImage(scenarioId, reference);
+          await setScenarioReferenceImage(scenarioId, reference);
           window.setGenerationStatus?.("Referencia de escenario actualizada", "is-live");
         } catch (error) {
           window.addChatMessage?.("system", `No se pudo adjuntar referencia de escenario (${error.message}).`);
@@ -585,11 +708,11 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
           }
           if (files.length === 1 && isLikelyVideoReferenceFile(file)) {
             const reference = await readVideoReferenceFromFile(file);
-            setRowReferenceVideo(rowId, reference);
+            await setRowReferenceVideo(rowId, reference);
             window.setGenerationStatus?.(`Video de referencia actualizado para escena ${deps.resolveSceneNumberByRowId?.(rowId, getActiveSession())}`, "is-live");
           } else {
             const references = await Promise.all(files.map((item) => readImageReferenceFromFile(item)));
-            setRowReferenceImages(rowId, references);
+            await setRowReferenceImages(rowId, references);
             window.setGenerationStatus?.(
               references.length > 1
                 ? `${references.length} referencias actualizadas para escena ${deps.resolveSceneNumberByRowId?.(rowId, getActiveSession())}`
@@ -624,6 +747,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     getRowReferenceModeByRowId,
     resolveRowReferenceAsset,
     resolveReferenceImagePreviewUrl,
+    hydrateSessionReferenceMedia,
     persistRowReferencesPatchToCloud,
     persistRowReferencesToCloud,
     setSpeakerReferenceImage,

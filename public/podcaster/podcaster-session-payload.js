@@ -27,6 +27,27 @@ function resolvePanelMusicPayloadSourceDurationMs(track = null) {
   return Math.max(durationFromSec, durationFromTrim, durationFromLoops);
 }
 
+function stripInlineMediaRecord(record = null) {
+  if (!record || typeof record !== "object") return record;
+  return {
+    ...record,
+    dataUrl: "",
+    localDataUrl: ""
+  };
+}
+
+function stripInlineMediaRecordMap(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, item]) => [key, stripInlineMediaRecord(item)])
+  );
+}
+
+function stripInlineMediaRecordListMap(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value && typeof value === "object" ? value : {}).map(([key, list]) => [key, Array.isArray(list) ? list.map((item) => stripInlineMediaRecord(item)) : []])
+  );
+}
+
 export function buildCloudSessionPayload(source = null, panelMusicState = {}, chatState = [], deps = {}) {
   if (!source || typeof source !== "object") return null;
 
@@ -147,9 +168,10 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     panelMusicConfig: {
       preset: String(panelMusicConfig.preset || "ambient"),
       volume: Math.max(0, Math.min(100, Number(panelMusicConfig.volume) || 0)),
-      montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? 0))),
+      montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.montageVolume ?? panelMusicConfig.volume ?? 0))),
       duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.duckingWhenGeminiPct ?? 60))),
       stabilize: panelMusicConfig.stabilize === true,
+      limiterEnabled: panelMusicConfig.limiterEnabled === true,
       sourceType: panelMusicConfig.sourceType === "track" ? "track" : "preset",
       selectedTrackKind: resolvePanelMusicTrackKind?.(panelMusicConfig.selectedTrackKind) || "preset",
       trackLibrary: {
@@ -179,7 +201,10 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             downloadUrl: String(panelMusicConfig.trackLibrary.uploaded.downloadUrl || "").trim(),
             storagePath: String(panelMusicConfig.trackLibrary.uploaded.storagePath || "").trim(),
             updatedAt: String(panelMusicConfig.trackLibrary.uploaded.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
-            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.trackLibrary.uploaded.mutedLoopIndexes || []) || []
+            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.trackLibrary.uploaded.mutedLoopIndexes || []) || [],
+            montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.trackLibrary.uploaded.montageVolume ?? 100))),
+            duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.trackLibrary.uploaded.duckingWhenGeminiPct ?? 60))),
+            stabilize: panelMusicConfig.trackLibrary.uploaded.stabilize === true
           }
           : null,
         uploadedTracks: Array.isArray(panelMusicConfig.trackLibrary?.uploadedTracks)
@@ -208,7 +233,10 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             downloadUrl: String(track?.downloadUrl || "").trim(),
             storagePath: String(track?.storagePath || "").trim(),
             updatedAt: String(track?.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
-            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(track?.mutedLoopIndexes || []) || []
+            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(track?.mutedLoopIndexes || []) || [],
+            montageVolume: Math.max(0, Math.min(100, Number(track?.montageVolume ?? 100))),
+            duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(track?.duckingWhenGeminiPct ?? 60))),
+            stabilize: track?.stabilize === true
           })).filter((track) => track.downloadUrl || track.storagePath || track.name)
           : [],
         ai: panelMusicConfig.trackLibrary?.ai
@@ -236,7 +264,10 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
             updatedAt: String(panelMusicConfig.trackLibrary.ai.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
             model: String(panelMusicConfig.trackLibrary.ai.model || "").trim(),
             prompt: String(panelMusicConfig.trackLibrary.ai.prompt || "").trim(),
-            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.trackLibrary.ai.mutedLoopIndexes || []) || []
+            mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.trackLibrary.ai.mutedLoopIndexes || []) || [],
+            montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.trackLibrary.ai.montageVolume ?? 100))),
+            duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.trackLibrary.ai.duckingWhenGeminiPct ?? 60))),
+            stabilize: panelMusicConfig.trackLibrary.ai.stabilize === true
           }
           : null
       },
@@ -267,16 +298,19 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
           updatedAt: String(panelMusicConfig.track.updatedAt || nowIso?.() || new Date().toISOString()).trim(),
           model: String(panelMusicConfig.track.model || "").trim(),
           prompt: String(panelMusicConfig.track.prompt || "").trim(),
-          mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.track.mutedLoopIndexes || []) || []
+          mutedLoopIndexes: normalizePanelMusicMutedLoopIndexes?.(panelMusicConfig.track.mutedLoopIndexes || []) || [],
+          montageVolume: Math.max(0, Math.min(100, Number(panelMusicConfig.track.montageVolume ?? 100))),
+          duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusicConfig.track.duckingWhenGeminiPct ?? 60))),
+          stabilize: panelMusicConfig.track.stabilize === true
         }
         : null
     },
     speakerPortraitMap: getSpeakerPortraitMap?.(source) || {},
-    speakerReferenceImageMap: getSpeakerReferenceImageMap?.(source) || {},
-    scenarioReferenceImageMap: getScenarioReferenceImageMap?.(source) || {},
-    rowReferenceImageListMap: getRowReferenceImageListMap?.(source) || {},
-    rowReferenceImageMap: getRowReferenceImageMap?.(source) || {},
-    rowReferenceVideoMap: getRowReferenceVideoMap?.(source) || {},
+    speakerReferenceImageMap: stripInlineMediaRecordMap(getSpeakerReferenceImageMap?.(source) || {}),
+    scenarioReferenceImageMap: stripInlineMediaRecordMap(getScenarioReferenceImageMap?.(source) || {}),
+    rowReferenceImageListMap: stripInlineMediaRecordListMap(getRowReferenceImageListMap?.(source) || {}),
+    rowReferenceImageMap: stripInlineMediaRecordMap(getRowReferenceImageMap?.(source) || {}),
+    rowReferenceVideoMap: stripInlineMediaRecordMap(getRowReferenceVideoMap?.(source) || {}),
     rowReferenceModeByRowId: getRowReferenceModeByRowId?.(source) || {},
     dialogueVideoMap: getDialogueVideoMap?.(source) || {},
     dialogueAudioMap: getDialogueAudioMap?.(source) || {},
