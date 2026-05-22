@@ -797,6 +797,17 @@ function showActivityNotification(activity) {
   const pods = ["podcastVideoActivityNotification", "creativeVideoActivityNotification", "mainStudioActivityNotification"];
   let foundAtLeastOne = false;
 
+  // Determine active pod based on current UI state
+  let activePodId = "mainStudioActivityNotification";
+  const pModal = document.getElementById("podcastVideoModal");
+  const cModal = document.getElementById("creativeVideoModal");
+  
+  if (cModal && !cModal.hidden) {
+    activePodId = "creativeVideoActivityNotification";
+  } else if (pModal && !pModal.hidden) {
+    activePodId = "podcastVideoActivityNotification";
+  }
+
   pods.forEach(id => {
     const el = document.getElementById(id);
     if (!el) {
@@ -811,8 +822,12 @@ function showActivityNotification(activity) {
       textEl.textContent = `${activity.userName} ${activity.action}${sceneLabel}`;
     }
 
-    el.style.display = "flex";
-    // console.log(`[Studio] Notificación visible en #${id}`);
+    if (id === activePodId) {
+      el.style.display = "flex";
+      // console.log(`[Studio] Notificación visible en #${id}`);
+    } else {
+      el.style.display = "none";
+    }
   });
 
   if (!foundAtLeastOne) return;
@@ -3890,7 +3905,7 @@ function getOnScreenTextSourceDimensions() {
 }
 
 function getOnScreenTextRenderResolution() {
-  return normalizeMontageExportSettings(montageExportState || {}).resolution;
+  return window.normalizeMontageExportSettings(window.montageExportState || {}).resolution;
 }
 
 function buildOnScreenTextPreviewStrokeShadowCss(settings = null, options = {}) {
@@ -4649,16 +4664,21 @@ function alignOnScreenTextClipsToGeminiTrack(session = null, clipMap = {}) {
   const next = normalizeOnScreenTextClipsByRowId(clipMap || {});
   const cfg = getPodcastVideoConfig(activeSession);
   const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
-  if (!Array.isArray(track.segments) || !track.segments.length) return next;
+  const sceneClips = ensureTimelineClipsByRowId(activeSession, { persist: false });
   const segmentByRowId = new Map(
     track.segments
       .map((segment) => [String(segment?.rowId || "").trim(), segment])
       .filter(([rowId]) => rowId)
   );
   Object.keys(next).forEach((rowId) => {
+    const sceneClip = sceneClips[String(rowId || "").trim()] || null;
     const segment = segmentByRowId.get(String(rowId || "").trim());
-    if (!segment) return;
-    const aligned = constrainOnScreenTextClipToGeminiSegment(next[rowId], segment, rowId);
+    const aligned = segment
+      ? constrainOnScreenTextClipToGeminiSegment(next[rowId], segment, rowId)
+      : (sceneClip ? constrainOnScreenTextClipToScene({
+        ...next[rowId],
+        startMs: Math.max(0, Number(sceneClip?.startMs || 0) || 0)
+      }, sceneClip, rowId) : null);
     if (!aligned) return;
     next[rowId] = {
       ...aligned,
@@ -5005,14 +5025,23 @@ function applyGeminiSubtitleInsetForReorderedTimeline(session = null, insetPx = 
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
     );
-    const desiredStartMs = snapTimelineMs(sceneStartMs + insetMs);
+    const desiredStartMs = clampGeminiSegmentStartToScene(
+      sceneStartMs,
+      getTimelineClipEffectiveDurationMs(sceneClip),
+      durationMs,
+      sceneStartMs + insetMs
+    );
     const legacyAutoStartMs = snapTimelineMs(sceneStartMs + legacyInsetMs);
     const legacyDelayStartMs = snapTimelineMs(sceneStartMs + legacyDelayMs);
     const currentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
     const previousAnchorMs = resolveGeminiSegmentAnchorStartMs(segment, sceneStartMs);
     // Si el usuario movio el chip manualmente, `startMs` deja de coincidir con su
     // anchor previo. En ese caso no debemos volver a insetearlo al rehidratar.
-    const hasManualOffsetFromAnchor = hasManualGeminiSegmentOffset(segment, sceneStartMs);
+    const hasManualOffsetFromAnchor = hasManualGeminiSegmentOffset(
+      segment,
+      sceneStartMs,
+      resolveAutomaticGeminiSceneOffsetMs(getTimelineClipEffectiveDurationMs(sceneClip), durationMs)
+    );
     const looksManual = hasManualOffsetFromAnchor || (
       previousAnchorMs === sceneStartMs
       && Math.abs(currentStartMs - legacyAutoStartMs) > STUDIO_TIMELINE_SNAP_MS
@@ -5070,6 +5099,11 @@ function normalizeLegacyGeminiTrackOffsets(session = null) {
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - currentStartMs) || STUDIO_TIMELINE_MIN_CLIP_MS
     );
+    const automaticStartMs = resolveGeminiSegmentStartWithinScene(
+      sceneStartMs,
+      getTimelineClipEffectiveDurationMs(sceneClip),
+      durationMs
+    );
     const matchesLegacyDefault = (
       currentStartMs === snapTimelineMs(sceneStartMs + legacyDelayMs)
       || currentStartMs === snapTimelineMs(sceneStartMs + legacyInsetMs)
@@ -5079,9 +5113,9 @@ function normalizeLegacyGeminiTrackOffsets(session = null) {
     changed = true;
     return {
       ...segment,
-      startMs: sceneStartMs,
+      startMs: automaticStartMs,
       anchorStartMs: sceneStartMs,
-      endMs: sceneStartMs + durationMs
+      endMs: automaticStartMs + durationMs
     };
   });
   if (!changed) return false;
@@ -5218,9 +5252,6 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
   if (!beforeTrack.enabled || !beforeTrack.segments.length) {
     return { track: afterTrack, changed: false };
   }
-  const forceCompactSceneAnchors = options.forceCompactSceneAnchors === true
-    || isAudioOnlyPodcastStudioMode(sessionAfter);
-  const interSegmentGapMs = Math.max(0, Math.round(Number(options.interSegmentGapMs || 0) || 0));
   const beforeRuntimeByRowId = new Map(
     (buildTimelineRuntimeEntries(sessionBefore) || [])
       .map((entry) => [String(entry?.rowId || "").trim(), entry])
@@ -5233,7 +5264,6 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
   );
   const rowsAfter = Array.isArray(sessionAfter?.script?.rows) ? sessionAfter.script.rows : [];
   const rowIndexById = new Map(rowsAfter.map((row, index) => [String(row?.id || "").trim(), index]));
-  const sequencingCursorByKey = new Map();
   const nextSegments = beforeTrack.segments.map((segment) => {
     const rowId = String(segment?.rowId || "").trim();
     const beforeRuntime = rowId ? beforeRuntimeByRowId.get(rowId) || null : null;
@@ -5242,8 +5272,14 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
     const sceneStartMs = Math.max(0, Number(afterRuntime?.startMs || 0) || 0);
     const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(afterRuntime?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
     const beforeSceneStartMs = Math.max(0, Number(beforeRuntime?.startMs || 0) || 0);
-    const previousAnchorMs = resolveGeminiSegmentAnchorStartMs(segment, beforeSceneStartMs);
-    const desiredStartMs = snapTimelineMs(sceneStartMs + (Number(segment?.startMs || 0) - previousAnchorMs));
+    const previousRelativeOffsetMs = resolveGeminiSegmentRelativeOffsetMs(
+      segment,
+      beforeSceneStartMs,
+      resolveAutomaticGeminiSceneOffsetMs(
+        Number(beforeRuntime?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS,
+        Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
+      )
+    );
     const durationMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.min(
@@ -5254,14 +5290,12 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
         sceneDurationMs
       )
     );
-    const maxStartMs = Math.max(sceneStartMs, sceneStartMs + sceneDurationMs - durationMs);
-    const compactSceneStartMs = Math.max(
+    const startMs = clampGeminiSegmentStartToScene(
       sceneStartMs,
-      Math.min(maxStartMs, Math.max(sceneStartMs, Number(sequencingCursorByKey.get(resolveGeminiSegmentSequencingKey(sessionAfter, afterRuntime)) || 0)))
+      sceneDurationMs,
+      durationMs,
+      sceneStartMs + previousRelativeOffsetMs
     );
-    const startMs = forceCompactSceneAnchors
-      ? compactSceneStartMs
-      : Math.max(sceneStartMs, Math.min(maxStartMs, desiredStartMs));
     const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
     const sceneIndex = Math.max(1, Number(rowIndexById.get(rowId) || 0) + 1);
     const normalized = normalizeGeminiDialogueTrackSegment({
@@ -5269,20 +5303,12 @@ function buildReorderedGeminiDialogueTrack(beforeSession = null, afterSession = 
       rowId,
       sceneIndex,
       startMs,
-      anchorStartMs: forceCompactSceneAnchors ? startMs : sceneStartMs,
+      anchorStartMs: sceneStartMs,
       durationMs,
       trimInMs,
       trimOutMs: trimInMs + durationMs,
       endMs: startMs + durationMs
     }, sceneIndex - 1);
-    if (normalized) {
-      const sequencingKey = resolveGeminiSegmentSequencingKey(sessionAfter, afterRuntime);
-      const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
-      sequencingCursorByKey.set(
-        sequencingKey,
-        Math.max(currentCursorMs, Number(normalized.startMs || 0) + Number(normalized.durationMs || 0) + interSegmentGapMs)
-      );
-    }
     return normalized;
   }).filter(Boolean);
   const nextTrack = normalizeGeminiDialogueTrack({
@@ -5494,10 +5520,7 @@ function reorderTimelineClipsByTracks() {
     podcastVideoConfig: nextBaseConfig
   };
   nextBaseConfig.timelineTracks = ensureTimelineTracks(nextSession, { persist: false });
-  const reorderGemini = buildReorderedGeminiDialogueTrack(beforeSession, nextSession, {
-    forceCompactSceneAnchors: isAudioOnlyPodcastStudioMode(nextSession),
-    interSegmentGapMs: 0
-  });
+  const reorderGemini = buildReorderedGeminiDialogueTrack(beforeSession, nextSession);
   const nextSessionWithGemini = {
     ...nextSession,
     podcastVideoConfig: {
@@ -5597,12 +5620,34 @@ function buildTimelineRuntimeEntries(session = null) {
   return window.buildTimelineRuntimeEntries(session);
 }
 
+function resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS) {
+  const safeSceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sceneDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+  const safeDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+  const maxOffsetMs = Math.max(0, safeSceneDurationMs - safeDurationMs);
+  const defaultOffsetMs = Math.max(0, snapTimelineMs(STUDIO_GEMINI_LEGACY_DEFAULT_DELAY_MS));
+  return Math.max(0, Math.min(maxOffsetMs, defaultOffsetMs));
+}
+
+function clampGeminiSegmentStartToScene(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS, desiredStartMs = 0) {
+  const safeSceneStartMs = Math.max(0, Math.round(Number(sceneStartMs || 0) || 0));
+  const safeSceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sceneDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+  const safeDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+  const safeDesiredStartMs = Math.max(0, Math.round(Number(desiredStartMs || 0) || 0));
+  const maxStartMs = Math.max(safeSceneStartMs, safeSceneStartMs + safeSceneDurationMs - safeDurationMs);
+  return Math.max(safeSceneStartMs, Math.min(maxStartMs, safeDesiredStartMs));
+}
+
 function resolveGeminiSegmentStartWithinScene(sceneStartMs = 0, sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, durationMs = STUDIO_TIMELINE_MIN_CLIP_MS) {
   const safeSceneStartMs = Math.max(0, Math.round(Number(sceneStartMs || 0) || 0));
   const safeSceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sceneDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
   const safeDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
-  const offsetMs = Math.max(0, Math.round((safeSceneDurationMs - safeDurationMs) / 2));
-  return Math.max(0, safeSceneStartMs + offsetMs + STUDIO_GEMINI_SCENE_DELAY_MS);
+  const offsetMs = resolveAutomaticGeminiSceneOffsetMs(safeSceneDurationMs, safeDurationMs);
+  return clampGeminiSegmentStartToScene(
+    safeSceneStartMs,
+    safeSceneDurationMs,
+    safeDurationMs,
+    safeSceneStartMs + offsetMs + STUDIO_GEMINI_SCENE_DELAY_MS
+  );
 }
 
 function resolveGeminiSegmentDurationWithinScene(sceneDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS, desiredDurationMs = STUDIO_TIMELINE_MIN_CLIP_MS) {
@@ -5617,11 +5662,30 @@ function resolveGeminiSegmentAnchorStartMs(segment = null, fallbackAnchorMs = 0)
   return Math.max(0, Math.round(Number(fallbackAnchorMs || 0) || 0));
 }
 
-function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS) {
-  if (!segment || typeof segment !== "object") return false;
+function resolveGeminiSegmentRelativeOffsetMs(segment = null, sceneStartMs = 0, fallbackOffsetMs = 0) {
+  const safeFallbackOffsetMs = Math.max(0, Math.round(Number(fallbackOffsetMs || 0) || 0));
+  if (!segment || typeof segment !== "object") return safeFallbackOffsetMs;
+  if (segment.relativeOffsetMs !== undefined && segment.relativeOffsetMs !== null) {
+    return Math.max(0, Math.round(Number(segment.relativeOffsetMs) || 0));
+  }
+  const safeSceneStartMs = Math.max(0, Math.round(Number(sceneStartMs || 0) || 0));
+  const anchorStartMs = resolveGeminiSegmentAnchorStartMs(segment, safeSceneStartMs);
   const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) || 0));
-  const anchorStartMs = resolveGeminiSegmentAnchorStartMs(segment, fallbackAnchorMs);
-  return Math.abs(startMs - anchorStartMs) > Math.max(1, Math.round(Number(toleranceMs || 0) || 0));
+  return Math.max(0, Math.round(startMs - anchorStartMs));
+}
+
+function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, fallbackOffsetMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS) {
+  if (!segment || typeof segment !== "object") return false;
+  const safeToleranceMs = Math.max(1, Math.round(Number(toleranceMs || 0) || 0));
+  const safeFallbackAnchorMs = Math.max(0, Math.round(Number(fallbackAnchorMs || 0) || 0));
+  const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) || 0));
+  const anchorStartMs = resolveGeminiSegmentAnchorStartMs(segment, safeFallbackAnchorMs);
+  const legacyAbsoluteAnchor = Math.abs(startMs - anchorStartMs) <= safeToleranceMs
+    && Math.abs(anchorStartMs - safeFallbackAnchorMs) > safeToleranceMs;
+  if (legacyAbsoluteAnchor) return false;
+  const nextOffsetMs = resolveGeminiSegmentRelativeOffsetMs(segment, fallbackAnchorMs, fallbackOffsetMs);
+  const safeFallbackOffsetMs = Math.max(0, Math.round(Number(fallbackOffsetMs || 0) || 0));
+  return Math.abs(nextOffsetMs - safeFallbackOffsetMs) > safeToleranceMs;
 }
 
 function resolveGeminiSegmentSequencingKey(session = null, runtimeEntry = null) {
@@ -5642,7 +5706,6 @@ function buildGeminiDialogueTimelineTrack(session = null) {
       .filter(Boolean)
   );
   const missingRowIds = [];
-  const sequencingCursorByKey = new Map();
   const segments = runtimeEntries.map((entry, timelineIndex) => {
     const rowId = String(entry?.rowId || "").trim();
     if (!rowId) return null;
@@ -5672,23 +5735,22 @@ function buildGeminiDialogueTimelineTrack(session = null) {
         desiredDurationMs
       );
     const trimOutMs = trimInMs + durationMs;
-    const delayedStartMsDefault = resolveGeminiSegmentStartWithinScene(
-      Number(entry?.startMs || 0),
-      Number(entry?.effectiveDurationMs || 0),
-      durationMs
-    );
-    const sequencingKey = resolveGeminiSegmentSequencingKey(activeSession, entry);
-    const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
-    const automaticStartMs = Math.max(delayedStartMsDefault, currentCursorMs);
+    const sceneStartMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+    const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, durationMs);
     const hasManualStartMs = existingSegment
-      ? hasManualGeminiSegmentOffset(existingSegment, automaticStartMs)
+      ? hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs)
       : false;
-    const startMs = existingSegment && existingSegment.startMs !== undefined && hasManualStartMs
-      ? Math.max(0, Number(existingSegment.startMs || 0))
-      : automaticStartMs;
-    const anchorStartMs = existingSegment && hasManualStartMs
-      ? resolveGeminiSegmentAnchorStartMs(existingSegment, automaticStartMs)
-      : automaticStartMs;
+    const relativeOffsetMs = existingSegment && hasManualStartMs
+      ? resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs, automaticOffsetMs)
+      : automaticOffsetMs;
+    const startMs = clampGeminiSegmentStartToScene(
+      sceneStartMs,
+      sceneDurationMs,
+      durationMs,
+      sceneStartMs + relativeOffsetMs
+    );
+    const anchorStartMs = sceneStartMs;
     const normalizedSegment = normalizeGeminiDialogueTrackSegment({
       rowId,
       // En el timeline, "Escena N" debe corresponder al orden visual (izq→der),
@@ -5703,12 +5765,6 @@ function buildGeminiDialogueTimelineTrack(session = null) {
       trimOutMs,
       durationMs
     }, timelineIndex);
-    if (normalizedSegment) {
-      sequencingCursorByKey.set(
-        sequencingKey,
-        Math.max(currentCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
-      );
-    }
     return normalizedSegment;
   }).filter(Boolean);
   return normalizeGeminiDialogueTrack({
@@ -5733,7 +5789,6 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
   const preserveStartMs = options?.preserveStartMs !== false;
   const forceDurationFromAudio = options?.forceDurationFromAudio === true;
   const missingRowIds = [];
-  const sequencingCursorByKey = new Map();
   const nextSegments = runtimeEntries.map((entry, timelineIndex) => {
     const rowId = String(entry?.rowId || "").trim();
     if (!rowId) return null;
@@ -5764,11 +5819,8 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       : 0;
     const expectedSegmentDuration = audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs;
 
-    const delayedStartMsDefault = resolveGeminiSegmentStartWithinScene(sceneStartMs, sceneDurationMs, expectedSegmentDuration);
-    const sequencingKey = resolveGeminiSegmentSequencingKey(activeSession, entry);
-    const currentCursorMs = Math.max(0, Number(sequencingCursorByKey.get(sequencingKey) || 0));
-    const automaticStartMs = Math.max(delayedStartMsDefault, currentCursorMs);
-    const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, automaticStartMs);
+    const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
+    const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs);
 
     // Calcular el desplazamiento exacto del inicio de la escena para preservar el offset relativo del audio
     let shiftSceneStartMs = 0;
@@ -5784,14 +5836,9 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       }
     }
 
-    const startMs = (preserveStartMs && existingSegment && hasManualStartMs)
-      ? Math.max(
-        0,
-        Math.round(Number(existingSegment.startMs || 0) + shiftSceneStartMs)
-      )
-      : automaticStartMs;
-
-
+    const relativeOffsetMs = (preserveStartMs && existingSegment && hasManualStartMs)
+      ? resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs - shiftSceneStartMs, automaticOffsetMs)
+      : automaticOffsetMs;
 
     // Voz Gemini (chip segment): la duración no debe "encogerse" por recortes del clip visual.
     // Si el usuario movió el chip, preservamos su duración previa; en caso contrario usamos
@@ -5816,6 +5863,12 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       STUDIO_TIMELINE_MIN_CLIP_MS,
       Math.min(resolveGeminiSegmentDurationWithinScene(sceneDurationMs, baseDurationMs), audioMaxPlayableMs)
     );
+    const startMs = clampGeminiSegmentStartToScene(
+      sceneStartMs,
+      sceneDurationMs,
+      durationMs,
+      sceneStartMs + relativeOffsetMs
+    );
     const segmentTrimOutMs = segmentTrimInMs + durationMs;
     const normalizedSegment = normalizeGeminiDialogueTrackSegment({
       rowId,
@@ -5823,20 +5876,12 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       speakerName: String(entry?.speakerName || "").trim(),
       audioSrc,
       startMs,
-      anchorStartMs: (preserveStartMs && existingSegment && hasManualStartMs)
-        ? resolveGeminiSegmentAnchorStartMs(existingSegment, automaticStartMs)
-        : automaticStartMs,
+      anchorStartMs: sceneStartMs,
       endMs: startMs + durationMs,
       trimInMs: segmentTrimInMs,
       trimOutMs: segmentTrimOutMs,
       durationMs
     }, timelineIndex);
-    if (normalizedSegment) {
-      sequencingCursorByKey.set(
-        sequencingKey,
-        Math.max(currentCursorMs, Number(normalizedSegment.startMs || 0) + Number(normalizedSegment.durationMs || 0))
-      );
-    }
     return normalizedSegment;
   }).filter(Boolean);
 
@@ -13068,7 +13113,6 @@ function beginTimelineGeminiSegmentMoveDrag(event = null) {
   }
   const runtimeEntries = buildTimelineRuntimeEntries(session);
   const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
-  const totalMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, getTimelineTotalDurationMs(session));
   const multi = event.metaKey || event.ctrlKey;
   podcastVideoState.timelineAudioSelection.uploadedKeys.clear();
   podcastVideoState.timelineAudioSelection.panelLoopKey = "";
@@ -13084,11 +13128,14 @@ function beginTimelineGeminiSegmentMoveDrag(event = null) {
     .filter((segment) => selected.includes(String(segment?.rowId || "").trim()))
     .map((segment) => {
       const segRowId = String(segment?.rowId || "").trim();
+      const runtimeEntry = runtimeByRowId.get(segRowId) || null;
       const durationMs = Math.max(
         STUDIO_TIMELINE_MIN_CLIP_MS,
         Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0)) || STUDIO_TIMELINE_MIN_CLIP_MS
       );
-      const maxStartMs = Math.max(0, totalMs - durationMs);
+      const sceneStartMs = Math.max(0, Number(runtimeEntry?.startMs || 0) || 0);
+      const sceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(runtimeEntry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
+      const maxStartMs = Math.max(sceneStartMs, sceneStartMs + sceneDurationMs - durationMs);
       return {
         rowId: segRowId,
         audioSrc: String(segment?.audioSrc || "").trim(),
@@ -13100,7 +13147,7 @@ function beginTimelineGeminiSegmentMoveDrag(event = null) {
         sceneIndex: Number(segment?.sceneIndex || 1),
         speakerName: String(segment?.speakerName || "").trim(),
         anchorStartMs: segment?.anchorStartMs,
-        minStartMs: 0,
+        minStartMs: sceneStartMs,
         maxStartMs
       };
     });
@@ -13599,7 +13646,7 @@ function applyTimelineClipDrag(event = null) {
         endMs: startMs + durationMs,
         durationMs,
         trimOutMs: trimInMs + durationMs,
-        anchorStartMs: segment.anchorStartMs
+        anchorStartMs: Number(segment.minStartMs || 0)
       }];
     }));
     const nextSegments = baseTrack.segments.map((segment) => {
@@ -14057,7 +14104,7 @@ podcasterSceneSelectionApi = createPodcasterSceneSelectionApi({
   resolveTargetVideoRowId,
   setPodcastVideoSpeaker,
   upsertPodcastStudioUiState,
-  scheduleMontageExportPreviewRefresh: window.scheduleMontageExportPreviewRefresh
+  scheduleMontageExportPreviewRefresh: (...args) => window.scheduleMontageExportPreviewRefresh?.(...args)
 });
 
 podcasterSceneTransitionApi = createPodcasterSceneTransitionApi({
@@ -19351,7 +19398,12 @@ function attachEvents() {
         return;
       }
       const lane = event.target.closest(".podcast-video-track-lane[data-track-id]");
-      if (lane && !event.target.closest(".podcast-audio-timeline-chip")) {
+      if (
+        lane
+        && !event.target.closest(".podcast-audio-timeline-chip")
+        && !event.target.closest(".podcast-montage-audio-chip")
+        && !event.target.closest(".podcast-onscreen-text-clip-body")
+      ) {
         const started = beginTimelineGapSelection(lane, event);
         if (started) {
           event.preventDefault();
@@ -21503,6 +21555,7 @@ Object.assign(window, {
   escapeHtml,
   logVideoCreateDebug,
   setSidepanelOpen,
+  clearAllActivityNotifications,
 });
 
 // Regression test patterns for test-podcaster-modular-runtime-and-spinner-regressions.mjs

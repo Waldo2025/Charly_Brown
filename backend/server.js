@@ -39,6 +39,9 @@ const {
 const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
+const {
+  buildBufferedMediaPayload
+} = require("./proxy-media-buffer.js");
 
 let admin = null;
 let GoogleGenAI = null;
@@ -9852,49 +9855,39 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const rangeHeader = String(req.headers.range || "").trim();
 
     if (storagePath) {
-      const buckets = getStorageBucketCandidates();
-      let lastError = null;
-      console.info("[backend][proxy-media] attempting storage resolution", { storagePath, bucketCount: buckets.length });
-      
-      for (const bucket of buckets) {
-        if (!bucket) continue;
-        const file = bucket.file(storagePath);
-        try {
-          const [exists] = await file.exists();
-          if (exists === false) {
-            console.info(`[backend][proxy-media] file not in bucket: ${bucket.name} (path: ${storagePath})`);
-            continue;
-          }
-          
-          console.info(`[backend][proxy-media] streaming from bucket: ${bucket.name}`);
-          const [meta] = await file.getMetadata().catch(() => [{}]);
-          await streamStorageFileToResponse(file, res, {
-            metadata: meta,
-            rangeHeader
-          });
-          return;
-        } catch (error) {
-          lastError = error;
-          console.warn(`[backend][proxy-media] error in bucket ${bucket?.name}:`, error?.message || error);
-          if (res.headersSent) {
-            console.error("[backend][proxy-media] storage stream failed after headers", {
-              storagePath,
-              bucket: String(bucket?.name || "").trim(),
-              message: String(error?.message || error)
-            });
-            try { res.destroy(error); } catch (_) {}
-            return;
-          }
-        }
-      }
-      return res.status(404).json({
-        error: "Archivo no encontrado en Storage.",
-        detail: {
+      console.info("[backend][proxy-media] attempting storage buffer download", { storagePath });
+      try {
+        const downloaded = await downloadStorageObjectToBuffer(storagePath);
+        const mimeType = String(downloaded?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+        const payload = buildBufferedMediaPayload(downloaded?.buffer, {
+          mimeType,
+          rangeHeader
+        });
+        Object.entries(payload.headers || {}).forEach(([name, value]) => {
+          if (!name || value == null || value === "") return;
+          res.setHeader(name, value);
+        });
+        return res.status(payload.status || 200).send(payload.body);
+      } catch (error) {
+        const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
+        const isMissing = status === 404 || String(error?.code || "").trim().toLowerCase() === "storage_not_found";
+        console.warn("[backend][proxy-media] storage buffer download failed", {
           storagePath,
-          bucketsTried: buckets.map((bucket) => bucket?.name).filter(Boolean),
-          lastError: lastError ? String(lastError?.message || lastError) : undefined
+          status: status || null,
+          code: String(error?.code || "").trim() || null,
+          message: String(error?.message || error)
+        });
+        if (isMissing) {
+          return res.status(404).json({
+            error: "Archivo no encontrado en Storage.",
+            detail: {
+              storagePath,
+              lastError: String(error?.message || error)
+            }
+          });
         }
-      });
+        throw error;
+      }
     }
 
     if (!normalizedUrl) {
@@ -9976,22 +9969,23 @@ app.get("/api/assets/proxy-media", async (req, res) => {
               if (exists === false) continue;
               try {
                 const [meta] = await file.getMetadata().catch(() => [{}]);
-                await streamStorageFileToResponse(file, res, {
-                  metadata: meta,
+                const [downloaded] = await file.download();
+                const payload = buildBufferedMediaPayload(downloaded, {
+                  mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
                   rangeHeader
                 });
-                return;
+                Object.entries(payload.headers || {}).forEach(([name, value]) => {
+                  if (!name || value == null || value === "") return;
+                  res.setHeader(name, value);
+                });
+                return res.status(payload.status || 200).send(payload.body);
               } catch (error) {
                 lastError = error;
-                if (res.headersSent) {
-                  console.error("[backend][proxy-media] admin fallback stream failed after headers", {
-                    objectPath,
-                    bucket: String(bucket?.name || "").trim(),
-                    message: String(error?.message || error)
-                  });
-                  try { res.destroy(error); } catch (_) {}
-                  return;
-                }
+                console.warn("[backend][proxy-media] admin fallback buffer failed", {
+                  objectPath,
+                  bucket: String(bucket?.name || "").trim(),
+                  message: String(error?.message || error)
+                });
               }
             }
             // Fallthrough: no se pudo leer por admin, devuelve upstream.

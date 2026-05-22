@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.57",
-  "build": "2026-1.0.10.57",
+  "version": "1.0.10.58",
+  "build": "2026-1.0.10.58",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: Lógica de Toggle de Notas del Maestro (ahora usa clases CSS).",
@@ -8,5 +8,5 @@
     "Fijado: Error de detección de estado en elementos inyectados.",
     "Corregido: Generación de escenas Veo desde timeline vuelve a activar spinner y trazas de diagnóstico dedicadas."
   ],
-  "cache_version": "2026-1.0.10.57"
+  "cache_version": "2026-1.0.10.58"
 }

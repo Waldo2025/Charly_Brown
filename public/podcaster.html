@@ -466,8 +466,8 @@
               <i class="fas fa-user-edit"></i>
               <span class="activity-text"></span>
               <div class="activity-actions">
-                <button class="activity-close-btn" title="Cerrar"><i class="fas fa-times"></i></button>
-                <button class="activity-clear-all-btn" title="Quitar todas"><i class="fas fa-broom"></i></button>
+                <button class="activity-close-btn" onclick="this.parentElement.parentElement.style.display='none'" title="Cerrar"><i class="fas fa-times"></i></button>
+                <button class="activity-clear-all-btn" onclick="clearAllActivityNotifications()" title="Quitar todas"><i class="fas fa-broom"></i></button>
               </div>
             </div>
           </div>

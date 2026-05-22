@@ -69,7 +69,6 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     syncStudioTimelinePreview,
     toFiniteNumber,
     getTimelineClipEndMs,
-    STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX,
     STUDIO_TIMELINE_MIN_CLIP_MS,
     PODCAST_TIMELINE_RULER_OFFSET_PX,
     PODCAST_RENDER_DEBUG
@@ -464,7 +463,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         if (!clip) return;
         const hasGemini = currentGeminiSegmentByRowId.has(rowId);
         const minWidthPx = hasGemini ? minAudioLoopPx : minClipPx;
-        const leftPx = Math.max(0, timelineMsToPx(Number(clip.startMs || 0), activeSession) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+        const leftPx = Math.max(0, timelineMsToPx(Number(clip.startMs || 0), activeSession));
         const widthPx = Math.max(minWidthPx, timelineMsToPx(getOnScreenTextClipEffectiveDurationMs(clip), activeSession) - 4);
         clipEl.style.left = `${leftPx.toFixed(3)}px`;
         clipEl.style.width = `${widthPx.toFixed(3)}px`;
@@ -633,7 +632,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
                 const isVisible = clip.hidden !== true;
                 const text = String(row?.onScreenText || "").trim() || "Sin texto";
                 const clippedText = trimWords(text, 18) || "Sin texto";
-                const leftPx = Math.max(0, Number(clipLeftPx || 0) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+                const leftPx = Math.max(0, Number(clipLeftPx || 0));
                 const widthPx = Math.max(minClipPx, Number(clipWidthPx || 0));
                 return `
                   <article class="podcast-onscreen-text-timeline-clip${isActive ? " is-active" : ""}${isVisible ? "" : " is-hidden"}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${Math.max(1, Number(clip?.zIndex || index + 1))};" data-style-preset="${escapeHtml(stylePreset)}">
@@ -922,7 +921,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
               const isVisible = clip.hidden !== true;
               const text = String(row?.onScreenText || "").trim() || "Sin texto";
               const clippedText = trimWords(text, 22) || "Sin texto";
-              const leftPx = Math.max(0, Number(clipLeftPx || 0) - STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+              const leftPx = Math.max(0, Number(clipLeftPx || 0));
               const widthPx = Math.max(minWidthPx, Number(clipWidthPx || 0));
               return `
                 <article class="podcast-onscreen-text-timeline-clip${isActive ? " is-active" : ""}${isVisible ? "" : " is-hidden"}" data-row-id="${escapeHtml(rowId)}" tabindex="-1" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${Math.max(1, Number(clip?.zIndex || index + 1))};" data-style-preset="${escapeHtml(stylePreset)}">
@@ -1516,7 +1515,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
       const rowId = String(chip?.dataset?.rowId || "").trim();
       const segment = segmentByRowId.get(rowId) || null;
       if (!rowId || !segment) return;
-      const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+      const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession));
       const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
       const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
       const rawVisibleMs = Math.max(

@@ -188,10 +188,56 @@
   global.generateDialogueAudioForRow = generateDialogueAudioForRow;
   global.measureVideoFile = measureVideoFile;
   global.setButtonLoadingState = setButtonLoadingState;
+
+  // --- Montage Export Placeholders ---
+  const defaultMontageExportSettings = {
+    exportMode: "normal",
+    format: "mp4_h264",
+    qualityPreset: "balanced",
+    resolution: "source",
+    bitrateMode: "vbr",
+    maxBitrate: 5,
+    minBitrate: 20,
+    filename: "montage",
+    includeReviewExcel: true,
+    onlyAudio: false
+  };
+
+  function fallbackNormalizeMontageExportSettings(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    return Object.assign({}, defaultMontageExportSettings, src);
+  }
+
+  global.montageExportState = global.montageExportState || Object.assign({}, defaultMontageExportSettings);
+  global.montageExportBusy = global.montageExportBusy || false;
+  global.normalizeMontageExportSettings = global.normalizeMontageExportSettings || fallbackNormalizeMontageExportSettings;
+  global.runMontageExport = global.runMontageExport || (async function runMontageExportFallback() {});
+  global.continueMontageExportPolling = global.continueMontageExportPolling || (async function continueMontageExportPollingFallback() {});
+  global.closeMontageExportModal = global.closeMontageExportModal || (function closeMontageExportModalFallback() {});
+  global.openMontageExportModal = global.openMontageExportModal || (function openMontageExportModalFallback() {});
+  global.syncMontageExportUi = global.syncMontageExportUi || (function syncMontageExportUiFallback() {});
+  global.scheduleMontageExportPreviewRefresh = global.scheduleMontageExportPreviewRefresh || (function scheduleMontageExportPreviewRefreshFallback() {});
+  global.setMontageExportProgress = global.setMontageExportProgress || (function setMontageExportProgressFallback() {});
+  global.setMontageExportStatus = global.setMontageExportStatus || (function setMontageExportStatusFallback() {});
+  global.persistMontageExportSettings = global.persistMontageExportSettings || (function persistMontageExportSettingsFallback() {});
+
   if (typeof globalThis !== "undefined") {
     globalThis.readDataUrlFromFile = readDataUrlFromFile;
     globalThis.generateDialogueAudioForRow = generateDialogueAudioForRow;
     globalThis.measureVideoFile = measureVideoFile;
     globalThis.setButtonLoadingState = setButtonLoadingState;
+
+    globalThis.montageExportState = globalThis.montageExportState || global.montageExportState;
+    globalThis.montageExportBusy = globalThis.montageExportBusy || global.montageExportBusy;
+    globalThis.normalizeMontageExportSettings = globalThis.normalizeMontageExportSettings || global.normalizeMontageExportSettings;
+    globalThis.runMontageExport = globalThis.runMontageExport || global.runMontageExport;
+    globalThis.continueMontageExportPolling = globalThis.continueMontageExportPolling || global.continueMontageExportPolling;
+    globalThis.closeMontageExportModal = globalThis.closeMontageExportModal || global.closeMontageExportModal;
+    globalThis.openMontageExportModal = globalThis.openMontageExportModal || global.openMontageExportModal;
+    globalThis.syncMontageExportUi = globalThis.syncMontageExportUi || global.syncMontageExportUi;
+    globalThis.scheduleMontageExportPreviewRefresh = globalThis.scheduleMontageExportPreviewRefresh || global.scheduleMontageExportPreviewRefresh;
+    globalThis.setMontageExportProgress = globalThis.setMontageExportProgress || global.setMontageExportProgress;
+    globalThis.setMontageExportStatus = globalThis.setMontageExportStatus || global.setMontageExportStatus;
+    globalThis.persistMontageExportSettings = globalThis.persistMontageExportSettings || global.persistMontageExportSettings;
   }
 })(typeof window !== "undefined" ? window : globalThis);

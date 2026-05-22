@@ -67,11 +67,40 @@ export async function putPodcasterLocalMediaBlob(key = "", blob = null, metadata
   return cleanKey;
 }
 
+function decodeBase64ToUint8Array(base64Value = "") {
+  const cleanBase64 = String(base64Value || "").replace(/\s+/g, "");
+  const binary = atob(cleanBase64);
+  const length = binary.length;
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function convertDataUrlToBlob(dataUrl = "") {
+  const cleanDataUrl = String(dataUrl || "").trim();
+  const match = /^data:([^;,]+)?((?:;[^,]+)*?),(.*)$/i.exec(cleanDataUrl);
+  if (!match) return null;
+  const mimeType = String(match[1] || "application/octet-stream").trim() || "application/octet-stream";
+  const params = String(match[2] || "");
+  const payload = String(match[3] || "");
+  const isBase64 = /;base64/i.test(params);
+  try {
+    if (isBase64) {
+      return new Blob([decodeBase64ToUint8Array(payload)], { type: mimeType });
+    }
+    return new Blob([decodeURIComponent(payload)], { type: mimeType });
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function putPodcasterLocalMediaDataUrl(key = "", dataUrl = "", metadata = {}) {
   const cleanDataUrl = String(dataUrl || "").trim();
   if (!cleanDataUrl.startsWith("data:")) return "";
-  const response = await fetch(cleanDataUrl);
-  const blob = await response.blob();
+  const blob = convertDataUrlToBlob(cleanDataUrl);
+  if (!(blob instanceof Blob)) return "";
   return putPodcasterLocalMediaBlob(key, blob, metadata);
 }
 
