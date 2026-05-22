@@ -320,10 +320,12 @@ function initFilePond() {
                         }
                         const data = await response.json().catch(() => ({}));
                         if (!response.ok) {
-                            throw new Error(String(data?.error || "No se pudo subir el archivo."));
+                            console.error("[MediaReplacement] Scene media upload failed. Status:", response.status, "Error data:", data);
+                            throw new Error(String(data?.error || `Error del servidor (status ${response.status})`));
                         }
                         const media = data?.media && typeof data.media === "object" ? data.media : null;
                         if (!media?.downloadUrl) {
+                            console.error("[MediaReplacement] Scene media upload response missing downloadUrl. Response data:", data);
                             throw new Error("Upload sin downloadUrl.");
                         }
                         uploadedMediaUrl = String(media.downloadUrl || "").trim();
@@ -344,6 +346,7 @@ function initFilePond() {
                         }
                         if (els.confirmBtn) els.confirmBtn.style.display = 'inline-block';
                     } catch (err) {
+                        console.error("[MediaReplacement] Exception in FilePond upload process:", err);
                         error(err?.message || 'Upload failed');
                     }
                 })();

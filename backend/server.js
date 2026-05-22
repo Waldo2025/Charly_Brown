@@ -825,7 +825,7 @@ if (!admin.apps.length) {
     // Firebase/Cloud Storage default bucket is typically <projectId>.appspot.com.
     // Using <projectId>.firebasestorage.app here can break Admin SDK downloads
     // ("The specified bucket does not exist") on many projects.
-    || `${projectId}.appspot.com`
+    || (projectId === "charly-brown" ? "charly-brown.firebasestorage.app" : `${projectId}.appspot.com`)
   ).trim();
 
   admin.initializeApp({

@@ -1501,6 +1501,39 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     }
   }
 
+  function syncTimelineGeminiSegmentDragPreview(session = null) {
+    const activeSession = session || getActiveSession();
+    if (!activeSession || !els.podcastVideoTimeline) return;
+    const minAudioLoopPx = getStudioAudioTrackMinLoopPx(activeSession);
+    const track = normalizeGeminiDialogueTrack(getPodcastVideoConfig(activeSession)?.geminiDialogueTrack || {});
+    if (!track.enabled || !Array.isArray(track.segments) || !track.segments.length) return;
+    const segmentByRowId = new Map(
+      track.segments
+        .map((segment) => [String(segment?.rowId || "").trim(), segment])
+        .filter(([rowId]) => rowId)
+    );
+    els.podcastVideoTimeline.querySelectorAll(".podcast-montage-audio-chip[data-row-id][data-audio-align='segment']").forEach((chip) => {
+      const rowId = String(chip?.dataset?.rowId || "").trim();
+      const segment = segmentByRowId.get(rowId) || null;
+      if (!rowId || !segment) return;
+      const leftPx = Math.max(0, timelineMsToPx(Number(segment?.startMs || 0) || 0, activeSession) + STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX);
+      const trimInMs = Math.max(0, Number(segment?.trimInMs || 0) || 0);
+      const trimOutMs = Math.max(0, Number(segment?.trimOutMs || 0) || 0);
+      const rawVisibleMs = Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        (trimOutMs > trimInMs ? (trimOutMs - trimInMs) : 0)
+        || Number(segment?.durationMs || 0)
+        || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
+        || STUDIO_TIMELINE_MIN_CLIP_MS
+      );
+      const playbackRate = Math.max(0.5, Number(resolveDialogueAudioPlaybackRate(activeSession, rowId) || 1) || 1);
+      const visibleDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(rawVisibleMs / playbackRate));
+      const widthPx = Math.max(minAudioLoopPx, timelineMsToPx(visibleDurationMs, activeSession) - 4);
+      chip.style.left = `${leftPx.toFixed(3)}px`;
+      chip.style.width = `${widthPx.toFixed(3)}px`;
+    });
+  }
+
   function seekStudioTimelineByRulerClientX(clientX = 0, options = {}) {
     const session = getActiveSession();
     if (!session || !els.podcastTimelineRuler) return;
@@ -1536,6 +1569,7 @@ export function createPodcasterTimelineUiApi(deps = {}) {
     syncPodcastTimelinePlayhead,
     scheduleStudioTimelinePreviewSync,
     seekStudioTimelineByClientX,
-    seekStudioTimelineByRulerClientX
+    seekStudioTimelineByRulerClientX,
+    syncTimelineGeminiSegmentDragPreview
   };
 }

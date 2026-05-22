@@ -32,7 +32,8 @@ const requiredDelegates = [
   "syncPodcastTimelinePlayhead",
   "scheduleStudioTimelinePreviewSync",
   "seekStudioTimelineByClientX",
-  "seekStudioTimelineByRulerClientX"
+  "seekStudioTimelineByRulerClientX",
+  "syncTimelineGeminiSegmentDragPreview"
 ];
 
 for (const name of requiredDelegates) {
