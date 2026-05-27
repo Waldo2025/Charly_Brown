@@ -47,10 +47,10 @@ test("validateDialogueVideoInlineReferenceBudget trims useful image references t
     continuityReferenceImageDataUrl: ""
   });
 
-  assert.equal(result.referenceImageDataUrls.length, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
+  assert.equal(result.referenceImageDataUrls.length, 3);
   assert.equal(result.referenceVideoDataUrl, "");
   assert.equal(result.continuityReferenceImageDataUrl, "");
-  assert.equal(result.counts.imageReferences, DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT);
+  assert.equal(result.counts.imageReferences, 3);
   assert.equal(result.counts.videoReferences, 0);
   assert.equal(result.counts.continuityFrames, 0);
 });

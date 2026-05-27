@@ -194,6 +194,12 @@
     const width = Math.max(2, Math.round(Number(sourceWidth || 0) || 0));
     const height = Math.max(2, Math.round(Number(sourceHeight || 0) || 0));
     switch (normalizeResolutionKey(resolution)) {
+      case "480x854":
+        return { width: 480, height: 854 };
+      case "720x1280":
+        return { width: 720, height: 1280 };
+      case "1080x1920":
+        return { width: 1080, height: 1920 };
       case "480p":
         return { width: 854, height: 480 };
       case "720p":
@@ -679,11 +685,12 @@
     return `${tightX}px ${tightY}px ${tightBlur}px rgba(15, 23, 42, ${(alpha * 0.92).toFixed(3)}), ${softX}px ${softY}px ${softBlur}px rgba(2, 6, 23, ${(alpha * 0.62).toFixed(3)})`;
   }
 
-  function wrapOnScreenTextRenderText(text, options) {
+  function resolveOnScreenTextWrapResult(text, options) {
     const config = options && typeof options === "object" ? options : {};
     const fallback = String(config.fallback || "").trim();
     const maxChars = Math.max(10, Math.round(Number(config.maxChars || 36) || 36));
     const maxLines = Math.max(1, Math.round(Number(config.maxLines || 2) || 2));
+    const shouldTruncate = config.truncate !== false;
     const rawLines = String(text || "")
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
@@ -695,7 +702,7 @@
 
     const pushLine = (line) => {
       if (!line) return;
-      if (lines.length < maxLines) lines.push(line);
+      if (!shouldTruncate || lines.length < maxLines) lines.push(line);
       else truncated = true;
     };
 
@@ -717,7 +724,7 @@
             pushLine(current);
             current = chunk;
           }
-          if (lines.length >= maxLines) {
+          if (shouldTruncate && lines.length >= maxLines) {
             truncated = true;
             return;
           }
@@ -728,15 +735,22 @@
 
     for (const sourceLine of sourceLines) {
       wrapSingleLine(sourceLine || fallback);
-      if (truncated || lines.length >= maxLines) break;
+      if (truncated || (shouldTruncate && lines.length >= maxLines)) break;
     }
 
-    const safeLines = lines.length ? lines.slice(0, maxLines) : (fallback ? [fallback] : []);
-    if (truncated && safeLines.length) {
+    const safeLines = lines.length ? (shouldTruncate ? lines.slice(0, maxLines) : lines) : (fallback ? [fallback] : []);
+    if (shouldTruncate && truncated && safeLines.length) {
       const last = safeLines[safeLines.length - 1] || "";
       safeLines[safeLines.length - 1] = `${last.slice(0, Math.max(0, maxChars - 1)).trimEnd()}...`;
     }
-    return safeLines.join("\n");
+    return {
+      text: safeLines.join("\n"),
+      truncated
+    };
+  }
+
+  function wrapOnScreenTextRenderText(text, options) {
+    return resolveOnScreenTextWrapResult(text, options).text;
   }
 
   function resolveOnScreenTextRenderSpec(input) {
@@ -754,17 +768,55 @@
     const previewHeightPx = Math.max(1, Number(config.previewHeightPx || 0) || exportCanvasHeight);
     const previewScaleX = Math.max(0.0001, previewWidthPx / exportCanvasWidth);
     const previewScaleY = Math.max(0.0001, previewHeightPx / exportCanvasHeight);
-    const fontSizePx = clampNumber(settings.fontSizePx, 16, 96, 44);
-    const lineSpacingPx = 6;
-    const lineHeightPx = Math.max(fontSizePx + lineSpacingPx, Math.round(fontSizePx * 1.22));
     const widthPct = clampNumber(layout.widthPct, 0.08, 0.96, 0.58);
     const heightPct = clampNumber(layout.heightPct, 0.05, 0.6, 0.14);
     const boxWidthPx = Math.max(120, Math.round(exportCanvasWidth * widthPct));
-    const minBoxHeightPx = Math.max(fontSizePx + 4, Math.round(lineHeightPx + (fontSizePx * 0.2)));
-    const boxHeightPx = Math.max(minBoxHeightPx, Math.round(exportCanvasHeight * heightPct));
-    const approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
-    const maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
-    const maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
+    let fontSizePx = clampNumber(settings.fontSizePx, 16, 96, 44);
+    let lineSpacingPx = 6;
+    let lineHeightPx = Math.max(fontSizePx + lineSpacingPx, Math.round(fontSizePx * 1.22));
+    let minBoxHeightPx = Math.max(fontSizePx + 4, Math.round(lineHeightPx + (fontSizePx * 0.2)));
+    let boxHeightPx = Math.max(minBoxHeightPx, Math.round(exportCanvasHeight * heightPct));
+    let approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
+    let maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
+    let maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
+    let wrapResult = resolveOnScreenTextWrapResult(text, {
+      fallback: String(config.fallback || "").trim(),
+      maxChars,
+      maxLines,
+      truncate: false
+    });
+    let renderedLineCount = Math.max(1, String(wrapResult.text || "").split("\n").length);
+    const minReadableFontSizePx = 24;
+    while ((wrapResult.truncated || renderedLineCount * lineHeightPx > boxHeightPx) && fontSizePx > minReadableFontSizePx) {
+      fontSizePx -= fontSizePx > 48 ? 3 : 2;
+      fontSizePx = Math.max(minReadableFontSizePx, fontSizePx);
+      lineSpacingPx = Math.max(3, Math.round(fontSizePx * 0.13));
+      lineHeightPx = Math.max(fontSizePx + lineSpacingPx, Math.round(fontSizePx * 1.22));
+      minBoxHeightPx = Math.max(fontSizePx + 4, Math.round(lineHeightPx + (fontSizePx * 0.2)));
+      boxHeightPx = Math.max(minBoxHeightPx, Math.round(exportCanvasHeight * heightPct));
+      approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
+      maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
+      maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
+      wrapResult = resolveOnScreenTextWrapResult(text, {
+        fallback: String(config.fallback || "").trim(),
+        maxChars,
+        maxLines,
+        truncate: false
+      });
+      renderedLineCount = Math.max(1, String(wrapResult.text || "").split("\n").length);
+    }
+    const requiredTextHeightPx = Math.max(
+      minBoxHeightPx,
+      Math.ceil((renderedLineCount * lineHeightPx) + Math.max(4, fontSizePx * 0.22))
+    );
+    const maxAutoBoxHeightPx = Math.max(
+      minBoxHeightPx,
+      Math.round(exportCanvasHeight * 0.68)
+    );
+    if (requiredTextHeightPx > boxHeightPx) {
+      boxHeightPx = Math.min(maxAutoBoxHeightPx, requiredTextHeightPx);
+      maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
+    }
     const isTrue = (v) => v === true || v === "true" || v === 1 || v === "1";
     const strokeWidthPx = clampNumber(settings.strokeWidthPx, 0, 12, 2);
     const shadowOpacity = clampNumber(settings.shadowOpacity, 0, 1, 0.48);
@@ -783,14 +835,11 @@
     const rawYPct = clampNumber(layout.yPct, 0, 0.99, 0.7);
     const rawXPx = Math.max(0, Math.round(exportCanvasWidth * xPct));
     const rawYPx = Math.max(0, Math.round(exportCanvasHeight * rawYPct));
-    const maxYPx = Math.max(0, exportCanvasHeight - boxHeightPx - bottomSafetyPx);
+    const textBlockHeightPx = Math.max(boxHeightPx, renderedLineCount * lineHeightPx);
+    const maxYPx = Math.max(0, exportCanvasHeight - textBlockHeightPx - bottomSafetyPx);
     const yPx = Math.max(0, Math.min(maxYPx, rawYPx));
     const textAlign = normalizeTextAlign(settings.textAlign);
-    const wrappedText = wrapOnScreenTextRenderText(text, {
-      fallback: String(config.fallback || "").trim(),
-      maxChars,
-      maxLines
-    });
+    const wrappedText = wrapResult.text;
     let xExpr = `${rawXPx}+(${boxWidthPx}-text_w)/2`;
     if (textAlign === "left") xExpr = String(rawXPx);
     else if (textAlign === "right") xExpr = `${rawXPx + boxWidthPx}-text_w`;
@@ -891,7 +940,16 @@
     const fontSizePx = metrics.previewFontSizePx;
     const align = String(current.textAlign || "center").trim().toLowerCase();
     const textAlign = align === "justify" ? "justify" : align;
+    const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || 1) || 1));
+    const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || 1) || 1));
+    const xPct = Math.max(0, Math.min(1, Number(options?.xPct ?? metrics.xPct ?? 0) || 0));
+    const yPct = Math.max(0, Math.min(1, Number(options?.yPct ?? metrics.yPct ?? metrics.clampedYPct ?? 0) || 0));
     const parts = [
+      `--pod-onscreen-text-x:${(xPct * 100).toFixed(3)}%`,
+      `--pod-onscreen-text-y:${(yPct * 100).toFixed(3)}%`,
+      `--pod-onscreen-text-bubble-width:${bubbleWidthPx}px`,
+      `--pod-onscreen-text-bubble-height:${bubbleHeightPx}px`,
+      `--pod-onscreen-text-color:${current.textColor || "#f8fafc"}`,
       `--pod-onscreen-text-font-family:${fontFamily}`,
       `--pod-onscreen-text-font-size:${fontSizePx}px`,
       `--pod-onscreen-text-font-weight:${current.fontWeight === "bold" ? "700" : "500"}`,
@@ -904,9 +962,7 @@
       `--pod-onscreen-text-bg-opacity:${current.bgOpacity ?? 0.82}`,
       `--pod-onscreen-text-bg-scale:${current.bgScale ?? 1.0}`,
       `--pod-onscreen-text-stroke-shadow:${buildOnScreenTextPreviewStrokeShadowCss(current, { strokeWidthPx: metrics.previewBorderWidthPx })}`,
-      `--pod-onscreen-text-user-shadow:${buildOnScreenTextPreviewShadowCss(current, { strokeWidthPx: metrics.previewBorderWidthPx })}`,
-      `font-size:${fontSizePx}px !important`,
-      `line-height:${metrics.previewLineHeightPx}px !important`
+      `--pod-onscreen-text-user-shadow:${buildOnScreenTextPreviewShadowCss(current, { strokeWidthPx: metrics.previewBorderWidthPx })}`
     ];
     return parts.join(";");
   }
@@ -960,7 +1016,7 @@
       bubbleWidthPx,
       bubbleHeightPx,
       metrics,
-      inlineStyle: buildOnScreenTextBubbleInlineStyle(settings, { metrics }),
+      inlineStyle: buildOnScreenTextBubbleInlineStyle(settings, { metrics, xPct, yPct }),
       presetClass: getOnScreenTextStylePresetClass(settings.stylePreset),
       bgClass: getOnScreenTextBgPresetClass(settings.bgPreset)
     };

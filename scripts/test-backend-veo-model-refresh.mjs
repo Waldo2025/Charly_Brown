@@ -9,12 +9,16 @@ if (!/const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3\.1-generate-preview";/.test(s
   throw new Error("El backend debe usar veo-3.1-generate-preview como modelo Veo por defecto en Gemini API.");
 }
 
-if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-lite-generate-preview"\s*\]\);/m.test(source)) {
-  throw new Error("El backend debe usar los modelos Veo 3.1 preview actuales, incluyendo lite como fallback.");
+if (!/const PODCASTER_VIDEO_MODEL_CANDIDATES = Object\.freeze\(\[\s*"veo-3\.1-generate-preview",\s*"veo-3\.1-fast-generate-preview",\s*"veo-3\.1-lite-generate-preview",\s*"veo-3\.0-generate-001",\s*"veo-3\.0-fast-generate-001",\s*"veo-2\.0-generate-001"\s*\]\);/m.test(source)) {
+  throw new Error("El backend debe exponer todos los modelos Veo compatibles con esta integración.");
 }
 
-if (/veo-3\.1-(?:fast-)?generate-001/.test(source)) {
-  throw new Error("El backend no debe mezclar los IDs generate-001 de Vertex en esta ruta Gemini API.");
+if (!/resolution\s*=\s*"1080p"/.test(source)) {
+  throw new Error("El backend debe forzar resolution=1080p para Veo.");
 }
 
-console.log("Backend Veo model refresh OK.");
+if (/compressionQuality\s*=/.test(source)) {
+  throw new Error("El backend no debe enviar compressionQuality a Veo 3.1 en Gemini API.");
+}
+
+console.log("Backend Veo GA refresh OK.");

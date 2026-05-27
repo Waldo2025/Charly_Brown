@@ -14,7 +14,7 @@ if (!/export\s+function\s+createPodcasterTimelineUiApi\s*\(/m.test(timelineUiMod
   throw new Error("podcaster-timeline-ui.js debe exportar createPodcasterTimelineUiApi.");
 }
 
-if (!/const podcasterTimelineUiApi = createPodcasterTimelineUiApi\(/m.test(podcasterSource)) {
+if (!/(?:const\s+podcasterTimelineUiApi\s*=\s*|podcasterTimelineUiApi\s*=\s*)createPodcasterTimelineUiApi\(/m.test(podcasterSource)) {
   throw new Error("podcaster.js debe inicializar podcasterTimelineUiApi.");
 }
 

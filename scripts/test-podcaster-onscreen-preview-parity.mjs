@@ -9,18 +9,19 @@ if (!/function resolveOnScreenTextPreviewLayoutSpec\(input = \{\}\)/.test(shared
   throw new Error("La spec compartida debe exponer una resolución única del preview del texto en pantalla.");
 }
 
-if (!/const resolveSharedOnScreenTextPreviewLayoutSpec = typeof onScreenTextRenderSpecApi\.resolveOnScreenTextPreviewLayoutSpec === "function"/.test(front)
+if (!/const resolveSharedOnScreenTextPreviewLayoutSpec = requireOnScreenTextApiFunction\("resolveOnScreenTextPreviewLayoutSpec"\);/.test(front)
   || !/function resolveOnScreenTextPreviewLayoutSpec\(input = \{\}\) \{[\s\S]*resolveSharedOnScreenTextPreviewLayoutSpec/m.test(front)) {
   throw new Error("podcaster.js debe delegar la geometría del preview al módulo compartido.");
 }
 
-if (!/const rowLayout = this\.resolveLiveOnScreenTextLayout\(selected\.rowId, persistedLayout, overlay, previewEl\);/.test(controller)
+if (!/const liveLayout = this\.resolveLiveOnScreenTextLayout\(selected\.rowId, persistedLayout, overlay, previewEl\);/.test(controller)
+  || !/const rowLayout = hasLiveOverlayInteraction[\s\S]*\? liveLayout[\s\S]*: this\.resolveTrackManagedOnScreenTextLayout\(liveLayout, settings, selected\.rowId\);/.test(controller)
   || !/const previewSpec = this\.deps\?\.resolveOnScreenTextPreviewLayoutSpec\?\.\(\{[\s\S]*layout: rowLayout,[\s\S]*text,[\s\S]*previewWidthPx,[\s\S]*previewHeightPx/m.test(controller)) {
   throw new Error("El controller debe consumir un único preview spec compartido para renderizar el overlay.");
 }
 
-if (!/const bubbleLeftPct = this\.clamp01\(Number\(previewSpec\?\.xPct \?\? rowLayout\?\.xPct \?\? 0\)\);/.test(controller)
-  || !/const bubbleTopPct = this\.clamp01\(Number\(previewSpec\?\.yPct \?\? rowLayout\?\.yPct \?\? 0\)\);/.test(controller)) {
+if (!/xPct: previewSpec\?\.xPct \?\? rowLayout\?\.xPct \?\? 0/.test(controller)
+  || !/yPct: previewSpec\?\.yPct \?\? rowLayout\?\.yPct \?\? 0/.test(controller)) {
   throw new Error("El preview debe usar xPct/yPct persistidos como posición final, sin reinterpretarlos.");
 }
 

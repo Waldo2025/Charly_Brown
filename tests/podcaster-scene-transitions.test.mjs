@@ -7,7 +7,7 @@ import {
   getTransitionOverlapWindow,
   normalizeTransitionsByEdge,
   resolveTransitionPlaybackState
-} from "../public/podcaster/podcaster-scene-transitions.js";
+} from "../public/podcaster/podcaster-scene-transition.js";
 
 test("normalizeTransitionsByEdge keeps valid transitions and clamps duration", () => {
   const normalized = normalizeTransitionsByEdge({

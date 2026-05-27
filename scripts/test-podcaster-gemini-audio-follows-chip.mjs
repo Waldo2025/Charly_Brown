@@ -12,8 +12,8 @@ if (!syncBlockMatch) {
 }
 const syncBlock = syncBlockMatch[0];
 
-if (!syncBlock.includes("const activeSegments = segments.filter(s => currentMs >= s.startMs && currentMs < (s.startMs + s.durationMs));")) {
-  throw new Error("El audio Gemini debe seguir los segmentos activos del timeline de audio.");
+if (!/const activeSegments = segments\.filter\(\(segment\) => \{[\s\S]*resolveSegmentTimelineDurationMs\(segment, clipPlaybackRate\)[\s\S]*currentMs >= segment\.startMs && currentMs < \(segment\.startMs \+ visibleDurationMs\)/m.test(syncBlock)) {
+  throw new Error("El audio Gemini debe seguir los segmentos activos del timeline de audio, no los límites del video VEO.");
 }
 
 if (!syncBlock.includes("const rowId = segment.rowId;")) {
@@ -26,6 +26,10 @@ if (!syncBlock.includes("const audioClip = this.deps?.resolveDialogueAudioForRow
 
 if (/visualVoiceEntry|resolvePrimaryVisualRowId\(activeEntries\)/.test(syncBlock)) {
   throw new Error("El controlador todavía prioriza la escena visual sobre el clip de audio Gemini.");
+}
+
+if (/activeEntry[\s\S]*activeSegments/.test(syncBlock) && /activeSegments[\s\S]*activeEntry/.test(syncBlock)) {
+  throw new Error("La selección de segmentos Gemini no debe depender del activeEntry visual.");
 }
 
 console.log("Gemini audio follows moved chip OK.");

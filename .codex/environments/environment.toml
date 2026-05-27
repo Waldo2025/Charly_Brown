@@ -6,26 +6,6 @@ name = "CharlyBrown"
 script = ""
 
 [[actions]]
-name = "Ejecutar"
-icon = "run"
-command = "npx live-server public --port=5502"
-
-[[actions]]
-name = "open backend gemini"
-icon = "tool"
-command = "node backend/server.js"
-
-[[actions]]
 name = "backend + live server"
-icon = "tool"
-command = "npm run dev:local"
-
-[[actions]]
-name = "npm run api:dev"
-icon = "tool"
-command = "npm run api:dev"
-
-[[actions]]
-name = "npm run dev:local"
 icon = "tool"
 command = "npm run dev:local"

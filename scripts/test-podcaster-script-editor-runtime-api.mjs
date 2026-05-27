@@ -61,7 +61,7 @@ if (/window\.PodcasterScriptEditor\.(renderScript|buildScriptRowEditorMarkup|bui
 }
 
 const scriptEditorIndex = htmlSource.indexOf('src="podcaster/podcaster-script-editor.js?v=2026-05-17.2"');
-const podcasterIndex = htmlSource.indexOf('src="podcaster/podcaster.js?v=2026-05-18.1"');
+const podcasterIndex = htmlSource.search(/src="podcaster\/podcaster\.js\?v=[^"]+"/);
 if (!(scriptEditorIndex >= 0 && podcasterIndex > scriptEditorIndex)) {
   throw new Error("podcaster.html debe cargar podcaster-script-editor.js antes que podcaster.js.");
 }

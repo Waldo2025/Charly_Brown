@@ -3,6 +3,8 @@ import {
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut
@@ -26,6 +28,7 @@ let app = null;
 let auth = null;
 let firestore = null;
 let authPersistenceReady = Promise.resolve();
+let authPersistenceMode = "local";
 const AREA_ROLE_MAP = Object.freeze({
   editorial: "editor",
   autoria: "author",
@@ -33,26 +36,89 @@ const AREA_ROLE_MAP = Object.freeze({
   desarrollo: "developer"
 });
 
+function isStorageQuotaExceededError(error) {
+  const name = String(error?.name || "");
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  return name === "QuotaExceededError"
+    || code === "22"
+    || code === "1014"
+    || message.includes("quota")
+    || message.includes("storage");
+}
+
+async function setAuthPersistenceWithFallback(authInstance) {
+  const options = [
+    { mode: "local", persistence: browserLocalPersistence },
+    { mode: "session", persistence: browserSessionPersistence },
+    { mode: "memory", persistence: inMemoryPersistence }
+  ];
+  let lastError = null;
+
+  for (const option of options) {
+    try {
+      await setPersistence(authInstance, option.persistence);
+      authPersistenceMode = option.mode;
+      if (option.mode !== "local") {
+        console.warn(`[index] Firebase Auth usará persistencia ${option.mode}; localStorage no está disponible.`);
+      }
+      return option.mode;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[index] No se pudo fijar persistencia ${option.mode} de Firebase Auth:`, error);
+    }
+  }
+
+  throw lastError || new Error("No se pudo configurar persistencia de Firebase Auth.");
+}
+
+async function runAuthCredentialOperationWithStorageFallback(operation) {
+  await authPersistenceReady;
+
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isStorageQuotaExceededError(error)) {
+      throw error;
+    }
+
+    const fallbackOptions = [
+      { mode: "session", persistence: browserSessionPersistence },
+      { mode: "memory", persistence: inMemoryPersistence }
+    ];
+    let lastError = error;
+
+    for (const option of fallbackOptions) {
+      if (authPersistenceMode === option.mode) continue;
+      try {
+        await setPersistence(auth, option.persistence);
+        authPersistenceMode = option.mode;
+        console.warn(`[index] Reintentando autenticación con persistencia ${option.mode} por falta de espacio en localStorage.`);
+        return await operation();
+      } catch (retryError) {
+        lastError = retryError;
+        if (!isStorageQuotaExceededError(retryError)) {
+          throw retryError;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+}
+
 try {
   app = getDefaultFirebaseApp();
   void bootstrapFirebaseAppCheck(app);
   auth = getAuth(app);
   firestore = getFirestore(app);
-  authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch((err) => {
-    console.warn("[index] No se pudo fijar persistencia local de Firebase Auth:", err);
+  authPersistenceReady = setAuthPersistenceWithFallback(auth).catch((err) => {
+    authPersistenceMode = "default";
+    console.warn("[index] No se pudo preparar persistencia de Firebase Auth:", err);
   });
 } catch (err) {
   const msg = err?.message || "No se pudo inicializar Firebase.";
   alert(`Error de configuración: ${msg}`);
-}
-
-async function waitAuthPersistence(maxMs = 1800) {
-  try {
-    const timeout = new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(maxMs) || 0)));
-    await Promise.race([authPersistenceReady, timeout]);
-  } catch (_) {
-    // ignore
-  }
 }
 
 function normalizeArea(area = "") {
@@ -104,6 +170,10 @@ function isFirestorePermissionError(error) {
 function buildFriendlyAuthErrorMessage(error) {
   const code = String(error?.code || "").trim();
   const message = String(error?.message || "").trim();
+
+  if (isStorageQuotaExceededError(error)) {
+    return "No se pudo guardar la sesión porque el almacenamiento del navegador está lleno. Se intentará usar una sesión temporal; si vuelve a fallar, borra datos del sitio y vuelve a iniciar sesión.";
+  }
 
   switch (code) {
     case "auth/api-key-not-valid":
@@ -300,8 +370,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       try {
         userLoginBtn.disabled = true;
-        await waitAuthPersistence();
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await runAuthCredentialOperationWithStorageFallback(() => (
+          signInWithEmailAndPassword(auth, email, password)
+        ));
         await routeAuthenticatedUser(userCredential.user);
 
       } catch (error) {
@@ -340,8 +411,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       try {
         registerUserBtn.disabled = true;
-        await waitAuthPersistence();
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await runAuthCredentialOperationWithStorageFallback(() => (
+          createUserWithEmailAndPassword(auth, email, password)
+        ));
         const uid = userCredential.user.uid;
 
         await setDoc(doc(firestore, "users", uid), {

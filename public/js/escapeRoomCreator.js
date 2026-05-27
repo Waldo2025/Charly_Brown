@@ -12,7 +12,7 @@ onAuthStateChanged(auth, async (user) => {
     if (user) {
         tokenAuth = await user.getIdToken();
     } else {
-        window.location.href = "login.html";
+        window.location.href = "index.html";
     }
 });
 

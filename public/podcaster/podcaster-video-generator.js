@@ -7,8 +7,16 @@ import { isReelModeEnabled } from "./podcaster-reels.js";
 const runtime = requirePodcasterGenerationRuntime();
 
 // --- Constants ---
-const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 2;
+const DIALOGUE_VIDEO_MAX_REFERENCE_IMAGE_COUNT = 4;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
+const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
+  "veo-3.1-generate-preview",
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-lite-generate-preview",
+  "veo-3.0-generate-001",
+  "veo-3.0-fast-generate-001",
+  "veo-2.0-generate-001"
+]);
 
 // --- State ---
 const dialogueVideoGenerationTasks = new Map();
@@ -19,6 +27,49 @@ const brokenDialogueVideoRows = podcasterGenerationShared.brokenDialogueVideoRow
 let nextDialogueVideoRequestAt = 0;
 
 // --- Helpers ---
+
+function extractGenerationErrorText(value = null, fallback = "", seen = new Set()) {
+  if (value == null) return String(fallback || "").trim();
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (typeof value !== "object") {
+    const text = String(value || "").trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (seen.has(value)) return String(fallback || "").trim();
+  seen.add(value);
+
+  const candidates = [
+    value?.error,
+    value?.message,
+    value?.detail,
+    value?.reason,
+    value?.code
+  ];
+  for (const candidate of candidates) {
+    const text = extractGenerationErrorText(candidate, "", seen);
+    if (text) return text;
+  }
+  try {
+    const text = JSON.stringify(value);
+    return text && text !== "{}" ? text : String(fallback || "").trim();
+  } catch (_) {
+    return String(fallback || "").trim();
+  }
+}
+
+function buildGenerationErrorMessage(error = null, fallback = "") {
+  if (typeof runtime.buildPodcasterApiErrorMessage === "function") {
+    return runtime.buildPodcasterApiErrorMessage(error, fallback);
+  }
+  if (error && typeof error === "object") {
+    const nested = extractGenerationErrorText(error?.detail, "", new Set()) || extractGenerationErrorText(error, fallback, new Set());
+    return nested || "No se pudo completar la acción.";
+  }
+  return String(fallback || error || "No se pudo completar la acción.").trim() || "No se pudo completar la acción.";
+}
 
 function hasVisualReferenceTrace(details = {}) {
   return Boolean(
@@ -281,10 +332,16 @@ async function pollDialogueVideoGenerationJob(jobId = "", options = {}) {
       return data;
     }
     if (status === "error") {
-      const message = String(data?.error?.error || hint || "No se pudo generar el video.").trim() || "No se pudo generar el video.";
+      const rawError = data?.error && typeof data.error === "object" ? data.error : { error: data?.error };
+      const message = buildGenerationErrorMessage({
+        status: Number(rawError?.status || 500) || 500,
+        code: rawError?.code,
+        detail: rawError?.detail || rawError,
+        message: extractGenerationErrorText(rawError, hint || "No se pudo generar el video.")
+      }, hint || "No se pudo generar el video.");
       const error = new Error(message);
-      error.status = Number(data?.error?.status || 500) || 500;
-      error.detail = data?.error?.detail || data?.error || null;
+      error.status = Number(rawError?.status || 500) || 500;
+      error.detail = rawError?.detail || rawError || null;
       throw error;
     }
     if (!silent) {
@@ -314,6 +371,10 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const educationalMode = isEducationalVideoMode(session);
   const rowReferenceImages = getRowReferenceImageList(session, key);
   const rowReferenceVideo = getRowReferenceVideoMap(session)[key] || null;
+  const rowReferenceModeMap = typeof runtime.getRowReferenceModeByRowId === "function"
+    ? (runtime.getRowReferenceModeByRowId(session) || {})
+    : {};
+  const explicitReferenceMode = String(rowReferenceModeMap?.[key] || "").trim().toLowerCase();
   const speakerReferenceImage = typeof runtime.getSpeakerReferenceImageMap === "function"
     ? (runtime.getSpeakerReferenceImageMap(session)[speakerLabel] || null)
     : null;
@@ -324,11 +385,14 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
     ? (runtime.getScenarioReferenceImageMap(session)[String(activeScenarioAsset?.id || "").trim()] || null)
     : null;
   const fallbackReferenceImages = [speakerReferenceImage, scenarioReferenceImage].filter(Boolean);
-  const effectiveReferenceImages = rowReferenceImages.length || rowReferenceVideo
-    ? rowReferenceImages
-    : fallbackReferenceImages;
+  const effectiveReferenceMode = explicitReferenceMode === "video" && rowReferenceVideo
+    ? "video"
+    : "image";
+  const effectiveReferenceImages = effectiveReferenceMode === "image"
+    ? (rowReferenceImages.length ? rowReferenceImages : fallbackReferenceImages)
+    : [];
   const rowReferenceImage = effectiveReferenceImages[0] || getRowReferenceImageMap(session)[key] || speakerReferenceImage || scenarioReferenceImage || null;
-  const referenceMode = rowReferenceVideo ? "video" : "image";
+  const referenceMode = effectiveReferenceMode;
   const pendingKey = `${sessionId}:${key}`;
 
   if (dialogueVideoGenerationTasks.has(pendingKey)) {
@@ -341,7 +405,15 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const enhanceFromExistingVideo = options.enhanceFromExistingVideo === true;
   const silent = options.silent === true;
   const videoCfg = typeof runtime.getPodcastVideoConfig === "function" ? runtime.getPodcastVideoConfig(session) : {};
-  const cheapVideoMode = options.cheapVideoMode === true || videoCfg.cheapVideoMode === true;
+  const selectedVideoModel = (() => {
+    const requested = String(options.videoModel || videoCfg.videoModel || "").trim();
+    if (requested && AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requested)) return requested;
+    return videoCfg.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview";
+  })();
+  const modelCandidates = typeof runtime.buildPodcasterVideoModelChain === "function"
+    ? runtime.buildPodcasterVideoModelChain(selectedVideoModel)
+    : Array.from(new Set([selectedVideoModel, ...AVAILABLE_PODCASTER_VIDEO_MODELS]));
+  const cheapVideoMode = selectedVideoModel === "veo-3.1-lite-generate-preview";
   const promptProfile = String(options.promptProfile || "").trim();
   const videoDirective = String(options.videoDirective || row?.videoDirective || resolveVisualNotesForGeneration(row) || "").replace(/\s+/g, " ").trim();
   const visualNotes = String(
@@ -478,6 +550,8 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         continuityReferenceImageDataUrl: inlineReferenceBudget.continuityReferenceImageDataUrl,
         regenerate,
         enhanceFromExistingVideo,
+        model: selectedVideoModel,
+        modelCandidates,
         cheapVideoMode,
         inlineReferenceBudget,
         forceImmediateSceneChange: shouldForceImmediateSceneChange(videoDirective),
@@ -534,7 +608,12 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         body: JSON.stringify(body)
       });
 
-      if (!resp?.ok) throw new Error(resp?.error || "Error al iniciar generación.");
+      if (!resp?.ok) {
+        const startError = new Error(buildGenerationErrorMessage(resp, "Error al iniciar generación."));
+        startError.status = Number(resp?.status || 500) || 500;
+        startError.detail = resp?.detail || resp?.error || null;
+        throw startError;
+      }
 
       traceVisualReferenceScene("request-accepted", {
         sessionId,
@@ -591,7 +670,12 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       }
 
       if (options.syncStageAfterGenerate !== false) {
-        setPodcastVideoRow(key, { syncStage: true });
+        setPodcastVideoRow(key, {
+          syncStage: true,
+          preserveMontageCursor: true,
+          lightweightUi: true,
+          reason: "generation-complete"
+        });
       }
 
       traceVisualReferenceScene("request-success", {
@@ -611,11 +695,11 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         sessionId,
         rowId: key,
         sceneNumber: resolveSceneNumberByRowId(key, session),
-        message: String(error?.message || "Error al generar video.").trim(),
+        message: buildGenerationErrorMessage(error, "Error al generar video."),
         detail: error?.detail || null
       });
       console.error("[Podcaster][SceneVideoRef][request-error]", error);
-      if (!silent) addChatMessage("system", `Error en escena ${resolveSceneNumberByRowId(key, session)}: ${error.message}`);
+      if (!silent) addChatMessage("system", `Error en escena ${resolveSceneNumberByRowId(key, session)}: ${buildGenerationErrorMessage(error, "Error al generar video.")}`);
       throw error;
     } finally {
       dialogueVideoGenerationPending.delete(pendingKey);
@@ -688,6 +772,9 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
 
   const shouldPromptDirective = options.promptDirective === true;
   let nextVideoDirective = normalizeVideoDirectiveText(options.videoDirective != null ? options.videoDirective : (row?.videoDirective || resolveVisualNotesForGeneration(row) || ""));
+  const preserveInteractivePlayback = podcastVideoState.montageActive === true || playbackController?.state?.isPlaying === true;
+  const preservedActiveRowId = String(podcastVideoState.activeRowId || "").trim();
+  const preservedCursorMs = Math.max(0, Number(podcastVideoState.montageCursorMs || 0) || 0);
 
   if (shouldPromptDirective) {
     const directiveResult = await promptDialogueVideoDirective(key, session, { initialValue: nextVideoDirective });
@@ -695,7 +782,7 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     nextVideoDirective = normalizeVideoDirectiveText(directiveResult.videoDirective || "");
   }
 
-  const selectRow = options.selectRow !== false;
+  const selectRow = options.selectRow !== false && !preserveInteractivePlayback;
   if (selectRow) selectTimelineSceneRow(key, { syncStage: options.syncStage === true });
 
   const loadingButton = options.loadingButton || null;
@@ -775,7 +862,7 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
       silent: options.silent === true,
       videoDirective: nextVideoDirective,
       deferTimelineRender: options.deferTimelineRender === true,
-      syncStageAfterGenerate: options.syncStageAfterGenerate !== false,
+      syncStageAfterGenerate: options.syncStageAfterGenerate !== false && !preserveInteractivePlayback,
       onJobUpdate: (jobData) => {
         if (!generationKey) return;
         const hint = String(jobData?.hint || "").trim() || [jobData?.stage || "Generando video", jobData?.variant ? `· ${jobData.variant}` : ""].filter(Boolean).join(" ");
@@ -785,6 +872,19 @@ async function runSceneVideoGenerationFlow(rowId = "", options = {}) {
     });
     return generated;
   } finally {
+    if (preserveInteractivePlayback) {
+      podcastVideoState.montageCursorMs = preservedCursorMs;
+      if (preservedActiveRowId) {
+        podcastVideoState.activeRowId = preservedActiveRowId;
+        podcastVideoState.timelineLastInteractedRowId = preservedActiveRowId;
+      }
+      runtime.syncPodcastTimelinePlayhead?.(getActiveSession(), {
+        currentMs: preservedCursorMs,
+        totalMs: getTimelineTotalDurationMs(getActiveSession()),
+        lightweight: true,
+        suppressAutoScroll: true
+      });
+    }
     if (generationKey) {
       timelineSceneVideoGenerationPending.delete(generationKey);
       timelineSceneVideoGenerationStatus.delete(generationKey);
@@ -1006,7 +1106,7 @@ async function handlePodcasterGenerationClick(event) {
           hasReferenceVideo: Boolean(getRowReferenceVideoMap(session)[rowId] || null)
         });
         setGenerationStatus("Error", "");
-        addChatMessage("system", `No se pudo generar video de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
+        addChatMessage("system", `No se pudo generar video de la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${buildGenerationErrorMessage(error, "Error al generar video.")}).`);
       }
       return;
     }
@@ -1068,7 +1168,7 @@ async function handlePodcasterGenerationClick(event) {
           hasReferenceVideo: Boolean(getRowReferenceVideoMap(session)[rowId] || null)
         });
         setGenerationStatus("Error", "");
-        addChatMessage("system", `No se pudo regenerar con mejora la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${error.message}).`);
+        addChatMessage("system", `No se pudo regenerar con mejora la escena ${resolveSceneNumberByRowId(rowId, getActiveSession())} (${buildGenerationErrorMessage(error, "Error al generar video.")}).`);
       }
       return;
     }

@@ -9855,6 +9855,7 @@ const lecturasAgentViewerState = {
   autoReadAdvanceTimer: null,
   autoReadSpeaking: false,
   autoReadSpeakSeq: 0,
+  geminiReadToken: 0,
   manualReadSpeaking: false,
   manualNavToken: 0,
   fullscreenHandler: null,
@@ -13130,6 +13131,7 @@ function _lecturasAgentInterruptPlaybackForManualNavigation() {
   lecturasAgentViewerState.manualReadSpeaking = false;
   lecturasAgentViewerState.autoReadSpeaking = false;
   lecturasAgentViewerState.autoReadSpeakSeq += 1;
+  lecturasAgentViewerState.geminiReadToken += 1;
   lecturasAgentViewerState.autoReadLockedUntil = 0;
   _lecturasAgentClearAutoReadTimer();
   _clearAgentSpeechPlaybackTimer();
@@ -13155,6 +13157,7 @@ function _lecturasAgentStopAutoRead(options = {}) {
   lecturasAgentViewerState.autoReadSpeaking = false;
   lecturasAgentViewerState.manualReadSpeaking = false;
   lecturasAgentViewerState.autoReadSpeakSeq += 1;
+  lecturasAgentViewerState.geminiReadToken += 1;
   lecturasAgentViewerState.autoReadLockedUntil = 0;
   _lecturasAgentClearAutoReadTimer();
   // Corta inmediatamente cualquier audio en curso (Gemini Live/TTS local)
@@ -13171,6 +13174,125 @@ function _lecturasAgentStopAutoRead(options = {}) {
   if (!silent) _lecturasAgentRenderCurrentSlide();
 }
 
+function _lecturasAgentBuildTtsText(text = "") {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1900);
+}
+
+function _lecturasAgentGetCurrentStoryTextParts(fallbackText = "") {
+  const refs = lecturasAgentViewerState.refs;
+  const blocks = refs?.pageText
+    ? Array.from(refs.pageText.querySelectorAll(".lecturas-asc-agent-story-text-block"))
+    : [];
+  const parts = blocks
+    .map((block) => String(block.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (parts.length) return parts;
+  const fallback = String(fallbackText || "").replace(/\s+/g, " ").trim();
+  return fallback ? [fallback] : [];
+}
+
+async function _lecturasAgentCreateGeminiTtsAudio(slide = {}, index = 0, text = "", partIndex = 0) {
+  const safePartIndex = Math.max(0, Number(partIndex || 0));
+  if (!Array.isArray(slide.geminiTtsUrls)) slide.geminiTtsUrls = [];
+  if (!Array.isArray(slide.geminiTtsPromises)) slide.geminiTtsPromises = [];
+  const existingUrl = String(slide.geminiTtsUrls[safePartIndex] || "").trim();
+  if (existingUrl) return existingUrl;
+  if (slide.geminiTtsPromises[safePartIndex]) return await slide.geminiTtsPromises[safePartIndex];
+
+  const user = await _unidadGetAuthUser({ maxMs: 2500 });
+  const token = user ? await user.getIdToken().catch(() => "") : "";
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const payload = lecturasAgentViewerState.payload || {};
+  const lecturaId = String(payload.id || "lectura").trim() || "lectura";
+  const sourceCollection = String(payload.sourceCollection || "lecturas").trim() || "lecturas";
+  const title = String(payload.titulo || "Lectura").trim() || "Lectura";
+  const lecturaVoice = _leerAjustesVozLecturaDesdeThemeSettings();
+  const voiceName = String(lecturaVoice.voiceName || charlyTtsVoiceName || CHARLY_TTS_VOICE_NAME_DEFAULT).trim();
+  const ttsText = _lecturasAgentBuildTtsText(text);
+  if (!ttsText) throw new Error("No hay texto para crear la lectura con voz Gemini.");
+
+  slide.geminiTtsPromises[safePartIndex] = (async () => {
+    const response = await fetch(buildApiUrl("/api/podcaster/dialogue-audio/generate"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sessionId: `lecturas-agent-${sourceCollection}-${lecturaId}`,
+        rowId: `slide-${Math.max(1, Number(index || 0) + 1)}-part-${safePartIndex + 1}-${String(slide?.paragraphHash || slide?.id || "parrafo").slice(0, 40)}`,
+        speakerLabel: "Narrador",
+        speakerName: title,
+        voiceName,
+        expression: "Narrativa",
+        text: ttsText,
+        targetSpeechLine: ttsText,
+        speechRateHint: Math.max(0.75, Math.min(1.35, Number(lecturaVoice.speed || 0.94) || 0.94)),
+        contentMode: "educational",
+        model: String(localStorage.getItem("cb_lecturas_agent_tts_model") || "gemini-3.1-flash-tts-preview").trim(),
+        ttsDirection: {
+          stylePrompt: `Lectura expresiva en ${_descripcionLocaleCharly(lecturaVoice.locale || charlyVoiceLocale)} con estilo ${String(lecturaVoice.mood || "narrativo").trim() || "narrativo"}.`
+        }
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(String(data?.error || data?.message || `No se pudo crear audio Gemini (${response.status}).`));
+    }
+    const audioUrl = String(data?.dialogueAudio?.downloadUrl || "").trim();
+    if (!audioUrl) throw new Error("Gemini creó la respuesta, pero no devolvió URL de audio.");
+    slide.geminiTtsUrls[safePartIndex] = audioUrl;
+    if (!Array.isArray(slide.geminiTtsStoragePaths)) slide.geminiTtsStoragePaths = [];
+    if (!Array.isArray(slide.geminiTtsMetaParts)) slide.geminiTtsMetaParts = [];
+    slide.geminiTtsStoragePaths[safePartIndex] = String(data?.dialogueAudio?.storagePath || "").trim();
+    slide.geminiTtsMetaParts[safePartIndex] = data?.dialogueAudio || null;
+    return audioUrl;
+  })();
+
+  try {
+    return await slide.geminiTtsPromises[safePartIndex];
+  } finally {
+    slide.geminiTtsPromises[safePartIndex] = null;
+  }
+}
+
+function _lecturasAgentPlayGeminiAudioUrl(audioUrl = "", callbacks = {}, token = 0) {
+  const url = String(audioUrl || "").trim();
+  if (!url) return false;
+  if (!geminiTtsAudioElUnidad) {
+    geminiTtsAudioElUnidad = new Audio();
+    geminiTtsAudioElUnidad.preload = "auto";
+  }
+  const audio = geminiTtsAudioElUnidad;
+  audio.onplay = null;
+  audio.onended = null;
+  audio.onerror = null;
+  audio.onpause = null;
+  audio.pause();
+  audio.src = url;
+  audio.currentTime = 0;
+  audio.onplay = () => {
+    if (Number(token || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+    _marcarActividadVozCharly(1800);
+    if (typeof callbacks.onPlaybackStart === "function") callbacks.onPlaybackStart();
+  };
+  audio.onended = () => {
+    if (Number(token || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+    if (typeof callbacks.onPlaybackEnd === "function") callbacks.onPlaybackEnd();
+  };
+  audio.onerror = () => {
+    if (Number(token || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+    if (typeof callbacks.onPlaybackError === "function") callbacks.onPlaybackError(new Error("No se pudo reproducir el audio Gemini."));
+  };
+  audio.play().catch((err) => {
+    if (Number(token || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+    if (typeof callbacks.onPlaybackError === "function") callbacks.onPlaybackError(err);
+  });
+  return true;
+}
+
 function _lecturasAgentSpeakViewerText(text = "", options = {}) {
   const textoPlano = String(text || "").replace(/\s+/g, " ").trim();
   if (!textoPlano) return false;
@@ -13180,6 +13302,15 @@ function _lecturasAgentSpeakViewerText(text = "", options = {}) {
     onPlaybackEnd = null,
     onPlaybackError = null
   } = options || {};
+  const currentIndex = Math.max(0, Number(lecturasAgentViewerState.currentIndex || 0));
+  const slide = lecturasAgentViewerState.slides[currentIndex];
+  const readToken = Number((lecturasAgentViewerState.geminiReadToken || 0) + 1);
+  lecturasAgentViewerState.geminiReadToken = readToken;
+  const textParts = (Array.isArray(options?.parts) ? options.parts : _lecturasAgentGetCurrentStoryTextParts(textoPlano))
+    .map((part) => String(part || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (!textParts.length) return false;
+  let started = false;
   let finished = false;
   let safetyTimer = null;
   const clearSafety = () => {
@@ -13207,22 +13338,41 @@ function _lecturasAgentSpeakViewerText(text = "", options = {}) {
   safetyTimer = setTimeout(() => {
     finishError(new Error("gemini_live_turn_timeout"));
   }, 120000);
-  const handled = hablarAgenteUnidad(textoPlano, {
-    cancelarPrevio,
-    withMic: false,
-    forceRestart: false,
-    onPlaybackStart: () => {
-      if (typeof onPlaybackStart === "function") {
-        try { onPlaybackStart(); } catch (_) {}
-      }
-    },
-    onPlaybackEnd: () => finishOk(),
-    onPlaybackError: (err) => finishError(err)
-  });
-  if (handled === false) {
-    finishError(new Error("gemini_live_unavailable"));
-    return false;
+  if (cancelarPrevio) {
+    try { _detenerAudioWorkflowPlay(); } catch (_) {}
   }
+  const playPart = (partIndex = 0) => {
+    if (finished) return;
+    if (Number(readToken || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+    if (!_lecturasAgentViewerIsOpen()) return;
+    const partText = textParts[partIndex];
+    if (!partText) {
+      finishOk();
+      return;
+    }
+    _lecturasAgentCreateGeminiTtsAudio(slide, currentIndex, partText, partIndex)
+      .then((audioUrl) => {
+        if (finished) return;
+        if (Number(readToken || 0) !== Number(lecturasAgentViewerState.geminiReadToken || 0)) return;
+        if (!_lecturasAgentViewerIsOpen()) return;
+        _lecturasAgentPlayGeminiAudioUrl(audioUrl, {
+          onPlaybackStart: () => {
+            if (started) return;
+            started = true;
+            if (typeof onPlaybackStart === "function") {
+              try { onPlaybackStart(); } catch (_) {}
+            }
+          },
+          onPlaybackEnd: () => playPart(partIndex + 1),
+          onPlaybackError: (err) => finishError(err)
+        }, readToken);
+      })
+      .catch((err) => {
+        finishError(err);
+        logVisual(`⚠️ No se pudo crear lectura con voz Gemini: ${err?.message || "sin detalle"}`);
+      });
+  };
+  playPart(0);
   return true;
 }
 
@@ -13402,19 +13552,30 @@ async function _lecturasAgentEnsureSlideImage(slide = {}, idx = 0, token = 0, op
   if (idx === lecturasAgentViewerState.currentIndex) _lecturasAgentRenderCurrentSlide();
   const generated = await _lecturasAgentGenerateImage(lecturasAgentViewerState.payload, slide, idx, token);
   if (token !== lecturasAgentViewerState.token) throw new Error("cancelled");
+  const generatedDataUrl = String(generated?.dataUrl || "").trim();
+  if (generatedDataUrl) {
+    slide.imageUrl = generatedDataUrl;
+    slide.imageDataUrl = generatedDataUrl;
+    slide.imageStatus = "ready";
+    if (idx === lecturasAgentViewerState.currentIndex) _lecturasAgentRenderCurrentSlide();
+  }
 
-  const persistentUrl = await _lecturasAgentPersistImageToStorage(slide, generated.dataUrl);
+  const persistentUrl = await _lecturasAgentPersistImageToStorage(slide, generatedDataUrl);
   const finalUrl = persistentUrl
     ? `${persistentUrl}${persistentUrl.includes("?") ? "&" : "?"}v=${Date.now()}`
-    : generated.dataUrl;
-  slide.imageUrl = finalUrl;
-  slide.imageDataUrl = generated.dataUrl;
+    : generatedDataUrl;
+  // Mantén el dataUrl como fuente visible inmediata; la URL persistente se usa
+  // para cache/descarga y se verá al reabrir, evitando parpadeos por Storage.
+  slide.imageUrl = generatedDataUrl || finalUrl;
+  slide.imageDataUrl = generatedDataUrl;
+  slide.persistentImageUrl = finalUrl;
   slide.imageStatus = "ready";
   if (cacheKey) {
-    lecturasAgentViewerState.inlineImageCache.set(cacheKey, generated.dataUrl);
-    lecturasAgentViewerState.memCache.set(cacheKey, slide.imageUrl);
+    if (generatedDataUrl) lecturasAgentViewerState.inlineImageCache.set(cacheKey, generatedDataUrl);
+    lecturasAgentViewerState.memCache.set(cacheKey, finalUrl);
     _lecturasAgentPersistCacheStore();
   }
+  if (idx === lecturasAgentViewerState.currentIndex) _lecturasAgentRenderCurrentSlide();
   return true;
 }
 

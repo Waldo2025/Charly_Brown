@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 
-const jsSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const jsSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 
 const beginDragMatch = jsSource.match(
-  /function beginOnScreenTextOverlayDrag\(event = null\) \{([\s\S]*?)\n\}/m
+  /function beginOverlayDrag\(event = null\) \{([\s\S]*?)\n  \}/m
 );
 
 if (!beginDragMatch) {
-  throw new Error("No se encontró beginOnScreenTextOverlayDrag.");
+  throw new Error("No se encontró beginOverlayDrag en podcaster-on-screen-text-track-editor.js.");
 }
 
 if (/syncPodcastOnScreenTextOverlay\(/.test(beginDragMatch[1])) {

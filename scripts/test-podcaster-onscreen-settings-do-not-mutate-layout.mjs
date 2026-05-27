@@ -6,7 +6,7 @@ if (!/function expandOnScreenTextLayoutToFitText\(layout = null, row = null, set
   throw new Error("La funcion auxiliar de expansion de layout debe seguir existiendo para uso local si se requiere.");
 }
 
-if (!/return expandSharedOnScreenTextLayoutToFitText\s*\?\s*expandSharedOnScreenTextLayoutToFitText\(layout, row, settings, \{/.test(source)) {
+if (!/return expandSharedOnScreenTextLayoutToFitText\(layout, row, settings, \{/.test(source)) {
   throw new Error("La expansión de layout debe delegarse al módulo compartido.");
 }
 

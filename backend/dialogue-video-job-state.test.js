@@ -29,3 +29,21 @@ test("includes public execution fields for dialogue video jobs", () => {
   assert.equal(payload.variant, "reference-continuity+aspect");
   assert.equal(payload.rowId, "row_1");
 });
+
+test("normalizes nested dialogue video job errors into readable text", () => {
+  const payload = sanitizeDialogueVideoJobPublicPayload({
+    jobId: "job_456",
+    status: "error",
+    error: {
+      status: 502,
+      error: {
+        message: "Veo devolvió operación completada sin URI de video.",
+        details: [{ reason: "empty_media" }]
+      }
+    }
+  });
+
+  assert.equal(payload.error.status, 502);
+  assert.equal(payload.error.error, "Veo devolvió operación completada sin URI de video.");
+  assert.notEqual(payload.error.error, "[object Object]");
+});

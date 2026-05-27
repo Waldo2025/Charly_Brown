@@ -2,16 +2,17 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
+const editor = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
 
-if (!/data-setting="stylePreset"/.test(source)) {
+if (!/data-setting="stylePreset"/.test(shared)) {
   throw new Error("El modal debe seguir exponiendo el selector de variante visual.");
 }
 
-if (!/data-setting="fontVariant"/.test(source)) {
+if (!/data-setting="fontVariant"/.test(shared)) {
   throw new Error("El modal debe renderizar un control combinado para peso y estilo.");
 }
 
-if (!/data-setting="strokeColor"/.test(source) || !/data-setting="strokeWidthPx"/.test(source)) {
+if (!/data-setting="strokeColor"/.test(shared) || !/data-setting="strokeWidthPx"/.test(shared)) {
   throw new Error("El modal debe exponer controles de color y grosor de stroke.");
 }
 
@@ -19,17 +20,17 @@ if (!/function normalizeOnScreenTextTrackSettings\(raw = \{\}\) \{[\s\S]*const s
   throw new Error("La normalización del track debe vivir en la spec compartida y soportar strokeColor y strokeWidthPx.");
 }
 
-if (!/return normalizeSharedOnScreenTextTrackSettings\s*\?\s*normalizeSharedOnScreenTextTrackSettings\(raw\)/.test(source)) {
+if (!/const normalizeOnScreenTextTrackSettings = requireOnScreenTextApiFunction\("normalizeOnScreenTextTrackSettings"\);/.test(source)) {
   throw new Error("Podcaster debe delegar la normalización del track al módulo compartido.");
 }
 
-if (!/else if \(key === "fontVariant"\) \{[\s\S]*current\.fontWeight = isBold \? "bold" : "normal";[\s\S]*current\.fontStyle = isItalic \? "italic" : "normal";/m.test(source)) {
+if (!/else if \(key === "fontVariant"\) \{[\s\S]*current\.fontVariant = selected\.value;[\s\S]*current\.fontWeight = selected\.fontWeight;[\s\S]*current\.fontStyle = selected\.fontStyle;/m.test(shared)) {
   throw new Error("El setter debe descomponer fontVariant a fontWeight y fontStyle.");
 }
 
-const setterStart = source.indexOf('function setOnScreenTextTrackSetting(setting = "fontFamily", value = "", options = {}) {');
-const setterEnd = source.indexOf("\nfunction syncOnScreenTextTrackToggleBtn(", setterStart);
-const setterBody = setterStart >= 0 && setterEnd > setterStart ? source.slice(setterStart, setterEnd) : "";
+const setterStart = editor.indexOf('function setTrackSetting(setting = "fontFamily", value = "", options = {}) {');
+const setterEnd = editor.indexOf("\n  function syncAnchorAcrossLayouts(", setterStart);
+const setterBody = setterStart >= 0 && setterEnd > setterStart ? editor.slice(setterStart, setterEnd) : "";
 if (!/if \(options\?\.renderShell === true\) \{\s*renderPodcastVideoShell\(session\);\s*\}/m.test(setterBody)) {
   throw new Error("El render completo del shell debe quedar solo como camino explícito y no por defecto.");
 }

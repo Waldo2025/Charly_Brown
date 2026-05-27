@@ -297,9 +297,36 @@ function sanitizeChatHtml(input = "") {
 function splitMarkdownTableCells(line = "") {
   const source = String(line || "").trim();
   if (!source.includes("|")) return [];
-  const normalized = source.startsWith("|") ? source.slice(1) : source;
-  const tailTrimmed = normalized.endsWith("|") ? normalized.slice(0, -1) : normalized;
-  return tailTrimmed.split("|").map((cell) => String(cell || "").trim());
+  const cells = [];
+  let current = "";
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (escaped) current += "\\";
+  cells.push(current.trim());
+  if (source.startsWith("|") && cells.length && cells[0] === "") {
+    cells.shift();
+  }
+  if (/(^|[^\\])\|$/.test(source) && cells.length && cells[cells.length - 1] === "") {
+    cells.pop();
+  }
+  return cells;
 }
 
 function isMarkdownDividerCell(cell = "") {

@@ -1,45 +1,37 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const timelineUiSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url), "utf8");
 
-const audioBuildMatch = source.match(
-  /const buildMontageAudioSubtrackRowHtml = \(track = null, trackIndex = 0, trackItems = \[\]\) => \{[\s\S]*?const leftPx = Math\.max\([\s\S]*?\);[\s\S]*?data-action="timeline-select-scene"[\s\S]*?\};/m
+assert.match(
+  podcasterSource,
+  /STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = -15;/,
+  "El nudge horizontal de subtracks debe ser -15px."
 );
 
-if (!audioBuildMatch) {
-  throw new Error("No se encontró buildMontageAudioSubtrackRowHtml.");
-}
-
-if (!/STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX = -15;/.test(source)) {
-  throw new Error("El nudge horizontal de subtracks debe ser -15px.");
-}
-
-if (!/STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX/.test(audioBuildMatch[0])) {
-  throw new Error("El chip de audio debe aplicar el nudge horizontal configurado.");
-}
-
-const textTrackMatch = source.match(
-  /const buildOnScreenTextTrackRowHtml = \(\) => \{[\s\S]*?const leftPx = Math\.max\(0, Number\(clipLeftPx \|\| 0\)([\s\S]*?)\);[\s\S]*?podcast-onscreen-text-timeline-clip/m
+assert.match(
+  timelineUiSource,
+  /const leftPx = Math\.max\(0, timelineMsToPx\(startMs, activeSession\) \+ STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX\);[\s\S]*?podcast-montage-audio-chip/m,
+  "El chip de audio debe aplicar el nudge horizontal configurado."
 );
 
-if (!textTrackMatch) {
-  throw new Error("No se encontró buildOnScreenTextTrackRowHtml.");
-}
-
-if (!(textTrackMatch[1] || "").includes("STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX")) {
-  throw new Error("El clip de texto debe aplicar el nudge horizontal configurado.");
-}
-
-const normalTextTrackMatch = source.match(
-  /const buildNormalOnScreenTextTrackRowHtml = \(\) => \{[\s\S]*?const leftPx = Math\.max\(0, Number\(clipLeftPx \|\| 0\)([\s\S]*?)\);[\s\S]*?podcast-onscreen-text-timeline-clip/m
+assert.match(
+  timelineUiSource,
+  /const clipLeftPx = timelineMsToPx\(startMs, activeSession\) \+ STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX;[\s\S]*?podcast-onscreen-text-timeline-clip/m,
+  "El clip de texto en tracks debe aplicar el mismo nudge horizontal que el chip de audio Gemini."
 );
 
-if (!normalTextTrackMatch) {
-  throw new Error("No se encontró buildNormalOnScreenTextTrackRowHtml.");
-}
+assert.match(
+  timelineUiSource,
+  /const clipLeftPx = timelineMsToPx\(Number\(clip\?\.startMs \|\| 0\), activeSession\) \+ STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX;[\s\S]*?podcast-normal-onscreen-text-track-row/m,
+  "El clip de texto en modo normal debe aplicar el nudge horizontal configurado."
+);
 
-if (!(normalTextTrackMatch[1] || "").includes("STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX")) {
-  throw new Error("El clip de texto en modo normal debe aplicar el nudge horizontal configurado.");
-}
+assert.match(
+  timelineUiSource,
+  /const startMs = hasGemini[\s\S]*?Number\(segment\?\.startMs \|\| 0\)[\s\S]*?const leftPx = Math\.max\(0, timelineMsToPx\(startMs, activeSession\) \+ STUDIO_TIMELINE_SUBTRACK_LEFT_NUDGE_PX\);/m,
+  "El render ligero del texto debe usar startMs del segmento Gemini y el mismo nudge que el audio."
+);
 
 console.log("Podcast subtrack left alignment OK.");

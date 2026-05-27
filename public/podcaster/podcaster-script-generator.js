@@ -3077,52 +3077,10 @@ async function handleGenerate(prompt, options = {}) {
 
 // === MIGRATED PROMPTING & EDUCATIONAL VIDEO FORMATTING FUNCTIONS ===
 
-function autoResizePrompt() {
-  if (!els.promptInput) return;
-  const node = els.promptInput;
-  node.style.height = "0px";
-  const nextHeight = Math.min(node.scrollHeight, 180);
-  node.style.height = `${Math.max(34, nextHeight)}px`;
-  node.style.overflowY = node.scrollHeight > 180 ? "auto" : "hidden";
-}
-
-function normalizePromptClipboardText(text = "") {
+function normalizeTableClipboardText(text = "") {
   return String(text || "")
     .replace(/\r\n?/g, "\n")
     .replace(/\u00a0/g, " ");
-}
-
-function getPromptInputPlainText() {
-  if (!els.promptInput) return "";
-  if (typeof els.promptInput.value === "string") {
-    return normalizePromptClipboardText(els.promptInput.value).trim();
-  }
-  return normalizePromptClipboardText(els.promptInput.innerText || els.promptInput.textContent || "").trim();
-}
-
-function getPromptInputHtml() {
-  if (!els.promptInput) return "";
-  if (typeof els.promptInput.value === "string") {
-    return escapeHtml(els.promptInput.value).replace(/\n/g, "<br>");
-  }
-  return String(els.promptInput.innerHTML || "")
-    .replace(/^(?:\s|<br\s*\/?>|&nbsp;)+$/i, "")
-    .trim();
-}
-
-function setPromptInputContent(content = "", options = {}) {
-  if (!els.promptInput) return;
-  const text = String(content || "");
-  const html = String(options?.html || "").trim();
-  if (typeof els.promptInput.value === "string") {
-    els.promptInput.value = text;
-    return;
-  }
-  if (html) {
-    els.promptInput.innerHTML = html;
-    return;
-  }
-  els.promptInput.textContent = text;
 }
 
 function buildMarkdownTableFromRows(rows = []) {
@@ -3169,7 +3127,7 @@ function parseHtmlTableToRows(html = "") {
 }
 
 function parsePlainTextTableToRows(text = "") {
-  const source = normalizePromptClipboardText(text);
+  const source = normalizeTableClipboardText(text);
   if (!source) return [];
   const lines = source
     .split("\n")
@@ -3217,7 +3175,7 @@ function hasStructuredVideoTableInput(promptText = "", promptHtml = "") {
 }
 
 function stripMarkdownTableFromText(text = "") {
-  const source = normalizePromptClipboardText(text);
+  const source = normalizeTableClipboardText(text);
   if (!source) return "";
   const lines = source.split("\n");
   const filtered = lines.filter((line) => {
@@ -3240,7 +3198,7 @@ function extractNonTableTextFromPromptHtml(promptHtml = "") {
     const root = doc.body.firstElementChild;
     if (!root) return "";
     root.querySelectorAll("table").forEach((node) => node.remove());
-    return normalizePromptClipboardText(root.textContent || "").replace(/\s+/g, " ").trim();
+    return normalizeTableClipboardText(root.textContent || "").replace(/\s+/g, " ").trim();
   } catch (_) {
     return "";
   }
@@ -3250,68 +3208,6 @@ function extractStructuredVideoTableRows(promptText = "", promptHtml = "") {
   const htmlRows = parseHtmlTableToRows(promptHtml);
   if (htmlRows.length) return htmlRows;
   return parsePlainTextTableToRows(promptText);
-}
-
-function insertPromptInputText(text = "") {
-  if (!els.promptInput) return;
-  const normalized = String(text || "");
-  const input = els.promptInput;
-  if (typeof input.value === "string") {
-    const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
-    const end = Number.isFinite(input.selectionEnd) ? input.selectionEnd : input.value.length;
-    if (typeof input.setRangeText === "function") {
-      input.setRangeText(normalized, start, end, "end");
-    } else {
-      input.value = `${input.value.slice(0, start)}${normalized}${input.value.slice(end)}`;
-      const caret = start + normalized.length;
-      input.selectionStart = caret;
-      input.selectionEnd = caret;
-    }
-    return;
-  }
-  input.focus();
-  try {
-    document.execCommand("insertText", false, normalized);
-  } catch (_) {
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount) {
-      input.textContent = `${input.textContent || ""}${normalized}`;
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    range.insertNode(document.createTextNode(normalized));
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-}
-
-function insertPromptInputHtml(html = "") {
-  if (!els.promptInput) return;
-  const normalized = String(html || "").trim();
-  if (!normalized) return;
-  if (typeof els.promptInput.value === "string") {
-    insertPromptInputText(normalized.replace(/<[^>]+>/g, " "));
-    return;
-  }
-  els.promptInput.focus();
-  try {
-    document.execCommand("insertHTML", false, normalized);
-  } catch (_) {
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount) {
-      els.promptInput.innerHTML += normalized;
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    const fragment = range.createContextualFragment(normalized);
-    range.insertNode(fragment);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
 }
 
 function buildHtmlTableFromRows(rows = []) {
@@ -4285,30 +4181,6 @@ async function composeVideoScriptFromUserInput(promptText = "", promptHtml = "",
   };
 }
 
-function handlePromptInputPaste(event) {
-  if (!els.promptInput) return;
-  const clipboardData = event?.clipboardData || window.clipboardData;
-  if (!clipboardData) return;
-  const html = clipboardData.getData("text/html");
-  const plainText = clipboardData.getData("text/plain")
-    || clipboardData.getData("text")
-    || clipboardData.getData("Text")
-    || "";
-  if (/<table[\s>]/i.test(html || "")) {
-    window.setTimeout(autoResizePrompt, 0);
-    return;
-  }
-  const htmlRows = parseHtmlTableToRows(html);
-  const plainRows = parsePlainTextTableToRows(plainText);
-  const rows = htmlRows.length ? htmlRows : plainRows;
-  if (!rows.length) return;
-  const htmlTable = buildHtmlTableFromRows(rows);
-  if (!htmlTable) return;
-  event.preventDefault();
-  insertPromptInputHtml(htmlTable);
-  autoResizePrompt();
-}
-
 registerPodcasterScriptGeneratorApi({
   rewriteScenarioPromptForEducationalVideo,
   resolveCreativeVisualNotesText,
@@ -4436,11 +4308,3 @@ window.isLocalApiReachable = isLocalApiReachable;
 window.connectScriptSnapshotToPanel = connectScriptSnapshotToPanel;
 
 // Migrated window bindings
-window.autoResizePrompt = autoResizePrompt;
-window.normalizePromptClipboardText = normalizePromptClipboardText;
-window.getPromptInputPlainText = getPromptInputPlainText;
-window.getPromptInputHtml = getPromptInputHtml;
-window.setPromptInputContent = setPromptInputContent;
-window.insertPromptInputText = insertPromptInputText;
-window.insertPromptInputHtml = insertPromptInputHtml;
-window.handlePromptInputPaste = handlePromptInputPaste;

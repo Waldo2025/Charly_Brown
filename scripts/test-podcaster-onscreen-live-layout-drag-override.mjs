@@ -26,7 +26,7 @@ assert.match(
 
 assert.match(
   source,
-  /const rowLayout = this\.resolveLiveOnScreenTextLayout\(selected\.rowId, persistedLayout, overlay, previewEl\);/,
+  /const liveLayout = this\.resolveLiveOnScreenTextLayout\(selected\.rowId, persistedLayout, overlay, previewEl\);/,
   "syncOverlay debe renderizar contra el layout vivo cuando exista interacción."
 );
 

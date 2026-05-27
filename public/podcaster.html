@@ -12,7 +12,8 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.42">
+  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.43">
+  <link rel="stylesheet" href="podcaster/podcaster-sidepanel-studio.css?v=2026-05-23-1">
   <!-- FilePond -->
   <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet">
   <link href="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.css"
@@ -448,11 +449,23 @@
       <div class="podcaster-layout">
         <aside class="sessions-rail" aria-label="Historial de sesiones">
           <div class="sessions-rail-header">
-            <h2>Sesiones</h2>
-            <div class="sessions-rail-actions">
-              <button id="newSessionBtn" class="panel-icon-btn" type="button" title="Nueva sesión">
-                <i class="fas fa-plus"></i>
-              </button>
+            <div class="sessions-rail-header-copy">
+              <h2>
+                <span>Sesiones</span>
+                <span class="sessions-rail-actions">
+                  <button id="toggleArchivedSessionsBtn" class="panel-icon-btn" type="button" title="Ver sesiones archivadas" aria-pressed="false" aria-label="Ver sesiones archivadas">
+                    <i class="fas fa-box-archive"></i>
+                  </button>
+                  <button id="newSessionBtn" class="panel-icon-btn" type="button" title="Nueva sesión">
+                    <i class="fas fa-plus"></i>
+                  </button>
+                </span>
+              </h2>
+              <div id="sessionsRailFilter" class="sessions-rail-filter" role="tablist" aria-label="Filtrar sesiones">
+                <button class="sessions-filter-chip is-active" type="button" data-filter="all" aria-pressed="true">Todo</button>
+                <button class="sessions-filter-chip" type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
+                <button class="sessions-filter-chip" type="button" data-filter="video" aria-pressed="false">Video</button>
+              </div>
             </div>
           </div>
 
@@ -551,64 +564,70 @@
           </footer>
         </section>
 
+        <button id="openSidepanelBtn" class="panel-icon-btn sidepanel-edge-tab" type="button" data-sidepanel-toggle
+          aria-controls="podcasterSidepanel" aria-expanded="false" title="Mostrar inspector">
+          <i class="fas fa-chevron-left" aria-hidden="true"></i>
+        </button>
+        <button id="togglePodcastVideoBtn" type="button"
+          title="Mostrar u ocultar video">
+          <i class="fas fa-video"></i>
+        </button>
+
         <aside id="podcasterSidepanel" class="sidepanel" aria-label="Panel lateral de guión">
-          <header class="sidepanel-header">
-            <button id="openSidepanelBtn" class="panel-icon-btn sidepanel-edge-tab" type="button"
-              aria-controls="podcasterSidepanel" aria-expanded="false" title="Mostrar inspector">
-              <i class="fas fa-chevron-left" aria-hidden="true"></i>
-            </button>
-            <div class="sidepanel-header-actions">
-              <button id="togglePodcastVideoBtn" class="panel-icon-btn sidepanel-video-btn" type="button"
-                title="Mostrar u ocultar video">
-                <i class="fas fa-video"></i>
+          <header>
+            <div data-sidepanel-actions>
+              <button id="toggleCollapseAllRowsBtn" type="button" title="Colapsar escenas">
+                <i class="fas fa-compress-alt"></i>
               </button>
-              <button id="saveSessionBtn" class="panel-icon-btn sidepanel-save-btn" type="button"
+              <button id="openVideoEditorBtn" type="button"
+                title="Pasar guión al editor de video">
+                <i class="fas fa-film"></i>
+              </button>
+              <button id="addRowBtn" type="button" title="Agregar fila">
+                <i class="fas fa-plus"></i>
+              </button>
+              <button id="duplicateRowBtn" type="button" title="Duplicar última fila">
+                <i class="fas fa-copy"></i>
+              </button>
+              <button id="saveSessionBtn" type="button"
                 title="Guardar sesión en Firebase">
                 <i class="fas fa-cloud-upload-alt"></i>
               </button>
-              <button id="regenerateAllGeminiAudiosBtn" class="panel-icon-btn sidepanel-audio-batch-btn" type="button"
+              <button id="regenerateAllGeminiAudiosBtn" type="button"
                 title="Regenerar audios Gemini (todas las escenas)"
                 aria-label="Regenerar audios Gemini de todas las escenas">
                 <i class="fas fa-wave-square"></i>
               </button>
-              <button id="openMusicConfigBtn" class="panel-icon-btn sidepanel-music-btn" type="button"
+              <button id="openMusicConfigBtn" type="button"
                 title="Música de fondo del panel">
                 <i class="fas fa-music"></i>
               </button>
-              <button id="openGlobalConfigBtn" class="panel-icon-btn sidepanel-config-btn" type="button"
+              <button id="openGlobalConfigBtn" type="button"
                 title="Configuración general">
                 <i class="fas fa-sliders-h"></i>
-              </button>
-              <button id="sidepanelHeaderToggleBtn" class="panel-icon-btn sidepanel-toggle-btn" type="button"
-                aria-controls="podcasterSidepanel" aria-expanded="true" title="Mostrar u ocultar inspector">
-                <i class="fas fa-times"></i>
               </button>
             </div>
           </header>
 
-          <section class="podcast-player-shell" aria-label="Reproductor completo del guión">
-            <div class="podcast-player-meta">
-              <strong id="hostSummary">Host A, Host B</strong>
-              <strong id="durationSummary">0:00</strong>
-            </div>
-            <div class="podcast-player-now">
-              <span id="podcastNowPlaying">Sin reproducción activa</span>
-              <span id="podcastPlaybackStatus">Detenido</span>
-            </div>
-            <div class="podcast-player-controls">
-              <div class="podcast-player-transport-bundle" aria-label="Reproducción">
-                <button id="podcastPrevBtn" class="row-icon-btn" type="button" title="Escena anterior"><i
+          <section data-tab-panel="script" data-sidepanel-pane>
+            <div id="scriptTableBody" aria-live="polite"></div>
+          </section>
+          <footer aria-label="Reproductor completo del guión" data-sidepanel-player>
+            <div data-sidepanel-player-controls>
+              <div data-sidepanel-transport aria-label="Reproducción">
+                <button id="podcastPrevBtn" type="button" title="Escena anterior"><i
                     class="fas fa-step-backward"></i></button>
-                <button id="podcastPlayBtn" class="row-icon-btn" type="button" title="Reproducir"><i
+                <button id="podcastPlayBtn" type="button" title="Reproducir"><i
                     class="fas fa-play"></i></button>
-                <button id="podcastPauseBtn" class="row-icon-btn" type="button" title="Pausar"><i
+                <button id="podcastPauseBtn" type="button" title="Pausar"><i
                     class="fas fa-pause"></i></button>
-                <button id="podcastStopBtn" class="row-icon-btn" type="button" title="Detener"><i
+                <button id="podcastStopBtn" type="button" title="Detener"><i
                     class="fas fa-stop"></i></button>
-                <button id="podcastNextBtn" class="row-icon-btn" type="button" title="Siguiente escena"><i
+                <button id="podcastNextBtn" type="button" title="Siguiente escena"><i
                     class="fas fa-step-forward"></i></button>
               </div>
-              <label class="podcast-speed-wrap" for="podcastSpeedSelect">
+              <strong id="durationSummary" data-sidepanel-duration>0:00</strong>
+              <label for="podcastSpeedSelect" data-sidepanel-speed>
                 <select id="podcastSpeedSelect">
                   <option value="0.85">0.85x</option>
                   <option value="1" selected>1x</option>
@@ -616,32 +635,11 @@
                   <option value="1.3">1.3x</option>
                 </select>
               </label>
-              <button id="downloadPodcastBtn" class="podcast-download-btn" type="button" title="Descargar podcast">
+              <button id="downloadPodcastBtn" type="button" data-sidepanel-download title="Descargar podcast">
                 <i class="fas fa-download"></i>
               </button>
             </div>
-          </section>
-          <section class="sidepanel-panel is-active" data-tab-panel="script">
-            <div class="panel-toolbar">
-              <div class="panel-toolbar-copy">
-                <h3 id="scriptPanelTitle">Tabla de diálogo</h3>
-                <p id="scriptPanelSubtitle">Lista compacta editable tipo inspector.</p>
-              </div>
-              <div class="panel-toolbar-actions">
-                <button id="openVideoEditorBtn" class="panel-icon-btn" type="button"
-                  title="Pasar guión al editor de video">
-                  <i class="fas fa-film"></i>
-                </button>
-                <button id="addRowBtn" class="panel-icon-btn" type="button" title="Agregar fila">
-                  <i class="fas fa-plus"></i>
-                </button>
-                <button id="duplicateRowBtn" class="panel-icon-btn" type="button" title="Duplicar última fila">
-                  <i class="fas fa-copy"></i>
-                </button>
-              </div>
-            </div>
-            <div id="scriptTableBody" class="script-list" aria-live="polite"></div>
-          </section>
+          </footer>
         </aside>
       </div>
     </section>
@@ -1018,6 +1016,15 @@
             inputmode="numeric" aria-label="Volumen Gemini global numérico">
         </div>
       </label>
+      <label class="row-field">
+        <span>Volumen audio de fondo %</span>
+        <div class="studio-volume-control">
+          <input id="montageSceneBackgroundVolumeRange" type="range" min="0" max="200" step="1" value="100"
+            aria-label="Volumen audio de fondo global">
+          <input id="montageSceneBackgroundVolumeNumber" type="number" min="0" max="200" step="1" value="100"
+            inputmode="numeric" aria-label="Volumen audio de fondo global numérico">
+        </div>
+      </label>
       <div class="timeline-clip-duration-actions">
         <button id="cancelMontageSceneMixBtn"
           class="row-icon-btn dialogue-video-directive-action timeline-clip-duration-cancel-btn"
@@ -1168,6 +1175,11 @@
                     <i class="fas fa-minus" aria-hidden="true"></i>
                   </button>
                 </div>
+                <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
+                <button id="podcastPreviewFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
+                  aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
+                  <i class="fas fa-expand" aria-hidden="true"></i>
+                </button>
                 <video id="podcastActiveSpeakerBackdropVideo"
                   class="podcast-active-speaker-video podcast-active-speaker-video-backdrop" playsinline preload="auto"
                   hidden muted></video>
@@ -1181,6 +1193,9 @@
                 <video id="podcastActiveSpeakerVideoAlt"
                   class="podcast-active-speaker-video podcast-active-speaker-video-alt" playsinline preload="auto"
                   hidden></video>
+                <img id="podcastActiveSpeakerImageAlt"
+                  class="podcast-active-speaker-image podcast-active-speaker-image-alt" alt="Scene image" hidden
+                  crossorigin="anonymous">
                 <div id="podcastStylizedTextOverlay" class="podcast-stylized-text-overlay"></div>
                 <div id="podcastOnScreenTextOverlay" class="podcast-onscreen-text-overlay" aria-hidden="true" hidden>
                 </div>
@@ -1919,12 +1934,16 @@
           <label class="compact-field">
             <span>Calidad / Modelo</span>
             <select id="globalCheapVideoMode">
-              <option value="true">VEO Lite (Rápido)</option>
-              <option value="false">VEO Pro (Máxima Calidad)</option>
+              <option value="veo-3.1-generate-preview">Veo 3.1 Preview</option>
+              <option value="veo-3.1-fast-generate-preview">Veo 3.1 Fast Preview</option>
+              <option value="veo-3.1-lite-generate-preview">Veo 3.1 Lite Preview</option>
+              <option value="veo-3.0-generate-001">Veo 3.0 Generate</option>
+              <option value="veo-3.0-fast-generate-001">Veo 3.0 Fast</option>
+              <option value="veo-2.0-generate-001">Veo 2.0 Generate</option>
             </select>
           </label>
         </div>
-        <p class="gemini-creativity-hint">VEO Pro es más estable con imágenes de referencia, pero consume más créditos.
+        <p class="gemini-creativity-hint">Veo 3.1 preview y fast son la ruta principal. Lite reduce costo; con referencias visuales el backend puede bajar prioridad de lite automáticamente.
         </p>
       </div>
 
@@ -2055,9 +2074,20 @@
           </div>
           <div class="montage-export-preview-stage">
             <div id="montageExportPreviewContainer" class="montage-export-preview-container">
+              <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
+              <button id="montageExportFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
+                aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
+                <i class="fas fa-expand" aria-hidden="true"></i>
+              </button>
               <video id="montageExportPreviewVideo" class="podcast-active-speaker-video" playsinline muted loop autoplay
                 preload="metadata" hidden></video>
               <img id="montageExportPreviewImage" class="podcast-active-speaker-image" src=""
+                alt="Preview de exportación" hidden>
+              <video id="montageExportPreviewVideoAlt"
+                class="podcast-active-speaker-video podcast-active-speaker-video-alt" playsinline muted loop autoplay
+                preload="metadata" hidden></video>
+              <img id="montageExportPreviewImageAlt"
+                class="podcast-active-speaker-image podcast-active-speaker-image-alt" src=""
                 alt="Preview de exportación" hidden>
               <div id="montageExportPreviewPlaceholder" class="montage-export-preview-placeholder">Preparando motor de
                 preview…</div>
@@ -2259,13 +2289,13 @@
   <script type="module" src="js/sidebar.js"></script>
   <script type="module" src="podcaster/podcaster-timeline-model.js?v=2026-05-18.1"></script>
   <script type="module" src="podcaster/podcaster-script-editor.js?v=2026-05-17.2"></script>
-  <script type="module" src="podcaster/podcaster.js?v=2026-05-18.1"></script>
+  <script type="module" src="podcaster/podcaster.js?v=2026-05-26.1"></script>
   <script type="module" src="podcaster/podcaster-reels.js"></script>
   <script type="module" src="podcaster/podcaster-public-library.js?v=2026-05-17.1"></script>
   <script type="module" src="podcaster/podcaster-chat-assistant.js?v=2026-05-17.1"></script>
   <script type="module" src="podcaster/podcaster-audioGemini-timeline.js?v=2026-05-17.1"></script>
-  <script type="module" src="podcaster/podcaster-video-generator.js?v=2026-05-16.2"></script>
-  <script type="module" src="podcaster/podcaster-montage-export.js?v=2026-05-17.2"></script>
+  <script type="module" src="podcaster/podcaster-video-generator.js?v=2026-05-25.1"></script>
+  <script type="module" src="podcaster/podcaster-montage-export.js?v=2026-05-26.1"></script>
   <script type="module" src="podcaster/podcaster-podcast-script-domain.js?v=2026-05-19.1"></script>
   <script type="module" src="podcaster/podcaster-video-script-domain.js?v=2026-05-19.1"></script>
   <script type="module" src="podcaster/podcaster-script-generator.js?v=2026-05-17.3"></script>

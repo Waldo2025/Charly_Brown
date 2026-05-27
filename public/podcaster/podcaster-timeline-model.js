@@ -29,6 +29,14 @@ const STUDIO_AUDIO_TRACK_MIN_LOOP_PX = readRuntimeNumber("STUDIO_AUDIO_TRACK_MIN
 const STUDIO_GEMINI_SCENE_DELAY_MS = readRuntimeNumber("STUDIO_GEMINI_SCENE_DELAY_MS", 0);
 const VIDEO_SCENE_MAX_SEC = readRuntimeNumber("VIDEO_SCENE_MAX_SEC", 8);
 const STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS = readRuntimeNumber("STUDIO_ONSCREEN_TEXT_DEFAULT_DURATION_MS", 7000);
+const AVAILABLE_PODCASTER_VIDEO_MODELS = Object.freeze([
+  "veo-3.1-generate-preview",
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-lite-generate-preview",
+  "veo-3.0-generate-001",
+  "veo-3.0-fast-generate-001",
+  "veo-2.0-generate-001"
+]);
 
 // Dynamic lookups for functions/vars defined in podcaster.js (loaded after this script)
 const toFiniteNumber = (v, fallback) => (window.toFiniteNumber || ((val, fb) => {
@@ -765,6 +773,11 @@ function normalizePodcastVideoConfig(raw = {}) {
     return next;
   })();
   const geminiDialogueTrackIndex = Math.max(0, Math.min(999, Math.floor(toFiniteNumber(raw?.geminiDialogueTrackIndex, 0))));
+  const normalizedVideoModel = (() => {
+    const requestedModel = String(raw?.videoModel || "").trim();
+    if (requestedModel && AVAILABLE_PODCASTER_VIDEO_MODELS.includes(requestedModel)) return requestedModel;
+    return raw?.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview";
+  })();
   return {
     enabled: raw?.enabled === true,
     editorEnabled: raw?.editorEnabled === true,
@@ -772,6 +785,7 @@ function normalizePodcastVideoConfig(raw = {}) {
     autoGeneratePortraits: raw?.autoGeneratePortraits === true,
     allowLivePreviewWithoutStoredAudio: raw?.allowLivePreviewWithoutStoredAudio === true,
     cheapVideoMode: raw?.cheapVideoMode !== false,
+    videoModel: normalizedVideoModel,
     timelineVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineVersion, STUDIO_TIMELINE_VERSION))),
     timelineTrackVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineTrackVersion, STUDIO_TIMELINE_TRACK_VERSION))),
     timelineTracks: normalizeTimelineTracks(raw?.timelineTracks || []),
@@ -1265,9 +1279,14 @@ function getTimelineTotalDurationMs(session = null) {
   const geminiTrack = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
   const geminiMaxEnd = geminiTrack.enabled === true
     ? (geminiTrack.segments || []).reduce((acc, segment) => {
+      const rowId = String(segment?.rowId || "").trim();
       const startMs = Math.max(0, Number(segment?.startMs || 0) || 0);
+      const measuredAudioVisibleMs = rowId
+        ? Math.max(0, Math.round(Number(resolveRowAudioDurationMs(rowId, session || getActiveSession()) || 0) || 0))
+        : 0;
       const durationMs = Math.max(
         STUDIO_TIMELINE_MIN_CLIP_MS,
+        measuredAudioVisibleMs,
         Number(segment?.durationMs || 0) || (Number(segment?.endMs || 0) - startMs) || STUDIO_TIMELINE_MIN_CLIP_MS
       );
       return Math.max(acc, startMs + durationMs);

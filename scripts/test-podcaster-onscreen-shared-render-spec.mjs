@@ -74,4 +74,61 @@ if (!(plain.boxHeightPx >= (plain.lineHeightPx * 2)) || !(plain.maxLines >= 2)) 
   throw new Error("La spec compartida debe reservar al menos dos lineas utiles para evitar cortes en la segunda linea.");
 }
 
+const longReelText = resolveOnScreenTextRenderSpec({
+  ...baseInput,
+  settings: {
+    ...baseInput.settings,
+    fontSizePx: 64,
+    strokeWidthPx: 3,
+    shadowEnabled: true,
+    shadowOpacity: 0.6
+  },
+  layout: {
+    widthPct: 0.58,
+    heightPct: 0.14,
+    xPct: 0.2,
+    yPct: 0.68
+  },
+  resolution: "720x1280",
+  sourceWidth: 720,
+  sourceHeight: 1280,
+  previewWidthPx: 360,
+  previewHeightPx: 640,
+  text: "Descubre cómo comunicarte con claridad incluso cuando todo parece ruido alrededor."
+});
+if (longReelText.fontSizePx >= 64 || longReelText.wrappedText.includes("...") || !longReelText.wrappedText.includes("alrededor")) {
+  throw new Error("La spec debe reducir la fuente en reel y conservar el texto completo sin puntos suspensivos.");
+}
+
+const veryLongReelText = resolveOnScreenTextRenderSpec({
+  ...baseInput,
+  settings: {
+    ...baseInput.settings,
+    fontSizePx: 64,
+    strokeWidthPx: 3,
+    shadowEnabled: true,
+    shadowOpacity: 0.6
+  },
+  layout: {
+    widthPct: 0.58,
+    heightPct: 0.14,
+    xPct: 0.2,
+    yPct: 0.62
+  },
+  resolution: "720x1280",
+  sourceWidth: 720,
+  sourceHeight: 1280,
+  previewWidthPx: 360,
+  previewHeightPx: 640,
+  text: "Este texto largo debe conservarse completo en un reel vertical aunque necesite muchas lineas para explicar la idea principal sin resumirse ni terminar convertido en puntos suspensivos al exportar."
+});
+const baseReelHeightPx = Math.round(1280 * 0.14);
+if (
+  veryLongReelText.wrappedText.includes("...")
+  || !veryLongReelText.wrappedText.includes("exportar.")
+  || !(veryLongReelText.boxHeightPx > baseReelHeightPx)
+) {
+  throw new Error("La spec debe crecer el alto automaticamente en reel y conservar el texto completo.");
+}
+
 console.log("Podcast onscreen shared render spec OK.");

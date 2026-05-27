@@ -405,7 +405,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (typeof unsubscribeUnread === "function") unsubscribeUnread();
             updateSidebarUnreadBadge(0);
             chatPanel.classList.remove("is-open");
-            window.location.replace("login.html");
+            window.location.replace("index.html");
         }
     });
 

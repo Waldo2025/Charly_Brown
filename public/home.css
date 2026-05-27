@@ -2524,6 +2524,80 @@ body:not(.sidebar-collapsed) .home-wrapper {
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
 }
 
+.player-stage .podcast-stage-brand-mark {
+  --pod-stage-brand-width-pct: 0.05;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 12;
+  width: calc(100% * var(--pod-stage-brand-width-pct));
+  height: auto;
+  max-width: 44px;
+  min-width: 20px;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 24px rgba(2, 6, 23, 0.38));
+}
+
+.player-stage .podcast-stage-fullscreen-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 13;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.player-stage .podcast-stage-fullscreen-btn:hover {
+  background: #38bdf8;
+}
+
+.player-stage .podcast-stage-fullscreen-controls-host {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 14;
+  transform: translateX(-50%);
+  width: min(92%, 720px);
+  display: none;
+  justify-content: center;
+}
+
+.player-stage.is-stage-fullscreen .podcast-stage-fullscreen-controls-host,
+.player-stage.is-stage-expanded .podcast-stage-fullscreen-controls-host {
+  display: flex;
+}
+
+.player-stage.is-stage-fullscreen .player-controls,
+.player-stage.is-stage-expanded .player-controls {
+  width: min(100%, 720px);
+  margin: 0;
+  background: rgba(2, 6, 23, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.44);
+}
+
+.player-stage.is-stage-fullscreen,
+.player-stage.is-stage-expanded {
+  background:
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.18), transparent 24%),
+    #020617;
+}
+
+.player-stage.is-stage-expanded {
+  position: fixed !important;
+  inset: 24px !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+  z-index: 100000 !important;
+}
+
 .player-video {
   position: absolute;
   top: 0;

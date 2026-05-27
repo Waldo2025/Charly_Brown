@@ -33,6 +33,10 @@ const {
   validateDialogueVideoInlineReferenceBudget
 } = require("./podcaster-stability.js");
 const {
+  normalizeDialogueAudioWordTimings,
+  extractGeminiDialogueAudioWordTimings
+} = require("./podcaster-dialogue-audio-alignment.js");
+const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-on-screen-text.js"));
@@ -42,6 +46,10 @@ const {
 const {
   buildBufferedMediaPayload
 } = require("./proxy-media-buffer.js");
+const {
+  resolveMontageExportVideoParams,
+  resolveMontageIntermediateVideoParams
+} = require("./montage-export-video-params.js");
 
 let admin = null;
 let GoogleGenAI = null;
@@ -168,7 +176,10 @@ const PODCASTER_IMAGE_MODEL_CANDIDATES = Object.freeze([
 const PODCASTER_VIDEO_MODEL_CANDIDATES = Object.freeze([
   "veo-3.1-generate-preview",
   "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview"
+  "veo-3.1-lite-generate-preview",
+  "veo-3.0-generate-001",
+  "veo-3.0-fast-generate-001",
+  "veo-2.0-generate-001"
 ]);
 const GEMINI_LIVE_ALLOWED_VOICE_NAMES = new Set([
   "Zephyr", "Kore", "Orus", "Autonoe", "Umbriel", "Erinome",
@@ -199,6 +210,14 @@ const fetchCompat = (...args) => {
   if (typeof fetch === "function") return fetch(...args);
   return import("node-fetch").then(({ default: f }) => f(...args));
 };
+
+function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9") {
+  const next = parameters && typeof parameters === "object" ? { ...parameters } : {};
+  next.aspectRatio = String(next.aspectRatio || aspectRatio).trim() || aspectRatio;
+  next.resolution = "1080p";
+  return next;
+}
+
 const dialogueVideoJobs = new Map();
 const heavyWorkCoordinator = createHeavyWorkCoordinator();
 const heavyWorkState = heavyWorkCoordinator.state;
@@ -1842,7 +1861,7 @@ function sanitizePodcasterSession(raw = {}) {
 
   const speakerReferenceImageMap = sanitizeReferenceImageMap(raw?.speakerReferenceImageMap || {}, 40);
   const scenarioReferenceImageMap = sanitizeReferenceImageMap(raw?.scenarioReferenceImageMap || {}, 120);
-  const sanitizeReferenceImageListMap = (rawMap = {}, maxEntries = 500, maxItemsPerEntry = 4) => {
+  const sanitizeReferenceImageListMap = (rawMap = {}, maxEntries = 500, maxItemsPerEntry = 12) => {
     const source = rawMap && typeof rawMap === "object" ? rawMap : {};
     const next = {};
     Object.entries(source).slice(0, maxEntries).forEach(([rawKey, value]) => {
@@ -1857,7 +1876,7 @@ function sanitizePodcasterSession(raw = {}) {
     });
     return next;
   };
-  const rowReferenceImageListMap = sanitizeReferenceImageListMap(raw?.rowReferenceImageListMap || {}, 500, 4);
+  const rowReferenceImageListMap = sanitizeReferenceImageListMap(raw?.rowReferenceImageListMap || {}, 500, 12);
   const rowReferenceImageMap = sanitizeReferenceImageMap(raw?.rowReferenceImageMap || {}, 500);
   Object.entries(rowReferenceImageMap).forEach(([key, value]) => {
     if (!rowReferenceImageListMap[key] && value) rowReferenceImageListMap[key] = [value];
@@ -1983,6 +2002,7 @@ function sanitizePodcasterSession(raw = {}) {
       promptVersion: clampText(clip?.promptVersion || "podcaster_live_audio_v1", 80) || "podcaster_live_audio_v1",
       durationSec: clampNumber(clip?.durationSec, 0, 180, 0),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
+      wordTimings: normalizeDialogueAudioWordTimings(clip?.wordTimings || clip?.alignment || []),
       updatedAt: clampText(clip?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
       downloadUrl,
       storagePath
@@ -1997,7 +2017,19 @@ function sanitizePodcasterSession(raw = {}) {
     if (!key || !item || typeof item !== "object") return;
     const transitionType = String(item.type || "cut").trim().toLowerCase();
     transitionsByEdge[key] = {
-      type: ["cut", "crossfade", "dip-black"].includes(transitionType) ? transitionType : "cut",
+      type: [
+        "cut",
+        "crossfade",
+        "dip-black",
+        "flash-white",
+        "slide-left",
+        "slide-right",
+        "slide-up",
+        "slide-down",
+        "zoom-in",
+        "zoom-out",
+        "blur"
+      ].includes(transitionType) ? transitionType : "cut",
       durationMs: Math.max(0, Math.min(1200, Number(item.durationMs) || 0))
     };
   });
@@ -2222,11 +2254,15 @@ function sanitizePodcasterSession(raw = {}) {
     timelineOnScreenTextDefaultsVersion: Math.max(1, Math.min(99, Math.round(Number(raw?.podcastVideoConfig?.timelineOnScreenTextDefaultsVersion) || 1))),
     timelineTrackHeightsById: sanitizeTimelineTrackHeightsById(raw?.podcastVideoConfig?.timelineTrackHeightsById || {}),
     timelineViewMode: timelineViewModeRaw === "normal" ? "normal" : "tracks",
+    videoModel: PODCASTER_VIDEO_MODEL_CANDIDATES.includes(String(raw?.podcastVideoConfig?.videoModel || "").trim())
+      ? String(raw.podcastVideoConfig.videoModel).trim()
+      : (raw?.podcastVideoConfig?.cheapVideoMode === false ? "veo-3.1-generate-preview" : "veo-3.1-lite-generate-preview"),
     onScreenTextTrack: sanitizeOnScreenTextTrack(raw?.podcastVideoConfig?.onScreenTextTrack || {}),
     geminiDialogueTrack: sanitizeGeminiDialogueTrack(raw?.podcastVideoConfig?.geminiDialogueTrack || {}),
     geminiDialogueTrackIndex: Math.max(0, Math.min(999, Math.floor(Number(raw?.podcastVideoConfig?.geminiDialogueTrackIndex) || 0))),
     montageDefaultVeoVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultVeoVolumePct, 0, 100, 0),
-    montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100)
+    montageDefaultGeminiVolumePct: clampNumber(raw?.podcastVideoConfig?.montageDefaultGeminiVolumePct, 0, 100, 100),
+    reelModeEnabled: raw?.podcastVideoConfig?.reelModeEnabled === true
   };
   const panelMusicConfigRaw = raw?.panelMusicConfig && typeof raw.panelMusicConfig === "object" ? raw.panelMusicConfig : {};
   const panelMusicTrackRaw = panelMusicConfigRaw?.track && typeof panelMusicConfigRaw.track === "object" ? panelMusicConfigRaw.track : null;
@@ -2653,6 +2689,30 @@ async function safeJson(response) {
   } catch (_) {
     const txt = await response.text().catch(() => "");
     return { error: txt || "Respuesta no JSON del upstream." };
+  }
+}
+
+function extractErrorText(value = null, fallback = "", seen = new Set()) {
+  if (value == null) return String(fallback || "").trim();
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (typeof value !== "object") {
+    const text = String(value || "").trim();
+    return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+  }
+  if (seen.has(value)) return String(fallback || "").trim();
+  seen.add(value);
+  for (const candidate of [value?.error, value?.message, value?.detail, value?.reason, value?.code]) {
+    const text = extractErrorText(candidate, "", seen);
+    if (text) return text;
+  }
+  try {
+    const text = JSON.stringify(value);
+    return text && text !== "{}" ? text : String(fallback || "").trim();
+  } catch (_) {
+    return String(fallback || "").trim();
   }
 }
 
@@ -3324,36 +3384,53 @@ async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), source
     await fs.promises.writeFile(inputPath, source);
     inputProbe = await probeMediaWithFfmpeg(inputPath, "input").catch(() => ({ videoCodec: "", audioCodec: "", duration: "" }));
     const hasInputAudio = Boolean(String(inputProbe?.audioCodec || "").trim());
+    const inputVideoCodec = String(inputProbe?.videoCodec || "").trim().toLowerCase();
+    const inputAudioCodec = String(inputProbe?.audioCodec || "").trim().toLowerCase();
+    const canCopyVideo = inputVideoCodec === "h264";
+    const canCopyAudio = inputAudioCodec === "aac";
+    const isMp4LikeSource = String(sourceMimeType || "").trim().toLowerCase().includes("mp4");
     const transcodeArgs = hasInputAudio
-      ? [
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-i",
-        inputPath,
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-ar",
-        "48000",
-        "-b:a",
-        "160k",
-        "-movflags",
-        "+faststart",
-        outputPath
-      ]
+      ? canCopyVideo && canCopyAudio && isMp4LikeSource
+        ? [
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "warning",
+          "-i",
+          inputPath,
+          "-map",
+          "0:v:0",
+          "-map",
+          "0:a:0?",
+          "-c:v",
+          "copy",
+          "-c:a",
+          "copy",
+          "-movflags",
+          "+faststart",
+          outputPath
+        ]
+        : [
+          "-y",
+          "-hide_banner",
+          "-loglevel",
+          "warning",
+          "-i",
+          inputPath,
+          "-map",
+          "0:v:0",
+          "-map",
+          "0:a:0?",
+          "-c:v",
+          canCopyVideo ? "copy" : "libx264",
+          ...(canCopyVideo ? [] : ["-preset", "medium", "-crf", "14", "-pix_fmt", "yuv420p"]),
+          "-c:a",
+          canCopyAudio ? "copy" : "aac",
+          ...(canCopyAudio ? [] : ["-ar", "48000", "-b:a", "160k"]),
+          "-movflags",
+          "+faststart",
+          outputPath
+        ]
       : [
         "-y",
         "-hide_banner",
@@ -3371,13 +3448,8 @@ async function transcodeDialogueVideoToMp4(inputBuffer = Buffer.alloc(0), source
         "1:a:0",
         "-shortest",
         "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-pix_fmt",
-        "yuv420p",
+        canCopyVideo ? "copy" : "libx264",
+        ...(canCopyVideo ? [] : ["-preset", "medium", "-crf", "14", "-pix_fmt", "yuv420p"]),
         "-c:a",
         "aac",
         "-ar",
@@ -5009,16 +5081,17 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
         });
         const data = await safeJson(syncResponse);
         if (!syncResponse.ok) {
+          const errorMessage = extractErrorText(data, `HTTP ${syncResponse.status}`) || "dialogue_video_generate_failed";
           upsertDialogueVideoJob(jobId, {
             status: "error",
             stage: "error",
             progress: 1,
-            hint: String(data?.error || `HTTP ${syncResponse.status}`).trim() || "No se pudo generar el video.",
+            hint: errorMessage,
             error: {
-              error: String(data?.error || "dialogue_video_generate_failed").trim(),
+              error: errorMessage,
               code: String(data?.code || "").trim() || undefined,
               status: Number(syncResponse.status || 500),
-              detail: data?.detail && typeof data.detail === "object" ? data.detail : undefined
+              detail: data?.detail && typeof data.detail === "object" ? data.detail : data
             }
           });
           return;
@@ -5598,6 +5671,15 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       useSceneReferenceAsInitImage
         ? `La imagen adjunta${referenceImageName ? ` (${referenceImageName})` : ""} es referencia visual principal de la escena. Debe guiar composición, estilo, ambientación y continuidad.`
         : "",
+      sceneReferenceAssets.length
+        ? `Las ${sceneReferenceAssets.length === 1 ? "referencia visual adjunta es" : `referencias visuales adjuntas (${sceneReferenceAssets.length}) son`} la fuente de verdad visual de esta escena. Respeta sus elementos dominantes y no inventes objetos, vestuario, personajes, arquitectura, utilería, colores o ambientación que las contradigan.`
+        : "",
+      sceneReferenceAssets.length > 1
+        ? "Si hay varias referencias, combínalas como el mismo universo visual y conserva únicamente los rasgos recurrentes entre ellas. Prioriza coincidencias repetidas sobre cualquier detalle ambiguo del texto."
+        : "",
+      sceneReferenceAssets.length
+        ? "Si alguna instrucción textual contradice las referencias visuales adjuntas, prioriza las referencias adjuntas y ajusta el texto para mantener coherencia visual."
+        : "",
       hasSceneReferenceVideo
         ? `El video adjunto${referenceVideoName ? ` (${referenceVideoName})` : ""} se convirtió a un frame de referencia para guiar encuadre, continuidad y estilo visual de la escena.`
         : "",
@@ -6077,6 +6159,13 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
           variant.body.parameters.aspectRatio = "9:16";
         }
       }
+    }
+    for (const variant of requestVariants) {
+      if (!variant?.body) continue;
+      variant.body.parameters = applyVeoHdParameters(
+        variant.body.parameters,
+        isReel ? "9:16" : "16:9"
+      );
     }
     const requestedMaxVariantAttempts = Math.max(1, Math.min(
       requestVariants.length || 1,
@@ -6658,6 +6747,7 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       measuredDurationSec: naturalDurationSec,
       mimeType: baseMime
     });
+    const wordTimings = extractGeminiDialogueAudioWordTimings(data);
     const finalBuffer = retimedAudio?.buffer?.length ? retimedAudio.buffer : baseBuffer;
     const finalMime = String(retimedAudio?.mimeType || baseMime).trim() || baseMime;
     const durationSec = Math.max(
@@ -6707,6 +6797,7 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
         tempoAdjusted: retimedAudio?.applied === true,
         appliedSpeedRatio: Number(retimedAudio?.appliedSpeedRatio || 1) || 1,
         targetSpeechLine,
+        wordTimings,
         updatedAt: new Date().toISOString(),
         storagePath: asset.path,
         downloadUrl: asset.downloadUrl
@@ -6728,65 +6819,15 @@ function getMontageExportMimeType(format = "mp4_h264") {
   return ext === "webm" ? "video/webm" : "video/mp4";
 }
 
-function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "balanced", bitrateSettings = null) {
-  const cleanFormat = String(format || "").trim().toLowerCase();
-  const preset = ["high", "balanced", "small"].includes(String(qualityPreset || "").trim().toLowerCase())
-    ? String(qualityPreset).trim().toLowerCase()
-    : "balanced";
-
-  if (cleanFormat === "webm_vp9") {
-    const crf = preset === "high" ? 28 : preset === "small" ? 36 : 32;
-    return {
-      container: "webm",
-      vCodec: "libvpx-vp9",
-      vArgs: ["-b:v", "0", "-crf", String(crf), "-deadline", "good"],
-      aCodec: "libopus",
-      aArgs: ["-b:a", "128k"]
-    };
-  }
-
-  let crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
-  let x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
-  let maxRate = preset === "high" ? "8M" : (preset === "small" ? "2M" : "5M");
-  let bufSize = preset === "high" ? "16M" : (preset === "small" ? "4M" : "10M");
-  let isCbr = false;
-
-  // Apply manual settings if provided
-  if (bitrateSettings && typeof bitrateSettings === "object") {
-    if (bitrateSettings.mode === "custom") {
-      crf = Math.max(0, Math.min(51, Number(bitrateSettings.minBitrateCrf || 23)));
-      const customMax = Math.max(0.1, Math.min(100, Number(bitrateSettings.maxBitrateMbps || 5)));
-      maxRate = `${customMax}M`;
-      bufSize = `${customMax * 2}M`;
-    } else if (bitrateSettings.mode === "cbr") {
-      isCbr = true;
-      const customMax = Math.max(0.1, Math.min(100, Number(bitrateSettings.maxBitrateMbps || 5)));
-      maxRate = `${customMax}M`;
-      bufSize = `${customMax}M`; // For CBR, maxrate and bufsize should be same or tight
-    }
-  }
-
-  const vArgs = ["-preset", x264Preset];
-  if (isCbr) {
-    vArgs.push("-b:v", maxRate, "-maxrate", maxRate, "-bufsize", bufSize);
-  } else {
-    vArgs.push("-crf", String(crf), "-maxrate", maxRate, "-bufsize", bufSize);
-  }
-  vArgs.push("-movflags", "+faststart");
-
-  return {
-    container: "mp4",
-    vCodec: "libx264",
-    vArgs,
-    aCodec: "aac",
-    aArgs: ["-b:a", "160k"]
-  };
-}
-
 function resolveMontageExportScaleFilter(resolution = "source") {
   const key = String(resolution || "").trim().toLowerCase();
   if (key === "source") return "";
-  const target = key === "1080p" ? { w: 1920, h: 1080 } : key === "720p" ? { w: 1280, h: 720 } : { w: 854, h: 480 };
+  const target = key === "1080p" ? { w: 1920, h: 1080 }
+    : key === "720p" ? { w: 1280, h: 720 }
+      : key === "1080x1920" ? { w: 1080, h: 1920 }
+        : key === "720x1280" ? { w: 720, h: 1280 }
+          : key === "480x854" ? { w: 480, h: 854 }
+            : { w: 854, h: 480 };
   // Downscale-only + enforce even dims for yuv420p.
   return `scale='if(gt(iw,${target.w}),${target.w},iw)':'if(gt(ih,${target.h}),${target.h},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
 }
@@ -7169,17 +7210,30 @@ function normalizeMontageExportRequestBody(body = {}) {
   const format = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
   const qualityPreset = String(raw?.qualityPreset || "balanced").trim();
   const resolution = String(raw?.resolution || "source").trim();
+  const reelModeEnabled = raw?.reelModeEnabled === true || isMontageReelResolution(resolution);
   const includeBackgroundMusic = raw?.includeBackgroundMusic === true;
   const filename = clampText(raw?.filename || "montage", 160) || "montage";
   const previewRowId = clampText(raw?.previewRowId || "", 140);
   const entriesRaw = Array.isArray(raw?.entries) ? raw.entries : [];
-  const entries = entriesRaw.slice(0, MAX_MONTAGE_EXPORT_SCENES).map((item) => (item && typeof item === "object" ? item : null)).filter(Boolean);
+  const entries = entriesRaw
+    .slice(0, MAX_MONTAGE_EXPORT_SCENES)
+    .map((item) => (item && typeof item === "object" ? {
+      ...item,
+      mediaScale: normalizeMontageMediaScale(item?.mediaScale || item?.clip?.mediaScale || 1),
+      visualEffects: normalizeMontageVisualEffects(item?.visualEffects || null),
+      transitionOut: normalizeMontageTransition(item?.transitionOut || null)
+    } : null))
+    .filter(Boolean);
   const audioTimelineRaw = raw?.audioTimeline && typeof raw.audioTimeline === "object" ? raw.audioTimeline : null;
   const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
     ? raw.onScreenTextTimeline
     : null;
+  const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
+    ? raw.brandOverlay
+    : null;
   const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
   const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
+  const repoRoot = path.resolve(__dirname, "..");
 
   const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
@@ -7189,9 +7243,15 @@ function normalizeMontageExportRequestBody(body = {}) {
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
     const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
     const trimOutMs = Math.max(trimInMs + 500, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs)));
+    const fadeInMs = Math.max(0, Math.min(durationMs, Math.round(Number(segment?.fadeInMs || 0) || 0)));
+    const fadeOutMs = Math.max(0, Math.min(durationMs, Math.round(Number(segment?.fadeOutMs || 0) || 0)));
     const rawVolumePct = Number(segment?.volumePct ?? 100);
     const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
-    const volumePct = Math.max(0, Math.min(100, legacyScaledPct));
+    const volumePct = Math.max(0, Math.min(200, legacyScaledPct));
+    const rawDuckPct = Number(segment?.duckingWhenGeminiPct ?? segment?.duckingPct);
+    const duckingWhenGeminiPct = Number.isFinite(rawDuckPct)
+      ? Math.max(40, Math.min(100, rawDuckPct))
+      : null;
     if (!storagePath && !url) return null;
     if (volumePct <= 0.0001) return null;
     return {
@@ -7207,6 +7267,9 @@ function normalizeMontageExportRequestBody(body = {}) {
       durationMs,
       trimInMs,
       trimOutMs,
+      fadeInMs,
+      fadeOutMs,
+      duckingWhenGeminiPct,
       volumePct
     };
   };
@@ -7234,18 +7297,70 @@ function normalizeMontageExportRequestBody(body = {}) {
     };
   };
 
+  const isTimelineBackgroundAudioKind = (kind = "") => {
+    const key = String(kind || "").trim().toLowerCase();
+    return key === "uploaded" || key === "background-track" || key === "background" || key === "music";
+  };
   const timelineAudioSegments = [...geminiSegmentsRaw, ...backgroundSegmentsRaw]
     .slice(0, 600)
     .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
     .filter(Boolean);
-  const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => String(segment?.kind || "").trim().toLowerCase() !== "uploaded");
+  const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => !isTimelineBackgroundAudioKind(segment?.kind));
   const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
-  const onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
+  let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
     ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
     : [];
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
     ? onScreenTextTimelineRaw.settings
     : null;
+  if (!onScreenTextSegments.length) {
+    onScreenTextSegments = entries
+      .map((entry, idx) => {
+        const text = clampText(entry?.onScreenText || "", 500);
+        if (!text) return null;
+        const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+        const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+        return {
+          id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
+          rowId: clampText(entry?.rowId || "", 140),
+          sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
+          text,
+          startMs,
+          durationMs,
+          zIndex: idx + 1,
+          layout: {
+            yPct: 0.72,
+            widthPct: 0.58,
+            heightPct: 0.14,
+            xPct: 0.21
+          }
+        };
+      })
+      .filter(Boolean);
+  }
+  const brandOverlay = brandOverlayRaw ? (() => {
+    const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
+    const cleanRelativeAssetPath = assetPathRaw.replace(/^[/\\]+/g, "");
+    const resolvedAssetPath = cleanRelativeAssetPath
+      ? path.resolve(repoRoot, cleanRelativeAssetPath)
+      : "";
+    const isSafeResolvedPath = resolvedAssetPath
+      && (resolvedAssetPath === repoRoot || resolvedAssetPath.startsWith(`${repoRoot}${path.sep}`));
+    const position = ["top-right", "top-left", "bottom-right", "bottom-left"].includes(String(brandOverlayRaw?.position || "").trim())
+      ? String(brandOverlayRaw.position).trim()
+      : "top-right";
+    const defaultBrandWidthPct = reelModeEnabled ? 0.09 : 0.05;
+    const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
+    return {
+      enabled: brandOverlayRaw?.enabled !== false,
+      assetPath: isSafeResolvedPath ? resolvedAssetPath : "",
+      assetUrl: clampText(brandOverlayRaw?.assetUrl || "", 900),
+      position,
+      marginPct: clampNumber(brandOverlayRaw?.marginPct, 0, 0.2, defaultBrandMarginPct),
+      widthPct: clampNumber(brandOverlayRaw?.widthPct, 0.04, 0.4, defaultBrandWidthPct),
+      opacity: clampNumber(brandOverlayRaw?.opacity, 0, 1, 1)
+    };
+  })() : null;
 
   return {
     sessionId,
@@ -7253,6 +7368,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     format,
     qualityPreset,
     resolution,
+    reelModeEnabled,
     includeBackgroundMusic,
     filename,
     previewRowId,
@@ -7264,7 +7380,8 @@ function normalizeMontageExportRequestBody(body = {}) {
     normalizedGeminiTimelineSegments,
     useTimelineAudio,
     onScreenTextSegments,
-    onScreenTextSettings,
+    onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    brandOverlay,
     backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,
     backgroundMusicDuckingPct: (() => {
       const rawValue = Number(raw?.backgroundMusicDuckingPct ?? raw?.backgroundMusic?.duckingWhenGeminiPct);
@@ -7303,7 +7420,7 @@ function validateMontageExportRequest(input = {}) {
     err.status = 400;
     throw err;
   }
-  if (!new Set(["source", "1080p", "720p", "480p"]).has(String(input?.resolution || "").trim())) {
+  if (!new Set(["source", "1080p", "720p", "480p", "1080x1920", "720x1280", "480x854"]).has(String(input?.resolution || "").trim())) {
     const err = new Error("Resolución inválida.");
     err.status = 400;
     throw err;
@@ -7502,6 +7619,101 @@ function createMontageReviewTextFileResolver(tmpDir = "", prefix = "review") {
   };
 }
 
+function buildMontageOnScreenTextDrawFilters(options = {}) {
+  const spec = options?.spec && typeof options.spec === "object" ? options.spec : {};
+  const settings = options?.settings && typeof options.settings === "object" ? options.settings : {};
+  const textPath = String(options?.textPath || "");
+  const fontSource = String(options?.fontSource || "");
+  const textColor = String(options?.textColor || "#F8FAFC@1.000");
+  const strokeColor = String(options?.strokeColor || "#0F172A@1.000");
+  const startSec = Math.max(0, Number(options?.startSec || 0) || 0);
+  const endSec = Math.max(startSec + 0.1, Number(options?.endSec || 0) || 0);
+  const stylePreset = String(settings?.stylePreset || "").trim().toLowerCase();
+  const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
+  const baseStrokeWidth = Math.max(0, Number(spec.strokeEnabled ? spec.strokeWidthPx : 0) || 0);
+  const baseShadowColor = spec.shadowEnabled
+    ? `#020617@${Math.max(0, Math.min(1, Number(spec.shadowOpacity || 0))).toFixed(3)}`
+    : "#020617@0.000";
+  const enableExpr = escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`);
+  const buildLayer = (overrides = {}) => {
+    const layerStrokeWidth = Number.isFinite(Number(overrides.borderw))
+      ? Math.max(0, Number(overrides.borderw))
+      : baseStrokeWidth;
+    const layerShadowX = Number.isFinite(Number(overrides.shadowx))
+      ? Number(overrides.shadowx)
+      : (spec.shadowEnabled ? spec.shadowX : 0);
+    const layerShadowY = Number.isFinite(Number(overrides.shadowy))
+      ? Number(overrides.shadowy)
+      : (spec.shadowEnabled ? spec.shadowY : 0);
+    return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${overrides.fontsize || spec.fontSizePx}:fontcolor=${overrides.fontcolor || textColor}:x='${overrides.xExpr || spec.xExpr}':y=${Number.isFinite(Number(overrides.yPx)) ? Number(overrides.yPx) : spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${layerStrokeWidth}:bordercolor=${overrides.bordercolor || strokeColor}:shadowx=${layerShadowX}:shadowy=${layerShadowY}:shadowcolor=${overrides.shadowcolor || baseShadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${enableExpr}'`;
+  };
+
+  if (stylePreset === "3d" && bgPreset === "none") {
+    const depth = Math.max(2, Math.round(Number(spec.fontSizePx || 44) * 0.06));
+    const visibleStrokeWidth = Math.max(baseStrokeWidth, Math.round(Number(spec.fontSizePx || 44) * 0.055), 2);
+    return [
+      buildLayer({
+        fontcolor: "#020617@0.520",
+        xExpr: `(${spec.xExpr})+${depth}`,
+        yPx: Math.round(Number(spec.yPx || 0) + depth),
+        borderw: visibleStrokeWidth + 1,
+        bordercolor: "#020617@0.760",
+        shadowx: 0,
+        shadowy: 0,
+        shadowcolor: "#020617@0.000"
+      }),
+      buildLayer({
+        borderw: visibleStrokeWidth,
+        bordercolor: strokeColor,
+        shadowx: Math.max(depth, Number(spec.shadowEnabled ? spec.shadowX : 0) || 0),
+        shadowy: Math.max(depth + 1, Number(spec.shadowEnabled ? spec.shadowY : 0) || 0),
+        shadowcolor: "#020617@0.620"
+      })
+    ];
+  }
+
+  return [buildLayer()];
+}
+
+function normalizeMontageOnScreenTextExportLayout(options = {}) {
+  const segment = options?.segment && typeof options.segment === "object" ? options.segment : {};
+  const layout = segment?.layout && typeof segment.layout === "object" ? segment.layout : {};
+  const settings = options?.settings && typeof options.settings === "object" ? options.settings : {};
+  const resolution = String(options?.resolution || "source").trim() || "source";
+  const sourceDims = options?.sourceDims && typeof options.sourceDims === "object" ? options.sourceDims : {};
+  const sourceWidth = Math.max(160, Math.round(Number(sourceDims.width || 1280) || 1280));
+  const sourceHeight = Math.max(90, Math.round(Number(sourceDims.height || 720) || 720));
+  const widthPct = clampNumber(layout?.widthPct, 0.08, 0.96, 0.58);
+  const heightPct = clampNumber(layout?.heightPct, 0.05, 0.68, 0.14);
+  const baseLayout = {
+    xPct: clampNumber(layout?.xPct, 0, Math.max(0, 1 - widthPct), 0.21),
+    yPct: clampNumber(layout?.yPct, 0, 0.99, 0.72),
+    widthPct,
+    heightPct
+  };
+  const spec = resolveOnScreenTextRenderSpec({
+    settings: {
+      ...settings,
+      boxEnabled: false
+    },
+    layout: baseLayout,
+    resolution,
+    sourceWidth,
+    sourceHeight,
+    text: segment.text || "",
+    fallback: ""
+  });
+  const autoHeightPct = Math.max(
+    heightPct,
+    Math.min(0.68, Number(spec.boxHeightPx || 0) / Math.max(1, Number(spec.exportCanvasHeight || sourceHeight)))
+  );
+  return {
+    ...baseLayout,
+    heightPct: autoHeightPct,
+    yPct: Math.max(0, Math.min(1 - autoHeightPct, baseLayout.yPct))
+  };
+}
+
 async function storeMontageExportResult(finalOutPath = "", input = {}, context = {}) {
   const exportId = clampExportId(context?.jobId || randomUUID());
   const token = randomUUID();
@@ -7568,10 +7780,154 @@ function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolu
   const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
   const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
   const key = String(resolution || "source").trim().toLowerCase();
-  if (key === "1080p") return { width: 1920, height: 1080 };
-  if (key === "720p") return { width: 1280, height: 720 };
-  if (key === "480p") return { width: 854, height: 480 };
+  if (key === "1080x1920") return { width: 1080, height: 1920 };
+  if (key === "720x1280") return { width: 720, height: 1280 };
+  if (key === "480x854") return { width: 480, height: 854 };
+  if (key === "1080p") {
+    return { width: 1920, height: 1080 };
+  }
+  if (key === "720p") {
+    return { width: 1280, height: 720 };
+  }
+  if (key === "480p") {
+    return { width: 854, height: 480 };
+  }
   return { width: even(safeWidth), height: even(safeHeight) };
+}
+
+function isMontageReelResolution(resolution = "") {
+  return new Set(["1080x1920", "720x1280", "480x854"]).has(String(resolution || "").trim().toLowerCase());
+}
+
+function normalizeMontageVisualEffects(raw = null) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const allowed = ["pan-left", "pan-right", "pan-up", "pan-down", "zoom-in", "zoom-out"];
+  const effects = Array.isArray(source.effects)
+    ? source.effects.map((item) => String(item || "").trim()).filter((item) => allowed.includes(item))
+    : [];
+  const speed = Math.max(1, Math.min(10, Math.round(Number(source.speed || 5) || 5)));
+  return { effects, speed };
+}
+
+function normalizeMontageTransition(raw = null) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const allowed = [
+    "cut",
+    "crossfade",
+    "dip-black",
+    "flash-white",
+    "slide-left",
+    "slide-right",
+    "slide-up",
+    "slide-down",
+    "zoom-in",
+    "zoom-out",
+    "blur"
+  ];
+  const requestedType = String(source.type || "cut").trim().toLowerCase();
+  const type = allowed.includes(requestedType) ? requestedType : "cut";
+  const durationMs = type === "cut"
+    ? 0
+    : Math.max(0, Math.min(1200, Math.round(Number(source.durationMs || 0) || 0)));
+  return { type, durationMs };
+}
+
+function normalizeMontageMediaScale(value = 1) {
+  const numeric = Math.round((Number(value) || 1) * 100) / 100;
+  return Math.max(1, Math.min(2.5, numeric || 1));
+}
+
+function resolveMontageKenBurnsEffect(rawEffects = null) {
+  const normalized = normalizeMontageVisualEffects(rawEffects);
+  const cascadeOrder = ["pan-left", "pan-right", "pan-up", "pan-down", "zoom-in", "zoom-out"];
+  const effect = cascadeOrder.findLast((item) => normalized.effects.includes(item)) || "";
+  const durationSecBySpeed = {
+    1: 20,
+    2: 18,
+    3: 16,
+    4: 14,
+    5: 12,
+    6: 10,
+    7: 8,
+    8: 6,
+    9: 4,
+    10: 2
+  };
+  return {
+    ...normalized,
+    effect,
+    durationSec: durationSecBySpeed[normalized.speed] || 12
+  };
+}
+
+function buildMontageImageMotionVideoFilter({
+  inputLabel = "[0:v]",
+  outputLabel = "vout",
+  canvas = { width: 1280, height: 720 },
+  durationSec = 1,
+  visualEffects = null,
+  mediaScale = 1
+} = {}) {
+  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  const sceneScale = normalizeMontageMediaScale(mediaScale);
+  const coverWidth = Math.max(2, Math.round((width * sceneScale) / 2) * 2);
+  const coverHeight = Math.max(2, Math.round((height * sceneScale) / 2) * 2);
+  const motion = resolveMontageKenBurnsEffect(visualEffects);
+  if (!motion.effect) {
+    return `${inputLabel}scale=${coverWidth}:${coverHeight}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[${outputLabel}]`;
+  }
+  const supersample = 2;
+  const renderWidth = coverWidth * supersample;
+  const renderHeight = coverHeight * supersample;
+  const effectDurationSec = Math.max(0.2, Math.min(
+    Math.max(0.2, Number(motion.durationSec || 12) || 12),
+    Math.max(0.2, Number(durationSec || 1) || 1)
+  ));
+  const effectFrames = Math.max(2, Math.round(effectDurationSec * 24));
+  const rawProgressExpr = `if(eq(${effectFrames},1),0,abs(mod(n,${Math.max(2, effectFrames * 2 - 2)})-${effectFrames - 1})/${effectFrames - 1})`;
+  const progressExpr = `((${rawProgressExpr})*(${rawProgressExpr})*(3-2*(${rawProgressExpr})))`;
+  const panZoom = `1.06+0.14*(${progressExpr})`;
+  const centerX = `(iw-${renderWidth})/2`;
+  const centerY = `(ih-${renderHeight})/2`;
+  let zExpr = panZoom;
+  let xExpr = centerX;
+  let yExpr = centerY;
+  if (motion.effect === "pan-left") {
+    xExpr = `(iw-${renderWidth})*(${progressExpr})`;
+  } else if (motion.effect === "pan-right") {
+    xExpr = `(iw-${renderWidth})*(1-(${progressExpr}))`;
+  } else if (motion.effect === "pan-up") {
+    yExpr = `(ih-${renderHeight})*(1-(${progressExpr}))`;
+  } else if (motion.effect === "pan-down") {
+    yExpr = `(ih-${renderHeight})*(${progressExpr})`;
+  } else if (motion.effect === "zoom-in") {
+    zExpr = `1+0.30*(${progressExpr})`;
+  } else if (motion.effect === "zoom-out") {
+    zExpr = `1.30-0.30*(${progressExpr})`;
+  }
+  return `${inputLabel}scale=${renderWidth}:${renderHeight}:force_original_aspect_ratio=increase,crop=${renderWidth}:${renderHeight},setsar=1,scale=w='ceil(${renderWidth}*(${zExpr})/2)*2':h='ceil(${renderHeight}*(${zExpr})/2)*2':eval=frame,crop=${renderWidth}:${renderHeight}:x='${xExpr}':y='${yExpr}',scale=${width}:${height},trim=duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},setpts=PTS-STARTPTS,setsar=1[${outputLabel}]`;
+}
+
+function buildMontageVideoSceneFilter({
+  inputLabel = "[0:v]",
+  outputLabel = "vout",
+  canvas = { width: 1280, height: 720 },
+  durationSec = 1,
+  scaleFilter = "",
+  mediaScale = 1
+} = {}) {
+  const sceneScale = normalizeMontageMediaScale(mediaScale);
+  const duration = Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3);
+  const base = `${inputLabel}tpad=stop_mode=clone:stop_duration=${duration},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`;
+  if (sceneScale <= 1.0001) {
+    return `${base}[${outputLabel}]`;
+  }
+  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  const scaledWidth = Math.max(2, Math.round((width * sceneScale) / 2) * 2);
+  const scaledHeight = Math.max(2, Math.round((height * sceneScale) / 2) * 2);
+  return `${base},scale=${scaledWidth}:${scaledHeight}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[${outputLabel}]`;
 }
 
 function buildMontageOverlapCompositionPlan(exportedEntries = []) {
@@ -7615,6 +7971,33 @@ function buildMontageOverlapCompositionPlan(exportedEntries = []) {
   return { entries: planned, hasOverlap, hasGaps, totalDurationMs: Math.max(500, totalDurationMs) };
 }
 
+function buildMontageTransitionProgressExpr(startSec = 0, durationSec = 0.3) {
+  const start = Math.max(0, Number(startSec || 0) || 0).toFixed(3);
+  const duration = Math.max(0.001, Number(durationSec || 0.3) || 0.3).toFixed(3);
+  const raw = `min(max((t-${start})/${duration}\\,0)\\,1)`;
+  return `((${raw})*(${raw})*(3-2*(${raw})))`;
+}
+
+function buildMontageLocalTransitionProgressExpr(durationSec = 0.3) {
+  const duration = Math.max(0.001, Number(durationSec || 0.3) || 0.3).toFixed(3);
+  const raw = `min(max(t/${duration}\\,0)\\,1)`;
+  return `((${raw})*(${raw})*(3-2*(${raw})))`;
+}
+
+function resolveMontageOverlayTransition(entry = null, previousEntry = null) {
+  if (!entry || !previousEntry) return { type: "cut", durationMs: 0 };
+  const transition = normalizeMontageTransition(previousEntry?.transitionOut || entry?.transitionIn || null);
+  const overlapMs = Math.max(
+    0,
+    Math.min(
+      Number(transition.durationMs || 0),
+      Math.round(Number(previousEntry?.timelineEndMs || 0) - Number(entry?.timelineStartMs || 0))
+    )
+  );
+  if (transition.type === "cut" || overlapMs < 20) return { type: "cut", durationMs: 0 };
+  return { type: transition.type, durationMs: overlapMs };
+}
+
 async function renderMontageOverlapComposition({
   input = {},
   tmpDir = "",
@@ -7630,24 +8013,65 @@ async function renderMontageOverlapComposition({
   const firstDims = await probeMediaVideoDimensionsWithFfmpeg(intermediatePaths[0], "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }));
   const canvas = resolveMontageCanvasSize(firstDims?.width || 1280, firstDims?.height || 720, input?.resolution || "source");
   const totalSec = Math.max(0.25, plan.totalDurationMs / 1000);
-  const scaleFilter = resolveMontageExportScaleFilter(input?.resolution || "source");
   const colorInputIndex = intermediatePaths.length;
   const silentAudioInputIndex = intermediatePaths.length + 1;
   const filters = [`[${colorInputIndex}:v]format=rgba[base0]`];
   const audioLabels = [];
-  const includeSceneAudio = input?.useTimelineAudio !== true;
+  let baseLabel = "base0";
 
   plan.entries.forEach((entry, index) => {
     const durSec = Math.max(0.2, Number(entry?.durationMs || 500) / 1000);
     const startSec = Math.max(0, Number(entry?.timelineStartMs || 0) / 1000);
+    const previousEntry = index > 0 ? plan.entries[index - 1] : null;
+    const transition = resolveMontageOverlayTransition(entry, previousEntry);
+    const transitionType = String(transition?.type || "cut").trim().toLowerCase();
+    const transitionSec = Math.max(0.02, Number(transition?.durationMs || 0) / 1000);
+    const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
+    const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
     const videoLabel = `v${index}`;
-    let videoChain = `[${index}:v]scale=trunc(iw/2)*2:trunc(ih/2)*2`;
-    if (scaleFilter) videoChain += `,${scaleFilter}`;
-    videoChain += `,pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2:color=0x05070B,format=rgba`;
+    let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height}:force_original_aspect_ratio=increase,crop=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+    if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
+      videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
+    }
+    if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
+      const scaleExpr = transitionType === "zoom-in"
+        ? `0.72+0.28*${localProgressExpr}`
+        : transitionType === "zoom-out"
+          ? `1.22-0.22*${localProgressExpr}`
+          : `1.06-0.06*${localProgressExpr}`;
+      videoChain += `,scale=w='${canvas.width}*(${scaleExpr})':h='${canvas.height}*(${scaleExpr})':eval=frame`;
+    }
     videoChain += `,setpts=PTS-STARTPTS+${startSec.toFixed(3)}/TB[${videoLabel}]`;
     filters.push(videoChain);
-    filters.push(`[base${index}][${videoLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[base${index + 1}]`);
+    let overlayX = "0";
+    let overlayY = "0";
+    if (transitionType === "slide-left") {
+      overlayX = `${canvas.width}*(1-${overlayProgressExpr})`;
+    } else if (transitionType === "slide-right") {
+      overlayX = `-${canvas.width}*(1-${overlayProgressExpr})`;
+    } else if (transitionType === "slide-up") {
+      overlayY = `${canvas.height}*(1-${overlayProgressExpr})`;
+    } else if (transitionType === "slide-down") {
+      overlayY = `-${canvas.height}*(1-${overlayProgressExpr})`;
+    } else if (transitionType === "zoom-in" || transitionType === "zoom-out" || transitionType === "blur") {
+      overlayX = `(${canvas.width}-w)/2`;
+      overlayY = `(${canvas.height}-h)/2`;
+    }
+    const overlayOutLabel = `base${index + 1}`;
+    filters.push(`[${baseLabel}][${videoLabel}]overlay=eof_action=pass:shortest=0:x='${overlayX}':y='${overlayY}':format=auto[${overlayOutLabel}]`);
+    baseLabel = overlayOutLabel;
+    if (transitionType === "dip-black" || transitionType === "flash-white") {
+      const pulseLabel = `transition_pulse_${index}`;
+      const pulseOutLabel = `base${index + 1}_pulse`;
+      const color = transitionType === "flash-white" ? "white" : "black";
+      const halfTransitionSec = Math.max(0.01, transitionSec / 2);
+      filters.push(`color=c=${color}@1:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24,format=rgba,fade=t=in:st=${startSec.toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1,fade=t=out:st=${(startSec + halfTransitionSec).toFixed(3)}:d=${halfTransitionSec.toFixed(3)}:alpha=1[${pulseLabel}]`);
+      filters.push(`[${baseLabel}][${pulseLabel}]overlay=eof_action=pass:shortest=0:x=0:y=0:format=auto[${pulseOutLabel}]`);
+      baseLabel = pulseOutLabel;
+    }
 
+    const sceneVeoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 0)));
+    const includeSceneAudio = input?.useTimelineAudio !== true || (entry?.useNativeVideoAudio === true && sceneVeoVolumePct > 0.0001);
     if (includeSceneAudio) {
       const audioLabel = `a${index}`;
       let audioChain = `[${index}:a]atrim=start=0:duration=${durSec.toFixed(3)},asetpts=PTS-STARTPTS`;
@@ -7672,7 +8096,7 @@ async function renderMontageOverlapComposition({
     "-f", "lavfi", "-i", `color=c=black:s=${canvas.width}x${canvas.height}:d=${totalSec.toFixed(3)}:r=24`,
     "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${totalSec.toFixed(3)}`,
     "-filter_complex", filters.join(";"),
-    "-map", `[base${plan.entries.length}]`,
+    "-map", `[${baseLabel}]`,
     "-map", "[aout]",
     "-r", "24",
     "-c:v", params.vCodec,
@@ -7705,7 +8129,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     tmpDir = path.join(os.tmpdir(), `cb-montage-export-${randomUUID()}`);
     await fs.promises.mkdir(tmpDir, { recursive: true });
 
-    const params = resolveMontageExportVideoParams(input.format, input.qualityPreset, input.bitrateSettings);
+    const deliveryParams = resolveMontageExportVideoParams(input.format, input.qualityPreset, input.bitrateSettings);
+    const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
@@ -7746,7 +8171,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const durationMs = Math.max(500, Number(entry?.durationMs || 0) || 0);
       const trimSec = Math.max(0, trimInMs / 1000);
       const durSec = Math.max(0.2, durationMs / 1000);
-      const useNativeVideoAudio = entry?.useNativeVideoAudio === true;
+      const veoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 0)));
+      const useNativeVideoAudio = entry?.useNativeVideoAudio === true || veoVolumePct > 0.0001;
       const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
       const isImageAsset = String(videoAsset?.mediaKind || videoAsset?.type || "").trim().toLowerCase() === "image"
         || String(videoAsset?.mimeType || "").trim().toLowerCase().startsWith("image/");
@@ -7888,6 +8314,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           extra: sourceDims
         }));
         const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
+        const mediaScale = normalizeMontageMediaScale(entry?.mediaScale || entry?.clip?.mediaScale || 1);
         const args = ["-y", "-hide_banner", "-loglevel", "warning"];
         if (isImageAsset) {
           args.push("-loop", "1", "-framerate", "24", "-i", inputVisualPath);
@@ -7902,7 +8329,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           args.push("-i", inputAudioPath);
         }
 
-        const veoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 100)));
         const veoVolume = (veoVolumePct / 100).toFixed(3);
         
         // Mapeo de audio dinámico para asegurar consistencia en concat
@@ -7928,11 +8354,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         
         // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
         let videoFilterGraph = "";
-        if (visualLayoutMode === "blur-backdrop") {
+        const visualEffects = normalizeMontageVisualEffects(entry?.visualEffects || null);
+        if (!isImageAsset && visualLayoutMode === "blur-backdrop") {
           const fgWidth = Math.max(2, Math.round((canvas.width * 0.76) / 2) * 2);
           const fgHeight = Math.max(2, Math.round((canvas.height * 0.76) / 2) * 2);
           const visualSourceGraph = isImageAsset
-            ? "[0:v]split=2[vbg_src][vfg_src]"
+            ? `${buildMontageImageMotionVideoFilter({
+              inputLabel: "[0:v]",
+              outputLabel: "image_motion",
+              canvas,
+              durationSec: durSec,
+              visualEffects,
+              mediaScale
+            })};[image_motion]split=2[vbg_src][vfg_src]`
             : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`;
           videoFilterGraph = [
             visualSourceGraph,
@@ -7942,14 +8376,28 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ].join(";");
         } else {
           videoFilterGraph = isImageAsset
-            ? `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`
-            : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}[vout]`;
+            ? buildMontageImageMotionVideoFilter({
+              inputLabel: "[0:v]",
+              outputLabel: "vout",
+              canvas,
+              durationSec: durSec,
+              visualEffects,
+              mediaScale
+            })
+            : buildMontageVideoSceneFilter({
+              inputLabel: "[0:v]",
+              outputLabel: "vout",
+              canvas,
+              durationSec: durSec,
+              scaleFilter,
+              mediaScale
+            });
         }
 
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", "[vout]", "-map", audioMapLabel);
-        args.push("-r", "24", "-c:v", params.vCodec);
-        args.push(...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", params.aCodec, "-ar", "48000", ...params.aArgs, intermediatePath);
+        args.push("-r", "24", "-c:v", intermediateParams.vCodec);
+        args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
         emitSceneSubstage({
           sceneIndex,
           rowId,
@@ -7996,6 +8444,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,
+          mediaScale,
           visualLayoutMode,
           timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0)),
           timelineEndMs: Math.max(0, Math.round(Number(entry?.timelineEndMs || 0) || 0)),
@@ -8003,7 +8452,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           sceneDescription: clampText(entry?.sceneDescription || "", 1600),
           onScreenText: clampText(entry?.onScreenText || "", 600),
           visualNotes: clampText(entry?.visualNotes || "", 2200),
-          videoDirective: clampText(entry?.videoDirective || "", 2200)
+          videoDirective: clampText(entry?.videoDirective || "", 2200),
+          useNativeVideoAudio,
+          veoVolumeOverridePct: veoVolumePct,
+          visualEffects,
+          transitionOut: normalizeMontageTransition(entry?.transitionOut || null)
         });
         emitSceneSubstage({
           sceneIndex,
@@ -8060,7 +8513,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
         tmpDir,
-        params,
+        params: intermediateParams,
         outExt,
         intermediatePaths,
         exportedEntries
@@ -8074,13 +8527,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-y", "-hide_banner", "-loglevel", "warning",
         "-fflags", "+genpts",
         "-f", "concat", "-safe", "0", "-i", concatListPath,
-        "-r", "24",
-        "-c:v", params.vCodec,
-        ...params.vArgs,
-        "-pix_fmt", "yuv420p",
-        "-c:a", params.aCodec,
-        "-ar", "48000",
-        ...params.aArgs,
+        "-c", "copy",
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         concatOutPath
       ], { stage: "montage_concat" });
@@ -8140,14 +8587,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const audioCodec = outExt === "webm" ? "libopus" : "aac";
         const audioBitrate = outExt === "webm" ? "128k" : "160k";
         const filters = [];
-        const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume));
         const labels = [];
         segmentInputs.forEach((item, idx) => {
           const segment = item.segment || {};
           const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
           const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
           const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
-          const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(100, Number(segment?.volumePct ?? 100))) / 100));
+          const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
+          const fadeInSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
+          const fadeOutSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
           const inputIndex = idx + 1;
           const label = `a${idx}`;
           labels.push(label);
@@ -8174,11 +8622,29 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             finalAdjustedStartMs = 0;
           }
 
-          const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
+          const fadeParts = [volume.toFixed(3)];
+          const effectiveFadeInSec = Math.max(0, Math.min(finalDurationSec, fadeInSec));
+          const effectiveFadeOutSec = Math.max(0, Math.min(finalDurationSec, fadeOutSec));
+          if (effectiveFadeInSec > 0.001) {
+            fadeParts.push(`if(lt(t,${effectiveFadeInSec.toFixed(3)}),t/${effectiveFadeInSec.toFixed(3)},1)`);
+          }
+          if (effectiveFadeOutSec > 0.001) {
+            fadeParts.push(`if(gt(t,${Math.max(0, finalDurationSec - effectiveFadeOutSec).toFixed(3)}),(${finalDurationSec.toFixed(3)}-t)/${effectiveFadeOutSec.toFixed(3)},1)`);
+          }
+          const localVolumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
+          const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
           const kind = String(segment?.kind || "").trim().toLowerCase();
-          filters.push(kind === "uploaded" && input.normalizedGeminiTimelineSegments.length
-            ? `${baseChain},volume='${bgDuckExprEscaped}*${volume.toFixed(3)}':eval=frame[${label}]`
-            : `${baseChain},volume=${volume.toFixed(3)}[${label}]`);
+          const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
+          if (isBackgroundSegment && input.normalizedGeminiTimelineSegments.length) {
+            const segmentDuckVolume = normalizeMontageBackgroundDuckVolume(
+              segment?.duckingWhenGeminiPct ?? segment?.duckingPct,
+              configuredBackgroundDuckVolume
+            );
+            const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, segmentDuckVolume));
+            filters.push(`${baseChain},volume='${bgDuckExprEscaped}':eval=frame[${label}]`);
+          } else {
+            filters.push(`${baseChain}[${label}]`);
+          }
         });
         const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
         const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
@@ -8232,11 +8698,18 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       finalOutPath = remuxOutPath;
     }
 
-    if (input.onScreenTextTimelineRaw?.enabled === true && input.onScreenTextSettings && input.onScreenTextSegments.length) {
+    if (input.onScreenTextSettings && input.onScreenTextSegments.length) {
       emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla.");
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_onscreen_input").catch(() => ({ width: 1280, height: 720 }));
-      const textColor = toFfmpegColor(input.onScreenTextSettings?.textColor || "#F8FAFC", input.onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
-      const strokeColor = toFfmpegColor(input.onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
+      const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
+      const onScreenTextSettings = {
+        ...input.onScreenTextSettings,
+        fontSizePx: isReelExport
+          ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
+          : input.onScreenTextSettings?.fontSizePx
+      };
+      const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
+      const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
       const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
       const fontFile = resolveFfmpegDrawtextFontFile();
       const fontSource = fontFile
@@ -8247,32 +8720,43 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const drawFilters = input.onScreenTextSegments
         .slice()
         .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
-        .map((segment) => {
+        .flatMap((segment) => {
           const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
           const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
-          const layout = segment?.layout && typeof segment.layout === "object" ? segment.layout : {};
+          const layout = normalizeMontageOnScreenTextExportLayout({
+            segment,
+            settings: onScreenTextSettings,
+            resolution: input.resolution || "source",
+            sourceDims
+          });
           const spec = resolveOnScreenTextRenderSpec({
             settings: {
-              ...input.onScreenTextSettings,
+              ...onScreenTextSettings,
               boxEnabled: false
             },
             layout,
-            resolution: "source", // Use source to match probed sourceDims perfectly
+            resolution: input.resolution || "source",
             sourceWidth: sourceDims.width,
             sourceHeight: sourceDims.height,
             text: segment.text || "",
             fallback: ""
           });
           const textPath = textFileResolver(String(spec.wrappedText || "").trim());
-          const shadowColor = spec.shadowEnabled
-            ? `#020617@${spec.shadowOpacity.toFixed(3)}`
-            : "#020617@0.000";
-          return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${spec.fontSizePx}:fontcolor=${textColor}:x='${spec.xExpr}':y=${spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${spec.strokeEnabled ? spec.strokeWidthPx : 0}:bordercolor=${strokeColor}:shadowx=${spec.shadowEnabled ? spec.shadowX : 0}:shadowy=${spec.shadowEnabled ? spec.shadowY : 0}:shadowcolor=${shadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`)}'`;
+          return buildMontageOnScreenTextDrawFilters({
+            spec,
+            settings: onScreenTextSettings,
+            textPath,
+            fontSource,
+            textColor,
+            strokeColor,
+            startSec,
+            endSec
+          });
         });
       if (drawFilters.length) {
         const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);
         try {
-          await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
+          await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
         } catch (err) {
           console.error("[backend][montage-export] montage_overlay_text stage failed:", err.message);
           if (err.stderr) {
@@ -8297,9 +8781,63 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         globalCounterMode: "dynamic",
         textFileResolver: reviewTextFileResolver
       });
-      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", reviewFilter, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", params.vCodec, ...params.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), reviewOutPath], { stage: "montage_review_layout" });
+      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", reviewFilter, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), reviewOutPath], { stage: "montage_review_layout" });
       finalOutPath = reviewOutPath;
     }
+
+    if (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath)) {
+      emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
+      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_brand_overlay_input").catch(() => ({ width: 1280, height: 720 }));
+      const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
+      const defaultBrandWidthPct = isReelExport ? 0.09 : 0.05;
+      const defaultBrandMarginPct = isReelExport ? 0.03 : 0.025;
+      const overlayWidthPx = Math.max(48, Math.round(sourceDims.width * Math.max(0.04, Math.min(0.4, Number(input.brandOverlay.widthPct || defaultBrandWidthPct) || defaultBrandWidthPct))));
+      const marginPx = Math.max(8, Math.round(sourceDims.width * Math.max(0, Math.min(0.2, Number(input.brandOverlay.marginPct || defaultBrandMarginPct) || defaultBrandMarginPct))));
+      const opacity = Math.max(0, Math.min(1, Number(input.brandOverlay.opacity ?? 1)));
+      const position = String(input.brandOverlay.position || "top-right").trim() || "top-right";
+      const xExpr = position.includes("left")
+        ? `${marginPx}`
+        : `W-w-${marginPx}`;
+      const yExpr = position.includes("bottom")
+        ? `H-h-${marginPx}`
+        : `${marginPx}`;
+      const overlayOutPath = path.join(tmpDir, `montage-brand-overlay.${outExt}`);
+      const overlayFilter = [
+        `[1:v]format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+        `[0:v][brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[vout]`
+      ].join(";");
+      await runFfmpegCommand([
+        "-y", "-hide_banner", "-loglevel", "warning",
+        "-i", finalOutPath,
+        "-i", input.brandOverlay.assetPath,
+        "-filter_complex", overlayFilter,
+        "-map", "[vout]",
+        "-map", "0:a:0?",
+        "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs,
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+        overlayOutPath
+      ], { stage: "montage_brand_overlay" });
+      finalOutPath = overlayOutPath;
+    }
+
+    emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+    const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+    await runFfmpegCommand([
+      "-y", "-hide_banner", "-loglevel", "warning",
+      "-i", finalOutPath,
+      "-map", "0:v:0",
+      "-map", "0:a:0?",
+      "-c:v", deliveryParams.vCodec,
+      ...deliveryParams.vArgs,
+      "-pix_fmt", "yuv420p",
+      "-c:a", deliveryParams.aCodec,
+      "-ar", "48000",
+      ...deliveryParams.aArgs,
+      deliveryOutPath
+    ], { stage: "montage_encode_delivery" });
+    finalOutPath = deliveryOutPath;
 
     if (context?.previewOnly === true) {
       const previewBuffer = await fs.promises.readFile(finalOutPath);
@@ -8360,7 +8898,9 @@ async function renderMontagePreviewImage(rawInput = {}, context = {}) {
     const inputVideoPath = await downloadInput(targetEntry?.video || {}, "video", 0);
     const trimSec = Math.max(0, Number(targetEntry?.trimInMs || 0) / 1000);
     const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, "montage_preview_input").catch(() => ({ width: 1280, height: 720 }));
-    const canvas = resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height);
+    const previewCanvas = input.exportMode === "review"
+      ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
+      : resolveMontageCanvasSize(sourceDims.width, sourceDims.height, input.resolution);
     const previewPath = path.join(tmpDir, "preview.jpg");
     const baseFilter = input.exportMode === "review"
       ? buildMontageReviewVideoFilter([{
@@ -8370,14 +8910,14 @@ async function renderMontagePreviewImage(rawInput = {}, context = {}) {
         timelineLabel: formatMontageReviewTimelineRange(targetEntry?.timelineStartMs || 0, targetEntry?.timelineEndMs || 0, targetEntry?.durationMs || 0),
         visualNotes: clampText(targetEntry?.visualNotes || "", 2200)
       }], {
-        width: canvas.width,
-        height: canvas.height,
+        width: previewCanvas.width,
+        height: previewCanvas.height,
         montageTotalDurationMs,
         globalCounterMode: "static",
         globalCounterCurrentMs,
         textFileResolver: createMontageReviewTextFileResolver(tmpDir, "review-preview")
       })
-      : `${resolveMontageExportScaleFilter(input.resolution) || "scale=trunc(iw/2)*2:trunc(ih/2)*2"},pad=${canvas.width}:${canvas.height}:(ow-iw)/2:(oh-ih)/2:color=0x05070B`;
+      : `scale=${previewCanvas.width}:${previewCanvas.height}:force_original_aspect_ratio=increase,crop=${previewCanvas.width}:${previewCanvas.height},setsar=1`;
     await runFfmpegCommand([
       "-y", "-hide_banner", "-loglevel", "warning",
       "-ss", String(trimSec), "-i", inputVideoPath,

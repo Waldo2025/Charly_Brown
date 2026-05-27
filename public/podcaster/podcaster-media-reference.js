@@ -163,12 +163,14 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     };
   }
 
-  function normalizeReferenceImageList(value = null, maxItems = 4) {
+  const MAX_ROW_REFERENCE_IMAGE_ITEMS = 12;
+
+  function normalizeReferenceImageList(value = null, maxItems = MAX_ROW_REFERENCE_IMAGE_ITEMS) {
     if (!Array.isArray(value)) return [];
     return value
       .map((item) => normalizeReferenceImageRecord(item))
       .filter(Boolean)
-      .slice(0, Math.max(1, Math.min(8, Number(maxItems || 4) || 4)));
+      .slice(0, Math.max(1, Math.min(MAX_ROW_REFERENCE_IMAGE_ITEMS, Number(maxItems || MAX_ROW_REFERENCE_IMAGE_ITEMS) || MAX_ROW_REFERENCE_IMAGE_ITEMS)));
   }
 
   function normalizeReferenceImageMap(raw = {}) {
@@ -183,7 +185,7 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
     return next;
   }
 
-  function normalizeReferenceImageListMap(raw = {}, maxEntries = 500, maxItemsPerRow = 4) {
+  function normalizeReferenceImageListMap(raw = {}, maxEntries = 500, maxItemsPerRow = MAX_ROW_REFERENCE_IMAGE_ITEMS) {
     const next = {};
     if (!raw || typeof raw !== "object") return next;
     Object.entries(raw).slice(0, maxEntries).forEach(([key, value]) => {
@@ -522,18 +524,25 @@ export function createPodcasterMediaReferenceApi(deps = {}) {
   }
 
   function setRowReferenceImage(rowId = "", reference = null) {
-    return setRowReferenceImages(rowId, reference ? [reference] : []);
+    return setRowReferenceImages(rowId, reference ? [reference] : [], { replaceExisting: true });
   }
 
-  async function setRowReferenceImages(rowId = "", references = []) {
+  async function setRowReferenceImages(rowId = "", references = [], options = {}) {
     const key = String(rowId || "").trim();
     if (!key) return false;
+    const activeSession = getActiveSession();
+    const existingReferences = options.replaceExisting === true
+      ? []
+      : getRowReferenceImageList(activeSession, key);
+    const seedList = normalizeReferenceImageList(existingReferences, MAX_ROW_REFERENCE_IMAGE_ITEMS);
     const normalizedList = [];
+    const appendedList = [...seedList];
     for (let index = 0; index < (Array.isArray(references) ? references.length : 0); index += 1) {
-      const normalized = await persistReferenceMediaRecord(references[index], { scope: "row-image", id: `${key}:${index}`, kind: "image" });
+      const normalized = await persistReferenceMediaRecord(references[index], { scope: "row-image", id: `${key}:${seedList.length + index}`, kind: "image" });
       if (normalized) normalizedList.push(normalized);
     }
-    const limitedList = normalizeReferenceImageList(normalizedList, 4);
+    appendedList.push(...normalizedList);
+    const limitedList = normalizeReferenceImageList(appendedList, MAX_ROW_REFERENCE_IMAGE_ITEMS);
     const primary = limitedList[0] || null;
     deps.upsertActiveSession?.((current) => {
       const {

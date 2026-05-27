@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const timelineUiSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url), "utf8");
 
 function extractFunction(name) {
   const signature = `function ${name}`;
@@ -55,6 +56,7 @@ vm.createContext(context);
 [
   "normalizeVideoContentType",
   "resolveVideoContentType",
+  "withSessionVideoContentType",
   "getPanelModeCopy"
 ].forEach((name) => {
   vm.runInContext(`${extractFunction(name)};`, context);
@@ -86,6 +88,26 @@ context.composerVideoEnabled = true;
 const videoPodcastPanelCopy = context.getPanelModeCopy(podcastSession);
 if (videoPodcastPanelCopy.videoMode !== false || videoPodcastPanelCopy.videoContentType !== "videopodcast") {
   throw new Error("Una sesión videopodcast debe conservarse como videopodcast y no colapsar al modo creativo.");
+}
+
+const disabledVideoPodcastSession = context.withSessionVideoContentType(podcastSession, "none");
+context.composerVideoEnabled = true;
+const creativePanelCopy = context.getPanelModeCopy(disabledVideoPodcastSession);
+if (creativePanelCopy.videoMode !== true || creativePanelCopy.videoContentType !== "creative") {
+  throw new Error("Al apagar podcastVideoModeToggle, el composer en video debe mantener visible el track de escenas como modo creativo.");
+}
+if (disabledVideoPodcastSession.script.videoContentType !== null || disabledVideoPodcastSession.script.videoMode !== true) {
+  throw new Error("Apagar podcastVideoModeToggle no debe apagar el modo video legacy mientras composerModeToggle siga activo.");
+}
+
+if (!/function isAudioOnlyPodcastStudioMode\(session = null\) \{\s*return isPodcastMode\(session\) && !isCurrentModeVideo\(session\)/.test(source)
+  || !/const legacyVideoMode = normalizedType === "creative" \|\| \(normalizedType === "none" && isCurrentModeVideo\(session\)\);/.test(source)
+  || !/isComposerVideoMode: isCurrentModeVideo/.test(source)
+  || !/const composerVideoMode = typeof isComposerVideoMode === "function" && isComposerVideoMode\(activeSession\) === true;/.test(timelineUiSource)
+  || !/const audioOnlyPodcastMode = isPodcastMode\(activeSession\) && !composerVideoMode/.test(timelineUiSource)
+  || !/const isVisibleVideoSceneTrack = isEducationalVisibleSceneTrack\(trackId\) \|\| \(composerVideoMode && trackItems\.length > 0\);/.test(timelineUiSource)
+  || !/podcast-video-track-row\$\{isVisibleVideoSceneTrack \? " is-educational-scene-track" : ""\}/.test(timelineUiSource)) {
+  throw new Error("El timeline debe mantener el row track de video visible cuando composerModeToggle está en modo video.");
 }
 
 console.log("Podcaster video mode toggle session override OK.");

@@ -67,7 +67,7 @@ onAuthStateChanged(auth, async (user) => {
         await cargarLecturas();
     } else {
         unidadContenido.innerHTML = "<p>Debes iniciar sesión para ver esta unidad.</p>";
-        window.location.href = "login.html";
+        window.location.href = "index.html";
     }
 });
 

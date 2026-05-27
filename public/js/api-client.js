@@ -162,9 +162,32 @@ export async function authFetchJson(url, options = {}) {
   }
 
   const parseJsonSafe = async (response) => response.json().catch(() => ({}));
+  const extractErrorText = (value, fallback = "", seen = new Set()) => {
+    if (value == null) return String(fallback || "").trim();
+    if (typeof value === "string") {
+      const text = value.trim();
+      return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+    }
+    if (typeof value !== "object") {
+      const text = String(value || "").trim();
+      return text && text !== "[object Object]" ? text : String(fallback || "").trim();
+    }
+    if (seen.has(value)) return String(fallback || "").trim();
+    seen.add(value);
+    for (const candidate of [value?.error, value?.message, value?.detail, value?.reason, value?.code]) {
+      const text = extractErrorText(candidate, "", seen);
+      if (text) return text;
+    }
+    try {
+      const text = JSON.stringify(value);
+      return text && text !== "{}" ? text : String(fallback || "").trim();
+    } catch (_) {
+      return String(fallback || "").trim();
+    }
+  };
   const buildHttpError = (response, data) => {
-    const detail = data?.error?.message || data?.error || `HTTP ${response.status}`;
-    const error = new Error(String(detail));
+    const detail = extractErrorText(data, `HTTP ${response.status}`);
+    const error = new Error(detail);
     error.status = Number(response.status || 0);
     error.detail = data;
     return error;

@@ -57,14 +57,10 @@ test("init opens the podcaster sidepanel by default", () => {
 test("video mode toggle persists and marks the session dirty immediately", () => {
   assert.match(
     podcasterSource,
-    /autosaveReason:\s*"video-content-type"/
+    /function setPodcastVideoModeEnabled\([\s\S]*?persist:\s*true,[\s\S]*?markDirty:\s*true,[\s\S]*?autosaveReason:\s*options\.reason \|\| "video-content-type"/
   );
   assert.match(
     podcasterSource,
-    /persist:\s*true/
-  );
-  assert.match(
-    podcasterSource,
-    /markDirty:\s*true/
+    /setPodcastVideoModeEnabled\(enableVideoPodcast, \{ render: false, reason: "video-content-type" \}\);/
   );
 });

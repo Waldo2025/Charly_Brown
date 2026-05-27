@@ -42,6 +42,7 @@ function preloadAllDialogueAudios(session = null) {
         }
         if (Math.abs(nextMs - (window.podcastVideoState.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
           window.podcastVideoState.montageAudioActualDurationsMs[rowId] = nextMs;
+          window.invalidateStudioRuntimeCache?.();
           
           // Reconciliar en segundo plano para que el geminiDialogueTrack tenga la duración real
           try {
@@ -296,7 +297,7 @@ async function cancelConnectScriptPanelGeneration(options = {}) {
   return true;
 }
 
-function removeDialogueAudioForRow(rowId = "", options = {}) {
+export function removeDialogueAudioForRow(rowId = "", options = {}) {
   const key = String(rowId || "").trim();
   if (!key) return;
   const silent = options.silent === true;

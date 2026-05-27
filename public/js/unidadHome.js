@@ -212,7 +212,7 @@ document.addEventListener("DOMContentLoaded", () => {
       currentUserId = user.uid;
       loadUnidades(currentUserId);
     } else {
-      window.location.href = "login.html";
+      window.location.href = "index.html";
     }
   });
   

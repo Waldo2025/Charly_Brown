@@ -354,6 +354,17 @@ async function loadSingleSessionFromCloud(sessionId = "", uid = "", deps = {}) {
   }
 }
 
+function mergePodcastVideoConfigForLoad(cloudConfig = null, localConfig = null, deps = {}) {
+  const normalizePodcastVideoConfig = deps.normalizePodcastVideoConfig || ((value) => (value && typeof value === "object" ? value : {}));
+  const local = localConfig && typeof localConfig === "object" ? localConfig : {};
+  const cloud = cloudConfig && typeof cloudConfig === "object" ? cloudConfig : {};
+  return normalizePodcastVideoConfig({
+    ...local,
+    ...cloud,
+    reelModeEnabled: local.reelModeEnabled === true ? true : cloud.reelModeEnabled === true
+  });
+}
+
 function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}) {
   const mergeSessionRowsWithFallback = deps.mergeSessionRowsWithFallback || ((primaryRows = [], fallbackRows = []) => primaryRows.length ? primaryRows : fallbackRows);
   const localById = new Map(
@@ -398,9 +409,11 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
         ...(cloudSession?.script || {}),
         rows: finalRows
       },
-      podcastVideoConfig: cloudSession.isStub === true
-        ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
-        : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {}),
+      podcastVideoConfig: mergePodcastVideoConfigForLoad(
+        cloudSession?.podcastVideoConfig || {},
+        localSession?.podcastVideoConfig || {},
+        deps
+      ),
       rows: finalRows,
       isStub: cloudSession.isStub === true
     };

@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 
 const panelMusicSource = readFileSync(new URL("../public/podcaster/podcaster-panel-music.js", import.meta.url), "utf8");
 const timelineUiSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url), "utf8");
+const timelineInteractionSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-interaction.js", import.meta.url), "utf8");
 const playbackControllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
-const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 
 test("panel music loop settings persist fadeInMs and fadeOutMs", () => {
@@ -29,10 +29,18 @@ test("timeline audio chips render draggable fadein and fadeout nodes", () => {
 });
 
 test("audio fade nodes start their own drag modes and preserve trim behavior", () => {
-  assert.match(podcasterSource, /const audioFadeinHandle = event\.target\.closest\("\[data-action='timeline-audio-fadein-handle'\]"\);[\s\S]*?beginTimelineAudioTrimDrag\("audio-fadein", event\);/m);
-  assert.match(podcasterSource, /const audioFadeoutHandle = event\.target\.closest\("\[data-action='timeline-audio-fadeout-handle'\]"\);[\s\S]*?beginTimelineAudioTrimDrag\("audio-fadeout", event\);/m);
-  assert.match(podcasterSource, /if \(drag\.mode === "audio-trim-start" \|\| drag\.mode === "audio-trim-end" \|\| drag\.mode === "audio-fadein" \|\| drag\.mode === "audio-fadeout"\) \{/m);
-  assert.match(podcasterSource, /dragMode === "audio-fadein"[\s\S]*?dragMode === "audio-fadeout"[\s\S]*?dragMode === "audio-move"[\s\S]*?flushSessionLocalPersistNow\("", "background-music"\)\.catch\(\(\) => \{ \}\);/m);
+  const fadeInIndex = timelineInteractionSource.indexOf("const audioFadeinHandle = event.target.closest(\"[data-action='timeline-audio-fadein-handle']\");");
+  const fadeOutIndex = timelineInteractionSource.indexOf("const audioFadeoutHandle = event.target.closest(\"[data-action='timeline-audio-fadeout-handle']\");");
+  const chipMoveIndex = timelineInteractionSource.indexOf("const audioChip = event.target.closest(\".podcast-audio-timeline-chip.has-audio:not(.podcast-gemini-audio-chip)\");");
+  assert.ok(fadeInIndex >= 0, "timeline interaction must detect fade in handle");
+  assert.ok(fadeOutIndex >= 0, "timeline interaction must detect fade out handle");
+  assert.ok(chipMoveIndex >= 0, "timeline interaction must keep generic audio chip move drag");
+  assert.ok(fadeInIndex < chipMoveIndex, "fade in handle must be checked before generic audio chip move");
+  assert.ok(fadeOutIndex < chipMoveIndex, "fade out handle must be checked before generic audio chip move");
+  assert.match(timelineInteractionSource, /beginAudioTrimDrag\("audio-fadein", event\);/m);
+  assert.match(timelineInteractionSource, /beginAudioTrimDrag\("audio-fadeout", event\);/m);
+  assert.match(timelineInteractionSource, /drag\.mode === "audio-trim-start" \|\| drag\.mode === "audio-trim-end" \|\| drag\.mode === "audio-fadein" \|\| drag\.mode === "audio-fadeout"/m);
+  assert.match(timelineInteractionSource, /dragMode === "audio-fadein"[\s\S]*?dragMode === "audio-fadeout"[\s\S]*?dragMode === "audio-move"[\s\S]*?flushSessionLocalPersistNow\("", "background-music"\)\.catch\(\(\) => \{ \}\);/m);
 });
 
 test("background music playback applies fadein and fadeout within the active segment", () => {

@@ -2,26 +2,44 @@ import { readFileSync } from "node:fs";
 
 const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const panelMusicSource = readFileSync(new URL("../public/podcaster/podcaster-panel-music.js", import.meta.url), "utf8");
+const timelineInteractionSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-interaction.js", import.meta.url), "utf8");
+const timelineUiSource = readFileSync(new URL("../public/podcaster/podcaster-timeline-ui.js", import.meta.url), "utf8");
 
 const podcasterRequirements = [
   "panelLoopKey: \"\"",
-  "function buildTimelinePanelAudioSelectionKey",
-  "function deleteSelectedTimelineAudioChips",
   "event.key === \"Backspace\" || event.key === \"Delete\"",
-  "removeDialogueAudioForRow(rowId",
-  "removeUploadedTrackAt(trackIndex)",
-  "clearTimelinePanelMusicTrackByKind(trackKind)",
-  "timelineAudioSelection.panelLoopKey",
-  ".podcast-montage-audio-chip[data-row-id]",
   "excludedRowIds",
-  "excludedGeminiRowIds.has",
-  "excludedRowIds: (geminiDialogueTrack.excludedRowIds || []).slice().sort()",
-  "if (!hasStoredAudio) return \"\";"
+  "excludedRowIds: (geminiDialogueTrack.excludedRowIds || []).slice().sort()"
 ];
 
 const missingPodcasterRequirements = podcasterRequirements.filter((snippet) => !podcasterSource.includes(snippet));
 if (missingPodcasterRequirements.length) {
   throw new Error(`podcaster.js debe soportar borrado por teclado de chips de audio: ${missingPodcasterRequirements.join(" | ")}`);
+}
+
+const timelineInteractionRequirements = [
+  "function buildPanelAudioSelectionKey",
+  "function deleteSelectedAudioChips",
+  "removeDialogueAudioForRow(rowId",
+  "removeUploadedTrackAt(trackIndex)",
+  "clearPanelMusicTrackByKind(trackKind)",
+  "timelineAudioSelection.panelLoopKey",
+  ".podcast-montage-audio-chip[data-row-id]"
+];
+
+const missingTimelineInteractionRequirements = timelineInteractionRequirements.filter((snippet) => !timelineInteractionSource.includes(snippet));
+if (missingTimelineInteractionRequirements.length) {
+  throw new Error(`podcaster-timeline-interaction.js debe poseer el borrado de chips de audio: ${missingTimelineInteractionRequirements.join(" | ")}`);
+}
+
+const timelineUiRequirements = [
+  "excludedGeminiRowIds.has",
+  "if (!hasStoredAudio) return \"\";"
+];
+
+const missingTimelineUiRequirements = timelineUiRequirements.filter((snippet) => !timelineUiSource.includes(snippet));
+if (missingTimelineUiRequirements.length) {
+  throw new Error(`podcaster-timeline-ui.js debe ocultar chips Gemini sin audio guardado: ${missingTimelineUiRequirements.join(" | ")}`);
 }
 
 const panelMusicRequirements = [

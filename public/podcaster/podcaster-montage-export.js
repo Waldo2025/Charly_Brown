@@ -11,10 +11,18 @@ const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
+const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
+  enabled: true,
+  assetPath: "public/podcaster/logo.png",
+  position: "top-right",
+  marginPct: 0.025,
+  widthPct: 0.05,
+  opacity: 1
+});
 
 // --- Helpers & Configuration Normalization ---
 
-function normalizeMontageExportSettings(raw = {}) {
+export function normalizeMontageExportSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   const exportMode = ["normal", "review"].includes(String(source.exportMode || "").trim())
     ? String(source.exportMode).trim()
@@ -169,7 +177,7 @@ async function downloadMontageReviewExcel(preparedPayload = null, baseFilename =
 
 // --- Persistence ---
 
-function loadMontageExportSettings() {
+export function loadMontageExportSettings() {
   try {
     const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_STORAGE_KEY) || "{}");
     const normalized = normalizeMontageExportSettings(parsed || {});
@@ -180,9 +188,9 @@ function loadMontageExportSettings() {
   }
 }
 
-function persistMontageExportSettings() {
+export function persistMontageExportSettings() {
   try {
-    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(window.montageExportState)));
+    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(montageExportState)));
   } catch (_) {
     // noop
   }
@@ -190,8 +198,16 @@ function persistMontageExportSettings() {
 
 // --- States Initialization ---
 
-let montageExportState = loadMontageExportSettings();
+export let montageExportState = loadMontageExportSettings();
 let montageExportBusy = false;
+window.montageExportState = montageExportState;
+window.montageExportBusy = montageExportBusy;
+
+function setMontageExportState(nextState = {}) {
+  montageExportState = normalizeMontageExportSettings(nextState);
+  window.montageExportState = montageExportState;
+  return montageExportState;
+}
 
 // --- Runtime & Environment Detectors ---
 
@@ -250,7 +266,29 @@ const safeSleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms
 
 // --- Migrated Montage Export Functions ---
 
-function setMontageExportOpen(isOpen = false) {
+export function buildDefaultMontageBrandOverlay() {
+  return { ...DEFAULT_MONTAGE_BRAND_OVERLAY };
+}
+
+function buildMontageBrandOverlayForExport(isReel = false) {
+  return {
+    ...buildDefaultMontageBrandOverlay(),
+    ...(isReel === true
+      ? {
+        marginPct: 0.03,
+        widthPct: 0.09
+      }
+      : {})
+  };
+}
+
+function isMontageExportReelModeActive() {
+  const session = window.getActiveSession?.() || null;
+  const cfg = window.getPodcastVideoConfig?.(session) || session?.podcastVideoConfig || {};
+  return cfg?.reelModeEnabled === true;
+}
+
+export function setMontageExportOpen(isOpen = false) {
   if (window.els.montageExportModal) {
     window.els.montageExportModal.hidden = !Boolean(isOpen);
   }
@@ -263,7 +301,7 @@ function clearMontageExportPolling() {
   }
 }
 
-function setMontageExportContinueButton({ visible = false, label = "Continuar exportación" } = {}) {
+export function setMontageExportContinueButton({ visible = false, label = "Continuar exportación" } = {}) {
   if (!window.els.continueMontageExportBtn) return;
   const hasJobId = Boolean(String(window.montageExportJobState.jobId || "").trim());
   const shouldShow = Boolean(visible) && hasJobId;
@@ -274,7 +312,7 @@ function setMontageExportContinueButton({ visible = false, label = "Continuar ex
   }
 }
 
-function resetMontageExportJobState() {
+export function resetMontageExportJobState() {
   clearMontageExportPolling();
   window.montageExportJobState = {
     jobId: "",
@@ -292,7 +330,8 @@ function resetMontageExportJobState() {
   setMontageExportContinueButton({ visible: false });
 }
 
-function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false } = {}) {
+export function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false } = {}) {
+  const isReelPreview = isMontageExportReelModeActive();
   window.montageExportPreviewState.loading = Boolean(loading);
   window.montageExportPreviewState.error = String(error || "").trim();
   window.montageExportPreviewState.dataUrl = String(dataUrl || "").trim();
@@ -302,6 +341,7 @@ function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "
   window.montageExportPreviewState.disabled = Boolean(disabled);
   if (window.els.montageExportPreviewBox) {
     window.els.montageExportPreviewBox.dataset.mode = window.montageExportPreviewState.mode;
+    window.els.montageExportPreviewBox.dataset.reel = isReelPreview ? "true" : "false";
     window.els.montageExportPreviewBox.dataset.state = window.montageExportPreviewState.loading
       ? "loading"
       : window.montageExportPreviewState.disabled
@@ -313,14 +353,19 @@ function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "
             : "idle";
   }
   if (window.els.montageExportPreviewBadge) {
-    window.els.montageExportPreviewBadge.textContent = window.montageExportPreviewState.mode === "review" ? "Revisión" : "Normal";
+    window.els.montageExportPreviewBadge.textContent = isReelPreview
+      ? "Reel 9:16"
+      : (window.montageExportPreviewState.mode === "review" ? "Revisión" : "Normal");
   }
   if (window.els.montageExportPreviewMeta) {
-    window.els.montageExportPreviewMeta.textContent = String(meta || (
+    const baseMeta = String(meta || (
       window.montageExportPreviewState.sceneIndex > 0
         ? `Escena ${window.montageExportPreviewState.sceneIndex} de referencia.`
         : "Así se vería tu video exportado."
     )).trim();
+    window.els.montageExportPreviewMeta.textContent = isReelPreview && !/reel|9:16/i.test(baseMeta)
+      ? `${baseMeta} Export reel 9:16.`
+      : baseMeta;
   }
   const hasReadyPreview = Boolean(window.montageExportPreviewState.dataUrl && !window.montageExportPreviewState.loading && !window.montageExportPreviewState.error);
   const isVideoPreview = hasReadyPreview && window.montageExportPreviewState.mediaType.startsWith("video/");
@@ -365,7 +410,7 @@ function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "
   }
 }
 
-function resetMontageExportPreviewState() {
+export function resetMontageExportPreviewState() {
   if (window.montageExportPreviewState.debounceTimer) {
     window.clearTimeout(window.montageExportPreviewState.debounceTimer);
   }
@@ -386,7 +431,7 @@ function resetMontageExportPreviewState() {
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
 }
 
-function closeMontageExportModal() {
+export function closeMontageExportModal() {
   if (typeof window.exportPreviewController?.stop === "function") {
     window.exportPreviewController.stop();
   }
@@ -398,7 +443,7 @@ function closeMontageExportModal() {
   setMontageExportOpen(false);
 }
 
-function setMontageExportStatus(text = "", hint = "", options = {}) {
+export function setMontageExportStatus(text = "", hint = "", options = {}) {
   const safeText = String(text || "").trim() || "Listo. Presiona Exportar para generar tu video.";
   const safeHint = String(hint || "").trim();
   const tone = String(options?.tone || "").trim();
@@ -416,7 +461,9 @@ function setMontageExportStatus(text = "", hint = "", options = {}) {
   }
 }
 
-function setMontageExportBusy(isBusy = false) {
+export function setMontageExportBusy(isBusy = false) {
+  montageExportBusy = Boolean(isBusy);
+  window.montageExportBusy = montageExportBusy;
   if (window.els.confirmMontageExportBtn) window.els.confirmMontageExportBtn.disabled = Boolean(isBusy);
   if (window.els.continueMontageExportBtn) window.els.continueMontageExportBtn.disabled = Boolean(isBusy);
   if (window.els.generateAllDialogueVideosBtn) window.els.generateAllDialogueVideosBtn.disabled = Boolean(isBusy) || window.podcastVideoState.busy;
@@ -428,7 +475,7 @@ function setMontageExportBusy(isBusy = false) {
   }
 }
 
-function setMontageExportProgress(progress = null) {
+export function setMontageExportProgress(progress = null) {
   const bar = window.els.montageExportProgressBar || null;
   if (!bar || !window.els.montageExportModal) return;
   if (!Number.isFinite(Number(progress))) {
@@ -441,7 +488,7 @@ function setMontageExportProgress(progress = null) {
   window.els.montageExportModal.classList.add("is-progress");
 }
 
-function describeMontageExportStage(stage = "", mode = window.montageExportState.exportMode) {
+export function describeMontageExportStage(stage = "", mode = window.montageExportState.exportMode) {
   const clean = String(stage || "").trim();
   const review = mode === "review";
   const map = {
@@ -461,7 +508,7 @@ function describeMontageExportStage(stage = "", mode = window.montageExportState
   return map[clean] || (review ? "Creando tu video de revisión…" : "Creando tu video…");
 }
 
-function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, totalScenes = 0) {
+export function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, totalScenes = 0) {
   const clean = String(substage || "").trim();
   const sceneLabel = sceneIndex > 0
     ? `escena ${sceneIndex}${totalScenes > 0 ? ` de ${totalScenes}` : ""}`
@@ -476,7 +523,7 @@ function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0, total
   return map[clean] || "";
 }
 
-async function pollMontageExportJob(jobId = "") {
+export async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
   const maxPollMs = Math.max(0, Number(MONTAGE_EXPORT_POLL_MAX_MS || 0) || 0);
@@ -688,7 +735,7 @@ async function pollMontageExportJob(jobId = "") {
   }, 2000);
 }
 
-async function continueMontageExportPolling() {
+export async function continueMontageExportPolling() {
   const jobId = String(window.montageExportJobState.jobId || "").trim();
   if (!jobId) {
     setMontageExportStatus(
@@ -715,11 +762,11 @@ async function continueMontageExportPolling() {
   pollMontageExportJob(jobId).catch(() => { });
 }
 
-function getMontagePreviewRowId() {
+export function getMontagePreviewRowId() {
   return String(window.podcastVideoState.activeRowId || window.creativeVideoState.activeRowId || "").trim();
 }
 
-function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
+export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
   if (shouldSuspendMontagePreviewActivity()) return;
   const cleanRowId = String(rowId || "").trim();
   if (!cleanRowId || !window.els.montageExportModal || window.els.montageExportModal.hidden) return;
@@ -748,14 +795,21 @@ function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
   const src = window.resolveStorageVideoUrl(String(video?.url || "").trim(), String(video?.storagePath || "").trim());
   if (!src) return null;
+  const mediaKind = String(video?.mediaKind || video?.type || "").trim().toLowerCase();
+  const mimeType = String(video?.mimeType || "").trim().toLowerCase();
+  const isImage = mediaKind === "image" || mimeType.startsWith("image/");
   return {
     src,
+    mediaType: isImage ? (mimeType || "image/png") : (mimeType || "video/mp4"),
+    mediaScale: window.normalizeTimelineClipMediaScale?.(selected?.mediaScale) || 1,
+    visualLayoutMode: String(selected?.visualLayoutMode || "default").trim() || "default",
+    visualEffects: selected?.visualEffects || null,
     sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
     rowId: String(selected?.rowId || "").trim()
   };
 }
 
-async function refreshMontageExportPreviewNow(options = {}) {
+export async function refreshMontageExportPreviewNow(options = {}) {
   if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity()) {
     setMontageExportPreviewState({
@@ -795,13 +849,30 @@ async function refreshMontageExportPreviewNow(options = {}) {
       loading: false,
       error: "",
       dataUrl: frontendPreview.src,
-      mediaType: "video/mp4",
+      mediaType: frontendPreview.mediaType || "video/mp4",
       mode: payload.exportMode,
       sceneIndex: frontendPreview.sceneIndex || 0,
       meta: frontendPreview.sceneIndex
-        ? `Escena ${frontendPreview.sceneIndex} de referencia (preview frontend).`
-        : "Preview frontend de la exportación."
+        ? `Escena ${frontendPreview.sceneIndex} de referencia (preview frontend${payload.reelModeEnabled === true ? " · Reel 9:16" : ""}).`
+        : `Preview frontend de la exportación${payload.reelModeEnabled === true ? " · Reel 9:16" : ""}.`
     });
+    const previewContainer = document.getElementById("montageExportPreviewContainer");
+    window.applySceneMediaScaleToStage?.({
+      rowId: frontendPreview.rowId,
+      mediaScale: frontendPreview.mediaScale,
+      visualLayoutMode: frontendPreview.visualLayoutMode,
+      container: previewContainer
+    });
+    if (String(frontendPreview.mediaType || "").startsWith("image/") && window.els.montageExportPreviewImage) {
+      const effects = frontendPreview.visualEffects;
+      let className = "podcast-active-speaker-image is-visible";
+      if (effects && Array.isArray(effects.effects) && effects.effects.length) {
+        const speedClass = `speed-${effects.speed || 5}`;
+        const effectClasses = effects.effects.map((effect) => `ken-burns-${effect}`).join(" ");
+        className += ` ${effectClasses} ${speedClass}`;
+      }
+      window.els.montageExportPreviewImage.className = className;
+    }
     return;
   }
   const signature = JSON.stringify({
@@ -819,7 +890,10 @@ async function refreshMontageExportPreviewNow(options = {}) {
       onScreenText: entry?.onScreenText,
       visualNotes: entry?.visualNotes,
       videoStoragePath: entry?.video?.storagePath,
-      videoUrl: entry?.video?.url
+      videoUrl: entry?.video?.url,
+      mediaScale: entry?.mediaScale,
+      visualLayoutMode: entry?.visualLayoutMode,
+      visualEffects: entry?.visualEffects
     }))
   });
   if (signature === window.montageExportPreviewState.lastSignature && window.montageExportPreviewState.dataUrl && options?.force !== true) return;
@@ -846,7 +920,7 @@ async function refreshMontageExportPreviewNow(options = {}) {
   });
 }
 
-function scheduleMontageExportPreviewRefresh(delayMs = 280) {
+export function scheduleMontageExportPreviewRefresh(delayMs = 280) {
   if (shouldSuspendMontagePreviewActivity()) {
     if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
     setMontageExportPreviewState({
@@ -871,37 +945,37 @@ function scheduleMontageExportPreviewRefresh(delayMs = 280) {
   }, Math.max(0, Number(delayMs || 0) || 0));
 }
 
-function syncMontageExportUi() {
-  window.montageExportState = normalizeMontageExportSettings(window.montageExportState);
-  if (isLegacyAutoMontageFilename(window.montageExportState.filename)) {
-    window.montageExportState.filename = "";
+export function syncMontageExportUi() {
+  const state = setMontageExportState(window.montageExportState || montageExportState);
+  if (isLegacyAutoMontageFilename(state.filename)) {
+    state.filename = "";
   }
-  if (window.els.montageExportMode) window.els.montageExportMode.value = window.montageExportState.exportMode;
-  if (window.els.montageExportFormat) window.els.montageExportFormat.value = window.montageExportState.format;
-  if (window.els.montageExportResolution) window.els.montageExportResolution.value = window.montageExportState.resolution;
-  if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.value = window.montageExportState.bitrateMode;
-  if (window.els.montageExportMaxBitrate) window.els.montageExportMaxBitrate.value = window.montageExportState.maxBitrate;
-  if (window.els.montageExportMinBitrate) window.els.montageExportMinBitrate.value = window.montageExportState.minBitrate;
+  if (window.els.montageExportMode) window.els.montageExportMode.value = state.exportMode;
+  if (window.els.montageExportFormat) window.els.montageExportFormat.value = state.format;
+  if (window.els.montageExportResolution) window.els.montageExportResolution.value = state.resolution;
+  if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.value = state.bitrateMode;
+  if (window.els.montageExportMaxBitrate) window.els.montageExportMaxBitrate.value = state.maxBitrate;
+  if (window.els.montageExportMinBitrate) window.els.montageExportMinBitrate.value = state.minBitrate;
   if (window.els.montageExportCustomBitrateBox) {
-    window.els.montageExportCustomBitrateBox.hidden = window.montageExportState.bitrateMode !== "custom";
+    window.els.montageExportCustomBitrateBox.hidden = state.bitrateMode !== "custom";
   }
-  if (window.els.montageExportFilename) window.els.montageExportFilename.value = window.montageExportState.filename || defaultMontageExportFilename(window.getActiveSession());
+  if (window.els.montageExportFilename) window.els.montageExportFilename.value = state.filename || defaultMontageExportFilename(window.getActiveSession());
   if (window.els.montageExportIncludeReviewExcel) {
-    window.els.montageExportIncludeReviewExcel.checked = window.montageExportState.includeReviewExcel !== false;
+    window.els.montageExportIncludeReviewExcel.checked = state.includeReviewExcel !== false;
   }
   if (window.els.montageExportReviewExcelField) {
-    window.els.montageExportReviewExcelField.hidden = window.montageExportState.exportMode !== "review";
+    window.els.montageExportReviewExcelField.hidden = state.exportMode !== "review";
   }
   if (window.els.montageExportOnlyAudio) {
-    window.els.montageExportOnlyAudio.checked = window.montageExportState.onlyAudio === true;
+    window.els.montageExportOnlyAudio.checked = state.onlyAudio === true;
   }
 
   // Si es solo audio, ocultamos campos irrelevantes de video
-  const onlyAudio = window.montageExportState.onlyAudio === true;
+  const onlyAudio = state.onlyAudio === true;
   if (window.els.montageExportFormat) window.els.montageExportFormat.closest(".row-field").hidden = onlyAudio;
   if (window.els.montageExportResolution) window.els.montageExportResolution.closest(".row-field").hidden = onlyAudio;
   if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.closest(".row-field").hidden = onlyAudio;
-  if (window.els.montageExportCustomBitrateBox) window.els.montageExportCustomBitrateBox.hidden = onlyAudio || window.montageExportState.bitrateMode !== "custom";
+  if (window.els.montageExportCustomBitrateBox) window.els.montageExportCustomBitrateBox.hidden = onlyAudio || state.bitrateMode !== "custom";
 
   const qualityField = window.els.montageExportModal?.querySelector(".montage-export-quality");
   if (qualityField) qualityField.hidden = onlyAudio;
@@ -916,7 +990,7 @@ function syncMontageExportUi() {
     } else {
       setMontageExportStatus(
         "Listo. Presiona Exportar para generar tu video.",
-        window.montageExportState.exportMode === "review"
+        state.exportMode === "review"
           ? "Revisión crea un split-screen con video y ficha editorial por escena."
           : "Usa el timeline tal como está (escenas + audio).",
         { tone: "neutral" }
@@ -927,19 +1001,19 @@ function syncMontageExportUi() {
     const btns = Array.from(window.els.montageExportModal.querySelectorAll("[data-quality]"));
     btns.forEach((btn) => {
       const key = String(btn?.dataset?.quality || "").trim();
-      btn.classList.toggle("is-active", key === window.montageExportState.qualityPreset);
+      btn.classList.toggle("is-active", key === state.qualityPreset);
     });
   }
   persistMontageExportSettings();
 }
 
-function openMontageExportModal() {
+export function openMontageExportModal() {
   if (typeof window.playbackController?.stop === "function") window.playbackController.stop();
   if (typeof window.exportPreviewController?.stop === "function") window.exportPreviewController.stop();
 
-  window.montageExportState = normalizeMontageExportSettings(window.montageExportState);
-  if (isLegacyAutoMontageFilename(window.montageExportState.filename)) window.montageExportState.filename = "";
-  if (!window.montageExportState.filename) window.montageExportState.filename = defaultMontageExportFilename(window.getActiveSession());
+  const state = setMontageExportState(window.montageExportState || montageExportState);
+  if (isLegacyAutoMontageFilename(state.filename)) state.filename = "";
+  if (!state.filename) state.filename = defaultMontageExportFilename(window.getActiveSession());
   setMontageExportOpen(true);
   syncMontageExportUi();
   resetMontageExportJobState();
@@ -954,7 +1028,7 @@ function openMontageExportModal() {
   }
   setMontageExportStatus(
     "Listo. Presiona Exportar para generar tu video.",
-    window.montageExportState.exportMode === "review"
+    state.exportMode === "review"
       ? "Revisión crea un split-screen con video y ficha editorial por escena."
       : "Usa el timeline tal como está (escenas + audio).",
     { tone: "neutral" }
@@ -975,7 +1049,7 @@ function openMontageExportModal() {
   }
 }
 
-function validateMontageExportLinearTimeline(runtimeEntries = []) {
+export function validateMontageExportLinearTimeline(runtimeEntries = []) {
   const entries = Array.isArray(runtimeEntries) ? runtimeEntries.slice() : [];
   entries.sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0));
   let lastEndMs = 0;
@@ -990,7 +1064,7 @@ function validateMontageExportLinearTimeline(runtimeEntries = []) {
   return { ok: true, error: "" };
 }
 
-function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
+export function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
   const list = Array.isArray(skippedEntries) ? skippedEntries.filter(Boolean) : [];
   if (!list.length) return "";
   const reasonLabels = {
@@ -1012,26 +1086,35 @@ function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
   return preview.join("; ") + suffix;
 }
 
-function buildMontageExportPayload(session = null) {
-  const activeSession = session || window.getActiveSession();
+export function buildMontageExportPayload(session = null) {
+  const activeSession = session || window.getActiveSession?.();
   if (!activeSession) return { ok: false, error: "No hay sesión activa.", payload: null };
   const sessionId = String(activeSession?.id || "").trim();
   if (!sessionId) return { ok: false, error: "La sesión no tiene un ID válido.", payload: null };
-  const runtimeEntries = window.buildTimelineRuntimeEntries(activeSession);
+  const runtimeEntries = Array.isArray(window.buildTimelineRuntimeEntries?.(activeSession))
+    ? window.buildTimelineRuntimeEntries(activeSession)
+    : [];
   if (!runtimeEntries.length) return { ok: false, error: "No hay clips en el timeline para exportar.", payload: null };
   const linear = validateMontageExportLinearTimeline(runtimeEntries);
   if (!linear.ok) return { ok: false, error: linear.error, payload: null };
-  const videoCfg = window.getPodcastVideoConfig(activeSession);
-  const timelineDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, window.getTimelineTotalDurationMs(activeSession));
+  const videoCfg = window.getPodcastVideoConfig?.(activeSession) || {};
+  const timelineDurationMs = Math.max(
+    STUDIO_TIMELINE_MIN_CLIP_MS,
+    Number(window.getTimelineTotalDurationMs?.(activeSession) || 0) || 0
+  );
   const montageAudioMode = String(videoCfg?.audioMode || "gemini-live-per-scene").trim().toLowerCase();
   const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
-  const onScreenTextTimeline = window.buildMontageOnScreenTextSegments(activeSession, runtimeEntries);
+  const onScreenTextTimeline = window.buildMontageOnScreenTextSegments?.(activeSession, runtimeEntries) || {
+    settings: null,
+    segments: []
+  };
 
-  const normalizeLegacyPct = (value, fallback = 100) => {
+  const normalizeLegacyPct = (value, fallback = 100, max = 200) => {
     const num = window.toFiniteNumber(value, fallback);
-    if (!Number.isFinite(num)) return Math.max(0, Math.min(100, Number(fallback) || 0));
+    const ceiling = Math.max(0, Number(max) || 100);
+    if (!Number.isFinite(num)) return Math.max(0, Math.min(ceiling, Number(fallback) || 0));
     const scaled = num > 0 && num <= 1 ? num * 100 : num;
-    return Math.max(0, Math.min(100, scaled));
+    return Math.max(0, Math.min(ceiling, scaled));
   };
 
   const splitBackgroundSegmentsByScene = (segmentList = []) => {
@@ -1054,6 +1137,8 @@ function buildMontageExportPayload(session = null) {
         const sceneVolumePct = window.getSceneBackgroundMusicVolumeOverridePct(activeSession, rowId);
         const effectiveVolumePct = baseVolumePct * (Number.isFinite(sceneVolumePct) ? (sceneVolumePct / 100) : 1);
         if (effectiveVolumePct <= 0.0001) return [];
+        const shouldApplyFadeIn = Math.abs(overlapStartMs - segmentStartMs) <= 1;
+        const shouldApplyFadeOut = Math.abs(overlapEndMs - segmentEndMs) <= 1;
         return [{
           ...segment,
           id: String(segment?.id || "bg").trim() ? `${String(segment?.id || "bg").trim()}-${rowId}-${overlapStartMs}` : `bg-${rowId}-${overlapStartMs}`,
@@ -1062,8 +1147,8 @@ function buildMontageExportPayload(session = null) {
           durationMs: overlapDurationMs,
           trimInMs: segmentTrimInMs + (overlapStartMs - segmentStartMs),
           trimOutMs: segmentTrimInMs + (overlapStartMs - segmentStartMs) + overlapDurationMs,
-          fadeInMs: Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeInMs || 0) || 0)),
-          fadeOutMs: Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeOutMs || 0) || 0)),
+          fadeInMs: shouldApplyFadeIn ? Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeInMs || 0) || 0)) : 0,
+          fadeOutMs: shouldApplyFadeOut ? Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeOutMs || 0) || 0)) : 0,
           volumePct: Math.max(0, Math.min(200, effectiveVolumePct))
         }];
       });
@@ -1124,8 +1209,8 @@ function buildMontageExportPayload(session = null) {
 
   const buildUploadedBackgroundSegments = () => {
     const segments = window.buildUploadedPanelMusicSegments(activeSession);
-    const volumePct = normalizeLegacyPct(window.panelMusicState?.montageVolume ?? 0, 0);
-    if (!Array.isArray(segments) || !segments.length || volumePct <= 0.0001) return [];
+    const panelMusic = window.getPanelMontageMusicConfig();
+    if (!Array.isArray(segments) || !segments.length) return [];
     return splitBackgroundSegmentsByScene(segments
       .map((segment, idx) => {
         const src = String(window.resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim();
@@ -1138,6 +1223,11 @@ function buildMontageExportPayload(session = null) {
           Math.max(trimInMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.trimOutMs || 0) || (trimInMs + durationMs))),
           trimInMs + durationMs
         );
+        const volumePct = normalizeLegacyPct(
+          segment?.montageVolume ?? segment?.volume ?? panelMusic?.montageVolume ?? panelMusic?.volume ?? 0,
+          0
+        );
+        if (volumePct <= 0.0001) return null;
         return {
           kind: "uploaded",
           id: String(segment?.id || `uploaded-${idx + 1}`).trim() || `uploaded-${idx + 1}`,
@@ -1155,6 +1245,7 @@ function buildMontageExportPayload(session = null) {
           trimOutMs,
           fadeInMs: Math.max(0, Math.min(durationMs, Number(segment?.fadeInMs || 0) || 0)),
           fadeOutMs: Math.max(0, Math.min(durationMs, Number(segment?.fadeOutMs || 0) || 0)),
+          duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(segment?.duckingWhenGeminiPct ?? segment?.duckingPct ?? panelMusic?.duckingWhenGeminiPct ?? 60))),
           volumePct
         };
       })
@@ -1176,40 +1267,38 @@ function buildMontageExportPayload(session = null) {
     );
     const startOffsetMs = Math.max(0, Math.round(Number(panelMusic?.startOffsetMs || 0) || 0));
     const segments = [];
-    runtimeEntries.forEach((entry) => {
-      const rowId = String(entry?.rowId || "").trim();
-      let cursorMs = Math.max(startOffsetMs, Math.round(Number(entry?.startMs || 0) || 0));
-      const sceneEndMs = Math.max(cursorMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.endMs || cursorMs + STUDIO_TIMELINE_MIN_CLIP_MS) || 0));
-      while (cursorMs < sceneEndMs) {
-        const relativeMs = Math.max(0, cursorMs - startOffsetMs);
-        const loopIndex = Math.max(0, Math.floor(relativeMs / effectiveLoopMs));
-        const loopPositionMs = relativeMs % effectiveLoopMs;
-        const chunkDurationMs = Math.max(
-          STUDIO_TIMELINE_MIN_CLIP_MS,
-          Math.min(sceneEndMs - cursorMs, effectiveLoopMs - loopPositionMs)
-        );
-        const loopFadeInMs = Math.max(0, Number(panelMusic?.loopSettings?.find?.((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex)?.fadeInMs || 0) || 0);
-        const loopFadeOutMs = Math.max(0, Number(panelMusic?.loopSettings?.find?.((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex)?.fadeOutMs || 0) || 0);
-        segments.push({
-          kind: "background-track",
-          id: `track-bg-${rowId}-${cursorMs}`,
-          rowId,
-          url: src,
-          storagePath: "",
-          downloadUrl: src,
-          mimeType: "audio/mpeg",
-          startMs: cursorMs,
-          endMs: cursorMs + chunkDurationMs,
-          durationMs: chunkDurationMs,
-          trimInMs: trimInMs + loopPositionMs,
-          trimOutMs: trimInMs + loopPositionMs + chunkDurationMs,
-          fadeInMs: Math.max(0, Math.min(chunkDurationMs, loopFadeInMs)),
-          fadeOutMs: Math.max(0, Math.min(chunkDurationMs, loopFadeOutMs)),
-          volumePct
-        });
-        cursorMs += chunkDurationMs;
-      }
-    });
+    let cursorMs = Math.max(0, startOffsetMs);
+    while (cursorMs < timelineDurationMs) {
+      const relativeMs = Math.max(0, cursorMs - startOffsetMs);
+      const loopIndex = Math.max(0, Math.floor(relativeMs / effectiveLoopMs));
+      const loopPositionMs = relativeMs % effectiveLoopMs;
+      const chunkDurationMs = Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.min(timelineDurationMs - cursorMs, effectiveLoopMs - loopPositionMs)
+      );
+      const loopSetting = panelMusic?.loopSettings?.find?.((item) => Math.max(0, Math.floor(Number(item?.loopIndex || 0) || 0)) === loopIndex) || null;
+      const loopFadeInMs = Math.max(0, Number(loopSetting?.fadeInMs || 0) || 0);
+      const loopFadeOutMs = Math.max(0, Number(loopSetting?.fadeOutMs || 0) || 0);
+      segments.push({
+        kind: "background-track",
+        id: `track-bg-loop-${loopIndex}-${cursorMs}`,
+        rowId: "",
+        url: src,
+        storagePath: "",
+        downloadUrl: src,
+        mimeType: "audio/mpeg",
+        startMs: cursorMs,
+        endMs: cursorMs + chunkDurationMs,
+        durationMs: chunkDurationMs,
+        trimInMs: trimInMs + loopPositionMs,
+        trimOutMs: trimInMs + loopPositionMs + chunkDurationMs,
+        fadeInMs: Math.max(0, Math.min(chunkDurationMs, loopFadeInMs)),
+        fadeOutMs: Math.max(0, Math.min(chunkDurationMs, loopFadeOutMs)),
+        duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
+        volumePct
+      });
+      cursorMs += chunkDurationMs;
+    }
     return splitBackgroundSegmentsByScene(segments);
   };
 
@@ -1218,15 +1307,20 @@ function buildMontageExportPayload(session = null) {
   const trackBackgroundSegments = buildTrackBackgroundSegments();
   const useTimelineAudio = geminiTimelineSegments.length > 0 || uploadedBackgroundSegments.length > 0 || trackBackgroundSegments.length > 0;
 
-  const entries = runtimeEntries
+  const orderedRuntimeEntries = runtimeEntries
     .slice()
-    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0))
+    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0));
+
+  const entries = orderedRuntimeEntries
     .map((entry, index) => {
       const rowId = String(entry?.rowId || "").trim();
-      const row = window.getSessionRows(activeSession).find((item) => String(item?.id || "").trim() === rowId) || null;
-      const clip = window.resolveDialogueVideoForRow(activeSession, rowId);
-      const primarySegment = window.resolvePrimaryDialogueVideoSegment(clip);
-      const audio = window.resolveDialogueAudioForRow(activeSession, rowId);
+      const nextEntry = orderedRuntimeEntries[index + 1] || null;
+      const nextRowId = String(nextEntry?.rowId || "").trim();
+      const rows = Array.isArray(window.getSessionRows?.(activeSession)) ? window.getSessionRows(activeSession) : [];
+      const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+      const clip = window.resolveDialogueVideoForRow?.(activeSession, rowId) || null;
+      const primarySegment = window.resolvePrimaryDialogueVideoSegment?.(clip) || null;
+      const audio = window.resolveDialogueAudioForRow?.(activeSession, rowId) || null;
       const videoStoragePath = String(primarySegment?.storagePath || clip?.storagePath || "").trim();
       const videoDownloadUrl = String(primarySegment?.downloadUrl || clip?.downloadUrl || "").trim();
       const videoMimeType = String(primarySegment?.mimeType || clip?.mimeType || "video/mp4").trim() || "video/mp4";
@@ -1235,7 +1329,14 @@ function buildMontageExportPayload(session = null) {
       const audioMimeType = String(audio?.mimeType || "audio/ogg").trim() || "audio/ogg";
       const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
       const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs || 0) || 0);
-      const useNativeVideoAudio = window.shouldKeepNativeVideoAudioForRow(activeSession, rowId);
+      const sceneMix = window.resolveTimelineClipMix?.(activeSession, rowId) || null;
+      const resolvedVeoVolumePct = Number.isFinite(Number(sceneMix?.veoPct))
+        ? Math.max(0, Math.min(100, Math.round(Number(sceneMix.veoPct))))
+        : normalizeLegacyPct(entry?.clip?.veoVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultVeoVolumePct, 100));
+      const useNativeVideoAudio = window.shouldKeepNativeVideoAudioForRow?.(activeSession, rowId) || resolvedVeoVolumePct > 0.0001;
+      const transitionOut = entry?.transitionOut
+        || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
+        || null;
       if (!rowId || !(videoStoragePath || videoDownloadUrl)) {
         return {
           ok: false,
@@ -1263,12 +1364,15 @@ function buildMontageExportPayload(session = null) {
           timelineEndMs: Math.max(0, Number(entry?.endMs || 0) || 0),
           trimInMs,
           durationMs,
-          visualLayoutMode: window.normalizeTimelineClipVisualLayoutMode(entry?.clip?.visualLayoutMode),
+          mediaScale: window.normalizeTimelineClipMediaScale?.(entry?.clip?.mediaScale) || 1,
+          visualLayoutMode: window.normalizeTimelineClipVisualLayoutMode?.(entry?.clip?.visualLayoutMode) || "default",
           voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
           sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
           onScreenText: String(row?.onScreenText || "").replace(/\s+/g, " ").trim(),
           visualNotes: String(row?.visualNotes || "").replace(/\s+/g, " ").trim(),
           videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+          visualEffects: activeSession?.visualEffectsMap?.[rowId] || null,
+          transitionOut,
           video: {
             storagePath: videoStoragePath || "",
             url: videoDownloadUrl || "",
@@ -1284,7 +1388,7 @@ function buildMontageExportPayload(session = null) {
               mimeType: audioMimeType
             } : null,
           useNativeVideoAudio: useNativeVideoAudio === true,
-          veoVolumeOverridePct: normalizeLegacyPct(entry?.clip?.veoVolumeOverridePct, normalizeLegacyPct(videoCfg?.montageDefaultVeoVolumePct, 100))
+          veoVolumeOverridePct: resolvedVeoVolumePct
         }
       };
     });
@@ -1304,7 +1408,7 @@ function buildMontageExportPayload(session = null) {
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
   const trackUrl = String(panelMusic?.sourceUrl || "").trim();
-  const trackVolumePct = Math.max(0, Math.min(100, Math.round(Number(panelMusic?.volume ?? 0))));
+  const trackVolumePct = Math.max(0, Math.min(200, Math.round(Number(panelMusic?.volume ?? 0))));
   const includeBackgroundMusic = Boolean(canUseTrackMusic && trackUrl && trackVolumePct > 0 && trackBackgroundSegments.length === 0);
   const backgroundMusic = includeBackgroundMusic ? {
     storagePath: "",
@@ -1316,13 +1420,15 @@ function buildMontageExportPayload(session = null) {
   const requestedFormat = String(window.montageExportState.format || "mp4_h264").trim();
   const effectiveFormat = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
 
+  const reelModeEnabled = videoCfg?.reelModeEnabled === true;
   const payload = {
     sessionId,
     exportMode: window.montageExportState.exportMode,
     onlyAudio: window.montageExportState.onlyAudio === true,
     format: effectiveFormat,
     qualityPreset: window.montageExportState.qualityPreset,
-    resolution: resolveEffectiveExportResolution(window.montageExportState.resolution, videoCfg?.reelModeEnabled),
+    resolution: resolveEffectiveExportResolution(window.montageExportState.resolution, reelModeEnabled),
+    reelModeEnabled,
     includeBackgroundMusic,
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
@@ -1343,7 +1449,8 @@ function buildMontageExportPayload(session = null) {
       mode: window.montageExportState.bitrateMode,
       maxBitrateMbps: window.montageExportState.maxBitrate,
       minBitrateCrf: window.montageExportState.minBitrate
-    }
+    },
+    brandOverlay: buildMontageBrandOverlayForExport(reelModeEnabled)
   };
 
   return {
@@ -1357,44 +1464,43 @@ function buildMontageExportPayload(session = null) {
   };
 }
 
-async function runMontageExport() {
+export async function runMontageExport() {
   if (window.montageExportBusy) return;
-  const previousJobId = String(window.montageExportJobState.jobId || "").trim();
-  const session = window.getActiveSession();
-  const prepared = buildMontageExportPayload(session);
-  logMontageExportDevtools("submit_clicked", {
-    hasSession: Boolean(session),
-    preparedOk: Boolean(prepared?.ok),
-    entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
-    exportMode: String(window.montageExportState.exportMode || "").trim() || undefined
-  });
-  if (!prepared.ok) {
-    setMontageExportProgress(null);
-    setMontageExportStatus(prepared.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
-    return;
-  }
-  window.montageExportBusy = true;
-  window.setTimelinePreviewsSuspended(true);
-  setMontageExportBusy(true);
-  if (window.montageExportPreviewState.debounceTimer) {
-    window.clearTimeout(window.montageExportPreviewState.debounceTimer);
-    window.montageExportPreviewState.debounceTimer = null;
-  }
-  setMontageExportPreviewState({
-    loading: false,
-    error: "",
-    dataUrl: "",
-    mediaType: "",
-    mode: window.montageExportState.exportMode,
-    sceneIndex: 0,
-    disabled: true,
-    meta: "Preview pausado mientras se exporta el video."
-  });
-  resetMontageExportJobState();
-  setMontageExportContinueButton({ visible: false });
-  setMontageExportProgress(0.08);
-  setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
   try {
+    const previousJobId = String(window.montageExportJobState.jobId || "").trim();
+    const session = window.getActiveSession?.() || null;
+    const prepared = buildMontageExportPayload(session);
+    logMontageExportDevtools("submit_clicked", {
+      hasSession: Boolean(session),
+      preparedOk: Boolean(prepared?.ok),
+      entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
+      exportMode: String(window.montageExportState.exportMode || "").trim() || undefined
+    });
+    if (!prepared?.ok) {
+      setMontageExportProgress(null);
+      setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
+      return;
+    }
+    window.setTimelinePreviewsSuspended?.(true);
+    setMontageExportBusy(true);
+    if (window.montageExportPreviewState?.debounceTimer) {
+      window.clearTimeout(window.montageExportPreviewState.debounceTimer);
+      window.montageExportPreviewState.debounceTimer = null;
+    }
+    setMontageExportPreviewState({
+      loading: false,
+      error: "",
+      dataUrl: "",
+      mediaType: "",
+      mode: window.montageExportState.exportMode,
+      sceneIndex: 0,
+      disabled: true,
+      meta: "Preview pausado mientras se exporta el video."
+    });
+    resetMontageExportJobState();
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportProgress(0.08);
+    setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
     const data = await authFetchJson("/api/podcaster/montage/export", {
       method: "POST",
       body: prepared.payload
@@ -1428,6 +1534,11 @@ async function runMontageExport() {
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
     const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
+    try {
+      console.error("[podcaster][montage-export] runMontageExport failed", error);
+    } catch (_) {
+      // noop
+    }
     logMontageExportDevtools("submit_failed", {
       status: status || undefined,
       code: code || undefined,
@@ -1458,12 +1569,11 @@ async function runMontageExport() {
     } else if (status >= 500) {
       hintParts.push("Intenta de nuevo en unos segundos.");
     } else {
-      hintParts.push("Revisa tu timeline y vuelve a intentar.");
+      hintParts.push(String(code || "Revisa tu timeline y vuelve a intentar."));
     }
     setMontageExportProgress(null);
     setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
-    window.montageExportBusy = false;
-    window.setTimelinePreviewsSuspended(false);
+    window.setTimelinePreviewsSuspended?.(false);
     setMontageExportBusy(false);
   }
 }

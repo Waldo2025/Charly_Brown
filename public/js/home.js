@@ -17,6 +17,7 @@ import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-con
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
+import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -54,7 +55,7 @@ onAuthStateChanged(auth, async (user) => {
       setTimeout(() => loader.classList.add("is-hidden"), 300);
     }
   } else {
-    window.location.href = "login.html";
+    window.location.href = "index.html";
   }
 });
 
@@ -4094,6 +4095,12 @@ function initMultimediaPlayer() {
     };
   }
 
+  createPodcasterStageFullscreenController({
+    targetEl: stage,
+    controlsEl: document.getElementById("playerControls"),
+    buttonEl: document.getElementById("playerStageFullscreenBtn")
+  });
+
   document.getElementById("cerrarMultimediaPlayer")?.addEventListener("click", () => {
     multimediaPlaybackController.stop();
     if (multimediaPlayerUnsubscribe) {
@@ -4195,7 +4202,8 @@ function initMultimediaPlayer() {
           enabled: true,
           settings: onScreenTextTimeline.settings,
           segments: onScreenTextTimeline.segments
-        } : null
+        } : null,
+        brandOverlay: buildDashboardBrandOverlay()
       };
 
       const result = await authFetchJson("/api/podcaster/montage/export", {
@@ -4760,6 +4768,17 @@ let exportJobState = {
   isBusy: false
 };
 
+function buildDashboardBrandOverlay() {
+  return {
+    enabled: true,
+    assetPath: "public/podcaster/logo.png",
+    position: "top-right",
+    marginPct: 0.025,
+    widthPct: 0.05,
+    opacity: 1
+  };
+}
+
 function initExportUiEvents() {
   const btnOpen = document.getElementById("btnOpenExportModal");
   const modal = document.getElementById("videoExportModal");
@@ -4906,7 +4925,8 @@ async function startMontageExport() {
         enabled: true,
         settings: onScreenTextTimeline.settings,
         segments: onScreenTextTimeline.segments
-      } : null
+      } : null,
+      brandOverlay: buildDashboardBrandOverlay()
     };
 
     const response = await authFetchJson("/api/podcaster/montage/export", {

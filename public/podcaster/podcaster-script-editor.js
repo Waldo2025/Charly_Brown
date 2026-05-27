@@ -67,6 +67,20 @@ function renderScript(session) {
     els.openVideoEditorBtn.setAttribute("title", "Pasar guión al editor de video Snoopy Creator");
     els.openVideoEditorBtn.setAttribute("aria-label", "Pasar guión al editor de video Snoopy Creator");
   }
+  if (els.toggleCollapseAllRowsBtn) {
+    const resolveAllCollapsed = typeof window.areAllScriptRowsCollapsed === "function"
+      ? window.areAllScriptRowsCollapsed
+      : () => false;
+    const allCollapsed = rows.length > 0 && resolveAllCollapsed(session);
+    els.toggleCollapseAllRowsBtn.disabled = rows.length === 0;
+    els.toggleCollapseAllRowsBtn.setAttribute("title", allCollapsed ? "Expandir escenas" : "Colapsar escenas");
+    els.toggleCollapseAllRowsBtn.setAttribute("aria-label", allCollapsed ? "Expandir escenas" : "Colapsar escenas");
+    els.toggleCollapseAllRowsBtn.classList.toggle("is-active", allCollapsed);
+    const icon = els.toggleCollapseAllRowsBtn.querySelector("i");
+    if (icon) {
+      icon.className = allCollapsed ? "fas fa-expand-alt" : "fas fa-compress-alt";
+    }
+  }
   if (els.hostSummary) {
     els.hostSummary.textContent = (script.hosts || []).join(", ") || "Host A, Host B";
   }
@@ -83,11 +97,8 @@ function renderScript(session) {
           <button class="script-row-collapse-btn" type="button" data-action="toggle-script-row-collapse" data-row-id="${escapeHtml(row.id)}" aria-expanded="${window.isScriptRowCollapsed(row.id, session) ? "false" : "true"}" aria-label="${window.isScriptRowCollapsed(row.id, session) ? "Expandir escena" : "Colapsar escena"}" title="${window.isScriptRowCollapsed(row.id, session) ? "Expandir escena" : "Colapsar escena"}">
             <i class="fas fa-chevron-down" aria-hidden="true"></i>
           </button>
-          <div class="drag-handle" aria-label="Reordenar fila">
-            <i class="fas fa-grip-vertical"></i>
-          </div>
           <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${index + 1}</span>
-          ${activeVisualProposal ? `<span class="row-chip" style="background: #fbbf24; color: #000; font-size: 9px; border: none; font-weight: bold;">PROPUESTA NUEVA</span>` : ""}
+          ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
           ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
           ${(panelCopy.videoMode || panelCopy.videoPodcastMode) && String(row?.publicSceneLibraryId || "").trim()
         ? `<span class="row-chip row-chip-public">Pública</span>`
@@ -174,9 +185,9 @@ function renderScript(session) {
   if (window.Sortable && els.scriptTableBody) {
     scriptSortable = window.Sortable.create(els.scriptTableBody, {
       animation: 150,
-      handle: ".drag-handle",
+      handle: ".script-row-head",
       draggable: ".script-row",
-      filter: ".script-row-insert",
+      filter: ".script-row-insert, .script-row-head button, .script-row-head [role='button']",
       ghostClass: "sortable-ghost",
       chosenClass: "sortable-chosen",
       onEnd(evt) {
@@ -315,7 +326,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
         </label>
         <label class="row-field wide">
           <span class="row-field-head">
-            <span style="display: flex; align-items: center;">
+            <span class="row-field-title-inline">
               Elemento visual
               ${(() => {
         const proposals = Array.isArray(creativeRow?.visualNotesProposals) ? creativeRow.visualNotesProposals : [];
@@ -342,14 +353,14 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
         const displayedActiveVisualProposal = window.resolveDisplayedVisualProposal(creativeRow);
         if (!displayedActiveVisualProposal) return "";
         return `
-            <div class="row-active-proposal${window.isVisualProposalResolved(creativeRow, displayedActiveVisualProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                <span class="row-active-proposal-label" style="font-size: 10px; font-weight: 800; text-transform: uppercase;">Propuesta Activa</span>
-                <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(displayedActiveVisualProposal)}" title="Marcar propuesta como realizada" style="color: #fbbf24; padding: 2px;">
+            <div class="row-active-proposal${window.isVisualProposalResolved(creativeRow, displayedActiveVisualProposal) ? " is-resolved" : ""}">
+              <div class="row-active-proposal-head">
+                <span class="row-active-proposal-label">Propuesta Activa</span>
+                <button class="row-icon-btn proposal-action-btn is-warning" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(displayedActiveVisualProposal)}" title="Marcar propuesta como realizada">
                   <i class="fas fa-times-circle"></i>
                 </button>
               </div>
-              <div class="row-active-proposal-text" style="font-size: 12px; line-height: 1.4;">${escapeHtml(displayedActiveVisualProposal)}</div>
+              <div class="row-active-proposal-text">${escapeHtml(displayedActiveVisualProposal)}</div>
             </div>
           `;
       })()}
@@ -362,17 +373,17 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
 
         if (filteredProposals.length === 0) return "";
         return `
-              <div class="row-proposals-list" style="margin-top: 12px; border-top: 1px dashed #334155; padding-top: 8px;">
-                <span style="font-size: 10px; color: #94a3b8; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 6px;">Otras propuestas disponibles</span>
+              <div class="row-proposals-list">
+                <span class="row-proposals-list-label">Otras propuestas disponibles</span>
                 ${filteredProposals.map((text, idx) => `
-                  <div class="proposal-item${window.isVisualProposalResolved(creativeRow, text) ? " is-resolved" : ""}" style="margin-bottom: 6px; display: flex; gap: 4px; align-items: flex-start;">
-                    <textarea readonly rows="2" style="flex: 1; font-size: 11px; background: #1e293b; border-color: #334155; opacity: 0.8; color: #cbd5e1; resize: none; padding: 4px;">${escapeHtml(text)}</textarea>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                      <button class="row-icon-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta como oficial" style="color: #3b82f6; padding: 4px; background: rgba(59, 130, 246, 0.1); border-radius: 4px;">
-                        <i class="fas fa-thumbtack" style="font-size: 16px;"></i>
+                  <div class="proposal-item${window.isVisualProposalResolved(creativeRow, text) ? " is-resolved" : ""}">
+                    <textarea class="proposal-item-text" readonly rows="2">${escapeHtml(text)}</textarea>
+                    <div class="proposal-item-actions">
+                      <button class="row-icon-btn proposal-action-btn is-primary" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta como oficial">
+                        <i class="fas fa-thumbtack"></i>
                       </button>
-                      <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada (Tachar)" style="color: #10b981; padding: 4px; background: rgba(16, 185, 129, 0.1); border-radius: 4px;">
-                        <i class="fas fa-check-circle" style="font-size: 16px;"></i>
+                      <button class="row-icon-btn proposal-action-btn is-success" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(creativeRow.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada (Tachar)">
+                        <i class="fas fa-check-circle"></i>
                       </button>
                     </div>
                   </div>
@@ -443,7 +454,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
       </label>
       <label class="row-field wide">
         <span class="row-field-head">
-          <span style="display: flex; align-items: center;">
+          <span class="row-field-title-inline">
             Notas
             ${(() => {
       const proposals = Array.isArray(row?.visualNotesProposals) ? row.visualNotesProposals : [];
@@ -456,7 +467,7 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
           </span>
           ${window.resolveActiveVisualProposal(row) ? `
             <span class="row-field-inline-actions">
-              <button class="row-icon-btn row-field-mini-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(window.resolveActiveVisualProposal(row))}" title="Aceptar y aplicar propuesta de cambio visual" style="color: #10b981;">
+              <button class="row-icon-btn row-field-mini-btn proposal-action-btn is-success" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(window.resolveActiveVisualProposal(row))}" title="Aceptar y aplicar propuesta de cambio visual">
                 <i class="fas fa-check-circle"></i>
               </button>
             </span>
@@ -469,14 +480,14 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
       const displayedActiveVisualProposal = window.resolveDisplayedVisualProposal(row);
       if (!displayedActiveVisualProposal) return "";
       return `
-          <div class="row-active-proposal${window.isVisualProposalResolved(row, displayedActiveVisualProposal) ? " is-resolved" : ""}" style="margin-top: 8px; border-radius: 6px; padding: 8px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-              <span class="row-active-proposal-label" style="font-size: 10px; font-weight: 800; text-transform: uppercase;">Propuesta Activa</span>
-              <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(displayedActiveVisualProposal)}" title="Marcar propuesta como realizada" style="color: #fbbf24; padding: 2px;">
+          <div class="row-active-proposal${window.isVisualProposalResolved(row, displayedActiveVisualProposal) ? " is-resolved" : ""}">
+            <div class="row-active-proposal-head">
+              <span class="row-active-proposal-label">Propuesta Activa</span>
+              <button class="row-icon-btn proposal-action-btn is-warning" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(displayedActiveVisualProposal)}" title="Marcar propuesta como realizada">
                 <i class="fas fa-times-circle"></i>
               </button>
             </div>
-            <div class="row-active-proposal-text" style="font-size: 12px; line-height: 1.4;">${escapeHtml(displayedActiveVisualProposal)}</div>
+            <div class="row-active-proposal-text">${escapeHtml(displayedActiveVisualProposal)}</div>
           </div>
         `;
     })()}
@@ -489,17 +500,17 @@ function buildScriptRowEditorMarkup(session, row, index = -1) {
 
       if (filteredProposals.length === 0) return "";
       return `
-            <div class="row-proposals-list" style="margin-top: 12px; border-top: 1px dashed #334155; padding-top: 8px;">
-              <span style="font-size: 10px; color: #94a3b8; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 6px;">Otras propuestas disponibles</span>
+            <div class="row-proposals-list">
+              <span class="row-proposals-list-label">Otras propuestas disponibles</span>
               ${filteredProposals.map((text, idx) => `
-                <div class="proposal-item${window.isVisualProposalResolved(row, text) ? " is-resolved" : ""}" style="margin-bottom: 6px; display: flex; gap: 4px; align-items: flex-start;">
-                  <textarea readonly rows="2" style="flex: 1; font-size: 11px; background: #1e293b; border-color: #334155; opacity: 0.8; color: #cbd5e1; resize: none; padding: 4px;">${escapeHtml(text)}</textarea>
-                  <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <button class="row-icon-btn" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta" style="color: #10b981; padding: 4px; background: rgba(16, 185, 129, 0.1); border-radius: 4px;">
-                      <i class="fas fa-check-circle" style="font-size: 16px;"></i>
+                <div class="proposal-item${window.isVisualProposalResolved(row, text) ? " is-resolved" : ""}">
+                  <textarea class="proposal-item-text" readonly rows="2">${escapeHtml(text)}</textarea>
+                  <div class="proposal-item-actions">
+                    <button class="row-icon-btn proposal-action-btn is-success" type="button" data-action="apply-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Seleccionar esta propuesta">
+                      <i class="fas fa-check-circle"></i>
                     </button>
-                    <button class="row-icon-btn" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada" style="color: #ef4444; padding: 4px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
-                      <i class="fas fa-trash" style="font-size: 14px;"></i>
+                    <button class="row-icon-btn proposal-action-btn is-danger" type="button" data-action="delete-visual-proposal-text" data-row-id="${escapeHtml(row.id)}" data-proposal-text="${escapeHtml(text)}" title="Marcar propuesta como realizada">
+                      <i class="fas fa-trash"></i>
                     </button>
                   </div>
                 </div>
@@ -537,7 +548,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
           <span>Locutor de referencia</span>
           <span class="inspector-row-reference-name">${speakerReference ? escapeHtml(speakerReference.name || host) : "Sin referencia"}</span>
         </div>
-        <div class="podcast-portrait-actions" style="margin-bottom: 8px;">
+        <div class="podcast-portrait-actions inspector-row-reference-actions">
           <button class="row-icon-btn" type="button" data-action="attach-speaker-reference-image" data-speaker="${escapeHtml(host)}" title="Adjuntar imagen de referencia del locutor">
             <i class="fas fa-paperclip"></i>
           </button>
@@ -552,7 +563,7 @@ function buildPodcastReferenceSectionsMarkup(session, speaker = "Host A") {
           <span>Escenario</span>
           <span class="inspector-row-reference-name">${activeScenario ? escapeHtml(activeScenario.title || "Escenario activo") : "Sin escenario"}</span>
         </div>
-        <div class="podcast-scenario-actions" style="margin-bottom: 8px;">
+        <div class="podcast-scenario-actions inspector-row-reference-actions">
           ${activeScenario ? `<button class="row-icon-btn" type="button" data-action="attach-scenario-reference-image" data-scenario-id="${escapeHtml(String(activeScenario.id || "").trim())}" title="Adjuntar imagen de referencia del escenario">
             <i class="fas fa-paperclip"></i>
           </button>` : ""}
@@ -592,7 +603,7 @@ function buildInspectorScriptRowMarkup(session, row, index = -1) {
       <div class="script-row-head script-row-head-inspector">
         <div class="row-head-left">
           <span class="row-chip">${panelCopy.videoMode ? "Secuencia" : "Escena"} ${safeIndex + 1}</span>
-          ${activeVisualProposal ? `<span class="row-chip" style="background: #fbbf24; color: #000; font-size: 9px; border: none; font-weight: bold;">PROPUESTA NUEVA</span>` : ""}
+          ${activeVisualProposal ? `<span class="row-chip row-chip-proposal-new">Propuesta nueva</span>` : ""}
           ${panelCopy.videoMode ? "" : `<span class="row-chip">${escapeHtml(String(row.speaker || "").trim() || "Host A")}</span>`}
         </div>
         ${(panelCopy.videoMode || panelCopy.videoPodcastMode)
