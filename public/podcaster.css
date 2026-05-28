@@ -9409,7 +9409,8 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 
 
-.podcast-video-shell.is-reel-mode .podcast-active-speaker-video {
+.podcast-video-shell.is-reel-mode .podcast-active-speaker-video,
+.podcast-video-shell.is-reel-mode .podcast-active-speaker-image {
   object-fit: cover !important;
 }
 
