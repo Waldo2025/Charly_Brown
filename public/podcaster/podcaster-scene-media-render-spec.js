@@ -62,9 +62,6 @@
   }
 
   function resolveSceneMediaFitMode({ reelMode = false, visualLayoutMode = "default", mediaKind = "video" } = {}) {
-    if (String(mediaKind || "").trim().toLowerCase() === "image") {
-      return "contain";
-    }
     return normalizeSceneMediaVisualLayoutMode(visualLayoutMode) === "blur-backdrop"
       ? "contain"
       : (reelMode === true ? "cover" : "contain");
