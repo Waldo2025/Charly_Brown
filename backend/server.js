@@ -6885,7 +6885,7 @@ function isAllowedRemoteMediaUrl(url = "") {
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
-    return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com";
+    return host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app") || host === "storage.googleapis.com" || host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
   } catch (_) {
     return false;
   }
@@ -7129,6 +7129,22 @@ async function downloadUrlToFile(url = "", outPath = "") {
     err.detail = { url: cleanUrl, outPath: targetPath };
     throw err;
   }
+
+  const isAbsoluteHttp = cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://");
+  if (!isAbsoluteHttp) {
+    const localPath = path.resolve(process.cwd(), "public", cleanUrl.replace(/^\//, ""));
+    try {
+      await fs.promises.access(localPath);
+      await fs.promises.copyFile(localPath, targetPath);
+      return targetPath;
+    } catch (_) {
+      const err = new Error("local_file_not_found");
+      err.code = "local_file_not_found";
+      err.detail = { url: cleanUrl, resolvedPath: localPath };
+      throw err;
+    }
+  }
+
   if (!isAllowedRemoteMediaUrl(cleanUrl)) {
     const err = new Error("url_not_allowed");
     err.code = "url_not_allowed";
