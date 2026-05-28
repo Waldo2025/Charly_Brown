@@ -8378,6 +8378,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediatePaths = [];
     const skippedEntries = [];
     const exportedEntries = [];
+    let globalCanvas = null;
     const emitSceneSubstage = ({
       sceneIndex = 0,
       rowId = "",
@@ -8421,7 +8422,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         return isImageAsset;
       })();
       const isImageAsset = isImageAssetOriginal
-        || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
+        || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#&]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
         || /\/api\/assets\/proxy-image\?/i.test(videoAsset?.storagePath || videoAsset?.url || "");
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
 
@@ -8560,7 +8561,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           elapsedMs: Date.now() - probeDimensionsStartMs,
           extra: sourceDims
         }));
-        const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
+        if (!globalCanvas) {
+          globalCanvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
+        }
+        const canvas = globalCanvas;
         const mediaScale = normalizeMontageMediaScale(entry?.mediaScale || entry?.clip?.mediaScale || 1);
         const mediaOffsetXPct = normalizeMontageMediaOffset(entry?.mediaOffsetXPct || entry?.clip?.mediaOffsetXPct || 0);
         const mediaOffsetYPct = normalizeMontageMediaOffset(entry?.mediaOffsetYPct || entry?.clip?.mediaOffsetYPct || 0);

@@ -61,7 +61,10 @@
     return { effects, speed };
   }
 
-  function resolveSceneMediaFitMode({ reelMode = false, visualLayoutMode = "default" } = {}) {
+  function resolveSceneMediaFitMode({ reelMode = false, visualLayoutMode = "default", mediaKind = "video" } = {}) {
+    if (String(mediaKind || "").trim().toLowerCase() === "image") {
+      return "contain";
+    }
     return normalizeSceneMediaVisualLayoutMode(visualLayoutMode) === "blur-backdrop"
       ? "contain"
       : (reelMode === true ? "cover" : "contain");
@@ -111,7 +114,8 @@
     const visualLayoutMode = normalizeSceneMediaVisualLayoutMode(input.visualLayoutMode);
     const fitMode = resolveSceneMediaFitMode({
       reelMode: input.reelMode === true,
-      visualLayoutMode
+      visualLayoutMode,
+      mediaKind: input.mediaKind
     });
     const frameRect = resolveSceneMediaFrameRect({
       canvasWidth,

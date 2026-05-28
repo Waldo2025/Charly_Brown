@@ -283,7 +283,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const explicitType = String(entry?.clip?.type || entry?.type || "").trim().toLowerCase();
     if (explicitType === "image") return true;
     const source = String(entry?.videoSrc || "").trim();
-    if (/\.(jpg|jpeg|png|webp|gif|avif)(?:[?#]|$)/i.test(source)) return true;
+    if (/\.(jpg|jpeg|png|webp|gif|avif)(?:[?#&]|$)/i.test(source)) return true;
     if (/\/api\/assets\/proxy-image\?/i.test(source)) return true;
     return false;
   }
@@ -433,7 +433,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
         let finalUrl = url;
         const isDirectFirebaseUrl = url.includes('firebasestorage.googleapis.com');
-        const isImageLikeUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#]|$)/i.test(String(url || "").trim());
+        const isImageLikeUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#&]|$)/i.test(String(url || "").trim());
 
         if (url.includes('/api/assets/proxy-media') || url.includes('/api/assets/proxy-image') || isDirectFirebaseUrl) {
           try {
@@ -472,7 +472,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
         }
 
-        const isImageLikeFinalUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#]|$)/i.test(String(finalUrl || "").trim());
+        const isImageLikeFinalUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#&]|$)/i.test(String(finalUrl || "").trim());
         const isDirectRemoteImage = isImageLikeFinalUrl && !String(finalUrl || "").includes('/api/');
         if (isDirectFirebaseUrl && isDirectRemoteImage) {
           this.blobCache.set(url, finalUrl);
