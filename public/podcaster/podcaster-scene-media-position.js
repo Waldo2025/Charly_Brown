@@ -35,6 +35,10 @@ function persistSceneMediaPosition(rowId, patch) {
     mediaMotionPreset: clip?.mediaMotionPreset,
     visualLayoutMode: clip?.visualLayoutMode
   });
+  // Force re-compute left/top/width/height CSS vars on the media element itself
+  // (applySceneMediaScaleToStage only updates container-level vars; the layout
+  // geometry on the <img>/<video> is owned by the playback controller)
+  window.PodcasterUI?.syncStageMedia?.(key, { force: true });
   window.persistReorderedTimelinePatchToCloud?.(refreshed, {
     timelineClipsByRowId: window.ensureTimelineClipsByRowId?.(refreshed, { persist: false }) || {}
   });

@@ -11001,6 +11001,45 @@ function applySceneMediaScaleToStage({
   target.dataset.sceneMediaOffsetY = String(nextY);
   target.dataset.sceneMediaMotionPreset = nextMotion;
   target.dataset.sceneMediaLayout = normalizeTimelineClipVisualLayoutMode(visualLayoutMode);
+
+  // Re-apply computed layout (left/top/width/height) to the active media element.
+  // The playback controller sets these vars using resolveSceneMediaRenderSpec and they
+  // must be recalculated whenever mediaOffsetXPct/mediaOffsetYPct/mediaScale change.
+  const resolver = window.resolveSceneMediaRenderSpec;
+  if (typeof resolver !== "function") return;
+  const activeImage = target.querySelector(".podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop)") || null;
+  const activeVideo = target.querySelector(".podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop)") || null;
+  const surfaceEl = (activeImage && !activeImage.hidden) ? activeImage : (activeVideo && !activeVideo.hidden ? activeVideo : null);
+  if (!surfaceEl) return;
+  const isImage = surfaceEl.tagName === "IMG";
+  const sourceWidth = Math.max(2, Number(isImage ? surfaceEl.naturalWidth : surfaceEl.videoWidth) || 0);
+  const sourceHeight = Math.max(2, Number(isImage ? surfaceEl.naturalHeight : surfaceEl.videoHeight) || 0);
+  if (!(sourceWidth > 1 && sourceHeight > 1)) return;
+  const canvasWidth = Math.max(2, Number(target.clientWidth || 0) || 1280);
+  const canvasHeight = Math.max(2, Number(target.clientHeight || 0) || 720);
+  const isReelPreview = target.closest?.(".montage-export-preview")?.dataset?.reel === "true"
+    || target.closest?.(".podcast-video-shell")?.classList?.contains("is-reel-mode") === true;
+  const spec = resolver({
+    canvasWidth,
+    canvasHeight,
+    sourceWidth,
+    sourceHeight,
+    reelMode: isReelPreview || getPodcastVideoConfig(getActiveSession())?.reelModeEnabled === true,
+    visualLayoutMode: normalizeTimelineClipVisualLayoutMode(visualLayoutMode),
+    mediaScale: nextScale,
+    mediaOffsetXPct: nextX,
+    mediaOffsetYPct: nextY,
+    mediaMotionPreset: nextMotion,
+    mediaKind: isImage ? "image" : "video",
+    durationSec: 12
+  });
+  if (!spec) return;
+  surfaceEl.style.setProperty("--pod-scene-media-left", `${spec.leftPx.toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-top", `${spec.topPx.toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-width", `${spec.scaledRect.width.toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-height", `${spec.scaledRect.height.toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
+  surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
 }
 
 function syncPodcastSceneZoomControls(session = null) {
