@@ -7984,6 +7984,60 @@ function buildSceneMediaPositionCropFilter({
     yExpr = `${(spec.topPx + spec.motion.amplitudeYPx).toFixed(3)}-(2*${spec.motion.amplitudeYPx.toFixed(3)}*(${progressExpr}))`;
   }
 
+  if (visualLayoutMode === "blur-backdrop") {
+    const prepLabel = cloneTail ? "[v_padded]" : inputLabel;
+    const prepFilter = cloneTail
+      ? `${inputLabel}tpad=stop_mode=clone:stop_duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}[v_padded];`
+      : "";
+    
+    const inputChain = [
+      `[vfg_src]scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
+    ];
+    if (mediaKind === "image" && spec.kenBurns.effect) {
+      const panScale = Number(spec.kenBurns.panScale || 1.2);
+      const panDistanceXPx = spec.scaledRect.width * Number(spec.kenBurns.panDistancePct || 0.10);
+      const panDistanceYPx = spec.scaledRect.height * Number(spec.kenBurns.panDistancePct || 0.10);
+      if (spec.kenBurns.effect === "zoom-in" || spec.kenBurns.effect === "zoom-out") {
+        const zoomFrom = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomTo || 1.3) : Number(spec.kenBurns.zoomFrom || 1);
+        const zoomTo = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomFrom || 1) : Number(spec.kenBurns.zoomTo || 1.3);
+        const zoomExpr = `${zoomFrom.toFixed(3)}+((${zoomTo.toFixed(3)}-${zoomFrom.toFixed(3)})*(${progressExpr}))`;
+        const widthExpr = `'ceil(${spec.scaledRect.width.toFixed(3)}*(${zoomExpr})/2)*2'`;
+        const heightExpr = `'ceil(${spec.scaledRect.height.toFixed(3)}*(${zoomExpr})/2)*2'`;
+        xExpr = `${spec.leftPx.toFixed(3)}-((${widthExpr}-${spec.scaledRect.width.toFixed(3)})/2)`;
+        yExpr = `${spec.topPx.toFixed(3)}-((${heightExpr}-${spec.scaledRect.height.toFixed(3)})/2)`;
+        inputChain.push(`scale=w=${widthExpr}:h=${heightExpr}:eval=frame`);
+      } else {
+        const motionWidth = Math.max(2, Math.round(spec.scaledRect.width * panScale / 2) * 2);
+        const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
+        inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
+        const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
+        const baseTop = spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
+        if (spec.kenBurns.effect === "pan-left") {
+          xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+          yExpr = `${baseTop.toFixed(3)}`;
+        } else if (spec.kenBurns.effect === "pan-right") {
+          xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+          yExpr = `${baseTop.toFixed(3)}`;
+        } else if (spec.kenBurns.effect === "pan-up") {
+          xExpr = `${baseLeft.toFixed(3)}`;
+          yExpr = `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+        } else if (spec.kenBurns.effect === "pan-down") {
+          xExpr = `${baseLeft.toFixed(3)}`;
+          yExpr = `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+        }
+      }
+    } else {
+      inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
+    }
+
+    return [
+      `${prepFilter}${prepLabel}split=2[vbg_src][vfg_src]`,
+      `[vbg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=24:8,eq=saturation=1.08[${backgroundLabel}]`,
+      `${inputChain.join(",")}[${transformedLabel}]`,
+      `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+    ].filter(Boolean).join(";");
+  }
+
   const inputChain = [
     `${inputLabel}${cloneTail ? `tpad=stop_mode=clone:stop_duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},` : ""}scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
   ];
@@ -8607,30 +8661,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
         
         // Filtro de video para asegurar duración exacta (tpad congela el último frame si el video es corto)
-        let videoFilterGraph = "";
         const visualEffects = normalizeMontageVisualEffects(entry?.visualEffects || null);
+        let videoFilterGraph = "";
         if (!isImageAsset && visualLayoutMode === "blur-backdrop") {
-          const fgWidth = Math.max(2, Math.round((canvas.width * 0.76) / 2) * 2);
-          const fgHeight = Math.max(2, Math.round((canvas.height * 0.76) / 2) * 2);
-          const visualSourceGraph = isImageAsset
-            ? `${buildMontageImageMotionVideoFilter({
-              inputLabel: "[0:v]",
-              outputLabel: "image_motion",
-              canvas,
-              durationSec: durSec,
-              visualEffects,
-              mediaScale,
-              mediaOffsetXPct,
-              mediaOffsetYPct,
-              mediaMotionPreset
-            })};[image_motion]split=2[vbg_src][vfg_src]`
-            : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`;
-          videoFilterGraph = [
-            visualSourceGraph,
-            `[vbg_src]scale=${canvas.width}:${canvas.height}:force_original_aspect_ratio=increase,crop=${canvas.width}:${canvas.height},boxblur=24:8,eq=saturation=1.08[bg]`,
-            `[vfg_src]scale=${fgWidth}:${fgHeight}:force_original_aspect_ratio=decrease,pad=${fgWidth}:${fgHeight}:(ow-iw)/2:(oh-ih)/2:color=0x05070B[fg]`,
-            `[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto[vout]`
-          ].join(";");
+          videoFilterGraph = buildMontageVideoSceneFilter({
+            inputLabel: "[0:v]",
+            outputLabel: "vout",
+            canvas,
+            sourceWidth: sourceDims?.width || canvas.width,
+            sourceHeight: sourceDims?.height || canvas.height,
+            durationSec: durSec,
+            scaleFilter,
+            reelMode: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+            visualLayoutMode,
+            mediaScale,
+            mediaOffsetXPct,
+            mediaOffsetYPct,
+            mediaMotionPreset
+          });
         } else {
           videoFilterGraph = isImageAsset
             ? buildMontageImageMotionVideoFilter({

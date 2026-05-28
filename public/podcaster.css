@@ -2524,10 +2524,12 @@ body.is-resizing-podcast-stage {
 .montage-export-preview-container .podcast-active-speaker-video,
 .montage-export-preview-container .podcast-active-speaker-image {
   position: absolute;
-  inset: 0;
+  inset: auto;
+  top: var(--pod-scene-media-top, 0px);
+  left: var(--pod-scene-media-left, 0px);
   display: block;
-  width: 100%;
-  height: 100%;
+  width: var(--pod-scene-media-width, 100%);
+  height: var(--pod-scene-media-height, 100%);
   object-fit: contain;
   object-position: center center;
   background: #05070b;
