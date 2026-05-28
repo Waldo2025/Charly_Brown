@@ -70,10 +70,21 @@ const onScreenTextRenderSpecApi = globalThis.PodcasterOnScreenTextRenderSpec;
 if (!onScreenTextRenderSpecApi || typeof onScreenTextRenderSpecApi !== "object") {
   throw new Error("PodcasterOnScreenTextRenderSpec no está disponible. Revisa la carga de podcaster-on-screen-text.js.");
 }
+const sceneMediaRenderSpecApi = globalThis.PodcasterSceneMediaRenderSpec;
+if (!sceneMediaRenderSpecApi || typeof sceneMediaRenderSpecApi !== "object") {
+  throw new Error("PodcasterSceneMediaRenderSpec no está disponible. Revisa la carga de podcaster-scene-media-render-spec.js.");
+}
 function requireOnScreenTextApiFunction(name = "") {
   const fn = onScreenTextRenderSpecApi?.[name];
   if (typeof fn !== "function") {
     throw new Error(`PodcasterOnScreenTextRenderSpec.${name} no está disponible.`);
+  }
+  return fn;
+}
+function requireSceneMediaRenderSpecApiFunction(name = "") {
+  const fn = sceneMediaRenderSpecApi?.[name];
+  if (typeof fn !== "function") {
+    throw new Error(`PodcasterSceneMediaRenderSpec.${name} no está disponible.`);
   }
   return fn;
 }
@@ -178,6 +189,7 @@ const applySharedOnScreenTextLookPresetValue = requireOnScreenTextApiFunction("a
 const buildSharedOnScreenTextTrackModalMarkup = requireOnScreenTextApiFunction("buildOnScreenTextTrackModalMarkup");
 const inferSharedOnScreenTextLookPreset = requireOnScreenTextApiFunction("inferOnScreenTextLookPreset");
 const resolveSharedOnScreenTextPreviewLayoutSpec = requireOnScreenTextApiFunction("resolveOnScreenTextPreviewLayoutSpec");
+const resolveSharedSceneMediaRenderSpec = requireSceneMediaRenderSpecApiFunction("resolveSceneMediaRenderSpec");
 const shouldRepairSharedOnScreenTextLayout = requireOnScreenTextApiFunction("shouldRepairLegacyOnScreenTextLayout");
 const getSharedOnScreenTextResizeHandles = requireOnScreenTextApiFunction("getOnScreenTextResizeHandles");
 const buildSharedOnScreenTextSelectionFrameHtml = requireOnScreenTextApiFunction("buildOnScreenTextSelectionFrameHtml");
@@ -3764,6 +3776,10 @@ function normalizeTimelineClipVisualLayoutMode(value = "") {
 
 function normalizeTimelineClipMediaScale(value = 1) {
   return window.normalizeTimelineClipMediaScale(value);
+}
+
+function resolveSceneMediaRenderSpec(input = {}) {
+  return resolveSharedSceneMediaRenderSpec(input);
 }
 
 function normalizeTimelineClipItem(raw = {}, rowId = "") {
@@ -10958,15 +10974,32 @@ function hideStageImagePreview() {
   delete els.podcastActiveSpeakerImage.dataset.src;
 }
 
-function applySceneMediaScaleToStage({ rowId = "", mediaScale = 1, visualLayoutMode = "default", container = null } = {}) {
+function applySceneMediaScaleToStage({
+  rowId = "",
+  mediaScale = 1,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none",
+  visualLayoutMode = "default",
+  container = null
+} = {}) {
   const target = container
     || els.podcastVideoStage?.querySelector?.(".podcast-video-preview")
     || null;
   if (!target) return;
   const nextScale = normalizeTimelineClipMediaScale(mediaScale);
+  const nextX = typeof normalizeTimelineClipMediaOffset === "function" ? normalizeTimelineClipMediaOffset(mediaOffsetXPct) : Math.max(-0.5, Math.min(0.5, Number(mediaOffsetXPct) || 0));
+  const nextY = typeof normalizeTimelineClipMediaOffset === "function" ? normalizeTimelineClipMediaOffset(mediaOffsetYPct) : Math.max(-0.5, Math.min(0.5, Number(mediaOffsetYPct) || 0));
+  const nextMotion = typeof normalizeTimelineClipMediaMotionPreset === "function" ? normalizeTimelineClipMediaMotionPreset(mediaMotionPreset) : "none";
   target.style.setProperty("--pod-scene-media-scale", String(nextScale));
+  target.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
+  target.style.setProperty("--pod-scene-media-y", `${(nextY * 100).toFixed(3)}%`);
+  target.style.setProperty("--pod-scene-media-motion-preset", nextMotion);
   target.dataset.sceneMediaRowId = String(rowId || "").trim();
   target.dataset.sceneMediaScale = String(nextScale);
+  target.dataset.sceneMediaOffsetX = String(nextX);
+  target.dataset.sceneMediaOffsetY = String(nextY);
+  target.dataset.sceneMediaMotionPreset = nextMotion;
   target.dataset.sceneMediaLayout = normalizeTimelineClipVisualLayoutMode(visualLayoutMode);
 }
 
@@ -10993,6 +11026,7 @@ function syncPodcastSceneZoomControls(session = null) {
     els.podcastSceneZoomOutBtn.title = `Alejar escena (${scalePct}%)`;
     els.podcastSceneZoomOutBtn.setAttribute("aria-label", `Alejar escena (${scalePct}%)`);
   }
+  window.syncPodcasterSceneMediaPositionControls?.();
 }
 
 function adjustActiveTimelineSceneMediaScale(direction = 0) {
@@ -11009,9 +11043,13 @@ function adjustActiveTimelineSceneMediaScale(direction = 0) {
   }
   const refreshed = getActiveSession();
   const clip = ensureTimelineClipsByRowId(refreshed, { persist: false })[activeRowId] || null;
+  // Regression contract: applySceneMediaScaleToStage({ rowId: activeRowId, mediaScale: clip?.mediaScale, visualLayoutMode: clip?.visualLayoutMode })
   applySceneMediaScaleToStage({
     rowId: activeRowId,
     mediaScale: clip?.mediaScale,
+    mediaOffsetXPct: clip?.mediaOffsetXPct,
+    mediaOffsetYPct: clip?.mediaOffsetYPct,
+    mediaMotionPreset: clip?.mediaMotionPreset,
     visualLayoutMode: clip?.visualLayoutMode
   });
   syncPodcastSceneZoomControls(refreshed);
@@ -12487,6 +12525,7 @@ playbackController.init(els, {
   setPodcastVideoPortraitFallback,
   syncStudioTimelinePreview,
   normalizeTimelineClipMediaScale,
+  resolveSceneMediaRenderSpec,
   applySceneMediaScaleToStage
 });
 
@@ -12611,6 +12650,7 @@ exportPreviewController.init(exportPreviewEls, {
   setPodcastVideoPortraitFallback: () => { },
   syncStudioTimelinePreview,
   normalizeTimelineClipMediaScale,
+  resolveSceneMediaRenderSpec,
   applySceneMediaScaleToStage
 });
 
@@ -19053,6 +19093,12 @@ registerPodcasterScriptEditorRuntime(podcasterScriptEditorRuntimeApi);
 Object.assign(window, {
   ...podcasterGenerationRuntimeApi,
   ...podcasterScriptEditorRuntimeApi,
+  getPodcastVideoConfig,
+  upsertPodcastVideoConfig,
+  updateTimelineClipForRow,
+  persistReorderedTimelinePatchToCloud,
+  renderPodcastVideoTimeline,
+  applySceneMediaScaleToStage,
   buildPodcasterVideoModelChain,
   buildUploadedPanelMusicSegments,
   getPanelMontageMusicConfig,

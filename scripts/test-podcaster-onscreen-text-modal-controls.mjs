@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const shared = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const editor = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
+const backend = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 if (!/data-setting="stylePreset"/.test(shared)) {
   throw new Error("El modal debe seguir exponiendo el selector de variante visual.");
@@ -41,6 +42,10 @@ if (!/onScreenTextTrackModal\.addEventListener\("input",[\s\S]*setOnScreenTextTr
 
 if (!/onScreenTextTrackModal\.addEventListener\("change",[\s\S]*setOnScreenTextTrackSetting\(settingTarget\.dataset\.setting, settingTarget\.value, \{[^}]*autosave:\s*true[^}]*renderModal:\s*true[^}]*\}\)/m.test(source)) {
   throw new Error("El flujo de change del modal debe consolidar persistencia y resincronización visual.");
+}
+
+if (!/boxWidthPct:\s*clampNumber\(trackRaw\?\.boxWidthPct,\s*0\.22,\s*0\.92,\s*0\.58\)/.test(backend)) {
+  throw new Error("El backend debe conservar boxWidthPct al guardar y rehidratar onScreenTextTrack.");
 }
 
 console.log("Podcast onscreen text modal controls OK.");

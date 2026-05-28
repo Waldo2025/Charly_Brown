@@ -233,6 +233,74 @@ function normalizeOnScreenTextLayoutByRowId(raw = {}) {
   return next;
 }
 
+function normalizeOverlayCardPosition(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const widthPct = Math.max(0.48, Math.min(0.9, toFiniteNumber(source.widthPct, 0.56)));
+  const heightPct = Math.max(0.18, Math.min(0.55, toFiniteNumber(source.heightPct, 0.2)));
+  return {
+    xPct: Math.max(0, Math.min(1 - widthPct, toFiniteNumber(source.xPct, 0.06))),
+    yPct: Math.max(0, Math.min(1 - heightPct, toFiniteNumber(source.yPct, 0.68))),
+    widthPct,
+    heightPct
+  };
+}
+
+function normalizeOverlayCardPreset(value = "") {
+  const preset = String(value || "lower-third").trim().toLowerCase();
+  return new Set(["lower-third", "info-panel", "phone-cta"]).has(preset) ? preset : "lower-third";
+}
+
+function normalizeOverlayCardAnimation(value = "", fallback = "slide-left") {
+  const animation = String(value || fallback).trim().toLowerCase();
+  return new Set(["slide-left", "slide-right", "slide-up", "slide-down", "fade"]).has(animation)
+    ? animation
+    : fallback;
+}
+
+function normalizeOverlayCardItem(raw = {}, fallbackId = "") {
+  if (!raw || typeof raw !== "object") return null;
+  const id = String(raw.id || fallbackId || "").trim();
+  if (!id) return null;
+  const textLines = Array.isArray(raw.textLines)
+    ? raw.textLines.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 4)
+    : [raw.title, raw.subtitle, raw.detail].map((line) => String(line || "").trim()).filter(Boolean).slice(0, 4);
+  if (!textLines.length) return null;
+  const startMs = Math.max(0, Math.round(toFiniteNumber(raw.startMs, 0)));
+  const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw.durationMs, 4000)));
+  return {
+    id,
+    rowId: String(raw.rowId || "").trim(),
+    startMs,
+    durationMs,
+    preset: normalizeOverlayCardPreset(raw.preset),
+    textLines,
+    position: normalizeOverlayCardPosition(raw.position || raw.size || {}),
+    enterAnimation: normalizeOverlayCardAnimation(raw.enterAnimation, "slide-left"),
+    exitAnimation: normalizeOverlayCardAnimation(raw.exitAnimation, "fade"),
+    style: raw.style && typeof raw.style === "object" ? {
+      accentColor: String(raw.style.accentColor || "#38bdf8").trim() || "#38bdf8",
+      backgroundColor: String(raw.style.backgroundColor || "#0f172a").trim() || "#0f172a",
+      textColor: String(raw.style.textColor || "#f8fafc").trim() || "#f8fafc"
+    } : {
+      accentColor: "#38bdf8",
+      backgroundColor: "#0f172a",
+      textColor: "#f8fafc"
+    },
+    zIndex: Math.max(1, Math.min(999, Math.round(toFiniteNumber(raw.zIndex, 20))))
+  };
+}
+
+function normalizeOverlayCardsById(raw = {}) {
+  const next = {};
+  if (!raw || typeof raw !== "object") return next;
+  Object.entries(raw).forEach(([id, item]) => {
+    const normalized = normalizeOverlayCardItem(item, id);
+    if (!normalized) return;
+    next[normalized.id] = normalized;
+  });
+  return next;
+}
+
 function normalizeOnScreenTextTrackSettings(raw = {}) {
   if (typeof window.normalizeOnScreenTextTrackSettings === "function") {
     return window.normalizeOnScreenTextTrackSettings(raw);
@@ -466,6 +534,18 @@ function normalizeTimelineClipMediaScale(value = 1) {
   return Math.max(1, Math.min(2.5, numeric || 1));
 }
 
+function normalizeTimelineClipMediaOffset(value = 0) {
+  const numeric = Math.round(toFiniteNumber(value, 0) * 1000) / 1000;
+  return Math.max(-0.5, Math.min(0.5, numeric || 0));
+}
+
+function normalizeTimelineClipMediaMotionPreset(value = "") {
+  const preset = String(value || "none").trim().toLowerCase();
+  return new Set(["pan-left-right", "pan-right-left", "pan-up-down", "pan-down-up"]).has(preset)
+    ? preset
+    : "none";
+}
+
 function normalizeTimelineClipItem(raw = {}, rowId = "") {
   const key = String(rowId || raw?.rowId || "").trim();
   if (!key) return null;
@@ -528,6 +608,9 @@ function normalizeTimelineClipItem(raw = {}, rowId = "") {
     veoVolumeOverridePct,
     geminiVolumeOverridePct,
     mediaScale: normalizeTimelineClipMediaScale(raw?.mediaScale),
+    mediaOffsetXPct: normalizeTimelineClipMediaOffset(raw?.mediaOffsetXPct),
+    mediaOffsetYPct: normalizeTimelineClipMediaOffset(raw?.mediaOffsetYPct),
+    mediaMotionPreset: normalizeTimelineClipMediaMotionPreset(raw?.mediaMotionPreset),
     visualLayoutMode: normalizeTimelineClipVisualLayoutMode(raw?.visualLayoutMode),
     zIndex: Math.max(1, Math.round(toFiniteNumber(raw?.zIndex, 1)))
   };
@@ -793,6 +876,7 @@ function normalizePodcastVideoConfig(raw = {}) {
     timelineOnScreenTextTrackVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineOnScreenTextTrackVersion, STUDIO_TIMELINE_TRACK_VERSION))),
     timelineOnScreenTextClipsByRowId: normalizeOnScreenTextClipsByRowId(raw?.timelineOnScreenTextClipsByRowId || {}),
     timelineOnScreenTextLayoutByRowId: normalizeOnScreenTextLayoutByRowId(raw?.timelineOnScreenTextLayoutByRowId || {}),
+    timelineOverlayCardsById: normalizeOverlayCardsById(raw?.timelineOverlayCardsById || {}),
     timelineSceneAudioMixByRowId: normalizeTimelineSceneAudioMixByRowId(raw?.timelineSceneAudioMixByRowId || {}),
     timelineOnScreenTextDefaultsVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineOnScreenTextDefaultsVersion, 1))),
     timelineOnScreenTextLayoutDefaultsVersion: Math.max(1, Math.round(toFiniteNumber(raw?.timelineOnScreenTextLayoutDefaultsVersion, 1))),
@@ -1704,8 +1788,12 @@ Object.assign(window, {
   normalizeTransitionsByEdge,
   normalizeTimelineClipVisualLayoutMode,
   normalizeTimelineClipMediaScale,
+  normalizeTimelineClipMediaOffset,
+  normalizeTimelineClipMediaMotionPreset,
   normalizeTimelineClipItem,
   normalizeTimelineClipsByRowId,
+  normalizeOverlayCardItem,
+  normalizeOverlayCardsById,
   normalizeOnScreenTextClipItem,
   normalizeOnScreenTextClipsByRowId,
   normalizeGeminiDialogueTrackSegment,

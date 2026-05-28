@@ -36,8 +36,9 @@ if (!/visualEffects: activeSession\?\.visualEffectsMap\?\.\[rowId\] \|\| null/.t
 
 if (!/function normalizeMontageVisualEffects\(raw = null\)/.test(back)
   || !/function buildMontageImageMotionVideoFilter\(\{/.test(back)
-  || !/scale=w='ceil\(\$\{renderWidth\}\*\(\$\{zExpr\}\)\/2\)\*2'/.test(back)) {
-  throw new Error("El backend debe normalizar y renderizar movimiento Ken Burns para escenas imagen.");
+  || !/resolveSceneMediaRenderSpec\(\{/.test(back)
+  || !/spec\.kenBurns\.effect/.test(back)) {
+  throw new Error("El backend debe normalizar y renderizar movimiento Ken Burns para escenas imagen con la spec compartida.");
 }
 
 if (!/const visualEffects = normalizeMontageVisualEffects\(entry\?\.visualEffects \|\| null\);/.test(back)
@@ -45,16 +46,12 @@ if (!/const visualEffects = normalizeMontageVisualEffects\(entry\?\.visualEffect
   throw new Error("La rama de export de imagen debe aplicar visualEffects al filtro de video.");
 }
 
-if (!/return `\$\{inputLabel\}scale=\$\{coverWidth\}:\$\{coverHeight\}:force_original_aspect_ratio=increase,crop=\$\{width\}:\$\{height\},setsar=1\[\$\{outputLabel\}\]`;/.test(back)
-  || !/const supersample = 2;/.test(back)
-  || !/const effectDurationSec = Math\.max\(0\.2, Math\.min\(/.test(back)
-  || !/const progressExpr = `\(\(\$\{rawProgressExpr\}\)\*\(\$\{rawProgressExpr\}\)\*\(3-2\*\(\$\{rawProgressExpr\}\)\)\)`;/.test(back)
-  || !/const panZoom = `1\.06\+0\.14\*\(\$\{progressExpr\}\)`;/.test(back)
-  || /zoompan=z=/.test(back)
-  || /scale=\$\{width \* 2\}:\$\{height \* 2\}:force_original_aspect_ratio=increase/.test(back)
-  || !/zExpr = `1\+0\.30\*\(\$\{progressExpr\}\)`;/.test(back)
-  || !/zExpr = `1\.30-0\.30\*\(\$\{progressExpr\}\)`;/.test(back)) {
-  throw new Error("El filtro Ken Burns de imágenes debe usar scale/crop con supersampling y completar el zoom en escenas cortas.");
+if (!/function buildSceneMediaMotionProgressExpr\(durationSec = 1\)/.test(back)
+  || !/const spec = resolveSceneMediaRenderSpec\(\{/.test(back)
+  || !/overlay=x='/.test(back)
+  || !/scale=w=\$\{widthExpr\}:h=\$\{heightExpr\}:eval=frame/.test(back)
+  || !/scale=\$\{motionWidth\}:\$\{motionHeight\}:eval=frame/.test(back)) {
+  throw new Error("El filtro Ken Burns de imágenes debe usar la geometría compartida y overlay sobre canvas final.");
 }
 
 if (/return `\$\{inputLabel\}scale=\$\{width\}:\$\{height\},setsar=1\[\$\{outputLabel\}\]`;/.test(back)
@@ -74,8 +71,8 @@ if (!/if \(!isImageAsset && visualLayoutMode === "blur-backdrop"\) \{/.test(back
   throw new Error("Las escenas imagen no deben usar blur-backdrop/pad como layout de export porque produce marco negro o imagen chica.");
 }
 
-if (!/scale=\$\{canvas\.width\}:\$\{canvas\.height\}:force_original_aspect_ratio=increase,crop=\$\{canvas\.width\}:\$\{canvas\.height\},setsar=1,format=rgba/.test(back)) {
-  throw new Error("La composición overlap/gaps debe usar cover/crop, no contain+pad negro.");
+if (!/let videoChain = `\[\$\{index\}:v\]scale=\$\{canvas\.width\}:\$\{canvas\.height\},setsar=1,format=rgba`/.test(back)) {
+  throw new Error("La composición overlap/gaps debe reutilizar las escenas ya transformadas, sin re-cropear el encuadre.");
 }
 
 console.log("Podcaster montage export supports image scenes OK.");

@@ -40,6 +40,15 @@ if (/&& !this\.isImageStageEntry\(overlapPair\.backEntry\)[\s\S]*&& !this\.isIma
   throw new Error("El preview debe aplicar transiciones también cuando una escena del overlap es imagen.");
 }
 
+if (!/applyEntryVisualStateToSurface\(entry, imageEl\);/.test(playback)
+  || !/applyEntryVisualStateToSurface\(entry, videoEl\);/.test(playback)
+  || !/resetEntryVisualStateOnSurface\(el\);/.test(playback)
+  || !/style\.setProperty\("--pod-scene-media-scale", String\(state\.mediaScale\)\);/.test(playback)
+  || !/style\.setProperty\("--pod-scene-media-x",/.test(playback)
+  || !/style\.setProperty\("--pod-scene-media-y",/.test(playback)) {
+  throw new Error("Cada superficie del overlap debe cargar su propio zoom y offsets para que la escena siguiente no herede el zoom anterior.");
+}
+
 if (!/id="podcastActiveSpeakerImageAlt"/.test(podcasterHtml)
   || !/id="montageExportPreviewVideoAlt"/.test(podcasterHtml)
   || !/id="montageExportPreviewImageAlt"/.test(podcasterHtml)

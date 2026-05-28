@@ -41,6 +41,9 @@ const {
   resolveOnScreenTextRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-on-screen-text.js"));
 const {
+  resolveSceneMediaRenderSpec
+} = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-scene-media-render-spec.js"));
+const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
 const {
@@ -2129,6 +2132,7 @@ function sanitizePodcasterSession(raw = {}) {
     shadowOffsetXPx: clampNumber(trackRaw?.shadowOffsetXPx, -80, 80, 0),
     shadowOffsetYPx: clampNumber(trackRaw?.shadowOffsetYPx, -80, 80, 8),
     shadowOpacity: clampNumber(trackRaw?.shadowOpacity, 0, 1, 0.48),
+    boxWidthPct: clampNumber(trackRaw?.boxWidthPct, 0.22, 0.92, 0.58),
     overlayXPct: clampNumber(trackRaw?.overlayXPct, 0, 1, 0.5),
     overlayYPct: clampNumber(trackRaw?.overlayYPct, 0, 1, 0.82)
   });
@@ -7220,6 +7224,9 @@ function normalizeMontageExportRequestBody(body = {}) {
     .map((item) => (item && typeof item === "object" ? {
       ...item,
       mediaScale: normalizeMontageMediaScale(item?.mediaScale || item?.clip?.mediaScale || 1),
+      mediaOffsetXPct: normalizeMontageMediaOffset(item?.mediaOffsetXPct || item?.clip?.mediaOffsetXPct || 0),
+      mediaOffsetYPct: normalizeMontageMediaOffset(item?.mediaOffsetYPct || item?.clip?.mediaOffsetYPct || 0),
+      mediaMotionPreset: normalizeMontageMediaMotionPreset(item?.mediaMotionPreset || item?.clip?.mediaMotionPreset || "none"),
       visualEffects: normalizeMontageVisualEffects(item?.visualEffects || null),
       transitionOut: normalizeMontageTransition(item?.transitionOut || null)
     } : null))
@@ -7228,6 +7235,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
     ? raw.onScreenTextTimeline
     : null;
+  const overlayCards = normalizeMontageOverlayCards(raw?.overlayCards || null);
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
     ? raw.brandOverlay
     : null;
@@ -7381,6 +7389,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    overlayCards,
     brandOverlay,
     backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,
     backgroundMusicDuckingPct: (() => {
@@ -7837,27 +7846,188 @@ function normalizeMontageMediaScale(value = 1) {
   return Math.max(1, Math.min(2.5, numeric || 1));
 }
 
+function normalizeMontageMediaOffset(value = 0) {
+  const numeric = Math.round((Number(value) || 0) * 1000) / 1000;
+  return Math.max(-0.5, Math.min(0.5, numeric || 0));
+}
+
+function normalizeMontageMediaMotionPreset(value = "") {
+  const preset = String(value || "none").trim().toLowerCase();
+  return ["pan-left-right", "pan-right-left", "pan-up-down", "pan-down-up"].includes(preset) ? preset : "none";
+}
+
+function normalizeMontageOverlayCards(raw = null) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const segmentsRaw = Array.isArray(source?.segments) ? source.segments : [];
+  return segmentsRaw.slice(0, 120).map((card, idx) => {
+    if (!card || typeof card !== "object") return null;
+    const textLines = Array.isArray(card.textLines)
+      ? card.textLines.map((line) => clampText(line || "", 180)).filter(Boolean).slice(0, 4)
+      : [];
+    if (!textLines.length) return null;
+    const position = card.position && typeof card.position === "object" ? card.position : {};
+      const widthPct = clampNumber(position.widthPct, 0.48, 0.9, 0.56);
+      const heightPct = clampNumber(position.heightPct, 0.18, 0.55, 0.2);
+    const enterAnimation = String(card.enterAnimation || "").trim().toLowerCase();
+    const exitAnimation = String(card.exitAnimation || "").trim().toLowerCase();
+    return {
+      id: clampText(card.id || `card-${idx + 1}`, 140),
+      rowId: clampText(card.rowId || "", 140),
+      startMs: Math.max(0, Math.round(Number(card.startMs || 0) || 0)),
+      durationMs: Math.max(500, Math.round(Number(card.durationMs || 0) || 0)),
+      preset: ["lower-third", "info-panel", "phone-cta"].includes(String(card.preset || "").trim().toLowerCase()) ? String(card.preset).trim().toLowerCase() : "lower-third",
+      textLines,
+      position: {
+        xPct: clampNumber(position.xPct, 0, Math.max(0, 1 - widthPct), 0.06),
+        yPct: clampNumber(position.yPct, 0, Math.max(0, 1 - heightPct), 0.66),
+        widthPct,
+        heightPct
+      },
+      enterAnimation: ["slide-left", "slide-right", "slide-up", "slide-down", "fade"].includes(enterAnimation) ? enterAnimation : "slide-left",
+      exitAnimation: ["slide-left", "slide-right", "slide-up", "slide-down", "fade"].includes(exitAnimation) ? exitAnimation : "fade",
+      style: card.style && typeof card.style === "object" ? card.style : {},
+      zIndex: Math.max(1, Math.min(999, Math.round(Number(card.zIndex || idx + 20) || idx + 20)))
+    };
+  }).filter(Boolean);
+}
+
+function buildMontageMediaPositionFilter({
+  width = 1280,
+  height = 720,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none",
+  durationSec = 1
+} = {}) {
+  const safeWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
+  const safeHeight = Math.max(2, Math.round(Number(height || 720) || 720));
+  const baseX = normalizeMontageMediaOffset(mediaOffsetXPct);
+  const baseY = normalizeMontageMediaOffset(mediaOffsetYPct);
+  const preset = normalizeMontageMediaMotionPreset(mediaMotionPreset);
+  const duration = Math.max(0.2, Number(durationSec || 1) || 1);
+  const progress = `(0.5-0.5*cos(2*PI*min(max(t/${duration.toFixed(3)}\\,0)\\,1)))`;
+  let motionX = "0";
+  let motionY = "0";
+  if (preset === "pan-left-right") motionX = `((${progress})-0.5)*0.16`;
+  if (preset === "pan-right-left") motionX = `(0.5-(${progress}))*0.16`;
+  if (preset === "pan-up-down") motionY = `((${progress})-0.5)*0.16`;
+  if (preset === "pan-down-up") motionY = `(0.5-(${progress}))*0.16`;
+  const xExpr = `(iw-${safeWidth})/2+(${safeWidth})*(${baseX.toFixed(3)}+${motionX})`;
+  const yExpr = `(ih-${safeHeight})/2+(${safeHeight})*(${baseY.toFixed(3)}+${motionY})`;
+  return `crop=${safeWidth}:${safeHeight}:x='min(max(${xExpr}\\,0)\\,iw-${safeWidth})':y='min(max(${yExpr}\\,0)\\,ih-${safeHeight})'`;
+}
+
 function resolveMontageKenBurnsEffect(rawEffects = null) {
-  const normalized = normalizeMontageVisualEffects(rawEffects);
-  const cascadeOrder = ["pan-left", "pan-right", "pan-up", "pan-down", "zoom-in", "zoom-out"];
-  const effect = cascadeOrder.findLast((item) => normalized.effects.includes(item)) || "";
-  const durationSecBySpeed = {
-    1: 20,
-    2: 18,
-    3: 16,
-    4: 14,
-    5: 12,
-    6: 10,
-    7: 8,
-    8: 6,
-    9: 4,
-    10: 2
-  };
-  return {
-    ...normalized,
-    effect,
-    durationSec: durationSecBySpeed[normalized.speed] || 12
-  };
+  return resolveSceneMediaRenderSpec({
+    canvasWidth: 1280,
+    canvasHeight: 720,
+    sourceWidth: 1280,
+    sourceHeight: 720,
+    visualEffects: rawEffects,
+    mediaKind: "image"
+  }).kenBurns;
+}
+
+function buildSceneMediaMotionProgressExpr(durationSec = 1) {
+  const duration = Math.max(0.2, Number(durationSec || 1) || 1);
+  const raw = `min(max(t/${duration.toFixed(3)}\\,0)\\,1)`;
+  return `((${raw})*(${raw})*(3-2*(${raw})))`;
+}
+
+function buildSceneMediaPositionCropFilter({
+  inputLabel = "[0:v]",
+  outputLabel = "vout",
+  canvas = { width: 1280, height: 720 },
+  sourceWidth = 1280,
+  sourceHeight = 720,
+  durationSec = 1,
+  visualLayoutMode = "default",
+  reelMode = false,
+  mediaScale = 1,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none",
+  visualEffects = null,
+  mediaKind = "video",
+  scaleFilter = "",
+  cloneTail = false,
+  backgroundLabel = "scene_bg",
+  transformedLabel = "scene_fg"
+} = {}) {
+  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  const spec = resolveSceneMediaRenderSpec({
+    canvasWidth: width,
+    canvasHeight: height,
+    sourceWidth: Math.max(2, Number(sourceWidth || width) || width),
+    sourceHeight: Math.max(2, Number(sourceHeight || height) || height),
+    reelMode,
+    visualLayoutMode,
+    mediaScale,
+    mediaOffsetXPct,
+    mediaOffsetYPct,
+    mediaMotionPreset,
+    visualEffects,
+    mediaKind,
+    durationSec
+  });
+  const progressExpr = buildSceneMediaMotionProgressExpr(durationSec);
+  let xExpr = `${spec.leftPx.toFixed(3)}`;
+  let yExpr = `${spec.topPx.toFixed(3)}`;
+  if (spec.motion.preset === "pan-left-right") {
+    xExpr = `${(spec.leftPx - spec.motion.amplitudeXPx).toFixed(3)}+(2*${spec.motion.amplitudeXPx.toFixed(3)}*(${progressExpr}))`;
+  } else if (spec.motion.preset === "pan-right-left") {
+    xExpr = `${(spec.leftPx + spec.motion.amplitudeXPx).toFixed(3)}-(2*${spec.motion.amplitudeXPx.toFixed(3)}*(${progressExpr}))`;
+  } else if (spec.motion.preset === "pan-up-down") {
+    yExpr = `${(spec.topPx - spec.motion.amplitudeYPx).toFixed(3)}+(2*${spec.motion.amplitudeYPx.toFixed(3)}*(${progressExpr}))`;
+  } else if (spec.motion.preset === "pan-down-up") {
+    yExpr = `${(spec.topPx + spec.motion.amplitudeYPx).toFixed(3)}-(2*${spec.motion.amplitudeYPx.toFixed(3)}*(${progressExpr}))`;
+  }
+
+  const inputChain = [
+    `${inputLabel}${cloneTail ? `tpad=stop_mode=clone:stop_duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},` : ""}scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`
+  ];
+  if (mediaKind === "image" && spec.kenBurns.effect) {
+    const panScale = Number(spec.kenBurns.panScale || 1.2);
+    const panDistanceXPx = spec.scaledRect.width * Number(spec.kenBurns.panDistancePct || 0.10);
+    const panDistanceYPx = spec.scaledRect.height * Number(spec.kenBurns.panDistancePct || 0.10);
+    if (spec.kenBurns.effect === "zoom-in" || spec.kenBurns.effect === "zoom-out") {
+      const zoomFrom = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomTo || 1.3) : Number(spec.kenBurns.zoomFrom || 1);
+      const zoomTo = spec.kenBurns.effect === "zoom-out" ? Number(spec.kenBurns.zoomFrom || 1) : Number(spec.kenBurns.zoomTo || 1.3);
+      const zoomExpr = `${zoomFrom.toFixed(3)}+((${zoomTo.toFixed(3)}-${zoomFrom.toFixed(3)})*(${progressExpr}))`;
+      const widthExpr = `'ceil(${spec.scaledRect.width.toFixed(3)}*(${zoomExpr})/2)*2'`;
+      const heightExpr = `'ceil(${spec.scaledRect.height.toFixed(3)}*(${zoomExpr})/2)*2'`;
+      xExpr = `${spec.leftPx.toFixed(3)}-((${widthExpr}-${spec.scaledRect.width.toFixed(3)})/2)`;
+      yExpr = `${spec.topPx.toFixed(3)}-((${heightExpr}-${spec.scaledRect.height.toFixed(3)})/2)`;
+      inputChain.push(`scale=w=${widthExpr}:h=${heightExpr}:eval=frame`);
+    } else {
+      const motionWidth = Math.max(2, Math.round(spec.scaledRect.width * panScale / 2) * 2);
+      const motionHeight = Math.max(2, Math.round(spec.scaledRect.height * panScale / 2) * 2);
+      inputChain.push(`scale=${motionWidth}:${motionHeight}:eval=frame`);
+      const baseLeft = spec.leftPx - ((motionWidth - spec.scaledRect.width) / 2);
+      const baseTop = spec.topPx - ((motionHeight - spec.scaledRect.height) / 2);
+      if (spec.kenBurns.effect === "pan-left") {
+        xExpr = `${(baseLeft - panDistanceXPx).toFixed(3)}+(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+        yExpr = `${baseTop.toFixed(3)}`;
+      } else if (spec.kenBurns.effect === "pan-right") {
+        xExpr = `${(baseLeft + panDistanceXPx).toFixed(3)}-(${(panDistanceXPx * 2).toFixed(3)}*(${progressExpr}))`;
+        yExpr = `${baseTop.toFixed(3)}`;
+      } else if (spec.kenBurns.effect === "pan-up") {
+        xExpr = `${baseLeft.toFixed(3)}`;
+        yExpr = `${(baseTop + panDistanceYPx).toFixed(3)}-(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+      } else if (spec.kenBurns.effect === "pan-down") {
+        xExpr = `${baseLeft.toFixed(3)}`;
+        yExpr = `${(baseTop - panDistanceYPx).toFixed(3)}+(${(panDistanceYPx * 2).toFixed(3)}*(${progressExpr}))`;
+      }
+    }
+  } else {
+    inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
+  }
+  return [
+    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}[${backgroundLabel}]`,
+    `${inputChain.join(",")}[${transformedLabel}]`,
+    `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
+  ].join(";");
 }
 
 function buildMontageImageMotionVideoFilter({
@@ -7866,47 +8036,31 @@ function buildMontageImageMotionVideoFilter({
   canvas = { width: 1280, height: 720 },
   durationSec = 1,
   visualEffects = null,
-  mediaScale = 1
+  sourceWidth = 1280,
+  sourceHeight = 720,
+  reelMode = false,
+  visualLayoutMode = "default",
+  mediaScale = 1,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none"
 } = {}) {
-  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
-  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
-  const sceneScale = normalizeMontageMediaScale(mediaScale);
-  const coverWidth = Math.max(2, Math.round((width * sceneScale) / 2) * 2);
-  const coverHeight = Math.max(2, Math.round((height * sceneScale) / 2) * 2);
-  const motion = resolveMontageKenBurnsEffect(visualEffects);
-  if (!motion.effect) {
-    return `${inputLabel}scale=${coverWidth}:${coverHeight}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[${outputLabel}]`;
-  }
-  const supersample = 2;
-  const renderWidth = coverWidth * supersample;
-  const renderHeight = coverHeight * supersample;
-  const effectDurationSec = Math.max(0.2, Math.min(
-    Math.max(0.2, Number(motion.durationSec || 12) || 12),
-    Math.max(0.2, Number(durationSec || 1) || 1)
-  ));
-  const effectFrames = Math.max(2, Math.round(effectDurationSec * 24));
-  const rawProgressExpr = `if(eq(${effectFrames},1),0,abs(mod(n,${Math.max(2, effectFrames * 2 - 2)})-${effectFrames - 1})/${effectFrames - 1})`;
-  const progressExpr = `((${rawProgressExpr})*(${rawProgressExpr})*(3-2*(${rawProgressExpr})))`;
-  const panZoom = `1.06+0.14*(${progressExpr})`;
-  const centerX = `(iw-${renderWidth})/2`;
-  const centerY = `(ih-${renderHeight})/2`;
-  let zExpr = panZoom;
-  let xExpr = centerX;
-  let yExpr = centerY;
-  if (motion.effect === "pan-left") {
-    xExpr = `(iw-${renderWidth})*(${progressExpr})`;
-  } else if (motion.effect === "pan-right") {
-    xExpr = `(iw-${renderWidth})*(1-(${progressExpr}))`;
-  } else if (motion.effect === "pan-up") {
-    yExpr = `(ih-${renderHeight})*(1-(${progressExpr}))`;
-  } else if (motion.effect === "pan-down") {
-    yExpr = `(ih-${renderHeight})*(${progressExpr})`;
-  } else if (motion.effect === "zoom-in") {
-    zExpr = `1+0.30*(${progressExpr})`;
-  } else if (motion.effect === "zoom-out") {
-    zExpr = `1.30-0.30*(${progressExpr})`;
-  }
-  return `${inputLabel}scale=${renderWidth}:${renderHeight}:force_original_aspect_ratio=increase,crop=${renderWidth}:${renderHeight},setsar=1,scale=w='ceil(${renderWidth}*(${zExpr})/2)*2':h='ceil(${renderHeight}*(${zExpr})/2)*2':eval=frame,crop=${renderWidth}:${renderHeight}:x='${xExpr}':y='${yExpr}',scale=${width}:${height},trim=duration=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)},setpts=PTS-STARTPTS,setsar=1[${outputLabel}]`;
+  return buildSceneMediaPositionCropFilter({
+    inputLabel,
+    outputLabel,
+    canvas,
+    sourceWidth,
+    sourceHeight,
+    durationSec,
+    visualLayoutMode,
+    reelMode,
+    mediaScale,
+    mediaOffsetXPct,
+    mediaOffsetYPct,
+    mediaMotionPreset,
+    visualEffects,
+    mediaKind: "image"
+  });
 }
 
 function buildMontageVideoSceneFilter({
@@ -7915,19 +8069,33 @@ function buildMontageVideoSceneFilter({
   canvas = { width: 1280, height: 720 },
   durationSec = 1,
   scaleFilter = "",
-  mediaScale = 1
+  sourceWidth = 1280,
+  sourceHeight = 720,
+  reelMode = false,
+  visualLayoutMode = "default",
+  mediaScale = 1,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none"
 } = {}) {
-  const sceneScale = normalizeMontageMediaScale(mediaScale);
-  const duration = Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3);
-  const base = `${inputLabel}tpad=stop_mode=clone:stop_duration=${duration},scale=trunc(iw/2)*2:trunc(ih/2)*2${scaleFilter ? `,${scaleFilter}` : ""}`;
-  if (sceneScale <= 1.0001) {
-    return `${base}[${outputLabel}]`;
-  }
-  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
-  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
-  const scaledWidth = Math.max(2, Math.round((width * sceneScale) / 2) * 2);
-  const scaledHeight = Math.max(2, Math.round((height * sceneScale) / 2) * 2);
-  return `${base},scale=${scaledWidth}:${scaledHeight}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[${outputLabel}]`;
+  return buildSceneMediaPositionCropFilter({
+    inputLabel,
+    outputLabel,
+    canvas,
+    sourceWidth,
+    sourceHeight,
+    durationSec,
+    visualLayoutMode,
+    reelMode,
+    mediaScale,
+    mediaOffsetXPct,
+    mediaOffsetYPct,
+    mediaMotionPreset,
+    visualEffects: null,
+    mediaKind: "video",
+    scaleFilter,
+    cloneTail: true
+  });
 }
 
 function buildMontageOverlapCompositionPlan(exportedEntries = []) {
@@ -8029,7 +8197,7 @@ async function renderMontageOverlapComposition({
     const localProgressExpr = buildMontageLocalTransitionProgressExpr(transitionSec);
     const overlayProgressExpr = buildMontageTransitionProgressExpr(startSec, transitionSec);
     const videoLabel = `v${index}`;
-    let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height}:force_original_aspect_ratio=increase,crop=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
+    let videoChain = `[${index}:v]scale=${canvas.width}:${canvas.height},setsar=1,format=rgba`;
     if (transitionType === "crossfade" || transitionType === "dip-black" || transitionType === "flash-white" || transitionType === "blur") {
       videoChain += `,fade=t=in:st=0:d=${transitionSec.toFixed(3)}:alpha=1`;
     }
@@ -8108,6 +8276,79 @@ async function renderMontageOverlapComposition({
     ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
     outPath
   ], { stage: "montage_overlap_compose" });
+  return outPath;
+}
+
+async function renderMontageOverlayCards({
+  input = {},
+  finalOutPath = "",
+  tmpDir = "",
+  outExt = "mp4",
+  params = {}
+} = {}) {
+  const cards = Array.isArray(input.overlayCards) ? input.overlayCards : [];
+  if (!cards.length || !finalOutPath) return finalOutPath;
+  const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_overlay_cards_input").catch(() => ({ width: 1280, height: 720 }));
+  const width = Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(sourceDims.height || 720) || 720));
+  const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "overlay-card");
+  const fontFile = resolveFfmpegDrawtextFontFile();
+  const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
+  const filters = [];
+  cards
+    .slice()
+    .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
+    .forEach((card) => {
+      const startSec = Math.max(0, Number(card.startMs || 0) / 1000);
+      const endSec = startSec + Math.max(0.1, Number(card.durationMs || 0) / 1000);
+      const enableExpr = escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`);
+      const pos = card.position || {};
+      const w = Math.max(120, Math.round(width * clampNumber(pos.widthPct, 0.48, 0.9, 0.56)));
+      const h = Math.max(72, Math.round(height * clampNumber(pos.heightPct, 0.18, 0.55, 0.2)));
+      const x = Math.round(width * clampNumber(pos.xPct, 0, Math.max(0, 1 - (w / width)), 0.06));
+      const y = Math.round(height * clampNumber(pos.yPct, 0, Math.max(0, 1 - (h / height)), 0.66));
+      const enterAnimation = String(card.enterAnimation || "slide-left").trim().toLowerCase();
+      const exitAnimation = String(card.exitAnimation || "fade").trim().toLowerCase();
+      const enterDx = enterAnimation === "slide-right" ? Math.round(w * 0.42) : enterAnimation === "slide-left" ? -Math.round(w * 0.42) : 0;
+      const enterDy = enterAnimation === "slide-down" ? Math.round(h * 0.42) : enterAnimation === "slide-up" ? -Math.round(h * 0.42) : 0;
+      const exitDx = exitAnimation === "slide-right" ? Math.round(w * 0.42) : exitAnimation === "slide-left" ? -Math.round(w * 0.42) : 0;
+      const exitDy = exitAnimation === "slide-down" ? Math.round(h * 0.42) : exitAnimation === "slide-up" ? -Math.round(h * 0.42) : 0;
+      const enterDurSec = Math.min(0.52, Math.max(0.12, (endSec - startSec) / 3));
+      const exitDurSec = Math.min(0.52, Math.max(0.12, (endSec - startSec) / 3));
+      const enterProgress = `min(max((t-${startSec.toFixed(3)})/${enterDurSec.toFixed(3)},0),1)`;
+      const exitProgress = `min(max((t-${Math.max(startSec, endSec - exitDurSec).toFixed(3)})/${exitDurSec.toFixed(3)},0),1)`;
+      const boxX = escapeFfmpegExpr(`${x}+(${enterDx})*(1-(${enterProgress}))+(${exitDx})*(${exitProgress})`);
+      const boxY = escapeFfmpegExpr(`${y}+(${enterDy})*(1-(${enterProgress}))+(${exitDy})*(${exitProgress})`);
+      const accent = toFfmpegColor(card?.style?.accentColor || "#38BDF8", 0.95, "38BDF8");
+      const bg = toFfmpegColor(card?.style?.backgroundColor || "#0F172A", 0.82, "0F172A");
+      const fg = toFfmpegColor(card?.style?.textColor || "#F8FAFC", 1, "F8FAFC");
+      filters.push(`drawbox=x='${boxX}':y='${boxY}':w=${w}:h=${h}:color=${bg}:t=fill:enable='${enableExpr}'`);
+      filters.push(`drawbox=x='${boxX}':y='${boxY}':w=${Math.max(7, Math.round(width * 0.006))}:h=${h}:color=${accent}:t=fill:enable='${enableExpr}'`);
+      const primarySize = Math.max(24, Math.round(height * 0.058));
+      const secondarySize = Math.max(16, Math.round(height * 0.036));
+      const textLines = Array.isArray(card.textLines) ? card.textLines : [];
+      textLines.slice(0, 4).forEach((line, index) => {
+        const textPath = textFileResolver(String(line || "").trim());
+        const fontSize = index === 0 ? primarySize : secondarySize;
+        const textY = `(${boxY})+${Math.round(height * 0.032) + index * Math.round(fontSize * 1.25)}`;
+        filters.push(`drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${fontSize}:fontcolor=${fg}:x='(${boxX})+${Math.round(width * 0.026)}':y='${textY}':fix_bounds=1:line_spacing=4:shadowx=0:shadowy=2:shadowcolor=0x020617@0.45:enable='${enableExpr}'`);
+      });
+    });
+  if (!filters.length) return finalOutPath;
+  const outPath = path.join(tmpDir, `montage-overlay-cards.${outExt}`);
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    "-i", finalOutPath,
+    "-vf", filters.join(","),
+    "-map", "0:v:0",
+    "-map", "0:a:0?",
+    "-c:v", params.vCodec,
+    ...params.vArgs,
+    "-pix_fmt", "yuv420p",
+    "-c:a", "copy",
+    ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+    outPath
+  ], { stage: "montage_overlay_cards" });
   return outPath;
 }
 
@@ -8315,6 +8556,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }));
         const canvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
         const mediaScale = normalizeMontageMediaScale(entry?.mediaScale || entry?.clip?.mediaScale || 1);
+        const mediaOffsetXPct = normalizeMontageMediaOffset(entry?.mediaOffsetXPct || entry?.clip?.mediaOffsetXPct || 0);
+        const mediaOffsetYPct = normalizeMontageMediaOffset(entry?.mediaOffsetYPct || entry?.clip?.mediaOffsetYPct || 0);
+        const mediaMotionPreset = normalizeMontageMediaMotionPreset(entry?.mediaMotionPreset || entry?.clip?.mediaMotionPreset || "none");
         const args = ["-y", "-hide_banner", "-loglevel", "warning"];
         if (isImageAsset) {
           args.push("-loop", "1", "-framerate", "24", "-i", inputVisualPath);
@@ -8365,7 +8609,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               canvas,
               durationSec: durSec,
               visualEffects,
-              mediaScale
+              mediaScale,
+              mediaOffsetXPct,
+              mediaOffsetYPct,
+              mediaMotionPreset
             })};[image_motion]split=2[vbg_src][vfg_src]`
             : `[0:v]tpad=stop_mode=clone:stop_duration=${durSec},split=2[vbg_src][vfg_src]`;
           videoFilterGraph = [
@@ -8380,17 +8627,31 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               inputLabel: "[0:v]",
               outputLabel: "vout",
               canvas,
+              sourceWidth: sourceDims?.width || canvas.width,
+              sourceHeight: sourceDims?.height || canvas.height,
               durationSec: durSec,
+              reelMode: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+              visualLayoutMode,
               visualEffects,
-              mediaScale
+              mediaScale,
+              mediaOffsetXPct,
+              mediaOffsetYPct,
+              mediaMotionPreset
             })
             : buildMontageVideoSceneFilter({
               inputLabel: "[0:v]",
               outputLabel: "vout",
               canvas,
+              sourceWidth: sourceDims?.width || canvas.width,
+              sourceHeight: sourceDims?.height || canvas.height,
               durationSec: durSec,
               scaleFilter,
-              mediaScale
+              reelMode: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+              visualLayoutMode,
+              mediaScale,
+              mediaOffsetXPct,
+              mediaOffsetYPct,
+              mediaMotionPreset
             });
         }
 
@@ -8445,6 +8706,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           durationSec: durSec,
           durationMs,
           mediaScale,
+          mediaOffsetXPct,
+          mediaOffsetYPct,
+          mediaMotionPreset,
           visualLayoutMode,
           timelineStartMs: Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0)),
           timelineEndMs: Math.max(0, Math.round(Number(entry?.timelineEndMs || 0) || 0)),
@@ -8766,6 +9030,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
         finalOutPath = overlayOutPath;
       }
+    }
+
+    if (Array.isArray(input.overlayCards) && input.overlayCards.length) {
+      emitStage("apply_overlay_cards", 0.84, "Aplicando cards animadas.");
+      finalOutPath = await renderMontageOverlayCards({
+        input,
+        finalOutPath,
+        tmpDir,
+        outExt,
+        params: intermediateParams
+      });
     }
 
     if (input.exportMode === "review" && exportedEntries.length) {

@@ -234,6 +234,7 @@ let montageExportPreviewState = {
   mode: "normal",
   sceneIndex: 0,
   disabled: false,
+  frontendPreview: null,
   lastSignature: "",
   debounceTimer: null,
   requestSeq: 0,
@@ -288,6 +289,51 @@ function isMontageExportReelModeActive() {
   return cfg?.reelModeEnabled === true;
 }
 
+function syncMontageFrontendPreviewMediaLayout(frontendPreview = null) {
+  const preview = frontendPreview && typeof frontendPreview === "object" ? frontendPreview : null;
+  const container = document.getElementById("montageExportPreviewContainer");
+  const resolver = window.resolveSceneMediaRenderSpec;
+  if (!preview || !container || typeof resolver !== "function") return;
+  const applyLayout = (mediaEl = null) => {
+    if (!mediaEl) return;
+    const sourceWidth = Number(mediaEl.tagName === "VIDEO" ? mediaEl.videoWidth : mediaEl.naturalWidth) || 0;
+    const sourceHeight = Number(mediaEl.tagName === "VIDEO" ? mediaEl.videoHeight : mediaEl.naturalHeight) || 0;
+    if (!(sourceWidth > 0 && sourceHeight > 0)) return;
+    const spec = resolver({
+      canvasWidth: Math.max(2, Number(container.clientWidth || 0) || 1280),
+      canvasHeight: Math.max(2, Number(container.clientHeight || 0) || 720),
+      sourceWidth,
+      sourceHeight,
+      reelMode: isMontageExportReelModeActive(),
+      visualLayoutMode: preview.visualLayoutMode,
+      mediaScale: preview.mediaScale,
+      mediaOffsetXPct: preview.mediaOffsetXPct,
+      mediaOffsetYPct: preview.mediaOffsetYPct,
+      mediaMotionPreset: preview.mediaMotionPreset,
+      visualEffects: preview.visualEffects || null,
+      mediaKind: String(preview.mediaType || "").startsWith("image/") ? "image" : "video",
+      durationSec: 12
+    });
+    mediaEl.style.setProperty("--pod-scene-media-left", `${spec.leftPx.toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-top", `${spec.topPx.toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-width", `${spec.scaledRect.width.toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-height", `${spec.scaledRect.height.toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-translate-x", "0px");
+    mediaEl.style.setProperty("--pod-scene-media-translate-y", "0px");
+    mediaEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
+    mediaEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+  };
+  if (String(preview.mediaType || "").startsWith("image/") && window.els.montageExportPreviewImage) {
+    window.els.montageExportPreviewImage.addEventListener("load", () => applyLayout(window.els.montageExportPreviewImage), { once: true });
+    applyLayout(window.els.montageExportPreviewImage);
+    return;
+  }
+  if (window.els.montageExportPreviewVideo) {
+    window.els.montageExportPreviewVideo.addEventListener("loadedmetadata", () => applyLayout(window.els.montageExportPreviewVideo), { once: true });
+    applyLayout(window.els.montageExportPreviewVideo);
+  }
+}
+
 export function setMontageExportOpen(isOpen = false) {
   if (window.els.montageExportModal) {
     window.els.montageExportModal.hidden = !Boolean(isOpen);
@@ -330,7 +376,7 @@ export function resetMontageExportJobState() {
   setMontageExportContinueButton({ visible: false });
 }
 
-export function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false } = {}) {
+export function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false, frontendPreview = null } = {}) {
   const isReelPreview = isMontageExportReelModeActive();
   window.montageExportPreviewState.loading = Boolean(loading);
   window.montageExportPreviewState.error = String(error || "").trim();
@@ -339,6 +385,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
   window.montageExportPreviewState.mode = String(mode || window.montageExportState.exportMode || "normal").trim() || "normal";
   window.montageExportPreviewState.sceneIndex = Math.max(0, Number(sceneIndex || 0) || 0);
   window.montageExportPreviewState.disabled = Boolean(disabled);
+  window.montageExportPreviewState.frontendPreview = frontendPreview && typeof frontendPreview === "object" ? frontendPreview : null;
   if (window.els.montageExportPreviewBox) {
     window.els.montageExportPreviewBox.dataset.mode = window.montageExportPreviewState.mode;
     window.els.montageExportPreviewBox.dataset.reel = isReelPreview ? "true" : "false";
@@ -378,6 +425,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
       }
       window.els.montageExportPreviewVideo.hidden = false;
       window.els.montageExportPreviewVideo.muted = true;
+      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview);
       const playPromise = window.els.montageExportPreviewVideo.play?.();
       if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => { });
     } else {
@@ -393,6 +441,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
     if (hasReadyPreview && !isVideoPreview) {
       window.els.montageExportPreviewImage.src = window.montageExportPreviewState.dataUrl;
       window.els.montageExportPreviewImage.hidden = false;
+      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview);
     } else {
       window.els.montageExportPreviewImage.hidden = true;
       if (!window.montageExportPreviewState.loading) window.els.montageExportPreviewImage.removeAttribute("src");
@@ -422,6 +471,7 @@ export function resetMontageExportPreviewState() {
     mode: window.montageExportState.exportMode,
     sceneIndex: 0,
     disabled: false,
+    frontendPreview: null,
     lastSignature: "",
     debounceTimer: null,
     requestSeq: window.montageExportPreviewState.requestSeq || 0,
@@ -802,9 +852,13 @@ function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
     src,
     mediaType: isImage ? (mimeType || "image/png") : (mimeType || "video/mp4"),
     mediaScale: window.normalizeTimelineClipMediaScale?.(selected?.mediaScale) || 1,
+    mediaOffsetXPct: selected?.mediaOffsetXPct || 0,
+    mediaOffsetYPct: selected?.mediaOffsetYPct || 0,
+    mediaMotionPreset: selected?.mediaMotionPreset || "none",
     visualLayoutMode: String(selected?.visualLayoutMode || "default").trim() || "default",
     visualEffects: selected?.visualEffects || null,
     sceneIndex: Math.max(1, Number(selected?.sceneIndex || 1) || 1),
+    timelineStartMs: Math.max(0, Number(selected?.timelineStartMs || selected?.startMs || 0) || 0),
     rowId: String(selected?.rowId || "").trim()
   };
 }
@@ -852,6 +906,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
       mediaType: frontendPreview.mediaType || "video/mp4",
       mode: payload.exportMode,
       sceneIndex: frontendPreview.sceneIndex || 0,
+      frontendPreview,
       meta: frontendPreview.sceneIndex
         ? `Escena ${frontendPreview.sceneIndex} de referencia (preview frontend${payload.reelModeEnabled === true ? " · Reel 9:16" : ""}).`
         : `Preview frontend de la exportación${payload.reelModeEnabled === true ? " · Reel 9:16" : ""}.`
@@ -860,8 +915,17 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     window.applySceneMediaScaleToStage?.({
       rowId: frontendPreview.rowId,
       mediaScale: frontendPreview.mediaScale,
+      mediaOffsetXPct: frontendPreview.mediaOffsetXPct,
+      mediaOffsetYPct: frontendPreview.mediaOffsetYPct,
+      mediaMotionPreset: frontendPreview.mediaMotionPreset,
       visualLayoutMode: frontendPreview.visualLayoutMode,
       container: previewContainer
+    });
+    window.renderPodcasterOverlayCardsForPreview?.({
+      session: window.getActiveSession?.(),
+      containerEl: previewContainer,
+      currentMs: frontendPreview.timelineStartMs || 0,
+      interactive: false
     });
     if (String(frontendPreview.mediaType || "").startsWith("image/") && window.els.montageExportPreviewImage) {
       const effects = frontendPreview.visualEffects;
@@ -892,6 +956,9 @@ export async function refreshMontageExportPreviewNow(options = {}) {
       videoStoragePath: entry?.video?.storagePath,
       videoUrl: entry?.video?.url,
       mediaScale: entry?.mediaScale,
+      mediaOffsetXPct: entry?.mediaOffsetXPct,
+      mediaOffsetYPct: entry?.mediaOffsetYPct,
+      mediaMotionPreset: entry?.mediaMotionPreset,
       visualLayoutMode: entry?.visualLayoutMode,
       visualEffects: entry?.visualEffects
     }))
@@ -1106,6 +1173,10 @@ export function buildMontageExportPayload(session = null) {
   const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
   const onScreenTextTimeline = window.buildMontageOnScreenTextSegments?.(activeSession, runtimeEntries) || {
     settings: null,
+    segments: []
+  };
+  const overlayCards = window.buildMontageOverlayCardSegments?.(activeSession, runtimeEntries) || {
+    enabled: false,
     segments: []
   };
 
@@ -1365,6 +1436,9 @@ export function buildMontageExportPayload(session = null) {
           trimInMs,
           durationMs,
           mediaScale: window.normalizeTimelineClipMediaScale?.(entry?.clip?.mediaScale) || 1,
+          mediaOffsetXPct: entry?.clip?.mediaOffsetXPct || 0,
+          mediaOffsetYPct: entry?.clip?.mediaOffsetYPct || 0,
+          mediaMotionPreset: entry?.clip?.mediaMotionPreset || "none",
           visualLayoutMode: window.normalizeTimelineClipVisualLayoutMode?.(entry?.clip?.visualLayoutMode) || "default",
           voiceOverText: String(row?.voiceOverText || row?.text || "").replace(/\s+/g, " ").trim(),
           sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
@@ -1438,6 +1512,7 @@ export function buildMontageExportPayload(session = null) {
       settings: onScreenTextTimeline.settings,
       segments: onScreenTextTimeline.segments
     } : null,
+    overlayCards: window.buildMontageOverlayCardSegments?.(activeSession, runtimeEntries) || overlayCards,
     audioTimeline: useTimelineAudio ? {
       enabled: true,
       durationMs: timelineDurationMs,

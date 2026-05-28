@@ -108,6 +108,17 @@ export class PodcasterPlaybackController extends EventEmitter {
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || null;
   }
+  syncStageMediaMotionPlaybackState(isPlaying = this.state.isPlaying === true) {
+    const container = this.resolveStageMediaScaleContainer()
+      || this.els?.podcastVideoStage?.querySelector?.(".podcast-video-preview")
+      || this.els?.podcastVideoStage
+      || null;
+    if (!container) return;
+    container.dataset.sceneMediaMotionPlaying = isPlaying === true ? "true" : "false";
+    container.querySelectorAll?.(".podcast-active-speaker-video:not(.podcast-active-speaker-video-backdrop), .podcast-active-speaker-image:not(.podcast-active-speaker-video-backdrop)").forEach((node) => {
+      node.style.animationPlayState = isPlaying === true ? "running" : "paused";
+    });
+  }
   applySceneMediaScale(entry = null) {
     const mediaScale = this.normalizeSceneMediaScale(entry?.clip?.mediaScale);
     const visualLayoutMode = String(entry?.clip?.visualLayoutMode || "default").trim() || "default";
@@ -115,6 +126,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.deps.applySceneMediaScaleToStage({
         rowId: String(entry?.rowId || "").trim(),
         mediaScale,
+        mediaOffsetXPct: entry?.clip?.mediaOffsetXPct,
+        mediaOffsetYPct: entry?.clip?.mediaOffsetYPct,
+        mediaMotionPreset: entry?.clip?.mediaMotionPreset,
         visualLayoutMode,
         container: this.resolveStageMediaScaleContainer()
       });
@@ -124,6 +138,125 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (container) {
       container.style.setProperty("--pod-scene-media-scale", String(mediaScale));
     }
+  }
+  resolveEntryVisualState(entry = null) {
+    const clip = entry?.clip || {};
+    const normalizeLayout = this.deps?.normalizeTimelineClipVisualLayoutMode || window.normalizeTimelineClipVisualLayoutMode;
+    return {
+      mediaScale: this.normalizeSceneMediaScale(clip?.mediaScale),
+      mediaOffsetXPct: Number(clip?.mediaOffsetXPct || 0) || 0,
+      mediaOffsetYPct: Number(clip?.mediaOffsetYPct || 0) || 0,
+      mediaMotionPreset: String(clip?.mediaMotionPreset || "none").trim() || "none",
+      visualLayoutMode: normalizeLayout?.(clip?.visualLayoutMode) || clip?.visualLayoutMode || "default"
+    };
+  }
+  resolveSceneMediaCanvasRect(surfaceEl = null) {
+    const container = surfaceEl?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
+      || this.resolveStageMediaScaleContainer()
+      || null;
+    const width = Math.max(2, Number(container?.clientWidth || 0) || 0);
+    const height = Math.max(2, Number(container?.clientHeight || 0) || 0);
+    return {
+      container,
+      width: width || 1280,
+      height: height || 720
+    };
+  }
+  resolveSceneMediaRenderSpec(entry = null, surfaceEl = null, sourceWidth = 0, sourceHeight = 0) {
+    const resolver = this.deps?.resolveSceneMediaRenderSpec || window.resolveSceneMediaRenderSpec;
+    if (typeof resolver !== "function") return null;
+    const { width, height, container } = this.resolveSceneMediaCanvasRect(surfaceEl);
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const config = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+    const isReelPreview = container?.closest?.(".montage-export-preview")?.dataset?.reel === "true";
+    const state = this.resolveEntryVisualState(entry);
+    return resolver({
+      canvasWidth: width,
+      canvasHeight: height,
+      sourceWidth: Math.max(2, Number(sourceWidth || 0) || width),
+      sourceHeight: Math.max(2, Number(sourceHeight || 0) || height),
+      reelMode: isReelPreview || config?.reelModeEnabled === true,
+      visualLayoutMode: state.visualLayoutMode,
+      mediaScale: state.mediaScale,
+      mediaOffsetXPct: state.mediaOffsetXPct,
+      mediaOffsetYPct: state.mediaOffsetYPct,
+      mediaMotionPreset: state.mediaMotionPreset,
+      visualEffects: session?.visualEffectsMap?.[entry?.rowId] || null,
+      mediaKind: this.isImageStageEntry(entry) ? "image" : "video",
+      durationSec: Math.max(0.2, Number(entry?.effectiveDurationMs || entry?.durationMs || 12000) / 1000)
+    });
+  }
+  applyComputedSceneMediaLayout(surfaceEl = null, spec = null) {
+    if (!surfaceEl || !spec) return;
+    surfaceEl.style.setProperty("--pod-scene-media-left", `${spec.leftPx.toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-top", `${spec.topPx.toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-width", `${spec.scaledRect.width.toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-height", `${spec.scaledRect.height.toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-translate-x", "0px");
+    surfaceEl.style.setProperty("--pod-scene-media-translate-y", "0px");
+    surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
+    surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
+  }
+  applyEntryVisualStateToSurface(entry = null, surfaceEl = null) {
+    if (!surfaceEl) return;
+    const state = this.resolveEntryVisualState(entry);
+    const normalizeOffset = this.deps?.normalizeTimelineClipMediaOffset || window.normalizeTimelineClipMediaOffset;
+    const normalizeMotion = this.deps?.normalizeTimelineClipMediaMotionPreset || window.normalizeTimelineClipMediaMotionPreset;
+    const nextX = typeof normalizeOffset === "function"
+      ? normalizeOffset(state.mediaOffsetXPct)
+      : Math.max(-0.5, Math.min(0.5, Number(state.mediaOffsetXPct || 0) || 0));
+    const nextY = typeof normalizeOffset === "function"
+      ? normalizeOffset(state.mediaOffsetYPct)
+      : Math.max(-0.5, Math.min(0.5, Number(state.mediaOffsetYPct || 0) || 0));
+    const nextMotion = typeof normalizeMotion === "function"
+      ? normalizeMotion(state.mediaMotionPreset)
+      : "none";
+    const sourceWidth = Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoWidth : surfaceEl.naturalWidth) || 0;
+    const sourceHeight = Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoHeight : surfaceEl.naturalHeight) || 0;
+    const spec = this.resolveSceneMediaRenderSpec(entry, surfaceEl, sourceWidth, sourceHeight);
+    if (spec) {
+      this.applyComputedSceneMediaLayout(surfaceEl, spec);
+    } else {
+      surfaceEl.style.setProperty("--pod-scene-media-left", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-top", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-width", "100%");
+      surfaceEl.style.setProperty("--pod-scene-media-height", "100%");
+      surfaceEl.style.setProperty("--pod-scene-media-pan-x-amplitude", "0px");
+      surfaceEl.style.setProperty("--pod-scene-media-pan-y-amplitude", "0px");
+    }
+    surfaceEl.style.setProperty("--pod-scene-media-scale", String(state.mediaScale));
+    surfaceEl.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
+    surfaceEl.style.setProperty("--pod-scene-media-y", `${(nextY * 100).toFixed(3)}%`);
+    surfaceEl.dataset.sceneMediaMotionPreset = nextMotion;
+    surfaceEl.dataset.sceneMediaLayout = String(state.visualLayoutMode || "default");
+    if (!(sourceWidth > 0 && sourceHeight > 0)) {
+      const eventName = surfaceEl.tagName === "VIDEO" ? "loadedmetadata" : "load";
+      surfaceEl.addEventListener(eventName, () => {
+        const refreshedSpec = this.resolveSceneMediaRenderSpec(
+          entry,
+          surfaceEl,
+          Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoWidth : surfaceEl.naturalWidth) || 0,
+          Number(surfaceEl.tagName === "VIDEO" ? surfaceEl.videoHeight : surfaceEl.naturalHeight) || 0
+        );
+        if (refreshedSpec) this.applyComputedSceneMediaLayout(surfaceEl, refreshedSpec);
+      }, { once: true });
+    }
+  }
+  resetEntryVisualStateOnSurface(surfaceEl = null) {
+    if (!surfaceEl) return;
+    surfaceEl.style.removeProperty("--pod-scene-media-left");
+    surfaceEl.style.removeProperty("--pod-scene-media-top");
+    surfaceEl.style.removeProperty("--pod-scene-media-width");
+    surfaceEl.style.removeProperty("--pod-scene-media-height");
+    surfaceEl.style.removeProperty("--pod-scene-media-translate-x");
+    surfaceEl.style.removeProperty("--pod-scene-media-translate-y");
+    surfaceEl.style.removeProperty("--pod-scene-media-pan-x-amplitude");
+    surfaceEl.style.removeProperty("--pod-scene-media-pan-y-amplitude");
+    surfaceEl.style.removeProperty("--pod-scene-media-scale");
+    surfaceEl.style.removeProperty("--pod-scene-media-x");
+    surfaceEl.style.removeProperty("--pod-scene-media-y");
+    delete surfaceEl.dataset.sceneMediaMotionPreset;
+    delete surfaceEl.dataset.sceneMediaLayout;
   }
   resolveSegmentSourceOffsetSec(currentMs, segmentStartMs, trimInMs = 0, clipPlaybackRate = 1) {
     const safeTrimInMs = Math.max(0, Number(trimInMs || 0));
@@ -625,9 +758,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       try { this.deps.stopPanelMusic(); } catch (_) { }
     }
     this.deps?.updatePodcastVideoTransportUi?.();
-    if (this.els?.podcastActiveSpeakerImage) {
-      this.els.podcastActiveSpeakerImage.style.animationPlayState = 'running';
-    }
+    this.syncStageMediaMotionPlaybackState(true);
   }
 
   pause() {
@@ -656,9 +787,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       } catch (_) { }
     }
     this.deps?.updatePodcastVideoTransportUi?.();
-    if (this.els?.podcastActiveSpeakerImage) {
-      this.els.podcastActiveSpeakerImage.style.animationPlayState = 'paused';
-    }
+    this.syncStageMediaMotionPlaybackState(false);
   }
 
   async stop(opts = {}) {
@@ -676,9 +805,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     
     this.stopBackgroundMusic();
     this.applySceneMediaScale(null);
-    if (this.els?.podcastActiveSpeakerImage) {
-      this.els.podcastActiveSpeakerImage.style.animationPlayState = 'paused';
-    }
+    this.syncStageMediaMotionPlaybackState(false);
     if (this.deps?.stopPanelMusic) { try { this.deps.stopPanelMusic(); } catch (_) { } }
     
     Object.values(this.dialoguePlayers).forEach(a => {
@@ -923,7 +1050,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         this.syncAudio(ms, speed),
         this.syncVideo(ms),
         this.syncOverlay ? this.syncOverlay(ms) : null,
-        this.syncStylizedText ? this.syncStylizedText(ms) : null
+        this.syncStylizedText ? this.syncStylizedText(ms) : null,
+        this.syncOverlayCards ? this.syncOverlayCards(ms) : null
       ]);
       
       this.emit('timeupdate', { currentMs: ms });
@@ -1433,6 +1561,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     const frontInfo = this.resolveEntryTargetOffsetSec(frontEntry, currentMs);
     const resetSurface = (el) => {
       if (!el) return;
+      this.resetEntryVisualStateOnSurface(el);
       el.style.transition = "none";
       el.style.opacity = "";
       el.style.transform = "";
@@ -1454,7 +1583,9 @@ export class PodcasterPlaybackController extends EventEmitter {
         await this.preloadImageSrc(src).catch(() => { });
         await this.ensureStageImageReady(imageEl, src);
         imageEl.className = `${imageBaseClass(imageEl)} is-visible`;
+        this.applyEntryVisualStateToSurface(entry, imageEl);
         imageEl.style.animationPlayState = this.state.isPlaying ? "running" : "paused";
+        this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
         imageEl.hidden = false;
         imageEl.style.visibility = "visible";
         imageEl.style.transition = "none";
@@ -1462,6 +1593,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       if (!videoEl || !entry?.videoSrc) return null;
       resetSurface(imageEl);
+      this.applyEntryVisualStateToSurface(entry, videoEl);
       if (videoEl.dataset.src !== entry.videoSrc) {
         const ready = await this.deps.setPodcastStageVideoSourceForElement(videoEl, entry.videoSrc, { keepHidden: false });
         if (ready !== true) return false;
@@ -1571,6 +1703,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   hideAllVideos() {
     [this.els?.podcastActiveSpeakerVideo, this.els?.podcastActiveSpeakerVideoAlt, this.els?.podcastActiveSpeakerBackdropVideo, this.els?.podcastActiveSpeakerBackdropVideoAlt].forEach(v => {
       if (v) { 
+        this.resetEntryVisualStateOnSurface(v);
         v.style.opacity = 0; 
         v.style.visibility = "hidden";
         v.style.transform = "";
@@ -1586,6 +1719,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     [this.els?.podcastActiveSpeakerImage, this.els?.podcastActiveSpeakerImageAlt].forEach((imageEl) => {
       if (!imageEl) return;
       imageEl.style.opacity = 0;
+      this.resetEntryVisualStateOnSurface(imageEl);
       imageEl.style.visibility = "hidden";
       imageEl.style.transform = "";
       imageEl.style.filter = "";
@@ -1700,6 +1834,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       imageEl.className = className;
       imageEl.style.animationPlayState = this.state.isPlaying ? 'running' : 'paused';
+      this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
     };
 
     if (currentSrc === cleanSrc && isReady) {
@@ -2146,6 +2281,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (window.PodcasterMediaEditor?.renderStylizedText) {
         window.PodcasterMediaEditor.renderStylizedText(container, rowId, session);
     }
+  }
+
+  syncOverlayCards(currentMs) {
+    if (typeof window.renderPodcasterOverlayCardsForPreview !== "function") return;
+    const stage = this.els?.podcastActiveSpeakerVideo?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
+      || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
+      || this.els?.podcastVideoStage?.querySelector?.(".podcast-video-preview")
+      || this.els?.podcastVideoStage
+      || null;
+    if (!stage) return;
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const config = this.deps?.getPodcastVideoConfig?.(session) || this.state.config || {};
+    window.renderPodcasterOverlayCardsForPreview({
+      session,
+      config,
+      containerEl: stage,
+      currentMs,
+      interactive: this.deps?.isDashboard !== true
+    });
   }
 
   initMse() { if (!this.mse) this.mse = { engine: null }; }
@@ -2666,7 +2820,14 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     const visualLayoutMode = normalizeLayout?.(clipCfg?.visualLayoutMode) || clipCfg?.visualLayoutMode || "default";
     const mediaScale = normalizeScale?.(clipCfg?.mediaScale) ?? 1;
-    applyScale?.({ rowId: key, mediaScale, visualLayoutMode });
+    applyScale?.({
+      rowId: key,
+      mediaScale,
+      mediaOffsetXPct: clipCfg?.mediaOffsetXPct,
+      mediaOffsetYPct: clipCfg?.mediaOffsetYPct,
+      mediaMotionPreset: clipCfg?.mediaMotionPreset,
+      visualLayoutMode
+    });
     
     const isLikelyImage = this.deps?.isLikelyImageMediaRecord || window.isLikelyImageMediaRecord;
     const isImageStageClip = isLikelyImage?.(firstSegment || clip || null) || (clip?.mimeType?.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif)/i.test(src));

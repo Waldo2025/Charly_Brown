@@ -8,9 +8,9 @@ if (!/mediaScale:\s*window\.normalizeTimelineClipMediaScale\?\.\(entry\?\.clip\?
 }
 
 if (!/mediaScale:\s*window\.normalizeTimelineClipMediaScale\?\.\(selected\?\.mediaScale\) \|\| 1/.test(front)
-  || !/window\.applySceneMediaScaleToStage\?\.\(\{[\s\S]*mediaScale: frontendPreview\.mediaScale[\s\S]*container: previewContainer/.test(front)
+  || !/function syncMontageFrontendPreviewMediaLayout\(frontendPreview = null\)/.test(front)
   || !/ken-burns-\$\{effect\}/.test(front)) {
-  throw new Error("El preview frontend de export debe aplicar zoom de escena y clases Ken Burns.");
+  throw new Error("El preview frontend de export debe sincronizar layout de escena y clases Ken Burns.");
 }
 
 if (!/function normalizeMontageMediaScale\(value = 1\)/.test(back)
@@ -18,16 +18,18 @@ if (!/function normalizeMontageMediaScale\(value = 1\)/.test(back)
   throw new Error("El backend debe normalizar mediaScale del payload de export.");
 }
 
-if (!/function buildMontageVideoSceneFilter\(\{/.test(back)
-  || !/const sceneScale = normalizeMontageMediaScale\(mediaScale\);/.test(back)
-  || !/scale=\$\{scaledWidth\}:\$\{scaledHeight\}:force_original_aspect_ratio=increase,crop=\$\{width\}:\$\{height\},setsar=1/.test(back)
-  || !/buildMontageVideoSceneFilter\(\{[\s\S]*mediaScale[\s\S]*\}\);/.test(back)) {
-  throw new Error("La exportación de video debe aplicar mediaScale con crop centrado sin deformar el aspect ratio.");
+if (!/function buildSceneMediaPositionCropFilter\(\{/.test(back)
+  || !/resolveSceneMediaRenderSpec\(\{/.test(back)
+  || !/color=c=0x020617:s=\$\{width\}x\$\{height\}:d=/.test(back)
+  || !/overlay=x='/.test(back)
+  || !/buildMontageVideoSceneFilter\(\{[\s\S]*sourceWidth[\s\S]*sourceHeight[\s\S]*mediaScale[\s\S]*\}\)/.test(back)) {
+  throw new Error("La exportación de video debe derivar layout explícito desde la spec compartida de escena.");
 }
 
 if (!/buildMontageImageMotionVideoFilter\(\{[\s\S]*mediaScale[\s\S]*\}\)/.test(back)
-  || !/const coverWidth = Math\.max\(2, Math\.round\(\(width \* sceneScale\) \/ 2\) \* 2\);/.test(back)) {
-  throw new Error("La exportación de imágenes debe aplicar mediaScale al cover/crop.");
+  || !/mediaKind:\s*"image"/.test(back)
+  || !/spec\.kenBurns\.effect/.test(back)) {
+  throw new Error("La exportación de imágenes debe aplicar mediaScale y Ken Burns desde la spec compartida.");
 }
 
 console.log("Podcaster export scene media scale OK.");
