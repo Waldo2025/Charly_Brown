@@ -1808,7 +1808,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     editor.prewarmStylizedText(nextEntry.rowId, session);
   }
 
-  requestImageStageSwap(entry = null) {
+  requestImageStageSwap(entry = null, offsetSec = 0) {
     const imageEl = this.els?.podcastActiveSpeakerImage;
     const cleanSrc = String(entry?.videoSrc || "").trim();
     if (!imageEl || !cleanSrc) return;
@@ -1832,8 +1832,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         const effectClasses = effects.effects.map(e => `ken-burns-${e}`).join(" ");
         className += ` ${effectClasses} ${speedClass}`;
       }
-      imageEl.className = className;
+      if (imageEl.className !== className) {
+        imageEl.className = className;
+      }
       imageEl.style.animationPlayState = this.state.isPlaying ? 'running' : 'paused';
+      const targetDelay = offsetSec >= 0 ? `-${offsetSec.toFixed(3)}s` : "";
+      if (imageEl.style.animationDelay !== targetDelay) {
+        imageEl.style.animationDelay = targetDelay;
+      }
       this.syncStageMediaMotionPlaybackState(this.state.isPlaying === true);
     };
 
@@ -1893,7 +1899,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.applySceneMediaScale(entry);
 
     if (isImage) {
-        this.requestImageStageSwap(entry);
+        this.requestImageStageSwap(entry, offsetSec);
         return;
     } else {
         this.hideAllImages();

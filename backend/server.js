@@ -8024,7 +8024,7 @@ function buildSceneMediaPositionCropFilter({
     inputChain.push(`scale=${spec.evenScaledSize.width}:${spec.evenScaledSize.height}`);
   }
   return [
-    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}[${backgroundLabel}]`,
+    `color=c=0x020617:s=${width}x${height}:d=${Math.max(0.2, Number(durationSec || 1) || 1).toFixed(3)}:r=24[${backgroundLabel}]`,
     `${inputChain.join(",")}[${transformedLabel}]`,
     `[${backgroundLabel}][${transformedLabel}]overlay=x='${xExpr}':y='${yExpr}':eval=frame:shortest=1,format=yuv420p[${outputLabel}]`
   ].join(";");
@@ -8415,8 +8415,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const veoVolumePct = Math.max(0, Math.min(200, Number(entry?.veoVolumeOverridePct ?? 0)));
       const useNativeVideoAudio = entry?.useNativeVideoAudio === true || veoVolumePct > 0.0001;
       const videoAsset = entry?.video && typeof entry.video === "object" ? entry.video : {};
-      const isImageAsset = String(videoAsset?.mediaKind || videoAsset?.type || "").trim().toLowerCase() === "image"
-        || String(videoAsset?.mimeType || "").trim().toLowerCase().startsWith("image/");
+      const isImageAssetOriginal = (() => {
+        const isImageAsset = String(videoAsset?.mediaKind || videoAsset?.type || "").trim().toLowerCase() === "image"
+          || String(videoAsset?.mimeType || "").trim().toLowerCase().startsWith("image/");
+        return isImageAsset;
+      })();
+      const isImageAsset = isImageAssetOriginal
+        || /\.(jpg|jpeg|png|webp|gif|avif)(?:[?#]|$)/i.test(videoAsset?.storagePath || videoAsset?.url || "")
+        || /\/api\/assets\/proxy-image\?/i.test(videoAsset?.storagePath || videoAsset?.url || "");
       const audioAsset = entry?.audio && typeof entry.audio === "object" ? entry.audio : null;
 
       if (!rowId) {
