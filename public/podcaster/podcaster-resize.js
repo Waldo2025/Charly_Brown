@@ -47,6 +47,25 @@ export let podcastVideoLibraryCollapsed = (() => {
   }
 })();
 
+function updatePodcastVideoLibraryToggleUi(els = {}) {
+  const expanded = !podcastVideoLibraryCollapsed;
+  const toggleBtn = els.togglePodcastVideoLibraryBtn || null;
+  if (toggleBtn) {
+    toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggleBtn.setAttribute("aria-label", expanded ? "Cerrar librería" : "Mostrar librería");
+    toggleBtn.setAttribute("title", expanded ? "Cerrar librería" : "Mostrar librería");
+    toggleBtn.dataset.tooltip = expanded ? "Cerrar librería" : "Mostrar librería";
+    const icon = toggleBtn.querySelector("i");
+    if (icon) {
+      icon.classList.remove("fa-chevron-left", "fa-chevron-right");
+      icon.classList.add(expanded ? "fa-chevron-left" : "fa-chevron-right");
+    }
+  }
+  if (els.podcastVideoLibraryCollapsedHandle) {
+    els.podcastVideoLibraryCollapsedHandle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+}
+
 /**
  * Updates the stage max height and persists state.
  */
@@ -259,9 +278,7 @@ export function setPodcastVideoLibraryCollapsed(collapsed, { persist = true, els
   if (els.podcastVideoLibraryCollapsedHandle) {
     els.podcastVideoLibraryCollapsedHandle.setAttribute("aria-expanded", podcastVideoLibraryCollapsed ? "false" : "true");
   }
-  if (els.togglePodcastVideoLibraryBtn) {
-    els.togglePodcastVideoLibraryBtn.setAttribute("aria-expanded", podcastVideoLibraryCollapsed ? "false" : "true");
-  }
+  updatePodcastVideoLibraryToggleUi(els);
   
   if (persist) {
     try {

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.64",
-  "build": "2026-1.0.10.64",
+  "version": "1.0.10.65",
+  "build": "2026-1.0.10.65",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: Lógica de Toggle de Notas del Maestro (ahora usa clases CSS).",
@@ -11,5 +11,5 @@
     "Corregido: El backend deja de enviar compressionQuality a Veo 3.1 en Gemini API.",
     "Mejorado: La configuración global de Podcaster ahora lista y persiste todos los modelos Veo disponibles."
   ],
-  "cache_version": "2026-1.0.10.64"
+  "cache_version": "2026-1.0.10.65"
 }

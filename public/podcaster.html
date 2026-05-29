@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="header.css">
   <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.43">
   <link rel="stylesheet" href="podcaster/podcaster-sidepanel-studio.css?v=2026-05-23-1">
+  <link rel="stylesheet" href="podcaster/podcaster-overlay-card-studio.css?v=2026-05-28-2">
   <!-- FilePond -->
   <link href="https://unpkg.com/filepond/dist/filepond.min.css" rel="stylesheet">
   <link href="https://unpkg.com/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.min.css"
@@ -1112,10 +1113,6 @@
       </div>
 
       <div class="podcast-studio-layout">
-        <button id="podcastVideoLibraryCollapsedHandle" class="podcast-video-library-collapsed-handle" type="button"
-          aria-label="Mostrar librería" aria-expanded="false" data-tooltip="Mostrar librería">
-          <i class="fas fa-chevron-right" aria-hidden="true"></i>
-        </button>
         <div class="podcast-studio-main">
           <div id="podcastVideoStage" class="podcast-video-stage">
             <aside class="podcast-video-library" aria-label="Librería pública de escenas">
@@ -1131,9 +1128,9 @@
                     title="Actualizar librería pública" aria-label="Actualizar librería pública">
                     <i class="fas fa-sync-alt"></i>
                   </button>
-                  <button id="togglePodcastVideoLibraryBtn" class="row-icon-btn" type="button"
-                    aria-controls="podcastVideoLibrary" aria-expanded="true" title="Ocultar librería">
-                    <i class="fas fa-chevron-left"></i>
+                  <button id="podcastSceneLibraryClearFiltersBtn" class="row-icon-btn" type="button"
+                    title="Limpiar filtros" aria-label="Limpiar filtros">
+                    <i class="fas fa-eraser"></i>
                   </button>
                 </div>
               </div>
@@ -1151,29 +1148,49 @@
                   <option value="violet">Violeta</option>
                   <option value="pink">Rosa</option>
                 </select>
-                <button id="podcastSceneLibraryClearFiltersBtn" class="row-icon-btn" type="button"
-                  title="Limpiar filtros" aria-label="Limpiar filtros">
-                  <i class="fas fa-eraser"></i>
-                </button>
               </div>
               <div id="podcastSceneLibraryList" class="podcast-scene-library-list" aria-live="polite"></div>
             </aside>
             <div class="podcast-video-preview-shell">
-              <div class="podcast-video-preview">
-                <div class="podcast-preview-scene-zoom-controls" role="group" aria-label="Zoom de escena">
-                  <button id="addStylizedTextBtn" class="row-icon-btn podcast-preview-add-stylized-text-btn"
-                    type="button" title="Añadir texto estilizado" aria-label="Añadir texto estilizado">
-                    <i class="fas fa-font" aria-hidden="true"></i>
-                  </button>
-                  <button id="podcastSceneZoomInBtn" class="row-icon-btn podcast-preview-scene-zoom-btn" type="button"
-                    title="Acercar escena" aria-label="Acercar escena">
-                    <i class="fas fa-plus" aria-hidden="true"></i>
-                  </button>
-                  <button id="podcastSceneZoomOutBtn" class="row-icon-btn podcast-preview-scene-zoom-btn" type="button"
-                    title="Alejar escena" aria-label="Alejar escena">
-                    <i class="fas fa-minus" aria-hidden="true"></i>
+              <div class="podcast-preview-left-toolbar" role="toolbar" aria-label="Herramientas de escena">
+                <button id="podcastVideoLibraryCollapsedHandle"
+                  class="row-icon-btn podcast-preview-toolbar-btn podcast-video-library-collapsed-handle" type="button"
+                  aria-label="Mostrar librería" aria-expanded="false" data-tooltip="Mostrar librería">
+                  <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                </button>
+                <button id="togglePodcastVideoLibraryBtn"
+                  class="row-icon-btn podcast-preview-toolbar-btn podcast-preview-toolbar-btn--library" type="button"
+                  aria-controls="podcastVideoLibrary" aria-expanded="true" title="Cerrar librería"
+                  aria-label="Cerrar librería" data-tooltip="Cerrar librería">
+                  <i class="fas fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <button class="row-icon-btn podcast-preview-toolbar-btn podcast-overlay-card-add-btn" type="button"
+                  data-action="overlay-card-open" aria-label="Añadir card" title="Añadir card"
+                  data-tooltip="Añadir card">
+                  <i class="far fa-id-card" aria-hidden="true"></i>
+                </button>
+                <button id="addStylizedTextBtn" class="row-icon-btn podcast-preview-toolbar-btn" type="button"
+                  title="Añadir texto estilizado" aria-label="Añadir texto estilizado"
+                  data-tooltip="Añadir texto estilizado">
+                  <i class="fas fa-font" aria-hidden="true"></i>
+                </button>
+                <button id="podcastSceneZoomInBtn" class="row-icon-btn podcast-preview-toolbar-btn" type="button"
+                  title="Acercar escena" aria-label="Acercar escena" data-tooltip="Acercar escena">
+                  <i class="fas fa-plus" aria-hidden="true"></i>
+                </button>
+                <button id="podcastSceneZoomOutBtn" class="row-icon-btn podcast-preview-toolbar-btn" type="button"
+                  title="Alejar escena" aria-label="Alejar escena" data-tooltip="Alejar escena">
+                  <i class="fas fa-minus" aria-hidden="true"></i>
+                </button>
+                <div class="podcast-scene-position-toolbar">
+                  <button id="podcastScenePositionToggleBtn" class="row-icon-btn podcast-preview-toolbar-btn"
+                    type="button" aria-label="Ajustar posición y movimiento" aria-expanded="false"
+                    title="Ajustar posición y movimiento" data-tooltip="Ajustar posición y movimiento">
+                    <i class="fas fa-sliders-h" aria-hidden="true"></i>
                   </button>
                 </div>
+              </div>
+              <div class="podcast-video-preview">
                 <img src="podcaster/logo.png" alt="" class="podcast-stage-brand-mark" aria-hidden="true">
                 <button id="podcastPreviewFullscreenBtn" class="row-icon-btn podcast-stage-fullscreen-btn" type="button"
                   aria-label="Pantalla completa" title="Pantalla completa" aria-pressed="false">
@@ -2011,11 +2028,12 @@
           <label class="row-field">
             <span>Resolución</span>
             <select id="montageExportResolution">
-              <option value="source" selected>Fuente (sin upscale)</option>
-              <option value="1080p">1080p (solo downscale)</option>
-              <option value="720p">720p (solo downscale)</option>
-              <option value="480p">480p (solo downscale)</option>
+              <option value="source" selected>Fuente original</option>
+              <option value="1080p">1080p final (1920×1080)</option>
+              <option value="720p">720p final (1280×720)</option>
+              <option value="480p">480p final (854×480)</option>
             </select>
+            <small>Si el video original es menor, el export puede escalarlo sin añadir detalle real.</small>
           </label>
           <div class="row-field montage-export-quality">
             <span>Calidad</span>
@@ -2291,7 +2309,7 @@
   <script type="module" src="podcaster/podcaster-script-editor.js?v=2026-05-17.2"></script>
   <script type="module" src="podcaster/podcaster.js?v=2026-05-26.1"></script>
   <script type="module" src="podcaster/podcaster-scene-media-position.js?v=2026-05-27.1"></script>
-  <script type="module" src="podcaster/podcaster-overlay-cards.js?v=2026-05-27.1"></script>
+  <script type="module" src="podcaster/podcaster-overlay-card-studio.js?v=2026-05-28.1"></script>
   <script type="module" src="podcaster/podcaster-reels.js"></script>
   <script type="module" src="podcaster/podcaster-public-library.js?v=2026-05-17.1"></script>
   <script type="module" src="podcaster/podcaster-chat-assistant.js?v=2026-05-17.1"></script>

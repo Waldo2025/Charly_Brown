@@ -15,8 +15,12 @@ if (!/const rowReferenceVideo = getRowReferenceVideoMap\(session\)\[key\] \|\| n
   throw new Error("La generación de video debe leer el video de referencia de la escena.");
 }
 
-if (!/const referenceMode = rowReferenceVideo \? "video" : "image";/.test(generatorSource)) {
-  throw new Error("La generación de video debe decidir entre referencia de imagen o video.");
+if (!/const effectiveReferenceMode = explicitReferenceMode === "video" && rowReferenceVideo\s*\?\s*"video"\s*:\s*"image";/.test(generatorSource)) {
+  throw new Error("La generación de video debe resolver el modo efectivo de referencia entre imagen y video.");
+}
+
+if (!/const referenceMode = effectiveReferenceMode;/.test(generatorSource)) {
+  throw new Error("La generación de video debe publicar el modo efectivo de referencia en referenceMode.");
 }
 
 if (!/const inlineReferenceBudget = buildDialogueVideoInlineReferenceBudget\(effectiveReferenceImages,\s*rowReferenceVideo,\s*continuityReferenceImageDataUrl\);/.test(generatorSource)) {

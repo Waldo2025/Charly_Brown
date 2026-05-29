@@ -235,8 +235,8 @@ function normalizeOnScreenTextLayoutByRowId(raw = {}) {
 
 function normalizeOverlayCardPosition(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
-  const widthPct = Math.max(0.48, Math.min(0.9, toFiniteNumber(source.widthPct, 0.56)));
-  const heightPct = Math.max(0.18, Math.min(0.55, toFiniteNumber(source.heightPct, 0.2)));
+  const widthPct = Math.max(0.22, Math.min(0.9, toFiniteNumber(source.widthPct, 0.56)));
+  const heightPct = Math.max(0.12, Math.min(0.55, toFiniteNumber(source.heightPct, 0.2)));
   return {
     xPct: Math.max(0, Math.min(1 - widthPct, toFiniteNumber(source.xPct, 0.06))),
     yPct: Math.max(0, Math.min(1 - heightPct, toFiniteNumber(source.yPct, 0.68))),
@@ -250,11 +250,21 @@ function normalizeOverlayCardPreset(value = "") {
   return new Set(["lower-third", "info-panel", "phone-cta"]).has(preset) ? preset : "lower-third";
 }
 
+function normalizeOverlayCardStyleModel(value = "", fallback = "lower-third-slab") {
+  const styleModel = String(value || fallback).trim();
+  return styleModel || fallback;
+}
+
 function normalizeOverlayCardAnimation(value = "", fallback = "slide-left") {
   const animation = String(value || fallback).trim().toLowerCase();
   return new Set(["slide-left", "slide-right", "slide-up", "slide-down", "fade"]).has(animation)
     ? animation
     : fallback;
+}
+
+function normalizeOverlayCardLoopAnimation(value = "", fallback = "none") {
+  const loopAnimation = String(value || fallback).trim().toLowerCase();
+  return loopAnimation || fallback;
 }
 
 function normalizeOverlayCardItem(raw = {}, fallbackId = "") {
@@ -267,12 +277,16 @@ function normalizeOverlayCardItem(raw = {}, fallbackId = "") {
   if (!textLines.length) return null;
   const startMs = Math.max(0, Math.round(toFiniteNumber(raw.startMs, 0)));
   const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(toFiniteNumber(raw.durationMs, 4000)));
+  const exitDelayMs = Math.max(0, Math.min(durationMs, Math.round(toFiniteNumber(raw.exitDelayMs, Math.max(0, durationMs - 520)))));
   return {
     id,
     rowId: String(raw.rowId || "").trim(),
     startMs,
     durationMs,
+    exitDelayMs,
     preset: normalizeOverlayCardPreset(raw.preset),
+    styleModel: normalizeOverlayCardStyleModel(raw.styleModel, "lower-third-slab"),
+    animationPreset: String(raw.animationPreset || "broadcast-soft").trim() || "broadcast-soft",
     textLines,
     position: normalizeOverlayCardPosition(raw.position || raw.size || {}),
     enterAnimation: normalizeOverlayCardAnimation(raw.enterAnimation, "slide-left"),
@@ -280,11 +294,15 @@ function normalizeOverlayCardItem(raw = {}, fallbackId = "") {
     style: raw.style && typeof raw.style === "object" ? {
       accentColor: String(raw.style.accentColor || "#38bdf8").trim() || "#38bdf8",
       backgroundColor: String(raw.style.backgroundColor || "#0f172a").trim() || "#0f172a",
-      textColor: String(raw.style.textColor || "#f8fafc").trim() || "#f8fafc"
+      textColor: String(raw.style.textColor || "#f8fafc").trim() || "#f8fafc",
+      fontScale: Math.max(0.65, Math.min(1.8, toFiniteNumber(raw.style.fontScale, 1))),
+      loopAnimation: normalizeOverlayCardLoopAnimation(raw.style.loopAnimation, "none")
     } : {
       accentColor: "#38bdf8",
       backgroundColor: "#0f172a",
-      textColor: "#f8fafc"
+      textColor: "#f8fafc",
+      fontScale: 1,
+      loopAnimation: "none"
     },
     zIndex: Math.max(1, Math.min(999, Math.round(toFiniteNumber(raw.zIndex, 20))))
   };

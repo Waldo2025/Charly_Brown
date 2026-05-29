@@ -526,17 +526,27 @@ async function probeMediaVideoDimensionsWithFfmpeg(inputPath = "", label = "prob
   return extractVideoDimensionsFromFfmpegStderr(probeResult.stderr || "");
 }
 
-async function probeMediaHasAudioWithFfmpeg(inputPath = "") {
+async function probeSceneMediaMetadataWithFfmpeg(inputPath = "", options = {}) {
+  const source = String(inputPath || "").trim();
+  const label = String(options?.label || "probe_scene").trim() || "probe_scene";
+  const hasAudio = options?.hasAudio === true;
   const probeResult = await runFfmpegCommand([
     "-hide_banner",
-    "-i", String(inputPath || "").trim(),
-    "-f", "null", "-"
+    "-i",
+    source,
+    "-f",
+    "null",
+    "-"
   ], {
-    stage: "probe_audio",
+    stage: `${label}_probe_metadata`,
     timeoutMs: MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS,
     timeoutCode: "scene_probe_timeout"
   });
-  return /Stream #.*: Audio:/i.test(probeResult.stderr || "");
+  const stderr = probeResult.stderr || "";
+  return {
+    dimensions: extractVideoDimensionsFromFfmpegStderr(stderr),
+    hasAudio: hasAudio ? /Stream #.*: Audio:/i.test(stderr) : false
+  };
 }
 
 async function probeImageDimensionsWithFfmpeg(inputPath = "", label = "probe_image") {
@@ -5663,6 +5673,17 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       }
     }
 
+    const sceneReferenceAssets = [...sceneReferenceImages];
+    if (sceneReferenceVideoFrameBase64) {
+      sceneReferenceAssets.push({
+        image: {
+          bytesBase64Encoded: sceneReferenceVideoFrameBase64,
+          mimeType: sceneReferenceVideoFrameMimeType
+        },
+        referenceType: "asset"
+      });
+    }
+
     const prompt = timelineScenePromptBundle?.prompt || [
       educationalVideo
         ? "Genera un video educativo corto, claro y realista."
@@ -5831,16 +5852,6 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       });
     }
     const requestVariants = [];
-    const sceneReferenceAssets = [...sceneReferenceImages];
-    if (sceneReferenceVideoFrameBase64) {
-      sceneReferenceAssets.push({
-        image: {
-          bytesBase64Encoded: sceneReferenceVideoFrameBase64,
-          mimeType: sceneReferenceVideoFrameMimeType
-        },
-        referenceType: "asset"
-      });
-    }
     const derivedHasSceneReference = sceneReferenceAssets.length > 0;
     const derivedUseSceneReferenceAsInitImage = derivedHasSceneReference && !strictIdentity;
     const continuityReferenceImage = continuityFrameBase64
@@ -7891,6 +7902,7 @@ function normalizeMontageOverlayCards(raw = null) {
       rowId: clampText(card.rowId || "", 140),
       startMs: Math.max(0, Math.round(Number(card.startMs || 0) || 0)),
       durationMs: Math.max(500, Math.round(Number(card.durationMs || 0) || 0)),
+      exitDelayMs: Math.max(0, Math.round(Number(card.exitDelayMs ?? Math.max(0, (Number(card.durationMs || 0) || 0) - 520)) || 0)),
       preset: ["lower-third", "info-panel", "phone-cta"].includes(String(card.preset || "").trim().toLowerCase()) ? String(card.preset).trim().toLowerCase() : "lower-third",
       textLines,
       position: {
@@ -8383,10 +8395,12 @@ async function renderMontageOverlayCards({
       const enterDy = enterAnimation === "slide-down" ? Math.round(h * 0.42) : enterAnimation === "slide-up" ? -Math.round(h * 0.42) : 0;
       const exitDx = exitAnimation === "slide-right" ? Math.round(w * 0.42) : exitAnimation === "slide-left" ? -Math.round(w * 0.42) : 0;
       const exitDy = exitAnimation === "slide-down" ? Math.round(h * 0.42) : exitAnimation === "slide-up" ? -Math.round(h * 0.42) : 0;
+      const exitDelayMs = Math.max(0, Math.min(Number(card.durationMs || 0) || 0, Number(card.exitDelayMs ?? Math.max(0, (Number(card.durationMs || 0) || 0) - 520)) || 0));
+      const exitStartSec = startSec + (exitDelayMs / 1000);
       const enterDurSec = Math.min(0.52, Math.max(0.12, (endSec - startSec) / 3));
-      const exitDurSec = Math.min(0.52, Math.max(0.12, (endSec - startSec) / 3));
+      const exitDurSec = Math.max(0.12, Math.min(2, Math.max(0.12, endSec - exitStartSec)));
       const enterProgress = `min(max((t-${startSec.toFixed(3)})/${enterDurSec.toFixed(3)},0),1)`;
-      const exitProgress = `min(max((t-${Math.max(startSec, endSec - exitDurSec).toFixed(3)})/${exitDurSec.toFixed(3)},0),1)`;
+      const exitProgress = `min(max((t-${Math.max(startSec, exitStartSec).toFixed(3)})/${exitDurSec.toFixed(3)},0),1)`;
       const boxX = escapeFfmpegExpr(`${x}+(${enterDx})*(1-(${enterProgress}))+(${exitDx})*(${exitProgress})`);
       const boxY = escapeFfmpegExpr(`${y}+(${enterDy})*(1-(${enterProgress}))+(${exitDy})*(${exitProgress})`);
       const accent = toFfmpegColor(card?.style?.accentColor || "#38BDF8", 0.95, "38BDF8");
@@ -8563,48 +8577,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const visualLayoutMode = String(entry?.visualLayoutMode || "").trim().toLowerCase() === "blur-backdrop"
           ? "blur-backdrop"
           : "default";
-        currentSceneSubstage = "scene_probe_audio";
-        if (!isImageAsset) {
-          emitSceneSubstage({
-            sceneIndex,
-            rowId,
-            totalScenes: input.entries.length,
-            substage: "scene_probe_audio",
-            hint: `Analizando audio de la escena ${sceneIndex} de ${input.entries.length}.`,
-            progress: sceneProgressBase + 0.015,
-            storagePath: videoStoragePath,
-            downloadUrl: videoDownloadUrl
-          });
-          console.info("[backend][montage-export][scene-step-start]", buildMontageSceneTrace({
-            jobId,
-            sceneIndex,
-            rowId,
-            storagePath: videoStoragePath,
-            downloadUrl: videoDownloadUrl,
-            substage: "scene_probe_audio"
-          }));
-        }
-        const probeAudioStartMs = Date.now();
-        const videoHasAudio = isImageAsset ? false : await probeMediaHasAudioWithFfmpeg(inputVisualPath);
-        if (!isImageAsset) {
-          console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
-            jobId,
-            sceneIndex,
-            rowId,
-            storagePath: videoStoragePath,
-            downloadUrl: videoDownloadUrl,
-            substage: "scene_probe_audio",
-            elapsedMs: Date.now() - probeAudioStartMs,
-            extra: { videoHasAudio }
-          }));
-        }
+        currentSceneSubstage = isImageAsset ? "scene_probe_dimensions" : "scene_probe_audio";
         emitSceneSubstage({
           sceneIndex,
           rowId,
           totalScenes: input.entries.length,
-          substage: "scene_probe_dimensions",
-          hint: `Analizando dimensiones de la escena ${sceneIndex} de ${input.entries.length}.`,
-          progress: sceneProgressBase + 0.03,
+          substage: currentSceneSubstage,
+          hint: isImageAsset
+            ? `Analizando dimensiones de la escena ${sceneIndex} de ${input.entries.length}.`
+            : `Analizando audio y dimensiones de la escena ${sceneIndex} de ${input.entries.length}.`,
+          progress: sceneProgressBase + 0.015,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl
         });
@@ -8614,22 +8596,29 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           rowId,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl,
-          substage: "scene_probe_dimensions"
+          substage: currentSceneSubstage
         }));
-        const probeDimensionsStartMs = Date.now();
-        currentSceneSubstage = "scene_probe_dimensions";
-        const sourceDims = isImageAsset
-          ? await probeImageDimensionsWithFfmpeg(inputVisualPath, `montage_scene_probe_image_${sceneIndex}`)
-          : await probeMediaVideoDimensionsWithFfmpeg(inputVisualPath, `montage_scene_probe_${sceneIndex}`);
+        const sceneProbeStartMs = Date.now();
+        const sceneProbe = isImageAsset
+          ? { dimensions: await probeImageDimensionsWithFfmpeg(inputVisualPath, `montage_scene_probe_image_${sceneIndex}`), hasAudio: false }
+          : await probeSceneMediaMetadataWithFfmpeg(inputVisualPath, {
+            label: `montage_scene_probe_${sceneIndex}`,
+            hasAudio: true
+          });
+        const sourceDims = sceneProbe.dimensions;
+        const videoHasAudio = sceneProbe.hasAudio;
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
           jobId,
           sceneIndex,
           rowId,
           storagePath: videoStoragePath,
           downloadUrl: videoDownloadUrl,
-          substage: "scene_probe_dimensions",
-          elapsedMs: Date.now() - probeDimensionsStartMs,
-          extra: sourceDims
+          substage: currentSceneSubstage,
+          elapsedMs: Date.now() - sceneProbeStartMs,
+          extra: {
+            ...sourceDims,
+            videoHasAudio
+          }
         }));
         if (!globalCanvas) {
           globalCanvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
@@ -9030,10 +9019,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         mixedOutPath
       ], { stage: "montage_mix_music" });
       finalOutPath = mixedOutPath;
-    } else if (outExt === "mp4") {
-      const remuxOutPath = path.join(tmpDir, "montage-faststart.mp4");
-      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-c", "copy", "-movflags", "+faststart", remuxOutPath], { stage: "montage_faststart" });
-      finalOutPath = remuxOutPath;
     }
 
     if (input.onScreenTextSettings && input.onScreenTextSegments.length) {
