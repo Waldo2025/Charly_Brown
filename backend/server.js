@@ -8760,6 +8760,74 @@ async function renderMontageOverlapComposition({
   return outPath;
 }
 
+async function renderMontageGapFillerClip({
+  tmpDir = "",
+  outExt = "mp4",
+  params = {},
+  canvas = null,
+  gapDurationMs = 0,
+  gapIndex = 0
+} = {}) {
+  const width = Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(canvas?.height || 720) || 720));
+  const durationSec = Math.max(0.08, Math.round(Number(gapDurationMs || 0) || 0) / 1000);
+  const outPath = path.join(tmpDir, `montage-gap-${String(gapIndex).padStart(3, "0")}.${outExt}`);
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    "-f", "lavfi", "-i", `color=c=black:s=${width}x${height}:d=${durationSec.toFixed(3)}:r=24`,
+    "-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:d=${durationSec.toFixed(3)}`,
+    "-map", "0:v:0",
+    "-map", "1:a:0",
+    "-r", "24",
+    "-c:v", params.vCodec,
+    ...params.vArgs,
+    "-pix_fmt", "yuv420p",
+    "-c:a", params.aCodec,
+    "-ar", "48000",
+    ...params.aArgs,
+    ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+    outPath
+  ], { stage: "montage_gap_fill" });
+  return outPath;
+}
+
+async function buildMontageGapAwareConcatSequence({
+  plan = null,
+  tmpDir = "",
+  outExt = "mp4",
+  params = {},
+  canvas = null
+} = {}) {
+  const entries = Array.isArray(plan?.entries) ? plan.entries : [];
+  if (!entries.length) return [];
+  const sequence = [];
+  let cursorMs = 0;
+  let gapIndex = 0;
+  for (const entry of entries) {
+    const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+    const endMs = Math.max(startMs, Math.round(Number(entry?.timelineEndMs || 0) || 0));
+    const sourcePath = String(entry?.intermediatePath || "").trim();
+    if (startMs > cursorMs + 1) {
+      // Insert a lightweight black/silent filler instead of forcing a full overlay composition.
+      const gapClipPath = await renderMontageGapFillerClip({
+        tmpDir,
+        outExt,
+        params,
+        canvas,
+        gapDurationMs: startMs - cursorMs,
+        gapIndex
+      });
+      gapIndex += 1;
+      sequence.push(gapClipPath);
+    }
+    if (sourcePath) {
+      sequence.push(sourcePath);
+    }
+    cursorMs = Math.max(cursorMs, endMs);
+  }
+  return sequence;
+}
+
 async function renderMontageOverlayCards({
   input = {},
   finalOutPath = "",
@@ -9164,6 +9232,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         exportedEntries.push({
           sceneIndex,
           rowId,
+          intermediatePath,
           zIndex: Math.max(1, Math.round(Number(entry?.zIndex || sceneIndex) || sceneIndex)),
           durationSec: durSec,
           durationMs,
@@ -9235,7 +9304,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
-    if (overlapPlan.hasOverlap || overlapPlan.hasGaps) {
+    if (overlapPlan.hasOverlap) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
         tmpDir,
@@ -9246,8 +9315,17 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
     }
     if (!concatOutPath) {
+      const concatSequencePaths = overlapPlan.hasGaps
+        ? await buildMontageGapAwareConcatSequence({
+          plan: overlapPlan,
+          tmpDir,
+          outExt,
+          params: intermediateParams,
+          canvas: globalCanvas
+        })
+        : intermediatePaths;
       const concatListPath = path.join(tmpDir, "concat-list.txt");
-      await fs.promises.writeFile(concatListPath, intermediatePaths.map((p) => `file '${String(p).replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
+      await fs.promises.writeFile(concatListPath, concatSequencePaths.map((p) => `file '${String(p).replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
       concatOutPath = path.join(tmpDir, `montage-concat.${outExt}`);
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning",
