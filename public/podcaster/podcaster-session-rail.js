@@ -45,6 +45,51 @@ export function createPodcasterSessionRailApi(deps = {}) {
     return Array.isArray(session.threads) ? session.threads : [];
   }
 
+  const sessionRailStatusCache = new Map();
+
+  function getSessionRailStatus(session = null) {
+    const sessionId = String(session?.id || "").trim();
+    const signature = [
+      sessionId,
+      String(session?.updatedAt || ""),
+      session?.archived === true ? "1" : "0",
+      session?.publicar === true ? "1" : "0",
+      String(session?.script?.rows?.length || session?.rows?.length || 0)
+    ].join("|");
+    const cached = sessionRailStatusCache.get(sessionId);
+    if (cached && cached.signature === signature) {
+      return cached.value;
+    }
+
+    const rows = getSessionRows(session);
+    let hasPendingProposal = false;
+    let hasAnyProposalPool = false;
+    let allProposalPoolsReviewed = true;
+    for (const row of rows) {
+      const activeProposal = resolveActiveVisualProposal(row);
+      if (activeProposal && !isVisualProposalResolved(row, activeProposal)) {
+        hasPendingProposal = true;
+      }
+      const proposals = Array.isArray(row?.visualNotesProposals)
+        ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
+        : [];
+      const explicitProposal = String(row?.visualNotesProposal || "").trim();
+      const proposalPool = Array.from(new Set([...proposals, explicitProposal].filter(Boolean)));
+      if (!proposalPool.length) continue;
+      hasAnyProposalPool = true;
+      if (proposalPool.some((proposalText) => !isVisualProposalResolved(row, proposalText))) {
+        allProposalPoolsReviewed = false;
+      }
+    }
+
+    const value = {
+      hasPendingProposal,
+      hasOnlyReviewedProposals: hasAnyProposalPool && allProposalPoolsReviewed
+    };
+    sessionRailStatusCache.set(sessionId, { signature, value });
+    return value;
+  }
+
   function getExpandedSessionIds() {
     if (!Array.isArray(state.expandedSessionIds)) {
       state.expandedSessionIds = [];
@@ -70,32 +115,6 @@ export function createPodcasterSessionRailApi(deps = {}) {
     const cleanSessionId = String(sessionId || "").trim();
     if (!cleanSessionId) return;
     state.expandedSessionIds = getExpandedSessionIds().filter((id) => id !== cleanSessionId);
-  }
-
-  function sessionHasPendingProposal(session = null) {
-    const rows = getSessionRows(session);
-    return rows.some((row) => {
-      const activeProposal = resolveActiveVisualProposal(row);
-      if (!activeProposal) return false;
-      return !isVisualProposalResolved(row, activeProposal);
-    });
-  }
-
-  function sessionHasOnlyReviewedProposals(session = null) {
-    const rows = getSessionRows(session);
-    let hasAnyProposal = false;
-    for (const row of rows) {
-      const proposals = Array.isArray(row?.visualNotesProposals)
-        ? row.visualNotesProposals.map((entry) => String(entry || "").trim()).filter(Boolean)
-        : [];
-      const explicitProposal = String(row?.visualNotesProposal || "").trim();
-      const proposalPool = Array.from(new Set([...proposals, explicitProposal].filter(Boolean)));
-      if (!proposalPool.length) continue;
-      hasAnyProposal = true;
-      const hasPending = proposalPool.some((proposalText) => !isVisualProposalResolved(row, proposalText));
-      if (hasPending) return false;
-    }
-    return hasAnyProposal;
   }
 
   function renderSessionThreadList(session = null) {
@@ -124,6 +143,35 @@ export function createPodcasterSessionRailApi(deps = {}) {
           `;
         }).join("")}
       </div>
+    `;
+  }
+
+  function renderSessionCard(session = null, activeId = "") {
+    const sessionStatus = getSessionRailStatus(session);
+    const sessionThreadList = isSessionExpanded(session.id) ? renderSessionThreadList(session) : "";
+    return `
+      <article class="session-card${session.id === activeId ? " is-active" : ""}" data-action="open-session" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-pressed="${session.id === activeId ? "true" : "false"}" aria-expanded="${isSessionExpanded(session.id) ? "true" : "false"}">
+        <div class="session-card-header${sessionStatus.hasPendingProposal ? " has-pending-proposal" : sessionStatus.hasOnlyReviewedProposals ? " has-reviewed-proposals" : ""}">
+          <span class="session-card-title">
+            <i class="far fa-folder session-card-folder-icon" aria-hidden="true"></i>
+            <strong>${escapeHtml(session.title || "Sesión sin título")}</strong>
+          </span>
+          <div class="session-card-menu">
+            <button class="session-menu-btn" type="button" data-action="toggle-session-menu" data-session-id="${escapeHtml(session.id)}" aria-label="Más opciones" aria-expanded="false">
+              <i class="fas fa-ellipsis-v"></i>
+            </button>
+            <div class="session-menu" hidden>
+              <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
+              <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
+              <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
+              <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
+              <button type="button" data-action="${session.archived === true ? "restore-session" : "archive-session"}" data-session-id="${escapeHtml(session.id)}">${session.archived === true ? "Desarchivar" : "Archivar"}</button>
+              <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
+            </div>
+          </div>
+        </div>
+        ${sessionThreadList}
+      </article>
     `;
   }
 
@@ -173,30 +221,7 @@ export function createPodcasterSessionRailApi(deps = {}) {
       return getSessionRailType(session) === activeFilter;
     });
     els.sessionList.classList.toggle("is-archived-view", showArchived);
-    els.sessionList.innerHTML = visibleSessions.map((session) => `
-      <article class="session-card${session.id === activeId ? " is-active" : ""}" data-action="open-session" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-pressed="${session.id === activeId ? "true" : "false"}" aria-expanded="${isSessionExpanded(session.id) ? "true" : "false"}">
-        <div class="session-card-header${sessionHasPendingProposal(session) ? " has-pending-proposal" : sessionHasOnlyReviewedProposals(session) ? " has-reviewed-proposals" : ""}">
-          <span class="session-card-title">
-            <i class="far fa-folder session-card-folder-icon" aria-hidden="true"></i>
-            <strong>${escapeHtml(session.title || "Sesión sin título")}</strong>
-          </span>
-          <div class="session-card-menu">
-            <button class="session-menu-btn" type="button" data-action="toggle-session-menu" data-session-id="${escapeHtml(session.id)}" aria-label="Más opciones" aria-expanded="false">
-              <i class="fas fa-ellipsis-v"></i>
-            </button>
-            <div class="session-menu" hidden>
-              <button type="button" data-action="new-session-chat" data-session-id="${escapeHtml(session.id)}">Nuevo chat</button>
-              <button type="button" data-action="rename-session" data-session-id="${escapeHtml(session.id)}">Editar nombre</button>
-              <button type="button" data-action="assign-session-data" data-session-id="${escapeHtml(session.id)}">Asignar datos</button>
-              <button type="button" data-action="share-session" data-session-id="${escapeHtml(session.id)}">Compartir sesión</button>
-              <button type="button" data-action="${session.archived === true ? "restore-session" : "archive-session"}" data-session-id="${escapeHtml(session.id)}">${session.archived === true ? "Desarchivar" : "Archivar"}</button>
-              <button type="button" data-action="delete-session" data-session-id="${escapeHtml(session.id)}">Eliminar</button>
-            </div>
-          </div>
-        </div>
-        ${isSessionExpanded(session.id) ? renderSessionThreadList(session) : ""}
-      </article>
-    `).join("") || `<div class="session-list-empty">${showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas."}</div>`;
+    els.sessionList.innerHTML = visibleSessions.map((session) => renderSessionCard(session, activeId)).join("") || `<div class="session-list-empty">${showArchived ? "No hay sesiones archivadas." : "No hay sesiones activas."}</div>`;
     syncFilterUi();
     syncArchivedToggleUi();
   }

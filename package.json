@@ -11,6 +11,7 @@
     "api:dev": "node backend/server.js",
     "api:start": "node backend/server.js",
     "api:worker": "node backend/workers/podcaster-montage-export-worker.js",
+    "languagetool:check": "node scripts/check-languagetool-local.mjs",
     "security:scan-secrets": "bash scripts/scan-secrets.sh",
     "security:verify-public": "bash scripts/verify-public-security.sh",
     "gemini:models": "node scripts/gemini-model-runner.mjs --list",

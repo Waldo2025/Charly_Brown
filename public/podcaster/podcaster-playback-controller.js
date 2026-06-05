@@ -410,6 +410,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   async getBlobUrl(url) {
     if (!url) return "";
     const cacheKey = this.resolvePersistentMediaCacheKey(url) || url;
+    const prefersStreamingProxy = String(url || "").includes('/api/assets/proxy-media');
     // 1. Check in-memory cache
     const cached = this.getBlobUrlSync(url);
     if (cached) return cached;
@@ -419,17 +420,19 @@ export class PodcasterPlaybackController extends EventEmitter {
     const p = (async () => {
       try {
         // 2. Check persistent Cache Storage
-        try {
-          const mediaCache = await caches.open(this.mediaCacheName);
-          const cachedResp = await mediaCache.match(cacheKey);
-          if (cachedResp) {
-            const blob = await cachedResp.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            this.blobCache.set(url, objectUrl);
-            if (cacheKey !== url) this.blobCache.set(cacheKey, objectUrl);
-            return objectUrl;
-          }
-        } catch (e) { }
+        if (!prefersStreamingProxy) {
+          try {
+            const mediaCache = await caches.open(this.mediaCacheName);
+            const cachedResp = await mediaCache.match(cacheKey);
+            if (cachedResp) {
+              const blob = await cachedResp.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              this.blobCache.set(url, objectUrl);
+              if (cacheKey !== url) this.blobCache.set(cacheKey, objectUrl);
+              return objectUrl;
+            }
+          } catch (e) { }
+        }
 
         let finalUrl = url;
         const isDirectFirebaseUrl = url.includes('firebasestorage.googleapis.com');
@@ -473,13 +476,21 @@ export class PodcasterPlaybackController extends EventEmitter {
         }
 
         const isImageLikeFinalUrl = /\.(png|jpe?g|webp|gif|avif|svg)(?:[?#&]|$)/i.test(String(finalUrl || "").trim());
+        const isProxyMediaUrl = String(finalUrl || "").includes('/api/assets/proxy-media');
         const isDirectRemoteImage = isImageLikeFinalUrl && !String(finalUrl || "").includes('/api/');
         if (isDirectFirebaseUrl && isDirectRemoteImage) {
           this.blobCache.set(url, finalUrl);
+          if (cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
           return finalUrl;
         }
         if (isImageLikeUrl && isDirectRemoteImage) {
           this.blobCache.set(url, finalUrl);
+          if (cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
+          return finalUrl;
+        }
+        if (isProxyMediaUrl && !isImageLikeFinalUrl) {
+          this.blobCache.set(url, finalUrl);
+          if (cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
           return finalUrl;
         }
 

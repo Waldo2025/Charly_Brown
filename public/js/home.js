@@ -18,6 +18,7 @@ import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/p
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
+import "../podcaster/podcaster-scene-media-render-spec.js";
 
 const app = getDefaultFirebaseApp();
 void bootstrapFirebaseAppCheck(app);
@@ -3482,6 +3483,80 @@ function resolveTimelineClipMix(session = null, rowId = "") {
   };
 }
 
+function resolveHomeStageSurface(stage = null) {
+  if (!stage) return null;
+  const visibleSurface = stage.querySelector(".player-video:not(.player-video-backdrop):not([hidden]), .podcast-active-speaker-image:not([hidden])");
+  if (visibleSurface) return visibleSurface;
+  return stage.querySelector(".player-video:not(.player-video-backdrop), .podcast-active-speaker-image") || null;
+}
+
+function applyHomeSceneMediaScaleToStage({
+  rowId = "",
+  mediaScale = 1,
+  mediaOffsetXPct = 0,
+  mediaOffsetYPct = 0,
+  mediaMotionPreset = "none",
+  visualLayoutMode = "default",
+  container = null
+} = {}) {
+  const stage = container || document.getElementById("playerStage");
+  if (!stage) return;
+  const surfaceEl = resolveHomeStageSurface(stage);
+  if (!surfaceEl) return;
+
+  const resolver = window.resolveSceneMediaRenderSpec
+    || globalThis.PodcasterSceneMediaRenderSpec?.resolveSceneMediaRenderSpec
+    || globalThis.resolveSceneMediaRenderSpec;
+  const nextScale = Math.max(1, Math.min(2.5, Number(mediaScale) || 1));
+  const nextX = Math.max(-0.5, Math.min(0.5, Number(mediaOffsetXPct) || 0));
+  const nextY = Math.max(-0.5, Math.min(0.5, Number(mediaOffsetYPct) || 0));
+  const nextMotion = String(mediaMotionPreset || "none").trim() || "none";
+
+  stage.style.setProperty("--pod-scene-media-scale", String(nextScale));
+  stage.style.setProperty("--pod-scene-media-x", `${(nextX * 100).toFixed(3)}%`);
+  stage.style.setProperty("--pod-scene-media-y", `${(nextY * 100).toFixed(3)}%`);
+  stage.dataset.sceneMediaRowId = String(rowId || "").trim();
+  stage.dataset.sceneMediaScale = String(nextScale);
+  stage.dataset.sceneMediaOffsetX = String(nextX);
+  stage.dataset.sceneMediaOffsetY = String(nextY);
+  stage.dataset.sceneMediaMotionPreset = nextMotion;
+  stage.dataset.sceneMediaLayout = String(visualLayoutMode || "default");
+
+  if (typeof resolver !== "function") return;
+
+  const isImage = surfaceEl.tagName === "IMG";
+  const sourceWidth = Math.max(2, Number(isImage ? surfaceEl.naturalWidth : surfaceEl.videoWidth) || 0);
+  const sourceHeight = Math.max(2, Number(isImage ? surfaceEl.naturalHeight : surfaceEl.videoHeight) || 0);
+  if (!(sourceWidth > 1 && sourceHeight > 1)) return;
+
+  const spec = resolver({
+    canvasWidth: Math.max(2, Number(stage.clientWidth || 0) || 1280),
+    canvasHeight: Math.max(2, Number(stage.clientHeight || 0) || 720),
+    sourceWidth,
+    sourceHeight,
+    reelMode: stage.classList.contains("is-reel-mode"),
+    visualLayoutMode,
+    mediaScale: nextScale,
+    mediaOffsetXPct: nextX,
+    mediaOffsetYPct: nextY,
+    mediaMotionPreset: nextMotion,
+    mediaKind: isImage ? "image" : "video",
+    durationSec: 12
+  });
+
+  if (!spec) return;
+
+  surfaceEl.style.left = "0px";
+  surfaceEl.style.top = "0px";
+  surfaceEl.style.right = "auto";
+  surfaceEl.style.bottom = "auto";
+  surfaceEl.style.width = "100%";
+  surfaceEl.style.height = "100%";
+  surfaceEl.style.objectFit = "cover";
+  surfaceEl.style.objectPosition = `${(50 + (nextX * 100)).toFixed(3)}% ${(50 + (nextY * 100)).toFixed(3)}%`;
+  surfaceEl.style.transform = `scale(${nextScale})`;
+}
+
 let cachedRuntimeEntries = null;
 let cachedRuntimeEntriesKey = null;
 let cachedVideoConfig = null;
@@ -4045,7 +4120,13 @@ const multimediaPlaybackDeps = {
     const s = currentMultimediaSession;
     const cfg = s?.podcastVideoConfig || s?.session?.podcastVideoConfig || {};
     return Math.max(0.5, Math.min(2.0, Number(cfg.playbackSpeed || 1.0)));
-  }
+  },
+  resolveSceneMediaRenderSpec: (input = {}) => (
+    window.resolveSceneMediaRenderSpec
+    || globalThis.PodcasterSceneMediaRenderSpec?.resolveSceneMediaRenderSpec
+    || globalThis.resolveSceneMediaRenderSpec
+  )?.(input),
+  applySceneMediaScaleToStage: (params = {}) => applyHomeSceneMediaScaleToStage(params)
 };
 
 function initMultimediaPlayer() {

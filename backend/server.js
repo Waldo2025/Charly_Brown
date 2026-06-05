@@ -47,12 +47,22 @@ const {
   extractFeaturedSourceTextFromHtml
 } = require("./featured-source-extractor.js");
 const {
-  buildBufferedMediaPayload
+  buildStreamingMediaPayload
 } = require("./proxy-media-buffer.js");
 const {
   resolveMontageExportVideoParams,
   resolveMontageIntermediateVideoParams
 } = require("./montage-export-video-params.js");
+const {
+  buildResultSummary,
+  classifyAnalizarPdfStartupError,
+  createAnalizarPdfJobStore,
+  ensureDirSync,
+  logAnalizarPdf,
+  resolveAnalyzerScript,
+  sanitizeAnalizarPdfSession,
+  spawnAnalizarPdfPythonJob
+} = require("./analizar-pdf.js");
 
 let admin = null;
 let GoogleGenAI = null;
@@ -161,6 +171,7 @@ const MAX_SPEAKER_PORTRAIT_BYTES = 10 * 1024 * 1024;
 const MAX_PODCASTER_MUSIC_BYTES = 12 * 1024 * 1024;
 const MAX_DIALOGUE_VIDEO_BYTES = 80 * 1024 * 1024;
 const MAX_DIALOGUE_AUDIO_BYTES = 24 * 1024 * 1024;
+const MAX_ANALIZAR_PDF_UPLOAD_BYTES = 260 * 1024 * 1024;
 const MAX_REFERENCE_FRAME_BYTES = 6 * 1024 * 1024;
 const MAX_MONTAGE_EXPORT_SCENES = 40;
 const MAX_MONTAGE_EXPORT_TOTAL_SEC = 10 * 60;
@@ -899,6 +910,8 @@ const STORAGE_BUCKET_CANDIDATES = STORAGE_BUCKET_CANDIDATE_NAMES
       : admin.storage().bucket(name)
   ));
 const montageExportJobStore = createMontageExportJobStore({ db });
+const analizarPdfJobStore = createAnalizarPdfJobStore();
+const ANALIZAR_PDF_COLLECTION = "analizarPDF";
 
 function getStorageBucketCandidates() {
   return STORAGE_BUCKET_CANDIDATES.filter(Boolean);
@@ -983,6 +996,56 @@ async function downloadStorageObjectToBuffer(storagePath = "") {
   throw err;
 }
 
+function parseStorageObjectSize(metadata = null) {
+  const rawSize = Number(metadata?.size || metadata?.metadata?.size || 0);
+  return Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 0;
+}
+
+async function openStorageObjectReadStream(storagePath = "", options = {}) {
+  const cleanStoragePath = normalizeStorageFilePath(storagePath);
+  const range = options?.range && typeof options.range === "object" ? options.range : null;
+  if (!cleanStoragePath) {
+    const err = new Error("missing_storage_path");
+    err.code = "missing_storage_path";
+    throw err;
+  }
+  const buckets = getStorageBucketCandidates();
+  let lastError = null;
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    const file = bucket.file(cleanStoragePath);
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const [metadata] = await file.getMetadata();
+      const stream = file.createReadStream(range ? {
+        start: Number(range.start || 0),
+        end: Number(range.end || 0)
+      } : undefined);
+      return {
+        bucket,
+        file,
+        metadata,
+        totalBytes: parseStorageObjectSize(metadata),
+        stream
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isMissingBucketError(error)) {
+        throw error;
+      }
+    }
+  }
+  const err = new Error("storage_not_found");
+  err.code = "storage_not_found";
+  err.status = 404;
+  err.detail = {
+    storagePath: cleanStoragePath,
+    bucketsTried: buckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean),
+    lastError: lastError ? String(lastError?.message || lastError) : ""
+  };
+  throw err;
+}
+
 const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
@@ -990,7 +1053,10 @@ const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS = 90 * 1000;
 const MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS = 30 * 1000;
-const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = 3 * 60 * 1000;
+const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = Math.max(
+  60 * 1000,
+  Number(process.env.MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS || 6 * 60 * 1000) || 6 * 60 * 1000
+);
 const montageExportJobs = new Map();
 
 function getMontageExportJobMetaPath(jobId = "") {
@@ -2448,6 +2514,92 @@ async function verifyFirebaseBearer(req) {
     err.status = 401;
     throw err;
   }
+}
+
+async function loadAnalizarPdfSessionForOwner(uid = "", sessionId = "") {
+  const cleanUid = String(uid || "").trim();
+  const cleanSessionId = clampText(sessionId, 120);
+  if (!cleanUid || !cleanSessionId) {
+    const err = new Error("Falta uid o sessionId.");
+    err.status = 400;
+    throw err;
+  }
+  const ref = db.collection(ANALIZAR_PDF_COLLECTION).doc(cleanSessionId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    const err = new Error("Sesión no encontrada.");
+    err.status = 404;
+    throw err;
+  }
+  const data = snap.data() || {};
+  if (String(data.ownerId || "").trim() !== cleanUid) {
+    const err = new Error("No puedes acceder a una sesión de otro usuario.");
+    err.status = 403;
+    throw err;
+  }
+  return {
+    ref,
+    data: sanitizeAnalizarPdfSession(data, {
+      id: cleanSessionId,
+      ownerId: cleanUid,
+      createdAt: data.createdAt || new Date().toISOString()
+    })
+  };
+}
+
+async function persistAnalizarPdfSessionForOwner(uid = "", source = {}) {
+  const cleanUid = String(uid || "").trim();
+  const base = sanitizeAnalizarPdfSession(source, {
+    ownerId: cleanUid,
+    id: source?.id || `analizar_pdf_${randomUUID().slice(0, 12)}`,
+    createdAt: source?.createdAt || new Date().toISOString()
+  });
+  const sessionRef = db.collection(ANALIZAR_PDF_COLLECTION).doc(base.id);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(sessionRef);
+    const existing = snap.exists ? (snap.data() || {}) : null;
+    if (existing && String(existing.ownerId || "").trim() !== cleanUid) {
+      const err = new Error("No puedes sobrescribir una sesión de otro usuario.");
+      err.status = 403;
+      throw err;
+    }
+    const merged = sanitizeAnalizarPdfSession({
+      ...(existing || {}),
+      ...base,
+      ownerId: cleanUid,
+      createdAt: existing?.createdAt || base.createdAt,
+      updatedAt: new Date().toISOString()
+    }, {
+      ownerId: cleanUid,
+      id: base.id,
+      createdAt: existing?.createdAt || base.createdAt
+    });
+    tx.set(sessionRef, merged, { merge: true });
+  });
+  const saved = await sessionRef.get();
+  return sanitizeAnalizarPdfSession(saved.data() || {}, {
+    id: base.id,
+    ownerId: cleanUid,
+    createdAt: base.createdAt
+  });
+}
+
+async function updateAnalizarPdfSessionState(uid = "", sessionId = "", patch = {}) {
+  const { ref, data } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+  const next = sanitizeAnalizarPdfSession({
+    ...data,
+    ...(patch && typeof patch === "object" ? patch : {}),
+    ownerId: uid,
+    id: sessionId,
+    createdAt: data.createdAt,
+    updatedAt: new Date().toISOString()
+  }, {
+    ownerId: uid,
+    id: sessionId,
+    createdAt: data.createdAt
+  });
+  await ref.set(next, { merge: true });
+  return next;
 }
 
 async function resolveShareTarget({ targetUid = "", targetEmail = "" }) {
@@ -4012,6 +4164,253 @@ async function handleMinebloxScreenshotList(req, res) {
     .filter((record) => record.visibility === "shared" || record.authorId === playerId);
   return res.json({ ok: true, records });
 }
+
+app.use("/api/analizar-pdf", async (req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  try {
+    req.authContext = await verifyFirebaseBearer(req);
+    return next();
+  } catch (error) {
+    return res.status(Number(error?.status || 401)).json({ error: String(error?.message || "AUTH_REQUIRED") });
+  }
+});
+
+app.get("/api/analizar-pdf/sessions/list", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const snap = await db.collection(ANALIZAR_PDF_COLLECTION).where("ownerId", "==", uid).limit(80).get();
+    const sessions = snap.docs
+      .map((docSnap) => sanitizeAnalizarPdfSession(docSnap.data() || {}, {
+        id: docSnap.id,
+        ownerId: uid
+      }))
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    return res.status(200).json({ ok: true, sessions });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudieron listar las sesiones.") });
+  }
+});
+
+app.post("/api/analizar-pdf/sessions/save", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const source = req.body?.session && typeof req.body.session === "object" ? req.body.session : null;
+    if (!source) {
+      return res.status(400).json({ error: "Falta payload session." });
+    }
+    const session = await persistAnalizarPdfSessionForOwner(uid, source);
+    return res.status(200).json({ ok: true, session });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo guardar la sesión.") });
+  }
+});
+
+app.post("/api/analizar-pdf/sessions/delete", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.body?.sessionId || "", 120);
+    if (!sessionId) {
+      return res.status(400).json({ error: "Falta sessionId." });
+    }
+    const { ref } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    await ref.delete();
+    return res.status(200).json({ ok: true, sessionId });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar la sesión.") });
+  }
+});
+
+app.post("/api/analizar-pdf/analyze", async (req, res) => {
+  const uid = String(req.authContext?.uid || "").trim();
+  const sessionId = clampText(req.headers["x-session-id"] || req.query?.sessionId || "", 120);
+  const rawFileName = clampText(req.headers["x-file-name"] || "documento.pdf", 240) || "documento.pdf";
+  const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+  const declaredLength = Number(req.headers["content-length"] || 0) || 0;
+  if (!uid) {
+    return res.status(401).json({ error: "AUTH_REQUIRED" });
+  }
+  if (!sessionId) {
+    return res.status(400).json({ error: "Falta sessionId." });
+  }
+  if (declaredLength > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
+    return res.status(413).json({ error: "El PDF excede el tamaño permitido." });
+  }
+
+  let tempFilePath = "";
+  try {
+    logAnalizarPdf("analyze.request.received", {
+      uid,
+      sessionId,
+      rawFileName,
+      contentType,
+      declaredLength
+    });
+    const { data: session } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    const expectedExt = session.sourceType === "idml" ? ".idml" : ".pdf";
+    const normalizedFileName = rawFileName.toLowerCase();
+    if (!normalizedFileName.endsWith(expectedExt)) {
+      return res.status(400).json({ error: `El archivo debe ser ${expectedExt}.` });
+    }
+    if (contentType && session.sourceType !== "idml" && !contentType.includes("pdf")) {
+      return res.status(400).json({ error: "El archivo debe ser PDF." });
+    }
+    const scriptPath = resolveAnalyzerScript(session);
+    const tempDir = path.join(os.tmpdir(), "analizar-pdf-jobs", sessionId, randomUUID());
+    ensureDirSync(tempDir);
+    tempFilePath = path.join(tempDir, normalizedFileName.endsWith(expectedExt) ? rawFileName : `${rawFileName}${expectedExt}`);
+    const output = fs.createWriteStream(tempFilePath);
+    let bytesRead = 0;
+    req.on("data", (chunk) => {
+      bytesRead += Buffer.byteLength(chunk);
+      if (bytesRead > MAX_ANALIZAR_PDF_UPLOAD_BYTES) {
+        req.destroy(new Error("PDF_TOO_LARGE"));
+      }
+    });
+    await pipeline(req, output);
+    logAnalizarPdf("analyze.upload.saved", {
+      sessionId,
+      tempFilePath,
+      bytesRead
+    });
+    const jobId = `analizar_pdf_job_${randomUUID().slice(0, 12)}`;
+    analizarPdfJobStore.set(jobId, {
+      sessionId,
+      ownerId: uid,
+      fileName: rawFileName,
+      status: "queued",
+      createdAt: new Date().toISOString()
+    });
+    await updateAnalizarPdfSessionState(uid, sessionId, {
+      analysisStatus: "queued",
+      analysisJobId: jobId
+    });
+    logAnalizarPdf("job.queued", { jobId, sessionId, ownerId: uid });
+
+    void (async () => {
+      try {
+        logAnalizarPdf("job.processing.start", {
+          jobId,
+          sessionId,
+          tempFilePath
+        });
+        analizarPdfJobStore.set(jobId, { status: "processing", startedAt: new Date().toISOString() });
+        await updateAnalizarPdfSessionState(uid, sessionId, {
+          analysisStatus: "processing",
+          analysisJobId: jobId
+        });
+        const result = await spawnAnalizarPdfPythonJob({
+          scriptPath,
+          pdfPath: tempFilePath,
+          session
+        });
+        const resultSummary = buildResultSummary(result);
+        const persistedSession = await updateAnalizarPdfSessionState(uid, sessionId, {
+          analysisStatus: "completed",
+          analysisJobId: jobId,
+          result,
+          resultSummary
+        });
+        logAnalizarPdf("job.completed", {
+          jobId,
+          sessionId,
+          resultSummary
+        });
+        analizarPdfJobStore.set(jobId, {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          resultSummary,
+          session: persistedSession
+        });
+      } catch (error) {
+        logAnalizarPdf("job.failed", {
+          jobId,
+          sessionId,
+          message: String(error?.message || error),
+          stack: String(error?.stack || "")
+        });
+        const persistedSession = await updateAnalizarPdfSessionState(uid, sessionId, {
+          analysisStatus: "failed",
+          analysisJobId: jobId
+        }).catch(() => null);
+        analizarPdfJobStore.set(jobId, {
+          status: "failed",
+          error: String(error?.message || error),
+          session: persistedSession
+        });
+      } finally {
+        try {
+          fs.unlinkSync(tempFilePath);
+          logAnalizarPdf("job.tempfile.deleted", {
+            jobId,
+            tempFilePath
+          });
+        } catch (_) {
+          // noop
+        }
+      }
+    })();
+
+    return res.status(202).json({
+      ok: true,
+      jobId,
+      sessionId,
+      status: "queued",
+      fileName: rawFileName
+    });
+  } catch (error) {
+    logAnalizarPdf("analyze.request.failed", {
+      sessionId,
+      rawFileName,
+      message: String(error?.message || error),
+      stack: String(error?.stack || "")
+    });
+    if (tempFilePath) {
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch (_) {
+        // noop
+      }
+    }
+    const message = String(error?.message || error);
+    if (message === "PDF_TOO_LARGE") {
+      return res.status(413).json({ error: "El PDF excede el tamaño permitido." });
+    }
+    const classified = classifyAnalizarPdfStartupError(error);
+    return res.status(Number(classified?.status || 500)).json({
+      error: String(classified?.error || "No se pudo iniciar el análisis."),
+      code: String(classified?.code || "ANALIZAR_PDF_START_FAILED")
+    });
+  }
+});
+
+app.get("/api/analizar-pdf/analyze-status", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const jobId = clampText(req.query?.jobId || "", 160);
+    if (!jobId) {
+      return res.status(400).json({ error: "Falta jobId." });
+    }
+    const job = analizarPdfJobStore.get(jobId);
+    if (!job) {
+      return res.status(404).json({ error: "Job no encontrado." });
+    }
+    if (String(job.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "No puedes consultar este job." });
+    }
+    const session = job.sessionId
+      ? (await loadAnalizarPdfSessionForOwner(uid, job.sessionId).then((payload) => payload.data).catch(() => null))
+      : null;
+    return res.status(200).json({
+      ok: true,
+      jobId,
+      status: String(job.status || "queued"),
+      error: job.error || null,
+      session
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo consultar el estado.") });
+  }
+});
 
 app.use("/api/podcaster", async (req, res, next) => {
   if (req.method === "OPTIONS") return next();
@@ -10729,11 +11128,14 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const rangeHeader = String(req.headers.range || "").trim();
 
     if (storagePath) {
-      console.info("[backend][proxy-media] attempting storage buffer download", { storagePath });
+      console.info("[backend][proxy-media] attempting storage stream", {
+        storagePath,
+        hasRange: Boolean(rangeHeader)
+      });
       try {
-        const downloaded = await downloadStorageObjectToBuffer(storagePath);
-        const mimeType = String(downloaded?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
-        const payload = buildBufferedMediaPayload(downloaded?.buffer, {
+        const streamMeta = await openStorageObjectReadStream(storagePath);
+        const mimeType = String(streamMeta?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+        const payload = buildStreamingMediaPayload(streamMeta?.totalBytes, {
           mimeType,
           rangeHeader
         });
@@ -10741,7 +11143,11 @@ app.get("/api/assets/proxy-media", async (req, res) => {
           if (!name || value == null || value === "") return;
           res.setHeader(name, value);
         });
-        return res.status(payload.status || 200).send(payload.body);
+        const rangedStreamMeta = payload.range
+          ? await openStorageObjectReadStream(storagePath, { range: payload.range })
+          : streamMeta;
+        await pipeline(rangedStreamMeta.stream, res.status(payload.status || 200));
+        return;
       } catch (error) {
         const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
         const isMissing = status === 404 || String(error?.code || "").trim().toLowerCase() === "storage_not_found";
@@ -10843,8 +11249,8 @@ app.get("/api/assets/proxy-media", async (req, res) => {
               if (exists === false) continue;
               try {
                 const [meta] = await file.getMetadata().catch(() => [{}]);
-                const [downloaded] = await file.download();
-                const payload = buildBufferedMediaPayload(downloaded, {
+                const totalBytes = parseStorageObjectSize(meta);
+                const payload = buildStreamingMediaPayload(totalBytes, {
                   mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
                   rangeHeader
                 });
@@ -10852,10 +11258,15 @@ app.get("/api/assets/proxy-media", async (req, res) => {
                   if (!name || value == null || value === "") return;
                   res.setHeader(name, value);
                 });
-                return res.status(payload.status || 200).send(payload.body);
+                const stream = file.createReadStream(payload.range ? {
+                  start: Number(payload.range.start || 0),
+                  end: Number(payload.range.end || 0)
+                } : undefined);
+                await pipeline(stream, res.status(payload.status || 200));
+                return;
               } catch (error) {
                 lastError = error;
-                console.warn("[backend][proxy-media] admin fallback buffer failed", {
+                console.warn("[backend][proxy-media] admin fallback stream failed", {
                   objectPath,
                   bucket: String(bucket?.name || "").trim(),
                   message: String(error?.message || error)

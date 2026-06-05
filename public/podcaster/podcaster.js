@@ -45,7 +45,7 @@ import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-05-17.1";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
-import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js";
+import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
 import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-05-25.1";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";

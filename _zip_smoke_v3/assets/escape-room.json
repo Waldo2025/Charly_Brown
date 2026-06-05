@@ -1,0 +1,183 @@
+{
+  "titulo": "Operación Galaxia Segura: El Código de la Singularidad",
+  "subtitulo": "Detén el colapso financiero y la fuga de datos intergaláctica",
+  "introduccion": "¡Atención, cadete! El Banco Central de la Federación y el Nexo de Datos están bajo un ataque coordinado. Un infiltrado está drenando créditos físicos y un grupo de hackers está extrayendo información confidencial. Ambos utilizan patrones matemáticos de progresión aritmética para evadir los radares. Tu misión es descifrar estos patrones y generar la clave de anulación antes de que el sistema colapse en 35 minutos.",
+  "ambientacion": "Una estación espacial de alta tecnología con pantallas holográficas parpadeantes, alarmas silenciosas de color ámbar y una terminal de comandos que espera la secuencia de desactivación.",
+  "linea_visual_base": "Estética ciberpunk espacial con tonos azul neón, fuentes digitales y diagramas de flujo de datos en 3D.",
+  "estilo_visual": "",
+  "personajes_recurrentes": [],
+  "misiones": [
+    {
+      "id": "m1",
+      "release": "RELEASE 01",
+      "titulo": "El Infiltrado del Cajero Central",
+      "historia": "Hemos detectado que un ladrón extrae dinero de un cajero automático en el Sector Oro. El primer día robó $500, el segundo $550 y el tercero $600. El patrón es constante, pero el sistema de seguridad solo se reiniciará si identificamos los valores exactos de su infiltración a largo plazo y detectamos errores en los informes del guardia Pedro.",
+      "reto": "Relaciona los datos del robo para obtener la ecuación y el valor crítico del día 25.",
+      "tipo_interaccion": "relacion_columnas",
+      "subtipo_respuesta": "codigo_corto",
+      "respuesta_correcta": "ECUACION-1700",
+      "respuestas_aceptadas": [
+        "1700",
+        "ecuacion1700"
+      ],
+      "opciones": [],
+      "parejas": [
+        {
+          "izquierda": "Dinero en el Día 25",
+          "derecha": "$1700",
+          "pista": ""
+        },
+        {
+          "izquierda": "Ecuación del robo",
+          "derecha": "an = 500 + (n-1)50",
+          "pista": ""
+        },
+        {
+          "izquierda": "Dato de Pedro (Día 10)",
+          "derecha": "Incorrecto (Robó $950)",
+          "pista": ""
+        },
+        {
+          "izquierda": "Incremento diario",
+          "derecha": "$50",
+          "pista": ""
+        }
+      ],
+      "media": {
+        "tipo": "imagen",
+        "url": "",
+        "alt": "Holograma de transacciones bancarias en aumento",
+        "titulo": "",
+        "texto": ""
+      },
+      "pista": "Calcula primero la diferencia constante (d). Luego usa la fórmula an = a1 + (n-1)d.",
+      "retroalimentacion_correcta": "¡Excelente! Has descifrado el patrón del ladrón. El valor crítico del día 25 es 1700. Guárdalo, lo necesitarás para la clave final.",
+      "retroalimentacion_incorrecta": "Los cálculos no coinciden. Revisa la diferencia diaria y verifica si el día 10 realmente suma $1520.",
+      "imagen_funcion": "Apoya la resolución con una pista visual.",
+      "imagen_prompt": "",
+      "imagen_alt": "",
+      "imagen": "",
+      "preguntas": [
+        {
+          "id": "mission-elinfiltradodelcajerocentral-question-1",
+          "release": "Q01",
+          "titulo": "El Infiltrado del Cajero Central",
+          "reto": "Relaciona los datos del robo para obtener la ecuación y el valor crítico del día 25.",
+          "tipo_interaccion": "relacion_columnas",
+          "subtipo_respuesta": "codigo_corto",
+          "respuesta_correcta": "ECUACION-1700",
+          "respuestas_aceptadas": [
+            "1700",
+            "ecuacion1700"
+          ],
+          "opciones": [],
+          "parejas": [
+            {
+              "izquierda": "Dinero en el Día 25",
+              "derecha": "$1700",
+              "pista": ""
+            },
+            {
+              "izquierda": "Ecuación del robo",
+              "derecha": "an = 500 + (n-1)50",
+              "pista": ""
+            },
+            {
+              "izquierda": "Dato de Pedro (Día 10)",
+              "derecha": "Incorrecto (Robó $950)",
+              "pista": ""
+            },
+            {
+              "izquierda": "Incremento diario",
+              "derecha": "$50",
+              "pista": ""
+            }
+          ],
+          "media": {
+            "tipo": "imagen",
+            "url": "",
+            "alt": "Holograma de transacciones bancarias en aumento",
+            "titulo": "",
+            "texto": ""
+          },
+          "pista": "Calcula primero la diferencia constante (d). Luego usa la fórmula an = a1 + (n-1)d.",
+          "retroalimentacion_correcta": "¡Excelente! Has descifrado el patrón del ladrón. El valor crítico del día 25 es 1700. Guárdalo, lo necesitarás para la clave final.",
+          "retroalimentacion_incorrecta": "Los cálculos no coinciden. Revisa la diferencia diaria y verifica si el día 10 realmente suma $1520.",
+          "imagen_funcion": "Apoya la resolución con una pista visual.",
+          "imagen_prompt": "",
+          "imagen_alt": "",
+          "imagen": "",
+          "bloqueada_inicial": false
+        }
+      ],
+      "desbloquea": [
+        "m2"
+      ],
+      "bloqueada_inicial": false
+    },
+    {
+      "id": "m2",
+      "release": "RELEASE 02",
+      "titulo": "La Brecha del Nexo de Datos",
+      "historia": "¡Alerta! Los hackers han superado el primer nivel. En el minuto 1 descargaron 25 MB, en el minuto 2 descargaron 42 MB y en el minuto 3 descargaron 59 MB. Luis dice que en el minuto 6 la velocidad es de 70 MB, pero sospechamos que miente. Para detener el ataque, debes calcular la descarga en el minuto 18 y sumarla al valor crítico de la misión anterior (Día 25 = 1700).",
+      "reto": "¿Cuál es la clave final de 4 dígitos para apagar el sistema? (Suma de MB en min 18 + Dinero en día 25)",
+      "tipo_interaccion": "texto",
+      "subtipo_respuesta": "numero",
+      "respuesta_correcta": "2014",
+      "respuestas_aceptadas": [
+        "2014"
+      ],
+      "opciones": [],
+      "parejas": [],
+      "media": {
+        "tipo": "video",
+        "url": "",
+        "alt": "Código digital cayendo en una pantalla de terminal",
+        "titulo": "",
+        "texto": ""
+      },
+      "pista": "La diferencia de descarga es de 17 MB por minuto. Calcula el minuto 18 usando an = 25 + (n-1)17 y súmalo a 1700.",
+      "retroalimentacion_correcta": "¡Código aceptado! 314 MB (minuto 18) + 1700 (día 25) = 2014. El sistema se está reiniciando y los intrusos han sido bloqueados.",
+      "retroalimentacion_incorrecta": "Clave incorrecta. Verifica la descarga del minuto 18. Recuerda que Luis estaba equivocado; la velocidad en el minuto 6 no era 70.",
+      "imagen_funcion": "Apoya la resolución con una pista visual.",
+      "imagen_prompt": "",
+      "imagen_alt": "",
+      "imagen": "",
+      "preguntas": [
+        {
+          "id": "mission-labrechadelnexodedatos-question-1",
+          "release": "Q01",
+          "titulo": "La Brecha del Nexo de Datos",
+          "reto": "¿Cuál es la clave final de 4 dígitos para apagar el sistema? (Suma de MB en min 18 + Dinero en día 25)",
+          "tipo_interaccion": "texto",
+          "subtipo_respuesta": "numero",
+          "respuesta_correcta": "2014",
+          "respuestas_aceptadas": [
+            "2014"
+          ],
+          "opciones": [],
+          "parejas": [],
+          "media": {
+            "tipo": "video",
+            "url": "",
+            "alt": "Código digital cayendo en una pantalla de terminal",
+            "titulo": "",
+            "texto": ""
+          },
+          "pista": "La diferencia de descarga es de 17 MB por minuto. Calcula el minuto 18 usando an = 25 + (n-1)17 y súmalo a 1700.",
+          "retroalimentacion_correcta": "¡Código aceptado! 314 MB (minuto 18) + 1700 (día 25) = 2014. El sistema se está reiniciando y los intrusos han sido bloqueados.",
+          "retroalimentacion_incorrecta": "Clave incorrecta. Verifica la descarga del minuto 18. Recuerda que Luis estaba equivocado; la velocidad en el minuto 6 no era 70.",
+          "imagen_funcion": "Apoya la resolución con una pista visual.",
+          "imagen_prompt": "",
+          "imagen_alt": "",
+          "imagen": "",
+          "bloqueada_inicial": true
+        }
+      ],
+      "desbloquea": [],
+      "bloqueada_inicial": true
+    }
+  ],
+  "conclusion": "¡Misión cumplida, cadete! Has demostrado un dominio total de las progresiones aritméticas. Gracias a tu precisión matemática, los fondos de la Federación están seguros y los datos confidenciales han sido recuperados. La 'Cámara del Conocimiento' ahora está abierta para ti.",
+  "backgroundImage": "assets/media/Operacion_Galaxia_Segura_El_Codigo_de_la_Singularidad-background.png"
+}

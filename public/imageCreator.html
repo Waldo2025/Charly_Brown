@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <script src="js/runtime-config-loader.js" defer></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Creator</title>
+  <link rel="stylesheet" href="local-fonts.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
+  <link rel="stylesheet" href="sidebar.css">
+  <link rel="stylesheet" href="header.css">
+  <link rel="stylesheet" href="imagecreator/imageCreator.css">
+</head>
+<body data-page="imageCreator.html">
+  <header class="main-header">
+    <div class="header-content">
+      <!-- header-content loaded from chromeLayout.js -->
+    </div>
+  </header>
+
+  <div id="sidebar">
+    <button id="menuToggle" aria-label="Abrir menú">
+      <i class="fas fa-bars"></i>
+    </button>
+    <div class="sidebar-menu">
+      <!-- sidebar-menu loaded from chromeLayout.js -->
+    </div>
+  </div>
+
+  <main id="imageCreatorApp" class="ic-page-shell">
+    <aside class="ic-session-rail">
+      <div class="ic-session-rail__header">
+        <div>
+          <p class="ic-eyebrow">Gemini Image Chat</p>
+          <h1>Image Creator</h1>
+        </div>
+        <button type="button" id="icNewSessionBtn" class="ic-ghost-btn">
+          <i class="fas fa-pen-to-square"></i>
+          <span>Nuevo chat</span>
+        </button>
+      </div>
+
+      <div class="ic-session-rail__search">
+        <i class="fas fa-search"></i>
+        <input id="icSessionSearchInput" type="search" placeholder="Buscar sesiones">
+      </div>
+
+      <div id="icSessionStatus" class="ic-session-status" aria-live="polite">Cargando sesiones...</div>
+      <div id="icSessionList" class="ic-session-list" aria-live="polite"></div>
+    </aside>
+
+    <section class="ic-chat-shell">
+      <div class="ic-chat-toolbar">
+        <div class="ic-chat-toolbar__main">
+          <div>
+            <p class="ic-toolbar-label">Sesión activa</p>
+            <h2 id="icActiveSessionTitle">Nueva sesión</h2>
+          </div>
+          <div id="icUserBadge" class="ic-user-badge">Sin sesión</div>
+        </div>
+
+        <div class="ic-chat-toolbar__actions">
+          <button type="button" id="icToggleOptionsBtn" class="ic-toolbar-btn" aria-expanded="true" aria-controls="icOptionsPanel">
+            <i class="fas fa-sliders"></i>
+            <span>Opciones</span>
+          </button>
+          <button type="button" id="icArchiveSessionBtn" class="ic-toolbar-btn">
+            <i class="fas fa-box-archive"></i>
+            <span>Archivar</span>
+          </button>
+          <button type="button" id="icDeleteSessionBtn" class="ic-toolbar-btn is-danger">
+            <i class="fas fa-trash"></i>
+            <span>Eliminar</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="ic-workspace">
+        <section id="icChatFeed" class="ic-chat-feed" aria-live="polite"></section>
+
+        <aside id="icOptionsPanel" class="ic-options-panel hidden">
+          <div class="ic-options-panel__header">
+            <div>
+              <h3>Ajustes</h3>
+              <p>Controla modelo, formato y orientación.</p>
+            </div>
+            <button type="button" id="icCloseOptionsBtn" class="ic-panel-close-btn" aria-label="Cerrar ajustes">
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="ic-options-grid">
+            <label class="ic-field">
+              <span>Modo</span>
+              <select id="icModeSelect"></select>
+            </label>
+
+            <label class="ic-field">
+              <span>Modelo</span>
+              <select id="icModelSelect"></select>
+            </label>
+
+            <label class="ic-field">
+              <span>Aspect ratio</span>
+              <select id="icAspectRatioSelect"></select>
+            </label>
+
+            <label class="ic-field">
+              <span>Image size</span>
+              <select id="icImageSizeSelect"></select>
+            </label>
+
+            <label class="ic-field">
+              <span>Formato descarga</span>
+              <select id="icDownloadFormatSelect"></select>
+            </label>
+
+            <label class="ic-field">
+              <span>Cantidad</span>
+              <select id="icCountSelect"></select>
+            </label>
+          </div>
+
+          <div class="ic-options-note">
+            <strong>Notas:</strong>
+            <span id="icOptionsHint">Gemini 2.5 ignora `imageSize`; Gemini 3.1 y Pro sí lo usan.</span>
+          </div>
+        </aside>
+      </div>
+
+      <div class="ic-composer-shell">
+        <div id="icComposerError" class="ic-inline-alert hidden" aria-live="polite"></div>
+        <div id="icComposerMeta" class="ic-composer-meta hidden"></div>
+        <div id="icAttachmentTray" class="ic-attachment-tray hidden"></div>
+
+        <div class="ic-composer">
+          <div class="ic-composer__actions">
+            <button type="button" id="icAttachBtn" class="ic-icon-btn" aria-label="Adjuntar referencias">
+              <i class="fas fa-paperclip"></i>
+            </button>
+            <input id="icAttachmentInput" type="file" accept="image/*" multiple hidden>
+          </div>
+
+          <label class="ic-composer__field" for="icPromptInput">
+            <textarea id="icPromptInput" rows="1" placeholder="Describe la imagen o indica cómo editar/componer referencias..."></textarea>
+          </label>
+
+          <div class="ic-composer__submit">
+            <button type="button" id="icSendBtn" class="ic-send-btn">
+              <i class="fas fa-wand-magic-sparkles"></i>
+              <span>Generar</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/chromeLayout.js"></script>
+  <script type="module" src="js/sidebar.js"></script>
+  <script type="module" src="imagecreator/app.js"></script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="js/update-banner-loader.js" defer></script>
+</body>
+</html>

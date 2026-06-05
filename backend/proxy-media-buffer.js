@@ -32,7 +32,36 @@ function buildBufferedMediaPayload(buffer, options = {}) {
   return { status: 200, headers, body: source };
 }
 
+function buildStreamingMediaPayload(totalBytes = 0, options = {}) {
+  const total = Math.max(0, Number(totalBytes || 0) || 0);
+  const mimeType = String(options?.mimeType || "application/octet-stream").trim() || "application/octet-stream";
+  const range = parseHttpByteRange(options?.rangeHeader || "", total);
+  const headers = {
+    "Content-Type": mimeType,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "private, max-age=120"
+  };
+
+  if (range) {
+    headers["Content-Range"] = `bytes ${range.start}-${range.end}/${total}`;
+    headers["Content-Length"] = String((range.end - range.start) + 1);
+    return {
+      status: 206,
+      headers,
+      range
+    };
+  }
+
+  headers["Content-Length"] = String(total);
+  return {
+    status: 200,
+    headers,
+    range: null
+  };
+}
+
 module.exports = {
   buildBufferedMediaPayload,
+  buildStreamingMediaPayload,
   parseHttpByteRange
 };

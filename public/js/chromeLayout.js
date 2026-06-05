@@ -26,7 +26,9 @@ const auth = getAuth(app);
     'contenidounidad.html': { title: 'Contenido', header: 'filters' },
     'contenidounidad-.html': { title: 'Contenido', header: 'filters' },
     'generarlectura.html': { title: 'Charly Studio', header: 'simple' },
+    'escaperoomcreator.html': { title: 'Editor de Escape Rooms', header: 'simple' },
     'podcaster.html': { title: 'Podcaster Studio', header: 'simple' },
+    'imagecreator.html': { title: 'Image Creator', header: 'simple' },
     'lecturasgame.html': { title: 'Lecturas Game', header: 'simple' },
     'moodlecourse.html': { title: 'Charly Brown Gestion de cursos Aprende', header: 'simple' },
     'voicetranscribe.html': { title: 'Charly Brown Session Recorder', header: 'simple' },
@@ -36,6 +38,14 @@ const auth = getAuth(app);
   };
 
   const cfg = pageConfig[page] || { title: 'Charly Brown', header: 'simple' };
+
+  function setHeaderUserEmail(email = '') {
+    const el = document.getElementById('headerUserEmail');
+    if (!el) return;
+    const safeEmail = String(email || '').trim();
+    el.textContent = safeEmail || 'Sin sesión';
+    el.setAttribute('title', safeEmail || 'Usuario autenticado');
+  }
 
   function applyStoredThemeSnapshot() {
     const classicLight = {
@@ -271,7 +281,9 @@ const auth = getAuth(app);
       { href: 'home.html', icon: 'fas fa-home', label: 'Inicio' },
       { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
+      { href: 'analizarPDF.html', icon: 'fas fa-file-pdf', label: 'Analizar PDF' },
       { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
+      { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },
       { href: 'lecturasGame.html', icon: 'fas fa-gamepad', label: 'Lecturas Game', id: 'lecturasGameLink', roleVisibility: 'admin' },
       { href: 'escapeRoomCreator.html', icon: 'fas fa-door-closed', label: 'Escape Room' },
@@ -327,6 +339,10 @@ const auth = getAuth(app);
   if (headerContent) {
     headerContent.innerHTML = renderHeader(cfg.title, cfg.header);
   }
+
+  onAuthStateChanged(auth, (user) => {
+    setHeaderUserEmail(user?.email || '');
+  });
 
   const sidebarMenu = document.querySelector('#sidebar .sidebar-menu');
   if (sidebarMenu) {

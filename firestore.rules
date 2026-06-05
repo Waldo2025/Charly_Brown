@@ -211,6 +211,54 @@ service cloud.firestore {
         (!("sharedWith" in data) || data.sharedWith is list);
     }
 
+    function isAllowedAnalizarPdfStatus(value) {
+      return [
+        "idle",
+        "uploading",
+        "queued",
+        "processing",
+        "completed",
+        "failed"
+      ].hasAny([value]);
+    }
+
+    function isAnalizarPdfSessionShape(data, sessionId) {
+      return data.ownerId is string &&
+        data.ownerId.size() > 0 &&
+        data.id is string &&
+        data.id == sessionId &&
+        data.sourceType is string &&
+        ["pdf", "idml"].hasAny([data.sourceType]) &&
+        isStringField(data, "title", 0, 240) &&
+        isStringField(data, "createdAt", 0, 80) &&
+        isStringField(data, "updatedAt", 0, 80) &&
+        isStringField(data, "analysisJobId", 0, 160) &&
+        (
+          !("analysisStatus" in data) ||
+          (data.analysisStatus is string && isAllowedAnalizarPdfStatus(data.analysisStatus))
+        ) &&
+        (!("indexConfig" in data) || data.indexConfig is map) &&
+        (!("resultSummary" in data) || data.resultSummary is map) &&
+        (!("result" in data) || data.result is map);
+    }
+
+    function isImageCreatorSessionShape(data) {
+      return (data.ownerId is string) &&
+        data.ownerId.size() > 0 &&
+        isStringField(data, "ownerEmail", 0, 240) &&
+        isStringField(data, "title", 0, 240) &&
+        isOptionalBool(data, "archived") &&
+        isStringField(data, "lastPrompt", 0, 5000) &&
+        data.session is map &&
+        (
+          !("messages" in data.session) ||
+          (
+            data.session.messages is list &&
+            data.session.messages.size() <= 30
+          )
+        );
+    }
+
     function isMoodleCourseOwnerData(data) {
       return isSignedIn() && (
         data.userId == request.auth.uid ||
@@ -268,6 +316,50 @@ service cloud.firestore {
         isSignedIn() &&
         isOwner(resource.data.ownerId)
       );
+    }
+
+    match /analizarPDF/{sessionId} {
+      allow read: if isEditor() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId)
+      );
+      allow create: if isSignedIn() &&
+        isOwner(request.resource.data.ownerId) &&
+        isAnalizarPdfSessionShape(request.resource.data, sessionId);
+      allow update: if isSignedIn() &&
+        isOwner(resource.data.ownerId) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        isAnalizarPdfSessionShape(request.resource.data, sessionId);
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId)
+      );
+    }
+
+    match /escapeRoom/{sessionId} {
+      allow read: if isSignedIn() && isOwner(resource.data.ownerId);
+      allow create: if isSignedIn() && isOwner(request.resource.data.ownerId);
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId) &&
+        request.resource.data.ownerId == resource.data.ownerId
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId)
+      );
+    }
+
+    match /image_creator_sessions/{sessionId} {
+      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isImageCreatorSessionShape(request.resource.data);
+      allow update: if isSignedIn() &&
+        resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        isImageCreatorSessionShape(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     // Fuentes de lecturas para juego/editor.

@@ -7,7 +7,7 @@ services:
     buildCommand: npm install
     startCommand: node backend/server.js
     healthCheckPath: /api/health
-    autoDeploy: false
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
@@ -21,6 +21,8 @@ services:
         value: https://charly-brown.web.app,https://charly-brown.firebaseapp.com,https://*.onrender.com
       - key: PUBLIC_BACKEND_BASE_URL
         value: https://charly-brown-gemini-backend.onrender.com
+      - key: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS
+        value: 360000
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:
           type: keyvalue
@@ -37,7 +39,7 @@ services:
     rootDir: .
     buildCommand: npm install
     startCommand: node backend/workers/podcaster-montage-export-worker.js
-    autoDeploy: false
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
@@ -47,6 +49,8 @@ services:
         value: charly-brown.firebasestorage.app
       - key: PUBLIC_BACKEND_BASE_URL
         value: https://charly-brown-gemini-backend.onrender.com
+      - key: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS
+        value: 360000
       - key: RENDER_KEY_VALUE_CONNECTION_STRING
         fromService:
           type: keyvalue

@@ -4,200 +4,371 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creador de Escape Rooms Educativos - CharlyBrown</title>
-    <!-- Project-wide CSS -->
+    <link rel="stylesheet" href="local-fonts.css">
     <link rel="stylesheet" href="tailwind-lite.css?v=1.0.0">
-    <link rel="stylesheet" href="sidebar.css">
-    <link rel="stylesheet" href="header.css">
+    <link rel="stylesheet" href="sidebar.css?v=2026-1.0.1.36">
+    <link rel="stylesheet" href="header.css?v=2026-1.0.1.36">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; }
-        .loader { border-top-color: #3b82f6; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
-        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        /* Adjust main content padding to avoid overlap with fixed header/sidebar */
-        .cb-main-layout {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-        #app-container {
-            display: flex;
-            flex: 1;
-            min-height: 0;
-        }
-        .content-wrapper {
-            flex: 1;
-            min-width: 0;
-            padding-top: var(--cb-header-height, 64px); /* Account for fixed header */
-            padding-left: var(--cb-sidebar-collapsed-width, 64px); /* Account for collapsed sidebar */
-            overflow-y: auto;
-        }
-        /* Adjust for expanded sidebar */
-        #sidebar.show ~ .content-wrapper {
-            padding-left: var(--cb-sidebar-expanded-width, 250px);
-        }
-        /* Adjust for mobile */
-        @media (max-width: 768px) {
-            .content-wrapper {
-                padding-top: var(--cb-header-mobile-height, 56px);
-                padding-left: 0; /* Sidebar is usually hidden or overlays on mobile */
-            }
-            #sidebar.show ~ .content-wrapper {
-                padding-left: 0; /* Sidebar overlays on mobile */
-            }
-        }
-        /* New styles for the two-panel layout */
-        .main-content-layout {
-            display: flex;
-            flex-grow: 1; /* Allow it to grow and fill space */
-            gap: 2rem; /* Space between panels */
-            flex-wrap: wrap; /* Allow wrapping on smaller screens */
-        }
-        .form-panel {
-            flex: 1 1 45%; /* Allow form to grow, shrink, and take at least 45% width */
-            min-width: 300px; /* Minimum width for the form panel */
-            display: flex;
-            flex-direction: column;
-        }
-        .preview-panel {
-            flex: 1 1 50%; /* Allow preview to grow, shrink, and take at least 50% width */
-            min-width: 400px; /* Minimum width for the preview panel */
-            display: flex;
-            flex-direction: column;
-            background-color: #fff; /* Background for the preview panel */
-            padding: 1.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border: 1px solid #e2e8f0;
-            overflow: hidden; /* Ensure iframe content doesn't overflow */
-        }
-        .preview-panel iframe {
-            flex-grow: 1; /* Allow iframe to fill available height */
-            min-height: 400px; /* Minimum height for the iframe */
-        }
-        /* Adjustments for smaller screens */
-        @media (max-width: 1024px) {
-            .main-content-layout {
-                flex-direction: column; /* Stack panels vertically */
-            }
-            .form-panel, .preview-panel {
-                flex: 1 1 100%; /* Take full width */
-                min-width: unset;
-            }
-        }
-        .content-main { flex: 1; display: flex; flex-direction: column; padding: 2rem; } /* Make content-main fill available space and be a flex container */
-        .loader { border-top-color: #3b82f6; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
-        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
+    <link rel="stylesheet" href="escapeRoomCreator.css?v=2.0.1">
 </head>
-<body class="cb-main-layout">
-
+<body data-page="escapeRoomCreator.html" class="cb-main-layout er-shell">
     <div id="updateBanner" class="update-banner" role="button" tabindex="0" aria-live="polite">
         Nuevas Actualizaciones
     </div>
 
     <div id="app-container">
-        <!-- Main project header -->
         <div class="main-header">
             <div class="header-content"></div>
         </div>
 
-        <!-- Main project sidebar -->
         <div id="sidebar">
-            <div class="sidebar-menu"></div>
+            <button id="menuToggle" aria-label="Abrir menú">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="sidebar-menu">
+                <!-- sidebar-menu loaded from chromeLayout.js -->
+            </div>
         </div>
 
-        <!-- Main content wrapper -->
         <div class="content-wrapper">
-            <main class="content-main">
-                <div class="main-content-layout">
-                    <!-- Left Panel: Form and JSON Preview -->
-                    <div class="form-panel">
-                        <div class="max-w-4xl mx-auto">
-                            <header class="mb-8">
-                                <h1 class="text-3xl font-extrabold text-slate-900">Diseñador de Escape Rooms</h1>
-                                <p class="text-slate-500 mt-2">Genera experiencias inmersivas impulsadas por IA y expórtalas como juegos interactivos (HTML) listos para subir a Moodle.</p>
-                            </header>
-
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 mb-8">
-                                <form id="escapeRoomForm" class="space-y-6">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div>
-                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Nivel Educativo</label>
-                                            <select id="nivelSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                                <option value="Primaria">Primaria</option>
-                                                <option value="Secundaria">Secundaria</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Grado</label>
-                                            <select id="gradoSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                                <option value="Primero">Primero</option>
-                                                <option value="Segundo">Segundo</option>
-                                                <option value="Tercero">Tercero</option>
-                                                <option value="Cuarto">Cuarto</option>
-                                                <option value="Quinto">Quinto</option>
-                                                <option value="Sexto">Sexto</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-semibold text-slate-700 mb-2">Número de Misiones/Salas</label>
-                                            <input type="number" id="numMisionesInput" value="4" min="2" max="8" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                        </div>
-                                    </div>
-                                    
-                                    <div>
-                                        <label class="block text-sm font-semibold text-slate-700 mb-2">Tema Curricular</label>
-                                        <input type="text" id="temaInput" placeholder="Ej. El Ciclo del Agua, Ecuaciones Lineales, La Revolución Mexicana..." class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-semibold text-slate-700 mb-2">Estilo Narrativo / Temática del Juego</label>
-                                        <select id="narrativaSelect" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                            <option value="Misterio y detectives (Investigación)">🕵️ Misterio y detectives (Investigación)</option>
-                                            <option value="Aventura espacial (Ciencia ficción)">🚀 Aventura espacial (Ciencia ficción)</option>
-                                            <option value="Exploración de ruinas antiguas (Aventura histórica)">🏺 Exploración de ruinas antiguas (Aventura histórica)</option>
-                                            <option value="Laboratorio secreto (Ciencia y experimentos)">🔬 Laboratorio secreto (Ciencia y experimentos)</option>
-                                            <option value="Fantasía mágica (Magia y hechizos)">🧙‍♂️ Fantasía mágica (Magia y hechizos)</option>
-                                        </select>
-                                    </div>
-
-                                    <div class="pt-4 flex items-center justify-between border-t border-slate-100">
-                                        <button type="submit" id="btnGenerar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md flex items-center gap-2">
-                                            <i class="fas fa-magic"></i> Crear Escape Room
-                                        </button>
-                                        <div id="loadingIndicator" class="hidden flex items-center gap-3 text-blue-600 font-medium">
-                                            <div class="loader ease-linear rounded-full border-4 border-t-4 border-slate-200 h-6 w-6"></div>
-                                            Diseñando la experiencia...
-                                        </div>
-                                    </div>
-                                </form>
+            <main class="er-page">
+                <section class="er-workspace">
+                    <aside class="er-sessions-panel" aria-label="Sesiones de Escape Room">
+                        <div class="er-card-header er-sessions-panel-header">
+                            <div>
+                                <div class="er-card-kicker">Sesiones</div>
+                                <h2>Mis sesiones</h2>
                             </div>
+                            <button type="button" id="btnNewSession" class="er-button er-button-primary er-button-compact">
+                                <i class="fas fa-plus"></i>
+                                <span>Nueva sesión</span>
+                            </button>
+                        </div>
+                        <div class="er-session-current">
+                            <div class="er-label">Sesión activa</div>
+                            <div id="erActiveSessionName" class="er-session-current-name">Sin sesión activa</div>
+                            <div id="erSaveState" class="er-session-save-state">Sin cambios remotos</div>
+                        </div>
+                        <div id="erSessionsLoading" class="er-empty-inline">Cargando sesiones...</div>
+                        <div id="erSessionsEmpty" class="er-empty-inline hidden">Todavía no tienes sesiones guardadas.</div>
+                        <div id="erSessionList" class="er-session-list hidden"></div>
+                    </aside>
 
-                            <!-- Área de Resultados (JSON Preview) -->
-                            <div id="resultadoContainer" class="hidden bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-2xl font-bold text-slate-900">Juego Generado (JSON)</h2>
-                                    <button id="btnExportar" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-5 rounded-lg transition-all shadow-sm flex items-center gap-2">
-                                        <i class="fas fa-download"></i> Descargar para Moodle
+                    <div class="er-main-column">
+                        <section class="er-card er-summary-card">
+                            <div class="er-summary-main">
+                                <div class="er-summary-copy">
+                                    <h1>Escape Room Editor</h1>
+                                </div>
+                                <div class="er-summary-actions">
+                                    <button type="button" id="btnAddMission" class="er-button er-button-ghost">
+                                        <i class="fas fa-plus"></i>
+                                        <span>Misión</span>
+                                    </button>
+                                    <button type="button" class="er-button er-button-secondary" data-bs-toggle="collapse" data-bs-target="#briefCollapse" aria-expanded="true" aria-controls="briefCollapse">
+                                        <i class="fas fa-sliders"></i>
+                                        <span>Brief</span>
+                                    </button>
+                                    <button type="button" id="btnModelConfig" class="er-button er-button-secondary er-button-icon" data-bs-toggle="modal" data-bs-target="#modelConfigModal" aria-label="Configuración">
+                                        <i class="fas fa-gear"></i>
+                                    </button>
+                                    <button type="button" id="btnExportar" class="er-button er-button-primary" disabled>
+                                        <i class="fas fa-file-zipper"></i>
+                                        <span>Exportar</span>
                                     </button>
                                 </div>
-                                <div id="jsonPreview" class="bg-slate-50 border border-slate-200 rounded-xl p-6 text-sm text-slate-700 max-h-96 overflow-y-auto font-mono">
-                                    <!-- Preview de datos JSON -->
+                            </div>
+                            <div class="er-summary-stats" id="erSummaryStats">
+                                <div class="er-stat">
+                                    <span class="er-stat-label">Misiones</span>
+                                    <strong id="erMissionCount">0</strong>
+                                </div>
+                                <div class="er-stat">
+                                    <span class="er-stat-label">Activas</span>
+                                    <strong id="erUnlockedCount">0</strong>
+                                </div>
+                                <div class="er-stat er-stat-wide">
+                                    <span class="er-stat-label">Tipo</span>
+                                    <strong id="erTypeSummary">-</strong>
                                 </div>
                             </div>
-                        </div>
-                    </div>
+                        </section>
 
-                    <!-- Right Panel: Real Preview -->
-                    <div id="escapeRoomPreviewPanel" class="preview-panel hidden">
-                        <h2 class="text-2xl font-bold text-slate-900 mb-4">Vista Previa del Escape Room</h2>
-                        <iframe id="escapeRoomPreviewFrame" class="w-full h-full border-none rounded-xl shadow-md"></iframe>
+                        <div class="collapse show" id="briefCollapse">
+                            <form id="escapeRoomForm" class="er-card er-form-card">
+                                <div class="er-card-header er-form-header-compact">
+                                    <div>
+                                        <div class="er-card-kicker">Brief</div>
+                                        <h2>Configuración base</h2>
+                                    </div>
+                                </div>
+
+                                <div class="er-form-compact-grid">
+                                    <label class="er-field er-field-topic">
+                                        <span>Tema curricular</span>
+                                        <textarea id="temaInput" class="er-multiline er-compact-textarea" rows="3" placeholder="Un tema o subtema por línea" required></textarea>
+                                    </label>
+                                    <label class="er-field er-field-objective">
+                                        <span>Objetivo final</span>
+                                        <textarea id="objetivoInput" class="er-objective-textarea er-compact-textarea" rows="3" placeholder="Qué debe lograr el grupo al terminar"></textarea>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Nivel</span>
+                                        <select id="nivelSelect" required>
+                                            <option value="Primaria">Primaria</option>
+                                            <option value="Secundaria">Secundaria</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Grado</span>
+                                        <select id="gradoSelect" required>
+                                            <option value="Primero">Primero</option>
+                                            <option value="Segundo">Segundo</option>
+                                            <option value="Tercero">Tercero</option>
+                                            <option value="Cuarto">Cuarto</option>
+                                            <option value="Quinto">Quinto</option>
+                                            <option value="Sexto">Sexto</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Misiones</span>
+                                        <input type="number" id="numMisionesInput" value="4" min="2" max="8" required>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Preguntas / sala</span>
+                                        <input type="number" id="preguntasPorSalaInput" value="1" min="1" max="6" required>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Duración</span>
+                                        <input type="number" id="duracionInput" min="10" max="120" step="5" value="35">
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Narrativa</span>
+                                        <select id="narrativaSelect">
+                                            <option value="Misterio y detectives (Investigación)">Misterio y detectives</option>
+                                            <option value="Aventura espacial (Ciencia ficción)">Aventura espacial</option>
+                                            <option value="Exploración de ruinas antiguas (Aventura histórica)">Ruinas antiguas</option>
+                                            <option value="Laboratorio secreto (Ciencia y experimentos)">Laboratorio secreto</option>
+                                            <option value="Fantasía mágica (Magia y hechizos)">Fantasía mágica</option>
+                                            <option value="Viaje en el tiempo (Aventura temporal)">Viaje en el tiempo</option>
+                                            <option value="otro">Otro</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field er-field-wide hidden" id="narrativaCustomField">
+                                        <span>Narrativa personalizada</span>
+                                        <input type="text" id="narrativaCustomInput" placeholder="Escribe tu propio estilo narrativo">
+                                    </label>
+                                    <div class="er-hidden-defaults hidden" aria-hidden="true">
+                                        <select id="publicoSelect">
+                                            <option value="Grupo completo" selected>Grupo completo</option>
+                                            <option value="Equipos pequeños">Equipos pequeños</option>
+                                            <option value="Parejas">Parejas</option>
+                                            <option value="Trabajo individual">Trabajo individual</option>
+                                        </select>
+                                        <select id="ritmoSelect">
+                                            <option value="progresivo" selected>Progresivo</option>
+                                            <option value="rapido">Rápido</option>
+                                            <option value="narrativo">Narrativo</option>
+                                            <option value="desafiante">Desafiante</option>
+                                        </select>
+                                        <select id="dificultadSelect">
+                                            <option value="guiada">Guiada</option>
+                                            <option value="equilibrada" selected>Equilibrada</option>
+                                            <option value="desafiante">Desafiante</option>
+                                        </select>
+                                        <select id="pistasSelect">
+                                            <option value="suaves">Suaves</option>
+                                            <option value="moderadas" selected>Moderadas</option>
+                                            <option value="explícitas">Explícitas</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="er-actions">
+                                    <button type="submit" id="btnGenerar" class="er-button er-button-primary">
+                                        <i class="fas fa-wand-magic-sparkles"></i>
+                                        <span>Generar</span>
+                                    </button>
+                                    <button type="button" id="btnLimpiar" class="er-button er-button-secondary">
+                                        <i class="fas fa-rotate-left"></i>
+                                        <span>Limpiar</span>
+                                    </button>
+                                    <button type="button" id="btnCopiarJson" class="er-button er-button-ghost" disabled>
+                                        <i class="fas fa-copy"></i>
+                                        <span>Copiar JSON</span>
+                                    </button>
+                                </div>
+
+                                <div id="loadingIndicator" class="er-loading hidden" aria-live="polite">
+                                    <span class="er-spinner" aria-hidden="true"></span>
+                                    <span>Diseñando la experiencia y normalizando las misiones...</span>
+                                </div>
+                            </form>
+                        </div>
+
+                        <section class="er-card er-missions-card">
+                            <div class="er-card-header">
+                                <div>
+                                    <div class="er-card-kicker">2. Studio de misiones</div>
+                                    <h2>Editor de salas, rutas y preguntas</h2>
+                                </div>
+                                <p class="er-inline-note">Arrastra para reordenar. Cada misión puede desbloquear otras.</p>
+                            </div>
+                            <div id="missionEditorList" class="er-mission-list"></div>
+                            <div id="erMissionEmpty" class="er-empty-inline">
+                                Genera un escape room o añade una misión manualmente para empezar a editar.
+                            </div>
+                        </section>
+
+                        <section class="er-card er-output-card">
+                            <div class="er-card-header">
+                                <div>
+                                    <div class="er-card-kicker">3. Preview y salida</div>
+                                    <h2>Juego exportable y JSON normalizado</h2>
+                                </div>
+                                <div class="er-output-header-actions">
+                                    <button type="button" id="btnPreviewTheme" class="er-button er-button-secondary er-button-icon" data-bs-toggle="modal" data-bs-target="#previewThemeModal" aria-label="Tema del juego">
+                                        <i class="fas fa-palette"></i>
+                                    </button>
+                                    <div class="er-tab-switcher" role="tablist" aria-label="Panel de salida">
+                                        <button type="button" class="er-tab is-active" data-er-tab="preview" aria-pressed="true">Vista previa</button>
+                                        <button type="button" class="er-tab" data-er-tab="json" aria-pressed="false">JSON</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="erEmptyState" class="er-empty-state">
+                                <div class="er-empty-illustration">
+                                    <i class="fas fa-gamepad"></i>
+                                </div>
+                                <h3>El juego se verá aquí</h3>
+                                <p>La preview usa el mismo modelo compartido que el export final.</p>
+                            </div>
+
+                            <section id="escapeRoomPreviewPanel" class="er-preview-frame-wrap hidden">
+                                <iframe id="escapeRoomPreviewFrame" title="Vista previa del escape room" class="er-preview-frame"></iframe>
+                            </section>
+
+                            <section id="resultadoContainer" class="er-json-panel hidden">
+                                <pre id="jsonPreview" class="er-json-preview"></pre>
+                            </section>
+                        </section>
+
+                        <div id="erStatusBanner" class="er-status-banner hidden" role="status" aria-live="polite"></div>
                     </div>
-                </div>
+                </section>
             </main>
         </div>
     </div>
-    <script type="module" src="js/chromeLayout.js"></script>
+
+    <div class="modal fade" id="modelConfigModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content er-modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Configuración del modelo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="er-field">
+                        <span>Modelo Gemini</span>
+                        <select id="modeloSelect">
+                            <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
+                            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                            <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                            <option value="gemini-3-pro-preview">Gemini 3 Pro Preview</option>
+                            <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                        </select>
+                    </label>
+                    <p class="er-field-help">Este modelo se usa para generar la narrativa, las salas y las preguntas.</p>
+
+                    <div class="er-modal-divider"></div>
+
+                    <div class="er-theme-config">
+                        <div class="er-card-kicker">Tema visual</div>
+                        <div class="er-theme-presets" role="group" aria-label="Temas de color">
+                            <button type="button" class="er-theme-preset" data-theme-preset="nebula">Nebula</button>
+                            <button type="button" class="er-theme-preset" data-theme-preset="midnight">Midnight</button>
+                            <button type="button" class="er-theme-preset" data-theme-preset="jade">Jade</button>
+                            <button type="button" class="er-theme-preset" data-theme-preset="sunset">Sunset</button>
+                        </div>
+                        <div class="er-theme-grid">
+                            <label class="er-field">
+                                <span>Fondo A</span>
+                                <input type="color" id="themeBgStart" value="#0e0b19">
+                            </label>
+                            <label class="er-field">
+                                <span>Fondo B</span>
+                                <input type="color" id="themeBgEnd" value="#1c1231">
+                            </label>
+                            <label class="er-field">
+                                <span>Primario</span>
+                                <input type="color" id="themePrimary" value="#f472b6">
+                            </label>
+                            <label class="er-field">
+                                <span>Acento</span>
+                                <input type="color" id="themeAccent" value="#22d3ee">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="previewThemeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+            <div class="modal-content er-modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tema del preview y export</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="er-theme-config">
+                        <div class="er-card-kicker">Paletas del juego</div>
+                        <div class="er-preview-theme-presets" role="group" aria-label="Presets del juego">
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="midnightAurora">Midnight Aurora</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="glacier">Glacier</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="volcanic">Volcanic</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="emberGold">Ember Gold</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="jadeNight">Jade Night</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="roseVelvet">Rose Velvet</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="steelBlue">Steel Blue</button>
+                            <button type="button" class="er-preview-theme-preset" data-preview-theme-preset="plumHeat">Plum Heat</button>
+                        </div>
+                        <div class="er-preview-theme-simple-grid">
+                            <label class="er-field">
+                                <span>Color base</span>
+                                <input type="color" id="previewBaseColor" value="#7c3aed">
+                            </label>
+                            <label class="er-field">
+                                <span>Radio cards</span>
+                                <input type="number" id="previewCardRadius" min="0" max="40" step="1" value="22">
+                            </label>
+                            <label class="er-field">
+                                <span>Vista del tema</span>
+                                <div id="previewThemeSummary" class="er-preview-theme-summary">Preset oscuro con acentos derivados del color base.</div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="btnPreviewThemeReset" class="er-button er-button-ghost">Restablecer</button>
+                    <button type="button" class="er-button er-button-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="vendor/sortablejs/Sortable.min.js"></script>
+    <script src="js/html-docx.js"></script>
+    <script type="module" src="js/chromeLayout.js?v=2026-1.0.0.71"></script>
+    <script type="module" src="js/sidebar.js?v=2026-1.0.0.59"></script>
     <script type="module" src="js/escapeRoomCreator.js"></script>
     <script src="js/update-banner-loader.js" defer></script>
 </body>

@@ -1,0 +1,2 @@
+PyMuPDF>=1.26.0
+pyenchant>=3.2.2

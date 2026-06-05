@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operación Galaxia Segura: El Código de la Singularidad</title>
+  <link rel="stylesheet" href="assets/game.css">
+</head>
+<body>
+  <main class="game-shell">
+    <section class="game-card">
+      <div class="gallery-nav">
+        <button type="button" class="secondary" data-gallery-prev>Anterior</button>
+        <div class="gallery-step" id="galleryStep">Sección 1 de 3</div>
+        <span></span>
+      </div>
+      <div class="gallery-stage">
+        <section class="gallery-screen is-active" data-gallery-screen="intro">
+          <section class="hero-panel" style="background-image: linear-gradient(135deg, rgba(18, 13, 34, 0.88), rgba(35, 20, 61, 0.72)), url('assets/media/Operacion_Galaxia_Segura_El_Codigo_de_la_Singularidad-background.png'); background-size: cover; background-position: center; background-repeat: no-repeat;">
+            <div class="label">Arena eSports</div>
+            <h1 class="title">Operación Galaxia Segura: El Código de la Singularidad</h1>
+            <p class="subtitle">Detén el colapso financiero y la fuga de datos intergaláctica</p>
+            <p class="muted">¡Atención, cadete! El Banco Central de la Federación y el Nexo de Datos están bajo un ataque coordinado. Un infiltrado está drenando créditos físicos y un grupo de hackers está extrayendo información confidencial. Ambos utilizan patrones matemáticos de progresión aritmética para evadir los radares. Tu misión es descifrar estos patrones y generar la clave de anulación antes de que el sistema colapse en 35 minutos.</p>
+            <div class="progress-shell">
+              <div class="badge-row">
+                <span class="badge">Mapa libre</span>
+                <span class="badge">2 salas</span>
+              </div>
+              <div class="progress-bar"><span id="progressBar"></span></div>
+              <p class="status-note">Progreso <strong id="progressText">0 / 2</strong></p>
+            </div>
+            <div class="button-row hero-actions">
+              <button type="button" class="primary" data-gallery-next>Ver siguiente sección</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="gallery-screen" data-gallery-screen="mission">
+          <section class="map-panel">
+            <div class="label">Mapa de salas</div>
+            <p class="map-help">Elige cualquier sala desbloqueada. Al resolverla, el mapa libre abre nuevas rutas.</p>
+            <div class="map-grid" id="mapGrid"></div>
+          </section>
+
+          <section id="missionStage"></section>
+        </section>
+
+        <section class="gallery-screen" data-gallery-screen="ending">
+          <section id="endingPanel" class="ending-panel hidden">
+            <div class="label">Victoria</div>
+            <h2>Escape room completado</h2>
+            
+        <div class="ending-media">
+          <img src="assets/media/Operacion_Galaxia_Segura_El_Codigo_de_la_Singularidad-background.png" alt="Operación Galaxia Segura: El Código de la Singularidad">
+        </div>
+            <p class="muted">¡Misión cumplida, cadete! Has demostrado un dominio total de las progresiones aritméticas. Gracias a tu precisión matemática, los fondos de la Federación están seguros y los datos confidenciales han sido recuperados. La &#39;Cámara del Conocimiento&#39; ahora está abierta para ti.</p>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="assets/game.js"></script>
+</body>
+</html>

@@ -87,3 +87,13 @@ public/config.local.json
 
 # Local backup snapshots
 backups/
+
+# macOS / generated clutter
+.DS_Store
+.pycache/
+.tmp_pycache/
+.superpowers/
+
+# Local analizar-pdf sample files
+public/analizarPDF/*.pdf
+public/analizarPDF/*.idml
