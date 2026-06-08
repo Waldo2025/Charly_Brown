@@ -1095,6 +1095,23 @@ function renderPageReportItems(items = [], session = null, options = {}) {
         <h5>Ortografía</h5>
         ${renderSelectableIssueList("spelling", page, session?.correctionSelection || {})}
       </section>
+      ${(() => {
+        const modes = Array.isArray(page?.instructionWorkModes) ? page.instructionWorkModes : [];
+        if (!modes.length) return "";
+        return `
+          <section>
+            <h5>Iconos de Trabajo Detectados</h5>
+            <ul class="analizar-pdf-selectable-issue-list">
+              ${modes.map(mode => `
+                <li class="analizar-pdf-selectable-issue-item">
+                  <span class="analizar-pdf-inline-badge is-ok">Modalidad: ${escapeHtml(mode.kind)}</span>
+                  <span>${escapeHtml(mode.text)}</span>
+                </li>
+              `).join("")}
+            </ul>
+          </section>
+        `;
+      })()}
     </article>
   `).join("");
 }

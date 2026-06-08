@@ -2679,6 +2679,13 @@ def analyze_idml_document(input_path, session):
         )
         semantic_blocks = _select_semantic_story_blocks(_build_semantic_blocks(page_reports))
         spelling_issues = find_spelling_issues(semantic_blocks, gemini_verifier=gemini_verifier)
+        spelling_issues = _filter_instruction_icon_orthotypography_issues(
+            spelling_issues,
+            page_reports=page_reports,
+            story_preview_index=story_preview_index,
+            gemini_verifier=gemini_verifier,
+            instruction_work_mode_index=instruction_work_mode_index,
+        )
         orthotypography_issues = find_orthotypography_issues(semantic_blocks, gemini_verifier=gemini_verifier)
         orthotypography_issues = _filter_instruction_icon_orthotypography_issues(
             orthotypography_issues,
