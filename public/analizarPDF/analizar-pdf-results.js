@@ -166,6 +166,13 @@ function buildConfiguredAliasRows(page = {}, session = null) {
       value: String(aliasValues?.[alias] || "").trim() || "N/D",
     });
   }
+  const instructionWorkType = String(aliasValues?.tipo_trabajo_instruccion || "").trim();
+  if (instructionWorkType) {
+    rows.push({
+      label: "tipo_trabajo_instruccion",
+      value: instructionWorkType,
+    });
+  }
   return rows;
 }
 

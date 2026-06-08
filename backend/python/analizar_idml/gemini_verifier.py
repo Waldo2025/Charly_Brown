@@ -287,3 +287,71 @@ class GeminiVerifier:
             ValueError,
         ):
             return {}
+
+    def detect_instruction_work_icon_visual(
+        self,
+        *,
+        page_name="",
+        image_base64="",
+        mime_type="image/jpeg",
+        excerpt="",
+        instruction_text="",
+    ):
+        if not self.enabled or not image_base64:
+            return {}
+        prompt = (
+            "Eres un verificador visual editorial para material escolar en español.\n"
+            "Debes revisar si el recorte de una instrucción contiene un icono pequeño de modalidad de trabajo insertado dentro de la línea de texto.\n"
+            "El icono puede aparecer entre palabras o entre una palabra y una sigla corta.\n"
+            "Tipos válidos de icono:\n"
+            "- individual: una persona\n"
+            "- pair: dos personas\n"
+            "- group: tres personas\n"
+            "Cuenta visualmente las personas del icono y devuelve el tipo exacto.\n"
+            "Si el supuesto fragmento problemático parece corresponder al icono o a su cercanía visual, responde que sí hay icono.\n"
+            "No inventes texto. No marques icono si no es visible. Si no puedes distinguir con claridad entre una, dos o tres personas, responde hasInstructionIcon=false.\n"
+            "Responde SOLO JSON con esta forma exacta:\n"
+            "{\"hasInstructionIcon\":false,\"kind\":\"\",\"reason\":\"\"}\n"
+            f"Página: {page_name or 'N/A'}\n"
+            f"Fragmento marcado: {str(excerpt or '').strip()}\n"
+            f"Texto de instrucción: {str(instruction_text or '').strip()}\n"
+        )
+        body = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": image_base64}},
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+            },
+        }
+        try:
+            response = self._post_json(body)
+            payload_text = self._extract_text(response)
+            if not payload_text:
+                return {}
+            parsed = json.loads(payload_text)
+            if not isinstance(parsed, dict):
+                return {}
+            has_icon = bool(parsed.get("hasInstructionIcon"))
+            kind = str(parsed.get("kind") or "").strip().lower()
+            reason = str(parsed.get("reason") or "").strip()
+            if kind not in {"", "individual", "pair", "group", "unknown"}:
+                kind = ""
+            return {
+                "hasInstructionIcon": has_icon,
+                "kind": kind,
+                "reason": reason,
+            }
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            socket.timeout,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            return {}

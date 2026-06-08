@@ -201,34 +201,6 @@ def _extract_embedded_story_ids(root):
     return story_ids
 
 
-def _extract_embedded_story_refs(root, parent_map):
-    story_refs = []
-    seen = set()
-    for node in root.iter():
-        if local_name(node.tag) != "TextFrame":
-            continue
-        story_id = str(node.get("ParentStory") or "").strip()
-        frame_id = str(node.get("Self") or "").strip()
-        if not story_id or not frame_id:
-            continue
-        signature = (story_id, frame_id)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        story_refs.append(
-            {
-                "storyId": story_id,
-                "frameId": frame_id,
-                "appliedObjectStyle": node.get("AppliedObjectStyle", ""),
-                "fillColor": _normalize_color_ref(node.get("FillColor", "")),
-                "strokeColor": _normalize_color_ref(node.get("StrokeColor", "")),
-                "frameRect": _get_text_frame_rect(node, parent_map),
-                "overflows": str(node.get("Overflows", "")).strip().lower() == "true",
-            }
-        )
-    return story_refs
-
-
 def _extract_story_notes(root):
     parent_map = {child: parent for parent in root.iter() for child in list(parent)}
     notes = []
@@ -288,6 +260,8 @@ def parse_stories(archive, story_sources=None):
         paragraph_style_ids = []
         character_style_ids = []
         paragraph_blocks = []
+        embedded_story_refs = []
+        embedded_story_ref_signatures = set()
         parent_map = {child: parent for parent in root.iter() for child in list(parent)}
 
         paragraph_block_index = 0
@@ -335,6 +309,31 @@ def parse_stories(archive, story_sources=None):
                         "inTable": _is_inside_table(node, parent_map),
                     })
                     paragraph_block_index += 1
+                anchor_block_order = paragraph_block_index if paragraph_text else max(paragraph_block_index - 1, 0)
+                for descendant in node.iter():
+                    if local_name(descendant.tag) != "TextFrame":
+                        continue
+                    embedded_story_id = str(descendant.get("ParentStory") or "").strip()
+                    embedded_frame_id = str(descendant.get("Self") or "").strip()
+                    if not embedded_story_id or not embedded_frame_id:
+                        continue
+                    signature = (embedded_story_id, embedded_frame_id)
+                    if signature in embedded_story_ref_signatures:
+                        continue
+                    embedded_story_ref_signatures.add(signature)
+                    embedded_story_refs.append(
+                        {
+                            "storyId": embedded_story_id,
+                            "frameId": embedded_frame_id,
+                            "appliedObjectStyle": descendant.get("AppliedObjectStyle", ""),
+                            "fillColor": _normalize_color_ref(descendant.get("FillColor", "")),
+                            "strokeColor": _normalize_color_ref(descendant.get("StrokeColor", "")),
+                            "frameRect": _get_text_frame_rect(descendant, parent_map),
+                            "overflows": str(descendant.get("Overflows", "")).strip().lower() == "true",
+                            "anchorBlockOrder": anchor_block_order,
+                            "anchorParentStoryId": story.get("Self", ""),
+                        }
+                    )
             elif tag == "CharacterStyleRange":
                 character_style_ids.append(node.get("AppliedCharacterStyle", ""))
 
@@ -346,7 +345,7 @@ def parse_stories(archive, story_sources=None):
                 "previewImage": _extract_preview_image(raw_xml),
                 "flowTokens": _extract_story_flow_tokens(root),
                 "embeddedStoryIds": _extract_embedded_story_ids(root),
-                "embeddedStoryRefs": _extract_embedded_story_refs(root, parent_map),
+                "embeddedStoryRefs": embedded_story_refs,
                 "notes": _extract_story_notes(root),
                 "paragraphStyleIds": [value for value in paragraph_style_ids if value],
                 "characterStyleIds": [value for value in character_style_ids if value],

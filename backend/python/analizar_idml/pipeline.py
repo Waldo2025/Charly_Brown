@@ -1105,11 +1105,73 @@ def _build_embedded_story_ref_lookup(stories=None):
     return lookup
 
 
-def _resolve_story_ref_for_page(page=None, story=None, parent_story_ref=None, embedded_story_ref_lookup=None):
+def _embedded_story_matches_page_by_anchor(page=None, parent_story=None, embedded_story_ref=None, story_page_sequences=None):
+    parent_story_id = str((parent_story or {}).get("storyId") or "").strip()
+    anchor_parent_story_id = str((embedded_story_ref or {}).get("anchorParentStoryId") or "").strip()
+    if not parent_story_id or parent_story_id != anchor_parent_story_id:
+        return False
+    current_page = str((page or {}).get("pageName") or "").strip()
+    if not current_page:
+        return False
+    parent_blocks = list((parent_story or {}).get("paragraphBlocks") or [])
+    if not parent_blocks:
+        page_order = list((story_page_sequences or {}).get(parent_story_id) or [])
+        if len(page_order) == 1:
+            return current_page == page_order[0]
+        return False
+    sliced_blocks = _slice_story_blocks_for_page(
+        parent_story,
+        page_name=current_page,
+        story_page_sequences=story_page_sequences,
+    )
+    if not sliced_blocks:
+        return False
+    try:
+        anchor_block_order = int((embedded_story_ref or {}).get("anchorBlockOrder") or 0)
+    except (TypeError, ValueError):
+        return False
+    block_orders = [
+        int((block or {}).get("blockOrder") or 0)
+        for block in sliced_blocks
+    ]
+    return min(block_orders) <= anchor_block_order <= max(block_orders)
+
+
+def _resolve_story_ref_for_page(
+    page=None,
+    story=None,
+    parent_story=None,
+    parent_story_ref=None,
+    embedded_story_ref_lookup=None,
+    story_page_sequences=None,
+):
     page_rect = (page or {}).get("pageRect") or None
     story_id = str((story or {}).get("storyId") or "").strip()
     embedded_refs = list((embedded_story_ref_lookup or {}).get(story_id) or [])
     if embedded_refs:
+        anchor_capable_refs = [
+            story_ref
+            for story_ref in embedded_refs
+            if str((story_ref or {}).get("anchorParentStoryId") or "").strip()
+        ]
+        anchor_matches = [
+            story_ref
+            for story_ref in anchor_capable_refs
+            if _embedded_story_matches_page_by_anchor(
+                page=page,
+                parent_story=parent_story,
+                embedded_story_ref=story_ref,
+                story_page_sequences=story_page_sequences,
+            )
+        ]
+        if anchor_matches:
+            anchor_selected = dict(anchor_matches[0] or {})
+            anchor_selected["textStatus"] = "correcto"
+            if parent_story_ref and not anchor_selected.get("frameRect"):
+                anchor_selected["frameRect"] = (parent_story_ref or {}).get("frameRect") or None
+            return anchor_selected
+        if anchor_capable_refs:
+            return None
         matching_refs = [
             story_ref
             for story_ref in embedded_refs
@@ -1219,8 +1281,10 @@ def _build_page_reports(pages, stories, styles, alias_index=None):
                 effective_story_ref = _resolve_story_ref_for_page(
                     page=page,
                     story=resolved_story,
+                    parent_story=story,
                     parent_story_ref=story_ref,
                     embedded_story_ref_lookup=embedded_story_ref_lookup,
+                    story_page_sequences=story_page_sequences,
                 )
                 if not effective_story_ref:
                     continue
@@ -1319,8 +1383,10 @@ def _apply_master_content(page_reports, master_spreads, stories, styles, alias_i
                 effective_story_ref = _resolve_story_ref_for_page(
                     page=page,
                     story=resolved_story,
+                    parent_story=story,
                     parent_story_ref=story_ref,
                     embedded_story_ref_lookup=embedded_story_ref_lookup,
+                    story_page_sequences=None,
                 )
                 if not effective_story_ref:
                     continue
@@ -1387,8 +1453,190 @@ def _build_semantic_blocks(page_reports):
                     "blockType": block_type,
                     "styleName": entry.get("styleName") or "",
                     "text": entry.get("text") or "",
+                    "frameRect": entry.get("frameRect") or None,
+                    "pageRect": page.get("pageRect") or None,
                 })
     return blocks
+
+
+def _find_page_content_entry(page=None, *, story_id="", style_name="", excerpt=""):
+    target_story_id = str(story_id or "").strip()
+    target_style_name = _normalize_style_name(style_name)
+    target_excerpt = str(excerpt or "").strip().lower()
+    candidates = []
+    for bucket_items in ((page or {}).get("content") or {}).values():
+        for item in (bucket_items or []):
+            if target_story_id and str((item or {}).get("storyId") or "").strip() != target_story_id:
+                continue
+            if target_style_name and _normalize_style_name((item or {}).get("styleName") or "") != target_style_name:
+                continue
+            candidates.append(item)
+    if not candidates:
+        return None
+    if target_excerpt:
+        for item in candidates:
+            text = str((item or {}).get("text") or "").lower()
+            if target_excerpt and target_excerpt in text:
+                return item
+    return candidates[0]
+
+
+def _instruction_work_kind_label(kind=""):
+    normalized = str(kind or "").strip().lower()
+    if normalized == "individual":
+        return "Trabajo individual"
+    if normalized == "pair":
+        return "Trabajo en pares"
+    if normalized == "group":
+        return "Trabajo en grupo"
+    return ""
+
+
+def _detect_instruction_icon_with_capture(
+    *,
+    gemini_verifier=None,
+    page_name="",
+    preview=None,
+    page_rect=None,
+    frame_rect=None,
+    excerpt="",
+    instruction_text="",
+):
+    if not gemini_verifier or not getattr(gemini_verifier, "enabled", False):
+        return {}
+    preview = preview or {}
+    cropped_preview = _crop_instruction_story_preview(
+        preview,
+        page_rect,
+        frame_rect,
+    ) or {}
+    attempts = [cropped_preview, preview]
+    for candidate in attempts:
+        image_base64 = str((candidate or {}).get("base64") or "").strip()
+        if not image_base64:
+            continue
+        visual_result = gemini_verifier.detect_instruction_work_icon_visual(
+            page_name=page_name,
+            image_base64=image_base64,
+            mime_type=(candidate or {}).get("mimeType") or "image/jpeg",
+            excerpt=excerpt,
+            instruction_text=instruction_text,
+        )
+        if bool((visual_result or {}).get("hasInstructionIcon")):
+            return visual_result
+    return {}
+
+
+def _detect_instruction_work_modes(page_reports=None, story_preview_index=None, gemini_verifier=None):
+    if not gemini_verifier or not getattr(gemini_verifier, "enabled", False):
+        return {}, list(page_reports or [])
+    detection_index = {}
+    for page in (page_reports or []):
+        detections = []
+        seen = set()
+        for bucket_name in ("instrucciones", "subinstrucciones"):
+            for item in ((page.get("content") or {}).get(bucket_name) or []):
+                story_id = str((item or {}).get("storyId") or "").strip()
+                if not story_id:
+                    continue
+                preview = (((story_preview_index or {}).get(story_id) or {}).get("previewImage")) or {}
+                if not preview.get("base64"):
+                    continue
+                visual_result = _detect_instruction_icon_with_capture(
+                    gemini_verifier=gemini_verifier,
+                    page_name=str((page or {}).get("pageName") or "").strip(),
+                    preview=preview,
+                    page_rect=page.get("pageRect") or None,
+                    frame_rect=(item or {}).get("frameRect") or None,
+                    excerpt="",
+                    instruction_text=str((item or {}).get("text") or "").strip(),
+                )
+                has_icon = bool((visual_result or {}).get("hasInstructionIcon"))
+                if not has_icon:
+                    continue
+                kind = str((visual_result or {}).get("kind") or "").strip().lower()
+                label = _instruction_work_kind_label(kind)
+                if not label:
+                    continue
+                signature = (story_id, kind, str((item or {}).get("text") or "").strip().lower())
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                detections.append({
+                    "storyId": story_id,
+                    "kind": kind,
+                    "label": label,
+                    "reason": str((visual_result or {}).get("reason") or "").strip(),
+                    "blockType": bucket_name,
+                    "text": str((item or {}).get("text") or "").strip(),
+                })
+        page["instructionWorkModes"] = detections
+        labels = []
+        label_seen = set()
+        for detection in detections:
+            label = str((detection or {}).get("label") or "").strip()
+            if not label or label.lower() in label_seen:
+                continue
+            label_seen.add(label.lower())
+            labels.append(label)
+        if labels:
+            page.setdefault("aliasValues", {})
+            page["aliasValues"]["tipo_trabajo_instruccion"] = "\n".join(labels)
+        detection_index[str((page or {}).get("pageName") or "").strip()] = detections
+    return detection_index, list(page_reports or [])
+
+
+def _filter_instruction_icon_orthotypography_issues(
+    issues=None,
+    page_reports=None,
+    story_preview_index=None,
+    gemini_verifier=None,
+    instruction_work_mode_index=None,
+):
+    if not gemini_verifier or not getattr(gemini_verifier, "enabled", False):
+        return list(issues or [])
+    work_mode_index = instruction_work_mode_index or {}
+    pages_by_name = {
+        str((page or {}).get("pageName") or "").strip(): page
+        for page in (page_reports or [])
+        if str((page or {}).get("pageName") or "").strip()
+    }
+    accepted = []
+    for issue in (issues or []):
+        style_name = _normalize_style_name((issue or {}).get("styleName") or "")
+        block_type = str((issue or {}).get("blockType") or "").strip().lower()
+        if style_name not in {"INSTRUCCION", "SUBINSTRUCCION"} and block_type not in {"instrucciones", "subinstrucciones"}:
+            accepted.append(issue)
+            continue
+        page_name = str((issue or {}).get("pageName") or "").strip()
+        story_id = str((issue or {}).get("storyId") or "").strip()
+        if any(str((entry or {}).get("storyId") or "").strip() == story_id for entry in (work_mode_index.get(page_name) or [])):
+            continue
+        page = pages_by_name.get(page_name) or {}
+        story = (story_preview_index or {}).get(story_id) or {}
+        preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+        if not preview.get("base64"):
+            accepted.append(issue)
+            continue
+        page_item = _find_page_content_entry(
+            page,
+            story_id=story_id,
+            style_name=style_name,
+            excerpt=(issue or {}).get("excerpt") or "",
+        ) or {}
+        visual_result = _detect_instruction_icon_with_capture(
+            gemini_verifier=gemini_verifier,
+            page_name=page_name,
+            preview=preview,
+            page_rect=page.get("pageRect") or None,
+            frame_rect=page_item.get("frameRect") or (issue or {}).get("frameRect") or None,
+            excerpt=(issue or {}).get("excerpt") or "",
+            instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
+        )
+        if bool((visual_result or {}).get("hasInstructionIcon")):
+            continue
+        accepted.append(issue)
+    return accepted
 
 
 def _attach_page_notes(page_reports, stories):
@@ -1702,6 +1950,47 @@ def _crop_story_preview(preview=None, page_rect=None, frame_rect=None):
             crop_y1 = max(page_y1, frame_y1 - (page_h * 0.015))
             frame_h = max(1.0, frame_y2 - frame_y1)
             crop_y2 = min(page_y2, frame_y1 + min(frame_h, page_h * 0.22))
+
+            left = int(max(0, min(width - 1, ((crop_x1 - page_x1) / page_w) * width)))
+            top = int(max(0, min(height - 1, ((crop_y1 - page_y1) / page_h) * height)))
+            right = int(max(left + 1, min(width, ((crop_x2 - page_x1) / page_w) * width)))
+            bottom = int(max(top + 1, min(height, ((crop_y2 - page_y1) / page_h) * height)))
+
+            cropped = image.crop((left, top, right, bottom))
+            buffer = io.BytesIO()
+            cropped.save(buffer, format="PNG")
+            return {
+                "mimeType": "image/png",
+                "base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            }
+    except Exception:
+        return {}
+
+
+def _crop_instruction_story_preview(preview=None, page_rect=None, frame_rect=None):
+    preview = preview or {}
+    image_base64 = str(preview.get("base64") or "").strip()
+    if not image_base64 or not page_rect or not frame_rect:
+        return {}
+    try:
+        image_bytes = base64.b64decode(image_base64)
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            width, height = image.size
+            page_x1 = float(page_rect.get("x1"))
+            page_y1 = float(page_rect.get("y1"))
+            page_x2 = float(page_rect.get("x2"))
+            page_y2 = float(page_rect.get("y2"))
+            frame_x1 = float(frame_rect.get("x1"))
+            frame_y1 = float(frame_rect.get("y1"))
+            frame_x2 = float(frame_rect.get("x2"))
+            frame_y2 = float(frame_rect.get("y2"))
+            page_w = max(1.0, page_x2 - page_x1)
+            page_h = max(1.0, page_y2 - page_y1)
+
+            crop_x1 = max(page_x1, frame_x1 - (page_w * 0.02))
+            crop_x2 = min(page_x2, frame_x2 + (page_w * 0.02))
+            crop_y1 = max(page_y1, frame_y1 - (page_h * 0.02))
+            crop_y2 = min(page_y2, frame_y2 + (page_h * 0.02))
 
             left = int(max(0, min(width - 1, ((crop_x1 - page_x1) / page_w) * width)))
             top = int(max(0, min(height - 1, ((crop_y1 - page_y1) / page_h) * height)))
@@ -2383,9 +2672,21 @@ def analyze_idml_document(input_path, session):
             page["fieldProfiles"] = _extract_field_profiles(page, swatch_lookup, alias_index=alias_index)
             page["configuredSwatches"] = _extract_configured_swatch_matches(page, swatch_lookup, configured_swatch_entries)
             page["footerMarkers"] = _extract_footer_markers(page, alias_index=alias_index, session=session, gemini_verifier=gemini_verifier)
+        instruction_work_mode_index, page_reports = _detect_instruction_work_modes(
+            page_reports=page_reports,
+            story_preview_index=story_preview_index,
+            gemini_verifier=gemini_verifier,
+        )
         semantic_blocks = _select_semantic_story_blocks(_build_semantic_blocks(page_reports))
         spelling_issues = find_spelling_issues(semantic_blocks, gemini_verifier=gemini_verifier)
         orthotypography_issues = find_orthotypography_issues(semantic_blocks, gemini_verifier=gemini_verifier)
+        orthotypography_issues = _filter_instruction_icon_orthotypography_issues(
+            orthotypography_issues,
+            page_reports=page_reports,
+            story_preview_index=story_preview_index,
+            gemini_verifier=gemini_verifier,
+            instruction_work_mode_index=instruction_work_mode_index,
+        )
         page_reports = _attach_page_level_findings(page_reports, pagination_rows, spelling_issues, orthotypography_issues)
         note_issues, note_history_issues, page_reports = _attach_page_notes(page_reports, stories)
         recortable_issues, page_reports = _build_recortable_checks(
