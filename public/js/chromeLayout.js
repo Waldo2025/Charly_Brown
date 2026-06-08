@@ -281,7 +281,7 @@ const auth = getAuth(app);
       { href: 'home.html', icon: 'fas fa-home', label: 'Inicio' },
       { href: 'generarLectura.html', icon: 'fas fa-chart-line', label: 'Analisis Editorial', id: 'analisisEditorialLink', roleVisibility: 'admin,author,editor,developer' },
       { href: 'moodleCourse.html', icon: 'fas fa-book', label: 'Crear Cursos de Moodle' },
-      { href: 'analizarPDF.html', icon: 'fas fa-file-pdf', label: 'Analizar PDF' },
+      { href: 'PeppermintPattyAnalizer.html', icon: 'fas fa-file-pdf', label: 'Peppermint Patty Analizer' },
       { href: 'podcaster.html', icon: 'fas fa-podcast', label: 'Podcaster Studio' },
       { href: 'imageCreator.html', icon: 'fas fa-images', label: 'Image Creator' },
       { href: 'voiceTranscribe.html', icon: 'fas fa-microphone-lines', label: 'Voice Transcribe' },

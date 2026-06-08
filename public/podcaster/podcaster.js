@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-05-26.1";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-05.1";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
@@ -36,7 +36,7 @@ import {
   continueMontageExportPolling,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-05-26.1";
+} from "./podcaster-montage-export.js?v=2026-06-05.1";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";

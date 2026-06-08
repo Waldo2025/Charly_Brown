@@ -157,3 +157,133 @@ class GeminiVerifier:
             ValueError,
         ):
             return []
+
+    def parse_unit_footer_text(self, *, page_name="", footer_text=""):
+        if not self.enabled:
+            return {}
+        normalized_text = " ".join(str(footer_text or "").split()).strip()
+        if len(normalized_text) < 12:
+            return {}
+
+        prompt = (
+            "Eres un parser conservador de textos editoriales extraídos de IDML en español.\n"
+            "Recibirás el contenido completo de una sola caja de texto cuyo estilo de párrafo corresponde al pie de página de una unidad normal.\n"
+            "Extrae SOLO estas partes si están presentes en el texto visible:\n"
+            "- sectionCode: valor tipo 'Unidad 1'\n"
+            "- grade: valor tipo 'Nivel 2'\n"
+            "- trimester: valor tipo 'Trimestre 1'\n"
+            "- sectionName: el nombre de la sección restante, por ejemplo 'Expresión escrita'\n"
+            "Reglas:\n"
+            "- No inventes campos.\n"
+            "- No cambies palabras.\n"
+            "- Si un campo no existe claramente, devuélvelo vacío.\n"
+            "- Responde SOLO JSON válido con esta forma exacta:\n"
+            "{\"sectionCode\":\"\",\"grade\":\"\",\"trimester\":\"\",\"sectionName\":\"\"}\n"
+            f"Página: {page_name or 'N/A'}\n"
+            f"Texto: {normalized_text}\n"
+        )
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+            },
+        }
+        try:
+            response = self._post_json(body)
+            payload_text = self._extract_text(response)
+            if not payload_text:
+                return {}
+            parsed = json.loads(payload_text)
+            if not isinstance(parsed, dict):
+                return {}
+            accepted = {}
+            for key in ("sectionCode", "grade", "trimester", "sectionName"):
+                value = str(parsed.get(key) or "").strip()
+                if value:
+                    accepted[key] = value
+            return accepted
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            socket.timeout,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            return {}
+
+    def classify_linked_asset_visual(self, *, page_name="", image_base64="", mime_type="image/jpeg"):
+        if not self.enabled:
+            return {}
+        if not image_base64:
+            return {}
+        prompt = (
+            "Eres un verificador editorial visual para material escolar de primaria.\n"
+            "Debes identificar TODOS los recursos visibles señalados por iconos y extraer la referencia visible que acompaña a cada uno.\n"
+            "Tipos válidos: recortable, anexo, ficha, video, unknown.\n"
+            "Para recortable, anexo y ficha, la referencia suele verse como 1aT1, 1dT1, 2bT3, etc.\n"
+            "Para video, no inventes códigos: extrae el nombre o título visible si aparece.\n"
+            "Si no es claro, usa unknown con code vacío y title vacío.\n"
+            "Pistas visuales comunes:\n"
+            "- tijeras o área punteada: recortable\n"
+            "- clip o sujetapapeles: anexo\n"
+            "- icono de tarjeta/hoja de actividad: ficha\n"
+            "- icono de play/pantalla: video\n"
+            "Puede haber varios recursos en la misma imagen.\n"
+            "Responde SOLO JSON con esta forma: {\"assets\":[{\"kind\":\"...\",\"code\":\"...\",\"title\":\"...\",\"confidence\":\"...\",\"reason\":\"...\"}]}.\n"
+            f"Página: {page_name or 'N/A'}\n"
+        )
+        body = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": image_base64}},
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": "application/json",
+            },
+        }
+        try:
+            response = self._post_json(body)
+            payload_text = self._extract_text(response)
+            if not payload_text:
+                return {}
+            parsed = json.loads(payload_text)
+            if not isinstance(parsed, dict):
+                return {}
+            raw_assets = parsed.get("assets")
+            if not isinstance(raw_assets, list):
+                raw_assets = [parsed]
+            assets = []
+            for item in raw_assets[:8]:
+                if not isinstance(item, dict):
+                    continue
+                kind = str(item.get("kind") or "").strip().lower()
+                code = str(item.get("code") or "").strip()
+                title = str(item.get("title") or "").strip()
+                confidence = str(item.get("confidence") or "").strip().lower()
+                reason = str(item.get("reason") or "").strip()
+                if kind not in {"recortable", "anexo", "ficha", "video", "unknown"}:
+                    continue
+                assets.append({
+                    "kind": kind,
+                    "code": code,
+                    "title": title,
+                    "confidence": confidence,
+                    "reason": reason,
+                })
+            if not assets:
+                return {}
+            return {"assets": assets}
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            socket.timeout,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            return {}

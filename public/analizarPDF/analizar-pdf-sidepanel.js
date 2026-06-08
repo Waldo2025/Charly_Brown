@@ -33,9 +33,6 @@ export function createAnalizarPdfSidepanelApi(deps = {}) {
             <small>${escapeHtml(session.analysisStatus || "idle")}</small>
           </div>
           <div class="analizar-pdf-session-card-actions">
-            <button type="button" class="analizar-pdf-icon-btn" data-action="rename-session" data-session-id="${escapeHtml(session.id)}" aria-label="Renombrar sesión">
-              <i class="fas fa-pen"></i>
-            </button>
             <button type="button" class="analizar-pdf-icon-btn" data-action="delete-session" data-session-id="${escapeHtml(session.id)}" aria-label="Eliminar sesión">
               <i class="fas fa-trash"></i>
             </button>
@@ -54,10 +51,6 @@ export function createAnalizarPdfSidepanelApi(deps = {}) {
       const actionBtn = event.target.closest("[data-action]");
       if (actionBtn) {
         const sessionId = String(actionBtn.dataset.sessionId || "").trim();
-        if (actionBtn.dataset.action === "rename-session") {
-          onRenameSession?.(sessionId);
-          return;
-        }
         if (actionBtn.dataset.action === "delete-session") {
           onDeleteSession?.(sessionId);
           return;

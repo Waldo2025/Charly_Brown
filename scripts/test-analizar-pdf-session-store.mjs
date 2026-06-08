@@ -29,7 +29,7 @@ assert.notEqual(
 
 assert.match(
   appSource,
-  /function getUploadUiState\(session = null, file = state\.selectedFile\)/,
+  /function getUploadUiState\(session = null, files = state\.selectedFiles\)/,
   "La app debe centralizar el estado de subida por sourceType."
 );
 assert.match(
@@ -44,8 +44,8 @@ assert.match(
 );
 assert.match(
   appSource,
-  /queueAnalizarPdfUpload\(sessionId, uploadState\.file, uploadState\.sourceType\)/,
-  "La app debe pasar sourceType al path de subida."
+  /queueAnalizarPdfUpload\(sessionId, file, uploadState\.sourceType, fileContext\)/,
+  "La app debe pasar sourceType y contexto del archivo al path de subida."
 );
 
 const tempDir = await mkdtemp(path.join(os.tmpdir(), "analizar-pdf-session-store-"));
@@ -96,6 +96,7 @@ const hasAvailableApiBase = () => true;`
   assert.equal(empty.sourceType, "pdf");
   assert.equal(empty.analysisStatus, "idle");
   assert.deepEqual(empty.bibliographicInfo, {
+    bookType: "",
     nivel: "",
     grado: "",
     trimestre: "",
@@ -110,6 +111,9 @@ const hasAvailableApiBase = () => true;`
     paginationIssueCount: 0,
     sectionIssueCount: 0,
     spellingIssueCount: 0,
+    orthotypographyIssueCount: 0,
+    colorIssueCount: 0,
+    recortableIssueCount: 0,
     pageCount: 0,
     analyzedAt: ""
   });
@@ -150,6 +154,7 @@ const hasAvailableApiBase = () => true;`
     sourceType: "idml",
     analysisStatus: "unexpected",
     bibliographicInfo: {
+      bookType: "LA",
       nivel: "P5",
       grado: "10",
       trimestre: "Trimestre 1",
@@ -173,6 +178,7 @@ const hasAvailableApiBase = () => true;`
 
   assert.equal(normalized.sourceType, "idml");
   assert.equal(normalized.analysisStatus, "idle");
+  assert.equal(normalized.bibliographicInfo.bookType, "LA");
   assert.equal(normalized.bibliographicInfo.unidad, "Unidad 3");
   assert.equal(normalized.bibliographicInfo.revisionNumero, "F2");
   assert.equal(normalized.colorConfig.palette[0].swatchName, "A_COLOR UNIDAD");
@@ -182,6 +188,9 @@ const hasAvailableApiBase = () => true;`
     paginationIssueCount: 1,
     sectionIssueCount: 1,
     spellingIssueCount: 1,
+    orthotypographyIssueCount: 1,
+    colorIssueCount: 1,
+    recortableIssueCount: 0,
     pageCount: 24,
     analyzedAt: "2026-06-03T00:00:00.000Z"
   });

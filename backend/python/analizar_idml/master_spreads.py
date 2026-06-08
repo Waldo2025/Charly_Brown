@@ -1,4 +1,4 @@
-from .pages import _get_page_rect, _get_path_rect, _normalize_color_ref, _resolve_page_for_rect
+from .pages import _get_page_rect, _get_text_frame_rect, _normalize_color_ref, _resolve_page_for_rect
 from .styles import local_name, parse_xml
 
 
@@ -12,6 +12,7 @@ def parse_master_spreads(archive, master_spread_sources=None):
     masters = {}
     for member_name in sources:
         root = parse_xml(archive, member_name)
+        parent_map = {child: parent for parent in root.iter() for child in list(parent)}
         master = next((node for node in root.iter() if local_name(node.tag) == "MasterSpread" and node.get("Self")), None)
         if master is None:
             continue
@@ -23,6 +24,7 @@ def parse_master_spreads(archive, master_spread_sources=None):
                 "pageId": page.get("Self", ""),
                 "pageName": page.get("Name", ""),
                 "pageIndex": index,
+                "appliedMaster": page.get("AppliedMaster", ""),
                 "storyRefs": [],
                 "frameSwatches": [],
                 "_rect": _get_page_rect(page),
@@ -34,7 +36,7 @@ def parse_master_spreads(archive, master_spread_sources=None):
             story_id = str(node.get("ParentStory", "")).strip()
             if not story_id:
                 continue
-            target_page = _resolve_page_for_rect(_get_path_rect(node), page_entries)
+            target_page = _resolve_page_for_rect(_get_text_frame_rect(node, parent_map), page_entries)
             if not target_page:
                 continue
             story_ref = {

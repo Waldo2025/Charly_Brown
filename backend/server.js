@@ -54,13 +54,19 @@ const {
   resolveMontageIntermediateVideoParams
 } = require("./montage-export-video-params.js");
 const {
+  ANALIZAR_PDF_MAPPING_TOOL_NAME,
   buildResultSummary,
+  buildDefaultStyleMappingSeeds,
+  buildStyleMappingScopeKey,
   classifyAnalizarPdfStartupError,
   createAnalizarPdfJobStore,
   ensureDirSync,
   logAnalizarPdf,
+  normalizeAnalysisStatus,
   resolveAnalyzerScript,
+  sanitizeResultSummary,
   sanitizeAnalizarPdfSession,
+  sanitizeStyleMapping,
   spawnAnalizarPdfPythonJob
 } = require("./analizar-pdf.js");
 
@@ -911,7 +917,9 @@ const STORAGE_BUCKET_CANDIDATES = STORAGE_BUCKET_CANDIDATE_NAMES
   ));
 const montageExportJobStore = createMontageExportJobStore({ db });
 const analizarPdfJobStore = createAnalizarPdfJobStore();
+const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
+const ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION = "analizarPDFStyleMappings";
 
 function getStorageBucketCandidates() {
   return STORAGE_BUCKET_CANDIDATES.filter(Boolean);
@@ -2584,6 +2592,347 @@ async function persistAnalizarPdfSessionForOwner(uid = "", source = {}) {
   });
 }
 
+async function ensureDefaultStyleMappings() {
+  const seeds = buildDefaultStyleMappingSeeds("");
+  if (!Array.isArray(seeds) || !seeds.length) return [];
+  const refs = seeds.map((entry) => db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).doc(entry.id));
+  const snaps = await Promise.all(refs.map((ref) => ref.get()));
+  const writes = [];
+  for (let index = 0; index < seeds.length; index += 1) {
+    const mapping = sanitizeStyleMapping(seeds[index], { ownerId: "", id: seeds[index].id, createdAt: seeds[index].createdAt });
+    const snap = snaps[index];
+    if (snap.exists) {
+      const existing = snap.data() || {};
+      const hasEntries = Array.isArray(existing.entries) && existing.entries.length > 0;
+      if (hasEntries) {
+        continue;
+      }
+    }
+    writes.push(refs[index].set(mapping, { merge: true }));
+  }
+  if (writes.length) {
+    await Promise.all(writes);
+  }
+  const saved = await db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).get();
+  return saved.docs.map((docSnap) => sanitizeStyleMapping(docSnap.data() || {}, {
+    id: docSnap.id,
+    ownerId: ""
+  }));
+}
+
+async function listStyleMappings() {
+  await ensureDefaultStyleMappings();
+  const snap = await db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).get();
+  return snap.docs
+    .map((docSnap) => sanitizeStyleMapping(docSnap.data() || {}, {
+      id: docSnap.id,
+      ownerId: ""
+    }))
+    .sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+}
+
+async function loadStyleMapping(mappingId = "") {
+  const cleanId = clampText(mappingId, 120);
+  if (!cleanId) {
+    const err = new Error("Falta mappingId.");
+    err.status = 400;
+    throw err;
+  }
+  const ref = db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).doc(cleanId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    const err = new Error("Mapeo no encontrado.");
+    err.status = 404;
+    throw err;
+  }
+  const data = snap.data() || {};
+  return {
+    ref,
+    data: sanitizeStyleMapping(data, {
+      id: cleanId,
+      ownerId: "",
+      createdAt: data.createdAt || new Date().toISOString()
+    })
+  };
+}
+
+async function persistStyleMapping(source = {}) {
+  const base = sanitizeStyleMapping(source, {
+    ownerId: "",
+    id: source?.id || `mapping_${randomUUID().slice(0, 12)}`,
+    createdAt: source?.createdAt || new Date().toISOString()
+  });
+  const ref = db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).doc(base.id);
+  const snap = await ref.get();
+  const existing = snap.exists ? (snap.data() || {}) : null;
+  const ownerQuery = base.isActive
+    ? await db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).get()
+    : null;
+  const merged = sanitizeStyleMapping({
+    ...(existing || {}),
+    ...base,
+    ownerId: "",
+    createdAt: existing?.createdAt || base.createdAt,
+    updatedAt: new Date().toISOString()
+  }, {
+    ownerId: "",
+    id: base.id,
+    createdAt: existing?.createdAt || base.createdAt
+  });
+  const writes = [ref.set(merged, { merge: true })];
+  if (ownerQuery) {
+    for (const docSnap of ownerQuery.docs) {
+      const candidate = docSnap.data() || {};
+      if (String(candidate.scopeKey || "").trim() !== base.scopeKey) continue;
+      if (docSnap.id === base.id) continue;
+      writes.push(docSnap.ref.set({ isActive: false, updatedAt: new Date().toISOString() }, { merge: true }));
+    }
+  }
+  await Promise.all(writes);
+  const saved = await ref.get();
+  return sanitizeStyleMapping(saved.data() || {}, {
+    id: base.id,
+    ownerId: "",
+    createdAt: base.createdAt
+  });
+}
+
+async function activateStyleMapping(mappingId = "") {
+  const { data } = await loadStyleMapping(mappingId);
+  return persistStyleMapping({
+    ...data,
+    isActive: true
+  });
+}
+
+async function resolveStyleMappingForAnalysis(uid = "", session = null, revisionId = "", fileId = "", explicitMappingId = "") {
+  if (!session) return null;
+  const revisions = Array.isArray(session.revisions) ? session.revisions : [];
+  const revision = revisions.find((entry) => String(entry?.id || "").trim() === String(revisionId || "").trim()) || revisions[0] || null;
+  const files = Array.isArray(revision?.files) ? revision.files : [];
+  const file = files.find((entry) => String(entry?.id || "").trim() === String(fileId || "").trim()) || files[0] || null;
+  const desiredMappingId = clampText(explicitMappingId || file?.mappingId || "", 120);
+  if (desiredMappingId) {
+    return loadStyleMapping(desiredMappingId).then((payload) => payload.data).catch(() => null);
+  }
+  const rawUnidad = clampText(revision?.unidad || session?.bibliographicInfo?.unidad || "", 80);
+  const candidateUnits = [rawUnidad];
+  if (/^Unidad\s+\d+/i.test(rawUnidad)) {
+    candidateUnits.push("Unidad normal");
+  }
+  for (const unidad of candidateUnits.filter(Boolean)) {
+    const scopeKey = buildStyleMappingScopeKey({
+      bookType: session?.bibliographicInfo?.bookType || "",
+      nivel: session?.bibliographicInfo?.nivel || "",
+      grado: session?.bibliographicInfo?.grado || "",
+      unidad
+    });
+    if (!scopeKey) {
+      continue;
+    }
+    const mappingsSnap = await db.collection(ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION).get();
+    const activeDoc = mappingsSnap.docs.find((docSnap) => {
+      const data = docSnap.data() || {};
+      return String(data.scopeKey || "").trim() === scopeKey && data.isActive === true;
+    });
+    if (activeDoc) {
+      return sanitizeStyleMapping(activeDoc.data() || {}, {
+        id: activeDoc.id,
+        ownerId: ""
+      });
+    }
+  }
+  return null;
+}
+
+function findRevisionAndFile(session = null, revisionId = "", fileId = "") {
+  const revisions = Array.isArray(session?.revisions) ? session.revisions : [];
+  const revision = revisions.find((entry) => String(entry?.id || "").trim() === String(revisionId || "").trim()) || null;
+  const file = Array.isArray(revision?.files) ? revision.files.find((entry) => String(entry?.id || "").trim() === String(fileId || "").trim()) || null : null;
+  return { revision, file };
+}
+
+function spawnCorrectIdmlPythonJob(options = {}) {
+  const pythonBin = String(options.pythonBin || process.env.PDF_ANALYZER_PYTHON_BIN || "python3").trim() || "python3";
+  const scriptPath = path.join(__dirname, "python", "correct_idml.py");
+  const payloadDir = path.join(os.tmpdir(), "analizar-pdf-corrected-payloads");
+  ensureDirSync(payloadDir);
+  const payloadPath = path.join(payloadDir, `${randomUUID()}.json`);
+  fs.writeFileSync(payloadPath, JSON.stringify(options.payload || {}), "utf8");
+  const args = [
+    scriptPath,
+    "--input",
+    path.resolve(String(options.inputPath || "")),
+    "--output",
+    path.resolve(String(options.outputPath || "")),
+    "--payload-file",
+    payloadPath
+  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn(pythonBin, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONUNBUFFERED: "1" } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk || ""); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk || ""); });
+    child.on("error", (error) => {
+      try {
+        fs.unlinkSync(payloadPath);
+      } catch (_) {
+        // noop
+      }
+      reject(error);
+    });
+    child.on("close", (code) => {
+      try {
+        fs.unlinkSync(payloadPath);
+      } catch (_) {
+        // noop
+      }
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || stdout.trim() || `Python exit ${code}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`Invalid Python JSON output: ${error.message}`));
+      }
+    });
+  });
+}
+
+function buildRevisionSummaryFromFiles(files = []) {
+  return (Array.isArray(files) ? files : []).reduce((acc, file) => {
+    const summary = file?.resultSummary || {};
+    acc.paginationIssueCount += Number(summary.paginationIssueCount || 0) || 0;
+    acc.sectionIssueCount += Number(summary.sectionIssueCount || 0) || 0;
+    acc.spellingIssueCount += Number(summary.spellingIssueCount || 0) || 0;
+    acc.orthotypographyIssueCount += Number(summary.orthotypographyIssueCount || 0) || 0;
+    acc.colorIssueCount += Number(summary.colorIssueCount || 0) || 0;
+    acc.recortableIssueCount += Number(summary.recortableIssueCount || 0) || 0;
+    return acc;
+  }, {
+    paginationIssueCount: 0,
+    sectionIssueCount: 0,
+    spellingIssueCount: 0,
+    orthotypographyIssueCount: 0,
+    colorIssueCount: 0,
+    recortableIssueCount: 0
+  });
+}
+
+async function updateAnalizarPdfFileState(uid = "", sessionId = "", revisionId = "", fileId = "", patch = {}) {
+  const { ref, data } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+  const cleanRevisionId = clampText(revisionId, 120);
+  const cleanFileId = clampText(fileId, 120);
+  if (!cleanRevisionId || !cleanFileId) {
+    return updateAnalizarPdfSessionState(uid, sessionId, patch);
+  }
+  const next = deepClone(data);
+  next.revisions = Array.isArray(next.revisions) ? next.revisions : [];
+  const patchDocumentName = clampText(patch?.documentName || patch?.fileName || "", 240);
+  const revisionInfo = {
+    unidad: clampText(next?.bibliographicInfo?.unidad || "", 80),
+    revisionNumero: clampText(next?.bibliographicInfo?.revisionNumero || "", 80)
+  };
+  let revision = next.revisions.find((entry) => String(entry?.id || "").trim() === cleanRevisionId);
+  if (!revision) {
+    revision = next.revisions.find((entry) =>
+      clampText(entry?.unidad || "", 80) === revisionInfo.unidad &&
+      clampText(entry?.revisionNumero || "", 80) === revisionInfo.revisionNumero
+    ) || null;
+  }
+  if (!revision) {
+    revision = {
+      id: cleanRevisionId,
+      revisionKey: [revisionInfo.unidad.toLowerCase(), revisionInfo.revisionNumero.toLowerCase()].filter(Boolean).join("|") || cleanRevisionId,
+      title: [revisionInfo.unidad, revisionInfo.revisionNumero].filter(Boolean).join(" · ") || "Revisión sin título",
+      unidad: revisionInfo.unidad,
+      revisionNumero: revisionInfo.revisionNumero,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      latestAnalysisAt: "",
+      fileCount: 0,
+      summary: {
+        paginationIssueCount: 0,
+        sectionIssueCount: 0,
+        spellingIssueCount: 0,
+        orthotypographyIssueCount: 0,
+        colorIssueCount: 0,
+        recortableIssueCount: 0
+      },
+      files: []
+    };
+    next.revisions.unshift(revision);
+  }
+  revision.files = Array.isArray(revision.files) ? revision.files : [];
+  let file = revision.files.find((entry) => String(entry?.id || "").trim() === cleanFileId);
+  if (!file && patchDocumentName) {
+    const fileKey = patchDocumentName.toLowerCase();
+    file = revision.files.find((entry) => String(entry?.fileKey || "").trim() === fileKey) || null;
+  }
+  if (!file) {
+    file = {
+      id: cleanFileId,
+      fileKey: patchDocumentName.toLowerCase() || cleanFileId,
+      documentName: patchDocumentName || "Archivo sin nombre",
+      mappingId: clampText(patch?.mappingId || "", 120),
+      mappingTitle: clampText(patch?.mappingTitle || "", 240),
+      mappingUpdatedAt: clampText(patch?.mappingUpdatedAt || "", 80),
+      sourceAssetPath: clampText(patch?.sourceAssetPath || "", 600),
+      localBlobKey: clampText(patch?.localBlobKey || "", 240),
+      hasLocalSource: patch?.hasLocalSource === true,
+      fileSize: Math.max(0, Number(patch?.fileSize || 0) || 0),
+      fileLastModified: Math.max(0, Number(patch?.fileLastModified || 0) || 0),
+      fileMimeType: clampText(patch?.fileMimeType || "", 160),
+      sourceType: String(patch?.sourceType || next.sourceType || "pdf").trim() === "idml" ? "idml" : "pdf",
+      analysisStatus: "idle",
+      analysisJobId: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      resultSummary: {
+        paginationIssueCount: 0,
+        sectionIssueCount: 0,
+        spellingIssueCount: 0,
+        orthotypographyIssueCount: 0,
+        colorIssueCount: 0,
+        recortableIssueCount: 0,
+        pageCount: 0,
+        analyzedAt: ""
+      },
+      result: {
+        paginationIssues: [],
+        sectionIssues: [],
+        spellingIssues: [],
+        orthotypographyIssues: [],
+        colorIssues: [],
+        recortableIssues: [],
+        stats: null
+      }
+    };
+    revision.files.push(file);
+  }
+  Object.assign(file, patch && typeof patch === "object" ? patch : {});
+  file.updatedAt = new Date().toISOString();
+  if (file.result && typeof file.result === "object") {
+    file.resultSummary = sanitizeResultSummary(file.resultSummary, file.result);
+  }
+  revision.fileCount = revision.files.length;
+  revision.updatedAt = new Date().toISOString();
+  revision.latestAnalysisAt = file.resultSummary?.analyzedAt || revision.latestAnalysisAt || "";
+  revision.summary = buildRevisionSummaryFromFiles(revision.files);
+  next.analysisStatus = normalizeAnalysisStatus(patch?.analysisStatus || next.analysisStatus);
+  next.analysisJobId = clampText(patch?.analysisJobId || next.analysisJobId || "", 160);
+  next.updatedAt = new Date().toISOString();
+  const sanitized = sanitizeAnalizarPdfSession(next, {
+    ownerId: uid,
+    id: sessionId,
+    createdAt: data.createdAt
+  });
+  await ref.set(sanitized, { merge: true });
+  return sanitized;
+}
+
 async function updateAnalizarPdfSessionState(uid = "", sessionId = "", patch = {}) {
   const { ref, data } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
   const next = sanitizeAnalizarPdfSession({
@@ -4220,9 +4569,145 @@ app.post("/api/analizar-pdf/sessions/delete", async (req, res) => {
   }
 });
 
+app.get("/api/analizar-pdf/style-mappings/list", async (req, res) => {
+  try {
+    const mappings = await listStyleMappings();
+    return res.status(200).json({ ok: true, mappings });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudieron listar los mapeos.") });
+  }
+});
+
+app.post("/api/analizar-pdf/style-mappings/save", async (req, res) => {
+  try {
+    const source = req.body?.mapping && typeof req.body.mapping === "object" ? req.body.mapping : null;
+    if (!source) {
+      return res.status(400).json({ error: "Falta payload mapping." });
+    }
+    const mapping = await persistStyleMapping(source);
+    return res.status(200).json({ ok: true, mapping });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo guardar el mapeo.") });
+  }
+});
+
+app.post("/api/analizar-pdf/style-mappings/delete", async (req, res) => {
+  try {
+    const mappingId = clampText(req.body?.mappingId || "", 120);
+    if (!mappingId) {
+      return res.status(400).json({ error: "Falta mappingId." });
+    }
+    const { ref } = await loadStyleMapping(mappingId);
+    await ref.delete();
+    return res.status(200).json({ ok: true, mappingId });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo eliminar el mapeo.") });
+  }
+});
+
+app.post("/api/analizar-pdf/style-mappings/activate", async (req, res) => {
+  try {
+    const mappingId = clampText(req.body?.mappingId || "", 120);
+    if (!mappingId) {
+      return res.status(400).json({ error: "Falta mappingId." });
+    }
+    const mapping = await activateStyleMapping(mappingId);
+    return res.status(200).json({ ok: true, mapping });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo activar el mapeo.") });
+  }
+});
+
+app.post("/api/analizar-pdf/export-corrected-idml", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const sessionId = clampText(req.body?.sessionId || "", 120);
+    const revisionId = clampText(req.body?.revisionId || "", 120);
+    const fileId = clampText(req.body?.fileId || "", 120);
+    if (!uid || !sessionId || !revisionId || !fileId) {
+      return res.status(400).json({ error: "Faltan sessionId, revisionId o fileId." });
+    }
+    const { data: session } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    const { revision, file } = findRevisionAndFile(session, revisionId, fileId);
+    if (!revision || !file) {
+      return res.status(404).json({ error: "Archivo de revisión no encontrado." });
+    }
+    if (String(file.sourceType || "").trim() !== "idml") {
+      return res.status(400).json({ error: "La exportación corregida solo aplica a archivos IDML." });
+    }
+    const inputPath = clampText(file.sourceAssetPath || "", 600);
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      return res.status(404).json({ error: "No se encontró la copia local del IDML original para exportar." });
+    }
+    const outputDir = path.join(os.tmpdir(), "analizar-pdf-corrected", sessionId, revisionId);
+    ensureDirSync(outputDir);
+    const outputFileName = `${path.basename(String(file.documentName || "documento.idml"), ".idml")}.corrected.idml`;
+    const outputPath = path.join(outputDir, outputFileName);
+    const correctionSelection = req.body?.correctionSelection && typeof req.body.correctionSelection === "object"
+      ? req.body.correctionSelection
+      : null;
+    const cleanupOptions = req.body?.cleanupOptions && typeof req.body.cleanupOptions === "object"
+      ? req.body.cleanupOptions
+      : null;
+    const selectedIssues = Array.isArray(correctionSelection?.selectedIssues) ? correctionSelection.selectedIssues : [];
+    const hasCleanupActions = cleanupOptions
+      ? Object.entries(cleanupOptions).some(([key, value]) => key !== "applySelectedCorrections" && value === true)
+      : false;
+    if (!selectedIssues.length && !hasCleanupActions) {
+      return res.status(400).json({ error: "Activa al menos una corrección o limpieza antes de exportar." });
+    }
+    const payload = {
+      toolName: ANALIZAR_PDF_MAPPING_TOOL_NAME,
+      result: file.result || {},
+      correctionSelection,
+      cleanupOptions
+    };
+    const exportResult = await spawnCorrectIdmlPythonJob({
+      inputPath,
+      outputPath,
+      payload
+    });
+    const token = randomUUID();
+    analizarPdfGeneratedFileStore.set(token, {
+      ownerId: uid,
+      path: outputPath,
+      fileName: outputFileName,
+      createdAt: new Date().toISOString()
+    });
+    return res.status(200).json({
+      ok: true,
+      token,
+      downloadUrl: `/api/analizar-pdf/download-generated?token=${encodeURIComponent(token)}`,
+      message: "IDML corregido generado.",
+      exportResult: {
+        ...exportResult,
+        fileName: outputFileName
+      }
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({ error: String(error?.message || "No se pudo exportar el IDML corregido.") });
+  }
+});
+
+app.get("/api/analizar-pdf/download-generated", async (req, res) => {
+  const uid = String(req.authContext?.uid || "").trim();
+  const token = clampText(req.query?.token || "", 180);
+  const entry = analizarPdfGeneratedFileStore.get(token);
+  if (!uid) {
+    return res.status(401).json({ error: "AUTH_REQUIRED" });
+  }
+  if (!entry || String(entry.ownerId || "").trim() !== uid || !fs.existsSync(String(entry.path || ""))) {
+    return res.status(404).json({ error: "Archivo generado no encontrado." });
+  }
+  return res.download(entry.path, entry.fileName || "corrected.idml");
+});
+
 app.post("/api/analizar-pdf/analyze", async (req, res) => {
   const uid = String(req.authContext?.uid || "").trim();
   const sessionId = clampText(req.headers["x-session-id"] || req.query?.sessionId || "", 120);
+  const revisionId = clampText(req.headers["x-revision-id"] || "", 120);
+  const fileId = clampText(req.headers["x-file-id"] || "", 120);
+  const mappingId = clampText(req.headers["x-mapping-id"] || "", 120);
   const rawFileName = clampText(req.headers["x-file-name"] || "documento.pdf", 240) || "documento.pdf";
   const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
   const declaredLength = Number(req.headers["content-length"] || 0) || 0;
@@ -4241,11 +4726,15 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
     logAnalizarPdf("analyze.request.received", {
       uid,
       sessionId,
+      revisionId,
+      fileId,
+      mappingId,
       rawFileName,
       contentType,
       declaredLength
     });
     const { data: session } = await loadAnalizarPdfSessionForOwner(uid, sessionId);
+    const selectedMapping = await resolveStyleMappingForAnalysis(uid, session, revisionId, fileId, mappingId);
     const expectedExt = session.sourceType === "idml" ? ".idml" : ".pdf";
     const normalizedFileName = rawFileName.toLowerCase();
     if (!normalizedFileName.endsWith(expectedExt)) {
@@ -4258,6 +4747,9 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
     const tempDir = path.join(os.tmpdir(), "analizar-pdf-jobs", sessionId, randomUUID());
     ensureDirSync(tempDir);
     tempFilePath = path.join(tempDir, normalizedFileName.endsWith(expectedExt) ? rawFileName : `${rawFileName}${expectedExt}`);
+    const stableSourceDir = path.join(os.tmpdir(), "analizar-pdf-sources", sessionId, revisionId || "default");
+    ensureDirSync(stableSourceDir);
+    const stableSourcePath = path.join(stableSourceDir, `${fileId || buildFileKey(rawFileName) || randomUUID()}${expectedExt}`);
     const output = fs.createWriteStream(tempFilePath);
     let bytesRead = 0;
     req.on("data", (chunk) => {
@@ -4275,15 +4767,25 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
     const jobId = `analizar_pdf_job_${randomUUID().slice(0, 12)}`;
     analizarPdfJobStore.set(jobId, {
       sessionId,
+      revisionId,
+      fileId,
       ownerId: uid,
       fileName: rawFileName,
       status: "queued",
       createdAt: new Date().toISOString()
     });
-    await updateAnalizarPdfSessionState(uid, sessionId, {
+    await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
       analysisStatus: "queued",
-      analysisJobId: jobId
+      analysisJobId: jobId,
+      documentName: rawFileName,
+      fileName: rawFileName,
+      sourceType: session.sourceType,
+      mappingId: selectedMapping?.id || mappingId || "",
+      mappingTitle: selectedMapping?.title || "",
+      mappingUpdatedAt: selectedMapping?.updatedAt || "",
+      sourceAssetPath: stableSourcePath
     });
+    fs.copyFileSync(tempFilePath, stableSourcePath);
     logAnalizarPdf("job.queued", { jobId, sessionId, ownerId: uid });
 
     void (async () => {
@@ -4291,22 +4793,41 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
         logAnalizarPdf("job.processing.start", {
           jobId,
           sessionId,
+          revisionId,
+          fileId,
           tempFilePath
         });
         analizarPdfJobStore.set(jobId, { status: "processing", startedAt: new Date().toISOString() });
-        await updateAnalizarPdfSessionState(uid, sessionId, {
+        await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
           analysisStatus: "processing",
-          analysisJobId: jobId
+          analysisJobId: jobId,
+          documentName: rawFileName,
+          fileName: rawFileName,
+          sourceType: session.sourceType,
+          mappingId: selectedMapping?.id || mappingId || "",
+          mappingTitle: selectedMapping?.title || "",
+          mappingUpdatedAt: selectedMapping?.updatedAt || "",
+          sourceAssetPath: stableSourcePath
         });
         const result = await spawnAnalizarPdfPythonJob({
           scriptPath,
           pdfPath: tempFilePath,
-          session
+          session: {
+            ...session,
+            analysisMapping: selectedMapping || null
+          }
         });
         const resultSummary = buildResultSummary(result);
-        const persistedSession = await updateAnalizarPdfSessionState(uid, sessionId, {
+        const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
           analysisStatus: "completed",
           analysisJobId: jobId,
+          documentName: rawFileName,
+          fileName: rawFileName,
+          sourceType: session.sourceType,
+          mappingId: selectedMapping?.id || mappingId || "",
+          mappingTitle: selectedMapping?.title || "",
+          mappingUpdatedAt: selectedMapping?.updatedAt || "",
+          sourceAssetPath: stableSourcePath,
           result,
           resultSummary
         });
@@ -4328,9 +4849,16 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
           message: String(error?.message || error),
           stack: String(error?.stack || "")
         });
-        const persistedSession = await updateAnalizarPdfSessionState(uid, sessionId, {
+        const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
           analysisStatus: "failed",
-          analysisJobId: jobId
+          analysisJobId: jobId,
+          documentName: rawFileName,
+          fileName: rawFileName,
+          sourceType: session.sourceType,
+          mappingId: selectedMapping?.id || mappingId || "",
+          mappingTitle: selectedMapping?.title || "",
+          mappingUpdatedAt: selectedMapping?.updatedAt || "",
+          sourceAssetPath: stableSourcePath
         }).catch(() => null);
         analizarPdfJobStore.set(jobId, {
           status: "failed",
@@ -4374,6 +4902,12 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
     const message = String(error?.message || error);
     if (message === "PDF_TOO_LARGE") {
       return res.status(413).json({ error: "El PDF excede el tamaño permitido." });
+    }
+    if (Number(error?.status || 0) >= 400 && Number(error?.status || 0) < 500) {
+      return res.status(Number(error.status)).json({
+        error: String(error?.message || "Solicitud inválida."),
+        code: "ANALIZAR_PDF_REQUEST_INVALID"
+      });
     }
     const classified = classifyAnalizarPdfStartupError(error);
     return res.status(Number(classified?.status || 500)).json({

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const htmlSource = readFileSync(new URL("../public/analizarPDF.html", import.meta.url), "utf8");
+const htmlSource = readFileSync(new URL("../public/PeppermintPattyAnalizer.html", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../public/analizarPDF/analizar-pdf-app.js", import.meta.url), "utf8");
 const resultsSource = readFileSync(new URL("../public/analizarPDF/analizar-pdf-results.js", import.meta.url), "utf8");
 const sidepanelSource = readFileSync(new URL("../public/analizarPDF/analizar-pdf-sidepanel.js", import.meta.url), "utf8");
@@ -8,7 +8,7 @@ const htmlIds = [...htmlSource.matchAll(/\bid="([^"]+)"/g)].map((match) => match
 const duplicateIds = [...new Set(htmlIds.filter((id, index) => htmlIds.indexOf(id) !== index))];
 
 if (duplicateIds.length) {
-  throw new Error(`analizarPDF.html no debe repetir ids. Duplicados: ${duplicateIds.join(", ")}`);
+  throw new Error(`PeppermintPattyAnalizer.html no debe repetir ids. Duplicados: ${duplicateIds.join(", ")}`);
 }
 
 function assertHtmlHasId(id, message) {
@@ -18,36 +18,26 @@ function assertHtmlHasId(id, message) {
   }
 }
 
-assertHtmlHasId("analizarPdfLayout", "analizarPDF.html debe definir el layout principal.");
+assertHtmlHasId("analizarPdfLayout", "PeppermintPattyAnalizer.html debe definir el layout principal.");
 
-assertHtmlHasId("analizarPdfSidepanel", "analizarPDF.html debe incluir sidepanel de sesiones.");
+assertHtmlHasId("analizarPdfSidepanel", "PeppermintPattyAnalizer.html debe incluir sidepanel de sesiones.");
 
-assertHtmlHasId("analizarPdfFileInput", "analizarPDF.html debe incluir input de PDF.");
+assertHtmlHasId("analizarPdfFileInput", "PeppermintPattyAnalizer.html debe incluir input de PDF.");
 
-assertHtmlHasId("analizarPdfResults", "analizarPDF.html debe incluir contenedor de resultados.");
+assertHtmlHasId("analizarPdfPageReports", "PeppermintPattyAnalizer.html debe incluir contenedor de reporte por página.");
 
-assertHtmlHasId("analizarPdfSourceType", "analizarPDF.html debe incluir selector de tipo de fuente.");
+assertHtmlHasId("analizarPdfSourceType", "PeppermintPattyAnalizer.html debe incluir selector de tipo de fuente.");
 
-assertHtmlHasId("analizarPdfNivelInput", "analizarPDF.html debe incluir el input de nivel.");
+assertHtmlHasId("analizarPdfBookTypeInput", "PeppermintPattyAnalizer.html debe incluir el input de tipo de libro.");
 
-assertHtmlHasId("analizarPdfRevisionNumeroInput", "analizarPDF.html debe incluir el input de numero de revision.");
+assertHtmlHasId("analizarPdfNivelInput", "PeppermintPattyAnalizer.html debe incluir el input de nivel.");
 
-assertHtmlHasId("analizarPdfUnidadInput", "analizarPDF.html debe incluir el input de unidad.");
+assertHtmlHasId("analizarPdfRevisionNumeroInput", "PeppermintPattyAnalizer.html debe incluir el input de numero de revision.");
 
-assertHtmlHasId("analizarPdfPaletteList", "analizarPDF.html debe incluir el contenedor de paleta.");
-
-assertHtmlHasId("analizarPdfAddPaletteColorBtn", "analizarPDF.html debe incluir el boton para agregar color.");
-
-assertHtmlHasId("analizarPdfAddSectionBtn", "analizarPDF.html debe incluir el boton principal para agregar secciones.");
-
-assertHtmlHasId("analizarPdfQuickAddSectionBtn", "analizarPDF.html debe incluir el boton rapido para agregar secciones.");
-
-if (!htmlSource.includes('data-action="add-section"')) {
-  throw new Error("analizarPDF.html debe marcar los controles de agregar seccion con data-action.");
-}
+assertHtmlHasId("analizarPdfUnidadInput", "PeppermintPattyAnalizer.html debe incluir el input de unidad.");
 
 if (!htmlSource.includes('src="analizarPDF/analizar-pdf-app.js"')) {
-  throw new Error("analizarPDF.html debe cargar el entrypoint modular del sitio.");
+  throw new Error("PeppermintPattyAnalizer.html debe cargar el entrypoint modular del sitio.");
 }
 
 if (!appSource.includes("createAnalizarPdfSessionStore")) {
@@ -66,6 +56,10 @@ if (!appSource.includes('document.getElementById("analizarPdfSourceType")')) {
   throw new Error("El app principal debe bindear analizarPdfSourceType.");
 }
 
+if (!appSource.includes('document.getElementById("analizarPdfBookTypeInput")')) {
+  throw new Error("El app principal debe bindear analizarPdfBookTypeInput.");
+}
+
 if (!appSource.includes('document.getElementById("analizarPdfNivelInput")')) {
   throw new Error("El app principal debe bindear analizarPdfNivelInput.");
 }
@@ -76,18 +70,6 @@ if (!appSource.includes('document.getElementById("analizarPdfRevisionNumeroInput
 
 if (!appSource.includes('document.getElementById("analizarPdfUnidadInput")')) {
   throw new Error("El app principal debe bindear analizarPdfUnidadInput.");
-}
-
-if (!appSource.includes('document.getElementById("analizarPdfPaletteList")')) {
-  throw new Error("El app principal debe bindear analizarPdfPaletteList.");
-}
-
-if (!appSource.includes('document.getElementById("analizarPdfAddPaletteColorBtn")')) {
-  throw new Error("El app principal debe bindear analizarPdfAddPaletteColorBtn.");
-}
-
-if (!appSource.includes('document.querySelectorAll(\'[data-action="add-section"]\')')) {
-  throw new Error("El app principal debe wirear de forma determinista todos los controles de agregar seccion.");
 }
 
 if (!/Ortotipografía/.test(resultsSource)) {
@@ -111,7 +93,7 @@ if (!sidepanelSource.includes('data-action="create-session"') && !sidepanelSourc
 }
 
 if (!htmlSource.includes('id="analizarPdfLayout"')) {
-  throw new Error("analizarPDF.html debe definir el layout principal.");
+  throw new Error("PeppermintPattyAnalizer.html debe definir el layout principal.");
 }
 
 console.log("Analizar PDF shell contract OK.");

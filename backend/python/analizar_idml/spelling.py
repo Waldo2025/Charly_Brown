@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 
 def _normalize_text(text):
@@ -47,6 +48,22 @@ def _build_context(text, excerpt, radius=60):
     return haystack[context_start:context_end].strip()
 
 
+def _strip_accents(text):
+    raw = str(text or "")
+    if not raw:
+        return ""
+    normalized = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+
+
+def _count_accents(text):
+    raw = str(text or "")
+    if not raw:
+        return 0
+    normalized = unicodedata.normalize("NFD", raw)
+    return sum(1 for ch in normalized if unicodedata.category(ch) == "Mn")
+
+
 def _is_valid_spelling_match(text, excerpt, suggestion):
     clean_excerpt = str(excerpt or "").strip()
     clean_suggestion = str(suggestion or "").strip()
@@ -60,6 +77,15 @@ def _is_valid_spelling_match(text, excerpt, suggestion):
         return False
     if " " in clean_suggestion or "\n" in clean_suggestion:
         return False
+    accent_fold_excerpt = _strip_accents(clean_excerpt).lower()
+    accent_fold_suggestion = _strip_accents(clean_suggestion).lower()
+    if accent_fold_excerpt == accent_fold_suggestion:
+        excerpt_accents = _count_accents(clean_excerpt)
+        suggestion_accents = _count_accents(clean_suggestion)
+        if excerpt_accents > 0:
+            return False
+        if suggestion_accents <= excerpt_accents:
+            return False
     return True
 
 
