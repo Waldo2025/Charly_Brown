@@ -337,10 +337,16 @@ class GeminiVerifier:
             if not isinstance(parsed, dict):
                 return {}
             has_icon = bool(parsed.get("hasInstructionIcon"))
-            kind = str(parsed.get("kind") or "").strip().lower()
+            kind = self._normalize_instruction_work_kind(parsed.get("kind") or "")
             reason = str(parsed.get("reason") or "").strip()
-            if kind not in {"", "individual", "pair", "group", "unknown"}:
-                kind = ""
+            if has_icon and not kind:
+                kind = self._classify_instruction_work_icon_kind(
+                    page_name=page_name,
+                    image_base64=image_base64,
+                    mime_type=mime_type,
+                    excerpt=excerpt,
+                    instruction_text=instruction_text,
+                )
             return {
                 "hasInstructionIcon": has_icon,
                 "kind": kind,
@@ -355,3 +361,75 @@ class GeminiVerifier:
             ValueError,
         ):
             return {}
+
+    def _normalize_instruction_work_kind(self, value=""):
+        normalized = " ".join(str(value or "").strip().lower().split())
+        if not normalized:
+            return ""
+        if normalized in {"individual", "single", "solo", "una persona", "1 persona", "trabajo individual", "persona"}:
+            return "individual"
+        if normalized in {"pair", "pairs", "pareja", "parejas", "dos personas", "2 personas", "trabajo en pares", "trabajo en pareja"}:
+            return "pair"
+        if normalized in {"group", "grupo", "grupal", "tres personas", "3 personas", "trabajo en grupo"}:
+            return "group"
+        if "individual" in normalized or "una persona" in normalized or "1 persona" in normalized:
+            return "individual"
+        if "pair" in normalized or "pares" in normalized or "pareja" in normalized or "dos personas" in normalized or "2 personas" in normalized:
+            return "pair"
+        if "group" in normalized or "grupo" in normalized or "grupal" in normalized or "tres personas" in normalized or "3 personas" in normalized:
+            return "group"
+        return ""
+
+    def _classify_instruction_work_icon_kind(
+        self,
+        *,
+        page_name="",
+        image_base64="",
+        mime_type="image/jpeg",
+        excerpt="",
+        instruction_text="",
+    ):
+        if not self.enabled or not image_base64:
+            return ""
+        prompt = (
+            "Eres un clasificador visual editorial.\n"
+            "En la imagen puede aparecer un icono pequeño de modalidad de trabajo dentro de una instrucción.\n"
+            "Debes responder SOLO uno de estos valores exactos:\n"
+            "- individual\n"
+            "- pair\n"
+            "- group\n"
+            "- unknown\n"
+            "Reglas:\n"
+            "- individual = una persona\n"
+            "- pair = dos personas\n"
+            "- group = tres personas o más\n"
+            "- Si no puedes distinguirlo con claridad, responde unknown.\n"
+            f"Página: {page_name or 'N/A'}\n"
+            f"Fragmento marcado: {str(excerpt or '').strip()}\n"
+            f"Texto de instrucción: {str(instruction_text or '').strip()}\n"
+        )
+        body = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type or "image/jpeg", "data": image_base64}},
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "text/plain",
+            },
+        }
+        try:
+            response = self._post_json(body)
+            payload_text = self._extract_text(response)
+            return self._normalize_instruction_work_kind(payload_text)
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            socket.timeout,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            return ""

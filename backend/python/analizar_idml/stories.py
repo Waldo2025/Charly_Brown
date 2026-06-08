@@ -1,6 +1,10 @@
+import base64
+import io
 import re
 
-from .pages import _get_text_frame_rect, _normalize_color_ref
+from PIL import Image, ImageDraw
+
+from .pages import _get_accumulated_transform, _get_text_frame_rect, _normalize_color_ref
 from .styles import local_name, parse_xml
 
 AUTO_PAGE_NUMBER_TOKEN = "__AUTO_PAGE_NUMBER__"
@@ -116,6 +120,142 @@ def _extract_preview_image(raw_xml):
         "mimeType": mime_type,
         "base64": image_data,
     }
+
+
+def _normalize_object_style_name(value=""):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "/" in raw:
+        raw = raw.split("/", 1)[-1]
+    return raw.strip().upper()
+
+
+def _parse_anchor_pair(value=""):
+    parts = str(value or "").strip().split()
+    if len(parts) != 2:
+        return None
+    try:
+        return float(parts[0]), float(parts[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_shape_bounds(node, parent_map=None):
+    points = []
+    transform = _get_accumulated_transform(node, parent_map)
+    tx = float((transform or [0, 0, 0, 0, 0, 0])[4] or 0)
+    ty = float((transform or [0, 0, 0, 0, 0, 0])[5] or 0)
+    for descendant in node.iter():
+        if local_name(descendant.tag) != "PathPointType":
+            continue
+        point = _parse_anchor_pair(descendant.get("Anchor", ""))
+        if point is not None:
+            points.append((point[0] + tx, point[1] + ty))
+    if not points:
+        return None
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return {
+        "x1": min(xs),
+        "y1": min(ys),
+        "x2": max(xs),
+        "y2": max(ys),
+    }
+
+
+def _node_style_color(value="", *, fallback="#1f2937", paper="#ffffff"):
+    normalized = str(value or "").strip().lower()
+    if not normalized or normalized.endswith("/none"):
+        return None
+    if normalized.endswith("/paper"):
+        return paper
+    return fallback
+
+
+def _render_icon_preview(node, parent_map=None):
+    if node is None:
+        return None
+    renderables = []
+    for descendant in node.iter():
+        tag = local_name(descendant.tag)
+        if tag not in {"Oval", "Rectangle", "Polygon", "TextFrame"}:
+            continue
+        bounds = _collect_shape_bounds(descendant, parent_map)
+        if not bounds:
+            continue
+        renderables.append({
+            "tag": tag,
+            "bounds": bounds,
+            "fill": _node_style_color(descendant.get("FillColor", ""), fallback="#334155", paper="#ffffff"),
+            "stroke": _node_style_color(descendant.get("StrokeColor", ""), fallback="#0f172a", paper="#ffffff"),
+            "strokeWeight": max(1.0, float(descendant.get("StrokeWeight", "1") or "1")),
+        })
+    if not renderables:
+        return None
+
+    x1 = min(item["bounds"]["x1"] for item in renderables)
+    y1 = min(item["bounds"]["y1"] for item in renderables)
+    x2 = max(item["bounds"]["x2"] for item in renderables)
+    y2 = max(item["bounds"]["y2"] for item in renderables)
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    padding = 8
+    target_size = 192
+    scale = min(target_size / width, target_size / height)
+    scale = max(2.0, min(scale, 10.0))
+    canvas_w = int((width * scale) + (padding * 2))
+    canvas_h = int((height * scale) + (padding * 2))
+    image = Image.new("RGB", (canvas_w, canvas_h), "#ffffff")
+    draw = ImageDraw.Draw(image)
+
+    def map_bounds(bounds):
+        return (
+            padding + ((bounds["x1"] - x1) * scale),
+            padding + ((bounds["y1"] - y1) * scale),
+            padding + ((bounds["x2"] - x1) * scale),
+            padding + ((bounds["y2"] - y1) * scale),
+        )
+
+    for item in renderables:
+        left, top, right, bottom = map_bounds(item["bounds"])
+        stroke_width = max(1, int(round(item["strokeWeight"] * scale * 0.18)))
+        fill = item["fill"]
+        outline = item["stroke"]
+        if item["tag"] == "Oval":
+            draw.ellipse((left, top, right, bottom), fill=fill, outline=outline, width=stroke_width)
+        elif item["tag"] == "Polygon":
+            draw.rectangle((left, top, right, bottom), fill=fill, outline=outline, width=stroke_width)
+        else:
+            draw.rounded_rectangle((left, top, right, bottom), radius=max(2, int(4 * scale * 0.25)), fill=fill, outline=outline, width=stroke_width)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return {
+        "mimeType": "image/png",
+        "base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+    }
+
+
+def _find_instruction_icon_preview_node(node, parent_map):
+    parent = parent_map.get(node)
+    if parent is not None:
+        current_style = _normalize_object_style_name(node.get("AppliedObjectStyle", ""))
+        for sibling in list(parent):
+            if sibling is node or local_name(sibling.tag) != "Group":
+                continue
+            sibling_style = _normalize_object_style_name(sibling.get("AppliedObjectStyle", ""))
+            if sibling_style != current_style:
+                continue
+            if any(local_name(desc.tag) in {"Oval", "Rectangle", "Polygon", "GraphicLine"} for desc in sibling.iter()):
+                return sibling
+    current = node
+    while current is not None:
+        style_name = _normalize_object_style_name(current.get("AppliedObjectStyle", ""))
+        if local_name(current.tag) == "Group" and "ICONOS INLINE" in style_name:
+            return current
+        current = parent_map.get(current)
+    return node
 
 
 def _normalize_inline_icon_kind(node):
@@ -263,6 +403,7 @@ def parse_stories(archive, story_sources=None):
         embedded_story_refs = []
         embedded_story_ref_signatures = set()
         parent_map = {child: parent for parent in root.iter() for child in list(parent)}
+        preview_cache = {}
 
         paragraph_block_index = 0
         for node in root.iter():
@@ -321,6 +462,12 @@ def parse_stories(archive, story_sources=None):
                     if signature in embedded_story_ref_signatures:
                         continue
                     embedded_story_ref_signatures.add(signature)
+                    preview_node = _find_instruction_icon_preview_node(descendant, parent_map)
+                    preview_key = str(preview_node.get("Self") or embedded_frame_id or embedded_story_id).strip()
+                    preview_image = preview_cache.get(preview_key)
+                    if preview_image is None:
+                        preview_image = _render_icon_preview(preview_node, parent_map)
+                        preview_cache[preview_key] = preview_image
                     embedded_story_refs.append(
                         {
                             "storyId": embedded_story_id,
@@ -332,6 +479,7 @@ def parse_stories(archive, story_sources=None):
                             "overflows": str(descendant.get("Overflows", "")).strip().lower() == "true",
                             "anchorBlockOrder": anchor_block_order,
                             "anchorParentStoryId": story.get("Self", ""),
+                            "previewImage": preview_image,
                         }
                     )
             elif tag == "CharacterStyleRange":

@@ -1492,6 +1492,44 @@ def _instruction_work_kind_label(kind=""):
     return ""
 
 
+def _normalize_instruction_icon_object_style(value=""):
+    raw = str(value or "").strip().upper()
+    if "/" in raw:
+        raw = raw.split("/", 1)[-1]
+    return raw
+
+
+def _is_instruction_icon_object_style(value=""):
+    normalized = _normalize_instruction_icon_object_style(value)
+    return "ICONOS INLINE" in normalized or "INSTRUCCION INSERTDA" in normalized or "INSTRUCCION INSERTADA" in normalized
+
+
+def _get_story_embedded_instruction_icon_previews(story=None, block_order=None):
+    previews = []
+    seen = set()
+    for ref in ((story or {}).get("embeddedStoryRefs") or []):
+        if not _is_instruction_icon_object_style((ref or {}).get("appliedObjectStyle") or ""):
+            continue
+        anchor_block_order = (ref or {}).get("anchorBlockOrder")
+        if block_order is not None and anchor_block_order not in {block_order, block_order - 1, block_order + 1}:
+            continue
+        preview = (ref or {}).get("previewImage") or {}
+        image_base64 = str(preview.get("base64") or "").strip()
+        if not image_base64:
+            continue
+        signature = str((ref or {}).get("frameId") or (ref or {}).get("storyId") or "").strip()
+        if signature and signature in seen:
+            continue
+        if signature:
+            seen.add(signature)
+        previews.append({
+            "previewImage": preview,
+            "storyId": str((ref or {}).get("storyId") or "").strip(),
+            "frameId": str((ref or {}).get("frameId") or "").strip(),
+        })
+    return previews
+
+
 def _detect_instruction_icon_with_capture(
     *,
     gemini_verifier=None,
@@ -1539,18 +1577,41 @@ def _detect_instruction_work_modes(page_reports=None, story_preview_index=None, 
                 story_id = str((item or {}).get("storyId") or "").strip()
                 if not story_id:
                     continue
-                preview = (((story_preview_index or {}).get(story_id) or {}).get("previewImage")) or {}
-                if not preview.get("base64"):
-                    continue
-                visual_result = _detect_instruction_icon_with_capture(
-                    gemini_verifier=gemini_verifier,
-                    page_name=str((page or {}).get("pageName") or "").strip(),
-                    preview=preview,
-                    page_rect=page.get("pageRect") or None,
-                    frame_rect=(item or {}).get("frameRect") or None,
-                    excerpt="",
-                    instruction_text=str((item or {}).get("text") or "").strip(),
-                )
+                story = ((story_preview_index or {}).get(story_id) or {})
+                visual_result = {}
+                detected_icon_without_kind = {}
+                preview_candidates = _get_story_embedded_instruction_icon_previews(story, (item or {}).get("blockOrder"))
+                for candidate in preview_candidates:
+                    candidate_result = gemini_verifier.detect_instruction_work_icon_visual(
+                        page_name=str((page or {}).get("pageName") or "").strip(),
+                        image_base64=((candidate or {}).get("previewImage") or {}).get("base64") or "",
+                        mime_type=((candidate or {}).get("previewImage") or {}).get("mimeType") or "image/png",
+                        excerpt="",
+                        instruction_text=str((item or {}).get("text") or "").strip(),
+                    )
+                    if bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                        detected_icon_without_kind = candidate_result
+                    if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                        visual_result = candidate_result
+                        break
+                if not visual_result:
+                    preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+                    if preview.get("base64"):
+                        candidate_result = _detect_instruction_icon_with_capture(
+                            gemini_verifier=gemini_verifier,
+                            page_name=str((page or {}).get("pageName") or "").strip(),
+                            preview=preview,
+                            page_rect=page.get("pageRect") or None,
+                            frame_rect=(item or {}).get("frameRect") or None,
+                            excerpt="",
+                            instruction_text=str((item or {}).get("text") or "").strip(),
+                        )
+                        if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                            visual_result = candidate_result
+                        elif bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                            detected_icon_without_kind = candidate_result
+                if not visual_result and detected_icon_without_kind:
+                    visual_result = detected_icon_without_kind
                 has_icon = bool((visual_result or {}).get("hasInstructionIcon"))
                 if not has_icon:
                     continue
@@ -1614,25 +1675,50 @@ def _filter_instruction_icon_orthotypography_issues(
             continue
         page = pages_by_name.get(page_name) or {}
         story = (story_preview_index or {}).get(story_id) or {}
-        preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
-        if not preview.get("base64"):
-            accepted.append(issue)
-            continue
         page_item = _find_page_content_entry(
             page,
             story_id=story_id,
             style_name=style_name,
             excerpt=(issue or {}).get("excerpt") or "",
         ) or {}
-        visual_result = _detect_instruction_icon_with_capture(
-            gemini_verifier=gemini_verifier,
-            page_name=page_name,
-            preview=preview,
-            page_rect=page.get("pageRect") or None,
-            frame_rect=page_item.get("frameRect") or (issue or {}).get("frameRect") or None,
-            excerpt=(issue or {}).get("excerpt") or "",
-            instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
-        )
+        visual_result = {}
+        detected_icon_without_kind = {}
+        preview_candidates = _get_story_embedded_instruction_icon_previews(story, (page_item or {}).get("blockOrder"))
+        for candidate in preview_candidates:
+            candidate_result = gemini_verifier.detect_instruction_work_icon_visual(
+                page_name=page_name,
+                image_base64=((candidate or {}).get("previewImage") or {}).get("base64") or "",
+                mime_type=((candidate or {}).get("previewImage") or {}).get("mimeType") or "image/png",
+                excerpt=(issue or {}).get("excerpt") or "",
+                instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
+            )
+            if bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                detected_icon_without_kind = candidate_result
+            if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                visual_result = candidate_result
+                break
+        if not visual_result:
+            preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+            if not preview.get("base64"):
+                if detected_icon_without_kind:
+                    continue
+                accepted.append(issue)
+                continue
+            candidate_result = _detect_instruction_icon_with_capture(
+                gemini_verifier=gemini_verifier,
+                page_name=page_name,
+                preview=preview,
+                page_rect=page.get("pageRect") or None,
+                frame_rect=page_item.get("frameRect") or (issue or {}).get("frameRect") or None,
+                excerpt=(issue or {}).get("excerpt") or "",
+                instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
+            )
+            if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                visual_result = candidate_result
+            elif bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                detected_icon_without_kind = candidate_result
+        if not visual_result and detected_icon_without_kind:
+            visual_result = detected_icon_without_kind
         if bool((visual_result or {}).get("hasInstructionIcon")):
             continue
         accepted.append(issue)
