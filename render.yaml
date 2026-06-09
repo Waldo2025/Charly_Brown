@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=400
       - key: API_HOST
         value: 0.0.0.0
       - key: FIREBASE_PROJECT_ID
@@ -43,6 +45,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=400
       - key: FIREBASE_PROJECT_ID
         value: charly-brown
       - key: FIREBASE_STORAGE_BUCKET

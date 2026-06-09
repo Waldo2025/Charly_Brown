@@ -11788,7 +11788,14 @@ app.get("/api/assets/proxy-media", async (req, res) => {
           res.setHeader(name, value);
         });
         const rangedStreamMeta = await openStorageObjectReadStream(storagePath, { range: payload.range });
-        await pipeline(rangedStreamMeta.stream, res.status(payload.status || 200));
+        const stream = rangedStreamMeta.stream;
+        req.on("close", () => {
+          if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
+            console.info("[backend][proxy-media] request closed, destroying storage stream for", storagePath);
+            stream.destroy();
+          }
+        });
+        await pipeline(stream, res.status(payload.status || 200));
         return;
       } catch (error) {
         const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
@@ -11904,6 +11911,12 @@ app.get("/api/assets/proxy-media", async (req, res) => {
                   start: Number(payload.range.start || 0),
                   end: Number(payload.range.end || 0)
                 } : undefined);
+                req.on("close", () => {
+                  if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
+                    console.info("[backend][proxy-media] request closed, destroying admin fallback stream");
+                    stream.destroy();
+                  }
+                });
                 await pipeline(stream, res.status(payload.status || 200));
                 return;
               } catch (error) {
@@ -11942,6 +11955,12 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       err.code = "proxy_media_stream_unavailable";
       throw err;
     }
+    req.on("close", () => {
+      if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
+        console.info("[backend][proxy-media] request closed, destroying upstream body stream");
+        stream.destroy();
+      }
+    });
     res.setHeader("Content-Type", mime);
     if (contentLength) res.setHeader("Content-Length", contentLength);
     if (contentRange) res.setHeader("Content-Range", contentRange);
