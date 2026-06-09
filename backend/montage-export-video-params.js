@@ -66,7 +66,7 @@ function resolveMontageIntermediateVideoParams(format = "mp4_h264") {
   return {
     container: "mp4",
     vCodec: "libx264",
-    vArgs: ["-preset", "slow", "-crf", "12", "-movflags", "+faststart"],
+    vArgs: ["-preset", "medium", "-crf", "12", "-movflags", "+faststart"],
     aCodec: "aac",
     aArgs: ["-b:a", "192k"]
   };
