@@ -9889,6 +9889,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-y", "-hide_banner", "-loglevel", "warning",
         "-fflags", "+genpts",
         "-f", "concat", "-safe", "0", "-i", concatListPath,
+        "-c:v", "copy", "-c:a", "copy",
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         concatOutPath
       ], { stage: "montage_concat" });
