@@ -276,35 +276,49 @@ document.addEventListener("DOMContentLoaded", () => {
         _procesarGeneracionMultipleIA(items);
     });
 
-    function _obtenerSubtemasDesdeTablaActual() {
-        const container = document.getElementById("contenedorTablaSecuencia");
-        if (!container) return [];
-
-        const rows = Array.from(container.querySelectorAll("tr"));
-        const dedup = new Map();
-
-        rows.forEach((row) => {
-            const chk = row.querySelector("input[name^='generar_'][data-subtema]");
-            if (!chk) return;
-            const categoria = String(chk.dataset.categoria || "").trim();
-            const subtemaRaw = String(chk.dataset.subtema || "").trim();
-            const subtemaVisual = String(row.querySelector("h3")?.textContent || subtemaRaw).trim();
-            if (!categoria || !subtemaVisual) return;
-            const key = `${_normalizar(categoria)}::${_normalizar(subtemaRaw || subtemaVisual)}`;
-            if (!dedup.has(key)) {
-                dedup.set(key, {
-                    categoria,
-                    subtema: subtemaRaw || subtemaVisual,
-                    etiqueta: subtemaVisual
-                });
-            }
-        });
-
-        return Array.from(dedup.values());
+    function _formatearSubtemaLocal(nombre) {
+        if (typeof window.formatearSubtema === "function") {
+            return window.formatearSubtema(nombre);
+        }
+        const reemplazos = {
+            "ExpresionOral": "Expresión oral",
+            "ExpresionEscrita": "Expresión escrita",
+            "TrazosDeLetras": "Trazos de letras",
+            "ExpresiónOral": "Expresión oral",
+            "ExpresiónEscrita": "Expresión escrita",
+            "ComprensionLectora": "Comprensión Lectora",
+            "ConvencionesLinguisticas": "Convenciones Lingüísticas",
+            "Gramatica": "Gramática",
+            "Ortografia": "Ortografía",
+            "Ortografía": "Ortografía",
+            "ConocimientoDelMedio": "Conocimiento del medio",
+            "conocimientoDelMedio": "Conocimiento del medio",
+            "CivicaEtica": "Formación Cívica y Ética",
+            "Habilidades": "Habilidades",
+        };
+        return reemplazos[nombre] || nombre.replace(/([a-z])([A-Z])/g, '$1 $2');
     }
 
-    function _obtenerSubtemasDesdeMapaGlobal() {
-        const mapa = window.categoriaPorSubtema || {};
+    async function _obtenerSubtemasDisponibles() {
+        const mapa = {
+            Proyectos: "Proyectos",
+            Artes: "Lenguaje y comunicación",
+            Ortografía: "Lenguaje y comunicación",
+            Gramatica: "Lenguaje y comunicación",
+            ExpresionEscrita: "Lenguaje y comunicación",
+            TrazosDeLetras: "Lenguaje y comunicación",
+            ComprensionLectora: "Lenguaje y comunicación",
+            ExpresionOral: "Lenguaje y comunicación",
+            Habilidades: "Lenguaje y comunicación",
+            Naturales: "Ciencias experimentales",
+            ConocimientoDelMedio: "Ciencias experimentales",
+            MiLocalidad: "Ciencias experimentales",
+            Socioemocional: "Formación socioemocional",
+            CivicaEtica: "Formación socioemocional",
+            Historia: "Ciencias sociales",
+            Geografia: "Ciencias sociales",
+            Matematicas: "Matemáticas"
+        };
         const dedup = new Map();
 
         Object.entries(mapa).forEach(([subtema, categoria]) => {
@@ -316,41 +330,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 dedup.set(key, {
                     categoria: categoriaSafe,
                     subtema: subtemaSafe,
-                    etiqueta: subtemaSafe.replace(/([a-z])([A-Z])/g, "$1 $2")
+                    etiqueta: _formatearSubtemaLocal(subtemaSafe)
                 });
             }
         });
 
-        return Array.from(dedup.values());
-    }
-
-    async function _obtenerSubtemasDisponibles() {
-        const desdeTabla = _obtenerSubtemasDesdeTablaActual();
-        if (desdeTabla.length) return desdeTabla;
-
-        const desdeMapaGlobal = _obtenerSubtemasDesdeMapaGlobal();
-        if (desdeMapaGlobal.length) return desdeMapaGlobal;
-
-        const snap = await getDocs(collection(db, "secuenciaAlcance"));
-        const dedup = new Map();
-        snap.forEach(d => {
-            const data = d.data();
-            Object.keys(data).forEach(key => {
-                if (key.endsWith("_T") && data[key]) {
-                    const categoria = key.replace("_T", "");
-                    const subtema = String(data[key] || "").trim();
-                    if (!categoria || !subtema) return;
-                    const dedupKey = `${_normalizar(categoria)}::${_normalizar(subtema)}`;
-                    if (!dedup.has(dedupKey)) {
-                        dedup.set(dedupKey, {
-                            categoria,
-                            subtema,
-                            etiqueta: subtema
-                        });
-                    }
-                }
-            });
-        });
         return Array.from(dedup.values());
     }
 
@@ -595,7 +579,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function _buscarFilaPorSubtema(subtemaBuscado, categoriaBuscada) {
-        const container = document.getElementById("contenedorTablaSecuencia");
+        const container = document.getElementById("camposSecuencia");
         if (!container) return null;
 
         const rows = Array.from(container.querySelectorAll("tr"));
@@ -606,18 +590,32 @@ document.addEventListener("DOMContentLoaded", () => {
         let maxScore = 0;
 
         for (const r of rows) {
-            const h3 = r.querySelector("h3");
-            const catLabel = r.querySelector(".categoria-label") || r.cells?.[1]; 
+            const chk = r.querySelector("input[name^='generar_'][data-subtema]");
+            if (!chk) continue;
             
-            const txt = _normalizar(h3?.textContent || "");
-            const cat = _normalizar(catLabel?.textContent || "");
+            const subtemaRaw = String(chk.dataset.subtema || "").trim();
+            const tdSubtema = r.cells?.[2];
+            const subtemaVisual = String(tdSubtema?.textContent || "").trim();
+
+            const catLabel = r.cells?.[1];
+            const catVisual = String(catLabel?.textContent || chk.dataset.categoria || "").trim();
+
+            const txtNorm = _normalizar(subtemaRaw);
+            const txtVisualNorm = _normalizar(subtemaVisual);
+            const catNormRow = _normalizar(catVisual);
 
             let score = 0;
-            if (txt === subtemaNorm) score += 10;
-            else if (txt.includes(subtemaNorm) || subtemaNorm.includes(txt)) score += 5;
+            if (txtNorm === subtemaNorm || txtVisualNorm === subtemaNorm) {
+                score += 10;
+            } else if (txtNorm.includes(subtemaNorm) || subtemaNorm.includes(txtNorm) || txtVisualNorm.includes(subtemaNorm) || subtemaNorm.includes(txtVisualNorm)) {
+                score += 5;
+            }
             
-            if (cat === catNorm) score += 3;
-            else if (cat.includes(catNorm)) score += 1;
+            if (catNormRow === catNorm) {
+                score += 3;
+            } else if (catNormRow.includes(catNorm)) {
+                score += 1;
+            }
 
             if (score > maxScore) {
                 maxScore = score;

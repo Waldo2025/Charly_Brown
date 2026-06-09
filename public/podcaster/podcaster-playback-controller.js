@@ -825,6 +825,8 @@ export class PodcasterPlaybackController extends EventEmitter {
         if (shouldReset) {
           a.currentTime = 0;
           a.dataset.initialized = "false";
+          delete a.dataset.pendingSeek;
+          delete a.dataset.pendingSeekSrc;
         }
       } catch (_) { }
     });
@@ -865,6 +867,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!el || !Number.isFinite(seconds)) return;
     try {
       const isVideo = el.tagName === "VIDEO";
+      const currentSrc = el.dataset.src || el.dataset.originalSrc || el.src || "";
       if (el.readyState >= 1) {
         let targetSeconds = seconds;
         if (isVideo) {
@@ -873,20 +876,51 @@ export class PodcasterPlaybackController extends EventEmitter {
             targetSeconds = seconds % videoDuration;
           }
         }
-        el.currentTime = targetSeconds;
-      } else {
-        el.dataset.pendingSeek = seconds;
-        const onLoaded = () => {
-          let targetSeconds = seconds;
-          if (isVideo) {
-            const videoDuration = el.duration;
-            if (Number.isFinite(videoDuration) && videoDuration > 0 && seconds >= videoDuration) {
-              targetSeconds = seconds % videoDuration;
-            }
-          }
-          el.currentTime = targetSeconds;
-          el.removeEventListener('loadedmetadata', onLoaded);
+        if (Math.abs(el.currentTime - targetSeconds) < 0.03) {
           delete el.dataset.pendingSeek;
+          delete el.dataset.pendingSeekSrc;
+          return;
+        }
+        el.currentTime = targetSeconds;
+        delete el.dataset.pendingSeek;
+        delete el.dataset.pendingSeekSrc;
+      } else {
+        if (el.dataset.pendingSeekSrc !== undefined && el.dataset.pendingSeekSrc !== currentSrc) {
+          delete el.dataset.pendingSeek;
+          delete el.dataset.pendingSeekSrc;
+        }
+
+        const alreadyPending = el.dataset.pendingSeek !== undefined;
+        el.dataset.pendingSeek = seconds;
+        el.dataset.pendingSeekSrc = currentSrc;
+        if (alreadyPending) return;
+
+        const onLoaded = () => {
+          try {
+            const pending = el.dataset.pendingSeek;
+            const pendingSrc = el.dataset.pendingSeekSrc;
+            const actualSrc = el.dataset.src || el.dataset.originalSrc || el.src || "";
+            if (pending === undefined || pendingSrc !== actualSrc) return;
+
+            let targetSeconds = Number(pending);
+            if (!Number.isFinite(targetSeconds)) targetSeconds = seconds;
+            if (isVideo) {
+              const videoDuration = el.duration;
+              if (Number.isFinite(videoDuration) && videoDuration > 0 && targetSeconds >= videoDuration) {
+                targetSeconds = targetSeconds % videoDuration;
+              }
+            }
+            if (Math.abs(el.currentTime - targetSeconds) < 0.03) {
+              return;
+            }
+            el.currentTime = targetSeconds;
+          } catch (err) {
+            void err;
+          } finally {
+            el.removeEventListener('loadedmetadata', onLoaded);
+            delete el.dataset.pendingSeek;
+            delete el.dataset.pendingSeekSrc;
+          }
         };
         el.addEventListener('loadedmetadata', onLoaded);
       }
@@ -1118,8 +1152,10 @@ export class PodcasterPlaybackController extends EventEmitter {
         const audio = this.dialoguePlayers[rowId];
         if (audio) {
           if (!audio.paused) try { audio.pause(); } catch (_) { }
-          // If the audio is not recently active, we could potentially remove it, 
-          // but keeping it in dialoguePlayers/audioCache is fine for reuse.
+          audio.src = "";
+          try { audio.load(); } catch (_) { }
+          delete this.dialoguePlayers[rowId];
+          delete this.audioCache[rowId];
         }
       }
     });
@@ -1207,22 +1243,43 @@ export class PodcasterPlaybackController extends EventEmitter {
         ? 0.01
         : (isPaused ? 0.08 : 0.35);
       
-      if (isFirstSync || drift > driftToleranceSec) {
-        if (isFirstSync || drift > 0.5) {
-           // console.log(`[Playback:Audio] Sincronizando tiempo para ${rowId}: ${audio.currentTime.toFixed(3)}s → ${offsetSec.toFixed(3)}s (Drift: ${drift.toFixed(3)}s)`);
-        }
+      // FIX C: Skip seek when offset is near 0 on first sync to avoid buffer flush cut-off
+      const needsSeek = isFirstSync
+        ? (offsetSec > 0.05) // Si el offset es básicamente 0, no buscar — evita flush audible
+        : (drift > driftToleranceSec);
+
+      if (needsSeek) {
         this.seekTo(audio, offsetSec);
+      }
+      if (isFirstSync) {
         audio.dataset.initialized = "true";
       }
 
       if (this.state.isPlaying && audio.paused) {
-        // console.log(`[Playback:Audio] Play para ${rowId}`);
-        audio.play().then(() => {
-          // Re-aplicar velocidad tras el play por seguridad (algunos navegadores la resetean al iniciar el play)
-          if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-            audio.playbackRate = effectiveRate;
-          }
-        }).catch(() => { });
+        // FIX C: Wait for canplay before playing to avoid cut-off from insufficient buffer
+        const startPlayback = () => {
+          audio.play().then(() => {
+            if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
+              audio.playbackRate = effectiveRate;
+            }
+          }).catch(() => { });
+        };
+        if (audio.readyState >= (typeof HTMLMediaElement !== "undefined" ? HTMLMediaElement.HAVE_FUTURE_DATA : 3)) {
+          startPlayback();
+        } else {
+          // Esperar a que haya datos suficientes para reproducir sin corte
+          const onCanPlay = () => {
+            audio.removeEventListener("canplay", onCanPlay);
+            clearTimeout(fallbackTimer);
+            startPlayback();
+          };
+          audio.addEventListener("canplay", onCanPlay, { once: true });
+          // Fallback: si no llega canplay en 1.5s, forzar play de todos modos
+          const fallbackTimer = setTimeout(() => {
+            audio.removeEventListener("canplay", onCanPlay);
+            startPlayback();
+          }, 1500);
+        }
       } else if (!audio.paused && Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
         // Asegurar que la velocidad se mantenga sincronizada incluso si ya está sonando
         audio.playbackRate = effectiveRate;
@@ -2116,6 +2173,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       backdrop.style.visibility = "hidden";
       backdrop.hidden = true;
       backdrop.pause();
+      // FIX B: Release backdrop streaming connection when not in blur-backdrop mode
+      if (backdrop.src) {
+        backdrop.src = "";
+        try { backdrop.load(); } catch (_) { }
+        delete backdrop.dataset.src;
+      }
       
       const foreground = activeSlot === 1 ? this.els?.podcastActiveSpeakerVideoAlt : this.els?.podcastActiveSpeakerVideo;
       if (foreground) {
@@ -2130,6 +2193,12 @@ export class PodcasterPlaybackController extends EventEmitter {
       inactiveBackdrop.style.opacity = "0";
       inactiveBackdrop.style.visibility = "hidden";
       inactiveBackdrop.pause();
+      // FIX B: Release inactive backdrop streaming connection
+      if (inactiveBackdrop.src) {
+        inactiveBackdrop.src = "";
+        try { inactiveBackdrop.load(); } catch (_) { }
+        delete inactiveBackdrop.dataset.src;
+      }
     }
   }
 
@@ -2595,6 +2664,14 @@ export class PodcasterPlaybackController extends EventEmitter {
         setTimeout(done, 1200);
       });
     }
+    // FIX A: Release the preloader's streaming connection now that the browser
+    // cache has been primed. This frees 1 HTTP connection toward the 6-per-origin limit.
+    try {
+      this.podcastStageVideoPreloader.src = "";
+      this.podcastStageVideoPreloader.load();
+    } catch (_) { }
+    this.podcastStageVideoPreloadSrc = "";
+
     if (!cachedObjectUrl) {
       this.getBlobUrl(cleanSrc).catch(() => { });
     }

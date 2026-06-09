@@ -229,3 +229,17 @@ test("syncOverlay falls back to plain subtitle text when the audio clip lacks wo
   assert.doesNotMatch(overlay.innerHTML, /podcast-karaoke-word/);
   assert.match(overlay.innerHTML, />Hola mundo</);
 });
+
+test("normalizeKaraokeWordTimings falls back to proportional timing estimation when timings are empty but duration and subtitle are present", () => {
+  const result = normalizeKaraokeWordTimings({
+    durationMs: 900
+  }, "Hola mundo");
+
+  assert.equal(result.length, 2);
+  assert.equal(result[0].text, "Hola");
+  assert.equal(result[0].startMs, 0);
+  assert.equal(result[0].endMs, 400);
+  assert.equal(result[1].text, "mundo");
+  assert.equal(result[1].startMs, 400);
+  assert.equal(result[1].endMs, 900);
+});

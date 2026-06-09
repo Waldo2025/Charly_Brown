@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const homeSource = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/home.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/home.js",
   "utf8"
 );
 

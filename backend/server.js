@@ -2113,7 +2113,12 @@ function sanitizePodcasterSession(raw = {}) {
       promptVersion: clampText(clip?.promptVersion || "podcaster_live_audio_v1", 80) || "podcaster_live_audio_v1",
       durationSec: clampNumber(clip?.durationSec, 0, 180, 0),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
-      wordTimings: normalizeDialogueAudioWordTimings(clip?.wordTimings || clip?.alignment || []),
+      // wordTimings: normalizeDialogueAudioWordTimings(clip?.wordTimings || clip?.alignment || [])
+      wordTimings: normalizeDialogueAudioWordTimings(
+        clip?.wordTimings || clip?.alignment || [],
+        clampText(clip?.targetSpeechLine || "", 2200),
+        clampNumber(clip?.durationSec, 0, 180, 0)
+      ),
       updatedAt: clampText(clip?.updatedAt || new Date().toISOString(), 64) || new Date().toISOString(),
       downloadUrl,
       storagePath
@@ -7719,13 +7724,13 @@ app.post(["/api/podcaster/dialogue-audio/generate", "/api/podcaster/dialogue-aud
       measuredDurationSec: naturalDurationSec,
       mimeType: baseMime
     });
-    const wordTimings = extractGeminiDialogueAudioWordTimings(data);
     const finalBuffer = retimedAudio?.buffer?.length ? retimedAudio.buffer : baseBuffer;
     const finalMime = String(retimedAudio?.mimeType || baseMime).trim() || baseMime;
     const durationSec = Math.max(
       0,
       Number(retimedAudio?.durationSec || 0) || clampNumber(parseWavDurationSeconds(finalBuffer), 0, 180, 0)
     );
+    const wordTimings = extractGeminiDialogueAudioWordTimings(data, targetSpeechLine, durationSec);
 
     const ext = getAudioExtension(finalMime);
     const sessionSlug = normalizeStorageSegment(sessionId, "session");
@@ -8200,6 +8205,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const resolution = String(raw?.resolution || "source").trim();
   const reelModeEnabled = raw?.reelModeEnabled === true || isMontageReelResolution(resolution);
   const includeBackgroundMusic = raw?.includeBackgroundMusic === true;
+  const partyKaraoke = raw?.partyKaraoke !== false;
   const filename = clampText(raw?.filename || "montage", 160) || "montage";
   const previewRowId = clampText(raw?.previewRowId || "", 140);
   const entriesRaw = Array.isArray(raw?.entries) ? raw.entries : [];
@@ -8306,29 +8312,38 @@ function normalizeMontageExportRequestBody(body = {}) {
     ? onScreenTextTimelineRaw.settings
     : null;
   if (!onScreenTextSegments.length) {
-    onScreenTextSegments = entries
-      .map((entry, idx) => {
-        const text = clampText(entry?.onScreenText || "", 500);
-        if (!text) return null;
-        const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-        const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
-        return {
-          id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
-          rowId: clampText(entry?.rowId || "", 140),
-          sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
-          text,
-          startMs,
-          durationMs,
-          zIndex: idx + 1,
-          layout: {
-            yPct: 0.72,
-            widthPct: 0.58,
-            heightPct: 0.14,
-            xPct: 0.21
-          }
-        };
-      })
-      .filter(Boolean);
+    if (raw.onScreenTextTimeline !== undefined) {
+      onScreenTextSegments = [];
+    } else {
+      onScreenTextSegments = entries
+        .map((entry, idx) => {
+          const text = clampText(entry?.onScreenText || "", 500);
+          if (!text) return null;
+          const geminiSeg = normalizedGeminiTimelineSegments.find((s) => s.rowId === entry.rowId);
+          const startMs = geminiSeg
+            ? geminiSeg.startMs
+            : Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+          const durationMs = geminiSeg
+            ? geminiSeg.durationMs
+            : Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+          return {
+            id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
+            rowId: clampText(entry?.rowId || "", 140),
+            sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
+            text,
+            startMs,
+            durationMs,
+            zIndex: idx + 1,
+            layout: {
+              yPct: 0.72,
+              widthPct: 0.58,
+              heightPct: 0.14,
+              xPct: 0.21
+            }
+          };
+        })
+        .filter(Boolean);
+    }
   }
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
@@ -8383,7 +8398,8 @@ function normalizeMontageExportRequestBody(body = {}) {
       if (rawValue >= 0 && rawValue < 40) return Math.max(40, 100 - rawValue);
       return 60;
     })(),
-    bitrateSettings: raw?.bitrateSettings && typeof raw.bitrateSettings === "object" ? raw.bitrateSettings : null
+    bitrateSettings: raw?.bitrateSettings && typeof raw.bitrateSettings === "object" ? raw.bitrateSettings : null,
+    partyKaraoke
   };
 }
 
@@ -8612,6 +8628,31 @@ function createMontageReviewTextFileResolver(tmpDir = "", prefix = "review") {
   };
 }
 
+function generateKaraokeOverlayText(wrappedText = "", activeWordIndex = -1) {
+  const lines = wrappedText.split("\n");
+  let wordCounter = 0;
+  
+  const nextLines = lines.map((line) => {
+    const tokens = line.split(/(\s+)/);
+    const nextTokens = tokens.map((token) => {
+      if (!token || /^\s+$/.test(token)) {
+        return token;
+      }
+      const currentWordIndex = wordCounter;
+      wordCounter += 1;
+      
+      if (currentWordIndex === activeWordIndex) {
+        return token;
+      } else {
+        return " ".repeat(token.length);
+      }
+    });
+    return nextTokens.join("");
+  });
+  
+  return nextLines.join("\n");
+}
+
 function buildMontageOnScreenTextDrawFilters(options = {}) {
   const spec = options?.spec && typeof options.spec === "object" ? options.spec : {};
   const settings = options?.settings && typeof options.settings === "object" ? options.settings : {};
@@ -8628,6 +8669,7 @@ function buildMontageOnScreenTextDrawFilters(options = {}) {
     ? `#020617@${Math.max(0, Math.min(1, Number(spec.shadowOpacity || 0))).toFixed(3)}`
     : "#020617@0.000";
   const enableExpr = escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`);
+
   const buildLayer = (overrides = {}) => {
     const layerStrokeWidth = Number.isFinite(Number(overrides.borderw))
       ? Math.max(0, Number(overrides.borderw))
@@ -8638,13 +8680,23 @@ function buildMontageOnScreenTextDrawFilters(options = {}) {
     const layerShadowY = Number.isFinite(Number(overrides.shadowy))
       ? Number(overrides.shadowy)
       : (spec.shadowEnabled ? spec.shadowY : 0);
-    return `drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${overrides.fontsize || spec.fontSizePx}:fontcolor=${overrides.fontcolor || textColor}:x='${overrides.xExpr || spec.xExpr}':y=${Number.isFinite(Number(overrides.yPx)) ? Number(overrides.yPx) : spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${layerStrokeWidth}:bordercolor=${overrides.bordercolor || strokeColor}:shadowx=${layerShadowX}:shadowy=${layerShadowY}:shadowcolor=${overrides.shadowcolor || baseShadowColor}:${spec.boxEnabled ? "box=1" : "box=0"}:enable='${enableExpr}'`;
+    const layerTextPath = String(overrides.textPath || textPath);
+    const layerEnableExpr = String(overrides.enableExpr || enableExpr);
+    const isBoxOn = (spec.boxEnabled && overrides.boxEnabled !== false);
+    return `drawtext=textfile='${escapeFfmpegFilterPath(layerTextPath)}'${fontSource}:reload=0:fontsize=${overrides.fontsize || spec.fontSizePx}:fontcolor=${overrides.fontcolor || textColor}:x='${overrides.xExpr || spec.xExpr}':y=${Number.isFinite(Number(overrides.yPx)) ? Number(overrides.yPx) : spec.yPx}:fix_bounds=1:line_spacing=${spec.lineSpacingPx}:borderw=${layerStrokeWidth}:bordercolor=${overrides.bordercolor || strokeColor}:shadowx=${layerShadowX}:shadowy=${layerShadowY}:shadowcolor=${overrides.shadowcolor || baseShadowColor}:${isBoxOn ? "box=1" : "box=0"}:boxcolor=${overrides.boxcolor || spec.boxColor || "0x000000@0.000"}:boxborderw=${overrides.boxborderw || spec.boxBorderWPx || 0}:enable='${layerEnableExpr}'`;
   };
 
-  if (stylePreset === "3d" && bgPreset === "none") {
+  const wordTimings = Array.isArray(options.wordTimings) ? options.wordTimings : [];
+  const textFileResolver = typeof options.textFileResolver === "function" ? options.textFileResolver : null;
+  const isKaraoke = settings?.partyKaraoke !== false && wordTimings.length > 0 && textFileResolver && String(spec.wrappedText || "").trim();
+
+  const baseTextColor = isKaraoke ? toFfmpegColor("#94A3B8", settings?.textOpacity ?? 1, "94A3B8") : textColor;
+  const filters = [];
+
+  if (stylePreset === "3d" && bgPreset === "none" || stylePreset === "3d" && bgPreset !== "none") {
     const depth = Math.max(2, Math.round(Number(spec.fontSizePx || 44) * 0.06));
     const visibleStrokeWidth = Math.max(baseStrokeWidth, Math.round(Number(spec.fontSizePx || 44) * 0.055), 2);
-    return [
+    filters.push(
       buildLayer({
         fontcolor: "#020617@0.520",
         xExpr: `(${spec.xExpr})+${depth}`,
@@ -8654,18 +8706,66 @@ function buildMontageOnScreenTextDrawFilters(options = {}) {
         shadowx: 0,
         shadowy: 0,
         shadowcolor: "#020617@0.000"
-      }),
+      })
+    );
+    filters.push(
       buildLayer({
+        fontcolor: baseTextColor,
         borderw: visibleStrokeWidth,
         bordercolor: strokeColor,
         shadowx: Math.max(depth, Number(spec.shadowEnabled ? spec.shadowX : 0) || 0),
         shadowy: Math.max(depth + 1, Number(spec.shadowEnabled ? spec.shadowY : 0) || 0),
-        shadowcolor: "#020617@0.620"
+        shadowcolor: "#020617@0.620",
+        boxEnabled: false
       })
-    ];
+    );
+  } else {
+    filters.push(buildLayer({ fontcolor: baseTextColor }));
   }
 
-  return [buildLayer()];
+  if (isKaraoke) {
+    const activeTextColor = toFfmpegColor("#FACC15", 1, "FACC15");
+    wordTimings.forEach((word, index) => {
+      const wordStartSec = startSec + (Number(word.startMs || 0) / 1000);
+      const wordEndSec = startSec + (Number(word.endMs || 0) / 1000);
+      if (wordStartSec >= endSec || wordEndSec <= startSec) return;
+      const clampedStartSec = Math.max(startSec, wordStartSec);
+      const clampedEndSec = Math.min(endSec, Math.max(clampedStartSec + 0.05, wordEndSec));
+
+      const overlayText = generateKaraokeOverlayText(spec.wrappedText, index);
+      const wordTextPath = textFileResolver(overlayText);
+      const wordEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
+
+      if (stylePreset === "3d" && bgPreset === "none" || stylePreset === "3d" && bgPreset !== "none") {
+        const depth = Math.max(2, Math.round(Number(spec.fontSizePx || 44) * 0.06));
+        const visibleStrokeWidth = Math.max(baseStrokeWidth, Math.round(Number(spec.fontSizePx || 44) * 0.055), 2);
+        filters.push(
+          buildLayer({
+            fontcolor: activeTextColor,
+            textPath: wordTextPath,
+            enableExpr: wordEnableExpr,
+            borderw: visibleStrokeWidth,
+            bordercolor: strokeColor,
+            shadowx: Math.max(depth, Number(spec.shadowEnabled ? spec.shadowX : 0) || 0),
+            shadowy: Math.max(depth + 1, Number(spec.shadowEnabled ? spec.shadowY : 0) || 0),
+            shadowcolor: "#020617@0.620",
+            boxEnabled: false
+          })
+        );
+      } else {
+        filters.push(
+          buildLayer({
+            fontcolor: activeTextColor,
+            textPath: wordTextPath,
+            enableExpr: wordEnableExpr,
+            boxEnabled: false
+          })
+        );
+      }
+    });
+  }
+
+  return filters;
 }
 
 function normalizeMontageOnScreenTextExportLayout(options = {}) {
@@ -8685,10 +8785,7 @@ function normalizeMontageOnScreenTextExportLayout(options = {}) {
     heightPct
   };
   const spec = resolveOnScreenTextRenderSpec({
-    settings: {
-      ...settings,
-      boxEnabled: false
-    },
+    settings,
     layout: baseLayout,
     resolution,
     sourceWidth,
@@ -10055,6 +10152,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
       const onScreenTextSettings = {
         ...input.onScreenTextSettings,
+        partyKaraoke: input.partyKaraoke !== false,
         fontSizePx: isReelExport
           ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
           : input.onScreenTextSettings?.fontSizePx
@@ -10081,10 +10179,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             sourceDims
           });
           const spec = resolveOnScreenTextRenderSpec({
-            settings: {
-              ...onScreenTextSettings,
-              boxEnabled: false
-            },
+            settings: onScreenTextSettings,
             layout,
             resolution: input.resolution || "source",
             sourceWidth: sourceDims.width,
@@ -10093,6 +10188,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             fallback: ""
           });
           const textPath = textFileResolver(String(spec.wrappedText || "").trim());
+          const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
+          const wordTimings = audioClip?.wordTimings || [];
           return buildMontageOnScreenTextDrawFilters({
             spec,
             settings: onScreenTextSettings,
@@ -10101,7 +10198,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             textColor,
             strokeColor,
             startSec,
-            endSec
+            endSec,
+            wordTimings,
+            textFileResolver
           });
         });
       if (drawFilters.length) {

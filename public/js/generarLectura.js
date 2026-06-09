@@ -10,6 +10,45 @@ setupImageGenerator(storage);
 
 export { auth, storage, db };
 
+function _safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn("localStorage.setItem failed for key:", key, e);
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22) {
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k) continue;
+          if (
+            k.startsWith('unidad_ingesta_texto_') ||
+            k.startsWith('cb_lectura_cache_') ||
+            k === 'cb_lectura_cache_v1' ||
+            k === 'lectura_cache' ||
+            k === 'cb_lecturas_catalog_cache_v1' ||
+            k === 'cb_lecturas_cache_list_v1' ||
+            k.startsWith('instrucciones_gemini_subtema_')
+          ) {
+            keysToRemove.push(k);
+          }
+        }
+        if (keysToRemove.length > 0) {
+          console.warn(`Pruning ${keysToRemove.length} non-essential cache key(s) from localStorage due to QuotaExceededError.`);
+          keysToRemove.forEach(k => {
+            try {
+              localStorage.removeItem(k);
+            } catch (_) {}
+          });
+          localStorage.setItem(key, value);
+          console.log(`Successfully saved key "${key}" after pruning cache.`);
+        }
+      } catch (retryErr) {
+        console.error("Failed to save to localStorage even after pruning:", retryErr);
+      }
+    }
+  }
+}
 
 let currentUserId = null;
 let resolveAuthReady;
@@ -595,7 +634,7 @@ function initPanelIzquierdoToggle() {
     panel.classList.toggle("is-open", open);
     btn.setAttribute("aria-expanded", open ? "true" : "false");
     btn.setAttribute("title", open ? "Cerrar menú" : "Abrir menú");
-    localStorage.setItem(key, open ? "1" : "0");
+    _safeLocalStorageSet(key, open ? "1" : "0");
   });
 
   btn.dataset.bound = "1";
@@ -671,14 +710,14 @@ function initStudioWorkspaceToggle() {
   btn.addEventListener("click", () => {
     const nextVisible = panelChat.classList.contains("is-hidden");
     applyState(nextVisible);
-    localStorage.setItem(key, nextVisible ? "1" : "0");
+    _safeLocalStorageSet(key, nextVisible ? "1" : "0");
   });
 
   window.addEventListener("cb-chat-visibility-force", (event) => {
     const forcedVisible = event?.detail?.visible;
     if (typeof forcedVisible !== "boolean") return;
     applyState(forcedVisible);
-    localStorage.setItem(key, forcedVisible ? "1" : "0");
+    _safeLocalStorageSet(key, forcedVisible ? "1" : "0");
   });
 
   btn.dataset.bound = "1";
@@ -1565,10 +1604,10 @@ function seleccionarRespuestaSeguimiento(texto, icono) {
         console.error("Error guardando lectura en cache:", e);
       }
 
-      localStorage.setItem("lecturaSeleccionadaDesdeModal", "true");
-      localStorage.setItem("ultimaLecturaSeleccionada", "lectura_chat_ia");
-      localStorage.setItem("unidad_unidadTemaTexto", "lectura_chat_ia");
-      localStorage.setItem("unidad_unidadTemaTexto_label", lecturaObj.titulo || "Lectura del chat");
+      _safeLocalStorageSet("lecturaSeleccionadaDesdeModal", "true");
+      _safeLocalStorageSet("ultimaLecturaSeleccionada", "lectura_chat_ia");
+      _safeLocalStorageSet("unidad_unidadTemaTexto", "lectura_chat_ia");
+      _safeLocalStorageSet("unidad_unidadTemaTexto_label", lecturaObj.titulo || "Lectura del chat");
     }
   } catch (err) {
     console.error("Error sincronizando lectura del chat con unidad:", err);

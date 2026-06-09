@@ -70,6 +70,46 @@ let geminiBackendUnavailableAt = 0;
 const UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY = "cb_unidad_activity_style_toggle_v1";
 let _unidadLecturasCanReadAllCache = { uid: "", value: false, ts: 0 };
 
+function _safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn("localStorage.setItem failed for key:", key, e);
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22) {
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k) continue;
+          if (
+            k.startsWith('unidad_ingesta_texto_') ||
+            k.startsWith('cb_lectura_cache_') ||
+            k === 'cb_lectura_cache_v1' ||
+            k === 'lectura_cache' ||
+            k === 'cb_lecturas_catalog_cache_v1' ||
+            k === 'cb_lecturas_cache_list_v1' ||
+            k.startsWith('instrucciones_gemini_subtema_')
+          ) {
+            keysToRemove.push(k);
+          }
+        }
+        if (keysToRemove.length > 0) {
+          console.warn(`Pruning ${keysToRemove.length} non-essential cache key(s) from localStorage due to QuotaExceededError.`);
+          keysToRemove.forEach(k => {
+            try {
+              localStorage.removeItem(k);
+            } catch (_) {}
+          });
+          localStorage.setItem(key, value);
+          console.log(`Successfully saved key "${key}" after pruning cache.`);
+        }
+      } catch (retryErr) {
+        console.error("Failed to save to localStorage even after pruning:", retryErr);
+      }
+    }
+  }
+}
+
 function _unidadReadStyleToggleMap() {
   try {
     const raw = localStorage.getItem(UNIDAD_ACTIVITY_STYLE_TOGGLE_STORAGE_KEY);
@@ -22705,15 +22745,15 @@ async function verificarSecuencia() {
           if (!newInput) return;
           if (saved !== null) newInput.checked = (saved === "true");
           newInput.addEventListener("change", function () {
-            localStorage.setItem(key, this.checked.toString());
+            _safeLocalStorageSet(key, this.checked.toString());
           });
         } else {
           if (saved !== null) input.value = saved;
           input.addEventListener("change", function () {
-            localStorage.setItem(key, this.value);
+            _safeLocalStorageSet(key, this.value);
           });
           input.addEventListener("input", function () {
-            localStorage.setItem(key, this.value);
+            _safeLocalStorageSet(key, this.value);
           });
         }
       });

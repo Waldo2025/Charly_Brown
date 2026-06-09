@@ -29,6 +29,34 @@ function tokenizeSubtitleText(text = "") {
   return String(text || "").match(/(\s+|[^\s]+)/g) || [];
 }
 
+function estimateProportionalWordTimings(words = [], durationMs = 0) {
+  if (!Array.isArray(words) || !words.length || !durationMs || durationMs <= 0) return [];
+  const totalChars = words.reduce((sum, w) => sum + w.length, 0);
+  if (totalChars <= 0) {
+    const wordDur = Math.round(durationMs / words.length);
+    return words.map((w, index) => ({
+      text: w,
+      startMs: index * wordDur,
+      endMs: Math.min(durationMs, (index + 1) * wordDur),
+      tokenIndex: index
+    }));
+  }
+  let currentStartMs = 0;
+  return words.map((word, index) => {
+    const weight = word.length / totalChars;
+    const wordDur = Math.round(weight * durationMs);
+    const startMs = currentStartMs;
+    const endMs = index === words.length - 1 ? durationMs : Math.min(durationMs, currentStartMs + wordDur);
+    currentStartMs = endMs;
+    return {
+      text: word,
+      startMs,
+      endMs,
+      tokenIndex: index
+    };
+  });
+}
+
 export function normalizeKaraokeWordTimings(audioClip = null, subtitleText = "") {
   const source = Array.isArray(audioClip?.wordTimings)
     ? audioClip.wordTimings
@@ -56,6 +84,12 @@ export function normalizeKaraokeWordTimings(audioClip = null, subtitleText = "")
       tokenIndex: next.length
     });
   });
+  if (!next.length) {
+    const durationMs = audioClip?.durationMs ?? (audioClip?.durationSec != null ? audioClip.durationSec * 1000 : (audioClip?.duration != null ? audioClip.duration * 1000 : 0));
+    if (durationMs > 0 && subtitleWords.length > 0) {
+      return estimateProportionalWordTimings(subtitleWords, durationMs);
+    }
+  }
   next.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs || a.tokenIndex - b.tokenIndex);
   return next.map((item, index) => ({
     text: item.text,

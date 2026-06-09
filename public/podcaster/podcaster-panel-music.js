@@ -390,7 +390,54 @@ export function createPodcasterPanelMusicApi(deps = {}) {
   function writePanelMusicStoragePayload(payload = null) {
     const storageKey = resolvePanelMusicStorageKey();
     const serialized = JSON.stringify(payload || {});
-    localStorage.setItem(storageKey, serialized);
+    try {
+      localStorage.setItem(storageKey, serialized);
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22) {
+        try {
+          const keysToRemove = [];
+          if (typeof localStorage.key === "function") {
+            const storageLen = Number(localStorage.length) || 0;
+            for (let i = 0; i < storageLen; i++) {
+              const k = localStorage.key(i);
+              if (!k) continue;
+              if (
+                k.startsWith('unidad_ingesta_texto_') ||
+                k.startsWith('cb_lectura_cache_') ||
+                k === 'cb_lectura_cache_v1' ||
+                k === 'lectura_cache' ||
+                k === 'cb_lecturas_catalog_cache_v1' ||
+                k === 'cb_lecturas_cache_list_v1' ||
+                k.startsWith('instrucciones_gemini_subtema_') ||
+                k.startsWith('unidad_recortable_') ||
+                k.startsWith('cb_podcaster_panel_music_v1:cache:')
+              ) {
+                keysToRemove.push(k);
+              }
+            }
+          }
+          if (keysToRemove.length > 0) {
+            console.log(`[podcaster-panel-music] Pruning ${keysToRemove.length} non-essential cache key(s) from localStorage due to QuotaExceededError.`);
+            keysToRemove.forEach(k => {
+              try {
+                localStorage.removeItem(k);
+              } catch (_) {}
+            });
+            localStorage.setItem(storageKey, serialized);
+            console.log(`[podcaster-panel-music] Successfully saved key "${storageKey}" after pruning cache.`);
+          } else {
+            console.warn("[podcaster-panel-music] No keys available to prune for key:", storageKey, e);
+            throw e;
+          }
+        } catch (retryErr) {
+          console.warn("[podcaster-panel-music] localStorage.setItem failed for key even after pruning:", storageKey, retryErr);
+          throw retryErr;
+        }
+      } else {
+        console.warn("[podcaster-panel-music] localStorage.setItem failed for key:", storageKey, e);
+        throw e;
+      }
+    }
   }
 
   function getPanelMusicUploadedTracks() {

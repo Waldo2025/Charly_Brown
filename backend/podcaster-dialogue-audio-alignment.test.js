@@ -42,3 +42,11 @@ test("extractGeminiDialogueAudioWordTimings maps inline alignment metadata into 
     { text: "mundo", startMs: 181, endMs: 420, tokenIndex: 1 }
   ]);
 });
+
+test("normalizeDialogueAudioWordTimings estimates proportional timings when input is empty but text and durationSec are provided", () => {
+  const timings = normalizeDialogueAudioWordTimings([], "Hola mundo", 0.9);
+  assert.deepEqual(timings, [
+    { text: "Hola", startMs: 0, endMs: 400, tokenIndex: 0 },
+    { text: "mundo", startMs: 400, endMs: 900, tokenIndex: 1 }
+  ]);
+});

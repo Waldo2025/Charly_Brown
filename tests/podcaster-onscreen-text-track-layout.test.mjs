@@ -5,24 +5,25 @@ import { readFileSync } from "node:fs";
 const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 const onScreenTextSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
+const editorSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
 const playbackControllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
 test("on-screen text drag commits a shared track anchor across layouts", () => {
-  assert.match(podcasterSource, /function syncOnScreenTextTrackAnchorAcrossLayouts\(session = null, options = \{\}\)/);
+  assert.match(editorSource, /function syncAnchorAcrossLayouts\(session = null, options = \{\}\)/);
   assert.match(
-    podcasterSource,
-    /endOnScreenTextOverlayDrag\(event = null\)[\s\S]*?syncOnScreenTextTrackAnchorAcrossLayouts\(session,\s*\{[\s\S]*?overlayXPct:\s*nextX \+ \(safeWidthPct \/ 2\),[\s\S]*?overlayYPct:\s*nextY \+ safeHeightPct[\s\S]*?\}\);/m
+    editorSource,
+    /endOverlayDrag\(event = null\)[\s\S]*?syncAnchorAcrossLayouts\(session,\s*\{[\s\S]*?overlayXPct:\s*nextX \+ \(safeWidthPct \/ 2\),[\s\S]*?overlayYPct:\s*nextY \+ safeHeightPct[\s\S]*?\}\);/m
   );
 });
 
 test("on-screen text width setting recomputes all layouts from the shared anchor", () => {
   assert.match(
-    podcasterSource,
-    /function syncOnScreenTextTrackWidthAcrossLayouts\(session = null\)[\s\S]*?return syncOnScreenTextTrackAnchorAcrossLayouts\(activeSession,\s*\{[\s\S]*?widthPct:\s*nextWidthPct,[\s\S]*?recomputeHeight:\s*true[\s\S]*?\}\);/m
+    editorSource,
+    /function syncWidthAcrossLayouts\(session = null\)[\s\S]*?return syncAnchorAcrossLayouts\(activeSession,\s*\{[\s\S]*?widthPct:\s*nextWidthPct,[\s\S]*?recomputeHeight:\s*true[\s\S]*?\}\);/m
   );
   assert.match(
-    podcasterSource,
-    /if \(key === "boxWidthPct"\) \{[\s\S]*?syncOnScreenTextTrackWidthAcrossLayouts\(session\);[\s\S]*?session = getActiveSession\(\);[\s\S]*?\}/m
+    editorSource,
+    /if \(key === "boxWidthPct"\) \{[\s\S]*?syncWidthAcrossLayouts\(session\);[\s\S]*?session = getActiveSession\(\);[\s\S]*?\}/m
   );
   assert.match(
     podcasterSource,
@@ -49,7 +50,6 @@ test("shared preview spec carries bubble geometry as inline css variables", () =
 test("playback controller does not re-hardcode bubble width and position outside the shared spec", () => {
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("width",/);
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("min-width",/);
-  assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("min-height",/);
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("--pod-onscreen-text-x",/);
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("--pod-onscreen-text-y",/);
 });

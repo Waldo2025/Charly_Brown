@@ -726,6 +726,23 @@
               max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
             }
 
+            .podcast-karaoke-word {
+              display: inline;
+              color: inherit;
+              transition: color 0.12s ease, filter 0.12s ease, text-shadow 0.12s ease;
+            }
+
+            .podcast-karaoke-word.is-active {
+              color: #fff7bf;
+              filter: brightness(1.08);
+              text-shadow:
+                0 0 0.18em rgba(255, 247, 191, 0.92),
+                0 0 0.6em rgba(255, 214, 10, 0.5),
+                var(--pod-onscreen-text-stroke-shadow),
+                var(--pod-onscreen-text-preset-shadow),
+                var(--pod-onscreen-text-user-shadow);
+            }
+
             .multimedia-render-btn {
               background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
               color: white !important;

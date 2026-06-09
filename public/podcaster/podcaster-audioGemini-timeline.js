@@ -5,6 +5,12 @@ import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./
 
 const dialogueAudioGenerationPending = podcasterGenerationShared.dialogueAudioGenerationPending;
 
+const computeDurationSpeedMultiplier = (text, target, limits) => {
+  return (typeof window.computeDurationSpeedMultiplier === "function")
+    ? window.computeDurationSpeedMultiplier(text, target, limits)
+    : 1;
+};
+
 /**
  * Preloads all dialogue audio metadata in the background to ensure timeline chips render at full width.
  */
@@ -33,7 +39,14 @@ function preloadAllDialogueAudios(session = null) {
     audio.src = audioSrc;
     audio.preload = "metadata";
 
-    audio.addEventListener("loadedmetadata", () => {
+    const cleanup = () => {
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("error", onError);
+      audio.src = "";
+      try { audio.load(); } catch (_) {}
+    };
+
+    const onLoaded = () => {
       const duration = Number(audio.duration);
       if (Number.isFinite(duration) && duration > 0) {
         const nextMs = Math.round(duration * 1000);
@@ -53,7 +66,15 @@ function preloadAllDialogueAudios(session = null) {
           window.renderPodcastVideoTimeline(window.getActiveSession(), { force: true, reason: "audio-metadata-loaded" });
         }
       }
-    }, { once: true });
+      cleanup();
+    };
+
+    const onError = () => {
+      cleanup();
+    };
+
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("error", onError);
   });
 }
 

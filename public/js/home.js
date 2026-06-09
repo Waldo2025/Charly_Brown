@@ -2385,7 +2385,8 @@ let multimediaPlayerUnsubscribe = null;
 let homePlaybackState = {
   stageVideoSlot: 0,
   montageCursorMs: 0,
-  montageAudioPlayers: {}
+  montageAudioPlayers: {},
+  montageActive: true
 };
 
 function extractDashboardSessionRows(session = null) {

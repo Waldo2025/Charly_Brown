@@ -53,7 +53,9 @@ export function normalizeMontageExportSettings(raw = {}) {
     minBitrate,
     filename,
     includeReviewExcel,
-    onlyAudio: source.onlyAudio === true
+    onlyAudio: source.onlyAudio === true,
+    includeLogo: source.includeLogo !== false,
+    partyKaraoke: source.partyKaraoke !== false
   };
 }
 
@@ -274,6 +276,7 @@ export function buildDefaultMontageBrandOverlay() {
 function buildMontageBrandOverlayForExport(isReel = false) {
   return {
     ...buildDefaultMontageBrandOverlay(),
+    enabled: window.montageExportState.includeLogo !== false,
     ...(isReel === true
       ? {
         marginPct: 0.03,
@@ -1030,6 +1033,12 @@ export function syncMontageExportUi() {
   if (window.els.montageExportIncludeReviewExcel) {
     window.els.montageExportIncludeReviewExcel.checked = state.includeReviewExcel !== false;
   }
+  if (window.els.montageExportIncludeLogo) {
+    window.els.montageExportIncludeLogo.checked = state.includeLogo !== false;
+  }
+  if (window.els.montageExportPartyKaraoke) {
+    window.els.montageExportPartyKaraoke.checked = state.partyKaraoke !== false;
+  }
   if (window.els.montageExportReviewExcelField) {
     window.els.montageExportReviewExcelField.hidden = state.exportMode !== "review";
   }
@@ -1043,6 +1052,8 @@ export function syncMontageExportUi() {
   if (window.els.montageExportResolution) window.els.montageExportResolution.closest(".row-field").hidden = onlyAudio;
   if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.closest(".row-field").hidden = onlyAudio;
   if (window.els.montageExportCustomBitrateBox) window.els.montageExportCustomBitrateBox.hidden = onlyAudio || state.bitrateMode !== "custom";
+  if (window.els.montageExportIncludeLogo) window.els.montageExportIncludeLogo.closest(".row-field").hidden = onlyAudio;
+  if (window.els.montageExportPartyKaraoke) window.els.montageExportPartyKaraoke.closest(".row-field").hidden = onlyAudio;
 
   const qualityField = window.els.montageExportModal?.querySelector(".montage-export-quality");
   if (qualityField) qualityField.hidden = onlyAudio;
@@ -1525,7 +1536,8 @@ export function buildMontageExportPayload(session = null) {
       maxBitrateMbps: window.montageExportState.maxBitrate,
       minBitrateCrf: window.montageExportState.minBitrate
     },
-    brandOverlay: buildMontageBrandOverlayForExport(reelModeEnabled)
+    brandOverlay: buildMontageBrandOverlayForExport(reelModeEnabled),
+    partyKaraoke: window.montageExportState.partyKaraoke !== false
   };
 
   return {

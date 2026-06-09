@@ -12,9 +12,11 @@ class FakeAudio {
     this.crossOrigin = "";
     this.src = "";
     this.dataset = {};
+    this.readyState = 4;
   }
 
   addEventListener() {}
+  removeEventListener() {}
 
   pause() {
     this.paused = true;
@@ -108,7 +110,7 @@ test("syncAudio re-seeks Gemini dialogue when audible drift exceeds visible tole
   drifted.src = "blob:audio-row-1";
   drifted.dataset.originalSrc = "blob:audio-row-1";
   drifted.dataset.initialized = "true";
-  drifted.currentTime = 0.32;
+  drifted.currentTime = 0.10;
   drifted.paused = false;
   controller.dialoguePlayers["row-1"] = drifted;
   controller.audioCache["row-1"] = drifted;

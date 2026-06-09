@@ -825,7 +825,16 @@
     const shadowX = shadowEnabled ? clampNumber(settings.shadowOffsetXPx, -80, 80, 0) : 0;
     const shadowY = shadowEnabled ? clampNumber(settings.shadowOffsetYPx, -80, 80, 8) : 0;
     const strokeEnabled = (settings.strokeEnabled === undefined ? true : isTrue(settings.strokeEnabled)) && strokeWidthPx > 0.001;
-    const boxEnabled = settings.boxEnabled === true && clampNumber(settings.bgOpacity, 0, 1, 0) > 0.001;
+    const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
+    const bgOpacitySetting = clampNumber(settings.bgOpacity, 0, 1, 0);
+    const boxEnabled = bgPreset !== "none" && bgOpacitySetting > 0.001;
+    let boxOpacity = 0;
+    if (bgPreset === "glass") {
+      boxOpacity = 0.58 * bgOpacitySetting;
+    } else if (bgPreset === "solid") {
+      boxOpacity = 0.82 * bgOpacitySetting;
+    }
+    const boxColor = `#020617@${boxOpacity.toFixed(3)}`;
     const bottomSafetyPx = Math.max(
       Math.round(lineHeightPx * 2.4),
       Math.round(fontSizePx * 1.9),
@@ -875,6 +884,7 @@
       previewShadowY: Math.round(shadowY * previewScaleY * 1000) / 1000,
       shadowOpacity,
       boxEnabled,
+      boxColor,
       textAlign,
       fontWeight: normalizeFontWeight(settings.fontWeight),
       fontStyle: normalizeFontStyle(settings.fontStyle),
