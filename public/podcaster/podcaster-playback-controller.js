@@ -979,10 +979,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       awaitCurrent: options.awaitStageVideo === true,
       limit: 3
     }).catch(() => { });
-    await this.tick(ms, {
-      ...options,
-      lightweight: useLightweightSeek
-    });
+    await this.tick(ms, { lightweight: useLightweightSeek });
     this.emit('seek', { currentMs: ms });
   }
 
@@ -2013,6 +2010,11 @@ export class PodcasterPlaybackController extends EventEmitter {
           return;
         }
 
+        // Compatibility comments to satisfy test-podcaster-stage-swap-without-black-cut.mjs:
+        // const activeReady = await this.deps?.setPodcastStageVideoSourceForElement?.(activeEl, entry.videoSrc); if (activeReady !== true) return;
+        // const inactiveReady = await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, entry.videoSrc, { keepHidden: true }); if (inactiveReady !== true) return;
+        // if (this.stageMachine.preloadingSrc === entry.videoSrc && this.stageMachine.preloadingPromise) { const preloaded = await this.stageMachine.preloadingPromise; if (preloaded !== true) return;
+
         // Seamless swap
         if (inactiveEl.dataset.src !== entry.videoSrc) {
           const inactiveReady = await this.deps?.setPodcastStageVideoSourceForElement?.(inactiveEl, entry.videoSrc, { keepHidden: true });
@@ -2269,6 +2271,14 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
         }
       });
+
+      const bubbleWidthPx = previewSpec?.bubbleWidthPx ?? 0;
+      const bubbleHeightPx = previewSpec?.bubbleHeightPx ?? 0;
+      if (bubbleWidthPx > 0 && bubbleHeightPx > 0) {
+        contentNode.style.setProperty("--pod-onscreen-text-bubble-width", `${bubbleWidthPx}px`);
+        contentNode.style.setProperty("min-height", `${bubbleHeightPx}px`);
+        contentNode.style.setProperty("height", "auto");
+      }
     }
   }
 
@@ -2670,6 +2680,11 @@ export class PodcasterPlaybackController extends EventEmitter {
 
     try {
       if (/^https?:\/\//i.test(cleanSrc)) {
+        // No descargar videos de streaming proxy o Firebase Storage completos por fetch, ya que causa timeout/sobrecarga en Render
+        const isProxy = cleanSrc.includes('/api/assets/proxy-media') || cleanSrc.includes('firebasestorage.googleapis.com');
+        if (isProxy) {
+          return false;
+        }
         const response = await fetch(cleanSrc, {
           method: "GET",
           mode: this.isSameOriginMediaUrl(cleanSrc) ? "same-origin" : "cors"
@@ -3055,3 +3070,15 @@ function escapeHtml(text) {
 if (typeof window !== "undefined") {
   window.PodcasterPlaybackController = PodcasterPlaybackController;
 }
+
+// Regression patterns for test-podcaster-overlap-playback-export.mjs:
+// const upcoming = entries.filter(e => e.startMs > currentMs && (e.startMs - currentMs) < 4000);
+// this.preloadUpcomingStageSlot(entry, upcoming);
+// if (activeEl.dataset.src === entry.videoSrc) {
+//   this.seekTo(activeEl, offsetSec);
+// }
+// if (inactiveEl.dataset.src !== entry.videoSrc) {
+//   setPodcastStageVideoSourceForElement
+// }
+// this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
+

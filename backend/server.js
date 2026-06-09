@@ -916,6 +916,21 @@ const STORAGE_BUCKET_CANDIDATES = STORAGE_BUCKET_CANDIDATE_NAMES
       : admin.storage().bucket(name)
   ));
 const montageExportJobStore = createMontageExportJobStore({ db });
+
+// Initialize BullMQ queue if Redis is configured
+let montageExportQueue = null;
+try {
+  const { resolveRedisConnectionUrl, createBullMqQueue, createMontageExportQueue } = require("./montage-export/queue-bullmq.js");
+  if (resolveRedisConnectionUrl()) {
+    const queue = createBullMqQueue();
+    montageExportQueue = createMontageExportQueue({ queue });
+    console.info("[backend] BullMQ montage export queue initialized successfully using Redis connection string.");
+  } else {
+    console.info("[backend] RENDER_KEY_VALUE_CONNECTION_STRING not set. Using direct in-memory setImmediate fallback for export jobs.");
+  }
+} catch (err) {
+  console.warn("[backend] Failed to initialize BullMQ queue, falling back to direct in-memory execution:", err.message || err);
+}
 const analizarPdfJobStore = createAnalizarPdfJobStore();
 const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
@@ -1025,6 +1040,15 @@ async function openStorageObjectReadStream(storagePath = "", options = {}) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const [metadata] = await file.getMetadata();
+      if (options?.metadataOnly) {
+        return {
+          bucket,
+          file,
+          metadata,
+          totalBytes: parseStorageObjectSize(metadata),
+          stream: null
+        };
+      }
       const stream = file.createReadStream(range ? {
         start: Number(range.start || 0),
         end: Number(range.end || 0)
@@ -9865,7 +9889,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-y", "-hide_banner", "-loglevel", "warning",
         "-fflags", "+genpts",
         "-f", "concat", "-safe", "0", "-i", concatListPath,
-        "-c", "copy",
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         concatOutPath
       ], { stage: "montage_concat" });
@@ -9880,6 +9903,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const durationMs = Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
       if (rowId) {
         exportOffsetsByRowId.set(String(entry.rowId || "").trim(), {
+          // startMs: cursorMs
           startMs: (overlapPlan.hasOverlap || overlapPlan.hasGaps)
             ? Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0))
             : cursorMs,
@@ -9938,18 +9962,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const label = `a${idx}`;
           labels.push(label);
           const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
-          // If startMs is explicitly provided and non-zero, it likely represents the absolute timeline position.
-          // We use a simpler logic for manual adjustments to avoid offset drift.
-          let finalAdjustedStartMs = startMs;
-          if (exportOffset) {
-            // For segments tied to a row, we may need to apply the row's relative offset if they are part of a sequence.
-            // But if the user moved them manually, startMs is usually already updated.
-            const rowBaseStartMs = Number(exportOffset.startMs || 0);
-            if (rowBaseStartMs > 0 && Math.abs(startMs - rowBaseStartMs) < 10) {
-               // If it's very close to the row base, it's likely still tied to the row start.
-               finalAdjustedStartMs = rowBaseStartMs;
-            }
-          }
+          const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
+          const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
+          const adjustedStartMs = exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
+          let finalAdjustedStartMs = adjustedStartMs;
           let finalTrimInSec = trimInSec;
           let finalDurationSec = durationSec;
           
@@ -10325,6 +10341,22 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       totalScenes: input.entries.length
     });
     upsertMontageExportJob(jobId, initial);
+
+    if (montageExportQueue) {
+      console.info("[backend][montage-export] Enqueuing export job to BullMQ:", jobId);
+      try {
+        await montageExportQueue.enqueueExportJob({
+          jobId,
+          sessionId: input.sessionId,
+          ownerId: uid,
+          input,
+          baseUrl
+        });
+        return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
+      } catch (enqueueErr) {
+        console.error("[backend][montage-export] Failed to enqueue to BullMQ, falling back to direct run:", enqueueErr.message || enqueueErr);
+      }
+    }
 
     const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
     if (!slot.ok) {
@@ -11745,7 +11777,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         hasRange: Boolean(rangeHeader)
       });
       try {
-        const streamMeta = await openStorageObjectReadStream(storagePath);
+        const streamMeta = await openStorageObjectReadStream(storagePath, { metadataOnly: true });
         const mimeType = String(streamMeta?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
         const payload = buildStreamingMediaPayload(streamMeta?.totalBytes, {
           mimeType,
@@ -11755,9 +11787,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
           if (!name || value == null || value === "") return;
           res.setHeader(name, value);
         });
-        const rangedStreamMeta = payload.range
-          ? await openStorageObjectReadStream(storagePath, { range: payload.range })
-          : streamMeta;
+        const rangedStreamMeta = await openStorageObjectReadStream(storagePath, { range: payload.range });
         await pipeline(rangedStreamMeta.stream, res.status(payload.status || 200));
         return;
       } catch (error) {
