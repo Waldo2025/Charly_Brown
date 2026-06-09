@@ -135,6 +135,7 @@ const els = {
   mappingsBtn: document.getElementById("analizarPdfMappingsBtn"),
   bootSpinner: document.getElementById("analizarPdfBootSpinner"),
   editorialPanel: document.getElementById("analizarPdfEditorialPanel"),
+  toggleEditorialBtn: document.getElementById("analizarPdfToggleEditorialBtn"),
   editorialSpinner: document.getElementById("analizarPdfEditorialSpinner"),
   editorialSpinnerLabel: document.getElementById("analizarPdfEditorialSpinnerLabel"),
   results: document.getElementById("analizarPdfResults"),
@@ -2282,6 +2283,14 @@ function updateCurrentMappingEntryDraftFromEvent(event) {
 }
 
 function bindEditorEvents() {
+  if (els.toggleEditorialBtn && els.editorialPanel) {
+    els.toggleEditorialBtn.addEventListener("click", () => {
+      const isCollapsed = els.editorialPanel.classList.toggle("is-collapsed");
+      els.toggleEditorialBtn.setAttribute("aria-expanded", !isCollapsed ? "true" : "false");
+      safeLocalStorageSet("cb_editorial_panel_collapsed", isCollapsed ? "true" : "false");
+    });
+  }
+
   els.indexPageInput.addEventListener("change", () => {
     mutateActiveSession((session) => {
       session.indexConfig.indexPageNumber = Number(els.indexPageInput.value || 0) || 0;
@@ -3010,6 +3019,11 @@ async function startPolling(jobId = "") {
 async function bootstrap() {
   sidepanelApi.bindEvents();
   bindEditorEvents();
+  const isCollapsed = safeLocalStorageGet("cb_editorial_panel_collapsed") === "true";
+  if (isCollapsed && els.editorialPanel && els.toggleEditorialBtn) {
+    els.editorialPanel.classList.add("is-collapsed");
+    els.toggleEditorialBtn.setAttribute("aria-expanded", "false");
+  }
   onAuthStateChanged(auth, async (user) => {
     state.currentUser = user || null;
       if (!user) {

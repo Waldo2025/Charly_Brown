@@ -7,9 +7,9 @@ if (!/const bottomSafetyPx = Math\.max\(\s*Math\.round\(lineHeightPx \* 2\.4\),\
   throw new Error("La spec compartida debe reservar margen inferior extra para que el texto no quede pegado al bottom.");
 }
 
-if (!/const maxYPx = Math\.max\(0, exportCanvasHeight - boxHeightPx - bottomSafetyPx\);/.test(shared)
+if (!/const maxYPx = Math\.max\(0, exportCanvasHeight - (?:boxHeightPx|textBlockHeightPx) - bottomSafetyPx\);/.test(shared)
   || !/const yPx = Math\.max\(0, Math\.min\(maxYPx, rawYPx\)\);/.test(shared)
-  || !/y=\$\{spec\.yPx\}/.test(source)) {
+  || !/spec\.yPx/.test(source)) {
   throw new Error("La posición Y del texto exportado debe salir de la spec compartida con margen inferior aplicado.");
 }
 

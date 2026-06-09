@@ -6,6 +6,11 @@ const source = fs.readFileSync(
   "utf8"
 );
 
+const editorSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-script-editor.js",
+  "utf8"
+);
+
 assert.match(
   source,
   /const PODCAST_SESSION_MANUAL_SAVE_ONLY = true;/,
@@ -26,12 +31,12 @@ assert.match(
 
 assert.match(
   source,
-  /function upsertActiveSession\(mutator, options = \{\}\) \{[\s\S]*if \(options\.recordHistory !== false\) \{[\s\S]*recordPodcastHistory\(/m,
+  /function upsertActiveSession\(mutator, options = \{\}\) \{[\s\S]*if \(options\.recordHistory !== false\) \{[\s\S]*(?:podcasterHistoryApi\.recordHistory|recordPodcastHistory)\(/m,
   "Las mutaciones deben poder saltarse el historial cuando son actualizaciones en tiempo real."
 );
 
-const scriptFieldHandlerMatch = source.match(
-  /function handleScriptFieldUpdate\(event\) \{([\s\S]*?)\n\}\n\nfunction shouldHandleScriptFieldOnInput/m
+const scriptFieldHandlerMatch = editorSource.match(
+  /function handleScriptFieldUpdate\(event\) \{([\s\S]*?)\n\}\n\n\/\/ --- Module Exports/m
 );
 
 assert.ok(scriptFieldHandlerMatch, "Debe existir el handler principal de edición de campos de escenas.");

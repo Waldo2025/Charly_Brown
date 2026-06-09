@@ -14,6 +14,10 @@ const timelineUiSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-ui.js",
   "utf8"
 );
+const timelineInteractionSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-interaction.js",
+  "utf8"
+);
 
 const playbackControllerSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-playback-controller.js",
@@ -45,7 +49,7 @@ assert.match(
 );
 
 assert.match(
-  publicSource,
+  timelineInteractionSource,
   /\[data-action='open-gemini-audio-speed-modal'\]\[data-row-id\]/,
   "El timeline debe reconocer clicks del botón para abrir el modal de velocidad."
 );

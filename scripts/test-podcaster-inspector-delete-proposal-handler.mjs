@@ -8,8 +8,14 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /els\.podcastStudioInspectorRowEditor\.addEventListener\("click",[\s\S]*const deleteProposalTextBtn = event\.target\.closest\("\[data-action='delete-visual-proposal-text'\]\[data-row-id\]"\);[\s\S]*deleteVisualProposalForRow\(rowId, text\);/,
-  "El panel podcastStudioInspectorRowEditor debe manejar delete-visual-proposal-text para tachar la propuesta activa allí también."
+  /els\.podcastStudioInspectorRowEditor\.addEventListener\("click",[\s\S]*handleSharedCreativeRowAction\((?:event\.)?target\)/,
+  "El panel podcastStudioInspectorRowEditor debe delegar las acciones al despachador compartido."
+);
+
+assert.match(
+  source,
+  /action === "delete-visual-proposal-text"[\s\S]*deleteVisualProposalForRow/,
+  "El despachador compartido debe manejar delete-visual-proposal-text para tachar la propuesta activa."
 );
 
 console.log("Podcaster inspector delete proposal handler OK.");

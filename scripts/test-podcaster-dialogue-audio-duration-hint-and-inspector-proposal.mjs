@@ -6,6 +6,11 @@ const publicSource = fs.readFileSync(
   "utf8"
 );
 
+const audioSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-audioGemini-timeline.js",
+  "utf8"
+);
+
 const backendSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/backend/server.js",
   "utf8"
@@ -18,13 +23,13 @@ assert.match(
 );
 
 assert.match(
-  publicSource,
+  audioSource,
   /const targetDurationSec = Math\.max\(0, Number\(row\?\.durationSec \|\| 0\) \|\| 0\);[\s\S]*const speechRateHint = computeDurationSpeedMultiplier\(dialogueText, targetDurationSec/,
   "La generación de audio debe calcular una pista de velocidad a partir de durationSec."
 );
 
 assert.match(
-  publicSource,
+  audioSource,
   /targetDurationSec,\s*speechRateHint,/,
   "La generación de audio debe enviar targetDurationSec y speechRateHint al backend."
 );

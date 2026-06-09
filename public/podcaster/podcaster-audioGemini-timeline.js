@@ -78,7 +78,10 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
   if (dialogueAudioGenerationPending.has(pendingKey)) return null;
 
   const voiceName = window.resolveConfiguredSpeakerVoiceForGeneration(row, session);
-  const text = window.buildTargetSpeechLine(row);
+  const dialogueText = window.buildTargetSpeechLine(row);
+  const text = dialogueText;
+  const targetDurationSec = Math.max(0, Number(row?.durationSec || 0) || 0);
+  const speechRateHint = computeDurationSpeedMultiplier(dialogueText, targetDurationSec);
   const regenerate = options.regenerate === true;
   const silent = options.silent === true;
 
@@ -95,6 +98,8 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
       voiceName,
       text,
       targetSpeechLine: text,
+      targetDurationSec,
+      speechRateHint,
       regenerate,
       disfluencyConfig: row?.disfluencyConfig || null,
       ttsDirectionConfig: row?.ttsDirectionConfig || null,

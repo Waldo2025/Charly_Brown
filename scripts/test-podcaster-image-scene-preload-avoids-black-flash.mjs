@@ -2,20 +2,26 @@ import { readFileSync } from "node:fs";
 
 const stageSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 const controllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+const replacementSource = readFileSync(new URL("../public/podcaster/podcaster-media-replacement.js", import.meta.url), "utf8");
 
-if (!/function preloadStageImageSource\(src = ""\)/.test(stageSource)
-  || !/function swapStageToImagePreview\(src = "", options = \{\}\)/.test(stageSource)) {
+if (!/function preloadStageImageSource\(src = "", fallbackUrl = ""\)/.test(replacementSource)
+  && !/function preloadStageImageSource\(src = ""\)/.test(replacementSource)) {
   throw new Error("El stage debe precargar imágenes antes de reemplazar la escena actual.");
 }
 
-if (!/function ensureStageImagePreviewReady\(src = ""\)/.test(stageSource)
-  || !/preloadStageImageSource\(cleanSrc\)\.then\(\(\)\s*=>\s*ensureStageImagePreviewReady\(cleanSrc\)\)/.test(stageSource)
-  || !/ensureStageImagePreviewReady\(cleanSrc\)[\s\S]*afterSwap/.test(stageSource)) {
+if (!/function swapStageToImagePreview\(src = "", options = \{\}\)/.test(replacementSource)) {
+  throw new Error("El stage debe precargar imágenes antes de reemplazar la escena actual.");
+}
+
+if (!/function ensureStageImagePreviewReady\(src = ""\)/.test(replacementSource)
+  || !/preloadStageImageSource\(cleanSrc,\s*fallbackUrl\)\.then\(\(\)\s*=>\s*ensureStageImagePreviewReady\(cleanSrc\)\)/.test(replacementSource)
+  || !/ensureStageImagePreviewReady\(cleanSrc\)[\s\S]*afterSwap/.test(replacementSource)) {
   throw new Error("La ruta PNG del stage debe esperar a que el <img> real del preview esté listo antes de ocultar los videos previos.");
 }
 
 if (!/async ensureStageImageReady\(imageEl, src = ""\)/.test(controllerSource)
-  || !/await this\.preloadImageSrc\(entry\.videoSrc\);[\s\S]*await this\.ensureStageImageReady\(imageEl, entry\.videoSrc\);[\s\S]*this\.hideAllVideos\(\);/.test(controllerSource)) {
+  || !/preloadImageSrc\(cleanSrc\)[\s\S]*ensureStageImageReady\(imageEl,\s*cleanSrc\)[\s\S]*revealImage/.test(controllerSource)
+  || !/revealImage\s*=\s*\(\)\s*=>\s*\{[\s\S]*hideAllVideos\(\)/.test(controllerSource)) {
   throw new Error("El playback controller debe esperar a que el <img> real esté listo antes de esconder el frame anterior.");
 }
 

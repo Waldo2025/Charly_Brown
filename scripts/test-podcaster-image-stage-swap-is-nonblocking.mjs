@@ -8,13 +8,13 @@ const controllerSource = fs.readFileSync(
 
 assert.match(
   controllerSource,
-  /requestImageStageSwap\(entry = null\) \{/,
+  /requestImageStageSwap\(entry = null,\s*offsetSec\s*=\s*0\) \{/,
   "El controller debe tener un helper explícito para preparar swaps de imagen fuera del tick crítico."
 );
 
 assert.match(
   controllerSource,
-  /if \(isImage\) \{\s*this\.requestImageStageSwap\(entry\);\s*return;\s*\}/m,
+  /if \(isImage\) \{\s*this\.requestImageStageSwap\(entry,\s*offsetSec\);\s*return;\s*\}/m,
   "La ruta de imagen no debe bloquear syncStageSwitching con awaits de preload/carga."
 );
 
@@ -32,7 +32,7 @@ assert.match(
 
 assert.match(
   controllerSource,
-  /upcoming\.forEach\(e => \{\s*if \(this\.isImageStageEntry\(e\)\) \{\s*this\.preloadImageSrc\(e\.videoSrc\)\.catch\(\(\) => \{ \}\);\s*\} else \{\s*this\.getBlobUrl\(e\.videoSrc\);\s*\}\s*\}\);/m,
+  /upcoming\.forEach\(\s*e\s*=>\s*\{\s*if\s*\(this\.isImageStageEntry\(e\)\)\s*\{\s*this\.preloadImageSrc\(e\.videoSrc\)\.catch\(\(\)\s*=>\s*\{\s*\}\);\s*\}\s*else\s*\{\s*this\.getBlobUrl\(e\.videoSrc\);\s*\}\s*\}\);/m,
   "El controller debe precargar imágenes próximas en background antes de que el playhead llegue a ellas."
 );
 

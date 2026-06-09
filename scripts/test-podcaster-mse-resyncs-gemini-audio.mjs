@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 
-const seekMatch = source.match(/async seek\(targetMs, options = \{\}\) \{[\s\S]*?await this\.tick\(ms, \{ lightweight: useLightweightSeek \}\);[\s\S]*?this\.emit\('seek', \{ currentMs: ms \}\);[\s\S]*?\}/m);
+const seekMatch = source.match(/async seek\(targetMs, options = \{\}\) \{[\s\S]*?await this\.tick\(ms, \{[\s\S]*?lightweight:\s*useLightweightSeek[\s\S]*?\}\);[\s\S]*?this\.emit\('seek', \{ currentMs: ms \}\);[\s\S]*?\}/m);
 
 if (!seekMatch) {
   throw new Error("No se encontró el flujo seek del controlador vivo.");
@@ -10,7 +10,7 @@ if (!seekMatch) {
 
 const seekBlock = seekMatch[0];
 
-if (!seekBlock.includes("await this.tick(ms, { lightweight: useLightweightSeek });")) {
+if (!seekBlock.includes("lightweight: useLightweightSeek")) {
   throw new Error("El seek del controlador debe delegar la resincronización a tick().");
 }
 

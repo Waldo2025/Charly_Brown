@@ -7,7 +7,7 @@ if (!/function buildOnScreenTextPreviewShadowCss\(settings = null, options = \{\
   throw new Error("La sombra del texto en pantalla debe centralizarse en el módulo compartido.");
 }
 
-if (!/const strokeWidthPx = Math\.max\(0, Math\.round\(Number\(options\?\.strokeWidthPx \?\? current\.strokeWidthPx \?\? 0\) \|\| 0\)\);/.test(shared)
+if (!/const strokeWidthPx = Math\.max\(0,\s*Math\.min\(12,\s*Number\(options\?\.strokeWidthPx\s*\?\?\s*current\.strokeWidthPx/.test(shared)
   || !/const radii = \[Math\.max\(0\.5, strokeWidthPx\)\];/.test(shared)
   || !/if \(strokeWidthPx > 1\.35\) \{\s*radii\.unshift\(Math\.max\(0\.4, strokeWidthPx \* 0\.58\)\);\s*\}/.test(shared)
   || !/const steps = Math\.max\(12, Math\.ceil\(radius \* \(ringIndex === radii\.length - 1 \? 18 : 12\)\)\);/.test(shared)) {
@@ -15,7 +15,7 @@ if (!/const strokeWidthPx = Math\.max\(0, Math\.round\(Number\(options\?\.stroke
 }
 
 if (!/--pod-onscreen-text-user-shadow:\$\{buildOnScreenTextPreviewShadowCss\(current, \{ strokeWidthPx: metrics\.previewBorderWidthPx \}\)\}/.test(shared)
-  || !/return buildSharedOnScreenTextPreviewShadowCss\s*\?\s*buildSharedOnScreenTextPreviewShadowCss\(settings, options\)/.test(source)) {
+  || !/return buildSharedOnScreenTextPreviewShadowCss\(settings, options\);/.test(source)) {
   throw new Error("El panel y el overlay deben usar la implementación compartida de sombra con grosor de stroke.");
 }
 

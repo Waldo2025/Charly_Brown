@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const front = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const montageExport = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
 const back = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 const nativeAudioFn = front.match(
@@ -28,12 +29,12 @@ if (/shouldUseNativeVideoAudioForRow\([^)]*\)\s*\|\|/.test(keepNativeFn[1])
   throw new Error("El export debe respetar timelineClipVeoVolumeRange=0 y no forzar audio nativo solo por ser video de biblioteca.");
 }
 
-if (/mp4_h265|H\.265|HEVC|libx265/.test(front) || /mp4_h265|libx265/.test(back)) {
+if (/mp4_h265|H\.265|HEVC|libx265/.test(front) || /mp4_h265|H\.265|HEVC|libx265/.test(montageExport) || /mp4_h265|libx265/.test(back)) {
   throw new Error("El export de montaje no debe ofrecer ni codificar H.265/HEVC; MP4 debe salir H.264/AAC compatible.");
 }
 
-if (!/const requestedFormat = String\(montageExportState\.format \|\| "mp4_h264"\)\.trim\(\);/.test(front)
-  || !/const effectiveFormat = requestedFormat === "webm_vp9"\s*\?\s*"webm_vp9"\s*:\s*"mp4_h264";/.test(front)) {
+if (!/const requestedFormat = String\((?:window\.)?montageExportState\.format \|\| "mp4_h264"\)\.trim\(\);/.test(montageExport)
+  || !/const effectiveFormat = requestedFormat === "webm_vp9"\s*\?\s*"webm_vp9"\s*:\s*"mp4_h264";/.test(montageExport)) {
   throw new Error("El export debe normalizar cualquier MP4 legado a H.264.");
 }
 
@@ -56,8 +57,8 @@ if (!/const exportOffsetsByRowId = new Map\(\);/.test(back)
   throw new Error("El export debe realinear el audio Gemini usando offsets del timeline ya concatenado, no solo startMs originales.");
 }
 
-if (!/const trimInMs = Math\.max\(0, Math\.round\(Number\(\(segment\?\.trimInMs \?\? runtime\?\.clip\?\.trimInMs \?\? 0\)\) \|\| 0\)\);/.test(front)
-  || !/const trimOutMsRaw = Math\.round\(Number\(\(segment\?\.trimOutMs \?\? runtime\?\.clip\?\.trimOutMs \?\? 0\)\) \|\| 0\);/.test(front)) {
+if (!/const trimInMs = Math\.max\(0, Math\.round\(Number\(\(segment\?\.trimInMs \?\? runtime\?\.clip\?\.trimInMs \?\? 0\)\) \|\| 0\)\);/.test(montageExport)
+  || !/const trimOutMsRaw = Math\.round\(Number\(\(segment\?\.trimOutMs \?\? runtime\?\.clip\?\.trimOutMs \?\? 0\)\) \|\| 0\);/.test(montageExport)) {
   throw new Error("El export Gemini debe respetar trimInMs=0 del segmento y no heredar recortes visuales por usar ||.");
 }
 

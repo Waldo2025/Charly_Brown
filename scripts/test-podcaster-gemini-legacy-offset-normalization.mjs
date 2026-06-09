@@ -6,7 +6,7 @@ if (!/function normalizeLegacyGeminiTrackOffsets\(session = null\)/.test(source)
   throw new Error("Debe existir normalizeLegacyGeminiTrackOffsets.");
 }
 
-if (!/function hasManualGeminiSegmentOffset\(segment = null, fallbackAnchorMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS\)/.test(source)) {
+if (!/function hasManualGeminiSegmentOffset\(segment = null, fallbackAnchorMs = 0, (?:fallbackOffsetMs = 0, )?toleranceMs = STUDIO_TIMELINE_SNAP_MS\)/.test(source)) {
   throw new Error("La normalización y reconciliación deben compartir un helper de offset manual.");
 }
 

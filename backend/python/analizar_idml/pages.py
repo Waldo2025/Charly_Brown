@@ -32,6 +32,9 @@ def _get_accumulated_transform(node, parent_map=None):
     current = node
     transforms = []
     while current is not None:
+        tag = local_name(current.tag)
+        if tag in {"Spread", "MasterSpread"}:
+            break
         parsed = _parse_transform(current.get("ItemTransform", ""))
         if parsed:
             transforms.append(parsed)

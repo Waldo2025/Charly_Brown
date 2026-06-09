@@ -1,17 +1,19 @@
-function escapeHtml(value = "") {
+import { getRecortableAnchorId, renderRecortableMetaList } from "./analizar-pdf-recortables.js";
+
+export function escapeHtml(value = "") {
   return String(value || "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 }
 
-function escapeHtmlAttr(value = "") {
+export function escapeHtmlAttr(value = "") {
   return escapeHtml(value)
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
 
-function slugifyAnchorPart(value = "") {
+export function slugifyAnchorPart(value = "") {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -19,7 +21,7 @@ function slugifyAnchorPart(value = "") {
     .replace(/^-+|-+$/g, "") || "x";
 }
 
-function renderIssues(items = [], emptyLabel = "") {
+export function renderIssues(items = [], emptyLabel = "") {
   if (!Array.isArray(items) || !items.length) {
     return `<p class="analizar-pdf-empty-state">${escapeHtml(emptyLabel)}</p>`;
   }
@@ -492,55 +494,7 @@ function renderChangeControlMetaList(activeItems = [], historyItems = []) {
   `;
 }
 
-function renderRecortableMetaList(page = {}) {
-  const summary = page?.recortableSummary || {};
-  const issues = Array.isArray(page?.recortableIssues) ? page.recortableIssues : [];
-  const originCodes = Array.isArray(summary.originCodes) ? summary.originCodes : [];
-  const destinationCodes = Array.isArray(summary.destinationCodes) ? summary.destinationCodes : [];
-  const resolved = Array.isArray(summary.resolvedDestinations) ? summary.resolvedDestinations : [];
-  const resolvedLinks = Array.isArray(summary.resolvedLinks) ? summary.resolvedLinks : [];
-  const statusBadge = issues.length
-    ? `<span class="analizar-pdf-inline-badge is-error">Error</span>`
-    : (originCodes.length || destinationCodes.length || resolved.length)
-      ? `<span class="analizar-pdf-inline-badge is-ok">OK</span>`
-      : "";
-  const rows = [];
 
-  if (resolvedLinks.length) {
-    rows.push(...resolvedLinks.flatMap((item) => {
-      const origins = Array.isArray(item?.origins) ? item.origins.filter(Boolean) : [];
-      const originLabel = origins.length ? origins.map((folio) => `pág. ${folio}`).join(", ") : "pág. ?";
-      return [
-        `Origen ${item.code}: ${originLabel}`,
-        `${item.code}: destino pág. ${item.destination || "?"}`,
-      ];
-    }));
-  } else {
-    if (originCodes.length) {
-      rows.push(...originCodes.map((code) => `Origen ${code}: pág. ${page?.pageName || "?"}`));
-    }
-    if (destinationCodes.length) {
-      rows.push(`Destino: ${destinationCodes.join(", ")}`);
-    }
-    if (resolved.length) {
-      rows.push(...resolved.map((item) => `${item.code}: destino pág. ${item.destination}`));
-    }
-  }
-  if (!rows.length && !issues.length && !summary.originIndicator) {
-    return "";
-  }
-  return `
-    <div class="analizar-pdf-meta-row is-stack">
-      <span>Recortables / Fichas / Anexos / Videos ${statusBadge}</span>
-      ${rows.length ? `
-        <div class="analizar-pdf-page-body">
-          ${rows.map((row) => `<p>${escapeHtml(row)}</p>`).join("")}
-        </div>
-      ` : ""}
-      ${issues.length ? renderIssues(issues, "") : ""}
-    </div>
-  `;
-}
 
 function countCorrectableIssues(page = {}) {
   const ortho = Array.isArray(page?.orthotypographyIssues) ? page.orthotypographyIssues.length : 0;
@@ -691,6 +645,29 @@ function isOddPage(page = {}) {
   return Number.isFinite(value) && value % 2 === 1;
 }
 
+function renderInstructionWorkModesMetaRow(page = {}) {
+  const modes = Array.isArray(page?.instructionWorkModes) ? page.instructionWorkModes : [];
+  if (!modes.length) {
+    return "";
+  }
+  return `
+    <div class="analizar-pdf-meta-row is-stack">
+      <span>Modalidad de Trabajo (Icono)</span>
+      <div class="analizar-pdf-page-body">
+        ${modes.map((mode) => `
+          <div class="analizar-pdf-page-body-item">
+            <span class="analizar-pdf-text-status-badge">
+              <span class="analizar-pdf-status-dot is-ok" aria-hidden="true"></span>
+              <span>${escapeHtml(mode.kind)}</span>
+            </span>
+            <p>${escapeHtml(mode.text)}</p>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderFolioSignals(page = {}, session = null, options = {}) {
   const bodyLines = collectPageBodyLines(page, session);
   const outsideLines = filterLinesByStatuses(bodyLines, ["fuera de la página", "parcialmente fuera de la página"]);
@@ -700,6 +677,7 @@ function renderFolioSignals(page = {}, session = null, options = {}) {
       ${renderFieldProfiles(page.fieldProfiles)}
       ${renderConfiguredSwatches(page.configuredSwatches)}
       ${renderConfiguredAliasRows(page, session)}
+      ${renderInstructionWorkModesMetaRow(page)}
       <span id="${getNotesAnchorId(page, session)}" class="analizar-pdf-anchor-target" aria-hidden="true"></span>
       ${renderChangeControlMetaList(page.notes, page.noteHistory)}
       ${renderRecortableMetaList(page)}
@@ -710,7 +688,7 @@ function renderFolioSignals(page = {}, session = null, options = {}) {
   `;
 }
 
-function buildPageAnchorScope(context = {}) {
+export function buildPageAnchorScope(context = {}) {
   return [
     slugifyAnchorPart(context?.sessionId || context?.id || ""),
     slugifyAnchorPart(context?.revisionTitle || ""),
@@ -732,10 +710,6 @@ function getTextStatusAnchorId(page = {}, context = {}) {
 
 function getNotesAnchorId(page = {}, context = {}) {
   return `analizar-pdf-change-control-${buildPageAnchorScope(context)}-page-${slugifyAnchorPart(page.pageName || "x")}`;
-}
-
-function getRecortableAnchorId(page = {}, context = {}) {
-  return `analizar-pdf-recortable-${buildPageAnchorScope(context)}-page-${slugifyAnchorPart(page.pageName || "x")}`;
 }
 
 function getProblematicTextStatusSummary(page = {}) {
@@ -1095,23 +1069,6 @@ function renderPageReportItems(items = [], session = null, options = {}) {
         <h5>Ortografía</h5>
         ${renderSelectableIssueList("spelling", page, session?.correctionSelection || {})}
       </section>
-      ${(() => {
-        const modes = Array.isArray(page?.instructionWorkModes) ? page.instructionWorkModes : [];
-        if (!modes.length) return "";
-        return `
-          <section>
-            <h5>Iconos de Trabajo Detectados</h5>
-            <ul class="analizar-pdf-selectable-issue-list">
-              ${modes.map(mode => `
-                <li class="analizar-pdf-selectable-issue-item">
-                  <span class="analizar-pdf-inline-badge is-ok">Modalidad: ${escapeHtml(mode.kind)}</span>
-                  <span>${escapeHtml(mode.text)}</span>
-                </li>
-              `).join("")}
-            </ul>
-          </section>
-        `;
-      })()}
     </article>
   `).join("");
 }

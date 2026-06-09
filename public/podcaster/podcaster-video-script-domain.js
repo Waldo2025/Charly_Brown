@@ -1,7 +1,7 @@
 const {
   VOICES,
   VIDEO_SCENE_MAX_SEC,
-  VIDEO_DIALOGUE_MAX_SEC,
+  VIDEO_DIALOGUE_MAX_SEC
 } = window;
 
 function requireWindowFunction(name = "") {
@@ -33,7 +33,7 @@ function buildVideoContextualInstructions(context = {}) {
     return [
       context?.isRefinement
         ? "Refina y mejora el guion actual de Reel/Short educativo, conservando el monólogo enérgico de un único presentador 'youtuber' centrado en la pantalla."
-        : "Genera un guion nuevo de Reel/Short educativo vertical y dinámico (formato 9:16) con un único presentador 'youtuber' posicionado en el centro del encuadre, explicándolo todo de frente a la cámara con entusiasmo.",
+        : "Genera un guion nuevo de Reel/Short educativo vertical y dinámico (formato 9:16) con un monólogo enérgico de un único presentador 'youtuber' centrado en la pantalla, explicándolo todo de frente a la cámara con entusiasmo.",
       "Entrega una estructura lista para UI tabular de video corto creativo (Reel/Short).",
       "Cada fila debe avanzar la explicación del tema de forma sumamente ágil y dinámica, usando oraciones completas de no más de 17 palabras por escena.",
       "Imita el estilo veloz y de altísima retención de divulgadores de YouTube en español como 'Derivando' o 'QuantumFracture', usando frases cortas, directas y exclamaciones como: '¡Ojo!', '¡Espera!', '¡Boom!', '¡Piénsalo!'.",

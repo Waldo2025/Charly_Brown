@@ -20,13 +20,11 @@ if (!/if \(isImageAsset\) \{[\s\S]*"-loop", "1"[\s\S]*\} else \{/.test(back)) {
   throw new Error("La exportación debe tener una rama explícita de FFmpeg para imágenes fijas con -loop 1.");
 }
 
-if (!/const videoHasAudio = isImageAsset \? false : await probeMediaHasAudioWithFfmpeg\(inputVisualPath\);/.test(back)) {
+if (!/const sceneProbe = isImageAsset[\s\S]*hasAudio:\s*false/.test(back)) {
   throw new Error("La exportación de escenas imagen no debe intentar probe de audio de video.");
 }
 
-if (!/const sourceDims = isImageAsset[\s\S]*probeImageDimensions/.test(back)
-  && !/const sourceDims = isImageAsset[\s\S]*probeMediaDimensions/.test(back)
-  && !/const sourceDims = isImageAsset[\s\S]*probeMediaVideoDimensionsWithFfmpeg/.test(back)) {
+if (!/isImageAsset\s*\?\s*\{[\s\S]*probeImageDimensionsWithFfmpeg/.test(back)) {
   throw new Error("La exportación de escenas imagen debe resolver dimensiones con una rama explícita.");
 }
 

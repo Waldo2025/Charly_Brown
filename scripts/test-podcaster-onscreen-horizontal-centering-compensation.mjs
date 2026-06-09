@@ -30,7 +30,7 @@ assert.doesNotMatch(
 
 assert.match(
   controller,
-  /const bubbleLeftPct = this\.clamp01\(Number\(previewSpec\?\.xPct \?\? rowLayout\?\.xPct \?\? 0\)\);/,
+  /xPct:\s*previewSpec\?\.xPct\s*\?\?\s*rowLayout\?\.xPct\s*\?\?\s*0/,
   "El controller debe aplicar directamente la coordenada horizontal resuelta por la spec compartida."
 );
 

@@ -10,7 +10,7 @@ if (!/function resolveGeminiSegmentAnchorStartMs\(segment = null, fallbackAnchor
   throw new Error("El anchor Gemini debe resolverse desde un helper único.");
 }
 
-if (!/const hasManualOffsetFromAnchor = hasManualGeminiSegmentOffset\(segment, sceneStartMs\);/.test(source)) {
+if (!/const hasManualOffsetFromAnchor = hasManualGeminiSegmentOffset\(\s*segment,\s*sceneStartMs/m.test(source)) {
   throw new Error("El reorder no debe volver a empujar un chip con offset manual hacia el anchor.");
 }
 

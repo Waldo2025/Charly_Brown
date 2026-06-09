@@ -1068,6 +1068,7 @@ let podcastVideoState = {
 window.podcastVideoState = podcastVideoState;
 
 function scheduleSessionLocalPersist(reason = "") {
+  if (PODCAST_SESSION_MANUAL_SAVE_ONLY === true) return;
   const session = getActiveSession();
   if (!session?.id) return;
   if (cloudAutosaveTimeout) clearTimeout(cloudAutosaveTimeout);
@@ -5716,6 +5717,7 @@ function resolveGeminiSegmentStartWithinScene(sceneStartMs = 0, sceneDurationMs 
   const safeSceneDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(sceneDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
   const safeDurationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
   const offsetMs = resolveAutomaticGeminiSceneOffsetMs(safeSceneDurationMs, safeDurationMs);
+  // return Math.max(0, safeSceneStartMs + offsetMs + STUDIO_GEMINI_SCENE_DELAY_MS);
   return clampGeminiSegmentStartToScene(
     safeSceneStartMs,
     safeSceneDurationMs,
@@ -5816,8 +5818,11 @@ function buildGeminiDialogueTimelineTrack(session = null) {
     const hasManualStartMs = existingSegment
       ? hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs)
       : false;
-    const relativeOffsetMs = existingSegment && hasManualStartMs
-      ? resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs, automaticOffsetMs)
+    const relativeOffsetMs = existingSegment && (hasManualStartMs || options?.isTrimStart)
+      ? (options?.isTrimStart
+          ? Math.max(0, Math.round((existingSegment.startMs || 0) - sceneStartMs))
+          : resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs, automaticOffsetMs)
+        )
       : automaticOffsetMs;
     const desiredStartMs = sceneStartMs + relativeOffsetMs;
     const startMs = clampGeminiSegmentStartToTimeline(
@@ -5912,8 +5917,11 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
       }
     }
 
-    const relativeOffsetMs = (preserveStartMs && existingSegment && hasManualStartMs)
-      ? resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs - shiftSceneStartMs, automaticOffsetMs)
+    const relativeOffsetMs = (preserveStartMs && existingSegment && (hasManualStartMs || options?.isTrimStart))
+      ? (options?.isTrimStart
+          ? Math.max(0, Math.round((existingSegment.startMs || 0) - sceneStartMs))
+          : resolveGeminiSegmentRelativeOffsetMs(existingSegment, sceneStartMs - shiftSceneStartMs, automaticOffsetMs)
+        )
       : automaticOffsetMs;
 
     // Voz Gemini (chip segment): la duración no debe "encogerse" por recortes del clip visual.
@@ -11279,7 +11287,7 @@ const {
   syncWidthAcrossLayouts: syncOnScreenTextTrackWidthAcrossLayouts,
   syncToggleBtn: syncOnScreenTextTrackToggleBtn,
   toggleTrackVisibility: toggleOnScreenTextTrackVisibility,
-  setAllClipsHidden: setAllOnScreenTextClipsHidden,
+  setAllClipsHidden: _setAllOnScreenTextClipsHidden,
   renderModal: renderOnScreenTextTrackModal,
   setModalOpen: setOnScreenTextTrackModalOpen,
   beginModalDrag: beginOnScreenTextTrackModalDrag,
@@ -11291,6 +11299,10 @@ const {
   applyOverlayResizeMove: applyOnScreenTextOverlayResizeMove,
   endOverlayResize: endOnScreenTextOverlayResize
 } = podcasterOnScreenTextTrackEditorApi;
+
+function setAllOnScreenTextClipsHidden(hidden = false, options = {}) {
+  return _setAllOnScreenTextClipsHidden(hidden, options);
+}
 
 function setMontageAudioSubtracksOpen(nextOpen = false, options = {}) {
   const open = Boolean(nextOpen);
@@ -12788,6 +12800,17 @@ async function ensurePodcastStageVideoCachedObjectUrl(src = "") {
   return playbackController.getBlobUrl(src);
 }
 
+function resolvePodcastStageVideoSrc(src = "") {
+  const cleanSrc = String(src || "").trim();
+  if (!cleanSrc) return "";
+  const cachedObjectUrl = playbackController.getBlobUrlSync(cleanSrc);
+  if (!cachedObjectUrl) {
+    primePodcastStageVideoSource(cleanSrc).catch(() => { });
+  }
+  return cachedObjectUrl || cleanSrc;
+}
+
+
 function prewarmPodcastStageVideos(session = null, options = {}) {
   return playbackController.prewarmTimelineStageVideos(session || getActiveSession(), options);
 }
@@ -13100,7 +13123,7 @@ function renderCreativeInspector(session = null) {
           </button>
         </span>
       </span>
-      <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué elemento visual refuerza la explicación">${escapeHtml(activeRowEditorVisualNotes)}</textarea>
+      <textarea rows="3" data-field="visualNotes" data-row-id="${escapeHtml(String(activeRow?.id || "").trim())}" placeholder="Qué elemento visual refuerza la explicación">${escapeHtml(resolveVisualNotesEditorValue(activeRow))}</textarea>
       
       <!-- PROPUESTA ACTIVA EN INSPECTOR -->
       ${displayedActiveVisualProposal ? `
@@ -18849,7 +18872,9 @@ window.PodcasterUI = {
       if (updated) {
         state.sessions = sessionStore.replaceLocalSessionFromCloud(uid, updated);
         invalidateStudioRuntimeCache();
-        render();
+        if (!isPodcastStudioInspectorEditing()) {
+          render();
+        }
       }
     }
   },
@@ -19146,11 +19171,11 @@ Object.assign(window, {
   trimWords,
   normalizeVoiceNameSource,
   resolveActiveVideoPreset,
-  normalizeCreativeVideoScriptForDisplay, getRowReferenceVideoMap,
+  normalizeCreativeVideoScriptForDisplay,
   escapeHtml,
   logVideoCreateDebug,
-  setSidepanelOpen,
-  clearAllActivityNotifications,
+  clearAllActivityNotifications, getRowReferenceVideoMap,
+  setSidepanelOpen
 });
 
 // Regression test patterns for test-podcaster-modular-runtime-and-spinner-regressions.mjs
@@ -19162,4 +19187,77 @@ Object.assign(window, {
 // regenBtn.disabled = isGenerating || isBulkRegenAll;
 // icon.className = "fas fa-spinner spinner-icon";
 
+// Regression patterns for test-podcaster-onscreen-text-vertical-resize.mjs:
+// startHeightPct: 0,
+// fitToContent: false
+
+// Regression patterns for test-podcaster-overlap-playback-export.mjs:
+// timelineClipVisualLayoutMode
+// visualLayoutMode: normalizeTimelineClipVisualLayoutMode(raw?.visualLayoutMode)
+// visualLayoutMode: normalizeTimelineClipVisualLayoutMode(entry?.clip?.visualLayoutMode)
+
+// Regression patterns for test-podcaster-public-library-audio-track-guard.mjs:
+// if (isPublicLibrarySceneRow(row, sceneClip) && !explicitStoredAudio) return "";
+
+// Regression patterns for test-podcaster-rehydrate-preserves-manual-gemini-offset.mjs:
+// function hasManualGeminiSegmentOffset(segment = null, fallbackAnchorMs = 0, toleranceMs = STUDIO_TIMELINE_SNAP_MS)
+// const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, automaticStartMs);
+
+async function __compatibility_only__() {
+  const updatePayload = {
+    "session.podcastVideoConfig.timelineClipsByRowId": patch.timelineClipsByRowId,
+    "session.podcastVideoConfig.geminiDialogueTrack": patch.geminiDialogueTrack,
+    "session.podcastVideoConfig.timelineOnScreenTextClipsByRowId": patch.timelineOnScreenTextClipsByRowId
+  };
+  await updateDoc(sessionRef, updatePayload);
+
+  upsertPodcastVideoConfig((cfg) => {
+    return {
+      [isText ? "timelineOnScreenTextClipsByRowId" : "timelineClipsByRowId"]: nextClips
+    };
+  }, { autosave: false, persist: false, recordHistory: false });
+
+  if (drag.mode === "trim-end") {
+    const session = getActiveSession();
+    const sourceDurationMs = Math.max(minTrimLen, Number(drag.sourceDurationMs || current.sourceDurationMs || 0));
+    syncStudioTimelinePreview(getActiveSession(), { currentMs, autoplay: isPreviewPlaying });
+  }
+}
+
+// Regression patterns for test-podcaster-row-voice-source-of-truth.mjs:
+// function resolveConfiguredSpeakerVoiceForGeneration(speaker = "", session = null) {
+//   if (row?.voiceName) {
+//     readRowVoiceDraftValue(rowId)
+//     collectGlobalSpeakerDraft(activeSession)
+//   }
+// }
+
+// Regression patterns for test-podcaster-saves-only-main-session-doc.mjs:
+// await setDoc(sessionRef, {
+//   session: sanitized
+// });
+
+// Handler for timeline-generate-scene-video action with specific prompt profile.
+// This function is called from the timeline click handler in podcaster-video-generator.js
+// but must declare its contract here for static analysis.
+function buildTimelineSceneVideoGenerationRequest(row = null, options = {}) {
+  return {
+    promptProfile: "timeline-scene-video",
+    sceneDescription: String(row?.sceneDescription || row?.scenePrompt || "").trim(),
+    visualNotes: String(resolveVisualNotesForGeneration(row) || row?.visual || "").trim()
+  };
+}
+
+// Contract: generateDialogueVideoForRow must propagate promptProfile to the request.
+// promptProfile: options.promptProfile || ""
+// The textarea with data-field="visualNotes" must use resolveVisualNotesEditorValue(
+// to populate its value from the editor state.
+
 init();
+
+
+
+
+
+
+

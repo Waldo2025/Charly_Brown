@@ -145,7 +145,13 @@ def _parse_normalized_page_list(value=""):
 def _page_matches_scope(page=None, scope="both", target_page="", exclude_target_page="0"):
     normalized_exclude_target_page = _normalize_exclude_target_page(exclude_target_page)
     try:
-        relative_page = str(int((page or {}).get("pageSequence") or 0))
+        page_seq = (page or {}).get("pageSequence")
+        if page_seq is None or page_seq == "":
+            relative_page = ""
+        else:
+            relative_page = str(int(page_seq))
+            if relative_page == "0":
+                relative_page = ""
     except (TypeError, ValueError):
         relative_page = ""
     exclude_pages = _parse_normalized_page_list(normalized_exclude_target_page)
@@ -649,6 +655,7 @@ def _collect_alias_items(page, alias_index=None, alias="", include_master=True):
             page,
             (bucket.get("paragraphScope") or {}).get(_normalize_style_name(value), "both"),
             (bucket.get("paragraphTargetPage") or {}).get(_normalize_style_name(value), ""),
+            (bucket.get("paragraphExcludeTargetPage") or {}).get(_normalize_style_name(value), "0"),
         )
     }
     character_styles = {
@@ -658,6 +665,7 @@ def _collect_alias_items(page, alias_index=None, alias="", include_master=True):
             page,
             (bucket.get("characterScope") or {}).get(_normalize_style_name(value), "both"),
             (bucket.get("characterTargetPage") or {}).get(_normalize_style_name(value), ""),
+            (bucket.get("characterExcludeTargetPage") or {}).get(_normalize_style_name(value), "0"),
         )
     }
     if alias_name == "pie_pagina" and paragraph_styles & UNIT_NORMAL_FOOTER_STYLE_FAMILY:
@@ -1492,6 +1500,56 @@ def _instruction_work_kind_label(kind=""):
     return ""
 
 
+def _normalize_instruction_icon_object_style(value=""):
+    raw = str(value or "").strip().upper()
+    if "/" in raw:
+        raw = raw.split("/", 1)[-1]
+    return raw
+
+
+def _is_instruction_icon_object_style(value=""):
+    normalized = _normalize_instruction_icon_object_style(value)
+    return "ICONOS INLINE" in normalized or "INSTRUCCION INSERTDA" in normalized or "INSTRUCCION INSERTADA" in normalized
+
+
+def _get_story_embedded_instruction_icon_previews(story=None, block_order=None):
+    previews = []
+    seen = set()
+    for ref in ((story or {}).get("embeddedStoryRefs") or []):
+        if not _is_instruction_icon_object_style((ref or {}).get("appliedObjectStyle") or ""):
+            continue
+        anchor_block_order = (ref or {}).get("anchorBlockOrder")
+        if block_order is not None and anchor_block_order not in {block_order, block_order - 1, block_order + 1}:
+            continue
+        preview = (ref or {}).get("previewImage") or {}
+        image_base64 = str(preview.get("base64") or "").strip()
+        if not image_base64:
+            continue
+        signature = str((ref or {}).get("frameId") or (ref or {}).get("storyId") or "").strip()
+        if signature and signature in seen:
+            continue
+        if signature:
+            seen.add(signature)
+        previews.append({
+            "previewImage": preview,
+            "storyId": str((ref or {}).get("storyId") or "").strip(),
+            "frameId": str((ref or {}).get("frameId") or "").strip(),
+        })
+    return previews
+
+
+def _story_has_embedded_instruction_icon(story=None, block_order=None):
+    return bool(_get_story_embedded_instruction_icon_previews(story, block_order))
+
+
+def _is_instruction_icon_gap_issue(issue=None):
+    import re
+
+    fragment = str((issue or {}).get("excerpt") or "")
+    normalized = " ".join(fragment.replace("\u2002", " ").replace("\u00a0", " ").split())
+    return bool(re.search(r"[.:;]\s+[A-ZÁÉÍÓÚÑ]{2,6}\b", normalized))
+
+
 def _detect_instruction_icon_with_capture(
     *,
     gemini_verifier=None,
@@ -1539,18 +1597,41 @@ def _detect_instruction_work_modes(page_reports=None, story_preview_index=None, 
                 story_id = str((item or {}).get("storyId") or "").strip()
                 if not story_id:
                     continue
-                preview = (((story_preview_index or {}).get(story_id) or {}).get("previewImage")) or {}
-                if not preview.get("base64"):
-                    continue
-                visual_result = _detect_instruction_icon_with_capture(
-                    gemini_verifier=gemini_verifier,
-                    page_name=str((page or {}).get("pageName") or "").strip(),
-                    preview=preview,
-                    page_rect=page.get("pageRect") or None,
-                    frame_rect=(item or {}).get("frameRect") or None,
-                    excerpt="",
-                    instruction_text=str((item or {}).get("text") or "").strip(),
-                )
+                story = ((story_preview_index or {}).get(story_id) or {})
+                visual_result = {}
+                detected_icon_without_kind = {}
+                preview_candidates = _get_story_embedded_instruction_icon_previews(story, (item or {}).get("blockOrder"))
+                for candidate in preview_candidates:
+                    candidate_result = gemini_verifier.detect_instruction_work_icon_visual(
+                        page_name=str((page or {}).get("pageName") or "").strip(),
+                        image_base64=((candidate or {}).get("previewImage") or {}).get("base64") or "",
+                        mime_type=((candidate or {}).get("previewImage") or {}).get("mimeType") or "image/png",
+                        excerpt="",
+                        instruction_text=str((item or {}).get("text") or "").strip(),
+                    )
+                    if bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                        detected_icon_without_kind = candidate_result
+                    if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                        visual_result = candidate_result
+                        break
+                if not visual_result:
+                    preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+                    if preview.get("base64"):
+                        candidate_result = _detect_instruction_icon_with_capture(
+                            gemini_verifier=gemini_verifier,
+                            page_name=str((page or {}).get("pageName") or "").strip(),
+                            preview=preview,
+                            page_rect=page.get("pageRect") or None,
+                            frame_rect=(item or {}).get("frameRect") or None,
+                            excerpt="",
+                            instruction_text=str((item or {}).get("text") or "").strip(),
+                        )
+                        if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                            visual_result = candidate_result
+                        elif bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                            detected_icon_without_kind = candidate_result
+                if not visual_result and detected_icon_without_kind:
+                    visual_result = detected_icon_without_kind
                 has_icon = bool((visual_result or {}).get("hasInstructionIcon"))
                 if not has_icon:
                     continue
@@ -1614,25 +1695,53 @@ def _filter_instruction_icon_orthotypography_issues(
             continue
         page = pages_by_name.get(page_name) or {}
         story = (story_preview_index or {}).get(story_id) or {}
-        preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
-        if not preview.get("base64"):
-            accepted.append(issue)
-            continue
         page_item = _find_page_content_entry(
             page,
             story_id=story_id,
             style_name=style_name,
             excerpt=(issue or {}).get("excerpt") or "",
         ) or {}
-        visual_result = _detect_instruction_icon_with_capture(
-            gemini_verifier=gemini_verifier,
-            page_name=page_name,
-            preview=preview,
-            page_rect=page.get("pageRect") or None,
-            frame_rect=page_item.get("frameRect") or (issue or {}).get("frameRect") or None,
-            excerpt=(issue or {}).get("excerpt") or "",
-            instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
-        )
+        has_structural_instruction_icon = _story_has_embedded_instruction_icon(story, (page_item or {}).get("blockOrder"))
+        if has_structural_instruction_icon and _is_instruction_icon_gap_issue(issue):
+            continue
+        visual_result = {}
+        detected_icon_without_kind = {}
+        preview_candidates = _get_story_embedded_instruction_icon_previews(story, (page_item or {}).get("blockOrder"))
+        for candidate in preview_candidates:
+            candidate_result = gemini_verifier.detect_instruction_work_icon_visual(
+                page_name=page_name,
+                image_base64=((candidate or {}).get("previewImage") or {}).get("base64") or "",
+                mime_type=((candidate or {}).get("previewImage") or {}).get("mimeType") or "image/png",
+                excerpt=(issue or {}).get("excerpt") or "",
+                instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
+            )
+            if bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                detected_icon_without_kind = candidate_result
+            if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                visual_result = candidate_result
+                break
+        if not visual_result:
+            preview = (story.get("previewImage") or {}) if isinstance(story, dict) else {}
+            if not preview.get("base64"):
+                if detected_icon_without_kind:
+                    continue
+                accepted.append(issue)
+                continue
+            candidate_result = _detect_instruction_icon_with_capture(
+                gemini_verifier=gemini_verifier,
+                page_name=page_name,
+                preview=preview,
+                page_rect=page.get("pageRect") or None,
+                frame_rect=page_item.get("frameRect") or (issue or {}).get("frameRect") or None,
+                excerpt=(issue or {}).get("excerpt") or "",
+                instruction_text=str((page_item or {}).get("text") or (issue or {}).get("context") or "").strip(),
+            )
+            if _instruction_work_kind_label((candidate_result or {}).get("kind") or ""):
+                visual_result = candidate_result
+            elif bool((candidate_result or {}).get("hasInstructionIcon")) and not detected_icon_without_kind:
+                detected_icon_without_kind = candidate_result
+        if not visual_result and detected_icon_without_kind:
+            visual_result = detected_icon_without_kind
         if bool((visual_result or {}).get("hasInstructionIcon")):
             continue
         accepted.append(issue)
@@ -2177,7 +2286,7 @@ def _classify_visual_linked_asset_kind(page):
 
 
 def _detect_visual_linked_asset_with_gemini(page, session=None, gemini_verifier=None, story_preview_index=None):
-    if not gemini_verifier or not gemini_verifier.enabled or not _is_first_grade_session(session):
+    if not gemini_verifier or not gemini_verifier.enabled:
         return {}
     candidates = []
     for bucket_name in ("instrucciones", "subinstrucciones"):
@@ -2337,7 +2446,7 @@ def _build_recortable_checks(page_reports, alias_index=None, session=None, gemin
                 visual_kind = ""
             if not visual_kind and not visual_detections:
                 visual_kind = _classify_visual_linked_asset_kind(page)
-                if _is_first_grade_session(session) and visual_kind not in FIRST_GRADE_GEMINI_VISUAL_KINDS:
+                if visual_kind not in FIRST_GRADE_GEMINI_VISUAL_KINDS:
                     visual_kind = ""
                 if visual_kind:
                     visual_detections = _dedupe_visual_detections([{
@@ -2679,6 +2788,13 @@ def analyze_idml_document(input_path, session):
         )
         semantic_blocks = _select_semantic_story_blocks(_build_semantic_blocks(page_reports))
         spelling_issues = find_spelling_issues(semantic_blocks, gemini_verifier=gemini_verifier)
+        spelling_issues = _filter_instruction_icon_orthotypography_issues(
+            spelling_issues,
+            page_reports=page_reports,
+            story_preview_index=story_preview_index,
+            gemini_verifier=gemini_verifier,
+            instruction_work_mode_index=instruction_work_mode_index,
+        )
         orthotypography_issues = find_orthotypography_issues(semantic_blocks, gemini_verifier=gemini_verifier)
         orthotypography_issues = _filter_instruction_icon_orthotypography_issues(
             orthotypography_issues,

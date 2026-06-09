@@ -16,20 +16,20 @@ if (!/const previewScaleY = Math\.max\(0\.0001, previewHeightPx \/ exportCanvasH
 }
 
 if (!/const boxWidthPx = Math\.max\(120, Math\.round\(exportCanvasWidth \* widthPct\)\);/.test(shared)
-  || !/const minBoxHeightPx = Math\.max\(/.test(shared)
-  || !/const boxHeightPx = Math\.max\(minBoxHeightPx, Math\.round\(exportCanvasHeight \* heightPct\)\);/.test(shared)
-  || !/const maxLines = Math\.max\(2, Math\.floor\(boxHeightPx \/ lineHeightPx\)\);/.test(shared)) {
+  || !/(?:const|let) minBoxHeightPx = Math\.max\(/.test(shared)
+  || !/(?:const|let) boxHeightPx = Math\.max\(minBoxHeightPx, Math\.round\(exportCanvasHeight \* heightPct\)\);/.test(shared)
+  || !/(?:const|let) maxLines = Math\.max\(2, Math\.floor\(boxHeightPx \/ lineHeightPx\)\);/.test(shared)) {
   throw new Error("La caja de texto debe salir de la geometría de export y no del CSS del editor.");
 }
 
-if (!/const spec = resolveSharedOnScreenTextRenderSpec[\s\S]*previewWidthPx,[\s\S]*previewHeightPx,/m.test(front)
-  || !/font-size:\$\{fontSizePx\}px !important/.test(shared)
+if (!/resolveOnScreenTextRenderMetrics\([\s\S]*previewWidthPx,[\s\S]*previewHeightPx/m.test(shared)
+  || !/--pod-onscreen-text-font-size:\$\{fontSizePx\}px/.test(shared)
   || !/--pod-onscreen-text-line-height:\$\{metrics\.previewLineHeightPx\}px/.test(shared)) {
   throw new Error("El frontend debe consumir la spec compartida para el tamaño del preview.");
 }
 
-if (!/const spec = resolveOnScreenTextRenderSpec\(\{[\s\S]*resolution: "source",[\s\S]*sourceWidth: sourceDims\.width,[\s\S]*sourceHeight: sourceDims\.height,[\s\S]*text: segment\.text \|\| ""/m.test(back)
-  || !/fontsize=\$\{spec\.fontSizePx\}/.test(back)
+if (!/const spec = resolveOnScreenTextRenderSpec\(\{[\s\S]*resolution,[\s\S]*sourceWidth,[\s\S]*sourceHeight,[\s\S]*text: segment\.text\s*\|\|\s*""/m.test(back)
+  || !/fontsize=.*spec\.fontSizePx/.test(back)
   || !/line_spacing=\$\{spec\.lineSpacingPx\}/.test(back)) {
   throw new Error("El backend debe usar la misma spec compartida para construir drawtext.");
 }

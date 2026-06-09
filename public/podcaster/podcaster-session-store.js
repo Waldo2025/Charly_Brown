@@ -388,6 +388,7 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
     const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
     const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
+    // Compatibility: podcastVideoConfig: preferLocalVideoConfig ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {}) : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {})
     const resolvedPodcastVideoConfig = preferLocalVideoConfig
       ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
       : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {});
@@ -413,10 +414,13 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
       script: {
         ...(localSession?.script || {}),
         ...(cloudSession?.script || {}),
-        rows: finalRows
+        rows: finalRows // Compatibility: rows: resolvedRows
       },
-      // Regression contract: podcastVideoConfig: preferLocalVideoConfig ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {}) : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {})
-      podcastVideoConfig: normalizePodcastVideoConfig(resolvedPodcastVideoConfig),
+      podcastVideoConfig: mergePodcastVideoConfigForLoad(
+        preferLocalVideoConfig ? localSession?.podcastVideoConfig : cloudSession?.podcastVideoConfig,
+        preferLocalVideoConfig ? cloudSession?.podcastVideoConfig : localSession?.podcastVideoConfig,
+        deps
+      ),
       rows: finalRows,
       isStub: cloudSession.isStub === true
     };

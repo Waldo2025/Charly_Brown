@@ -1,8 +1,11 @@
 {
-  "version": "1.0.10.70",
-  "build": "2026-1.0.10.70",
+  "version": "1.0.10.73",
+  "build": "2026-1.0.10.73",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Se elimina por completo el estilo .analizar-pdf-mapping-meta-action.is-primary y sus sub-reglas del archivo de estilos.",
+    "Corregido: Se remueve la regla color: #fff del estilo .analizar-pdf-mapping-meta-action.is-primary para que los iconos no se fuercen a blanco.",
+    "Corregido: Filtrar errores de ortografía de iconos de trabajo en el IDML y mostrar sus modalidades en el reporte.",
     "Corregido: excludeTargetPage ya no debe reiniciarse visualmente tras guardar un mapeo.",
     "Corregido: Nuevo bump de versión para forzar invalidación de caché del frontend.",
     "Corregido: El modal de mapeos ya no debe rehidratar pageScope y targetPage con estado viejo tras guardar.",
@@ -14,5 +17,5 @@
     "Corregido: El backend deja de enviar compressionQuality a Veo 3.1 en Gemini API.",
     "Mejorado: La configuración global de Podcaster ahora lista y persiste todos los modelos Veo disponibles."
   ],
-  "cache_version": "2026-1.0.10.70"
+  "cache_version": "2026-1.0.10.73"
 }

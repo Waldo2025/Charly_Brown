@@ -5,10 +5,14 @@ const source = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
+const sessionStoreSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-session-store.js",
+  "utf8"
+);
 
 assert.match(
-  source,
-  /let finalSessions = loadSessions\(nextUid\);[\s\S]*const cloud = await loadCloudSessions\(\);[\s\S]*finalSessions = mergeSessionsById\(finalSessions, cloud\);/,
+  sessionStoreSource,
+  /const localSessions = loadSessionsFromLocalCache\(uid, deps, nextStorage\);[\s\S]*cloudSessions = await loadSessionsFromCloud\(uid, deps\);[\s\S]*mergeCloudVsLocalSessions\(cloudSessions, localSessions, deps\)/,
   "El bootstrap debe mezclar sesiones locales y cloud prefiriendo la más nueva, no reemplazar local ciegamente."
 );
 

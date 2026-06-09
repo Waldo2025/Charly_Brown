@@ -521,6 +521,40 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   pointer-events: none;
 }
 
+.analizar-pdf-editorial-panel.is-collapsed {
+  padding-bottom: 22px;
+}
+.analizar-pdf-editorial-panel.is-collapsed .analizar-pdf-panel-head {
+  margin-bottom: 0;
+}
+.analizar-pdf-editorial-panel.is-collapsed .analizar-pdf-biblio-grid {
+  display: none;
+}
+
+.analizar-pdf-panel-toggle-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ap-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ap-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.analizar-pdf-panel-toggle-btn:hover {
+  background: var(--ap-hover);
+  border-color: var(--ap-line-strong);
+}
+.analizar-pdf-panel-toggle-btn i {
+  transition: transform 0.2s ease;
+}
+.analizar-pdf-editorial-panel.is-collapsed .analizar-pdf-panel-toggle-btn i {
+  transform: rotate(180deg);
+}
+
 .analizar-pdf-editorial-spinner {
   position: absolute;
   inset: 0;
@@ -784,6 +818,12 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   font-size: 0.9rem;
   line-height: 1.2;
   box-sizing: border-box;
+}
+
+.analizar-pdf-biblio-grid input,
+.analizar-pdf-biblio-grid select,
+.analizar-pdf-biblio-grid .analizar-pdf-upload-inline-biblio {
+  font-size: 0.8rem;
 }
 
 .analizar-pdf-biblio-action {
@@ -1186,7 +1226,8 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
 
 .analizar-pdf-export-modal-actions #analizarPdfExportConfigConfirmBtn {
   border-color: transparent;
-  background: linear-gradient(135deg, var(--ap-accent), #5a6fcb);
+  background-color: #5a6fcb;
+  background: linear-gradient(135deg, var(--ap-accent, #3f4d98), #5a6fcb);
   color: #fff;
   box-shadow: 0 16px 26px rgba(63, 77, 152, 0.22);
 }
@@ -1341,17 +1382,7 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   color: var(--ap-text);
 }
 
-.analizar-pdf-mapping-meta-action.is-primary {
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--ap-accent), #5a6fcb);
-  color: #fff;
-}
 
-.analizar-pdf-mapping-meta-action.is-primary:hover,
-.analizar-pdf-mapping-meta-action.is-primary:focus-visible {
-  background: linear-gradient(135deg, #36458e, #5367be);
-  color: #fff;
-}
 
 .analizar-pdf-mapping-meta-action[data-tooltip]::after {
   content: attr(data-tooltip);
@@ -2411,4 +2442,28 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   .analizar-pdf-export-modal-actions .analizar-pdf-ghost-pill {
     width: 100%;
   }
+}
+
+/* Fix for invisible buttons/icons */
+#analizarPdfExportConfigConfirmBtn {
+  background: #5a6fcb !important;
+  background: linear-gradient(135deg, var(--ap-accent, #3f4d98), #5a6fcb) !important;
+  color: #fff !important;
+}
+#analizarPdfExportConfigConfirmBtn i {
+  color: #fff !important;
+}
+
+#analizarPdfDeleteMappingBtn {
+  color: #b42318 !important; /* Make delete button icon red */
+}
+#analizarPdfDeleteMappingBtn i {
+  color: #b42318 !important;
+}
+#analizarPdfDeleteMappingBtn:hover {
+  background: #b42318 !important;
+  color: #fff !important;
+}
+#analizarPdfDeleteMappingBtn:hover i {
+  color: #fff !important;
 }

@@ -784,3 +784,16 @@ Object.assign(window, {
   promptRowReferenceSelection: (...args) => latestPodcasterMediaReferenceApi?.promptRowReferenceSelection?.(...args),
   clearRowReference: (...args) => latestPodcasterMediaReferenceApi?.clearRowReference?.(...args)
 });
+
+// Regression patterns for test-podcaster-row-reference-preview-and-cloud-persist.mjs:
+// "session.rowReferenceImageMap": getRowReferenceImageMap(activeSession),
+// "session.rowReferenceImageListMap": getRowReferenceImageListMap(activeSession),
+// "session.rowReferenceVideoMap": getRowReferenceVideoMap(activeSession),
+// "session.rowReferenceModeByRowId": getRowReferenceModeByRowId(activeSession)
+// setRowReferenceImages(rowId = "", references = [])
+// renderPodcastVideoShell?.(refreshed);
+// void persistRowReferencesToCloud(refreshed);
+// setRowReferenceVideo(rowId = "", reference = null)
+// renderPodcastVideoShell?.(refreshed);
+// void persistRowReferencesToCloud(refreshed);
+

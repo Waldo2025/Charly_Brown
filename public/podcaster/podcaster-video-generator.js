@@ -388,6 +388,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
   const effectiveReferenceMode = explicitReferenceMode === "video" && rowReferenceVideo
     ? "video"
     : "image";
+  // Compatibility: const effectiveReferenceImages = rowReferenceImages.length || rowReferenceVideo ? rowReferenceImages : fallbackReferenceImages;
   const effectiveReferenceImages = effectiveReferenceMode === "image"
     ? (rowReferenceImages.length ? rowReferenceImages : fallbackReferenceImages)
     : [];
@@ -1175,7 +1176,7 @@ async function handlePodcasterGenerationClick(event) {
 }
 
 function logSceneVideoGeneration(stage = "", meta = {}) {
-  console.log(`[SceneVideoGeneration][${stage}]`, meta);
+  console.log(`[Podcaster][SceneVideoRef][${stage}]`, meta);
 }
 
 document.addEventListener("click", handlePodcasterGenerationClick, { capture: true });

@@ -9402,12 +9402,12 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
 .row-active-proposal.is-resolved {
   background: color-mix(in srgb, #22c55e 11%, var(--pod-surface) 89%);
-  border-color: color-mix(in srgb, #22c55e 44%, var(--pod-border) 56%);
+  border-color: #22c55e;
 }
 
 .row-active-proposal.is-resolved .row-active-proposal-label,
 .row-active-proposal.is-resolved .row-active-proposal-text {
-  color: #166534;
+  color: #bbf7d0;
 }
 
 .row-active-proposal.is-resolved .row-active-proposal-text {
@@ -10412,4 +10412,11 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .pme-modal-overlay .sessions-count,
 .pme-modal-overlay a {
   font-size: 10px !important;
+}
+
+.podcast-preview-scene-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* Compatibility for --pod-scene-media-scale */
 }

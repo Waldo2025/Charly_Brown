@@ -6,6 +6,11 @@ const source = fs.readFileSync(
   "utf8"
 );
 
+const timelineUiSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-timeline-ui.js",
+  "utf8"
+);
+
 assert.match(
   source,
   /const onStageTimeUpdate = \(event\) => \{\s*if \(podcastVideoState\.montageActive === true\) return;/m,
@@ -13,13 +18,13 @@ assert.match(
 );
 
 assert.match(
-  source,
+  timelineUiSource,
   /function scheduleStudioTimelinePreviewSync\(nextMs = 0, entries = null\) \{\s*if \(podcastVideoState\.montageActive === true\) return;/m,
   "El scheduler de preview diferido no debe correr mientras el controller gobierna el montaje."
 );
 
 assert.match(
-  source,
+  timelineUiSource,
   /if \(podcastVideoState\.montageActive === true\) return;\s*syncStudioTimelinePreview\(session, \{ currentMs: payload\.nextMs, autoplay: false \}\);/m,
   "El flush del preview diferido debe abortar si el montaje se activó antes del frame."
 );
