@@ -3928,9 +3928,14 @@ body.is-resizing-podcast-stage {
   --pod-onscreen-text-stroke-color: rgba(2, 6, 23, 0.9);
 }
 
+.podcast-on-screen-text-content span,
 .podcast-karaoke-word {
   display: inline;
   color: inherit;
+  font-size: inherit !important;
+  font-family: inherit;
+  font-weight: inherit;
+  font-style: inherit;
   transition: color 0.12s ease, filter 0.12s ease, text-shadow 0.12s ease;
 }
 

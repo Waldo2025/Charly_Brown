@@ -471,6 +471,7 @@ const els = {
   globalTtsScenePrompt: document.getElementById("globalTtsScenePrompt"),
   globalTtsAudioTags: document.getElementById("globalTtsAudioTags"),
   globalCheapVideoMode: document.getElementById("globalCheapVideoMode"),
+  globalMediaLoadMode: document.getElementById("globalMediaLoadMode"),
   applyGlobalConfigBtn: document.getElementById("applyGlobalConfigBtn"),
   podcastPlayBtn: document.getElementById("podcastPlayBtn"),
   podcastPauseBtn: document.getElementById("podcastPauseBtn"),
@@ -5893,6 +5894,12 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     );
     const clipPlayableMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
     const audioDurationMs = Math.max(0, Math.round(Number(entry?.audioDurationMs || 0) || 0));
+    const existingDurationMs = existingSegment
+      ? Math.max(
+        STUDIO_TIMELINE_MIN_CLIP_MS,
+        Math.round(Number(existingSegment.durationMs || 0) || (Number(existingSegment.endMs || 0) - Number(existingSegment.startMs || 0)) || clipPlayableMs)
+      )
+      : 0;
 
     const segmentTrimInMs = preserveStartMs && existingSegment
       ? Math.max(0, Math.round(Number(existingSegment.trimInMs ?? 0) || 0))
@@ -5900,7 +5907,9 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     const audioSuggestedDurationMs = audioDurationMs > 0
       ? Math.round(Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, audioDurationMs - segmentTrimInMs))
       : 0;
-    const expectedSegmentDuration = audioSuggestedDurationMs > 0 ? audioSuggestedDurationMs : clipPlayableMs;
+    const expectedSegmentDuration = audioSuggestedDurationMs > 0
+      ? audioSuggestedDurationMs
+      : (preserveStartMs && existingSegment && existingDurationMs > 0 ? existingDurationMs : clipPlayableMs);
 
     const automaticOffsetMs = resolveAutomaticGeminiSceneOffsetMs(sceneDurationMs, expectedSegmentDuration);
     const hasManualStartMs = hasManualGeminiSegmentOffset(existingSegment, sceneStartMs, automaticOffsetMs);
@@ -5932,12 +5941,6 @@ function reconcileGeminiDialogueTrackWithRuntime(session = null, existingTrack =
     const audioMaxPlayableMs = audioDurationMs > 0
       ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(audioDurationMs - segmentTrimInMs))
       : Number.POSITIVE_INFINITY;
-    const existingDurationMs = existingSegment
-      ? Math.max(
-        STUDIO_TIMELINE_MIN_CLIP_MS,
-        Math.round(Number(existingSegment.durationMs || 0) || (Number(existingSegment.endMs || 0) - Number(existingSegment.startMs || 0)) || clipPlayableMs)
-      )
-      : 0;
     // Si el track ya existía pero se importó con una duración recortada (por trim del clip visual),
     // expandimos de forma segura hasta la duración real del audio para evitar cortes al final.
     const baseDurationMs = forceDurationFromAudio && audioSuggestedDurationMs > 0
@@ -9934,6 +9937,9 @@ function syncGlobalConfigPanel(session = null) {
     const videoCfg = getPodcastVideoConfig(session);
     if (els.globalCheapVideoMode) {
       els.globalCheapVideoMode.value = String(videoCfg.videoModel || "").trim() || "veo-3.1-lite-generate-preview";
+    }
+    if (els.globalMediaLoadMode) {
+      els.globalMediaLoadMode.value = String(videoCfg.mediaLoadMode || "streaming").trim().toLowerCase();
     }
   } catch (e) {
     void e;
@@ -14249,12 +14255,14 @@ async function applyGlobalConfig() {
   // Guardamos la configuración de video por separado para no interferir con el script
   try {
     const selectedVideoModel = buildPodcasterVideoModelChain(String(els.globalCheapVideoMode?.value || "").trim())[0] || "veo-3.1-lite-generate-preview";
+    const selectedMediaLoadMode = String(els.globalMediaLoadMode?.value || "streaming").trim().toLowerCase();
     upsertActiveSession((current) => ({
       ...current,
       podcastVideoConfig: {
         ...getPodcastVideoConfig(current),
         videoModel: selectedVideoModel,
-        cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview"
+        cheapVideoMode: selectedVideoModel === "veo-3.1-lite-generate-preview",
+        mediaLoadMode: selectedMediaLoadMode
       }
     }), { render: false });
   } catch (e) {

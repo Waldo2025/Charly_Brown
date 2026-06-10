@@ -116,7 +116,7 @@ export function buildKaraokeSubtitleMarkup(text = "", wordTimings = [], activeIn
     if (/^\s+$/.test(token)) return token;
     const isActive = wordIndex === activeIndex;
     const className = `podcast-karaoke-word${isActive ? " is-active" : ""}`;
-    const html = `<span class="${className}" data-karaoke-index="${wordIndex}">${escapeHtml(token)}</span>`;
+    const html = `<span class="${className}" data-karaoke-index="${wordIndex}" style="font-size: inherit !important;">${escapeHtml(token)}</span>`;
     wordIndex += 1;
     return html;
   }).join("");

@@ -914,7 +914,10 @@ function normalizePodcastVideoConfig(raw = {}) {
     montageDefaultVeoVolumePct,
     montageDefaultGeminiVolumePct,
     playbackSpeed: Math.max(0.5, Math.min(2.0, toFiniteNumber(raw?.playbackSpeed, 1.0))),
-    reelModeEnabled: raw?.reelModeEnabled === true
+    reelModeEnabled: raw?.reelModeEnabled === true,
+    mediaLoadMode: ["streaming", "blob", "auto"].includes(String(raw?.mediaLoadMode || "").trim().toLowerCase())
+      ? String(raw.mediaLoadMode).trim().toLowerCase()
+      : "streaming"
   };
 }
 

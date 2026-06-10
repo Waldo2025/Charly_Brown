@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="local-fonts.css">
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="header.css">
-  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.43">
+  <link rel="stylesheet" href="podcaster.css?v=2026-1.0.1.44">
   <link rel="stylesheet" href="podcaster/podcaster-sidepanel-studio.css?v=2026-05-23-1">
   <link rel="stylesheet" href="podcaster/podcaster-overlay-card-studio.css?v=2026-05-28-2">
   <!-- FilePond -->
@@ -1963,6 +1963,22 @@
         </p>
       </div>
 
+      <div class="global-config-section">
+        <div class="global-config-section-title">Carga y Reproducción de Media</div>
+        <div class="global-config-row">
+          <label class="compact-field">
+            <span>Modo de Carga</span>
+            <select id="globalMediaLoadMode">
+              <option value="streaming">Streaming directo (Fluido y rápido, recomendado)</option>
+              <option value="blob">Blob / Descarga completa en caché</option>
+              <option value="auto">Automático (Streaming para videos, Blobs para audios)</option>
+            </select>
+          </label>
+        </div>
+        <p class="gemini-creativity-hint">El modo Streaming directo permite que las escenas y audios comiencen a reproducirse inmediatamente usando peticiones por rangos (HTTP 206), evitando cortes y reduciendo el uso de memoria. El modo Blob descarga todo el contenido antes de reproducir.
+        </p>
+      </div>
+
       <div id="globalSpeakerSettings" class="global-speaker-settings"></div>
 
       <div class="global-config-actions">
@@ -2321,7 +2337,7 @@
   <script type="module" src="js/sidebar.js"></script>
   <script type="module" src="podcaster/podcaster-timeline-model.js?v=2026-05-18.1"></script>
   <script type="module" src="podcaster/podcaster-script-editor.js?v=2026-05-17.2"></script>
-  <script type="module" src="podcaster/podcaster.js?v=2026-06-05.1"></script>
+  <script type="module" src="podcaster/podcaster.js?v=2026-06-10.1"></script>
   <script type="module" src="podcaster/podcaster-scene-media-position.js?v=2026-05-27.1"></script>
   <script type="module" src="podcaster/podcaster-overlay-card-studio.js?v=2026-05-28.1"></script>
   <script type="module" src="podcaster/podcaster-overlay-cards.js?v=2026-05-27.2"></script>

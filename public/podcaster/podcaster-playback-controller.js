@@ -349,9 +349,41 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
     return entries.find(e => currentMs >= e.startMs && currentMs < e.endMs);
   }
+  resolveActiveMediaLoadMode(url = "") {
+    const configMode = String(this.state.config?.mediaLoadMode || "streaming").trim().toLowerCase();
+    if (configMode === "auto") {
+      const isVideo = /\.(mp4|webm|mov|m4v)(?:[?#&]|$)/i.test(url) || url.includes("video") || url.includes("montage");
+      return isVideo ? "streaming" : "blob";
+    }
+    return configMode;
+  }
   getBlobUrlSync(url) {
     if (!url) return "";
-    if (url.startsWith('blob:')) return url;
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+    
+    const activeMode = this.resolveActiveMediaLoadMode(url);
+    if (activeMode === "streaming") {
+      if (this.blobCache.has(url)) return this.blobCache.get(url);
+      
+      let finalUrl = url;
+      if (finalUrl.startsWith("gs://")) {
+        const cacheKey = this.resolvePersistentMediaCacheKey(finalUrl);
+        if (cacheKey && this.blobCache.has(cacheKey)) {
+          return this.blobCache.get(cacheKey);
+        }
+        return null;
+      }
+      
+      const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
+      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
+        finalUrl = `/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`;
+      }
+      this.blobCache.set(url, finalUrl);
+      const cacheKey = this.resolvePersistentMediaCacheKey(url);
+      if (cacheKey && cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
+      return finalUrl;
+    }
+    
     if (this.blobCache.has(url)) return this.blobCache.get(url);
     const cacheKey = this.resolvePersistentMediaCacheKey(url);
     if (cacheKey && cacheKey !== url && this.blobCache.has(cacheKey)) {
@@ -414,6 +446,38 @@ export class PodcasterPlaybackController extends EventEmitter {
     // 1. Check in-memory cache
     const cached = this.getBlobUrlSync(url);
     if (cached) return cached;
+
+    const activeMode = this.resolveActiveMediaLoadMode(url);
+    if (activeMode === "streaming") {
+      if (this.fetchPromises.has(cacheKey)) return this.fetchPromises.get(cacheKey);
+
+      const p = (async () => {
+        try {
+          let finalUrl = url;
+          if (finalUrl.startsWith("gs://")) {
+            if (this.deps?.resolveFirebaseStorageUrl) {
+              finalUrl = await this.deps.resolveFirebaseStorageUrl(finalUrl);
+            }
+          }
+
+          const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
+          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
+            finalUrl = `/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`;
+          }
+
+          this.blobCache.set(url, finalUrl);
+          if (cacheKey !== url) this.blobCache.set(cacheKey, finalUrl);
+          return finalUrl;
+        } catch (e) {
+          console.error("[podcaster-playback-controller] Error resolving streaming URL:", e);
+          return url;
+        } finally {
+          this.fetchPromises.delete(cacheKey);
+        }
+      })();
+      this.fetchPromises.set(cacheKey, p);
+      return p;
+    }
 
     if (this.fetchPromises.has(cacheKey)) return this.fetchPromises.get(cacheKey);
 
@@ -638,7 +702,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.state.useMse = false; // Force disable MSE as it is an incomplete experimental feature
     const totalMs = this.deps?.getTimelineTotalDurationMs?.(this.state.session) || 0;
     this.state.totalDurationMs = Number.isFinite(totalMs) ? Math.max(0, totalMs) : 0;
-
+    this.prewarmDialogueAudios(this.state.session);
   }
 
   /**
@@ -649,10 +713,25 @@ export class PodcasterPlaybackController extends EventEmitter {
   invalidateRowAudioCache(rowId = "") {
     const key = String(rowId || "").trim();
     if (!key) return;
+    const session = this.state.session || this.deps?.getActiveSession?.();
+    const clip = this.deps?.resolveDialogueAudioForRow?.(session, key);
+    const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+    if (rawUrl) {
+      if (this.blobCache.has(rawUrl)) {
+        const cached = this.blobCache.get(rawUrl);
+        if (cached && cached.startsWith("blob:")) {
+          try { URL.revokeObjectURL(cached); } catch (_) { }
+        }
+        this.blobCache.delete(rawUrl);
+      }
+      const cacheKey = this.resolvePersistentMediaCacheKey(rawUrl);
+      if (cacheKey && cacheKey !== rawUrl && this.blobCache.has(cacheKey)) {
+        this.blobCache.delete(cacheKey);
+      }
+    }
     const audio = this.dialoguePlayers[key];
     if (audio) {
       try { audio.pause(); } catch (_) { }
-      // If the audio has a blob src in our cache, revoke and evict it
       const originalSrc = String(audio.dataset?.originalSrc || "").trim();
       if (originalSrc && this.blobCache.has(originalSrc)) {
         try { URL.revokeObjectURL(this.blobCache.get(originalSrc)); } catch (_) { }
@@ -1104,6 +1183,65 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
   }
 
+  prewarmDialogueAudios(session) {
+    if (!session) return;
+    const rows = session?.script?.rows || [];
+    rows.forEach((row) => {
+      const rowId = row?.id;
+      if (!rowId) return;
+      const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
+      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+      if (rawUrl && !this.blobCache.has(rawUrl)) {
+        this.getBlobUrl(rawUrl).catch(() => {});
+      }
+    });
+  }
+
+  getOrCreateDialoguePlayer(rowId, audioSrc, session) {
+    let audio = this.dialoguePlayers[rowId];
+    if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
+      if (audio) try { audio.pause(); } catch (_) { }
+      audio = new Audio();
+      audio.crossOrigin = 'anonymous';
+      audio.src = audioSrc;
+      audio.dataset.originalSrc = audioSrc;
+      audio.dataset.initialized = "false";
+      audio.preload = "auto";
+      this.dialoguePlayers[rowId] = audio;
+      this.audioCache[rowId] = audio;
+      
+      audio.addEventListener("loadedmetadata", () => {
+        const nextMs = Math.round(audio.duration * 1000);
+        const pvs = this.deps?.podcastVideoState;
+        
+        const speed = this.deps?.getPlaybackSpeed?.() || 1;
+        const clipRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
+        const effectiveRate = this.clampPlaybackRate(speed * clipRate);
+        audio.playbackRate = effectiveRate;
+        audio.defaultPlaybackRate = effectiveRate;
+
+        if (pvs && Number.isFinite(nextMs)) {
+          if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
+          if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
+            pvs.montageAudioActualDurationsMs[rowId] = nextMs;
+            if (typeof window.invalidateStudioRuntimeCache === "function") {
+              window.invalidateStudioRuntimeCache();
+            }
+            this.pendingTimelineRender = true;
+            if (typeof window.syncGeminiDialogueTrackWithRuntime === "function") {
+              try {
+                window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
+              } catch (_) {}
+            }
+          }
+        }
+      }, { once: true });
+
+      try { audio.load(); } catch (_) { }
+    }
+    return audio;
+  }
+
   // --- Audio ---
   async syncAudio(currentMs, speed) {
     const session = this.state.session || this.deps?.getActiveSession?.();
@@ -1136,19 +1274,18 @@ export class PodcasterPlaybackController extends EventEmitter {
     });
     const activeRowIds = new Set(activeSegments.map(s => s.rowId));
 
-    // Upcoming pre-load
+    // Upcoming pre-load (look ahead 5 seconds)
     const upcoming = segments.filter((segment) => {
       const segmentStartMs = Math.max(0, Number(segment?.startMs || 0) || 0);
-      return segmentStartMs > currentMs && (segmentStartMs - currentMs) < 3000;
-    });
-    upcoming.forEach(s => {
-      const clip = this.deps?.resolveDialogueAudioForRow?.(session, s.rowId);
-      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
-      if (rawUrl) this.getBlobUrl(rawUrl);
+      return segmentStartMs > currentMs && (segmentStartMs - currentMs) < 5000;
     });
 
+    const upcomingRowIds = new Set(upcoming.map(s => s.rowId));
+    const keepRowIds = new Set([...activeRowIds, ...upcomingRowIds]);
+
+    // Cleanup players that are no longer active or upcoming
     Object.keys(this.dialoguePlayers).forEach(rowId => {
-      if (!activeRowIds.has(rowId)) {
+      if (!keepRowIds.has(rowId)) {
         const audio = this.dialoguePlayers[rowId];
         if (audio) {
           if (!audio.paused) try { audio.pause(); } catch (_) { }
@@ -1158,6 +1295,21 @@ export class PodcasterPlaybackController extends EventEmitter {
           delete this.audioCache[rowId];
         }
       }
+    });
+
+    // Run preload loop to pre-create and buffer upcoming audio elements
+    upcoming.forEach(async (s) => {
+      const rowId = s.rowId;
+      if (this.dialoguePlayers[rowId]) return;
+
+      const clip = this.deps?.resolveDialogueAudioForRow?.(session, rowId);
+      const rawUrl = this.deps?.resolveStorageAudioUrl?.(clip?.downloadUrl, clip?.storagePath);
+      if (!rawUrl) return;
+
+      const audioSrc = await this.getBlobUrl(rawUrl);
+      if (!audioSrc) return;
+
+      this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
     });
 
     let hasVoice = false;
@@ -1170,57 +1322,15 @@ export class PodcasterPlaybackController extends EventEmitter {
 
       let audioSrc = this.getBlobUrlSync(rawAudioSrc);
       if (!audioSrc) audioSrc = await this.getBlobUrl(rawAudioSrc);
+      if (!audioSrc) continue;
       
       hasVoice = true;
-      let audio = this.dialoguePlayers[rowId];
-      if (!audio || (audio.dataset.originalSrc !== audioSrc)) {
-        if (audio) try { audio.pause(); } catch (_) { }
-        audio = new Audio();
-        audio.crossOrigin = 'anonymous';
-        audio.src = audioSrc;
-        audio.dataset.originalSrc = audioSrc;
-        audio.dataset.initialized = "false";
-        this.dialoguePlayers[rowId] = audio;
-        this.audioCache[rowId] = audio;
-        audio.addEventListener("loadedmetadata", () => {
-          const nextMs = Math.round(audio.duration * 1000);
-          const pvs = this.deps?.podcastVideoState;
-          
-          // Forzar la velocidad efectiva también al cargar metadatos
-          const speed = this.deps?.getPlaybackSpeed?.() || 1;
-          const clipRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
-          const effectiveRate = this.clampPlaybackRate(speed * clipRate);
-          audio.playbackRate = effectiveRate;
-          audio.defaultPlaybackRate = effectiveRate;
-
-          if (pvs && Number.isFinite(nextMs)) {
-            if (!pvs.montageAudioActualDurationsMs) pvs.montageAudioActualDurationsMs = {};
-            if (Math.abs(nextMs - (pvs.montageAudioActualDurationsMs[rowId] || 0)) > 100) {
-              pvs.montageAudioActualDurationsMs[rowId] = nextMs;
-              if (typeof window.invalidateStudioRuntimeCache === "function") {
-                window.invalidateStudioRuntimeCache();
-              }
-              this.pendingTimelineRender = true;
-              if (typeof window.syncGeminiDialogueTrackWithRuntime === "function") {
-                try {
-                  window.syncGeminiDialogueTrackWithRuntime({ render: false, preserveStartMs: true });
-                } catch (_) {}
-              }
-            }
-          }
-        }, { once: true });
-      }
+      let audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
 
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
       const effectiveRate = this.clampPlaybackRate(speed * clipPlaybackRate);
 
-      // Log informativo de resolución (solo una vez por inicialización de segmento)
-      if (audio.dataset.initialized === "false") {
-        // console.log(`[Playback:Audio] Configurando ${rowId}: Speed=${speed.toFixed(2)}x, ClipRate=${clipPlaybackRate.toFixed(2)}x -> Effective=${effectiveRate.toFixed(2)}x`);
-      }
-
       if (Math.abs(audio.playbackRate - effectiveRate) > 0.01) {
-        // console.log(`[Playback:Audio] Ajustando velocidad para ${rowId}: ${audio.playbackRate.toFixed(2)}x -> ${effectiveRate.toFixed(2)}x`);
         audio.playbackRate = effectiveRate;
         audio.defaultPlaybackRate = effectiveRate;
       }
