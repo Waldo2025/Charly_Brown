@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.80",
-  "build": "2026-1.0.10.80",
+  "version": "1.0.10.81",
+  "build": "2026-1.0.10.81",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Rediseñado: Modal musicConfigModal con nuevo layout compacto tipo estudio (mc-panel). Incluye header con ícono, fila de controles inline (preset + volumen con display numérico), separadores de sección con acciones rápidas, listas de tracks reutilizables, bloque de IA con textarea y botón inline, y toolbar inferior con reproducción/detener/limpiar.",

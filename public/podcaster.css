@@ -8761,9 +8761,9 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .mc-close-btn {
   width: 26px;
   height: 26px;
-  border: 1px solid var(--mc-border);
-  background: var(--mc-surface);
-  color: var(--mc-muted);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.80);
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
@@ -8774,8 +8774,8 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   flex-shrink: 0;
 }
 .mc-close-btn:hover {
-  background: rgba(255,80,80,0.12);
-  border-color: rgba(255,80,80,0.30);
+  background: rgba(255,80,80,0.14);
+  border-color: rgba(255,80,80,0.35);
   color: #ff6b6b;
 }
 
@@ -8802,26 +8802,27 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--mc-muted);
+  color: rgba(255,255,255,0.70);
 }
-.mc-ctrl-label i { opacity: 0.7; }
+.mc-ctrl-label i { opacity: 0.85; }
 
 .mc-select {
   appearance: none;
-  background: var(--mc-surface-2);
-  border: 1px solid var(--mc-border-strong);
-  color: var(--mc-text);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #ffffff;
   border-radius: 8px;
   padding: 5px 28px 5px 8px;
   font-size: 12px;
   font: inherit;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(203,213,225,0.5)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.7)'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
   outline: none;
   transition: border-color 0.15s;
 }
+.mc-select option { background: #161a22; color: #ffffff; }
 .mc-select:focus { border-color: var(--mc-accent); }
 
 .mc-vol-row {
@@ -8860,7 +8861,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--mc-muted);
+  color: rgba(255,255,255,0.75);
 }
 
 .mc-divider-actions {
@@ -8876,16 +8877,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   width: 24px;
   height: 24px;
   border-radius: 7px;
-  border: 1px solid var(--mc-border);
-  background: var(--mc-surface);
-  color: var(--mc-muted);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.80);
   cursor: pointer;
   font-size: 10px;
   transition: background 0.15s, color 0.15s;
 }
 .mc-add-file-btn:hover {
-  background: var(--mc-surface-2);
-  color: var(--mc-text);
+  background: rgba(255,255,255,0.12);
+  color: #ffffff;
 }
 
 /* ICON BTNS SMALL */
@@ -8893,9 +8894,9 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   width: 24px;
   height: 24px;
   border-radius: 7px;
-  border: 1px solid var(--mc-border);
-  background: var(--mc-surface);
-  color: var(--mc-muted);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.80);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8903,14 +8904,14 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-size: 10px;
   transition: background 0.15s, color 0.15s;
 }
-.mc-icon-btn:hover { background: var(--mc-surface-2); color: var(--mc-text); }
+.mc-icon-btn:hover { background: rgba(255,255,255,0.12); color: #ffffff; }
 .mc-icon-btn--accent {
-  background: color-mix(in srgb, var(--mc-accent) 18%, transparent 82%);
-  border-color: color-mix(in srgb, var(--mc-accent) 40%, transparent 60%);
-  color: color-mix(in srgb, var(--mc-accent) 90%, white 10%);
+  background: color-mix(in srgb, var(--mc-accent) 22%, rgba(255,255,255,0.05) 78%);
+  border-color: color-mix(in srgb, var(--mc-accent) 50%, transparent 50%);
+  color: #ffffff;
 }
 .mc-icon-btn--accent:hover {
-  background: color-mix(in srgb, var(--mc-accent) 28%, transparent 72%);
+  background: color-mix(in srgb, var(--mc-accent) 34%, transparent 66%);
   color: #fff;
 }
 
@@ -8949,6 +8950,25 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   border-color: var(--mc-accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mc-accent) 40%, transparent 60%);
 }
+/* Texto de los tracks — forzar blanco sobre fondo oscuro del mc-panel */
+.mc-track-list .panel-music-track-item-copy strong {
+  color: #ffffff !important;
+  font-size: 12px;
+}
+.mc-track-list .panel-music-track-item-copy span {
+  color: rgba(255,255,255,0.60) !important;
+  font-size: 11px;
+}
+/* Botones dentro de los items */
+.mc-track-list .panel-music-track-item .row-icon-btn {
+  color: rgba(255,255,255,0.65) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  background: rgba(255,255,255,0.05) !important;
+}
+.mc-track-list .panel-music-track-item .row-icon-btn:hover {
+  color: #ffffff !important;
+  background: rgba(255,255,255,0.10) !important;
+}
 
 /* TRACK INFO */
 .mc-track-info {
@@ -8957,11 +8977,11 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   gap: 8px;
   margin: 0 10px;
   padding: 7px 10px;
-  border: 1px solid var(--mc-border);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 9px;
-  background: var(--mc-surface);
+  background: rgba(255,255,255,0.05);
   font-size: 11px;
-  color: var(--mc-muted);
+  color: rgba(255,255,255,0.80);
 }
 .mc-track-info-icon {
   font-size: 14px;
@@ -8981,13 +9001,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--mc-muted);
+  color: rgba(255,255,255,0.75);
 }
 .mc-ai-textarea {
   width: 100%;
   border: 1px solid var(--mc-border-strong);
-  background: var(--mc-surface);
-  color: var(--mc-text);
+  background: rgba(14,18,24,0.92) !important;
+  color: #ffffff !important;
   border-radius: 9px;
   padding: 8px 10px;
   font: inherit;
@@ -9037,9 +9057,9 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  border: 1px solid var(--mc-border);
-  background: var(--mc-surface);
-  color: var(--mc-muted);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.85);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9047,10 +9067,10 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   font-size: 12px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.mc-tool-btn:hover { background: var(--mc-surface-2); color: var(--mc-text); }
+.mc-tool-btn:hover { background: rgba(255,255,255,0.12); color: #ffffff; }
 .mc-tool-btn--danger:hover {
-  background: rgba(255,80,80,0.12);
-  border-color: rgba(255,80,80,0.30);
+  background: rgba(255,80,80,0.14);
+  border-color: rgba(255,80,80,0.35);
   color: #ff6b6b;
 }
 /* ─────────────────────────────────────────────────────────────── */
