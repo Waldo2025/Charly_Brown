@@ -1312,7 +1312,9 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
     });
 
-    let hasVoice = false;
+    // Duck the background music whenever we're within any Gemini dialogue segment
+    // (regardless of whether the audio blob has loaded), to prevent per-word volume flutter.
+    let hasVoice = activeSegments.length > 0;
 
     for (const segment of activeSegments) {
       const rowId = segment.rowId;
@@ -1324,7 +1326,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (!audioSrc) audioSrc = await this.getBlobUrl(rawAudioSrc);
       if (!audioSrc) continue;
       
-      hasVoice = true;
+      // hasVoice is already true from activeSegments.length > 0
       let audio = this.getOrCreateDialoguePlayer(rowId, audioSrc, session);
 
       const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, rowId) || 1;
@@ -1518,13 +1520,16 @@ export class PodcasterPlaybackController extends EventEmitter {
       if (this.audioCtx) {
         this.ensureBackgroundChain(stabilizeEnabled, limiterEnabled);
         if (this.backgroundGain) {
-          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, 0.05);
+          // Use a slightly longer time constant (0.15s) for ducking transitions to avoid abrupt jumps
+          const smoothingConstant = 0.15;
+          this.backgroundGain.gain.setTargetAtTime(this.clamp01(finalVolume * masterVolumeFactor), this.audioCtx.currentTime, smoothingConstant);
         } else {
           this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
         }
       } else {
         this.backgroundAudio.volume = this.clamp01(finalVolume * masterVolumeFactor);
       }
+
 
       this.backgroundAudio.playbackRate = speed;
 

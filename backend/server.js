@@ -836,7 +836,12 @@ const corsOptions = {
     }
     callback(new Error("CORS_NOT_ALLOWED"));
   },
-  credentials: false
+  credentials: false,
+  allowedHeaders: ["Range", "Content-Type", "Authorization", "Accept", "X-Requested-With"],
+  exposedHeaders: ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));

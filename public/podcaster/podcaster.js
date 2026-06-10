@@ -9226,6 +9226,28 @@ function applyMontageSceneMixToAllScenes() {
   setMontageSceneMixOpen(false);
 }
 
+function previewBackgroundMusicVolume(rawPct) {
+  try {
+    const session = getActiveSession();
+    if (!session) return;
+    const backgroundPct = Math.max(0, Math.min(200, Math.round(Number(rawPct) || 0)));
+    const rowIds = getSessionRows(session)
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean);
+    // Update in-memory config only (persist: false) so resolveTimelineClipMix picks up the new value
+    upsertPodcastVideoConfig((cfg) => {
+      const nextMix = { ...(cfg?.timelineSceneAudioMixByRowId || {}) };
+      rowIds.forEach((rowId) => {
+        nextMix[rowId] = { ...(nextMix[rowId] || {}), backgroundMusicVolumePct: backgroundPct };
+      });
+      return { ...cfg, timelineSceneAudioMixByRowId: nextMix };
+    }, { persist: false, markDirty: false, autosave: false });
+    // Immediately apply to live playback
+    const speed = Math.max(0.5, Math.min(1.8, Number(els.podcastVideoSpeedSelect?.value || 1)));
+    playbackController.syncBackgroundMusic(Math.max(0, Number(podcastVideoState.montageCursorMs || 0)), speed);
+  } catch (_) { }
+}
+
 function setScriptSetupOpen(isOpen) {
   scriptSetupOpen = !!isOpen;
   if (els.scriptSetupModal) {
@@ -17625,14 +17647,17 @@ function attachEvents() {
   if (els.montageSceneBackgroundVolumeRange) {
     els.montageSceneBackgroundVolumeRange.addEventListener("input", () => {
       syncMontageSceneMixModalInputs("backgroundRange");
+      previewBackgroundMusicVolume(Number(els.montageSceneBackgroundVolumeRange.value) || 0);
     });
   }
   if (els.montageSceneBackgroundVolumeNumber) {
     els.montageSceneBackgroundVolumeNumber.addEventListener("input", () => {
       syncMontageSceneMixModalInputs("backgroundNumber");
+      previewBackgroundMusicVolume(Number(els.montageSceneBackgroundVolumeNumber.value) || 0);
     });
     els.montageSceneBackgroundVolumeNumber.addEventListener("change", () => {
       syncMontageSceneMixModalInputs("backgroundNumber");
+      previewBackgroundMusicVolume(Number(els.montageSceneBackgroundVolumeNumber.value) || 0);
     });
   }
   if (els.closeTimelineClipDurationBtn) {
