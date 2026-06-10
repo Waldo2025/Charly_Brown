@@ -88,6 +88,13 @@
         ]
       }
     ],
+    "redirects": [
+      {
+        "source": "/api/:path*",
+        "destination": "https://charly-brown-gemini-backend.onrender.com/api/:path*",
+        "type": 302
+      }
+    ],
     "rewrites": [
       {
         "source": "/",
