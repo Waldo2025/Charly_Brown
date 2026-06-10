@@ -584,7 +584,7 @@ function setupEventListeners() {
                     logSceneReplacement("stage-sync:start", currentEditingRowId, {
                         activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
                     });
-                    window.syncPodcastVideoStageMedia(currentEditingRowId, { force: true });
+                    window.syncPodcastVideoStageMedia(session || getActivePodcasterSession(), currentEditingRowId, { force: true });
                     logSceneReplacement("stage-sync:done", currentEditingRowId, {
                         activeRowId: String(window.PodcasterState?.activeRowId || '').trim()
                     });

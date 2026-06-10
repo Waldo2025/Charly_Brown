@@ -673,6 +673,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       if (options.syncStageAfterGenerate !== false) {
         setPodcastVideoRow(key, {
           syncStage: true,
+          force: true,
           preserveMontageCursor: true,
           lightweightUi: true,
           reason: "generation-complete"

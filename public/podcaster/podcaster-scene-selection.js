@@ -55,7 +55,7 @@ export function createPodcasterSceneSelectionApi(deps = {}) {
       syncPodcastTimelinePlayhead(session);
     }
     if (options.syncStage !== false) {
-      syncPodcastVideoStageMedia(session, key);
+      syncPodcastVideoStageMedia(session, key, options);
     }
     syncPodcastOnScreenTextOverlay(session, {
       rowId: key,

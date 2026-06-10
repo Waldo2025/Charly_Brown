@@ -3103,7 +3103,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       setPortrait?.(false);
       const currentSrc = String(stageVideo.dataset.src || "").trim();
-      if (currentSrc !== src) {
+      if (opts.force || currentSrc !== src) {
         const cachedObjectUrl = this.getBlobUrlSync(src);
         const preferredSource = cachedObjectUrl || src;
         this.assignStageVideoElementSource(stageVideo, preferredSource, {

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.76",
-  "build": "2026-1.0.10.76",
+  "version": "1.0.10.77",
+  "build": "2026-1.0.10.77",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Al generar un video de escena o reemplazarlo desde storage, el nuevo video ahora se carga y renderiza inmediatamente en el escenario de video de la escena sin necesidad de reiniciar el sitio. Se propagan las opciones de force y se obliga al elemento de video del DOM a recargar su origen.",
     "Corregido: El slider de tamaño de fuente del texto en pantalla ahora se aplica a TODAS las escenas, no solo a la escena activa. Se recalcula la altura del layout de cada escena al cambiar fontSizePx y se fuerza el re-render global del timeline.",
     "Corregido: CORS — se agregan allowedHeaders (Range, Content-Type) y exposedHeaders (Content-Range, Accept-Ranges) para que el streaming de video con cabeceras Range pase el preflight del navegador.",
     "Corregido: El slider de volumen de música de fondo en el modal de mezcla ahora actualiza el audio en vivo inmediatamente al deslizar, sin necesidad de presionar Aplicar.",
@@ -11,6 +12,7 @@
     "Corregido: Generación de escenas Veo desde timeline vuelve a activar spinner y trazas de diagnóstico dedicadas.",
     "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta."
   ],
-  "cache_version": "2026-1.0.10.76"
+  "cache_version": "2026-1.0.10.77"
 }
+
 
