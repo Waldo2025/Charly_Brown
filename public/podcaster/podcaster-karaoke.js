@@ -99,9 +99,10 @@ export function normalizeKaraokeWordTimings(audioClip = null, subtitleText = "")
   }));
 }
 
-export function resolveActiveKaraokeWordIndex(wordTimings = [], currentMs = 0, clipStartMs = 0) {
+export function resolveActiveKaraokeWordIndex(wordTimings = [], currentMs = 0, clipStartMs = 0, clipPlaybackRate = 1) {
   const safeWordTimings = Array.isArray(wordTimings) ? wordTimings : [];
-  const localMs = Math.max(0, Math.round(Number(currentMs || 0) - Number(clipStartMs || 0)));
+  const rate = Number(clipPlaybackRate || 1);
+  const localMs = Math.max(0, Math.round((Number(currentMs || 0) - Number(clipStartMs || 0)) * rate));
   const active = safeWordTimings.find((item) => localMs >= Number(item?.startMs || 0) && localMs < Number(item?.endMs || 0));
   return active ? Number(active.tokenIndex || 0) : -1;
 }

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.82",
-  "build": "2026-1.0.10.82",
+  "version": "1.0.10.83",
+  "build": "2026-1.0.10.83",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El karaoke de texto en pantalla ahora se acelera o desacelera en sincronía con el cambio de velocidad (playbackRate) del audio Gemini al multiplicar el tiempo transcurrido local en la resolución de la palabra activa.",
     "Corregido: Forzada visibilidad de texto y canciones en el modal musicConfigModal (mc-panel) al redefinir variables globales del pod (--pod-text, --pod-muted, --pod-border, etc.) con valores claros/blancos en el bloque del panel y configurando color-scheme: dark para los controles nativos del navegador. También se adaptaron los estilos de .music-track-info para estados de carga/vacío.",
     "Rediseñado: Modal musicConfigModal con nuevo layout compacto tipo estudio (mc-panel). Incluye header con ícono, fila de controles inline (preset + volumen con display numérico), separadores de sección con acciones rápidas, listas de tracks reutilizables, bloque de IA con textarea y botón inline, y toolbar inferior con reproducción/detener/limpiar.",
     "Modificado: Se aumenta el z-index de .podcast-stage-fullscreen-btn a 63 en podcaster.css y home.css.",

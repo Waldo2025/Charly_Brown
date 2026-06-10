@@ -63,6 +63,23 @@ test("karaoke helper resolves the active word for current playback time", () => 
   assert.equal(resolveActiveKaraokeWordIndex(wordTimings, 600), -1);
 });
 
+test("karaoke helper scales active word timing using clipPlaybackRate", () => {
+  const wordTimings = normalizeKaraokeWordTimings({
+    wordTimings: [
+      { text: "Hola", startMs: 0, endMs: 200 },
+      { text: "mundo", startMs: 200, endMs: 400 }
+    ]
+  }, "Hola mundo");
+
+  // A velocidad 2.0x, a los 110ms de tiempo transcurrido en el timeline,
+  // el tiempo de reproducción escalado de la voz es 110 * 2.0 = 220ms, por lo tanto apunta a la palabra "mundo" (index 1)
+  assert.equal(resolveActiveKaraokeWordIndex(wordTimings, 110, 0, 2.0), 1);
+
+  // A velocidad 0.5x, a los 300ms de tiempo transcurrido,
+  // el tiempo de reproducción escalado es 300 * 0.5 = 150ms, apunta a "Hola" (index 0)
+  assert.equal(resolveActiveKaraokeWordIndex(wordTimings, 300, 0, 0.5), 0);
+});
+
 test("buildKaraokeSubtitleMarkup wraps each word and marks the active token", () => {
   const html = buildKaraokeSubtitleMarkup("Hola mundo", [
     { text: "Hola", startMs: 0, endMs: 180, tokenIndex: 0 },

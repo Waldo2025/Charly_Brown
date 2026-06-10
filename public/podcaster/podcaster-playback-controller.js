@@ -2425,12 +2425,13 @@ export class PodcasterPlaybackController extends EventEmitter {
       : "");
 
     const audioClip = this.deps?.resolveDialogueAudioForRow?.(session, selected.rowId) || null;
+    const clipPlaybackRate = this.deps?.resolveDialogueAudioPlaybackRate?.(session, selected.rowId) || 1;
     const karaokeWordTimings = normalizeKaraokeWordTimings(audioClip, text);
     const selectedStartMs = Math.max(0, Number(selected?.startMs || 0) || 0);
     const karaokeClipStartMs = editorPreviewMode && shouldShowPreferredRow && Number(currentMs || 0) < selectedStartMs
       ? 0
       : selectedStartMs;
-    const activeKaraokeWordIndex = resolveActiveKaraokeWordIndex(karaokeWordTimings, currentMs, karaokeClipStartMs);
+    const activeKaraokeWordIndex = resolveActiveKaraokeWordIndex(karaokeWordTimings, currentMs, karaokeClipStartMs, clipPlaybackRate);
     const contentHtml = karaokeWordTimings.length
       ? buildKaraokeSubtitleMarkup(text, karaokeWordTimings, activeKaraokeWordIndex)
       : this.deps.escapeHtml(text);
