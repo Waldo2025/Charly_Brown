@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.78",
-  "build": "2026-1.0.10.78",
+  "version": "1.0.10.80",
+  "build": "2026-1.0.10.80",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Rediseñado: Modal musicConfigModal con nuevo layout compacto tipo estudio (mc-panel). Incluye header con ícono, fila de controles inline (preset + volumen con display numérico), separadores de sección con acciones rápidas, listas de tracks reutilizables, bloque de IA con textarea y botón inline, y toolbar inferior con reproducción/detener/limpiar.",
     "Modificado: Se aumenta el z-index de .podcast-stage-fullscreen-btn a 63 en podcaster.css y home.css.",
     "Corregido: Al generar un video de escena o reemplazarlo desde storage, el nuevo video ahora se carga y renderiza inmediatamente en el escenario de video de la escena sin necesidad de reiniciar el sitio. Se propagan las opciones de force y se obliga al elemento de video del DOM a recargar su origen.",
     "Corregido: El slider de tamaño de fuente del texto en pantalla ahora se aplica a TODAS las escenas, no solo a la escena activa. Se recalcula la altura del layout de cada escena al cambiar fontSizePx y se fuerza el re-render global del timeline.",
@@ -13,7 +14,7 @@
     "Corregido: Generación de escenas Veo desde timeline vuelve a activar spinner y trazas de diagnóstico dedicadas.",
     "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta."
   ],
-  "cache_version": "2026-1.0.10.78"
+  "cache_version": "2026-1.0.10.79"
 }
 
 

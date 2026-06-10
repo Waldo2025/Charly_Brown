@@ -15975,6 +15975,9 @@ function attachEvents() {
   if (els.panelMusicVolume) {
     els.panelMusicVolume.addEventListener("input", async () => {
       panelMusicState.volume = Math.max(0, Math.min(100, Number(els.panelMusicVolume.value || 0)));
+      // sync display label for new compact UI
+      const displayEl = document.getElementById("panelMusicVolumeDisplay");
+      if (displayEl) displayEl.textContent = String(panelMusicState.volume);
       persistPanelMusicSettings();
       persistPanelMusicToActiveSession();
       if (panelMusicState.playing) {

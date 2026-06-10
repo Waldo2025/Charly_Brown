@@ -1620,6 +1620,8 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     const els = getEls();
     if (els.panelMusicPreset) els.panelMusicPreset.value = panelMusicState.preset;
     if (els.panelMusicVolume) els.panelMusicVolume.value = String(panelMusicState.volume);
+    const _volDisplay = document.getElementById("panelMusicVolumeDisplay");
+    if (_volDisplay) _volDisplay.textContent = String(panelMusicState.volume);
     if (els.panelMusicTrackInfo) {
       const uploadedTracks = getPanelMusicUploadedTracks();
       const track = getPanelMusicTrackAvailability(panelMusicState.selectedTrackKind) || normalizePanelMusicTrack(panelMusicState.track);
@@ -1627,11 +1629,12 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         const origin = panelMusicState.selectedTrackKind === "ai"
           ? "IA"
           : (track.storagePath ? "Firebase" : track.localDataUrl ? "Local" : "Sin origen");
-        els.panelMusicTrackInfo.textContent = panelMusicState.selectedTrackKind === "uploaded" && uploadedTracks.length > 1
+        const label = panelMusicState.selectedTrackKind === "uploaded" && uploadedTracks.length > 1
           ? `${uploadedTracks.length} audios cargados · ${origin}`
           : `${track.slotLabel || track.name || "Audio"} · ${origin}`;
+        els.panelMusicTrackInfo.innerHTML = `<i class="fas fa-compact-disc mc-track-info-icon"></i><span>${label}</span>`;
       } else {
-        els.panelMusicTrackInfo.textContent = "Sin canción seleccionada. Se usará preset.";
+        els.panelMusicTrackInfo.innerHTML = `<i class="fas fa-compact-disc mc-track-info-icon"></i><span>Sin canción seleccionada</span>`;
       }
     }
     if (els.panelMusicTrackList) {
