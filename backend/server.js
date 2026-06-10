@@ -84,6 +84,20 @@ try {
   throw new Error("Missing dependency: @google/genai. Run npm install at the repo root.");
 }
 
+async function safePipeline(stream, destination) {
+  try {
+    await pipeline(stream, destination);
+  } catch (error) {
+    if (destination.headersSent) {
+      console.info("[backend] stream pipeline closed after headers sent:", error?.message);
+      if (!destination.writableEnded) {
+        destination.end();
+      }
+      return;
+    }
+    throw error;
+  }
+}
 
 function resolveFfmpegBinaryPath() {
   let staticPath = "";
@@ -379,14 +393,14 @@ async function streamStorageFileToResponse(file, res, options = {}) {
     res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${total}`);
     res.setHeader("Content-Length", String(length));
     const stream = targetFile.createReadStream({ start: range.start, end: range.end });
-    await pipeline(stream, res.status(206));
+    await safePipeline(stream, res.status(206));
     return;
   }
   if (total > 0) {
     res.setHeader("Content-Length", String(total));
   }
   const stream = targetFile.createReadStream();
-  await pipeline(stream, res.status(200));
+  await safePipeline(stream, res.status(200));
 }
 
 function resolveFfmpegDrawtextFontFile() {
@@ -11895,7 +11909,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
             stream.destroy();
           }
         });
-        await pipeline(stream, res.status(payload.status || 200));
+        await safePipeline(stream, res.status(payload.status || 200));
         return;
       } catch (error) {
         const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
@@ -12017,7 +12031,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
                     stream.destroy();
                   }
                 });
-                await pipeline(stream, res.status(payload.status || 200));
+                await safePipeline(stream, res.status(payload.status || 200));
                 return;
               } catch (error) {
                 lastError = error;
@@ -12066,7 +12080,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     if (contentRange) res.setHeader("Content-Range", contentRange);
     if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
     if (cacheControl) res.setHeader("Cache-Control", cacheControl);
-    await pipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
+    await safePipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
     return;
   } catch (error) {
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
