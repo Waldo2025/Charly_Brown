@@ -40,9 +40,25 @@ export function createPodcasterOnScreenTextTrackEditorApi(deps = {}) {
       syncWidthAcrossLayouts(session);
       session = getActiveSession();
     }
+    // When font size changes, recalculate the height of ALL scene layouts so the
+    // bubble fits the new font size across every scene, not just the active one.
+    if (key === "fontSizePx") {
+      const cfg = getPodcastVideoConfig(session);
+      const currentSettings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
+      syncAnchorAcrossLayouts(session, {
+        overlayXPct: Number(currentSettings.overlayXPct || 0.5),
+        overlayYPct: Number(currentSettings.overlayYPct || 0.86),
+        widthPct: Math.max(0.22, Math.min(0.92, Number(currentSettings.boxWidthPct || 0.58))),
+        recomputeHeight: true
+      });
+      session = getActiveSession();
+    }
     if (options?.renderShell === true) {
       renderPodcastVideoShell(session);
     }
+    // Re-render the full timeline so ALL scenes update with the new shared setting
+    renderPodcastVideoTimeline(session, { force: true, reason: "onscreen-text-track-setting" });
+    session = getActiveSession();
     syncPodcastOnScreenTextOverlay(session, {
       rowId: String(podcastVideoState.activeRowId || "").trim(),
       currentMs: Number(podcastVideoState.montageCursorMs || 0),
@@ -55,6 +71,8 @@ export function createPodcasterOnScreenTextTrackEditorApi(deps = {}) {
       scheduleSessionLocalPersist("inspector");
     }
   }
+
+
 
   function syncAnchorAcrossLayouts(session = null, options = {}) {
     const activeSession = session || getActiveSession();

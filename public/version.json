@@ -1,18 +1,16 @@
 {
-  "version": "1.0.10.75",
-  "build": "2026-1.0.10.75",
+  "version": "1.0.10.76",
+  "build": "2026-1.0.10.76",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El slider de tamaño de fuente del texto en pantalla ahora se aplica a TODAS las escenas, no solo a la escena activa. Se recalcula la altura del layout de cada escena al cambiar fontSizePx y se fuerza el re-render global del timeline.",
     "Corregido: CORS — se agregan allowedHeaders (Range, Content-Type) y exposedHeaders (Content-Range, Accept-Ranges) para que el streaming de video con cabeceras Range pase el preflight del navegador.",
     "Corregido: El slider de volumen de música de fondo en el modal de mezcla ahora actualiza el audio en vivo inmediatamente al deslizar, sin necesidad de presionar Aplicar.",
     "Corregido: Ducking — hasVoice ahora se determina por la presencia de segmentos activos de diálogo Gemini (no por la carga del blob), eliminando el flutter de volumen entre palabras.",
     "Mejorado: La transición de ducking de fondo ahora usa una constante de suavizado de 150ms para evitar saltos abruptos de volumen al inicio/fin de segmentos Gemini.",
-    "Corregido: Gracefully handle premature stream closures in backend/server.js to prevent ERR_HTTP_HEADERS_SENT crashes.",
     "Corregido: Generación de escenas Veo desde timeline vuelve a activar spinner y trazas de diagnóstico dedicadas.",
-    "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta.",
-    "Corregido: El backend deja de enviar compressionQuality a Veo 3.1 en Gemini API.",
-    "Mejorado: La configuración global de Podcaster ahora lista y persiste todos los modelos Veo disponibles."
+    "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta."
   ],
-  "cache_version": "2026-1.0.10.75"
+  "cache_version": "2026-1.0.10.76"
 }
 
