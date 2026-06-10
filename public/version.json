@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.81",
-  "build": "2026-1.0.10.81",
+  "version": "1.0.10.82",
+  "build": "2026-1.0.10.82",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Forzada visibilidad de texto y canciones en el modal musicConfigModal (mc-panel) al redefinir variables globales del pod (--pod-text, --pod-muted, --pod-border, etc.) con valores claros/blancos en el bloque del panel y configurando color-scheme: dark para los controles nativos del navegador. También se adaptaron los estilos de .music-track-info para estados de carga/vacío.",
     "Rediseñado: Modal musicConfigModal con nuevo layout compacto tipo estudio (mc-panel). Incluye header con ícono, fila de controles inline (preset + volumen con display numérico), separadores de sección con acciones rápidas, listas de tracks reutilizables, bloque de IA con textarea y botón inline, y toolbar inferior con reproducción/detener/limpiar.",
     "Modificado: Se aumenta el z-index de .podcast-stage-fullscreen-btn a 63 en podcaster.css y home.css.",
     "Corregido: Al generar un video de escena o reemplazarlo desde storage, el nuevo video ahora se carga y renderiza inmediatamente en el escenario de video de la escena sin necesidad de reiniciar el sitio. Se propagan las opciones de force y se obliga al elemento de video del DOM a recargar su origen.",

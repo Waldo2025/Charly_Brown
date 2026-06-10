@@ -8705,6 +8705,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   --mc-accent: var(--pod-accent, #6c63ff);
   --mc-radius: 14px;
 
+  /* Forzar variables de pod a colores claros/oscuros adaptados a este panel oscuro */
+  --pod-text: #ffffff !important;
+  --pod-muted: rgba(255,255,255,0.65) !important;
+  --pod-border: rgba(255,255,255,0.12) !important;
+  --pod-surface: rgba(255,255,255,0.05) !important;
+  --pod-surface-2: rgba(255,255,255,0.08) !important;
+
+  color-scheme: dark;
+  color: #ffffff;
+
   position: relative;
   z-index: 1;
   width: min(560px, calc(100vw - 24px));
@@ -8968,6 +8978,13 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 .mc-track-list .panel-music-track-item .row-icon-btn:hover {
   color: #ffffff !important;
   background: rgba(255,255,255,0.10) !important;
+}
+
+/* TRACK INFO / EMPTY STATES */
+.mc-panel .music-track-info {
+  border: 1px dashed rgba(255, 255, 255, 0.20) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
 }
 
 /* TRACK INFO */
