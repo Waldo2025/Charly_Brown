@@ -2,17 +2,30 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <script src="js/runtime-config-loader.js" defer></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Creador de Escape Rooms Educativos - CharlyBrown</title>
+    <title>PigPen Escape Room Creator</title>
+    <link rel="icon" type="image/png" href="pigpen.png">
     <link rel="stylesheet" href="local-fonts.css">
     <link rel="stylesheet" href="tailwind-lite.css?v=1.0.0">
     <link rel="stylesheet" href="sidebar.css?v=2026-1.0.1.36">
     <link rel="stylesheet" href="header.css?v=2026-1.0.1.36">
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="vendor/fontawesome/all.min.css">
-    <link rel="stylesheet" href="escapeRoomCreator.css?v=2.0.1">
+    <link rel="stylesheet" href="PigPenCreator.css?v=2.0.1">
 </head>
-<body data-page="escapeRoomCreator.html" class="cb-main-layout er-shell">
+<body data-page="PigPenCreator.html" class="cb-main-layout er-shell">
+    <div id="pigpenBootSpinner" class="pigpen-boot-spinner" aria-live="polite" aria-label="Cargando PigPen Escape Room Creator">
+        <div class="pigpen-boot-spinner-card">
+            <img src="pigpen.png" alt="PigPen Logo" class="pigpen-loading-logo">
+            <strong>PigPen Escape Room Creator</strong>
+            <div class="pigpen-loading-dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </div>
     <div id="updateBanner" class="update-banner" role="button" tabindex="0" aria-live="polite">
         Nuevas Actualizaciones
     </div>
@@ -59,7 +72,7 @@
                         <section class="er-card er-summary-card">
                             <div class="er-summary-main">
                                 <div class="er-summary-copy">
-                                    <h1>Escape Room Editor</h1>
+                                    <h1>PigPen EscapeRoom Creator</h1>
                                 </div>
                                 <div class="er-summary-actions">
                                     <button type="button" id="btnAddMission" class="er-button er-button-ghost">
@@ -76,6 +89,10 @@
                                     <button type="button" id="btnExportar" class="er-button er-button-primary" disabled>
                                         <i class="fas fa-file-zipper"></i>
                                         <span>Exportar</span>
+                                    </button>
+                                    <button type="button" id="btnPublicar" class="er-button er-button-publish" disabled>
+                                        <i class="fas fa-globe"></i>
+                                        <span>Publicar</span>
                                     </button>
                                 </div>
                             </div>
@@ -97,11 +114,15 @@
 
                         <div class="collapse show" id="briefCollapse">
                             <form id="escapeRoomForm" class="er-card er-form-card">
-                                <div class="er-card-header er-form-header-compact">
+                                <div class="er-card-header er-form-header-compact" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                     <div>
                                         <div class="er-card-kicker">Brief</div>
                                         <h2>Configuración base</h2>
                                     </div>
+                                    <button type="button" id="btnSugerirObjetivo" class="er-button er-button-ghost er-button-compact">
+                                        <i class="fas fa-wand-magic-sparkles"></i>
+                                        <span>Sugerir objetivo</span>
+                                    </button>
                                 </div>
 
                                 <div class="er-form-compact-grid">
@@ -144,15 +165,84 @@
                                         <input type="number" id="duracionInput" min="10" max="120" step="5" value="35">
                                     </label>
                                     <label class="er-field">
+                                        <span>Estilo visual de imágenes</span>
+                                        <select id="estiloImagenSelect">
+                                            <optgroup label="Ilustración">
+                                                <option value="Ilustración editorial en acuarela con colores vibrantes, trazos suaves y atmósfera cálida." selected>🎨 Acuarela editorial</option>
+                                                <option value="Ilustración de libro infantil colorida, personajes redondeados y simpáticos, líneas limpias y expresivas.">📚 Libro ilustrado infantil</option>
+                                                <option value="Ilustración vectorial flat design, paleta de colores armónica, geometría simple y moderna.">🔷 Flat design vectorial</option>
+                                                <option value="Ilustración estilo cómic con líneas negras marcadas, colores vivos y perspectiva dinámica.">💥 Cómic y manga</option>
+                                                <option value="Ilustración tipo gouache o tempera con texturas ricas, colores saturados y estilo artesanal.">🖌️ Gouache artesanal</option>
+                                            </optgroup>
+                                            <optgroup label="Realista y Fotográfico">
+                                                <option value="Fotografía de alta resolución, iluminación natural, composición cinematográfica y colores realistas.">📷 Fotorrealista</option>
+                                                <option value="Arte realista detallado, pintado digitalmente con técnica académica y proporciones naturales.">🖼️ Realismo digital</option>
+                                                <option value="Fotografía vintage con grano de película, colores desaturados, estética retro años 70-80.">🎞️ Vintage / Retro</option>
+                                            </optgroup>
+                                            <optgroup label="Ambientación especial">
+                                                <option value="Estilo fantasía épica medieval, paisajes dramáticos, castillos, dragones y luz mística.">⚔️ Fantasía medieval épica</option>
+                                                <option value="Estilo ciencia ficción futurista con neón, tecnología avanzada, ciudades estelares y brillo metálico.">🚀 Ciencia ficción futurista</option>
+                                                <option value="Estilo aventura arqueológica, mapas antiguos, junglas, ruinas mayas o aztecas, luz tropical.">🏛️ Aventura arqueológica</option>
+                                                <option value="Estilo western americano, praderas, pueblos del desierto, sepia y polvo dorado.">🤠 Western</option>
+                                                <option value="Estilo horror gótico, atmósfera oscura, brumas, castillos en ruinas y luz tenue misteriosa.">🕸️ Horror gótico</option>
+                                                <option value="Estilo naturaleza y biología, ilustración científica detallada con flora, fauna y mapas geográficos.">🌿 Naturaleza científica</option>
+                                                <option value="Estilo submundo marino, arrecifes de coral, criaturas bioluminiscentes, fondos oceánicos profundos.">🐙 Océano y biología marina</option>
+                                                <option value="Estilo espacio exterior, nebulosas, planetas, astronautas y galaxias con colores profundos.">🌌 Espacio exterior</option>
+                                            </optgroup>
+                                            <optgroup label="Artístico y Especial">
+                                                <option value="Arte estilo Studio Ghibli, fondos detallados, personajes expresivos, naturaleza majestuosa y paleta pastel.">🌸 Studio Ghibli</option>
+                                                <option value="Arte pixel art retro estilo videojuego 16-bit, colores limitados y cuadrícula visible.">👾 Pixel art retro</option>
+                                                <option value="Arte isométrico 3D con perspectiva 45°, colores brillantes y escenarios miniatura detallados.">📐 Isométrico 3D</option>
+                                                <option value="Estilo pintura al óleo clásica con técnica renacentista, fondos ricos y realismo dramático.">🏺 Pintura al óleo clásica</option>
+                                                <option value="Arte estilo mural mexicano inspirado en Diego Rivera: figuras monumentales, colores tierra y simbología cultural.">🇲🇽 Mural mexicano</option>
+                                            </optgroup>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
                                         <span>Narrativa</span>
                                         <select id="narrativaSelect">
-                                            <option value="Misterio y detectives (Investigación)">Misterio y detectives</option>
-                                            <option value="Aventura espacial (Ciencia ficción)">Aventura espacial</option>
-                                            <option value="Exploración de ruinas antiguas (Aventura histórica)">Ruinas antiguas</option>
-                                            <option value="Laboratorio secreto (Ciencia y experimentos)">Laboratorio secreto</option>
-                                            <option value="Fantasía mágica (Magia y hechizos)">Fantasía mágica</option>
-                                            <option value="Viaje en el tiempo (Aventura temporal)">Viaje en el tiempo</option>
-                                            <option value="otro">Otro</option>
+                                            <optgroup label="General / Clásicas">
+                                                <option value="Misterio y detectives (Investigación)" selected>Misterio y detectives</option>
+                                                <option value="Aventura espacial (Ciencia ficción)">Aventura espacial</option>
+                                                <option value="Fantasía mágica (Magia y hechizos)">Fantasía mágica</option>
+                                                <option value="Viaje en el tiempo (Aventura temporal)">Viaje en el tiempo</option>
+                                            </optgroup>
+                                            <optgroup label="Geografía">
+                                                <option value="Exploración de ruinas antiguas (Aventura al estilo de exploradores y arqueólogos)">Exploración arqueológica y mapas antiguos</option>
+                                                <option value="Expedición geográfica mundial (Descubrimiento y cartografía de biomas)">Expedición geográfica mundial</option>
+                                            </optgroup>
+                                            <optgroup label="Matemáticas">
+                                                <option value="Enigma lógico y acertijos numéricos (Desafíos de cálculo y patrones)">Retos lógicos y matemáticos</option>
+                                                <option value="La gran olimpiada de los números (Competencia de lógica matemática)">Olimpiada matemática</option>
+                                            </optgroup>
+                                            <optgroup label="Español / Lengua">
+                                                <option value="El laberinto de las palabras perdidas (Ortografía y gramática en acción)">Laberinto de palabras y ortografía</option>
+                                                <option value="Rescate en la biblioteca clásica (Narrativa literaria y comprensión)">Rescate en la biblioteca literaria</option>
+                                            </optgroup>
+                                            <optgroup label="Historia de México">
+                                                <option value="Archivos secretos y sucesos clave de la historia nacional (Historia de México)">Hitos, documentos y personajes históricos nacionales</option>
+                                                <option value="Viaje al encuentro de culturas prehispánicas y civilizaciones antiguas (Historia prehispánica de México)">Civilizaciones prehispánicas y culturas originarias</option>
+                                            </optgroup>
+                                            <optgroup label="Historia del Mundo">
+                                                <option value="El diario de grandes inventores y descubrimientos científicos (Historia del Mundo)">Grandes inventores y científicos del pasado</option>
+                                                <option value="Exploración de imperios y civilizaciones del mundo antiguo (Historia del Mundo)">Grandes imperios y culturas de la antigüedad</option>
+                                            </optgroup>
+                                            <optgroup label="Física y Química">
+                                                <option value="La paradoja cuántica (Física, energía y reactores nucleares)">La paradoja cuántica (Física)</option>
+                                                <option value="La fórmula secreta del laboratorio (Química y reacciones químicas)">La fórmula secreta del laboratorio (Química)</option>
+                                                <option value="Laboratorio secreto (Ciencia y experimentos)">Laboratorio secreto (Ciencia)</option>
+                                            </optgroup>
+                                            <optgroup label="Inglés">
+                                                <option value="Aventura de misterio e investigación en una ciudad anglófona (Inglés)">Misterio en ciudades globales (Inglés)</option>
+                                                <option value="Misiones de rescate cultural y lingüístico en el mundo angloparlante (Inglés)">Misión de rescate lingüístico (Inglés)</option>
+                                            </optgroup>
+                                            <optgroup label="Cívica y Ética">
+                                                <option value="El foro de la justicia y derechos humanos (Cívica y valores éticos)">Foro de la justicia y derechos humanos</option>
+                                                <option value="La cumbre de la paz y mediación de conflictos (Ética y valores cívicos)">Cumbre de la paz y mediación</option>
+                                            </optgroup>
+                                            <optgroup label="Personalizado">
+                                                <option value="otro">Otro</option>
+                                            </optgroup>
                                         </select>
                                     </label>
                                     <label class="er-field er-field-wide hidden" id="narrativaCustomField">
@@ -247,6 +337,17 @@
                             </div>
 
                             <section id="escapeRoomPreviewPanel" class="er-preview-frame-wrap hidden">
+                                <div id="erPreviewSpinner" class="er-preview-spinner hidden" aria-live="polite" aria-label="Creando Escape Room e imágenes">
+                                    <div class="er-preview-spinner-card">
+                                        <img src="pigpen.png" alt="PigPen Logo" class="pigpen-loading-logo">
+                                        <strong>Creando escape room e imágenes...</strong>
+                                        <div class="pigpen-loading-dots" aria-hidden="true">
+                                            <span></span>
+                                            <span></span>
+                                            <span></span>
+                                        </div>
+                                    </div>
+                                </div>
                                 <iframe id="escapeRoomPreviewFrame" title="Vista previa del escape room" class="er-preview-frame"></iframe>
                             </section>
 
@@ -262,7 +363,7 @@
         </div>
     </div>
 
-    <div class="modal fade" id="modelConfigModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="modelConfigModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content er-modal-content">
                 <div class="modal-header">
@@ -320,7 +421,7 @@
         </div>
     </div>
 
-    <div class="modal fade" id="previewThemeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="previewThemeModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
             <div class="modal-content er-modal-content">
                 <div class="modal-header">
@@ -369,7 +470,7 @@
     <script src="js/html-docx.js"></script>
     <script type="module" src="js/chromeLayout.js?v=2026-1.0.0.71"></script>
     <script type="module" src="js/sidebar.js?v=2026-1.0.0.59"></script>
-    <script type="module" src="js/escapeRoomCreator.js"></script>
+    <script type="module" src="js/PigPenCreator.js"></script>
     <script src="js/update-banner-loader.js" defer></script>
 </body>
 </html>

@@ -12,6 +12,12 @@ import {
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadString,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import { authFetchJson } from "./api-client.js";
@@ -49,11 +55,11 @@ const ALLOWED_TEXT_MODELS = new Set([
   "gemini-3-pro-preview",
   "gemini-flash-latest"
 ]);
-const FORM_STORAGE_KEY = "escapeRoomCreator.formState.v2";
-const PROJECT_STORAGE_KEY = "escapeRoomCreator.projectState.v1";
-const ACTIVE_SESSION_STORAGE_KEY = "escapeRoomCreator.activeSessionId.v1";
-const THEME_STORAGE_KEY = "escapeRoomCreator.theme.v1";
-const PREVIEW_THEME_STORAGE_KEY = "escapeRoomCreator.previewTheme.v1";
+const FORM_STORAGE_KEY = "PigPenCreator.formState.v2";
+const PROJECT_STORAGE_KEY = "PigPenCreator.projectState.v1";
+const ACTIVE_SESSION_STORAGE_KEY = "PigPenCreator.activeSessionId.v1";
+const THEME_STORAGE_KEY = "PigPenCreator.theme.v1";
+const PREVIEW_THEME_STORAGE_KEY = "PigPenCreator.previewTheme.v1";
 const ESCAPE_ROOM_COLLECTION = "escapeRoom";
 const SESSION_TITLE_DEFAULT = "Sesion sin titulo";
 const TEXT_SUBTYPES = ["palabra", "letra", "numero", "codigo_corto", "frase_corta"];
@@ -89,12 +95,15 @@ const elements = {
   btnGenerar: document.getElementById("btnGenerar"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
+  btnPublicar: document.getElementById("btnPublicar"),
   btnCopiarJson: document.getElementById("btnCopiarJson"),
+  btnSugerirObjetivo: document.getElementById("btnSugerirObjetivo"),
   btnAddMission: document.getElementById("btnAddMission"),
   loading: document.getElementById("loadingIndicator"),
   emptyState: document.getElementById("erEmptyState"),
   previewPanel: document.getElementById("escapeRoomPreviewPanel"),
   previewFrame: document.getElementById("escapeRoomPreviewFrame"),
+  previewSpinner: document.getElementById("erPreviewSpinner"),
   resultadoContainer: document.getElementById("resultadoContainer"),
   jsonPreview: document.getElementById("jsonPreview"),
   statusBanner: document.getElementById("erStatusBanner"),
@@ -104,6 +113,7 @@ const elements = {
   narrativaSelect: document.getElementById("narrativaSelect"),
   narrativaCustomField: document.getElementById("narrativaCustomField"),
   narrativaCustomInput: document.getElementById("narrativaCustomInput"),
+  estiloImagenSelect: document.getElementById("estiloImagenSelect"),
   missionCount: document.getElementById("erMissionCount"),
   unlockedCount: document.getElementById("erUnlockedCount"),
   typeSummary: document.getElementById("erTypeSummary"),
@@ -129,6 +139,8 @@ const state = {
   project: null,
   generationNote: "",
   activeTab: "preview",
+  isLoading: false,
+  isGenerating: false,
   formPersistenceSuspended: false,
   refreshHandle: null,
   sortable: null,
@@ -145,16 +157,29 @@ const state = {
   previewTheme: { ...PREVIEW_THEME_DEFAULT }
 };
 
+function hideBootSpinner() {
+  const spinner = document.getElementById("pigpenBootSpinner");
+  if (spinner) {
+    spinner.classList.add("is-hidden");
+  }
+}
+
 onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    state.currentUser = user;
-    setHeaderUserEmail(user.email || "");
-    await user.getIdToken();
-    await loadSessionsFromFirebase();
-  } else {
-    state.currentUser = null;
-    setHeaderUserEmail("");
-    window.location.href = "index.html";
+  try {
+    if (user) {
+      state.currentUser = user;
+      setHeaderUserEmail(user.email || "");
+      await user.getIdToken();
+      await loadSessionsFromFirebase();
+    } else {
+      state.currentUser = null;
+      setHeaderUserEmail("");
+      window.location.href = "index.html";
+    }
+  } catch (error) {
+    console.error("Error en cambio de estado de autenticación:", error);
+  } finally {
+    hideBootSpinner();
   }
 });
 
@@ -588,6 +613,7 @@ function renderSessionList() {
 async function loadSessionIntoEditor(session) {
   state.isHydratingFromRemote = true;
   try {
+    resetEditorState({ preserveForm: false });
     applyFormState(session.formState || {});
     state.project = session.project ? withDefaultRoutes(session.project) : null;
     restorePreviewTheme({ preferProject: true });
@@ -646,12 +672,79 @@ async function createRemoteSession({ title, project = null, formState = null, ac
   return docRef.id;
 }
 
+async function uploadImageIfDataUrl(value, path) {
+  if (!isDataUrl(value)) return value;
+  if (!state.currentUser?.uid) return value;
+  try {
+    const storageInstance = getStorage(app);
+    const refInstance = storageRef(storageInstance, path);
+    const mimeMatch = value.match(/^data:([^;]+);/);
+    const contentType = mimeMatch ? mimeMatch[1] : "image/png";
+    await uploadString(refInstance, value, "data_url", { contentType });
+    return await getDownloadURL(refInstance);
+  } catch (error) {
+    console.warn("No se pudo subir la imagen a Firebase Storage:", error);
+    return value;
+  }
+}
+
+async function uploadProjectImagesToFirebaseStorage(sessionId) {
+  if (!state.project || !state.currentUser?.uid || !sessionId) return;
+  const uid = state.currentUser.uid;
+  const project = state.project;
+
+  // 1. Cover Image
+  if (project.backgroundImage && isDataUrl(project.backgroundImage)) {
+    const downloadUrl = await uploadImageIfDataUrl(project.backgroundImage, `escaperooms/${uid}/${sessionId}/cover.png`);
+    if (downloadUrl) project.backgroundImage = downloadUrl;
+  }
+
+  // 2. Mission Images
+  if (Array.isArray(project.misiones)) {
+    for (const [index, mission] of project.misiones.entries()) {
+      if (mission.imagen && isDataUrl(mission.imagen)) {
+        const downloadUrl = await uploadImageIfDataUrl(mission.imagen, `escaperooms/${uid}/${sessionId}/mission_${index}_${Date.now()}.png`);
+        if (downloadUrl) {
+          mission.imagen = downloadUrl;
+          if (mission.media && mission.media.tipo === "imagen") {
+            mission.media.url = downloadUrl;
+          }
+        }
+      }
+      if (mission.media?.url && isDataUrl(mission.media.url)) {
+        const downloadUrl = await uploadImageIfDataUrl(mission.media.url, `escaperooms/${uid}/${sessionId}/mission_media_${index}_${Date.now()}.png`);
+        if (downloadUrl) mission.media.url = downloadUrl;
+      }
+
+      // 3. Question Images
+      if (Array.isArray(mission.preguntas)) {
+        for (const [questionIndex, question] of mission.preguntas.entries()) {
+          if (question.imagen && isDataUrl(question.imagen)) {
+            const downloadUrl = await uploadImageIfDataUrl(question.imagen, `escaperooms/${uid}/${sessionId}/question_${index}_${questionIndex}_${Date.now()}.png`);
+            if (downloadUrl) {
+              question.imagen = downloadUrl;
+              if (question.media && question.media.tipo === "imagen") {
+                question.media.url = downloadUrl;
+              }
+            }
+          }
+          if (question.media?.url && isDataUrl(question.media.url)) {
+            const downloadUrl = await uploadImageIfDataUrl(question.media.url, `escaperooms/${uid}/${sessionId}/question_media_${index}_${questionIndex}_${Date.now()}.png`);
+            if (downloadUrl) question.media.url = downloadUrl;
+          }
+        }
+      }
+    }
+  }
+}
+
 async function ensureActiveRemoteSession() {
   if (state.activeSessionId) return state.activeSessionId;
   if (!state.currentUser?.uid) return "";
+  const strippedProject = state.project ? stripHeavyAssetsFromProject(state.project) : null;
   const sessionId = await createRemoteSession({
     title: deriveSessionTitle(),
-    project: state.project ? materializeProjectForExport() : null,
+    project: strippedProject,
     formState: serializeFormState(),
     activate: true
   });
@@ -664,6 +757,10 @@ async function persistActiveSession() {
     setRemoteSaveState("saving");
     const sessionId = await ensureActiveRemoteSession();
     if (!sessionId) return;
+
+    // Subir imágenes pesadas a Storage y reemplazarlas en el estado local con URLs HTTPS
+    await uploadProjectImagesToFirebaseStorage(sessionId);
+
     const payload = buildSessionPayload({
       title: deriveSessionTitle(),
       project: state.project ? materializeProjectForExport() : null,
@@ -690,6 +787,63 @@ async function persistActiveSession() {
     console.error("No se pudo guardar la sesión activa:", error);
     setRemoteSaveState("error", "Error al guardar");
     setStatus("No se pudo guardar la sesión en Firebase.", "bad");
+  }
+}
+
+async function updateActiveSessionMetadata(payload = {}) {
+  const sessionId = await ensureActiveRemoteSession();
+  if (!sessionId) {
+    throw new Error("No hay sesión activa para sincronizar.");
+  }
+
+  await uploadProjectImagesToFirebaseStorage(sessionId);
+
+  const sessionPayload = buildSessionPayload({
+    title: deriveSessionTitle(),
+    status: payload.status || state.activeSessionMeta?.status || "draft",
+    project: state.project ? materializeProjectForExport() : null,
+    formState: serializeFormState()
+  });
+  await updateDoc(doc(db, ESCAPE_ROOM_COLLECTION, sessionId), {
+    ...sessionPayload,
+    updatedAt: serverTimestamp()
+  });
+
+  const nextTitle = sessionPayload.title || SESSION_TITLE_DEFAULT;
+  state.sessions = sortSessions(state.sessions.map((session) => (
+    session.id === sessionId
+      ? { ...session, ...sessionPayload, title: nextTitle, updatedAtMs: Date.now() }
+      : session
+  )));
+  state.activeSessionId = sessionId;
+  state.activeSessionMeta = {
+    id: sessionId,
+    title: nextTitle,
+    status: sessionPayload.status || "draft"
+  };
+  renderSessionList();
+  return sessionId;
+}
+
+async function publishActiveSession() {
+  if (!state.project) {
+    setStatus("Genera o carga un escape room antes de publicarlo.", "warning");
+    return;
+  }
+
+  try {
+    setRemoteSaveState("saving");
+    setLoading(true);
+    await updateActiveSessionMetadata({ status: "published" });
+    setRemoteSaveState("saved");
+    setStatus("Sesión publicada y sincronizada con Firebase.", "success");
+  } catch (error) {
+    console.error("No se pudo publicar la sesión:", error);
+    setRemoteSaveState("error", "Error al publicar");
+    setStatus("No fue posible publicar la sesión.", "bad");
+  } finally {
+    setLoading(false);
+    refreshPanels();
   }
 }
 
@@ -784,8 +938,16 @@ function parseTopicLines(value = "") {
 
 function saveFormState() {
   if (!elements.form || state.formPersistenceSuspended || !isLocalStorageAvailable()) return;
-  const formState = serializeFormState();
-  window.localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formState));
+  try {
+    const formState = serializeFormState();
+    window.localStorage.removeItem(FORM_STORAGE_KEY);
+    window.localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formState));
+  } catch (error) {
+    const isQuota = error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota");
+    if (!isQuota) {
+      console.warn("No se pudo guardar el estado del formulario:", error);
+    }
+  }
   scheduleSessionSave();
 }
 
@@ -895,6 +1057,7 @@ function saveProjectState() {
     const projectToStore = containsEmbeddedDataUrl(state.project)
       ? stripHeavyAssetsFromProject(state.project)
       : state.project;
+    window.localStorage.removeItem(PROJECT_STORAGE_KEY);
     window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(projectToStore));
     if (projectToStore !== state.project && !state.projectStorageNoticeShown) {
       state.projectStorageNoticeShown = true;
@@ -909,6 +1072,7 @@ function saveProjectState() {
 
     try {
       const lightweightProject = stripHeavyAssetsFromProject(state.project);
+      window.localStorage.removeItem(PROJECT_STORAGE_KEY);
       window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(lightweightProject));
       if (!state.projectStorageNoticeShown) {
         state.projectStorageNoticeShown = true;
@@ -916,7 +1080,10 @@ function saveProjectState() {
         setStatus("El proyecto se guardó sin imágenes embebidas para no superar el límite del navegador.", "warning");
       }
     } catch (lightweightError) {
-      console.warn("No se pudo guardar ni la versión ligera del proyecto:", lightweightError);
+      const isQuota = lightweightError?.name === "QuotaExceededError" || String(lightweightError?.message || "").toLowerCase().includes("quota");
+      if (!isQuota) {
+        console.warn("No se pudo guardar ni la versión ligera del proyecto:", lightweightError);
+      }
       setStatus("El proyecto excede la cuota de almacenamiento del navegador.", "bad");
     }
   }
@@ -956,12 +1123,32 @@ function setStatus(message = "", type = "info") {
   elements.statusBanner.textContent = message;
 }
 
+function isPublishedSession() {
+  return normalizeString(state.activeSessionMeta?.status, "draft") === "published";
+}
+
+function syncActionButtons() {
+  const hasData = Boolean(state.project);
+  const canPublish = Boolean(state.currentUser?.uid) && hasData && !state.isGenerating;
+
+  elements.btnGenerar.disabled = state.isLoading;
+  elements.btnLimpiar.disabled = state.isLoading;
+  elements.btnAddMission.disabled = state.isLoading;
+  elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating;
+  elements.btnCopiarJson.disabled = state.isLoading || !hasData || state.isGenerating;
+
+  if (elements.btnPublicar) {
+    elements.btnPublicar.disabled = state.isLoading || !canPublish;
+    elements.btnPublicar.classList.toggle("is-published", isPublishedSession());
+    elements.btnPublicar.innerHTML = isPublishedSession()
+      ? '<i class="fas fa-rotate"></i><span>Actualizar publicación</span>'
+      : '<i class="fas fa-globe"></i><span>Publicar</span>';
+  }
+}
+
 function setLoading(isLoading) {
-  elements.btnGenerar.disabled = isLoading;
-  elements.btnLimpiar.disabled = isLoading;
-  elements.btnAddMission.disabled = isLoading;
-  elements.btnExportar.disabled = isLoading || !state.project;
-  elements.btnCopiarJson.disabled = isLoading || !state.project;
+  state.isLoading = isLoading;
+  syncActionButtons();
   elements.loading.classList.toggle("hidden", !isLoading);
 }
 
@@ -977,12 +1164,16 @@ function setActiveTab(tabName = "preview") {
 
 function refreshPanels() {
   const hasData = Boolean(state.project);
-  elements.emptyState.classList.toggle("hidden", hasData);
-  elements.previewPanel.classList.toggle("hidden", !hasData || state.activeTab !== "preview");
+  const showPreview = (hasData || state.isGenerating) && state.activeTab === "preview";
+  elements.emptyState.classList.toggle("hidden", hasData || state.isGenerating);
+  elements.previewPanel.classList.toggle("hidden", !showPreview);
   elements.resultadoContainer.classList.toggle("hidden", !hasData || state.activeTab !== "json");
-  elements.btnExportar.disabled = !hasData;
-  elements.btnCopiarJson.disabled = !hasData;
   elements.missionEmpty.classList.toggle("hidden", hasData && state.project.misiones.length > 0);
+  syncActionButtons();
+
+  if (elements.previewSpinner) {
+    elements.previewSpinner.classList.toggle("hidden", !state.isGenerating);
+  }
 }
 
 function getFormData() {
@@ -990,6 +1181,7 @@ function getFormData() {
   const narrativaBase = elements.narrativaSelect?.value || "";
   const narrativaPersonalizada = String(elements.narrativaCustomInput?.value || "").trim();
   const narrativa = narrativaBase === "otro" ? (narrativaPersonalizada || "Otro") : narrativaBase;
+  const estiloImagen = String(elements.estiloImagenSelect?.value || "").trim();
   return {
     nivel: document.getElementById("nivelSelect")?.value || "Primaria",
     grado: document.getElementById("gradoSelect")?.value || "Primero",
@@ -1006,6 +1198,7 @@ function getFormData() {
     narrativa,
     narrativaBase,
     narrativaPersonalizada,
+    estiloImagen,
     ritmo: document.getElementById("ritmoSelect")?.value || "progresivo",
     dificultad: document.getElementById("dificultadSelect")?.value || "equilibrada",
     pistas: document.getElementById("pistasSelect")?.value || "moderadas",
@@ -1049,6 +1242,7 @@ ${objetivosTematicos}
 - En opción múltiple, la respuesta correcta debe coincidir exactamente con una de las opciones.
 - Para relación de columnas incluye 3 o 4 pares claros.
 - Para multimedia incluye media con tipo, url o referencia, y alt.
+- CRÍTICO PARA IMÁGENES COHERENTES Y DE APOYO: En cada pregunta (especialmente las multimedia o con "imagen_prompt"), describe con detalle minucioso los elementos visuales necesarios. Si la pregunta menciona mapas, leyendas, coordenadas, nombres o puntos específicos en una imagen (ej. "el Río Amazonas", "la zona verde oscuro"), la propiedad "imagen_prompt" y el "alt" de la pregunta DEBEN detallar exhaustivamente dichos elementos visuales, nombres y coordenadas exactas para que la IA generadora de imágenes los dibuje en la imagen correspondiente y no queden incoherentes. La imagen debe servir como apoyo visual o pista para resolver el ejercicio, pero bajo ninguna circunstancia debe contener o mostrar explícitamente la respuesta del reto.
 - Cada sala del mapa debe incluir una lista "preguntas" con exactamente ${data.preguntasPorSala} preguntas internas.
 - Las preguntas internas de una misma sala pueden resolverse en cualquier orden.
 - Cada pregunta interna debe tener su propio "tipo_interaccion", "reto", "respuesta_correcta" o estructura equivalente, y feedback no vacío.
@@ -1124,9 +1318,16 @@ function extractGeminiImageData(imageData = {}) {
 function buildVisualDirection(data = {}) {
   const temas = Array.isArray(data.temas) ? data.temas.filter(Boolean) : [];
   const temaResumen = temas.length ? temas.join(", ") : normalizeString(data.tema, "la temática principal");
+  // Prioridad: 1) estilo elegido por el usuario en el brief, 2) linea_visual_base generada por la IA, 3) fallback genérico
+  const estiloUsuario = normalizeString(data.estiloImagen, "");
+  const estiloIA = normalizeString(data.linea_visual_base, "");
+  const narrativaCtx = normalizeString(data.narrativa, "la narrativa del escape room");
+  const line = estiloUsuario
+    ? `${estiloUsuario} La dirección visual debe ser coherente con: ${narrativaCtx}.`
+    : (estiloIA || `Ilustración editorial coherente con ${narrativaCtx}.`);
   return {
     temaResumen,
-    line: normalizeString(data.linea_visual_base, `Ilustración editorial coherente con ${normalizeString(data.narrativa, "la narrativa del escape room")}.`),
+    line,
     ambientacion: normalizeString(data.ambientacion, "")
   };
 }
@@ -1150,6 +1351,7 @@ function buildRoomVisualPrompt({ data, mission, index }) {
     `Dirección visual: ${visual.line}.`,
     visual.ambientacion ? `Ambientación: ${visual.ambientacion}.` : "",
     `La imagen debe apoyar el reto: ${normalizeString(mission.reto, "Resolver la sala.")}`,
+    `REGLA ESTRICTA: La imagen es un apoyo visual o pista para que el estudiante resuelva el reto. Bajo ninguna circunstancia muestres o escribas la respuesta correcta o solución final directamente sobre el dibujo.`,
     normalizeString(mission.imagen_prompt, "") || "Sin texto legible y útil para resolver la sala."
   ].filter(Boolean).join("\n");
 }
@@ -1163,6 +1365,7 @@ function buildQuestionVisualPrompt({ data, mission, question, roomIndex, questio
     `Dirección visual: ${visual.line}.`,
     visual.ambientacion ? `Ambientación: ${visual.ambientacion}.` : "",
     `La imagen debe apoyar el reto: ${normalizeString(question.reto, "Resolver la pregunta.")}`,
+    `REGLA ESTRICTA: La imagen es un apoyo visual o pista para resolver el ejercicio. Bajo ninguna circunstancia muestres, dibujes o escribas la respuesta correcta o el valor de la solución final de forma explícita en la imagen. La solución debe quedar oculta para que el estudiante la deduzca.`,
     normalizeString(question.imagen_prompt, "") || normalizeString(question.media?.texto || question.media?.alt, "") || "Sin texto legible y útil para resolver la pregunta."
   ].filter(Boolean).join("\n");
 }
@@ -1193,18 +1396,37 @@ async function generateCoverImage(project, context) {
     return "";
   }
 }
-
-async function generateMissionImages(project, context) {
+async function generateMissionImages(project, context, onProgress) {
   let generated = 0;
   let failed = 0;
   let total = 0;
+
+  // Calcular total de imágenes a generar de antemano
   for (const [index, mission] of project.misiones.entries()) {
     total += 1;
+    for (const [questionIndex, question] of (Array.isArray(mission.preguntas) ? mission.preguntas.entries() : [])) {
+      if (!question) continue;
+      const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
+      const needsImage = question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+      if (!needsImage) continue;
+      total += 1;
+    }
+  }
+
+  let processed = 0;
+
+  for (const [index, mission] of project.misiones.entries()) {
+    processed += 1;
+    if (onProgress) onProgress(processed, total);
+
     try {
       const image = await generateGeminiImage(buildRoomVisualPrompt({ data: { ...project, ...context }, mission, index }), { aspectRatio: "4:3" });
       mission.imagen = image;
-      mission.imagen_alt = mission.imagen_alt || `Imagen de la sala ${index + 1}`;
-      if (!mission.media?.url) {
+      mission.imagen_alt = mission.imagen_alt || mission.media?.alt || `Imagen de la sala ${index + 1}`;
+      if (mission.media) {
+        mission.media.url = image;
+        if (!mission.media.tipo) mission.media.tipo = "imagen";
+      } else {
         mission.media = {
           tipo: "imagen",
           url: image,
@@ -1220,15 +1442,22 @@ async function generateMissionImages(project, context) {
     }
 
     for (const [questionIndex, question] of (Array.isArray(mission.preguntas) ? mission.preguntas.entries() : [])) {
-      if (!question || question.tipo_interaccion !== "multimedia" && !question.imagen_prompt && !question.imagen && !question.media?.texto && !question.media?.alt) {
-        continue;
-      }
-      total += 1;
+      if (!question) continue;
+      const hasMedia = question.media && (question.media.tipo === "imagen" || !question.media.tipo);
+      const needsImage = question.tipo_interaccion === "multimedia" || question.imagen_prompt || question.imagen || hasMedia;
+      if (!needsImage) continue;
+
+      processed += 1;
+      if (onProgress) onProgress(processed, total);
+
       try {
         const image = await generateGeminiImage(buildQuestionVisualPrompt({ data: { ...project, ...context }, mission, question, roomIndex: index, questionIndex }), { aspectRatio: "4:3" });
         question.imagen = image;
-        question.imagen_alt = question.imagen_alt || `Imagen de la pregunta ${questionIndex + 1}`;
-        if (!question.media?.url) {
+        question.imagen_alt = question.imagen_alt || question.media?.alt || `Imagen de la pregunta ${questionIndex + 1}`;
+        if (question.media) {
+          question.media.url = image;
+          if (!question.media.tipo) question.media.tipo = "imagen";
+        } else {
           question.media = {
             tipo: "imagen",
             url: image,
@@ -1329,7 +1558,44 @@ function findCorrectOptionIndex(mission = {}) {
   if (!options.length) return -1;
   const accepted = normalizeAcceptedAnswers(mission.respuestas_aceptadas || mission.respuesta_correcta || []);
   if (!accepted.length) return -1;
-  return options.findIndex((option) => accepted.includes(getNormalizedAnswerToken(option)));
+
+  const normalizedOptions = options.map(opt => getNormalizedAnswerToken(opt));
+
+  // Intento 1: Coincidencia exacta con tokens normalizados
+  let index = options.findIndex((option) => accepted.includes(getNormalizedAnswerToken(option)));
+  if (index >= 0) return index;
+
+  // Intento 2: Si la respuesta es una sola letra ("a"-"h") o número ("1"-"8") indicando el índice
+  for (const acc of accepted) {
+    if (acc.length === 1) {
+      const matchExact = normalizedOptions.indexOf(acc);
+      if (matchExact >= 0) return matchExact;
+
+      const letterCode = acc.charCodeAt(0) - 97; // 'a' es 97
+      if (letterCode >= 0 && letterCode < options.length) {
+        return letterCode;
+      }
+
+      const numCode = parseInt(acc, 10) - 1;
+      if (!isNaN(numCode) && numCode >= 0 && numCode < options.length) {
+        return numCode;
+      }
+    }
+  }
+
+  // Intento 3: Coincidencia parcial (subcadena o supercadena)
+  for (const acc of accepted) {
+    const matchSubstring = normalizedOptions.findIndex(opt => opt.includes(acc) || acc.includes(opt));
+    if (matchSubstring >= 0) return matchSubstring;
+  }
+
+  // Intento 4: Coincidencia de prefijo
+  for (const acc of accepted) {
+    const matchPrefix = normalizedOptions.findIndex(opt => opt.startsWith(acc));
+    if (matchPrefix >= 0) return matchPrefix;
+  }
+
+  return -1;
 }
 
 function repairQuestionAnswers(question = {}, roomIndex = 0, questionIndex = 0) {
@@ -1524,7 +1790,7 @@ function validateProjectSetup(project = null) {
 }
 
 function isRenderableMediaUrl(url = "") {
-  return /^data:/i.test(String(url || "")) || /^assets\//i.test(String(url || "")) || /^\.{0,2}\//.test(String(url || ""));
+  return /^data:/i.test(String(url || "")) || /^assets\//i.test(String(url || "")) || /^\.{0,2}\//.test(String(url || "")) || /^https?:\/\//i.test(String(url || ""));
 }
 
 function sanitizeMissionMedia(media = null) {
@@ -1975,6 +2241,19 @@ function renderMissionEditor() {
     refreshPanels();
     return;
   }
+
+  state.project.misiones.forEach((mission) => {
+    if (mission.tipo_interaccion === "opcion_multiple" && (typeof mission._correctOptionIndex !== "number" || mission._correctOptionIndex < 0)) {
+      mission._correctOptionIndex = findCorrectOptionIndex(mission);
+    }
+    if (Array.isArray(mission.preguntas)) {
+      mission.preguntas.forEach((question) => {
+        if (question.tipo_interaccion === "opcion_multiple" && (typeof question._correctOptionIndex !== "number" || question._correctOptionIndex < 0)) {
+          question._correctOptionIndex = findCorrectOptionIndex(question);
+        }
+      });
+    }
+  });
 
   elements.missionEditorList.innerHTML = state.project.misiones.map((mission, index) => {
     const unlockChoices = state.project.misiones
@@ -2555,15 +2834,14 @@ function wireSessionEvents() {
   elements.btnNewSession?.addEventListener("click", async () => {
     try {
       setRemoteSaveState("saving");
-      const project = state.project ? materializeProjectForExport() : null;
-      const formState = serializeFormState();
+
       await createRemoteSession({
         title: deriveSessionTitle(),
-        project,
-        formState,
+        project: null,
+        formState: null,
         activate: true
       });
-      setStatus("Nueva sesión creada.", "success");
+      setStatus("Nueva sesión vacía creada.", "success");
       setRemoteSaveState("saved");
     } catch (error) {
       console.error("No se pudo crear la sesión:", error);
@@ -2639,10 +2917,134 @@ function wirePreviewThemeEvents() {
   });
 }
 
+function isRemoteUrl(value) {
+  if (typeof value !== "string") return false;
+  return /^(https?:)?\/\//i.test(value);
+}
+
+/**
+ * Fetch a remote resource and return its ArrayBuffer.
+ * Returns null if the request fails or the response is not ok.
+ */
+async function fetchBinaryAsset(url) {
+  try {
+    const response = await fetch(url, { mode: "cors" });
+    if (!response.ok) return null;
+    const buffer = await response.arrayBuffer();
+    return buffer;
+  } catch (e) {
+    console.warn(`Failed to fetch binary asset ${url}:`, e);
+    return null;
+  }
+}
+
+function inferExtensionFromContentType(contentType, fallback = "png") {
+  if (!contentType) return fallback;
+  const mime = contentType.toLowerCase();
+  if (mime.includes("png")) return "png";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("gif")) return "gif";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("svg")) return "svg";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("mp4")) return "mp4";
+  if (mime.includes("webm")) return "webm";
+  return fallback;
+}
+
+function sanitizeFileNameForAssets(value = "", fallback = "EscapeRoom") {
+  const normalized = String(value || fallback)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
+  // 1. Background Image
+  if (project.backgroundImage && isRemoteUrl(project.backgroundImage)) {
+    const buffer = await fetchBinaryAsset(project.backgroundImage);
+    if (buffer) {
+      const ext = inferExtensionFromContentType("image/png", "png"); // fallback content-type; actual type not needed for extension inference here
+      const fileName = `${mediaFolder}/${sanitizeFileNameForAssets(project.titulo, "escape-room")}-background.${ext}`;
+      remoteFiles[fileName] = new Uint8Array(buffer);
+      project.backgroundImage = fileName;
+    }
+  }
+
+  // 2. Misiones
+  if (Array.isArray(project.misiones)) {
+    for (const [index, mission] of project.misiones.entries()) {
+      const missionBase = sanitizeFileNameForAssets(mission.id || `mission-${index + 1}`, "mission");
+
+      // Mission imagen
+      if (mission.imagen && isRemoteUrl(mission.imagen)) {
+        const buffer = await fetchBinaryAsset(mission.imagen);
+        if (buffer) {
+          const ext = inferExtensionFromContentType("image/png", "png");
+          const fileName = `${mediaFolder}/${missionBase}-reference.${ext}`;
+          remoteFiles[fileName] = new Uint8Array(buffer);
+          mission.imagen = fileName;
+          if (mission.media && mission.media.tipo === "imagen") {
+            mission.media.url = fileName;
+          }
+        }
+      }
+
+      // Mission media
+      if (mission.media?.url && isRemoteUrl(mission.media.url)) {
+        const buffer = await fetchBinaryAsset(mission.media.url);
+        if (buffer) {
+          const ext = inferExtensionFromContentType("application/octet-stream", mission.media.tipo === "audio" ? "mp3" : mission.media.tipo === "video" ? "mp4" : "png");
+          const fileName = `${mediaFolder}/${missionBase}-media.${ext}`;
+          remoteFiles[fileName] = new Uint8Array(buffer);
+          mission.media.url = fileName;
+        }
+      }
+
+      // 3. Preguntas
+      if (Array.isArray(mission.preguntas)) {
+        for (const [questionIndex, question] of mission.preguntas.entries()) {
+          const questionBase = `${missionBase}-${sanitizeFileNameForAssets(question.id || `question-${questionIndex + 1}`, "question")}`;
+
+          // Question imagen
+          if (question.imagen && isRemoteUrl(question.imagen)) {
+            const buffer = await fetchBinaryAsset(question.imagen);
+            if (buffer) {
+              const ext = inferExtensionFromContentType("image/png", "png");
+              const fileName = `${mediaFolder}/${missionBase}-${questionIndex}-question.${ext}`;
+              remoteFiles[fileName] = new Uint8Array(buffer);
+              question.imagen = fileName;
+              if (question.media && question.media.tipo === "imagen") {
+                question.media.url = fileName;
+              }
+            }
+          }
+
+          // Question media
+          if (question.media?.url && isRemoteUrl(question.media.url)) {
+            const buffer = await fetchBinaryAsset(question.media.url);
+            if (buffer) {
+              const ext = inferExtensionFromContentType("application/octet-stream", question.media.tipo === "audio" ? "mp3" : question.media.tipo === "video" ? "mp4" : "png");
+              const fileName = `${mediaFolder}/${missionBase}-${questionIndex}-${question.media.tipo}.${ext}`;
+              remoteFiles[fileName] = new Uint8Array(buffer);
+              question.media.url = fileName;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 async function exportPackage() {
-  const project = materializeProjectForExport();
-  if (!project) return;
-  const validation = validateProjectSetup(project);
+  const originalProject = materializeProjectForExport();
+  if (!originalProject) return;
+  const validation = validateProjectSetup(originalProject);
   if (validation.issues.length) {
     setStatus(`No se puede exportar: ${validation.issues.join(" · ")}`, "bad");
     return;
@@ -2653,7 +3055,24 @@ async function exportPackage() {
     return;
   }
 
-  const pkg = buildEscapeRoomPackage(project);
+  setStatus("Descargando recursos remotos para empaquetado...", "info");
+
+  const projectClone = clonePlainObject(originalProject);
+  const remoteFiles = {};
+  const mediaFolder = "assets/media";
+
+  await downloadRemoteAssets(projectClone, remoteFiles, mediaFolder);
+
+  try {
+    const logoBuffer = await fetchBinaryAsset("logo.png");
+    if (logoBuffer) {
+      remoteFiles["logo.png"] = new Uint8Array(logoBuffer);
+    }
+  } catch (e) {
+    console.warn("No se pudo descargar logo.png para el paquete:", e);
+  }
+
+  const pkg = buildEscapeRoomPackage(projectClone);
   const zip = new JSZipCtor();
 
   Object.entries(pkg.files).forEach(([path, content]) => {
@@ -2664,6 +3083,13 @@ async function exportPackage() {
     }
     zip.file(path, content);
   });
+
+  Object.entries(remoteFiles).forEach(([path, blob]) => {
+    // `blob` is a Uint8Array containing binary data. Explicitly mark as binary for JSZip.
+    zip.file(path, blob, { binary: true });
+  });
+
+  setStatus("Generando paquete ZIP...", "info");
 
   let blob = null;
   if (typeof zip.generateAsync === "function") {
@@ -2708,6 +3134,7 @@ elements.form.addEventListener("submit", async (event) => {
   }
 
   setLoading(true);
+  state.isGenerating = true;
   state.project = null;
   state.generationNote = "";
   refreshPanels();
@@ -2740,6 +3167,29 @@ elements.form.addEventListener("submit", async (event) => {
 
     const rawText = generated?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = extractGeneratedJson(rawText);
+
+    // Limpiar URLs de imágenes ficticias / marcadores de posición generados por la IA
+    if (parsed && typeof parsed === "object") {
+      if (Array.isArray(parsed.misiones)) {
+        for (const mission of parsed.misiones) {
+          if (mission.media && typeof mission.media === "object") {
+            if (mission.media.url && !mission.media.url.startsWith("data:")) {
+              mission.media.url = "";
+            }
+          }
+          if (Array.isArray(mission.preguntas)) {
+            for (const question of mission.preguntas) {
+              if (question.media && typeof question.media === "object") {
+                if (question.media.url && !question.media.url.startsWith("data:")) {
+                  question.media.url = "";
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     const validation = validateProjectSetup(parsed);
     if (validation.issues.length) {
       state.project = null;
@@ -2759,24 +3209,64 @@ elements.form.addEventListener("submit", async (event) => {
       ? `Ajustado a ${formData.misiones} salas${formData.preguntasPorSala ? ` y ${formData.preguntasPorSala} preguntas por sala` : ""}`
       : "";
 
-    const coverImage = await generateCoverImage(project, formData);
-    if (coverImage) project.backgroundImage = coverImage;
-    const imageStats = await generateMissionImages(project, formData);
-
+    // Establecer proyecto en el estado y renderizar texto/preview inmediatamente
     state.project = project;
-    state.generationNote = `${alignmentNote ? `${alignmentNote} · ` : ""}${coverImage ? "1 portada · " : ""}${imageStats.generated}/${imageStats.total} imágenes funcionales listas${imageStats.failed ? ` · ${imageStats.failed} sin imagen` : ""}`;
+    state.generationNote = `${alignmentNote ? `${alignmentNote} · ` : ""}Generando imágenes en segundo plano...`;
 
     renderMissionEditor();
     renderOutputsNow();
     setActiveTab("preview");
+    setLoading(false);
     setStatus(
-      `Generado: "${state.project.titulo}" · ${state.project.misiones.length} salas · ${formData.duracion} min${state.generationNote ? ` · ${state.generationNote}` : ""}`,
+      `Generado: "${state.project.titulo}" · ${state.project.misiones.length} salas · ${formData.duracion} min · ${state.generationNote}`,
       "success"
     );
+
+    // Iniciar la generación de imágenes de forma asíncrona en segundo plano
+    (async () => {
+      try {
+        let coverImage = "";
+        try {
+          coverImage = await generateCoverImage(project, formData);
+          if (coverImage) {
+            project.backgroundImage = coverImage;
+            renderOutputsNow();
+          }
+        } catch (e) {
+          console.warn("No se pudo generar la portada en segundo plano:", e);
+        }
+
+        const imageStats = await generateMissionImages(project, formData, (current, total) => {
+          const progressNote = `Generando imágenes (${current}/${total})...`;
+          state.generationNote = `${alignmentNote ? `${alignmentNote} · ` : ""}${coverImage ? "1 portada · " : ""}${progressNote}`;
+          renderMissionEditor();
+          renderOutputsNow();
+          setStatus(
+            `Generado: "${project.titulo}" · ${project.misiones.length} salas · ${formData.duracion} min · ${state.generationNote}`,
+            "success"
+          );
+        });
+
+        // Estado de finalización
+        state.generationNote = `${alignmentNote ? `${alignmentNote} · ` : ""}${coverImage ? "1 portada · " : ""}${imageStats.generated}/${imageStats.total} imágenes funcionales listas${imageStats.failed ? ` · ${imageStats.failed} sin imagen` : ""}`;
+        renderMissionEditor();
+        renderOutputsNow();
+        setStatus(
+          `Generado: "${project.titulo}" · ${project.misiones.length} salas · ${formData.duracion} min · ${state.generationNote}`,
+          "success"
+        );
+      } catch (bgError) {
+        console.error("Error en la generación de imágenes en segundo plano:", bgError);
+      } finally {
+        state.isGenerating = false;
+        refreshPanels();
+      }
+    })();
   } catch (error) {
     console.error(error);
     setStatus(`No se pudo generar el escape room: ${error.message}`, "bad");
     state.project = null;
+    state.isGenerating = false;
     renderMissionEditor();
     refreshPanels();
   } finally {
@@ -2786,6 +3276,7 @@ elements.form.addEventListener("submit", async (event) => {
 
 elements.btnAddMission.addEventListener("click", addMission);
 elements.btnExportar.addEventListener("click", exportPackage);
+elements.btnPublicar?.addEventListener("click", publishActiveSession);
 
 elements.btnCopiarJson.addEventListener("click", async () => {
   const project = materializeProjectForExport();
@@ -2802,6 +3293,74 @@ elements.btnCopiarJson.addEventListener("click", async () => {
     setStatus("No fue posible copiar el JSON en este navegador.", "warning");
   }
 });
+
+async function sugerirObjetivoFinal() {
+  const tema = String(document.getElementById("temaInput")?.value || "").trim();
+  if (!tema) {
+    setStatus("Por favor, ingresa primero un tema curricular para poder sugerir un objetivo.", "warning");
+    document.getElementById("temaInput")?.focus();
+    return;
+  }
+
+  const numMisiones = document.getElementById("numMisionesInput")?.value || 4;
+  const preguntasPorSala = document.getElementById("preguntasPorSalaInput")?.value || 1;
+  const duracion = document.getElementById("duracionInput")?.value || 35;
+  const narrativa = elements.narrativaSelect?.value || "";
+
+  const btn = elements.btnSugerirObjetivo;
+  const originalText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span>Pensando...</span>`;
+  }
+  try {
+    const model = elements.modeloSelect?.value || TEXT_MODEL_DEFAULT;
+    const response = await authFetchJson("/api/gemini/generate", {
+      method: "POST",
+      body: {
+        model,
+        payload: {
+          systemInstruction: {
+            parts: [{
+              text: "Eres un experto diseñador instruccional y de escape rooms educativos. Tu tarea es generar un Brief detallado y estructurado de objetivos pedagógicos, narrativa y diseño para la creación del escape room. Escribe única y exclusivamente en español latinoamericano neutro (es-419). Queda estrictamente prohibido utilizar modismos o conjugaciones verbales típicas de España (como vosotros, tenéis, deberéis, etc.). Debes estructurar el texto obligatoriamente en 5 secciones separadas por saltos de línea:\n1) PROPÓSITO PEDAGÓGICO GENERAL (aprendizajes, habilidades y competencias que se desarrollarán en relación al tema curricular).\n2) NARRATIVA INICIAL Y REGLAS DE ESCAPE (el gancho de la historia, las reglas de juego implícitas y cómo se enlazan las pistas y el progreso visual).\n3) ENFOQUE DIDÁCTICO POR SALA (para cada una de las salas indicadas define con precisión qué subtema o concepto se abordará y el tipo de desafío cognitivo o lógico a resolver. Asimismo, describe detalladamente qué elementos y referencias visuales explícitas -como mapas, leyendas, coordenadas o símbolos específicos- DEBEN contener las imágenes de apoyo para que los alumnos puedan resolver la pregunta).\n4) CANDADOS, LLAVES Y MECANISMOS DE BLOQUEO (diseñar qué tipo de candado físico o digital, código de dirección, combinación de colores, contraseña numérica o llaves físicas se asocian a cada reto para bloquear y desbloquear el progreso).\n5) CLÍMAX Y CONCLUSIÓN (la resolución del gran enigma final en el panel de control o cierre del escape room).\n\nSé sumamente descriptivo y propón metas claras y coherentes para que el motor de generación de salas lo entienda perfectamente."
+            }]
+          },
+          contents: [{
+            role: "user",
+            parts: [{
+              text: `Tema curricular: "${tema}"\nNarrativa: "${narrativa}"\nCantidad de salas/misiones: ${numMisiones}\nPreguntas por sala: ${preguntasPorSala}\nDuración total: ${duracion} minutos\n\nGenera el Brief estructurado de 5 secciones detallando el Propósito Pedagógico General, la Narrativa Inicial/Reglas de progreso, el Enfoque Didáctico por sala (con detalles explícitos para las imágenes correspondientes), los Candados/Llaves/Mecanismos de bloqueo de cada desafío y el Clímax/Conclusión. Usa guiones sencillos (-) para listar salas e ítems. Escribe todo en texto plano con saltos de línea. No utilices negritas de markdown (**), símbolos complejos ni etiquetas HTML.`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.9
+          }
+        }
+      }
+    });
+
+    const generatedText = String(response?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+    if (generatedText) {
+      const objetivoInput = document.getElementById("objetivoInput");
+      if (objetivoInput) {
+        objetivoInput.value = generatedText;
+        saveFormState();
+        setStatus("Objetivo final sugerido exitosamente por la IA.", "success");
+      }
+    } else {
+      setStatus("No se recibió una sugerencia clara de la IA. Intenta de nuevo.", "warning");
+    }
+  } catch (err) {
+    console.error("Error al sugerir objetivo final:", err);
+    setStatus("Error al generar el objetivo. Intenta de nuevo.", "bad");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  }
+}
+
+elements.btnSugerirObjetivo?.addEventListener("click", sugerirObjetivoFinal);
 
 elements.btnLimpiar.addEventListener("click", () => {
   state.formPersistenceSuspended = true;

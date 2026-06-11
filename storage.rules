@@ -95,6 +95,12 @@ service firebase.storage {
       allow read, write: if isOwner(uid);
     }
 
+    // Assets de escape rooms.
+    match /escaperooms/{uid}/{sessionId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() && isSafePublicAsset(fileName);
+    }
+
     // Biblioteca compartida de mindmaps.
     match /mindmap/{allPaths=**} {
       allow read: if true;

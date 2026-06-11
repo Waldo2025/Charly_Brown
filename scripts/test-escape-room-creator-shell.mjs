@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const html = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/escapeRoomCreator.html",
+  "/Users/waldolopez/Documents/CharlyBrown/public/PigPenCreator.html",
   "utf8"
 );
 
 const css = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/escapeRoomCreator.css",
+  "/Users/waldolopez/Documents/CharlyBrown/public/PigPenCreator.css",
   "utf8"
 );
 
 const js = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/js/escapeRoomCreator.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/PigPenCreator.js",
   "utf8"
 );
 
@@ -58,4 +58,4 @@ assert.match(
   "El creador debe renderizar y editar todas las preguntas internas de cada sala."
 );
 
-console.log("escapeRoomCreator shell OK.");
+console.log("PigPenCreator shell OK.");

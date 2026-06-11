@@ -4595,7 +4595,10 @@ function syncOnScreenTextClipVisibilityFromRowText(rowId = "", text = "", option
 function syncPodcastOnScreenTextOverlay(session = null, options = {}) {
   const currentMs = Math.max(0, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0) || 0);
   if (typeof playbackController?.syncOverlay === "function") {
-    return playbackController.syncOverlay(currentMs, options);
+    playbackController.syncOverlay(currentMs, options);
+  }
+  if (typeof playbackController?.syncStylizedText === "function") {
+    playbackController.syncStylizedText(currentMs);
   }
 }
 

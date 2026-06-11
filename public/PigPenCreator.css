@@ -695,6 +695,28 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.er-button-publish {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  box-shadow: 0 18px 34px rgba(16, 185, 129, 0.28);
+  border: none;
+}
+
+.er-button-publish:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669, #047857);
+  box-shadow: 0 22px 40px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.er-button-publish.is-published {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 18px 34px rgba(245, 158, 11, 0.28);
+}
+
+.er-button-publish.is-published:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706, #b45309);
+}
+
 .er-button-ghost,
 .er-button-mini,
 .er-icon-button {
@@ -1552,4 +1574,107 @@
 .er-theme-grid input[type="color"] {
   border-color: var(--er-studio-border);
   background: var(--er-studio-surface);
+}
+
+/* PigPen Boot Spinner & Preview Spinner Overlay */
+body:has(.pigpen-boot-spinner:not(.is-hidden)) {
+  overflow: hidden;
+}
+
+.pigpen-boot-spinner {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  background: rgba(14, 11, 25, 0.98);
+  transition: opacity 220ms ease, visibility 220ms ease;
+}
+
+.pigpen-boot-spinner.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pigpen-boot-spinner-card,
+.er-preview-spinner-card {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+.pigpen-boot-spinner-card strong,
+.er-preview-spinner-card strong {
+  color: var(--er-text);
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-family: var(--er-font-sans);
+}
+
+.pigpen-loading-logo {
+  width: 96px;
+  height: auto;
+  animation: pigpen-logo-float 1.4s ease-in-out infinite;
+}
+
+.pigpen-loading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.pigpen-loading-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--er-primary);
+  animation: pigpen-loading-dot 1.1s ease-in-out infinite;
+}
+
+.pigpen-loading-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.pigpen-loading-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.er-preview-frame-wrap {
+  position: relative;
+}
+
+.er-preview-spinner {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: rgba(14, 11, 25, 0.85);
+  backdrop-filter: blur(4px);
+  border-radius: inherit;
+  transition: opacity 220ms ease, visibility 220ms ease;
+}
+
+.er-preview-spinner.hidden {
+  display: none !important;
+}
+
+@keyframes pigpen-logo-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes pigpen-loading-dot {
+  0%, 80%, 100% {
+    transform: scale(0.75);
+    opacity: 0.45;
+  }
+  40% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
 }

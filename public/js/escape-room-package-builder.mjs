@@ -204,6 +204,15 @@ body {
   font-family: "Segoe UI", system-ui, sans-serif;
   background: linear-gradient(135deg, var(--bg), var(--bg-2));
 }
+.game-logo-brand {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  width: 48px;
+  height: auto;
+  z-index: 100;
+  pointer-events: none;
+}
 .game-shell {
   max-width: 1280px;
   margin: 0 auto;
@@ -977,6 +986,20 @@ h2, h3, .mission-title, .question-title {
     border-radius: 12px;
   }
 }
+
+@keyframes green-blink {
+  0%, 100% {
+    background: var(--panel);
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0);
+  }
+  50% {
+    background: color-mix(in srgb, var(--success) 20%, var(--panel));
+    box-shadow: 0 0 30px var(--success);
+  }
+}
+.is-success-flash {
+  animation: green-blink 0.5s ease-in-out 4 !important;
+}
 `;
 }
 
@@ -1008,7 +1031,8 @@ export function buildGameRuntime(project) {
     isFinished: false,
     startedAtMs: null,
     endAtMs: null,
-    timerIntervalId: null
+    timerIntervalId: null,
+    isMasterSolved: false
   };
 
   function isStorageAvailable() {
@@ -1041,16 +1065,21 @@ export function buildGameRuntime(project) {
       isStarted: state.isStarted,
       isFinished: state.isFinished,
       startedAtMs: state.startedAtMs,
-      endAtMs: state.endAtMs
+      endAtMs: state.endAtMs,
+      isMasterSolved: state.isMasterSolved
     };
   }
 
   function saveProgressState() {
     if (!isStorageAvailable()) return;
     try {
+      window.localStorage.removeItem(getProgressStorageKey());
       window.localStorage.setItem(getProgressStorageKey(), JSON.stringify(serializeProgressState()));
     } catch (error) {
-      console.warn("No se pudo guardar el avance del escape room:", error);
+      const isQuota = error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota");
+      if (!isQuota) {
+        console.warn("No se pudo guardar el avance del escape room:", error);
+      }
     }
   }
 
@@ -1072,6 +1101,7 @@ export function buildGameRuntime(project) {
       state.durationSeconds = normalizeDurationSeconds(parsed.durationSeconds);
       state.isStarted = parsed.isStarted === true;
       state.isFinished = parsed.isFinished === true;
+      state.isMasterSolved = parsed.isMasterSolved === true;
       state.startedAtMs = Number.isFinite(Number(parsed.startedAtMs)) ? Number(parsed.startedAtMs) : null;
       state.endAtMs = Number.isFinite(Number(parsed.endAtMs)) ? Number(parsed.endAtMs) : null;
     } catch (error) {
@@ -1124,7 +1154,7 @@ export function buildGameRuntime(project) {
   }
 
   function isRenderableMediaUrl(url = "") {
-    return /^data:/i.test(url) || /^assets\\\//i.test(url) || /^\\\.{0,2}\\\//.test(url);
+    return /^data:/i.test(url) || /^assets\\\//i.test(url) || /^\\\.{0,2}\\\//.test(url) || /^https?:\\\/\\\//i.test(url);
   }
 
   function normalizeDurationSeconds(value) {
@@ -1308,6 +1338,36 @@ export function buildGameRuntime(project) {
     if (els.endingPanel) {
       const shouldShowEnding = state.galleryScreen === "ending" && areAllMissionsCompleted();
       els.endingPanel.classList.toggle("hidden", !shouldShowEnding);
+      if (shouldShowEnding) {
+        const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
+        const masterPanelContainer = document.getElementById("masterPanelContainer");
+        const victoryContainer = document.getElementById("victoryContainer");
+
+        if (finalCode && !state.isMasterSolved) {
+          if (masterPanelContainer) masterPanelContainer.classList.remove("hidden");
+          if (victoryContainer) victoryContainer.classList.add("hidden");
+        } else {
+          if (masterPanelContainer) masterPanelContainer.classList.add("hidden");
+          if (victoryContainer) victoryContainer.classList.remove("hidden");
+
+          let timeDisplay = els.endingPanel.querySelector(".ending-time-display");
+          if (!timeDisplay) {
+            timeDisplay = document.createElement("div");
+            timeDisplay.className = "ending-time-display";
+            timeDisplay.style.marginTop = "20px";
+            timeDisplay.style.fontSize = "1.25rem";
+            timeDisplay.style.fontWeight = "bold";
+            timeDisplay.style.color = "var(--primary)";
+            if (victoryContainer) {
+              victoryContainer.appendChild(timeDisplay);
+            } else {
+              els.endingPanel.appendChild(timeDisplay);
+            }
+          }
+          const elapsed = Math.max(0, state.durationSeconds - getRemainingSeconds());
+          timeDisplay.innerHTML = \`¡Felicidades! Lograste escapar en <span>\${formatDuration(elapsed)}</span>.\`;
+        }
+      }
     }
 
     updateTimerUi();
@@ -1587,7 +1647,17 @@ export function buildGameRuntime(project) {
     updateProgress();
     renderMap();
     if (areAllMissionsCompleted()) {
-      setGalleryScreen('ending');
+      const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
+      if (finalCode && !state.isMasterSolved) {
+        setGalleryScreen('ending');
+      } else {
+        stopTimerInterval();
+        state.isFinished = true;
+        if (!state.endAtMs) {
+          state.endAtMs = Date.now();
+        }
+        setGalleryScreen('ending');
+      }
       return;
     }
     renderGallery();
@@ -1718,8 +1788,19 @@ export function buildGameRuntime(project) {
     state.durationSeconds = normalizeDurationSeconds(DEFAULT_DURATION_MINUTES * 60);
     state.isStarted = false;
     state.isFinished = false;
+    state.isMasterSolved = false;
     state.startedAtMs = null;
     state.endAtMs = null;
+    const input = document.getElementById("masterPasscodeInput");
+    const statusBox = document.getElementById("masterStatusBox");
+    if (input) input.value = "";
+    if (statusBox) {
+      statusBox.classList.add("hidden");
+      statusBox.textContent = "";
+    }
+    if (els.endingPanel) {
+      els.endingPanel.classList.remove("is-success-flash");
+    }
     if (isStorageAvailable()) {
       try {
         window.localStorage.removeItem(getProgressStorageKey());
@@ -1754,6 +1835,65 @@ export function buildGameRuntime(project) {
   els.resetButtons.forEach((button) => {
     button.addEventListener("click", resetEscapeRoom);
   });
+
+  function extractFinalPasscode(text) {
+    if (!text) return null;
+    const quotedMatch = text.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
+    if (quotedMatch) return quotedMatch[1];
+    const keywordMatch = text.match(/(?:clave|código|codigo|clave final|código final|codigo final|clave final es|clave es|clave final es:|codigo es|código es:)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
+    if (keywordMatch) return keywordMatch[1];
+    return null;
+  }
+
+  function verifyMasterPasscode() {
+    const input = document.getElementById("masterPasscodeInput");
+    const statusBox = document.getElementById("masterStatusBox");
+    if (!input || !statusBox) return;
+
+    const value = String(input.value || "").trim().toLowerCase();
+    const finalCode = String(extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion) || "").trim().toLowerCase();
+
+    if (value === finalCode) {
+      statusBox.textContent = "¡Clave correcta! Desactivando el sistema...";
+      statusBox.className = "status-box is-good";
+      statusBox.classList.remove("hidden");
+
+      if (els.endingPanel) {
+        els.endingPanel.classList.add("is-success-flash");
+      }
+
+      setTimeout(() => {
+        stopTimerInterval();
+        state.isMasterSolved = true;
+        state.isFinished = true;
+        if (!state.endAtMs) {
+          state.endAtMs = Date.now();
+        }
+        if (els.endingPanel) {
+          els.endingPanel.classList.remove("is-success-flash");
+        }
+        persistProgressState();
+        render();
+      }, 2000);
+    } else {
+      statusBox.textContent = "Clave de acceso incorrecta. El sistema sigue en peligro.";
+      statusBox.className = "status-box is-bad";
+      statusBox.classList.remove("hidden");
+    }
+  }
+
+  const btnVerify = document.getElementById("btnVerifyMasterPasscode");
+  const inputPasscode = document.getElementById("masterPasscodeInput");
+  if (btnVerify) {
+    btnVerify.addEventListener("click", verifyMasterPasscode);
+  }
+  if (inputPasscode) {
+    inputPasscode.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        verifyMasterPasscode();
+      }
+    });
+  }
 
   state.durationSeconds = normalizeDurationSeconds((ESCAPE_ROOM_DATA.duracion_minutos || DEFAULT_DURATION_MINUTES) * 60);
   restoreProgressState();
@@ -1811,6 +1951,7 @@ export function buildGameHtml(project) {
   <link rel="stylesheet" href="assets/game.css">
 </head>
 <body>
+  <img src="logo.png" alt="Logo" class="game-logo-brand">
   <main class="game-shell">
     <header class="game-header">
       <button type="button" class="secondary" data-gallery-prev>Anterior</button>
@@ -1856,10 +1997,25 @@ export function buildGameHtml(project) {
 
         <section class="gallery-screen" data-gallery-screen="ending">
           <section id="endingPanel" class="ending-panel hidden">
-            <div class="label">Victoria</div>
-            <h2>Escape room completado</h2>
-            ${endingImageHtml}
-            <p class="muted">${conclusion}</p>
+            <!-- Contenedor del Panel de Control Maestro (Clave Final) -->
+            <div id="masterPanelContainer" class="master-panel-container hidden" style="text-align: center; max-width: 500px; margin: 0 auto; padding: 20px;">
+              <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">Panel de Control Maestro</div>
+              <h3 style="margin-bottom: 15px;">Sistema en Estado Crítico</h3>
+              <p class="muted" style="margin-bottom: 25px;">Introduce la clave final para desactivar el sistema y detener el temporizador.</p>
+              <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; align-items: center;">
+                <input type="text" id="masterPasscodeInput" placeholder="Clave final" style="padding: 12px 20px; border-radius: 12px; border: 2px solid var(--line); background: var(--panel-soft); color: var(--text); font-size: 1.5rem; text-align: center; width: 180px; letter-spacing: 2px; font-weight: bold; outline: none; transition: border-color 0.2s;" />
+                <button type="button" class="primary" id="btnVerifyMasterPasscode" style="padding: 12px 24px; border-radius: 12px; font-weight: bold;">Desactivar</button>
+              </div>
+              <div id="masterStatusBox" class="status-box hidden" style="margin-top: 15px; padding: 10px; border-radius: 8px;"></div>
+            </div>
+
+            <!-- Contenedor de Éxito / Victoria -->
+            <div id="victoryContainer">
+              <div class="label">Victoria</div>
+              <h2>Escape room completado</h2>
+              ${endingImageHtml}
+              <p class="muted">${conclusion}</p>
+            </div>
           </section>
         </section>
       </div>
