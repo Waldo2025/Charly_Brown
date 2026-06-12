@@ -28,4 +28,10 @@ assert.match(
   "La exportación debe forzar la inclusión del texto en pantalla cuando party karaoke está activo."
 );
 
+assert.match(
+  montageExportSource,
+  /dialogueAudioMap,/,
+  "La exportación debe enviar el mapa de audio para reconstruir el karaoke en backend."
+);
+
 console.log("Podcaster montage export party karaoke OK.");

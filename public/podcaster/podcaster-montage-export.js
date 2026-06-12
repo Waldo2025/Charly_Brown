@@ -1191,6 +1191,7 @@ export function buildMontageExportPayload(session = null) {
     enabled: false,
     segments: []
   };
+  const dialogueAudioMap = window.getDialogueAudioMap?.(activeSession) || activeSession?.dialogueAudioMap || {};
 
   const normalizeLegacyPct = (value, fallback = 100, max = 200) => {
     const num = window.toFiniteNumber(value, fallback);
@@ -1524,6 +1525,7 @@ export function buildMontageExportPayload(session = null) {
       settings: onScreenTextTimeline.settings,
       segments: onScreenTextTimeline.segments
     } : null,
+    dialogueAudioMap,
     overlayCards: window.buildMontageOverlayCardSegments?.(activeSession, runtimeEntries) || overlayCards,
     audioTimeline: useTimelineAudio ? {
       enabled: true,
