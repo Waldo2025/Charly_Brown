@@ -1389,6 +1389,37 @@ async function readPersistedMontageExportJob(jobId = "") {
   }
 }
 
+async function resolveMontageExportJobSnapshot(jobId = "") {
+  const cleanJobId = clampExportId(jobId);
+  if (!cleanJobId) return null;
+
+  const memoryJob = montageExportJobs.get(cleanJobId) || null;
+  if (memoryJob) return memoryJob;
+
+  const persistedJob = await readPersistedMontageExportJob(cleanJobId).catch(() => null);
+  if (persistedJob) return persistedJob;
+
+  try {
+    return await withTimeout(
+      () => montageExportJobStore.getJob(cleanJobId),
+      1200,
+      (timeoutMs) => {
+        const err = new Error(`montage_export_status_timeout_${timeoutMs}`);
+        err.code = "montage_export_status_timeout";
+        err.status = 202;
+        err.timeoutMs = timeoutMs;
+        return err;
+      }
+    );
+  } catch (error) {
+    const status = Number(error?.status || 500) || 500;
+    if (status === 404 || String(error?.code || "").trim() === "job_not_found") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
@@ -10499,6 +10530,50 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 
     const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
     if (!slot.ok) {
+      const activeJobId = String(slot.error?.detail?.activeJobId || "").trim();
+      if (activeJobId) {
+        const activeJob = await resolveMontageExportJobSnapshot(activeJobId).catch(() => null);
+        if (!activeJob) {
+          releaseHeavyWorkSlot("montage_export", activeJobId);
+          const retrySlot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+          if (retrySlot.ok) {
+            // Continue with the fresh slot below.
+          } else {
+            return res.status(429).json({
+              error: "backend_busy_with_export",
+              message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+              detail: retrySlot.error?.detail
+            });
+          }
+        } else {
+          return res.status(429).json({
+            error: "backend_busy_with_export",
+            message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+            detail: slot.error?.detail
+          });
+        }
+      } else {
+        return res.status(429).json({
+          error: "backend_busy_with_export",
+          message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+          detail: slot.error?.detail
+        });
+      }
+    }
+
+    if (!getActiveHeavyWorkJobId() || getActiveHeavyWorkJobId() !== jobId) {
+      const refreshedSlot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+      if (!refreshedSlot.ok) {
+        return res.status(429).json({
+          error: "backend_busy_with_export",
+          message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
+          detail: refreshedSlot.error?.detail
+        });
+      }
+    }
+
+    const activeJobId = getActiveHeavyWorkJobId();
+    if (!activeJobId || activeJobId !== jobId) {
       return res.status(429).json({
         error: "backend_busy_with_export",
         message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
@@ -10564,49 +10639,11 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
 
-  const memoryJob = montageExportJobs.get(jobId) || null;
-  let job = memoryJob;
-
-  if (!job) {
-    try {
-      job = await withTimeout(
-        () => montageExportJobStore.getJob(jobId),
-        1200,
-        (timeoutMs) => {
-          const err = new Error(`montage_export_status_timeout_${timeoutMs}`);
-          err.code = "montage_export_status_timeout";
-          err.status = 202;
-          err.timeoutMs = timeoutMs;
-          return err;
-        }
-      );
-    } catch (error) {
-      const status = Number(error?.status || 500) || 500;
-      const timeoutFallback = status === 202 || String(error?.code || "").trim() === "montage_export_status_timeout";
-      if (timeoutFallback) {
-        return res.status(202).json({
-          ok: true,
-          jobId,
-          status: "running",
-          stage: "queued",
-          progress: 0,
-          hint: "Sincronizando estado del export.",
-          degraded: true
-        });
-      }
-      if (!memoryJob && status === 404) {
-        return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
-      }
-      console.warn("[backend][montage-export] export-status fallback", {
-        jobId,
-        status: status || null,
-        code: String(error?.code || "").trim() || null,
-        message: String(error?.message || error)
-      });
-      if (memoryJob) {
-        return res.status(200).json(sanitizeMontageExportJobPublicPayload(memoryJob));
-      }
-      return res.status(202).json({
+  const job = await resolveMontageExportJobSnapshot(jobId).catch((error) => {
+    const status = Number(error?.status || 500) || 500;
+    const timeoutFallback = status === 202 || String(error?.code || "").trim() === "montage_export_status_timeout";
+    if (timeoutFallback) {
+      return {
         ok: true,
         jobId,
         status: "running",
@@ -10614,9 +10651,16 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
         progress: 0,
         hint: "Sincronizando estado del export.",
         degraded: true
-      });
+      };
     }
-  }
+    console.warn("[backend][montage-export] export-status fallback", {
+      jobId,
+      status: status || null,
+      code: String(error?.code || "").trim() || null,
+      message: String(error?.message || error)
+    });
+    return null;
+  });
 
   if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
   return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
