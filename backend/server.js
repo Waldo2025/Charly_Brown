@@ -862,7 +862,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
 app.use(express.json({ limit: MAX_BODY }));
 
 app.get("/api/health", (_req, res) => {

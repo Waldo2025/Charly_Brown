@@ -12,10 +12,10 @@ assert.match(
   "El backend debe permitir Cache-Control/Pragma/Expires en preflight CORS."
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
   /app\.options\("\*",\s*cors\(corsOptions\)\);/,
-  "El backend debe responder OPTIONS de forma explícita con CORS."
+  "El backend no debe usar app.options('*') porque Express 5 lo rechaza."
 );
 
 console.log("Backend CORS preflight OK.");
