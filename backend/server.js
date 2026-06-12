@@ -10564,10 +10564,58 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
 
-  // Optimización: En local, preferimos la memoria interna para evitar lags de red con Firestore
-  let job = montageExportJobs.get(jobId);
+  const memoryJob = montageExportJobs.get(jobId) || null;
+  let job = memoryJob;
+
   if (!job) {
-    job = await montageExportJobStore.getJob(jobId);
+    try {
+      job = await withTimeout(
+        () => montageExportJobStore.getJob(jobId),
+        1200,
+        (timeoutMs) => {
+          const err = new Error(`montage_export_status_timeout_${timeoutMs}`);
+          err.code = "montage_export_status_timeout";
+          err.status = 202;
+          err.timeoutMs = timeoutMs;
+          return err;
+        }
+      );
+    } catch (error) {
+      const status = Number(error?.status || 500) || 500;
+      const timeoutFallback = status === 202 || String(error?.code || "").trim() === "montage_export_status_timeout";
+      if (timeoutFallback) {
+        return res.status(202).json({
+          ok: true,
+          jobId,
+          status: "running",
+          stage: "queued",
+          progress: 0,
+          hint: "Sincronizando estado del export.",
+          degraded: true
+        });
+      }
+      if (!memoryJob && status === 404) {
+        return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+      }
+      console.warn("[backend][montage-export] export-status fallback", {
+        jobId,
+        status: status || null,
+        code: String(error?.code || "").trim() || null,
+        message: String(error?.message || error)
+      });
+      if (memoryJob) {
+        return res.status(200).json(sanitizeMontageExportJobPublicPayload(memoryJob));
+      }
+      return res.status(202).json({
+        ok: true,
+        jobId,
+        status: "running",
+        stage: "queued",
+        progress: 0,
+        hint: "Sincronizando estado del export.",
+        degraded: true
+      });
+    }
   }
 
   if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
@@ -11941,6 +11989,16 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         await safePipeline(stream, res.status(payload.status || 200));
         return;
       } catch (error) {
+        const errorText = String(error?.code || error?.message || "").trim();
+        const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
+        if (isPrematureClose) {
+          console.info("[backend][proxy-media] storage stream closed before completion", {
+            storagePath,
+            code: String(error?.code || "").trim() || null,
+            message: String(error?.message || error)
+          });
+          return;
+        }
         const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
         const isMissing = status === 404 || String(error?.code || "").trim().toLowerCase() === "storage_not_found";
         console.warn("[backend][proxy-media] storage buffer download failed", {
@@ -12112,6 +12170,14 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     await safePipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
     return;
   } catch (error) {
+    const errorText = String(error?.code || error?.message || "").trim();
+    const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
+    if (isPrematureClose) {
+      console.info("[backend][proxy-media] request closed before completion", {
+        message: String(error?.message || error)
+      });
+      return;
+    }
     applyAssetCorsHeaders(req, res);
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
   }

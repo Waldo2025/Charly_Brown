@@ -24,4 +24,10 @@ assert.match(
   "El backend debe permitir el polling público de montage/export-status sin bearer."
 );
 
+assert.match(
+  source,
+  /withTimeout\(\s*\(\) => montageExportJobStore\.getJob\(jobId\),\s*1200,/m,
+  "El polling de montage/export-status debe degradar consultas lentas en vez de bloquear la respuesta."
+);
+
 console.log("Backend CORS preflight OK.");
