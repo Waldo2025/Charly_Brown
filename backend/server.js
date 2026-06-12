@@ -5013,6 +5013,9 @@ app.get("/api/analizar-pdf/analyze-status", async (req, res) => {
 
 app.use("/api/podcaster", async (req, res, next) => {
   if (req.method === "OPTIONS") return next();
+  if (req.method === "GET" && String(req.path || "").trim() === "/montage/export-status") {
+    return next();
+  }
   try {
     req.authContext = await verifyFirebaseBearer(req);
     return next();

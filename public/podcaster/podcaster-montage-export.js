@@ -599,6 +599,7 @@ export async function pollMontageExportJob(jobId = "") {
   }
   try {
     const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
+      auth: false
     });
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     window.montageExportJobState.pollFailureCount = 0;

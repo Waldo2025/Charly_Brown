@@ -5148,7 +5148,9 @@ async function pollExportStatus() {
   if (!exportJobState.jobId) return;
 
   try {
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
+    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`, {
+      auth: false
+    });
 
     if (data.status === "ready") {
       const url = data.downloadUrl || data.export?.downloadUrl;

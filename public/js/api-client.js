@@ -137,14 +137,16 @@ export async function authFetchJson(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
+  const { auth = true, ...requestOptions } = options || {};
   const finalUrl = buildApiUrl(url);
-  const requestHasBody = Object.prototype.hasOwnProperty.call(options || {}, "body") && options.body != null;
-  const headers = await getAuthHeaders(requestHasBody ? { "Content-Type": "application/json" } : {});
+  const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
+  const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
+  const headers = auth ? await getAuthHeaders(baseHeaders) : baseHeaders;
   const requestInit = {
-    ...options,
+    ...requestOptions,
     headers: {
       ...headers,
-      ...(options.headers || {}),
+      ...(requestOptions.headers || {}),
     },
   };
   const contentType = String(requestInit.headers?.["Content-Type"] || requestInit.headers?.["content-type"] || "").toLowerCase();

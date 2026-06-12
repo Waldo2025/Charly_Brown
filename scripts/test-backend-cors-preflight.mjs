@@ -18,4 +18,10 @@ assert.doesNotMatch(
   "El backend no debe usar app.options('*') porque Express 5 lo rechaza."
 );
 
+assert.match(
+  source,
+  /req\.method === "GET" && String\(req\.path \|\| ""\)\.trim\(\) === "\/montage\/export-status"/,
+  "El backend debe permitir el polling público de montage/export-status sin bearer."
+);
+
 console.log("Backend CORS preflight OK.");
