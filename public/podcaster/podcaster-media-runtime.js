@@ -166,6 +166,23 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
     const timestamp = options.updatedAt || options.timestamp || "";
     const noRange = options.noRange !== false;
+    if (clean) {
+      try {
+        const parsed = new URL(clean, window.location.origin);
+        const host = String(parsed.hostname || "").toLowerCase();
+        const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+        if (isFirebaseStorageUrl) {
+          let directUrl = clean;
+          if (timestamp && !directUrl.includes("u=")) {
+            const separator = directUrl.includes("?") ? "&" : "?";
+            directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+          }
+          return directUrl;
+        }
+      } catch (_) {
+        // keep proxy fallback for non-URL media refs
+      }
+    }
     let finalUrl = "";
     if (cleanStoragePath) {
       const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}${noRange ? "&noRange=1" : ""}`) || "";

@@ -41,7 +41,7 @@ import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-12.2";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.1";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
@@ -6281,6 +6281,16 @@ function resolveStorageMediaUrl(rawUrl = "") {
 
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
+  if (/^https?:\/\//i.test(clean)) {
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      const host = String(parsed.hostname || "").toLowerCase();
+      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+      if (isFirebaseStorageUrl) return clean;
+    } catch (_) {
+      // fall through to proxy resolution
+    }
+  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (clean.startsWith("data:")) return clean;
@@ -6350,6 +6360,16 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
 
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
+  if (/^https?:\/\//i.test(clean)) {
+    try {
+      const parsed = new URL(clean, window.location.origin);
+      const host = String(parsed.hostname || "").toLowerCase();
+      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
+      if (isFirebaseStorageUrl) return clean;
+    } catch (_) {
+      // fall through to proxy resolution
+    }
+  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
