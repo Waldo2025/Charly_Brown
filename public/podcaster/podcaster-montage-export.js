@@ -731,7 +731,7 @@ export async function pollMontageExportJob(jobId = "") {
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
-    if (errorStatus === 404 && errorCode === "job_not_found") {
+    if (errorStatus === 404) {
       clearMontageExportPolling();
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
@@ -739,7 +739,9 @@ export async function pollMontageExportJob(jobId = "") {
       setMontageExportProgress(null);
       setMontageExportStatus(
         "Se perdió el estado del export en el backend.",
-        "El backend se reinició durante la exportación. Vuelve a exportar.",
+        errorCode === "job_not_found"
+          ? "El backend se reinició durante la exportación. Vuelve a exportar."
+          : "El backend respondió 404 al consultar el job. Vuelve a exportar o revisa el log del backend.",
         { tone: "error" }
       );
       setMontageExportContinueButton({ visible: false });
