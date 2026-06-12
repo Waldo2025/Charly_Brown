@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.88",
-  "build": "2026-1.0.10.88",
+  "version": "1.0.10.89",
+  "build": "2026-1.0.10.89",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El karaoke de texto en pantalla ahora se acelera o desacelera en sincronía con el cambio de velocidad (playbackRate) del audio Gemini al multiplicar el tiempo transcurrido local en la resolución de la palabra activa.",
@@ -17,7 +17,7 @@
     "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta.",
     "Corregido: El podcaster ahora prioriza downloadUrl públicas de Firebase Storage en vez del proxy-media cuando están disponibles, evitando errores de CORS/QUIC en producción.",
     "Corregido: El polling del export de montage en podcaster ahora corta correctamente ante 404 en Render y muestra el estado perdido en vez de quedarse reintentando indefinidamente.",
-    "Corregido: El export de montage ahora envía también el mapa de audio del timeline para que el modo party karaoke conserve el texto sincronizado en pantalla y no pierda el overlay al renderizar."
+    "Corregido: El export de montage ahora envía downloadUrl explícito para video y audio, y el backend lo prioriza antes del storagePath para reducir la dependencia del proxy-media en Render. También se mantiene el fix de party karaoke para conservar el texto sincronizado."
   ],
-  "cache_version": "2026-1.0.10.88"
+  "cache_version": "2026-1.0.10.89"
 }

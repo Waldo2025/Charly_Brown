@@ -8536,7 +8536,7 @@ function shouldSkipMontageEntryError(error) {
 function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
   return async (asset = {}, kind = "video", index = 0) => {
     const storagePath = clampText(asset?.storagePath || "", 900);
-    const url = String(asset?.url || "").trim();
+    const url = String(asset?.downloadUrl || asset?.url || "").trim();
     if (!storagePath && !url) {
       const err = new Error("missing_download_source");
       err.code = "missing_download_source";
@@ -8569,6 +8569,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       }
       return targetPath;
     };
+    const isDirectHttpUrl = (value = "") => /^https?:\/\//i.test(String(value || "").trim());
     const downloadWithTimeout = async (task, label = "download") => withTimeout(
       task,
       MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS,
@@ -8607,6 +8608,18 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       return nextOwners.map((owner) => `${prefix}${owner}${suffix}`);
     };
 
+    if (url && isDirectHttpUrl(url)) {
+      try {
+        await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+        return validateDownloadedAsset(outPath);
+      } catch (directUrlError) {
+        const directCode = String(directUrlError?.code || directUrlError?.message || "").trim();
+        if (storagePath || directCode !== "missing_download_url") {
+          // Continue with storagePath fallback below.
+        }
+      }
+    }
+
     if (storagePath) {
       try {
         await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath), "storage_download");
@@ -8635,7 +8648,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
               }
             }
           }
-          if (url && !parseFirebaseStorageGoogleApisObjectUrl(url)) {
+          if (url && !parseFirebaseStorageGoogleApisObjectUrl(url) && !isDirectHttpUrl(url)) {
             await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
             return validateDownloadedAsset(outPath);
           }

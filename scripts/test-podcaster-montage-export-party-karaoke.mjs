@@ -34,4 +34,10 @@ assert.match(
   "La exportación debe enviar el mapa de audio para reconstruir el karaoke en backend."
 );
 
+assert.match(
+  montageExportSource,
+  /downloadUrl:\s*videoDownloadUrl \|\| ""/,
+  "La exportación debe enviar downloadUrl explícito para el video de escena."
+);
+
 console.log("Podcaster montage export party karaoke OK.");

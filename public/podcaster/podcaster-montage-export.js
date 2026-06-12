@@ -1463,6 +1463,7 @@ export function buildMontageExportPayload(session = null) {
           video: {
             storagePath: videoStoragePath || "",
             url: videoDownloadUrl || "",
+            downloadUrl: videoDownloadUrl || "",
             mimeType: videoMimeType,
             type: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
             mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video")
@@ -1472,6 +1473,7 @@ export function buildMontageExportPayload(session = null) {
             : (audioStoragePath || audioDownloadUrl) ? {
               storagePath: audioStoragePath || "",
               url: audioDownloadUrl || "",
+              downloadUrl: audioDownloadUrl || "",
               mimeType: audioMimeType
             } : null,
           useNativeVideoAudio: useNativeVideoAudio === true,
