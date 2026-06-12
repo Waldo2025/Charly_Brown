@@ -137,8 +137,9 @@ export async function authFetchJson(url, options = {}) {
     error.code = "API_UNAVAILABLE";
     throw error;
   }
-  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
   const finalUrl = buildApiUrl(url);
+  const requestHasBody = Object.prototype.hasOwnProperty.call(options || {}, "body") && options.body != null;
+  const headers = await getAuthHeaders(requestHasBody ? { "Content-Type": "application/json" } : {});
   const requestInit = {
     ...options,
     headers: {

@@ -8,8 +8,8 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /authFetchJson\(`\/api\/podcaster\/montage\/export-status\?jobId=\$\{encodeURIComponent\(cleanJobId\)\}`,\s*\{\s*cache:\s*"no-store"\s*\}\s*\);/m,
-  "El polling del export no debe enviar headers Cache-Control/Pragma que disparen preflight CORS."
+  /authFetchJson\(`\/api\/podcaster\/montage\/export-status\?jobId=\$\{encodeURIComponent\(cleanJobId\)\}`,\s*\{\s*\}\s*\);/m,
+  "El polling del export debe evitar opciones de fetch que disparen preflight CORS."
 );
 
 assert.doesNotMatch(

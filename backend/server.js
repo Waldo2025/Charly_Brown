@@ -845,7 +845,16 @@ const corsOptions = {
     callback(new Error("CORS_NOT_ALLOWED"));
   },
   credentials: false,
-  allowedHeaders: ["Range", "Content-Type", "Authorization", "Accept", "X-Requested-With"],
+  allowedHeaders: [
+    "Range",
+    "Content-Type",
+    "Authorization",
+    "Accept",
+    "X-Requested-With",
+    "Cache-Control",
+    "Pragma",
+    "Expires"
+  ],
   exposedHeaders: ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   preflightContinue: false,
@@ -853,6 +862,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: MAX_BODY }));
 
 app.get("/api/health", (_req, res) => {
