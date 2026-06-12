@@ -36,7 +36,7 @@ import {
   continueMontageExportPolling,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-12.4";
+} from "./podcaster-montage-export.js?v=2026-06-12.5";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -4106,12 +4106,13 @@ function getOnScreenTextClipEffectiveDurationMs(clip = null) {
   return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
 }
 
-function buildMontageOnScreenTextSegments(session = null, runtimeEntries = []) {
+function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], options = {}) {
   const activeSession = session || getActiveSession();
   const rows = getSessionRows(activeSession);
   const cfg = getPodcastVideoConfig(activeSession);
   const settings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
-  if (!settings.enabled || settings.showTrack === false) return { settings, segments: [] };
+  const includeHidden = options?.includeHidden === true;
+  if ((!settings.enabled || settings.showTrack === false) && !includeHidden) return { settings, segments: [] };
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
   const layoutMap = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
   const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
@@ -4119,7 +4120,8 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = []) {
     const rowId = String(row?.id || "").trim();
     if (!rowId) return null;
     const clip = clipMap[rowId] || null;
-    if (!clip || clip.hidden === true) return null;
+    if (!clip) return null;
+    if (clip.hidden === true && !includeHidden) return null;
     const text = getOnScreenTextClipText(row);
     if (!text) return null;
     const runtime = runtimeByRowId.get(rowId) || null;
