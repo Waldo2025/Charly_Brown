@@ -18,6 +18,7 @@ import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/p
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
 import { getTransitionForEdge } from "../podcaster/podcaster-scene-transition.js";
 import { createPodcasterStageFullscreenController } from "../podcaster/podcaster-fullscreen.js";
+import { buildPreviewDocument } from "./escape-room-package-builder.mjs";
 import "../podcaster/podcaster-scene-media-render-spec.js";
 
 const app = getDefaultFirebaseApp();
@@ -123,6 +124,7 @@ let dashboardUnsubscribes = {
   aprende: null,
   downloads: null
 };
+const escapeRoomPreviewCache = new Map();
 
 let unsubscribeLecturas;
 let unsubscribeComentarios;
@@ -900,6 +902,8 @@ const configurarEventos = () => {
         window.location.href = `moodleCourse.html?cursoId=${id}`;
       } else if (wbType === 'aprende_ver') {
         openAprendeViewer(id);
+      } else if (wbType === 'escapeRoom_preview') {
+        openEscapeRoomPreview(id);
       }
       return;
     }
@@ -1122,9 +1126,9 @@ const configurarBusquedaWorkbench = () => {
       const query = input.value.toLowerCase().trim();
       const items = document.querySelectorAll(`#${containerId} .workbench-item`);
       items.forEach(item => {
-        // En el nuevo diseño el título está en .workbench-item-meta
-        const title = item.querySelector(".workbench-item-meta")?.textContent.toLowerCase() || "";
-        item.style.display = title.includes(query) ? "" : "none";
+        const title = item.querySelector(".workbench-item-title")?.textContent.toLowerCase() || "";
+        const meta = item.querySelector(".workbench-item-meta")?.textContent.toLowerCase() || "";
+        item.style.display = title.includes(query) || meta.includes(query) ? "" : "none";
       });
     });
   };
@@ -1133,6 +1137,7 @@ const configurarBusquedaWorkbench = () => {
   setupSearch("searchUnidades", "contenedorUnidadesUser");
   setupSearch("searchMultimedia", "contenedorMultimediaUser");
   setupSearch("searchPodcasts", "contenedorPodcastsUser");
+  setupSearch("searchEscapeRooms", "contenedorEscapeRoomsUser");
   setupSearch("searchAprende", "contenedorAprendeUser");
 };
 
@@ -1156,6 +1161,7 @@ function aplicarFiltros() {
     document.getElementById("contenedorUnidadesUser"),
     document.getElementById("contenedorMultimediaUser"),
     document.getElementById("contenedorPodcastsUser"),
+    document.getElementById("contenedorEscapeRoomsUser"),
     document.getElementById("contenedorAprendeUser")
   ].filter(Boolean);
 
@@ -1945,6 +1951,7 @@ function mostrarSeccion(viewId) {
     if (viewId === 'viewUnidades') loadUserUnidades();
     if (viewId === 'viewMultimedia') loadUserMultimedia();
     if (viewId === 'viewPodcasts') loadUserPodcasts();
+    if (viewId === 'viewEscapeRooms') loadUserEscapeRooms();
   }
 }
 
@@ -1957,7 +1964,8 @@ const workbenchFilters = {
   lecturas: "published",
   unidades: "published",
   multimedia: "published",
-  podcasts: "published"
+  podcasts: "published",
+  escapeRooms: "published"
 };
 
 async function loadUserStats() {
@@ -1990,6 +1998,7 @@ function configureWorkbenchFilters() {
       if (view === "unidades") loadUserUnidades();
       if (view === "multimedia") loadUserMultimedia();
       if (view === "podcasts") loadUserPodcasts();
+      if (view === "escapeRooms") loadUserEscapeRooms();
       if (view === "aprende") loadUserAprende();
     });
     button.dataset.workbenchBound = "1";
@@ -2194,9 +2203,17 @@ async function loadUserUnidades() {
 function updateWorkbenchStats(scope, items) {
   const total = Array.isArray(items) ? items.length : 0;
   const published = Array.isArray(items)
-    ? items.filter((item) => item?.publicar === true || item?.published === true).length
+    ? items.filter((item) => item?.publicar === true || item?.published === true || item?.status === "published").length
     : 0;
-  const prefix = scope === 'unidades' ? 'unidades' : 'lecturas';
+  const prefixMap = {
+    lecturas: 'lecturas',
+    unidades: 'unidades',
+    multimedia: 'multimedia',
+    podcasts: 'podcasts',
+    escapeRooms: 'escapeRooms',
+    aprende: 'aprende'
+  };
+  const prefix = prefixMap[scope] || 'lecturas';
   const totalEl = document.getElementById(`${prefix}WorkbenchTotal`);
   const publishedEl = document.getElementById(`${prefix}WorkbenchPublished`);
   if (totalEl) totalEl.textContent = String(total);
@@ -2373,6 +2390,78 @@ async function loadUserPodcasts() {
     contenedor.innerHTML = '<p class="text-danger">Error al iniciar carga de podcasts.</p>';
   }
 }
+
+async function loadUserEscapeRooms() {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const contenedor = document.getElementById("contenedorEscapeRoomsUser");
+  if (!contenedor) return;
+
+  configureWorkbenchFilters();
+  updateWorkbenchFilterButtons("escapeRooms");
+  contenedor.innerHTML = '<div class="flex justify-center p-8"><div class="loading-spinner-snoopy w-12 h-12 opacity-40"></div></div>';
+
+  try {
+    const snap = await getDocs(query(collection(db, "escapeRoom"), orderBy("updatedAt", "desc")));
+    const filter = workbenchFilters.escapeRooms || "published";
+    const isAdmin = isCurrentUserAdmin();
+
+    let escapeRooms = snap.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+      coleccion: "escapeRoom",
+      type: "escapeRoom"
+    }));
+
+    if (filter === "published") {
+      escapeRooms = escapeRooms.filter((item) => item.status === "published");
+    } else if (!isAdmin) {
+      escapeRooms = escapeRooms.filter((item) => isUserOwnedDoc(item, user.uid) || item.ownerId === user.uid);
+    }
+
+    const authorIds = new Set();
+    escapeRooms.forEach((item) => {
+      if (item.ownerId) authorIds.add(item.ownerId);
+      if (item.userId) authorIds.add(item.userId);
+      if (item.uid) authorIds.add(item.uid);
+    });
+    if (authorIds.size > 0) await prefetchUsers(authorIds);
+
+    updateWorkbenchStats("escapeRooms", escapeRooms);
+    renderUserItemList(contenedor, escapeRooms, 'escapeRoom');
+  } catch (err) {
+    console.error("Error al cargar escape rooms:", err);
+    updateWorkbenchStats("escapeRooms", []);
+    contenedor.innerHTML = '<p class="text-danger">Error al cargar escape rooms.</p>';
+  }
+}
+
+function closeEscapeRoomPreview() {
+  const modal = document.getElementById("escapeRoomPreviewModal");
+  const frame = document.getElementById("escapeRoomPreviewFrame");
+  if (frame) frame.removeAttribute("srcdoc");
+  if (modal) modal.classList.add("hidden");
+}
+
+function openEscapeRoomPreview(id) {
+  const project = escapeRoomPreviewCache.get(id);
+  const modal = document.getElementById("escapeRoomPreviewModal");
+  const frame = document.getElementById("escapeRoomPreviewFrame");
+  const title = document.getElementById("escapeRoomPreviewTitle");
+
+  if (!project || !modal || !frame) {
+    showNotification("No se pudo cargar el preview del escape room.", "error");
+    return;
+  }
+
+  frame.srcdoc = buildPreviewDocument(project, { editorialReview: true });
+  if (title) title.textContent = project.titulo || "Preview del Escape Room";
+  modal.classList.remove("hidden");
+}
+
+document.getElementById("escapeRoomPreviewClose")?.addEventListener("click", closeEscapeRoomPreview);
+document.getElementById("escapeRoomPreviewBackdrop")?.addEventListener("click", closeEscapeRoomPreview);
 
 
 
@@ -5088,6 +5177,7 @@ function renderUserItemList(container, items, type) {
     if (type === "unidad") accentClass = "workbench-item-unidad";
     if (type === "download") accentClass = "workbench-item-download";
     if (type === "aprende") accentClass = "workbench-item-aprende";
+    if (type === "escapeRoom") accentClass = "workbench-item-unidad";
     if (type === "multimedia" || type === "podcast") accentClass = "workbench-item-multimedia";
 
     card.className = `workbench-item ${accentClass}`;
@@ -5131,6 +5221,9 @@ function renderUserItemList(container, items, type) {
       // Ajuste específico para Aprende
       if (type === 'aprende') {
         displayTitle = item.nombre || "Sesión de Aprende";
+      } else if (type === 'escapeRoom') {
+        displayTitle = item.title || item.project?.titulo || item.formState?.temaInput || "Escape Room";
+        metaLabel = "ESCAPE ROOM";
       }
     }
 
@@ -5171,7 +5264,7 @@ function renderUserItemList(container, items, type) {
     if (type === 'podcast') iconClass = "fas fa-microphone-lines";
     if (type === 'aprende') iconClass = "fas fa-wand-magic-sparkles";
     const typeLabel = type === 'lectura' ? 'Lectura' : type === 'unidad' ? 'Unidad' : type === 'aprende' ? 'Aprende' : 'Descarga';
-    const statusLabel = item.publicar === true || item.published === true ? 'Publicada' : 'Borrador';
+    const statusLabel = item.status === "published" || item.publicar === true || item.published === true ? 'Publicada' : 'Borrador';
 
     let unitTypeLabel = "";
     if (type === 'unidad') {
@@ -5219,7 +5312,91 @@ function renderUserItemList(container, items, type) {
       authorName = "Sistema / Migrado";
     }
 
-    if (type === 'multimedia' || type === 'podcast') {
+    if (type === 'escapeRoom') {
+      const project = item.project && typeof item.project === "object" ? item.project : {};
+      const formState = item.formState && typeof item.formState === "object" ? item.formState : {};
+      const nivel = project.nivel || formState.nivelSelect || "—";
+      const grado = project.grado || formState.gradoSelect || "—";
+      const trimestre = project.trimestre || item.trimestre || formState.trimestreSelect || "—";
+      const materia = project.materia || item.materia || formState.materiaSelect || "—";
+      const unidadTemaLabel = String(nivel).toLowerCase() === "primaria" ? "Unidad" : "Tema";
+      const unidadTemaValue = project.unidad || item.unidad || project.tema || item.tema || formState.unidadTemaSelect || "—";
+      const estacion = project.estacion || item.estacion || formState.estacionSelect || "";
+      const previewProject = project && Object.keys(project).length ? project : null;
+
+      if (previewProject) {
+        escapeRoomPreviewCache.set(item.id, previewProject);
+      }
+
+      card.className = `workbench-item ${accentClass} accordion-item`;
+      card.dataset.id = item.id;
+      card.dataset.coleccion = item.coleccion || "";
+      card.innerHTML = `
+        <div class="workbench-accordion-header">
+          <div class="workbench-item-icon" aria-hidden="true">
+            <img src="pigpen.png" alt="PigPen" class="flow-status-img" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">
+          </div>
+          <div class="workbench-item-copy">
+            <div class="workbench-item-meta">
+              <span>${escapeHtml(metaLabel)}</span>
+            </div>
+            <h2 class="workbench-item-title">${escapeHtml(displayTitle)}</h2>
+          </div>
+          <i class="fas fa-chevron-down workbench-accordion-icon"></i>
+        </div>
+
+        <div class="workbench-accordion-body">
+          <div class="workbench-details-grid">
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Nivel</span>
+              <span class="workbench-detail-value">${escapeHtml(String(nivel))}</span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Grado</span>
+              <span class="workbench-detail-value">${escapeHtml(String(grado))}</span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Trimestre</span>
+              <span class="workbench-detail-value">${escapeHtml(String(trimestre))}</span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Materia</span>
+              <span class="workbench-detail-value">${escapeHtml(String(materia))}</span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">${escapeHtml(unidadTemaLabel)}</span>
+              <span class="workbench-detail-value">${escapeHtml(String(unidadTemaValue))}</span>
+            </div>
+            ${String(nivel).toLowerCase() === "secundaria" ? `
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Estación</span>
+              <span class="workbench-detail-value">${escapeHtml(String(estacion || "—"))}</span>
+            </div>
+            ` : ""}
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Autor</span>
+              <span class="workbench-detail-value">${escapeHtml(authorName)}</span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Estado</span>
+              <span class="workbench-detail-value"><span class="workbench-tag is-status">${statusLabel}</span></span>
+            </div>
+            <div class="workbench-detail-item">
+              <span class="workbench-detail-label">Fecha</span>
+              <span class="workbench-detail-value">${escapeHtml(date)}</span>
+            </div>
+            <div class="workbench-action-area">
+              <div class="workbench-item-actions" style="flex-direction: row; gap: 0.75rem; justify-content: flex-end; width: 100%;">
+                <a href="#" class="btn-workbench-action" data-id="${item.id}" data-type="escapeRoom_preview" title="Ver preview" style="padding: 0.6rem 1.2rem; font-size: 0.85rem; background: #ec4899 !important; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3) !important;">
+                  <i class="fas fa-eye"></i>
+                  <span>Ver preview</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (type === 'multimedia' || type === 'podcast') {
       const session = item.session || item;
       const ui = session?.podcastStudioUiState || {};
       const clipMap = session?.timelineClipMap || ui.timelineClipsByRowId || {};

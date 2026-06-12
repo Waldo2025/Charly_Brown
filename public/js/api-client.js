@@ -249,7 +249,8 @@ export async function authFetchJson(url, options = {}) {
   if (!response.ok) {
     // Suppress noisy logs for known transient backend 503 error montage_export_queue_unavailable to avoid log flood
     const isMontageQueueUnavailable = response.status === 503 && data && (data.error === 'montage_export_queue_unavailable' || data.code === 'montage_export_queue_unavailable');
-    if (!isMontageQueueUnavailable) {
+    const isMontageBusyWithExport = response.status === 429 && data && (data.error === 'backend_busy_with_export' || data.code === 'backend_busy_with_export');
+    if (!isMontageQueueUnavailable && !isMontageBusyWithExport) {
       try {
         console.error("[api-client] request failed", {
           url: finalUrl,

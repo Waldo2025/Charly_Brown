@@ -403,6 +403,14 @@ async function streamStorageFileToResponse(file, res, options = {}) {
   await safePipeline(stream, res.status(200));
 }
 
+function applyAssetCorsHeaders(req, res) {
+  const origin = String(req.headers?.origin || "").trim();
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, ETag");
+}
+
 function resolveFfmpegDrawtextFontFile() {
   return FFMPEG_DRAWTEXT_FONT_CANDIDATES.find((candidate) => {
     try {
@@ -11724,6 +11732,7 @@ app.post("/api/gemini/live-token", async (req, res) => {
 
 app.get("/api/assets/proxy-image", async (req, res) => {
   try {
+    applyAssetCorsHeaders(req, res);
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
     if (storagePath) {
       const downloaded = await downloadStorageObjectToBuffer(storagePath);
@@ -11776,6 +11785,7 @@ app.get("/api/assets/proxy-image", async (req, res) => {
     res.setHeader("Cache-Control", "private, max-age=120");
     return res.status(200).send(buffer);
   } catch (error) {
+    applyAssetCorsHeaders(req, res);
     return res.status(500).json({ error: String(error?.message || "Error en proxy de imagen.") });
   }
 });
@@ -11885,10 +11895,12 @@ app.get("/api/assets/montage-download", async (req, res) => {
 
 app.get("/api/assets/proxy-media", async (req, res) => {
   try {
+    applyAssetCorsHeaders(req, res);
+    const ignoreRange = String(req.query?.noRange || "").trim() === "1" || String(req.query?.noRange || "").trim().toLowerCase() === "true";
     const storagePath = normalizeStorageFilePath(clampText(req.query?.storagePath || "", 700));
     const rawUrl = String(req.query?.url || "").trim();
     const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
-    const rangeHeader = String(req.headers.range || "").trim();
+    const rangeHeader = ignoreRange ? "" : String(req.headers.range || "").trim();
 
     if (storagePath) {
       console.info("[backend][proxy-media] attempting storage stream", {
@@ -12088,6 +12100,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     await safePipeline(stream, res.status(upstream.status === 206 ? 206 : 200));
     return;
   } catch (error) {
+    applyAssetCorsHeaders(req, res);
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
   }
 });

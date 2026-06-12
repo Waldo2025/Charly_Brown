@@ -90,10 +90,15 @@
                                         <i class="fas fa-file-zipper"></i>
                                         <span>Exportar</span>
                                     </button>
-                                    <button type="button" id="btnPublicar" class="er-button er-button-publish" disabled>
-                                        <i class="fas fa-globe"></i>
-                                        <span>Publicar</span>
-                                    </button>
+                                    <div class="er-publish-switch-wrap" role="group" aria-label="Publicación del escape room">
+                                        <span id="publishSwitchLabel" class="er-publish-switch-label">Borrador</span>
+                                        <label class="er-publish-switch" title="Publicar escape room">
+                                            <input type="checkbox" id="publishToggle" aria-label="Publicar escape room">
+                                            <span class="er-publish-switch-track" aria-hidden="true">
+                                                <span class="er-publish-switch-thumb"></span>
+                                            </span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                             <div class="er-summary-stats" id="erSummaryStats">
@@ -150,6 +155,52 @@
                                             <option value="Cuarto">Cuarto</option>
                                             <option value="Quinto">Quinto</option>
                                             <option value="Sexto">Sexto</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Trimestre</span>
+                                        <select id="trimestreSelect" required>
+                                            <option value="1">Primer trimestre</option>
+                                            <option value="2">Segundo trimestre</option>
+                                            <option value="3">Tercer trimestre</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span>Materia</span>
+                                        <select id="materiaSelect" required>
+                                            <option value="Español">Español</option>
+                                            <option value="Inglés">Inglés</option>
+                                            <option value="Matemáticas">Matemáticas</option>
+                                            <option value="Historia de México">Historia de México</option>
+                                            <option value="Historia del mundo">Historia del mundo</option>
+                                            <option value="Ciencias Naturales">Ciencias Naturales</option>
+                                            <option value="Cívica y ética">Cívica y ética</option>
+                                            <option value="Física">Física</option>
+                                            <option value="Química">Química</option>
+                                            <option value="Biología">Biología</option>
+                                            <option value="Geografía">Geografía</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field">
+                                        <span id="unidadTemaLabel">Unidad</span>
+                                        <select id="unidadTemaSelect">
+                                            <option value="1">1</option>
+                                            <option value="2">2</option>
+                                            <option value="3">3</option>
+                                            <option value="4">4</option>
+                                            <option value="5">5</option>
+                                            <option value="6">6</option>
+                                            <option value="7">7</option>
+                                            <option value="8">8</option>
+                                        </select>
+                                    </label>
+                                    <label class="er-field hidden" id="estacionField">
+                                        <span>Estación</span>
+                                        <select id="estacionSelect">
+                                            <option value="Primera estación">Primera estación</option>
+                                            <option value="Segunda estación">Segunda estación</option>
+                                            <option value="Tercera estación">Tercera estación</option>
+                                            <option value="Cuarta estación">Cuarta estación</option>
                                         </select>
                                     </label>
                                     <label class="er-field">
@@ -318,6 +369,10 @@
                                     <h2>Juego exportable y JSON normalizado</h2>
                                 </div>
                                 <div class="er-output-header-actions">
+                                    <button type="button" id="btnPreviewAutofill" class="er-button er-button-secondary">
+                                        <i class="fas fa-wand-magic-sparkles"></i>
+                                        <span>Resolver preview</span>
+                                    </button>
                                     <button type="button" id="btnPreviewTheme" class="er-button er-button-secondary er-button-icon" data-bs-toggle="modal" data-bs-target="#previewThemeModal" aria-label="Tema del juego">
                                         <i class="fas fa-palette"></i>
                                     </button>

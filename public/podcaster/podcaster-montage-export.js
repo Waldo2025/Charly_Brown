@@ -117,6 +117,7 @@ function formatMontageExportTimelineLabel(entry = null) {
 // --- XLSX & Review Excel Generation ---
 
 let montageExportXlsxLoaderPromise = null;
+let montageExportSubmitLocked = false;
 
 function ensureMontageExportXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -598,11 +599,7 @@ export async function pollMontageExportJob(jobId = "") {
   }
   try {
     const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache"
-      }
+      cache: "no-store"
     });
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     window.montageExportJobState.pollFailureCount = 0;
@@ -1552,7 +1549,8 @@ export function buildMontageExportPayload(session = null) {
 }
 
 export async function runMontageExport() {
-  if (window.montageExportBusy) return;
+  if (window.montageExportBusy || montageExportSubmitLocked) return;
+  montageExportSubmitLocked = true;
   try {
     const previousJobId = String(window.montageExportJobState.jobId || "").trim();
     const session = window.getActiveSession?.() || null;
@@ -1566,6 +1564,7 @@ export async function runMontageExport() {
     if (!prepared?.ok) {
       setMontageExportProgress(null);
       setMontageExportStatus(prepared?.error || "No pudimos preparar la exportación.", "Revisa que el timeline tenga clips válidos.", { tone: "error" });
+      setMontageExportBusy(false);
       return;
     }
     window.setTimelinePreviewsSuspended?.(true);
@@ -1619,10 +1618,19 @@ export async function runMontageExport() {
     const apiPayload = error?.detail && typeof error.detail === "object" ? error.detail : null;
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
+    const activeJobId = String(detail?.activeJobId || apiPayload?.activeJobId || "").trim();
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
     const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
     try {
-      console.error("[podcaster][montage-export] runMontageExport failed", error);
+      if (status === 429 || code === "backend_busy_with_export") {
+        console.warn("[podcaster][montage-export] export already active or backend busy", {
+          status: status || undefined,
+          code: code || undefined,
+          activeJobId: activeJobId || undefined
+        });
+      } else {
+        console.error("[podcaster][montage-export] runMontageExport failed", error);
+      }
     } catch (_) {
       // noop
     }
@@ -1636,6 +1644,17 @@ export async function runMontageExport() {
       hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
     } else if (status === 429 || code === "backend_busy_with_export") {
+      if (activeJobId) {
+        window.montageExportJobState.jobId = activeJobId;
+        setMontageExportContinueButton({ visible: true, label: "Seguir exportación" });
+        setMontageExportStatus(
+          "Ya hay una exportación activa.",
+          "Estamos retomando el seguimiento del job en curso.",
+          { tone: "warning" }
+        );
+        await continueMontageExportPolling();
+        return;
+      }
       hintParts.push("El servidor está ocupado con otra exportación.");
       hintParts.push(previousJobId
         ? "Usa \"Continuar exportación\" para retomar el job activo."
@@ -1662,6 +1681,8 @@ export async function runMontageExport() {
     setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
     window.setTimelinePreviewsSuspended?.(false);
     setMontageExportBusy(false);
+  } finally {
+    montageExportSubmitLocked = false;
   }
 }
 

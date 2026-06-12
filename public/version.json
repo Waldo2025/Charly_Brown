@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.83",
-  "build": "2026-1.0.10.83",
+  "version": "1.0.10.84",
+  "build": "2026-1.0.10.84",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El karaoke de texto en pantalla ahora se acelera o desacelera en sincronía con el cambio de velocidad (playbackRate) del audio Gemini al multiplicar el tiempo transcurrido local en la resolución de la palabra activa.",
@@ -16,7 +16,6 @@
     "Corregido: Generación de escenas Veo desde timeline vuelve a activar spinner y trazas de diagnóstico dedicadas.",
     "Corregido: Podcaster vuelve a usar los modelos Veo 3.1 preview compatibles con Gemini API v1beta."
   ],
-  "cache_version": "2026-1.0.10.79"
+  "cache_version": "2026-1.0.10.84"
 }
-
 

@@ -794,6 +794,16 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
       return true;
     }
 
+    const openGeminiAudioSpeedBtn = event.target?.closest?.("[data-action='open-gemini-audio-speed-modal'][data-row-id]");
+    if (openGeminiAudioSpeedBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rowId = String(openGeminiAudioSpeedBtn.dataset.rowId || "").trim();
+      if (!rowId) return true;
+      setGeminiAudioSpeedModalOpen(rowId);
+      return true;
+    }
+
     const geminiChip = event.target?.closest?.("[data-action='timeline-select-gemini-audio'][data-row-id]");
     if (geminiChip) {
       const rowId = String(geminiChip.dataset.rowId || "").trim();
@@ -812,16 +822,6 @@ export function createPodcasterTimelineInteractionApi(deps = {}) {
         podcastVideoState.timelineAudioSelection.geminiRowIds.add(rowId);
       }
       renderPodcastVideoTimeline(getActiveSession());
-      return true;
-    }
-
-    const openGeminiAudioSpeedBtn = event.target?.closest?.("[data-action='open-gemini-audio-speed-modal'][data-row-id]");
-    if (openGeminiAudioSpeedBtn) {
-      event.preventDefault();
-      event.stopPropagation();
-      const rowId = String(openGeminiAudioSpeedBtn.dataset.rowId || "").trim();
-      if (!rowId) return true;
-      setGeminiAudioSpeedModalOpen(rowId);
       return true;
     }
 

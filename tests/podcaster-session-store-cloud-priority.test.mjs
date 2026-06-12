@@ -41,7 +41,8 @@ test("mergeCloudVsLocalSessions prefers full cloud rows over stale local rows", 
   assert.equal(merged.script.rows[0].text, "cloud");
   assert.equal(merged.script.rows[0].visualNotesProposal, "");
   assert.deepEqual(merged.script.rows[0].visualNotesResolvedProposals, ["cloud proposal"]);
-  assert.deepEqual(merged.podcastVideoConfig, { cloud: true });
+  assert.equal(merged.podcastVideoConfig.cloud, true);
+  assert.equal(merged.podcastVideoConfig.local, true);
 });
 
 test("mergeCloudVsLocalSessions keeps local fallback rows for stub cloud sessions", () => {
@@ -66,7 +67,8 @@ test("mergeCloudVsLocalSessions keeps local fallback rows for stub cloud session
 
   assert.equal(merged.script.rows[0].text, "stub");
   assert.equal(merged.script.rows[0].visualNotesProposal, "keep me");
-  assert.deepEqual(merged.podcastVideoConfig, { local: true });
+  assert.equal(merged.podcastVideoConfig.local, true);
+  assert.equal(merged.podcastVideoConfig.reelModeEnabled, false);
 });
 
 test("bootstrapSessions prefers cloud snapshot when local and cloud differ", async () => {
@@ -114,4 +116,61 @@ test("bootstrapSessions prefers cloud snapshot when local and cloud differ", asy
   assert.equal(result.sessions[0].script.rows[0].text, "cloud");
   assert.equal(result.useLocal, false);
   assert.ok(written.length > 0);
+});
+
+test("bootstrapSessions persists merged local cloud session instead of raw cloud snapshot", async () => {
+  const written = [];
+  const local = [{
+    id: "s1",
+    updatedAt: "2026-06-12T00:00:00.000Z",
+    title: "local",
+    dialogueAudioMap: {
+      "row-1": { rowId: "row-1", playbackRate: 4.5, downloadUrl: "local.wav" }
+    },
+    script: { rows: [{ id: "row-1", text: "local", playbackRate: 4.5 }] }
+  }];
+  const cloud = [{
+    id: "s1",
+    updatedAt: "2026-06-11T00:00:00.000Z",
+    title: "cloud",
+    isStub: false,
+    dialogueAudioMap: {
+      "row-1": { rowId: "row-1", playbackRate: 1, downloadUrl: "cloud.wav" }
+    },
+    script: { rows: [{ id: "row-1", text: "cloud", playbackRate: 1 }] }
+  }];
+  const storageAdapter = {
+    readJson(key) {
+      if (String(key).startsWith("test_sessions:deleted:")) return [];
+      if (String(key).startsWith("test_sessions:uid-1")) return local;
+      return [];
+    },
+    writeJson(key, value) { written.push({ key, value }); },
+    getItem() { return ""; },
+    setItem() {},
+    removeItem() {}
+  };
+
+  const result = await bootstrapSessions("uid-1", {
+    STORAGE_KEY_BASE: "test_sessions",
+    nowIso: () => "2026-06-12T12:00:00.000Z",
+    normalizePodcastVideoConfig(value) { return value || {}; },
+    mergeSessionRowsWithFallback(primaryRows = [], fallbackRows = []) {
+      return primaryRows.length
+        ? primaryRows.map((row, index) => ({ ...(fallbackRows[index] || {}), ...row }))
+        : fallbackRows;
+    },
+    mergeSessionsById(primary = [], secondary = []) {
+      return [...primary, ...secondary];
+    },
+    forceCloud: false,
+    authFetchJson: async () => ({ sessions: cloud }),
+    hasAvailableApiBase: () => true
+  }, storageAdapter);
+
+  assert.equal(result.sessions[0].dialogueAudioMap["row-1"].playbackRate, 4.5);
+  assert.equal(result.sessions[0].script.rows[0].playbackRate, 1);
+  const persistedSession = written.find((entry) => entry.key === "test_sessions:uid-1")?.value?.find?.((session) => session.id === "s1") || null;
+  assert.ok(persistedSession);
+  assert.equal(persistedSession.dialogueAudioMap["row-1"].playbackRate, 4.5);
 });

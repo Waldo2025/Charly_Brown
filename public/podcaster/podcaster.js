@@ -1,9 +1,9 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-05.1";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-12.1";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
-import { createPodcasterSessionStore } from "./podcaster-session-store.js";
-import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js";
+import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.1";
+import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-12.1";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import {
@@ -36,20 +36,20 @@ import {
   continueMontageExportPolling,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-05.1";
+} from "./podcaster-montage-export.js?v=2026-06-12.1";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
 import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js";
 import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
-import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-05-17.1";
+import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.1";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";
 import { createPodcasterOnScreenTextTrackEditorApi } from "./podcaster-on-screen-text-track-editor.js";
-import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-05-25.1";
+import { createPodcasterTimelineInteractionApi } from "./podcaster-timeline-interaction.js?v=2026-06-12.1";
 import { createPodcasterTimelineClipDurationApi } from "./podcaster-timeline-clip-duration.js";
-import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js";
+import { createPodcasterTimelineUiApi } from "./podcaster-timeline-ui.js?v=2026-06-12.1";
 import { createPodcasterSceneSelectionApi } from "./podcaster-scene-selection.js";
 import { createPodcasterSceneTransitionApi } from "./podcaster-scene-transition.js";
 import { buildSpeakerMapsForHosts as buildSpeakerMapsForHostsShared } from "./podcaster-speaker-maps.js";
@@ -1940,7 +1940,7 @@ function normalizePodcastSceneLibraryItem(item = null) {
     // Preservar metadatos adicionales si existen para la copia
     originalSpeaker: String(item.speaker || "Narrador").trim(),
     originalExpression: String(item.expression || "Neutral").trim(),
-    playbackRate: Math.max(0.5, Math.min(2.25, Number(item.playbackRate) || 1))
+    playbackRate: Math.max(0.5, Math.min(10, Number(item.playbackRate) || 1))
   };
 }
 
@@ -3660,7 +3660,7 @@ function getDialogueVideoMap(session = null) {
 }
 
 function normalizeDialogueAudioPlaybackRate(value = 1) {
-  return Math.max(0.5, Math.min(2.25, Number(value || 1) || 1));
+  return Math.max(0.5, Math.min(10, Number(value || 1) || 1));
 }
 
 function normalizeDialogueAudioMap(raw = {}) {
@@ -3680,7 +3680,7 @@ function normalizeDialogueAudioMap(raw = {}) {
       model: String(clip.model || "gemini-3.1-flash-tts-preview").trim() || "gemini-3.1-flash-tts-preview",
       promptVersion: String(clip.promptVersion || "podcaster_live_audio_v1").trim() || "podcaster_live_audio_v1",
       durationSec: Math.max(0, Number(clip.durationSec) || 0),
-      playbackRate: Math.max(0.5, Math.min(2.25, Number(clip.playbackRate || 1) || 1)),
+      playbackRate: Math.max(0.5, Math.min(10, Number(clip.playbackRate || 1) || 1)),
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       wordTimings: normalizeKaraokeWordTimings(clip, String(clip.targetSpeechLine || "").trim()),
       updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
@@ -3755,8 +3755,13 @@ function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
   const key = String(rowId || "").trim();
   if (!key) return 1;
   const row = getSessionRows(session).find((item) => String(item?.id || "").trim() === key) || null;
-  const rowPlaybackRate = Math.max(0.5, Math.min(2.25, Number(row?.playbackRate || 1) || 1));
+  const rowPlaybackRate = Math.max(0.5, Math.min(10, Number(row?.playbackRate || 1) || 1));
   const audioClip = resolveDialogueAudioForRow(session, key);
+  const audioUpdatedAt = Date.parse(String(audioClip?.updatedAt || ""));
+  const rowUpdatedAt = Date.parse(String(row?.updatedAt || ""));
+  if (Number.isFinite(rowUpdatedAt) && (!Number.isFinite(audioUpdatedAt) || rowUpdatedAt > audioUpdatedAt)) {
+    return normalizeDialogueAudioPlaybackRate(rowPlaybackRate || audioClip?.playbackRate || 1);
+  }
   return normalizeDialogueAudioPlaybackRate(audioClip?.playbackRate || rowPlaybackRate || 1);
 }
 
@@ -4598,7 +4603,7 @@ function syncPodcastOnScreenTextOverlay(session = null, options = {}) {
     playbackController.syncOverlay(currentMs, options);
   }
   if (typeof playbackController?.syncStylizedText === "function") {
-    playbackController.syncStylizedText(currentMs);
+    playbackController.syncStylizedText(currentMs, options);
   }
 }
 
@@ -6268,7 +6273,7 @@ function resolveStorageMediaUrl(rawUrl = "") {
     const host = String(parsed.hostname || "").toLowerCase();
     const isStorageHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
     if (!isStorageHost) return clean;
-    return buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}`);
+    return buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}&noRange=1`);
   } catch (_) {
     return clean;
   }
@@ -6363,7 +6368,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
     const parsed = new URL(clean, window.location.origin);
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
     if (isStorageUrl) {
-      let proxyUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}`);
+      let proxyUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}&noRange=1`);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
       return proxyUrl;
@@ -8802,7 +8807,7 @@ async function playRowAudio(rowId, options = {}) {
       updateRowPlayButtons();
 
       const audioSrc = await ensurePodcastStageAudioCachedObjectUrl(storedAudioSrc);
-      const playbackRate = Math.max(0.5, Math.min(2.25, speedMultiplier * clipPlaybackRate));
+      const playbackRate = Math.max(0.5, Math.min(10, speedMultiplier * clipPlaybackRate));
       const volume = resolveTimelineClipVoiceVolume(session, rowId);
 
       const started = await playbackController.playStandaloneAudio(rowId, audioSrc, {
@@ -10491,7 +10496,7 @@ function syncGeminiTrackVolumeModalInputs(source = "") {
   }
 }
 
-function applyGeminiAudioSpeedModal(options = {}) {
+async function applyGeminiAudioSpeedModal(options = {}) {
   const rowId = String(geminiAudioSpeedModalState.rowId || "").trim();
   if (!rowId) return false;
   const nextPlaybackRate = normalizeDialogueAudioPlaybackRate(geminiAudioSpeedModalState.playbackRate || 1);
@@ -10532,7 +10537,6 @@ function applyGeminiAudioSpeedModal(options = {}) {
   }, { render: false, autosave: true, autosaveReason: "audio-speed" });
 
   if (!changed) return false;
-  if (options.close !== false) setGeminiAudioSpeedModalOpen("");
 
   invalidateStudioRuntimeCache();
   syncGeminiDialogueTrackWithRuntime({
@@ -10543,8 +10547,19 @@ function applyGeminiAudioSpeedModal(options = {}) {
   });
   renderPodcastVideoTimeline(getActiveSession(), { force: true, reason: "structure" });
   playbackController.sync(getActiveSession(), getPodcastVideoConfig(getActiveSession()));
-  scheduleSessionLocalPersist("gemini-audio-speed");
-  setGenerationStatus(`Velocidad Gemini ajustada a ${nextPlaybackRate.toFixed(2)}x`, "is-live");
+  flushSessionLocalPersistNow(String(getActiveSession()?.id || "").trim(), "gemini-audio-speed");
+  let cloudSaved = false;
+  try {
+    await saveSessionToCloud(String(getActiveSession()?.id || "").trim(), { render: false, silent: true });
+    cloudSaved = true;
+  } catch (error) {
+    console.error("[podcaster] No se pudo guardar la velocidad Gemini en Firebase", error);
+    setGenerationStatus(`Velocidad Gemini guardada localmente a ${nextPlaybackRate.toFixed(2)}x`, "");
+  }
+  if (cloudSaved && options.close !== false) setGeminiAudioSpeedModalOpen("");
+  if (cloudSaved) {
+    setGenerationStatus(`Velocidad Gemini ajustada a ${nextPlaybackRate.toFixed(2)}x`, "is-live");
+  }
   return true;
 }
 
@@ -16590,8 +16605,12 @@ function attachEvents() {
     });
   }
   if (els.confirmMontageExportBtn) {
-    els.confirmMontageExportBtn.addEventListener("click", () => {
-      runMontageExport().catch(() => { });
+    els.confirmMontageExportBtn.addEventListener("click", async () => {
+      try {
+        await runMontageExport();
+      } catch (_) {
+        // noop
+      }
     });
   }
   if (els.continueMontageExportBtn) {
@@ -16836,15 +16855,18 @@ function attachEvents() {
 
           if (audioMatch) {
             upsertActiveSession((current) => {
+              const existingAudioClip = getDialogueAudioMap(current)?.[rowId] || null;
               const nextAudioMap = {
                 ...getDialogueAudioMap(current),
                 [rowId]: {
+                  ...(existingAudioClip || {}),
                   rowId,
                   speaker,
                   mimeType: String(audioMatch.contentType || "audio/wav").trim() || "audio/wav",
                   model: "gemini-autolink-storage",
                   promptVersion: "podcaster_live_audio_v1",
                   durationSec: Math.max(0, Number(current?.dialogueAudioMap?.[rowId]?.durationSec || 0) || Number(audioMatch.durationSec || 0) || 5),
+                  playbackRate: normalizeDialogueAudioPlaybackRate(existingAudioClip?.playbackRate || row?.playbackRate || 1),
                   targetSpeechLine: String(current?.dialogueAudioMap?.[rowId]?.targetSpeechLine || row?.text || "").trim(),
                   updatedAt: String(audioMatch.updatedAt || nowIso()).trim() || nowIso(),
                   downloadUrl: String(audioMatch.downloadUrl || "").trim(),
@@ -17682,15 +17704,15 @@ function attachEvents() {
     });
   }
   if (els.resetGeminiAudioSpeedBtn) {
-    els.resetGeminiAudioSpeedBtn.addEventListener("click", () => {
+    els.resetGeminiAudioSpeedBtn.addEventListener("click", async () => {
       geminiAudioSpeedModalState.playbackRate = 1;
       syncGeminiAudioSpeedModalInputs();
-      applyGeminiAudioSpeedModal({ close: false });
+      await applyGeminiAudioSpeedModal({ close: false });
     });
   }
   if (els.applyGeminiAudioSpeedBtn) {
-    els.applyGeminiAudioSpeedBtn.addEventListener("click", () => {
-      applyGeminiAudioSpeedModal();
+    els.applyGeminiAudioSpeedBtn.addEventListener("click", async () => {
+      await applyGeminiAudioSpeedModal();
     });
   }
   if (els.closeGeminiTrackVolumeModalBtn) {
@@ -19310,10 +19332,3 @@ function buildTimelineSceneVideoGenerationRequest(row = null, options = {}) {
 // to populate its value from the editor state.
 
 init();
-
-
-
-
-
-
-

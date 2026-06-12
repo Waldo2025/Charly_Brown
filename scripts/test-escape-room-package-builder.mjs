@@ -91,8 +91,28 @@ assert.match(pkg.files["assets/game.js"], /galleryScreen/, "El runtime debe mane
 assert.match(pkg.files["assets/game.js"], /questionProgress/, "El runtime debe manejar preguntas internas por sala.");
 assert.match(pkg.files["assets/game.js"], /localStorage/, "El runtime debe persistir el avance en localStorage.");
 assert.match(pkg.files["assets/game.js"], /progressStorageKey|saveProgressState|restoreProgressState/, "El runtime debe definir una clave de persistencia para el avance.");
+assert.match(pkg.files["assets/game.js"], /const ESCAPE_ROOM_FINAL_PASSCODE =/, "El runtime debe hidratar una clave final garantizada.");
+assert.match(pkg.files["index.html"], /Panel de Control Maestro/, "El flujo final debe seguir mostrando el panel maestro.");
+assert.match(pkg.files["assets/game.css"], /\.ending-panel\.is-alert/, "El CSS debe poder hacer parpadear el ending panel en rojo.");
+assert.match(pkg.files["assets/game.js"], /function syncEndingAlertState\(/, "El runtime debe sincronizar el estado visual y sonoro de alerta del ending panel.");
+assert.match(pkg.files["assets/game.js"], /function startAlertSound\(/, "El runtime debe exponer un arranque del sonido de alerta.");
+assert.match(pkg.files["assets/game.js"], /function stopAlertSound\(/, "El runtime debe exponer un apagado del sonido de alerta.");
 assert.doesNotMatch(pkg.files["assets/game.js"], /data-match-left=|data-match-right=/, "No debe usar el matching antiguo por columnas de botones.");
 assert.doesNotMatch(pkg.files["index.html"], /<img src="Terminal de computadora antigua/i, "No debe renderizar descripciones largas como src de imagen.");
 assert.doesNotThrow(() => new vm.Script(pkg.files["assets/game.js"]), "El JS empaquetado debe tener sintaxis válida.");
+
+const fallbackProject = normalizeEscapeRoomProject({
+  titulo: "Operacion Centinela",
+  introduccion: "Desactiva el sistema final.",
+  conclusion: "El sistema central se apaga cuando el equipo completa la misión.",
+  misiones: [{ id: "m1", titulo: "Sala 1", preguntas: [{ id: "q1", titulo: "Clave", reto: "Resuelve", respuesta_correcta: "ok" }] }]
+});
+
+const fallbackPkg = buildEscapeRoomPackage(fallbackProject);
+assert.match(
+  fallbackPkg.files["assets/game.js"],
+  /const ESCAPE_ROOM_FINAL_PASSCODE = "[A-Z0-9]{4,8}";/,
+  "El runtime debe generar una clave final de respaldo cuando la conclusión no la incluye."
+);
 
 console.log("escapeRoom package builder OK.");

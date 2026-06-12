@@ -337,7 +337,7 @@ service cloud.firestore {
     }
 
     match /escapeRoom/{sessionId} {
-      allow read: if isSignedIn() && isOwner(resource.data.ownerId);
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && isOwner(request.resource.data.ownerId);
       allow update: if isAdmin() || (
         isSignedIn() &&

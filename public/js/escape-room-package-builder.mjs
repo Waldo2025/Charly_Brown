@@ -57,6 +57,30 @@ function buildRuntimeMission(mission = {}, unlockedIds = []) {
   };
 }
 
+function extractExplicitFinalPasscode(text = "") {
+  const raw = String(text || "");
+  if (!raw) return "";
+  const quotedMatch = raw.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
+  if (quotedMatch) return String(quotedMatch[1] || "").toUpperCase();
+  const keywordMatch = raw.match(/(?:clave|código|codigo|clave final|código final|codigo final|clave final es|clave es|clave final es:|codigo es|código es:)\s*(?:es|:|is)?\s*['"“‘]?([A-Za-z0-9]{3,8})['"”’]?/i);
+  if (keywordMatch) return String(keywordMatch[1] || "").toUpperCase();
+  return "";
+}
+
+function buildFallbackFinalPasscode(project = {}) {
+  const slug = sanitizeFileName(project?.titulo || "escape-room", "ESCAPE").replace(/_/g, "").toUpperCase();
+  const base = `${slug}${Array.isArray(project?.misiones) ? project.misiones.length : 0}X9`;
+  return (base.replace(/[^A-Z0-9]/g, "") || "ESC9").slice(0, 6);
+}
+
+function resolveFinalPasscode(project = {}) {
+  const explicit = extractExplicitFinalPasscode(project?.conclusion || "");
+  if (explicit) {
+    return { code: explicit, isFallback: false };
+  }
+  return { code: buildFallbackFinalPasscode(project), isFallback: true };
+}
+
 function isDuplicateMediaNote(note = "", fallbackText = "") {
   const normalizedNote = String(note || "").trim();
   const normalizedFallback = String(fallbackText || "").trim();
@@ -324,6 +348,11 @@ body {
   margin: 0 auto;
 }
 .ending-panel { text-align: center; }
+.ending-panel.is-alert {
+  border-color: color-mix(in srgb, var(--danger) 78%, white 22%);
+  box-shadow: 0 0 0 1px rgba(251, 113, 133, 0.22), 0 0 38px rgba(251, 113, 133, 0.42);
+  animation: red-alert-blink 1s ease-in-out infinite;
+}
 .game-header {
   position: sticky;
   top: 0;
@@ -537,6 +566,16 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes red-alert-blink {
+  0%, 100% {
+    background: color-mix(in srgb, var(--panel-soft) 90%, var(--danger) 10%);
+    box-shadow: 0 0 0 1px rgba(251, 113, 133, 0.18), 0 0 16px rgba(251, 113, 133, 0.18);
+  }
+  50% {
+    background: color-mix(in srgb, var(--danger) 20%, var(--panel-soft) 80%);
+    box-shadow: 0 0 0 1px rgba(251, 113, 133, 0.32), 0 0 42px rgba(251, 113, 133, 0.5);
   }
 }
 .label {
@@ -1006,12 +1045,15 @@ h2, h3, .mission-title, .question-title {
 export function buildGameRuntime(project) {
   const normalized = normalizeEscapeRoomProject(project);
   const initialUnlocked = normalized.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id);
+  const finalPasscode = resolveFinalPasscode(normalized);
   const runtimeProject = {
     ...normalized,
     misiones: normalized.misiones.map((mission) => buildRuntimeMission(mission, initialUnlocked))
   };
 
   return `const ESCAPE_ROOM_DATA = ${JSON.stringify(runtimeProject, null, 2)};
+const ESCAPE_ROOM_FINAL_PASSCODE = ${JSON.stringify(finalPasscode.code)};
+const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "true" : "false"};
 
 // Runtime de mapa libre: las salas desbloqueadas se eligen en cualquier orden permitido.
 (function initEscapeRoomGame() {
@@ -1032,7 +1074,9 @@ export function buildGameRuntime(project) {
     startedAtMs: null,
     endAtMs: null,
     timerIntervalId: null,
-    isMasterSolved: false
+    isMasterSolved: false,
+    alertAudioContext: null,
+    alertAudioNodes: null
   };
 
   function isStorageAvailable() {
@@ -1185,6 +1229,65 @@ export function buildGameRuntime(project) {
     if (!state.timerIntervalId) return;
     window.clearInterval(state.timerIntervalId);
     state.timerIntervalId = null;
+  }
+
+  function stopAlertSound() {
+    const nodes = state.alertAudioNodes;
+    state.alertAudioNodes = null;
+    if (!nodes) return;
+    try { nodes.oscillator?.stop?.(); } catch (_) {}
+    try { nodes.oscillator?.disconnect?.(); } catch (_) {}
+    try { nodes.gain?.disconnect?.(); } catch (_) {}
+  }
+
+  function startAlertSound() {
+    if (state.alertAudioNodes) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    try {
+      const ctx = state.alertAudioContext || new AudioCtx();
+      state.alertAudioContext = ctx;
+      if (typeof ctx.resume === "function" && ctx.state === "suspended") {
+        void ctx.resume();
+      }
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = "square";
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+      oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.22);
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.44);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.045, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + 0.22);
+      gain.gain.exponentialRampToValueAtTime(0.04, ctx.currentTime + 0.24);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.46);
+      oscillator.onended = () => {
+        if (state.alertAudioNodes?.oscillator === oscillator) {
+          state.alertAudioNodes = null;
+        }
+        try { oscillator.disconnect(); } catch (_) {}
+        try { gain.disconnect(); } catch (_) {}
+      };
+      state.alertAudioNodes = { oscillator, gain };
+    } catch (error) {
+      console.warn("No se pudo reproducir la alerta del panel maestro:", error);
+    }
+  }
+
+  function syncEndingAlertState() {
+    if (!els.endingPanel) return;
+    const shouldAlert = state.galleryScreen === "ending" && areAllMissionsCompleted() && !state.isMasterSolved;
+    els.endingPanel.classList.toggle("is-alert", shouldAlert);
+    if (shouldAlert) {
+      startAlertSound();
+      return;
+    }
+    stopAlertSound();
   }
 
   function setGameInteractionState(isDisabled) {
@@ -1370,6 +1473,7 @@ export function buildGameRuntime(project) {
       }
     }
 
+    syncEndingAlertState();
     updateTimerUi();
     persistProgressState();
   }
@@ -1442,6 +1546,24 @@ export function buildGameRuntime(project) {
     return Array.isArray(question?.respuestas_aceptadas)
       ? question.respuestas_aceptadas.map((value) => normalizeBaseText(value)).filter(Boolean)
       : [];
+  }
+
+  function getQuestionAutofillText(question) {
+    const firstAccepted = Array.isArray(question?.respuestas_aceptadas)
+      ? question.respuestas_aceptadas.find((value) => String(value || "").trim())
+      : "";
+    const fallback = String(question?.respuesta_correcta || "").trim();
+    return String(firstAccepted || fallback || "");
+  }
+
+  function getQuestionCorrectChoiceIndex(question) {
+    const accepted = getQuestionAcceptedAnswers(question);
+    const options = Array.isArray(question?.opciones) ? question.opciones : [];
+    for (let index = 0; index < options.length; index += 1) {
+      const normalized = normalizePlayerAnswer(options[index], question);
+      if (accepted.includes(normalized)) return index;
+    }
+    return -1;
   }
 
   function areMissionQuestionsCompleted(mission) {
@@ -1663,6 +1785,74 @@ export function buildGameRuntime(project) {
     renderGallery();
   }
 
+  function autocompleteCurrentScreen() {
+    if (state.galleryScreen === "ending") {
+      const finalCode = extractFinalPasscode(ESCAPE_ROOM_DATA.conclusion);
+      const input = document.getElementById("masterPasscodeInput");
+      if (input && finalCode) {
+        input.value = finalCode;
+        setRoomStatus("Clave final autocompletada para revisión editorial.", "good");
+        return;
+      }
+    }
+
+    if (state.galleryScreen !== "mission") {
+      setRoomStatus("No hay respuestas editables en esta pantalla.", "info");
+      return;
+    }
+
+    const mission = missionById(state.currentMissionId);
+    if (!mission) {
+      setRoomStatus("No se encontró la sala activa.", "bad");
+      return;
+    }
+
+    const questions = getRoomQuestions(mission);
+    let filled = 0;
+
+    questions.forEach((question) => {
+      const key = getQuestionKey(mission, question);
+      if (state.completedQuestions.has(key)) return;
+
+      if (question.tipo_interaccion === "opcion_multiple") {
+        const choiceIndex = getQuestionCorrectChoiceIndex(question);
+        if (choiceIndex >= 0) {
+          state.questionChoices[key] = choiceIndex;
+          els.missionStage?.querySelectorAll('[data-question-choice="' + CSS.escape(key) + '"]').forEach((node) => {
+            const isSelected = Number(node.getAttribute("data-choice-index")) === choiceIndex;
+            node.classList.toggle("is-selected", isSelected);
+          });
+          filled += 1;
+        }
+        return;
+      }
+
+      if (question.tipo_interaccion === "relacion_columnas") {
+        state.questionMatches[key] = {};
+        question.parejas.forEach((pair, index) => {
+          state.questionMatches[key][String(index)] = pair.derecha;
+          const select = els.missionStage?.querySelector('[data-question-match-select="' + CSS.escape(key) + '"][data-match-index="' + index + '"]');
+          if (select) select.value = pair.derecha;
+        });
+        filled += 1;
+        return;
+      }
+
+      const autofillText = getQuestionAutofillText(question);
+      state.questionAnswers[key] = autofillText;
+      const input = els.missionStage?.querySelector('[data-question-answer="' + CSS.escape(key) + '"]');
+      if (input) input.value = autofillText;
+      if (autofillText) filled += 1;
+    });
+
+    persistProgressState();
+    if (filled > 0) {
+      setRoomStatus('Se autocompletaron ' + filled + ' respuesta(s) de esta pantalla.', 'good');
+    } else {
+      setRoomStatus("No había respuestas pendientes para autocompletar.", "info");
+    }
+  }
+
   function wireMissionEvents() {
     if (!els.missionStage || state.missionEventsBound) return;
     state.missionEventsBound = true;
@@ -1777,6 +1967,7 @@ export function buildGameRuntime(project) {
 
   function resetEscapeRoom() {
     stopTimerInterval();
+    stopAlertSound();
     state.unlocked = new Set(ESCAPE_ROOM_DATA.misiones.filter((mission) => !mission.bloqueada_inicial).map((mission) => mission.id));
     state.completed = new Set();
     state.completedQuestions = new Set();
@@ -1798,9 +1989,10 @@ export function buildGameRuntime(project) {
       statusBox.classList.add("hidden");
       statusBox.textContent = "";
     }
-    if (els.endingPanel) {
-      els.endingPanel.classList.remove("is-success-flash");
-    }
+      if (els.endingPanel) {
+        els.endingPanel.classList.remove("is-success-flash");
+        els.endingPanel.classList.remove("is-alert");
+      }
     if (isStorageAvailable()) {
       try {
         window.localStorage.removeItem(getProgressStorageKey());
@@ -1836,7 +2028,14 @@ export function buildGameRuntime(project) {
     button.addEventListener("click", resetEscapeRoom);
   });
 
+  const editorialAutofillButton = document.querySelector("[data-editorial-autofill]");
+  if (editorialAutofillButton && window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ === true) {
+    editorialAutofillButton.hidden = false;
+    editorialAutofillButton.addEventListener("click", autocompleteCurrentScreen);
+  }
+
   function extractFinalPasscode(text) {
+    if (ESCAPE_ROOM_FINAL_PASSCODE) return ESCAPE_ROOM_FINAL_PASSCODE;
     if (!text) return null;
     const quotedMatch = text.match(/['"“‘]([A-Za-z0-9]{3,8})['"”’]/);
     if (quotedMatch) return quotedMatch[1];
@@ -1857,8 +2056,10 @@ export function buildGameRuntime(project) {
       statusBox.textContent = "¡Clave correcta! Desactivando el sistema...";
       statusBox.className = "status-box is-good";
       statusBox.classList.remove("hidden");
+      stopAlertSound();
 
       if (els.endingPanel) {
+        els.endingPanel.classList.remove("is-alert");
         els.endingPanel.classList.add("is-success-flash");
       }
 
@@ -1913,6 +2114,7 @@ export function buildGameRuntime(project) {
 
 export function buildGameHtml(project) {
   const normalized = normalizeEscapeRoomProject(project);
+  const finalPasscode = resolveFinalPasscode(normalized);
   const title = escapeHtml(normalized.titulo);
   const subtitle = escapeHtml(normalized.subtitulo);
   const introduction = escapeHtml(normalized.introduccion);
@@ -2002,6 +2204,7 @@ export function buildGameHtml(project) {
               <div class="label" style="background: var(--warn); color: white; display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; margin-bottom: 15px;">Panel de Control Maestro</div>
               <h3 style="margin-bottom: 15px;">Sistema en Estado Crítico</h3>
               <p class="muted" style="margin-bottom: 25px;">Introduce la clave final para desactivar el sistema y detener el temporizador.</p>
+              ${finalPasscode.isFallback ? `<p class="muted" style="margin-bottom: 18px;">Clave final de respaldo: <strong>${escapeHtml(finalPasscode.code)}</strong></p>` : ""}
               <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; align-items: center;">
                 <input type="text" id="masterPasscodeInput" placeholder="Clave final" style="padding: 12px 20px; border-radius: 12px; border: 2px solid var(--line); background: var(--panel-soft); color: var(--text); font-size: 1.5rem; text-align: center; width: 180px; letter-spacing: 2px; font-weight: bold; outline: none; transition: border-color 0.2s;" />
                 <button type="button" class="primary" id="btnVerifyMasterPasscode" style="padding: 12px 24px; border-radius: 12px; font-weight: bold;">Desactivar</button>
@@ -2026,11 +2229,18 @@ export function buildGameHtml(project) {
 </html>`;
 }
 
-export function buildPreviewDocument(project) {
+export function buildPreviewDocument(project, options = {}) {
   const normalized = normalizeEscapeRoomProject(project);
   const fullHtml = buildGameHtml(normalized);
   const bodyMatch = fullHtml.match(/<body>([\s\S]*?)<script src="assets\/game\.js"><\/script>\s*<\/body>/i);
   const bodyContent = bodyMatch?.[1] || "";
+  const editorialReview = options?.editorialReview === true;
+  const editorialScript = editorialReview
+    ? `<script>window.__ESCAPE_ROOM_EDITORIAL_REVIEW__ = true;</script>`
+    : "";
+  const editorialButton = editorialReview
+    ? `<button type="button" data-editorial-autofill hidden style="position: fixed; right: 20px; bottom: 20px; z-index: 9999; border: 0; border-radius: 999px; padding: 12px 16px; background: #ec4899; color: #fff; font-weight: 700; box-shadow: 0 12px 30px rgba(236,72,153,.35);">Autocompletar pantalla</button>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -2041,6 +2251,8 @@ export function buildPreviewDocument(project) {
 </head>
 <body>
   ${bodyContent}
+  ${editorialButton}
+  ${editorialScript}
   <script>${buildGameRuntime(normalized)}<\/script>
 </body>
 </html>`;

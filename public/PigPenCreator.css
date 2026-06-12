@@ -695,26 +695,71 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.er-button-publish {
+.er-publish-switch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.er-publish-switch-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--er-text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.er-publish-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.er-publish-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.er-publish-switch-track {
+  width: 52px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  transition: background 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
+}
+
+.er-publish-switch-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.35);
+  transform: translateX(0);
+  transition: transform 180ms ease;
+}
+
+.er-publish-switch input:checked + .er-publish-switch-track {
   background: linear-gradient(135deg, #10b981, #059669);
-  color: #fff;
-  box-shadow: 0 18px 34px rgba(16, 185, 129, 0.28);
-  border: none;
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.28);
 }
 
-.er-button-publish:hover:not(:disabled) {
-  background: linear-gradient(135deg, #059669, #047857);
-  box-shadow: 0 22px 40px rgba(16, 185, 129, 0.4);
-  transform: translateY(-1px);
+.er-publish-switch input:checked + .er-publish-switch-track .er-publish-switch-thumb {
+  transform: translateX(22px);
 }
 
-.er-button-publish.is-published {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  box-shadow: 0 18px 34px rgba(245, 158, 11, 0.28);
-}
-
-.er-button-publish.is-published:hover:not(:disabled) {
-  background: linear-gradient(135deg, #d97706, #b45309);
+.er-publish-switch input:disabled + .er-publish-switch-track {
+  opacity: 0.55;
 }
 
 .er-button-ghost,

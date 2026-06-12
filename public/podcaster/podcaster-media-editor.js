@@ -208,7 +208,19 @@ function resolveStylizedTextRenderBox(container = null) {
         return { width: STYLIZED_TEXT_STAGE_WIDTH, height: STYLIZED_TEXT_STAGE_HEIGHT, left: 0, top: 0 };
     }
     const hostRect = host.getBoundingClientRect?.() || null;
-    const mediaCandidates = Array.from((host.parentElement || host).querySelectorAll('video, img'))
+    const scope = host.parentElement || host;
+    const preferredSelectors = [
+        '#podcastActiveSpeakerVideo',
+        '#podcastActiveSpeakerImage',
+        '#podcastActiveSpeakerVideoAlt',
+        '#podcastActiveSpeakerImageAlt',
+        '#montageExportPreviewVideo',
+        '#montageExportPreviewImage',
+        '#montageExportPreviewVideoAlt',
+        '#montageExportPreviewImageAlt'
+    ];
+    const mediaCandidates = preferredSelectors
+        .map((selector) => scope.querySelector(selector))
         .filter((node) => {
             if (!node || node.hidden) return false;
             const rect = node.getBoundingClientRect?.();

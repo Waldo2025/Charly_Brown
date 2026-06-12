@@ -367,6 +367,57 @@ function mergePodcastVideoConfigForLoad(cloudConfig = null, localConfig = null, 
 
 function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps = {}) {
   const mergeSessionRowsWithFallback = deps.mergeSessionRowsWithFallback || ((primaryRows = [], fallbackRows = []) => primaryRows.length ? primaryRows : fallbackRows);
+  const chooseNewerByUpdatedAt = (primary = null, secondary = null) => {
+    if (!primary) return secondary;
+    if (!secondary) return primary;
+    const primaryUpdatedAt = Date.parse(String(primary?.updatedAt || ""));
+    const secondaryUpdatedAt = Date.parse(String(secondary?.updatedAt || ""));
+    if (Number.isFinite(primaryUpdatedAt) && Number.isFinite(secondaryUpdatedAt) && secondaryUpdatedAt > primaryUpdatedAt) {
+      return {
+        ...primary,
+        ...secondary
+      };
+    }
+    return {
+      ...secondary,
+      ...primary
+    };
+  };
+  const mergeDialogueAudioMapByEntryUpdatedAt = (primaryMap = {}, secondaryMap = {}) => {
+    const next = {};
+    const keys = new Set([
+      ...Object.keys(primaryMap && typeof primaryMap === "object" ? primaryMap : {}),
+      ...Object.keys(secondaryMap && typeof secondaryMap === "object" ? secondaryMap : {})
+    ]);
+    keys.forEach((key) => {
+      const resolved = chooseNewerByUpdatedAt(
+        primaryMap && typeof primaryMap === "object" ? primaryMap[key] : null,
+        secondaryMap && typeof secondaryMap === "object" ? secondaryMap[key] : null
+      );
+      if (resolved && typeof resolved === "object") {
+        next[key] = resolved;
+      }
+    });
+    return next;
+  };
+  const mergeRowsByUpdatedAt = (primaryRows = [], secondaryRows = []) => {
+    const secondaryById = new Map(
+      (Array.isArray(secondaryRows) ? secondaryRows : [])
+        .map((row) => [String(row?.id || "").trim(), row])
+        .filter(([rowId]) => rowId)
+    );
+    const mergedPrimary = (Array.isArray(primaryRows) ? primaryRows : []).map((row) => {
+      const rowId = String(row?.id || "").trim();
+      if (!rowId) return row;
+      const fallbackRow = secondaryById.get(rowId) || null;
+      if (fallbackRow) secondaryById.delete(rowId);
+      return chooseNewerByUpdatedAt(row, fallbackRow) || row;
+    });
+    secondaryById.forEach((row) => {
+      mergedPrimary.push(row);
+    });
+    return mergedPrimary;
+  };
   const localById = new Map(
     (Array.isArray(localSessions) ? localSessions : [])
       .map((session) => [String(session?.id || "").trim(), session])
@@ -381,13 +432,17 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     const cloudRows = Array.isArray(cloudSession?.script?.rows) ? cloudSession.script.rows : [];
     const isShallow = cloudSession.isStub === true || !cloudSession.dialogueVideoMap || Object.keys(cloudSession.dialogueVideoMap).length === 0;
     const hasConcreteCloudRows = cloudSession.isStub !== true && cloudRows.length > 0;
-    const resolvedRows = mergeSessionRowsWithFallback(cloudRows, localRows);
+    const resolvedRows = mergeRowsByUpdatedAt(
+      mergeSessionRowsWithFallback(cloudRows, localRows),
+      localRows
+    );
     const finalRows = hasConcreteCloudRows
-      ? cloudRows
+      ? mergeRowsByUpdatedAt(cloudRows, localRows)
       : resolvedRows;
     const localUpdatedAt = Date.parse(String(localSession?.updatedAt || ""));
     const cloudUpdatedAt = Date.parse(String(cloudSession?.updatedAt || ""));
     const preferLocalVideoConfig = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
+    const preferLocalDialogueAudioMap = Number.isFinite(localUpdatedAt) && (!Number.isFinite(cloudUpdatedAt) || localUpdatedAt > cloudUpdatedAt);
     // Compatibility: podcastVideoConfig: preferLocalVideoConfig ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {}) : (cloudSession?.podcastVideoConfig || localSession?.podcastVideoConfig || {})
     const resolvedPodcastVideoConfig = preferLocalVideoConfig
       ? (localSession?.podcastVideoConfig || cloudSession?.podcastVideoConfig || {})
@@ -396,6 +451,9 @@ function mergeCloudVsLocalSessions(cloudSessions = [], localSessions = [], deps 
     return {
       ...localSession,
       ...cloudSession,
+      dialogueAudioMap: preferLocalDialogueAudioMap
+        ? mergeDialogueAudioMapByEntryUpdatedAt(localSession?.dialogueAudioMap || {}, cloudSession?.dialogueAudioMap || {})
+        : mergeDialogueAudioMapByEntryUpdatedAt(cloudSession?.dialogueAudioMap || {}, localSession?.dialogueAudioMap || {}),
       dialogueVideoMap: isShallow && localSession?.dialogueVideoMap && Object.keys(localSession.dialogueVideoMap).length > 0 
         ? localSession.dialogueVideoMap 
         : (cloudSession?.dialogueVideoMap || localSession?.dialogueVideoMap || {}),
@@ -616,9 +674,7 @@ async function bootstrapSessions(uid = "", deps = {}, storageAdapter = null) {
 
   const resolvedSessions = mergeCloudVsLocalSessions(cloudSessions, localSessions, deps);
   if (cloudSessions.length) {
-    cloudSessions.forEach((session) => {
-      replaceLocalSessionFromCloud(uid, session, deps, nextStorage);
-    });
+    persistSessionsToLocalCache(uid, resolvedSessions, deps, nextStorage);
   } else {
     persistSessionsToLocalCache(uid, resolvedSessions, deps, nextStorage);
   }

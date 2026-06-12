@@ -853,8 +853,9 @@ export function createPodcasterTimelineUiApi(deps = {}) {
         const widthPx = Math.max(minAudioLoopPx, Math.min(baseWidthPx, remainingWidthPx));
         if (widthPx <= 0) return "";
         const isSelected = podcastVideoState.timelineAudioSelection?.geminiRowIds?.has?.(String(rowId || "").trim()) === true;
+        const chipZIndex = isSelected ? 24 : 1;
         return `
-          <div class="podcast-montage-audio-chip is-stored${isSelected ? " is-selected" : ""}" data-row-id="${escapeHtml(rowId)}" data-audio-align="${escapeHtml(alignMode)}" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px" title="${escapeHtml(`Escena ${sceneIndex} · ${speakerLabel} · Voz guardada`)}">
+          <div class="podcast-montage-audio-chip is-stored${isSelected ? " is-selected" : ""}" data-action="timeline-select-gemini-audio" data-row-id="${escapeHtml(rowId)}" data-audio-align="${escapeHtml(alignMode)}" style="left:${leftPx.toFixed(3)}px;width:${widthPx.toFixed(3)}px;z-index:${chipZIndex}" title="${escapeHtml(`Escena ${sceneIndex} · ${speakerLabel} · Voz guardada`)}">
             <i class="fas fa-volume-up" aria-hidden="true"></i>
             <span>${escapeHtml(`Escena ${sceneIndex} · ${speakerLabel}`)}</span>
             <button class="podcast-montage-audio-chip-speed-btn" type="button" data-action="open-gemini-audio-speed-modal" data-row-id="${escapeHtml(rowId)}" title="Velocidad de voz Gemini" aria-label="Velocidad de voz Gemini">

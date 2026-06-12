@@ -135,13 +135,26 @@ async function generateDialogueAudioForRow(rowId = "", options = {}) {
     if (!resp?.ok) throw new Error(resp?.error || "Error al generar audio.");
 
     const finalAudio = resp.dialogueAudio;
-    window.upsertActiveSession((current) => ({
-      ...current,
-      dialogueAudioMap: {
-        ...(current.dialogueAudioMap || {}),
-        [key]: finalAudio
-      }
-    }), { render: !options.deferTimelineRender });
+    window.upsertActiveSession((current) => {
+      const currentAudioMap = window.getDialogueAudioMap(current);
+      const existingClip = currentAudioMap[key] || null;
+      const row = window.getSessionRows(current).find((item) => String(item?.id || "").trim() === key) || null;
+      const preservedPlaybackRate = window.normalizeDialogueAudioPlaybackRate?.(
+        existingClip?.playbackRate || row?.playbackRate || finalAudio?.playbackRate || 1
+      ) || 1;
+      return {
+        ...current,
+        dialogueAudioMap: {
+          ...(current.dialogueAudioMap || {}),
+          [key]: {
+            ...(existingClip || {}),
+            ...(finalAudio || {}),
+            rowId: key,
+            playbackRate: preservedPlaybackRate
+          }
+        }
+      };
+    }, { render: !options.deferTimelineRender });
     if (typeof window.upsertPodcastVideoConfig === "function") {
       window.upsertPodcastVideoConfig((cfg) => {
         const track = window.normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});

@@ -93,7 +93,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   // --- Helpers ---
   clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
   toFiniteNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
-  clampPlaybackRate(rate, min = 0.5, max = 2.25) {
+  clampPlaybackRate(rate, min = 0.5, max = 10) {
     return Math.max(min, Math.min(max, Number(rate) || 1));
   }
   normalizeSceneMediaScale(value = 1) {
@@ -261,7 +261,7 @@ export class PodcasterPlaybackController extends EventEmitter {
   resolveSegmentSourceOffsetSec(currentMs, segmentStartMs, trimInMs = 0, clipPlaybackRate = 1) {
     const safeTrimInMs = Math.max(0, Number(trimInMs || 0));
     const timelineOffsetMs = Math.max(0, Number(currentMs || 0) - Math.max(0, Number(segmentStartMs || 0)));
-    const sourceOffsetMs = safeTrimInMs + (timelineOffsetMs * this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25));
+    const sourceOffsetMs = safeTrimInMs + (timelineOffsetMs * this.clampPlaybackRate(clipPlaybackRate, 0.5, 10));
     return sourceOffsetMs / 1000;
   }
   resolveSegmentTimelineDurationMs(segment = null, clipPlaybackRate = 1) {
@@ -275,7 +275,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       || (Number(segment?.endMs || 0) - Number(segment?.startMs || 0))
       || 500
     );
-    return Math.max(500, Math.round(rawVisibleMs / this.clampPlaybackRate(clipPlaybackRate, 0.5, 2.25)));
+    return Math.max(500, Math.round(rawVisibleMs / this.clampPlaybackRate(clipPlaybackRate, 0.5, 10)));
   }
   isImageStageEntry(entry = null) {
     if (!entry) return false;
@@ -2467,16 +2467,25 @@ export class PodcasterPlaybackController extends EventEmitter {
     }
   }
 
-  syncStylizedText(currentMs) {
+  syncStylizedText(currentMs, options = {}) {
     const container = this.els?.podcastStylizedTextOverlay;
     if (!container) return;
 
     const session = this.state.session || this.deps?.getActiveSession?.();
     const entry = this.getEntryAtMs(currentMs);
-    const rowId = entry?.rowId;
+    const activeEntryRowId = String(entry?.rowId || "").trim();
+    const preferredRowId = String(options?.rowId || options?.preferredRowId || this.state.activeRowId || "").trim();
+    const forceRow = options?.forceRow === true;
+    const editorPreviewMode = this.deps?.podcastVideoState?.montageActive !== true;
+    const shouldShowPreferredRow = forceRow || (editorPreviewMode && Boolean(preferredRowId));
+    const rowId = preferredRowId && shouldShowPreferredRow && session?.stylizedTextMap?.[preferredRowId]
+      ? preferredRowId
+      : activeEntryRowId;
 
     if (!rowId || !session?.stylizedTextMap?.[rowId]) {
         container.innerHTML = '';
+        delete container.dataset.activeRowId;
+        delete container.dataset.activeText;
         container.hidden = true;
         return;
     }
@@ -3274,4 +3283,3 @@ if (typeof window !== "undefined") {
 //   setPodcastStageVideoSourceForElement
 // }
 // this.deps?.setActiveStageVideoSlot?.(activeSlot === 1 ? 0 : 1);
-

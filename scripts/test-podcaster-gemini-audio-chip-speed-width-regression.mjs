@@ -20,7 +20,7 @@ const playbackControllerSource = readFileSync(
 
 assert.match(
   source,
-  /function resolveDialogueAudioPlaybackRate\(session = null, rowId = ""\)\s*\{[\s\S]*const rowPlaybackRate = Math\.max\(0\.5, Math\.min\(2\.25, Number\(row\?\.playbackRate \|\| 1\) \|\| 1\)\);[\s\S]*return normalizeDialogueAudioPlaybackRate\(audioClip\?\.playbackRate \|\| rowPlaybackRate \|\| 1\);[\s\S]*\}/,
+  /function resolveDialogueAudioPlaybackRate\(session = null, rowId = ""\)\s*\{[\s\S]*const rowPlaybackRate = Math\.max\(0\.5, Math\.min\(10, Number\(row\?\.playbackRate \|\| 1\) \|\| 1\)\);[\s\S]*return normalizeDialogueAudioPlaybackRate\(audioClip\?\.playbackRate \|\| rowPlaybackRate \|\| 1\);[\s\S]*\}/,
   "resolveDialogueAudioPlaybackRate debe caer al playbackRate persistido en la fila cuando no exista entrada explícita en dialogueAudioMap."
 );
 

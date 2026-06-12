@@ -261,6 +261,14 @@ export function normalizeEscapeRoomProject(data = {}) {
     misiones: Array.isArray(data.misiones) ? data.misiones.map((mission, index) => normalizeMission(mission, index)) : [],
     conclusion: normalizeString(data.conclusion, "La sala concluye con éxito."),
     backgroundImage: normalizeString(data.backgroundImage, ""),
+    nivel: normalizeString(data.nivel, "Primaria"),
+    grado: normalizeString(data.grado, "Primero"),
+    trimestre: normalizeString(data.trimestre, "1"),
+    materia: normalizeString(data.materia, "Español"),
+    unidad: normalizeString(data.unidad, ""),
+    tema: normalizeString(data.tema, ""),
+    tema_curricular: normalizeString(data.tema_curricular, ""),
+    estacion: normalizeString(data.estacion, ""),
     duracion_minutos
   };
 }

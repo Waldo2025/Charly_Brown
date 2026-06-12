@@ -165,15 +165,16 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const cleanStoragePath = String(storagePath || "").trim();
     const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
     const timestamp = options.updatedAt || options.timestamp || "";
+    const noRange = options.noRange !== false;
     let finalUrl = "";
     if (cleanStoragePath) {
-      const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}`) || "";
+      const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}${noRange ? "&noRange=1" : ""}`) || "";
       finalUrl = isMarkedStaleProxyMediaUrl(proxyUrl) ? clean : proxyUrl;
     }
     if (!finalUrl && clean) {
       try {
         const parsed = new URL(clean, window.location.origin);
-        const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}`) || "";
+        const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}${noRange ? "&noRange=1" : ""}`) || "";
         finalUrl = isMarkedStaleProxyMediaUrl(proxyUrl) ? clean : proxyUrl;
       } catch (_) {
         finalUrl = clean;
@@ -192,7 +193,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const downloadUrl = String(source?.downloadUrl || "").trim();
     const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
     if (key) staleDialogueVideoSourceKeys.add(key);
-    const storageProxyUrl = storagePath ? deps.buildApiUrl?.(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`) : "";
+    const storageProxyUrl = storagePath ? deps.buildApiUrl?.(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}&noRange=1`) : "";
     const downloadProxyUrl = downloadUrl ? deps.resolveStorageVideoUrl?.(downloadUrl, "") : "";
     [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
       markStaleProxyMediaUrl(url, reason, {

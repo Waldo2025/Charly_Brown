@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
-import { authFetchJson } from "./api-client.js";
+import { authFetchJson, buildApiUrl, hasAvailableApiBase } from "./api-client.js";
 import {
   normalizeEscapeRoomProject,
   normalizeMission,
@@ -95,7 +95,9 @@ const elements = {
   btnGenerar: document.getElementById("btnGenerar"),
   btnLimpiar: document.getElementById("btnLimpiar"),
   btnExportar: document.getElementById("btnExportar"),
-  btnPublicar: document.getElementById("btnPublicar"),
+  btnPreviewAutofill: document.getElementById("btnPreviewAutofill"),
+  publishToggle: document.getElementById("publishToggle"),
+  publishSwitchLabel: document.getElementById("publishSwitchLabel"),
   btnCopiarJson: document.getElementById("btnCopiarJson"),
   btnSugerirObjetivo: document.getElementById("btnSugerirObjetivo"),
   btnAddMission: document.getElementById("btnAddMission"),
@@ -110,6 +112,14 @@ const elements = {
   tabButtons: Array.from(document.querySelectorAll("[data-er-tab]")),
   modeloSelect: document.getElementById("modeloSelect"),
   preguntasPorSalaInput: document.getElementById("preguntasPorSalaInput"),
+  nivelSelect: document.getElementById("nivelSelect"),
+  gradoSelect: document.getElementById("gradoSelect"),
+  trimestreSelect: document.getElementById("trimestreSelect"),
+  materiaSelect: document.getElementById("materiaSelect"),
+  unidadTemaLabel: document.getElementById("unidadTemaLabel"),
+  unidadTemaSelect: document.getElementById("unidadTemaSelect"),
+  estacionField: document.getElementById("estacionField"),
+  estacionSelect: document.getElementById("estacionSelect"),
   narrativaSelect: document.getElementById("narrativaSelect"),
   narrativaCustomField: document.getElementById("narrativaCustomField"),
   narrativaCustomInput: document.getElementById("narrativaCustomInput"),
@@ -452,14 +462,71 @@ function getStoredActiveSessionId() {
   return String(window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || "").trim();
 }
 
-function deriveSessionTitle() {
-  const projectTitle = normalizeString(state.project?.titulo, "");
+function isVerboseDraftSessionTitle(value = "") {
+  const candidate = normalizeString(value, "");
+  if (!candidate) return false;
+  return candidate.startsWith("Escape Room:") && candidate.length > 80;
+}
+
+function normalizeSessionTitle(title, project = null) {
+  const candidate = normalizeString(title, "");
+  if (candidate && candidate !== SESSION_TITLE_DEFAULT && !isVerboseDraftSessionTitle(candidate)) {
+    return candidate;
+  }
+  const projectTitle = normalizeString(project?.titulo, "");
   if (projectTitle) return projectTitle;
-  const tema = normalizeString(document.getElementById("temaInput")?.value || "", "");
-  if (tema) return `Escape Room: ${tema.split(/\r?\n/)[0].trim()}`;
-  const objetivo = normalizeString(document.getElementById("objetivoInput")?.value || "", "");
-  if (objetivo) return objetivo.slice(0, 60);
   return SESSION_TITLE_DEFAULT;
+}
+
+function getAcademicFieldMode() {
+  return String(elements.nivelSelect?.value || "Primaria").trim() === "Secundaria" ? "Secundaria" : "Primaria";
+}
+
+function buildAcademicFormState(project = {}) {
+  if (!project || typeof project !== "object") return {};
+  const nivel = normalizeString(project.nivel, "");
+  const isSecondary = nivel === "Secundaria";
+  return {
+    ...(nivel ? { nivelSelect: nivel } : {}),
+    ...(project.grado ? { gradoSelect: project.grado } : {}),
+    ...(project.trimestre ? { trimestreSelect: project.trimestre } : {}),
+    ...(project.materia ? { materiaSelect: project.materia } : {}),
+    ...((project.unidad || project.tema) ? { unidadTemaSelect: isSecondary ? project.tema : project.unidad } : {}),
+    ...(project.estacion ? { estacionSelect: project.estacion } : {})
+  };
+}
+
+function syncAcademicFields() {
+  const unidadTemaModo = getAcademicFieldMode();
+  const isSecondary = unidadTemaModo === "Secundaria";
+  if (elements.unidadTemaLabel) {
+    elements.unidadTemaLabel.textContent = isSecondary ? "Tema" : "Unidad";
+  }
+  if (elements.estacionField) {
+    elements.estacionField.classList.toggle("hidden", !isSecondary);
+  }
+  if (elements.estacionSelect) {
+    elements.estacionSelect.required = isSecondary;
+    if (!isSecondary) elements.estacionSelect.value = "Primera estación";
+  }
+}
+
+function getSessionAcademicMetadata(project = null) {
+  const normalizedProject = project && typeof project === "object" ? project : null;
+  const formData = getFormData();
+  return {
+    nivel: normalizedProject?.nivel || formData.nivel || "Primaria",
+    grado: normalizedProject?.grado || formData.grado || "Primero",
+    trimestre: normalizedProject?.trimestre || formData.trimestre || "1",
+    materia: normalizedProject?.materia || formData.materia || "Español",
+    unidad: normalizedProject?.unidad || formData.unidad || "",
+    tema: normalizedProject?.tema || formData.temaSecundaria || "",
+    estacion: normalizedProject?.estacion || formData.estacion || ""
+  };
+}
+
+function deriveSessionTitle() {
+  return normalizeSessionTitle(state.activeSessionMeta?.title, state.project);
 }
 
 function sortSessions(items = []) {
@@ -495,6 +562,7 @@ function applyFormState(formState = {}) {
   } finally {
     state.formPersistenceSuspended = false;
   }
+  syncAcademicFields();
   syncNarrativaCustomField();
 }
 
@@ -508,14 +576,22 @@ function toMillis(value) {
 
 function mapSessionDoc(docSnap) {
   const data = docSnap.data() || {};
+  const project = data.project && typeof data.project === "object" ? data.project : null;
   return {
     id: docSnap.id,
     ownerId: String(data.ownerId || ""),
     ownerEmail: String(data.ownerEmail || ""),
-    title: normalizeString(data.title, SESSION_TITLE_DEFAULT),
+    title: normalizeSessionTitle(data.title, project),
     status: normalizeString(data.status, "draft"),
+    nivel: normalizeString(data.nivel, ""),
+    grado: normalizeString(data.grado, ""),
+    trimestre: normalizeString(data.trimestre, ""),
+    materia: normalizeString(data.materia, ""),
+    unidad: normalizeString(data.unidad, ""),
+    tema: normalizeString(data.tema, ""),
+    estacion: normalizeString(data.estacion, ""),
     formState: data.formState && typeof data.formState === "object" ? data.formState : {},
-    project: data.project && typeof data.project === "object" ? data.project : null,
+    project,
     createdAt: data.createdAt || null,
     updatedAt: data.updatedAt || null,
     createdAtMs: toMillis(data.createdAt),
@@ -535,13 +611,16 @@ async function fetchRemoteSessions(uid) {
 }
 
 function buildSessionPayload({ title, status = "draft", project, formState } = {}) {
+  const normalizedProject = project === undefined ? (state.project ? materializeProjectForExport() : null) : (project || null);
+  const academic = getSessionAcademicMetadata(normalizedProject);
   return {
     ownerId: state.currentUser?.uid || "",
     ownerEmail: state.currentUser?.email || "",
-    title: normalizeString(title, deriveSessionTitle()),
+    title: normalizeSessionTitle(title, normalizedProject),
     status,
-    formState: formState || serializeFormState(),
-    project: project ?? (state.project ? materializeProjectForExport() : null)
+    ...academic,
+    formState: formState === undefined ? serializeFormState() : (formState || null),
+    project: normalizedProject
   };
 }
 
@@ -560,6 +639,7 @@ function resetEditorState({ preserveForm = false } = {}) {
     } finally {
       state.formPersistenceSuspended = false;
     }
+    syncAcademicFields();
     syncNarrativaCustomField();
   }
   state.project = null;
@@ -578,7 +658,7 @@ function renderSessionList() {
   elements.sessionList.classList.toggle("hidden", state.sessionsLoading || sessions.length === 0);
   if (state.activeSessionName) {
     state.activeSessionName.textContent = state.activeSessionId
-      ? (deriveSessionTitle() || state.activeSessionMeta?.title || SESSION_TITLE_DEFAULT)
+      ? (state.activeSessionMeta?.title || SESSION_TITLE_DEFAULT)
       : "Sin sesión activa";
   }
   if (state.sessionsLoading || sessions.length === 0) {
@@ -614,7 +694,7 @@ async function loadSessionIntoEditor(session) {
   state.isHydratingFromRemote = true;
   try {
     resetEditorState({ preserveForm: false });
-    applyFormState(session.formState || {});
+    applyFormState({ ...buildAcademicFormState(session.project), ...(session.formState || {}) });
     state.project = session.project ? withDefaultRoutes(session.project) : null;
     restorePreviewTheme({ preferProject: true });
     state.generationNote = "";
@@ -825,22 +905,27 @@ async function updateActiveSessionMetadata(payload = {}) {
   return sessionId;
 }
 
-async function publishActiveSession() {
+async function handlePublishToggleChange() {
   if (!state.project) {
     setStatus("Genera o carga un escape room antes de publicarlo.", "warning");
+    syncActionButtons();
     return;
   }
 
+  const nextPublished = elements.publishToggle?.checked === true;
   try {
     setRemoteSaveState("saving");
     setLoading(true);
-    await updateActiveSessionMetadata({ status: "published" });
+    await updateActiveSessionMetadata({ status: nextPublished ? "published" : "draft" });
     setRemoteSaveState("saved");
-    setStatus("Sesión publicada y sincronizada con Firebase.", "success");
+    setStatus(
+      nextPublished ? "Sesión publicada y sincronizada con Firebase." : "Sesión movida a borrador.",
+      "success"
+    );
   } catch (error) {
-    console.error("No se pudo publicar la sesión:", error);
+    console.error("No se pudo actualizar la sesión:", error);
     setRemoteSaveState("error", "Error al publicar");
-    setStatus("No fue posible publicar la sesión.", "bad");
+    setStatus("No fue posible actualizar la publicación.", "bad");
   } finally {
     setLoading(false);
     refreshPanels();
@@ -1136,13 +1221,16 @@ function syncActionButtons() {
   elements.btnAddMission.disabled = state.isLoading;
   elements.btnExportar.disabled = state.isLoading || !hasData || state.isGenerating;
   elements.btnCopiarJson.disabled = state.isLoading || !hasData || state.isGenerating;
+  if (elements.btnPreviewAutofill) {
+    elements.btnPreviewAutofill.disabled = state.isLoading || !hasData || state.isGenerating;
+  }
 
-  if (elements.btnPublicar) {
-    elements.btnPublicar.disabled = state.isLoading || !canPublish;
-    elements.btnPublicar.classList.toggle("is-published", isPublishedSession());
-    elements.btnPublicar.innerHTML = isPublishedSession()
-      ? '<i class="fas fa-rotate"></i><span>Actualizar publicación</span>'
-      : '<i class="fas fa-globe"></i><span>Publicar</span>';
+  if (elements.publishToggle) {
+    elements.publishToggle.disabled = state.isLoading || !canPublish;
+    elements.publishToggle.checked = isPublishedSession();
+  }
+  if (elements.publishSwitchLabel) {
+    elements.publishSwitchLabel.textContent = isPublishedSession() ? "Publicado" : "Borrador";
   }
 }
 
@@ -1182,14 +1270,21 @@ function getFormData() {
   const narrativaPersonalizada = String(elements.narrativaCustomInput?.value || "").trim();
   const narrativa = narrativaBase === "otro" ? (narrativaPersonalizada || "Otro") : narrativaBase;
   const estiloImagen = String(elements.estiloImagenSelect?.value || "").trim();
+  const unidadTemaModo = getAcademicFieldMode();
+  const unidadTemaValor = String(document.getElementById("unidadTemaSelect")?.value || "").trim();
   return {
     nivel: document.getElementById("nivelSelect")?.value || "Primaria",
     grado: document.getElementById("gradoSelect")?.value || "Primero",
+    trimestre: document.getElementById("trimestreSelect")?.value || "1",
+    materia: document.getElementById("materiaSelect")?.value || "Español",
+    unidad: unidadTemaModo === "Primaria" ? unidadTemaValor : "",
+    temaSecundaria: unidadTemaModo === "Secundaria" ? unidadTemaValor : "",
     publico: document.getElementById("publicoSelect")?.value || "Grupo completo",
     duracion: Number(document.getElementById("duracionInput")?.value || 35),
     tema: temaLines.join(" / "),
     temaPrincipal: temaLines[0] || "",
     temas: temaLines,
+    estacion: unidadTemaModo === "Secundaria" ? (document.getElementById("estacionSelect")?.value || "Primera estación") : "",
     misiones: Number(document.getElementById("numMisionesInput")?.value || 4),
     preguntasPorSala: Number(document.getElementById("preguntasPorSalaInput")?.value || 1),
     modelo: ALLOWED_TEXT_MODELS.has(String(elements.modeloSelect?.value || "").trim())
@@ -1909,6 +2004,14 @@ function createProjectFromForm(seedCount = 1) {
   const questionCount = Math.max(1, Number(formData.preguntasPorSala || 1));
   const misiones = Array.from({ length: Math.max(1, seedCount) }, (_, index) => createMissionDraft(index, {}, questionCount));
   return withDefaultRoutes({
+    nivel: formData.nivel,
+    grado: formData.grado,
+    trimestre: formData.trimestre,
+    materia: formData.materia,
+    unidad: formData.unidad,
+    tema: formData.temaSecundaria,
+    tema_curricular: formData.tema,
+    estacion: formData.estacion,
     themeConfig: state.previewTheme,
     titulo: `Escape Room: ${baseTitle}`,
     subtitulo: `Sala para ${formData.grado} de ${formData.nivel}`,
@@ -1923,8 +2026,17 @@ function createProjectFromForm(seedCount = 1) {
 
 function materializeProjectForExport() {
   if (!state.project) return null;
+  const formData = getFormData();
   const project = withDefaultRoutes({
     ...state.project,
+    nivel: formData.nivel,
+    grado: formData.grado,
+    trimestre: formData.trimestre,
+    materia: formData.materia,
+    unidad: formData.unidad,
+    tema: formData.temaSecundaria,
+    tema_curricular: formData.tema,
+    estacion: formData.estacion,
     themeConfig: normalizePreviewThemeConfig(state.project.themeConfig || state.previewTheme),
     misiones: state.project.misiones.map((mission, index) => repairMissionAnswers({
       ...mission,
@@ -1948,7 +2060,29 @@ function renderPreview() {
     elements.previewFrame?.removeAttribute("srcdoc");
     return;
   }
-  elements.previewFrame.srcdoc = buildPreviewDocument(project);
+  elements.previewFrame.srcdoc = buildPreviewDocument(project, { editorialReview: true });
+}
+
+function triggerPreviewEditorialAutofill() {
+  const frame = elements.previewFrame;
+  if (!frame || !state.project) {
+    setStatus("Genera un escape room antes de usar la resolución automática del preview.", "warning");
+    return;
+  }
+
+  try {
+    const frameDoc = frame.contentDocument || frame.contentWindow?.document;
+    const button = frameDoc?.querySelector?.("[data-editorial-autofill]");
+    if (!button) {
+      setStatus("El preview todavía no está listo para autocompletarse.", "warning");
+      return;
+    }
+    button.click();
+    setStatus("Se disparó la resolución automática de la pantalla actual del preview.", "success");
+  } catch (error) {
+    console.error("No se pudo activar la resolución automática del preview:", error);
+    setStatus("No fue posible resolver automáticamente el preview.", "bad");
+  }
 }
 
 function updateSummaryStats() {
@@ -2836,7 +2970,7 @@ function wireSessionEvents() {
       setRemoteSaveState("saving");
 
       await createRemoteSession({
-        title: deriveSessionTitle(),
+        title: SESSION_TITLE_DEFAULT,
         project: null,
         formState: null,
         activate: true
@@ -2922,18 +3056,37 @@ function isRemoteUrl(value) {
   return /^(https?:)?\/\//i.test(value);
 }
 
+function resolveRemoteAssetDownloadUrl(rawUrl = "") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return "";
+  if (!hasAvailableApiBase()) return clean;
+  try {
+    const parsed = new URL(clean, window.location.origin);
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      return parsed.toString();
+    }
+    if (/\/api\/assets\/proxy-media\?/i.test(parsed.toString())) {
+      return buildApiUrl(parsed.pathname + parsed.search);
+    }
+    return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
+  } catch (_) {
+    return clean;
+  }
+}
+
 /**
  * Fetch a remote resource and return its ArrayBuffer.
  * Returns null if the request fails or the response is not ok.
  */
 async function fetchBinaryAsset(url) {
   try {
-    const response = await fetch(url, { mode: "cors" });
+    const finalUrl = resolveRemoteAssetDownloadUrl(url);
+    const response = await fetch(finalUrl, { mode: "cors" });
     if (!response.ok) return null;
     const buffer = await response.arrayBuffer();
     return buffer;
   } catch (e) {
-    console.warn(`Failed to fetch binary asset ${url}:`, e);
+    console.warn(`No se pudo descargar el recurso remoto para empaquetarlo: ${url}`, e);
     return null;
   }
 }
@@ -2965,6 +3118,9 @@ function sanitizeFileNameForAssets(value = "", fallback = "EscapeRoom") {
 }
 
 async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
+  let downloaded = 0;
+  let failed = 0;
+
   // 1. Background Image
   if (project.backgroundImage && isRemoteUrl(project.backgroundImage)) {
     const buffer = await fetchBinaryAsset(project.backgroundImage);
@@ -2973,6 +3129,9 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
       const fileName = `${mediaFolder}/${sanitizeFileNameForAssets(project.titulo, "escape-room")}-background.${ext}`;
       remoteFiles[fileName] = new Uint8Array(buffer);
       project.backgroundImage = fileName;
+      downloaded += 1;
+    } else {
+      failed += 1;
     }
   }
 
@@ -2992,6 +3151,9 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
           if (mission.media && mission.media.tipo === "imagen") {
             mission.media.url = fileName;
           }
+          downloaded += 1;
+        } else {
+          failed += 1;
         }
       }
 
@@ -3003,6 +3165,9 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
           const fileName = `${mediaFolder}/${missionBase}-media.${ext}`;
           remoteFiles[fileName] = new Uint8Array(buffer);
           mission.media.url = fileName;
+          downloaded += 1;
+        } else {
+          failed += 1;
         }
       }
 
@@ -3022,6 +3187,9 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
               if (question.media && question.media.tipo === "imagen") {
                 question.media.url = fileName;
               }
+              downloaded += 1;
+            } else {
+              failed += 1;
             }
           }
 
@@ -3033,12 +3201,17 @@ async function downloadRemoteAssets(project, remoteFiles, mediaFolder) {
               const fileName = `${mediaFolder}/${missionBase}-${questionIndex}-${question.media.tipo}.${ext}`;
               remoteFiles[fileName] = new Uint8Array(buffer);
               question.media.url = fileName;
+              downloaded += 1;
+            } else {
+              failed += 1;
             }
           }
         }
       }
     }
   }
+
+  return { downloaded, failed };
 }
 
 async function exportPackage() {
@@ -3061,7 +3234,7 @@ async function exportPackage() {
   const remoteFiles = {};
   const mediaFolder = "assets/media";
 
-  await downloadRemoteAssets(projectClone, remoteFiles, mediaFolder);
+  const remoteAssetStats = await downloadRemoteAssets(projectClone, remoteFiles, mediaFolder);
 
   try {
     const logoBuffer = await fetchBinaryAsset("logo.png");
@@ -3107,6 +3280,13 @@ async function exportPackage() {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+  if (remoteAssetStats.failed > 0) {
+    setStatus(
+      `Paquete ZIP generado con recursos remotos omitidos por CORS: ${remoteAssetStats.failed}. El juego seguirá usando esas URLs remotas.`,
+      "warning"
+    );
+    return;
+  }
   setStatus("Paquete ZIP generado con index.html y assets.", "success");
 }
 
@@ -3202,6 +3382,14 @@ elements.form.addEventListener("submit", async (event) => {
     const alignment = fitProjectToConfiguredCounts(validation.project, formData);
     const project = {
       ...alignment.project,
+      nivel: formData.nivel,
+      grado: formData.grado,
+      trimestre: formData.trimestre,
+      materia: formData.materia,
+      unidad: formData.unidad,
+      tema: formData.temaSecundaria,
+      tema_curricular: formData.tema,
+      estacion: formData.estacion,
       themeConfig: normalizePreviewThemeConfig(state.previewTheme),
       duracion_minutos: formData.duracion
     };
@@ -3276,7 +3464,8 @@ elements.form.addEventListener("submit", async (event) => {
 
 elements.btnAddMission.addEventListener("click", addMission);
 elements.btnExportar.addEventListener("click", exportPackage);
-elements.btnPublicar?.addEventListener("click", publishActiveSession);
+elements.btnPreviewAutofill?.addEventListener("click", triggerPreviewEditorialAutofill);
+elements.publishToggle?.addEventListener("change", handlePublishToggleChange);
 
 elements.btnCopiarJson.addEventListener("click", async () => {
   const project = materializeProjectForExport();
@@ -3384,6 +3573,7 @@ elements.btnLimpiar.addEventListener("click", () => {
     setStatus("Formulario y editor listos para un nuevo escape room.", "info");
   } finally {
     state.formPersistenceSuspended = false;
+    syncAcademicFields();
     syncNarrativaCustomField();
   }
 });
@@ -3399,12 +3589,14 @@ if (elements.form) {
 
 elements.modeloSelect?.addEventListener("change", saveFormState);
 
+elements.nivelSelect?.addEventListener("change", syncAcademicFields);
 elements.narrativaSelect?.addEventListener("change", syncNarrativaCustomField);
 
 restoreFormState();
 restoreProjectState();
 restoreTheme();
 restorePreviewTheme({ preferProject: true });
+syncAcademicFields();
 syncNarrativaCustomField();
 wireMissionEditorEvents();
 wireSessionEvents();
