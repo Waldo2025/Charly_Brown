@@ -8,6 +8,7 @@ import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
+const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
@@ -118,6 +119,7 @@ function formatMontageExportTimelineLabel(entry = null) {
 
 let montageExportXlsxLoaderPromise = null;
 let montageExportSubmitLocked = false;
+let montageExportPreviewPaused = false;
 
 function ensureMontageExportXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -205,6 +207,7 @@ export let montageExportState = loadMontageExportSettings();
 let montageExportBusy = false;
 window.montageExportState = montageExportState;
 window.montageExportBusy = montageExportBusy;
+window.montageExportPreviewPaused = montageExportPreviewPaused;
 
 function setMontageExportState(nextState = {}) {
   montageExportState = normalizeMontageExportSettings(nextState);
@@ -226,7 +229,13 @@ function shouldDisableMontagePreviewInCurrentRuntime() {
 }
 
 function shouldSuspendMontagePreviewActivity() {
-  return window.montageExportBusy === true || shouldDisableMontagePreviewInCurrentRuntime();
+  return montageExportPreviewPaused === true || shouldDisableMontagePreviewInCurrentRuntime();
+}
+
+export function setMontageExportPreviewPaused(isPaused = false) {
+  montageExportPreviewPaused = Boolean(isPaused);
+  window.montageExportPreviewPaused = montageExportPreviewPaused;
+  return montageExportPreviewPaused;
 }
 
 let montageExportPreviewState = {
@@ -491,6 +500,7 @@ export function closeMontageExportModal() {
   }
   resetMontageExportJobState();
   resetMontageExportPreviewState();
+  setMontageExportPreviewPaused(false);
   window.montageExportBusy = false;
   window.setTimelinePreviewsSuspended(false);
   setMontageExportBusy(false);
@@ -801,7 +811,6 @@ export async function continueMontageExportPolling() {
   logMontageExportDevtools("continue_polling_clicked", { jobId });
   clearMontageExportPolling();
   window.montageExportBusy = true;
-  window.setTimelinePreviewsSuspended(true);
   setMontageExportBusy(true);
   setMontageExportContinueButton({ visible: false });
   window.montageExportJobState.pollFailureCount = 0;
@@ -824,9 +833,11 @@ export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex
   if (!cleanRowId || !window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   const now = Date.now();
   if (window.montageExportPreviewState.loading) return;
-  if ((now - Math.max(0, Number(window.montageExportPreviewState.lastJobPreviewAt || 0) || 0)) < 12000) return;
   const sameRow = cleanRowId === String(window.montageExportPreviewState.lastJobPreviewRowId || "").trim();
-  if (sameRow) return;
+  const lastRefreshAt = Math.max(0, Number(window.montageExportPreviewState.lastJobPreviewAt || 0) || 0);
+  const elapsedMs = now - lastRefreshAt;
+  const minDelayMs = sameRow ? MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS : 250;
+  if (elapsedMs < minDelayMs) return;
   window.montageExportPreviewState.lastJobPreviewRowId = cleanRowId;
   window.montageExportPreviewState.lastJobPreviewAt = now;
   refreshMontageExportPreviewNow({
@@ -1095,6 +1106,7 @@ export function openMontageExportModal() {
   syncMontageExportUi();
   resetMontageExportJobState();
   resetMontageExportPreviewState();
+  setMontageExportPreviewPaused(false);
   setMontageExportBusy(false);
   setMontageExportProgress(null);
 
@@ -1575,26 +1587,19 @@ export async function runMontageExport() {
       setMontageExportBusy(false);
       return;
     }
-    window.setTimelinePreviewsSuspended?.(true);
     setMontageExportBusy(true);
     if (window.montageExportPreviewState?.debounceTimer) {
       window.clearTimeout(window.montageExportPreviewState.debounceTimer);
       window.montageExportPreviewState.debounceTimer = null;
     }
-    setMontageExportPreviewState({
-      loading: false,
-      error: "",
-      dataUrl: "",
-      mediaType: "",
-      mode: window.montageExportState.exportMode,
-      sceneIndex: 0,
-      disabled: true,
-      meta: "Preview pausado mientras se exporta el video."
-    });
     resetMontageExportJobState();
     setMontageExportContinueButton({ visible: false });
     setMontageExportProgress(0.08);
     setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
+    refreshMontageExportPreviewNow({
+      force: true,
+      loadingMeta: "Manteniendo el preview del montaje mientras inicia la exportación…"
+    }).catch(() => { });
     const data = await authFetchJson("/api/podcaster/montage/export", {
       method: "POST",
       body: prepared.payload
@@ -1726,6 +1731,7 @@ Object.assign(window, {
   closeMontageExportModal,
   setMontageExportStatus,
   setMontageExportBusy,
+  setMontageExportPreviewPaused,
   setMontageExportProgress,
   describeMontageExportStage,
   describeMontageExportSceneSubstage,

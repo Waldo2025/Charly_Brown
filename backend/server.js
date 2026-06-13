@@ -421,6 +421,212 @@ function resolveFfmpegDrawtextFontFile() {
   }) || "";
 }
 
+function resolveMontageOnScreenTextFontFile(settings = {}) {
+  const current = settings && typeof settings === "object" ? settings : {};
+  const family = String(current.fontFamily || "").trim();
+  const weight = String(current.fontWeight || "").trim().toLowerCase();
+  const style = String(current.fontStyle || "").trim().toLowerCase();
+  const fontMap = {
+    AvantGardeLocal: {
+      regular: path.resolve(__dirname, "..", "public", "lecturasGame-mineblox", "runtime", "avantgarde", "AVGARDN_2.TTF"),
+      bold: path.resolve(__dirname, "..", "public", "lecturasGame-mineblox", "runtime", "avantgarde", "AVGARDD_2.TTF"),
+      italic: path.resolve(__dirname, "..", "public", "lecturasGame-mineblox", "runtime", "avantgarde", "AVGARDN_2.TTF"),
+      "bold-italic": path.resolve(__dirname, "..", "public", "lecturasGame-mineblox", "runtime", "avantgarde", "AVGARDDO_2.TTF")
+    },
+    Balloon: {
+      regular: path.resolve(__dirname, "..", "public", "Balloon.ttf"),
+      bold: path.resolve(__dirname, "..", "public", "Balloon.ttf"),
+      italic: path.resolve(__dirname, "..", "public", "Balloon.ttf"),
+      "bold-italic": path.resolve(__dirname, "..", "public", "Balloon.ttf")
+    },
+    Ballooning: {
+      regular: path.resolve(__dirname, "..", "public", "Ballooning.otf"),
+      bold: path.resolve(__dirname, "..", "public", "Ballooning.otf"),
+      italic: path.resolve(__dirname, "..", "public", "Ballooning.otf"),
+      "bold-italic": path.resolve(__dirname, "..", "public", "Ballooning.otf")
+    },
+    Radiora: {
+      regular: path.resolve(__dirname, "..", "public", "Radiora.ttf"),
+      bold: path.resolve(__dirname, "..", "public", "Radiora.ttf"),
+      italic: path.resolve(__dirname, "..", "public", "Radiora.ttf"),
+      "bold-italic": path.resolve(__dirname, "..", "public", "Radiora.ttf")
+    },
+    "ASC-Cursive-2022": {
+      regular: path.resolve(__dirname, "..", "public", "ASC-Cursive-2022.otf"),
+      bold: path.resolve(__dirname, "..", "public", "ASC-Cursive-2022.otf"),
+      italic: path.resolve(__dirname, "..", "public", "ASC-Cursive-2022.otf"),
+      "bold-italic": path.resolve(__dirname, "..", "public", "ASC-Cursive-2022.otf")
+    }
+  };
+  const familyEntry = fontMap[family] || null;
+  const styleKey = weight === "bold" && style === "italic"
+    ? "bold-italic"
+    : weight === "bold"
+      ? "bold"
+      : style === "italic"
+        ? "italic"
+        : "regular";
+  const resolved = familyEntry
+    ? familyEntry[styleKey] || familyEntry.regular
+    : "";
+  if (resolved && fs.existsSync(resolved)) return resolved;
+  return resolveFfmpegDrawtextFontFile();
+}
+
+function escapeAssText(value = "") {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/{/g, "\\{")
+    .replace(/}/g, "\\}")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n/g, "\\N");
+}
+
+function formatAssTimestamp(ms = 0) {
+  const safe = Math.max(0, Math.round(Number(ms || 0) || 0));
+  const hours = Math.floor(safe / 3600000);
+  const minutes = Math.floor((safe % 3600000) / 60000);
+  const seconds = Math.floor((safe % 60000) / 1000);
+  const centiseconds = Math.floor((safe % 1000) / 10);
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+}
+
+function toAssColor(value = "#FFFFFF", alpha = 0) {
+  const safe = String(value || "").trim();
+  const hex = safe.replace(/^#/, "").replace(/[^0-9a-f]/gi, "").slice(0, 6).padEnd(6, "F");
+  const rr = hex.slice(0, 2);
+  const gg = hex.slice(2, 4);
+  const bb = hex.slice(4, 6);
+  const safeAlpha = Math.max(0, Math.min(255, Math.round(Number(alpha || 0) || 0)));
+  return `&H${String(safeAlpha.toString(16).toUpperCase()).padStart(2, "0")}${bb}${gg}${rr}&`;
+}
+
+function buildMontageOnScreenTextKaraokeAssText(wrappedText = "", wordTimings = []) {
+  const timingList = Array.isArray(wordTimings) ? wordTimings : [];
+  const lines = String(wrappedText || "").split("\n");
+  let wordIndex = 0;
+  return lines.map((line) => {
+    const tokens = String(line || "").split(/(\s+)/);
+    const nextTokens = tokens.map((token) => {
+      if (!token) return token;
+      if (/^\s+$/.test(token)) return token;
+      const word = timingList[wordIndex] || null;
+      const durationCs = word
+        ? Math.max(1, Math.round(Math.max(0, Number(word.endMs || 0) - Number(word.startMs || 0)) / 10))
+        : 1;
+      wordIndex += 1;
+      return `{\\k${durationCs}}${escapeAssText(token)}`;
+    });
+    return nextTokens.join("");
+  }).join("\\N");
+}
+
+function buildMontageOnScreenTextKaraokeAssFile(segments = [], settings = {}, options = {}) {
+  const list = Array.isArray(segments) ? segments.filter(Boolean) : [];
+  if (!list.length) return "";
+  const sourceWidth = Math.max(2, Math.round(Number(options?.sourceWidth || 1280) || 1280));
+  const sourceHeight = Math.max(2, Math.round(Number(options?.sourceHeight || 720) || 720));
+  const resolution = String(options?.resolution || "source").trim() || "source";
+  const baseFontName = String(settings?.fontFamily || "Sans").trim() || "Sans";
+  const fontSize = Math.max(16, Math.round(Number(settings?.fontSizePx || 44) || 44));
+  const fontWeight = String(settings?.fontWeight || "").trim().toLowerCase();
+  const fontStyle = String(settings?.fontStyle || "").trim().toLowerCase();
+  const fontBold = fontWeight === "bold" ? -1 : 0;
+  const fontItalic = fontStyle === "italic" ? -1 : 0;
+  const strokeWidth = Math.max(0, Math.round(Number(settings?.strokeEnabled === false ? 0 : settings?.strokeWidthPx || 0) || 0));
+  const shadowEnabled = settings?.shadowEnabled !== false && Number(settings?.shadowOpacity || 0) > 0.001;
+  const shadowDepth = shadowEnabled ? Math.max(1, Math.round(Number(settings?.shadowOffsetYPx ?? 8) || 8)) : 0;
+  const outlineColor = toAssColor(settings?.strokeColor || "#0F172A", 0);
+  const primaryColor = toAssColor(settings?.textColor || "#F8FAFC", Math.round((1 - Math.max(0, Math.min(1, Number(settings?.textOpacity ?? 1) || 1))) * 255));
+  const activeColor = toAssColor("#FACC15", 0);
+  const shadowColor = toAssColor("#020617", Math.round((1 - Math.max(0, Math.min(1, Number(settings?.shadowOpacity ?? 0.48) || 0.48))) * 255));
+  const boxOpacity = (() => {
+    const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
+    const bgOpacity = Math.max(0, Math.min(1, Number(settings?.bgOpacity ?? 0) || 0));
+    if (bgPreset === "none" || bgOpacity <= 0.001) return 0;
+    if (bgPreset === "solid") return 0.82 * bgOpacity;
+    return 0.58 * bgOpacity;
+  })();
+  const backColor = toAssColor("#020617", Math.round((1 - boxOpacity) * 255));
+  const widthPct = Math.max(0.08, Math.min(0.96, Number(options?.widthPct || 0.58) || 0.58));
+  const layoutHeightPct = Math.max(0.05, Math.min(0.6, Number(options?.heightPct || 0.14) || 0.14));
+  const bottomSafetyPx = Math.max(
+    Math.round(fontSize * 1.9),
+    Math.round(sourceHeight * 0.035)
+  );
+  const assHeader = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${sourceWidth}`,
+    `PlayResY: ${sourceHeight}`,
+    "WrapStyle: 2",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    [
+      "Style: Default",
+      baseFontName,
+      fontSize,
+      primaryColor,
+      activeColor,
+      outlineColor,
+      backColor,
+      fontBold,
+      fontItalic,
+      0,
+      0,
+      100,
+      100,
+      0,
+      0,
+      boxOpacity > 0 ? 3 : 1,
+      boxOpacity > 0 ? 0 : strokeWidth,
+      boxOpacity > 0 ? 0 : Math.min(4, shadowDepth),
+      7,
+      0,
+      0,
+      0,
+      1
+    ].join(", "),
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+  ].join("\n");
+  const rows = list
+    .slice()
+    .sort((a, b) => Number(a?.startSec || 0) - Number(b?.startSec || 0) || Number(a?.sceneIndex || 0) - Number(b?.sceneIndex || 0))
+    .map((segment) => {
+      const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
+      const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
+      const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
+      const x = Math.max(0, Math.round(Number(spec.rawXPx ?? spec.xExpr ?? 0) || 0));
+      const y = Math.max(0, Math.round(Number(spec.yPx || 0) || 0));
+      const xTag = `\\an7\\pos(${x},${Math.max(0, y)})`;
+      const scaleTag = `\\fs${Math.max(16, Math.round(Number(spec.fontSizePx || fontSize) || fontSize))}`;
+      const alignTags = [
+        xTag,
+        scaleTag,
+        `\\b${fontBold}`,
+        `\\i${fontItalic}`,
+        `\\bord${boxOpacity > 0 ? 0 : Math.max(0, Math.round(Number(spec.strokeEnabled ? spec.strokeWidthPx : 0) || 0))}`,
+        `\\shad${boxOpacity > 0 ? 0 : (shadowEnabled ? Math.max(1, Math.round(Number(spec.shadowOffsetYPx ?? 6) || 6)) : 0)}`,
+        `\\1c${primaryColor}`,
+        `\\2c${activeColor}`,
+        `\\3c${outlineColor}`,
+        `\\4c${backColor}`,
+        `\\fn${escapeAssText(baseFontName)}`
+      ].join("");
+      const karaokeText = buildMontageOnScreenTextKaraokeAssText(
+        String(spec.wrappedText || segment?.text || "").trim(),
+        Array.isArray(segment?.wordTimings) ? segment.wordTimings : []
+      );
+      return `Dialogue: 0,${formatAssTimestamp(startSec * 1000)},${formatAssTimestamp(endSec * 1000)},Default,,0,0,0,,{${alignTags}}${karaokeText}`;
+    });
+  return [assHeader, ...rows].join("\n");
+}
+
 function roundEven(value = 0, fallback = 2) {
   const base = Number.isFinite(Number(value)) ? Math.round(Number(value)) : Math.round(Number(fallback) || 2);
   const safe = Math.max(2, base);
@@ -10239,10 +10445,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
       const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
       const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
-      const fontFile = resolveFfmpegDrawtextFontFile();
+      const karaokeAssSegments = [];
+      const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
       const fontSource = fontFile
         ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
-        : ":font='Sans'"; // Fallback for Linux if physical file not found
+        : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`; // Fallback to the selected family name
       if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
       else console.warn("[backend] drawtext using fallback font hint: Sans");
       const drawFilters = input.onScreenTextSegments
@@ -10266,9 +10473,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             text: segment.text || "",
             fallback: ""
           });
-          const textPath = textFileResolver(String(spec.wrappedText || "").trim());
           const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
           const wordTimings = audioClip?.wordTimings || [];
+          const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
+          if (karaokeEnabled) {
+            karaokeAssSegments.push({
+              startSec,
+              endSec,
+              spec,
+              wordTimings
+            });
+            return [];
+          }
+          const textPath = textFileResolver(String(spec.wrappedText || "").trim());
           return buildMontageOnScreenTextDrawFilters({
             spec,
             settings: onScreenTextSettings,
@@ -10282,6 +10499,24 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             textFileResolver
           });
         });
+      if (karaokeAssSegments.length) {
+        const assPath = path.join(tmpDir, "montage-onscreen-karaoke.ass");
+        try {
+          const assFontsDir = path.resolve(__dirname, "..", "public");
+          fs.writeFileSync(assPath, buildMontageOnScreenTextKaraokeAssFile(karaokeAssSegments, onScreenTextSettings, {
+            resolution: input.resolution || "source",
+            sourceWidth: sourceDims.width,
+            sourceHeight: sourceDims.height
+          }), "utf8");
+          drawFilters.push(`subtitles='${escapeFfmpegFilterPath(assPath)}':fontsdir='${escapeFfmpegFilterPath(assFontsDir)}'`);
+        } catch (err) {
+          console.error("[backend][montage-export] karaoke ass generation failed:", err.message);
+          if (err.stderr) {
+            console.error("[backend][montage-export] karaoke ass stderr:", err.stderr.slice(-2000));
+          }
+          throw err;
+        }
+      }
       if (drawFilters.length) {
         const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);
         try {
