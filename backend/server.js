@@ -10618,6 +10618,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const baseVideoChain = isReviewVisualPass
           ? reviewFilter
           : (visualFilters.join(",") || "format=rgba");
+        let filterGraph = baseVideoChain;
         if (hasBrandOverlay) {
           emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
           finalVisualArgs.push("-loop", "1", "-i", input.brandOverlay.assetPath);
@@ -10639,6 +10640,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
             finalVisualArgs.push("-map", `[${baseVideoLabel}]`);
           }
+          filterGraph = filterGraphParts.join(";");
         } else {
           finalVisualArgs.push("-vf", baseVideoChain);
           finalVisualArgs.push("-map", "0:v:0");
@@ -10657,7 +10659,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           hasReviewFilter: Boolean(reviewFilter),
           hasBrandOverlay,
           baseVideoChain,
-          filterGraph: filterGraphParts.join(";"),
+          filterGraph,
           args: finalVisualArgs
         });
         await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals" });
