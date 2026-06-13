@@ -10653,6 +10653,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ...deliveryParams.aArgs,
           finalVisualOutPath
         );
+        console.info("[backend][montage-export][final-visual-ffmpeg]", {
+          hasReviewFilter: Boolean(reviewFilter),
+          hasBrandOverlay,
+          baseVideoChain,
+          filterGraph: filterGraphParts.join(";"),
+          args: finalVisualArgs
+        });
         await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals" });
         finalOutPath = finalVisualOutPath;
       } else {
