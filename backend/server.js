@@ -9831,7 +9831,10 @@ function buildMontageOverlayCardsFilter({
 function buildMontageBrandOverlayFilter(brandOverlay = null, {
   width = 1280,
   height = 720,
-  reelModeEnabled = false
+  reelModeEnabled = false,
+  baseInputLabel = "[0:v]",
+  brandInputLabel = "[1:v]",
+  outputLabel = "vout"
 } = {}) {
   if (!brandOverlay || typeof brandOverlay !== "object") return "";
   if (brandOverlay.enabled !== true || !brandOverlay.assetPath || !fs.existsSync(brandOverlay.assetPath)) return "";
@@ -9849,8 +9852,8 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     ? `H-h-${marginPx}`
     : `${marginPx}`;
   return [
-    `[1:v]format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
-    `[0:v][brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[vout]`
+    `${brandInputLabel}format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `${baseInputLabel}[brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
   ].join(";");
 }
 
@@ -10603,24 +10606,41 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         if (overlayCardsFilter) visualFilters.push(overlayCardsFilter);
       }
 
-      if (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath)) {
-        emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
-        const brandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
-          width: visualDims.width,
-          height: visualDims.height,
-          reelModeEnabled: isReelExport
-        });
-        if (brandFilter) visualFilters.push(brandFilter);
-      }
-
-      if (visualFilters.length) {
+      const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
+      if (visualFilters.length || hasBrandOverlay) {
         emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
         const finalVisualOutPath = path.join(tmpDir, `montage-final-visuals.${outExt}`);
-        await runFfmpegCommand([
+        const finalVisualArgs = [
           "-y", "-hide_banner", "-loglevel", "warning",
-          "-i", finalOutPath,
-          "-vf", visualFilters.join(","),
-          "-map", "0:v:0",
+          "-i", finalOutPath
+        ];
+        const baseVisualLabel = "basev";
+        const baseVisualChain = visualFilters.length ? visualFilters.join(",") : "format=rgba";
+        const filterGraphParts = [`[0:v]${baseVisualChain}[${baseVisualLabel}]`];
+        if (hasBrandOverlay) {
+          emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
+          finalVisualArgs.push("-loop", "1", "-i", input.brandOverlay.assetPath);
+          const brandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
+            width: visualDims.width,
+            height: visualDims.height,
+            reelModeEnabled: isReelExport,
+            baseInputLabel: `[${baseVisualLabel}]`,
+            brandInputLabel: "[1:v]",
+            outputLabel: "vout"
+          });
+          if (brandFilter) {
+            filterGraphParts.push(brandFilter);
+            finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
+            finalVisualArgs.push("-map", "[vout]");
+          } else {
+            finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
+            finalVisualArgs.push("-map", `[${baseVisualLabel}]`);
+          }
+        } else {
+          finalVisualArgs.push("-vf", visualFilters.join(","));
+          finalVisualArgs.push("-map", "0:v:0");
+        }
+        finalVisualArgs.push(
           "-map", "0:a:0?",
           "-c:v", deliveryParams.vCodec,
           ...deliveryParams.vArgs,
@@ -10629,7 +10649,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-ar", "48000",
           ...deliveryParams.aArgs,
           finalVisualOutPath
-        ], { stage: "montage_final_visuals" });
+        );
+        await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals" });
         finalOutPath = finalVisualOutPath;
       } else {
         emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
