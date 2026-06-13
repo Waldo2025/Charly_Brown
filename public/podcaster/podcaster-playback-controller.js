@@ -96,6 +96,40 @@ export class PodcasterPlaybackController extends EventEmitter {
   clampPlaybackRate(rate, min = 0.5, max = 10) {
     return Math.max(min, Math.min(max, Number(rate) || 1));
   }
+  async resolvePlayableMediaSource(src = "") {
+    const cleanSrc = String(src || "").trim();
+    if (!cleanSrc) return "";
+    const resolver = this.deps?.resolveFirebaseStorageUrl;
+    if (typeof resolver !== "function") return cleanSrc;
+    try {
+      const storagePathFromProxy = (() => {
+        try {
+          const parsed = new URL(cleanSrc, window.location.origin);
+          const proxyStoragePath = String(parsed.searchParams.get("storagePath") || "").trim();
+          if (proxyStoragePath) return proxyStoragePath;
+          const proxyUrl = String(parsed.searchParams.get("url") || "").trim();
+          if (proxyUrl && /firebasestorage|googleapis/i.test(proxyUrl)) {
+            const nested = new URL(proxyUrl, window.location.origin);
+            const pathPart = String(nested.pathname || "").replace(/^\/+/, "").trim();
+            return pathPart ? `gs://${nested.hostname}/${pathPart}` : "";
+          }
+        } catch (_) { }
+        return "";
+      })();
+      const bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "").trim() || "charly-brown.firebasestorage.app";
+      const gsUrl = cleanSrc.startsWith("gs://")
+        ? cleanSrc
+        : (storagePathFromProxy.startsWith("gs://")
+          ? storagePathFromProxy
+          : (storagePathFromProxy ? `gs://${bucket}/${storagePathFromProxy}` : ""));
+      if (!gsUrl) return cleanSrc;
+      const resolved = await resolver(gsUrl);
+      if (resolved && /^https?:\/\//i.test(String(resolved)) && !String(resolved).includes("/api/assets/proxy-")) {
+        return String(resolved).trim();
+      }
+    } catch (_) { }
+    return cleanSrc;
+  }
   normalizeSceneMediaScale(value = 1) {
     if (typeof this.deps?.normalizeTimelineClipMediaScale === "function") {
       return this.deps.normalizeTimelineClipMediaScale(value);
@@ -2757,19 +2791,20 @@ export class PodcasterPlaybackController extends EventEmitter {
   async primeStageVideoSource(src = "") {
     const cleanSrc = String(src || "").trim();
     if (!cleanSrc) return false;
+    const preferredSrc = await this.resolvePlayableMediaSource(cleanSrc);
     if (!this.podcastStageVideoPreloader) {
       this.podcastStageVideoPreloader = document.createElement("video");
       this.podcastStageVideoPreloader.preload = "auto";
       this.podcastStageVideoPreloader.muted = true;
       this.podcastStageVideoPreloader.playsInline = true;
     }
-    if (this.isSameOriginMediaUrl(cleanSrc)) {
+    if (this.isSameOriginMediaUrl(preferredSrc)) {
       this.podcastStageVideoPreloader.removeAttribute("crossorigin");
     } else {
       this.podcastStageVideoPreloader.crossOrigin = "anonymous";
     }
-    const cachedObjectUrl = this.getBlobUrlSync(cleanSrc);
-    const preloadSrc = cachedObjectUrl || cleanSrc;
+    const cachedObjectUrl = this.getBlobUrlSync(preferredSrc);
+    const preloadSrc = cachedObjectUrl || preferredSrc;
     if (this.podcastStageVideoPreloadSrc !== preloadSrc || this.podcastStageVideoPreloader.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       this.podcastStageVideoPreloadSrc = preloadSrc;
       this.podcastStageVideoPreloader.src = preloadSrc;
@@ -2798,7 +2833,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     this.podcastStageVideoPreloadSrc = "";
 
     if (!cachedObjectUrl) {
-      this.getBlobUrl(cleanSrc).catch(() => { });
+      this.getBlobUrl(preferredSrc).catch(() => { });
     }
     return true;
   }
@@ -2808,6 +2843,7 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (!video) return false;
     const cleanSrc = String(src || "").trim();
     if (!cleanSrc) return false;
+    const preferredSrc = await this.resolvePlayableMediaSource(cleanSrc);
     const setPortrait = this.deps?.setPodcastVideoPortraitFallback || window.setPodcastVideoPortraitFallback;
     setPortrait?.(false);
     
@@ -2819,17 +2855,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (String(video.dataset.src || "").trim() === cleanSrc && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       return true;
     }
-    const cachedObjectUrl = this.getBlobUrlSync(cleanSrc);
+    const cachedObjectUrl = this.getBlobUrlSync(preferredSrc);
     if (!cachedObjectUrl) {
-      this.primeStageVideoSource(cleanSrc).catch(() => { });
+      this.primeStageVideoSource(preferredSrc).catch(() => { });
     }
-    const preferredSource = cachedObjectUrl || cleanSrc;
-    if (this.isSameOriginMediaUrl(cleanSrc)) {
+    const assignedSource = cachedObjectUrl || preferredSrc;
+    if (this.isSameOriginMediaUrl(assignedSource)) {
       video.removeAttribute("crossorigin");
     } else {
       video.crossOrigin = "anonymous";
     }
-    this.assignStageVideoElementSource(video, preferredSource, {
+    this.assignStageVideoElementSource(video, assignedSource, {
       logicalSrc: cleanSrc,
       mode: cachedObjectUrl ? "cache" : "direct",
       cacheKey: cleanSrc
@@ -2867,9 +2903,9 @@ export class PodcasterPlaybackController extends EventEmitter {
     if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
     if (ready) return true;
 
-    const hydratedObjectUrl = await this.getBlobUrl(cleanSrc);
+    const hydratedObjectUrl = await this.getBlobUrl(preferredSrc);
     if (this.podcastStageVideoLoadTokensByEl.get(video) !== loadToken) return false;
-    if (hydratedObjectUrl && hydratedObjectUrl !== preferredSource) {
+    if (hydratedObjectUrl && hydratedObjectUrl !== assignedSource) {
       this.assignStageVideoElementSource(video, hydratedObjectUrl, {
         logicalSrc: cleanSrc,
         mode: "cache",
