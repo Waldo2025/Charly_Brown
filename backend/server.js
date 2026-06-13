@@ -10615,7 +10615,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-i", finalOutPath
         ];
         const baseVideoLabel = "basev";
-        const baseVideoChain = [...visualFilters, reviewFilter].filter(Boolean).join(",") || "format=rgba";
+        const isReviewVisualPass = Boolean(reviewFilter && input.exportMode === "review");
+        const baseVideoChain = isReviewVisualPass
+          ? reviewFilter
+          : (visualFilters.join(",") || "format=rgba");
         const filterGraphParts = [`[0:v]${baseVideoChain}[${baseVideoLabel}]`];
         if (hasBrandOverlay) {
           emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
