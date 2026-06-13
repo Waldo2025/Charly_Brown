@@ -107,6 +107,18 @@ export function buildApiUrl(path = "") {
   return `${base}/${input.replace(/^\/+/, "")}`;
 }
 
+export function buildApiUrlPreferRemote(path = "") {
+  const input = String(path || "").trim();
+  if (!input) return getRemoteApiBase();
+  if (/^https?:\/\//i.test(input)) return input;
+  const resolvedBase = resolveApiBase();
+  const remoteBase = getRemoteApiBase();
+  if (resolvedBase === "/api" && remoteBase && !isLocalHostRuntime()) {
+    return buildApiUrlFromBase(remoteBase, input);
+  }
+  return buildApiUrl(input);
+}
+
 export function buildApiUrlFromBase(base, path = "") {
   const root = String(base || "").trim().replace(/\/+$/, "");
   const input = String(path || "").trim();

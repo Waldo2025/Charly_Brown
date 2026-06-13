@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { authFetchJson, buildApiUrl, hasAvailableApiBase, getAuthHeaders } from "../js/api-client.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase, getAuthHeaders } from "../js/api-client.js";
 import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-12.2";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
@@ -1232,6 +1232,7 @@ const PODCAST_RENDER_DEBUG = (() => {
 const podcasterMediaRuntimeApi = createPodcasterMediaRuntimeApi({
   localProxyMediaUnavailableTtlMs: LOCAL_PROXY_MEDIA_UNAVAILABLE_TTL_MS,
   buildApiUrl,
+  buildApiUrlPreferRemote,
   resolveDateIso,
   setGenerationStatus,
   renderPodcastVideoTimeline,
@@ -6269,13 +6270,13 @@ function resolveStorageMediaUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
   if (!hasAvailableApiBase()) return clean;
-  if (clean.startsWith("/api/assets/proxy-image?")) return buildApiUrl(clean);
+  if (clean.startsWith("/api/assets/proxy-image?")) return buildApiUrlPreferRemote(clean);
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
     const isStorageHost = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
     if (!isStorageHost) return clean;
-    return buildApiUrl(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}&noRange=1`);
+    return buildApiUrlPreferRemote(`/api/assets/proxy-image?url=${encodeURIComponent(clean)}&noRange=1`);
   } catch (_) {
     return clean;
   }
@@ -6314,7 +6315,7 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
 
     // Si ya es una URL de proxy, solo añadimos el timestamp si falta
     if (clean.startsWith("/api/assets/proxy-media?") || clean.startsWith("/api/assets/proxy-image?")) {
-      let proxyUrl = buildApiUrl(clean);
+      let proxyUrl = buildApiUrlPreferRemote(clean);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp && !proxyUrl.includes("u=")) {
         const sep = proxyUrl.includes("?") ? "&" : "?";
@@ -6380,7 +6381,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
     }
     if (clean.startsWith("/api/assets/proxy-media?")) {
-      let proxyUrl = buildApiUrl(clean);
+      let proxyUrl = buildApiUrlPreferRemote(clean);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp && !proxyUrl.includes("u=")) {
         proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
@@ -6390,7 +6391,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
     const parsed = new URL(clean, window.location.origin);
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
     if (isStorageUrl) {
-      let proxyUrl = buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}&noRange=1`);
+      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}&noRange=1`);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
       return proxyUrl;

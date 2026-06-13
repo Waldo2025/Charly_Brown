@@ -6,6 +6,18 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
   let localProxyMediaUnavailableAt = 0;
   let staleMediaReRenderTimer = null;
 
+  function buildMediaProxyUrl(path = "") {
+    const clean = String(path || "").trim();
+    if (!clean) return "";
+    if (typeof deps.buildApiUrlPreferRemote === "function") {
+      return deps.buildApiUrlPreferRemote(clean);
+    }
+    if (typeof deps.buildApiUrl === "function") {
+      return deps.buildApiUrl(clean);
+    }
+    return clean;
+  }
+
   function isLocalProxyMediaUrl(url = "") {
     const src = String(url || "").trim();
     if (!src) return false;
@@ -185,13 +197,13 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     }
     let finalUrl = "";
     if (cleanStoragePath) {
-      const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}${noRange ? "&noRange=1" : ""}`) || "";
+      const proxyUrl = buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(cleanStoragePath)}${noRange ? "&noRange=1" : ""}`);
       finalUrl = isMarkedStaleProxyMediaUrl(proxyUrl) ? clean : proxyUrl;
     }
     if (!finalUrl && clean) {
       try {
         const parsed = new URL(clean, window.location.origin);
-        const proxyUrl = deps.buildApiUrl?.(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}${noRange ? "&noRange=1" : ""}`) || "";
+        const proxyUrl = buildMediaProxyUrl(`${proxyPath}?url=${encodeURIComponent(parsed.toString())}${noRange ? "&noRange=1" : ""}`);
         finalUrl = isMarkedStaleProxyMediaUrl(proxyUrl) ? clean : proxyUrl;
       } catch (_) {
         finalUrl = clean;
@@ -210,7 +222,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const downloadUrl = String(source?.downloadUrl || "").trim();
     const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
     if (key) staleDialogueVideoSourceKeys.add(key);
-    const storageProxyUrl = storagePath ? deps.buildApiUrl?.(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}&noRange=1`) : "";
+    const storageProxyUrl = storagePath ? buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}&noRange=1`) : "";
     const downloadProxyUrl = downloadUrl ? deps.resolveStorageVideoUrl?.(downloadUrl, "") : "";
     [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
       markStaleProxyMediaUrl(url, reason, {
