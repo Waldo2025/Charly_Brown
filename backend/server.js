@@ -9768,23 +9768,22 @@ async function buildMontageGapAwareConcatSequence({
   return sequence;
 }
 
-async function renderMontageOverlayCards({
-  input = {},
-  finalOutPath = "",
-  tmpDir = "",
-  outExt = "mp4",
-  params = {}
+function buildMontageOverlayCardsFilter({
+  cards = [],
+  width = 1280,
+  height = 720,
+  tmpDir = ""
 } = {}) {
-  const cards = Array.isArray(input.overlayCards) ? input.overlayCards : [];
-  if (!cards.length || !finalOutPath) return finalOutPath;
-  const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_overlay_cards_input").catch(() => ({ width: 1280, height: 720 }));
-  const width = Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280));
-  const height = Math.max(2, Math.round(Number(sourceDims.height || 720) || 720));
+  const normalizedCards = Array.isArray(cards) ? cards.filter(Boolean) : [];
+  if (!normalizedCards.length) return "";
+  const canvasWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
+  const canvasHeight = Math.max(2, Math.round(Number(height || 720) || 720));
   const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "overlay-card");
   const fontFile = resolveFfmpegDrawtextFontFile();
   const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
   const filters = [];
-  cards
+
+  normalizedCards
     .slice()
     .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
     .forEach((card) => {
@@ -9792,10 +9791,10 @@ async function renderMontageOverlayCards({
       const endSec = startSec + Math.max(0.1, Number(card.durationMs || 0) / 1000);
       const enableExpr = escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`);
       const pos = card.position || {};
-      const w = Math.max(120, Math.round(width * clampNumber(pos.widthPct, 0.48, 0.9, 0.56)));
-      const h = Math.max(72, Math.round(height * clampNumber(pos.heightPct, 0.18, 0.55, 0.2)));
-      const x = Math.round(width * clampNumber(pos.xPct, 0, Math.max(0, 1 - (w / width)), 0.06));
-      const y = Math.round(height * clampNumber(pos.yPct, 0, Math.max(0, 1 - (h / height)), 0.66));
+      const w = Math.max(120, Math.round(canvasWidth * clampNumber(pos.widthPct, 0.48, 0.9, 0.56)));
+      const h = Math.max(72, Math.round(canvasHeight * clampNumber(pos.heightPct, 0.18, 0.55, 0.2)));
+      const x = Math.round(canvasWidth * clampNumber(pos.xPct, 0, Math.max(0, 1 - (w / canvasWidth)), 0.06));
+      const y = Math.round(canvasHeight * clampNumber(pos.yPct, 0, Math.max(0, 1 - (h / canvasHeight)), 0.66));
       const enterAnimation = String(card.enterAnimation || "slide-left").trim().toLowerCase();
       const exitAnimation = String(card.exitAnimation || "fade").trim().toLowerCase();
       const enterDx = enterAnimation === "slide-right" ? Math.round(w * 0.42) : enterAnimation === "slide-left" ? -Math.round(w * 0.42) : 0;
@@ -9814,17 +9813,65 @@ async function renderMontageOverlayCards({
       const bg = toFfmpegColor(card?.style?.backgroundColor || "#0F172A", 0.82, "0F172A");
       const fg = toFfmpegColor(card?.style?.textColor || "#F8FAFC", 1, "F8FAFC");
       filters.push(`drawbox=x='${boxX}':y='${boxY}':w=${w}:h=${h}:color=${bg}:t=fill:enable='${enableExpr}'`);
-      filters.push(`drawbox=x='${boxX}':y='${boxY}':w=${Math.max(7, Math.round(width * 0.006))}:h=${h}:color=${accent}:t=fill:enable='${enableExpr}'`);
-      const primarySize = Math.max(24, Math.round(height * 0.058));
-      const secondarySize = Math.max(16, Math.round(height * 0.036));
+      filters.push(`drawbox=x='${boxX}':y='${boxY}':w=${Math.max(7, Math.round(canvasWidth * 0.006))}:h=${h}:color=${accent}:t=fill:enable='${enableExpr}'`);
+      const primarySize = Math.max(24, Math.round(canvasHeight * 0.058));
+      const secondarySize = Math.max(16, Math.round(canvasHeight * 0.036));
       const textLines = Array.isArray(card.textLines) ? card.textLines : [];
       textLines.slice(0, 4).forEach((line, index) => {
         const textPath = textFileResolver(String(line || "").trim());
         const fontSize = index === 0 ? primarySize : secondarySize;
-        const textY = `(${boxY})+${Math.round(height * 0.032) + index * Math.round(fontSize * 1.25)}`;
-        filters.push(`drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${fontSize}:fontcolor=${fg}:x='(${boxX})+${Math.round(width * 0.026)}':y='${textY}':fix_bounds=1:line_spacing=4:shadowx=0:shadowy=2:shadowcolor=0x020617@0.45:enable='${enableExpr}'`);
+        const textY = `(${boxY})+${Math.round(canvasHeight * 0.032) + index * Math.round(fontSize * 1.25)}`;
+        filters.push(`drawtext=textfile='${escapeFfmpegFilterPath(textPath)}'${fontSource}:reload=0:fontsize=${fontSize}:fontcolor=${fg}:x='(${boxX})+${Math.round(canvasWidth * 0.026)}':y='${textY}':fix_bounds=1:line_spacing=4:shadowx=0:shadowy=2:shadowcolor=0x020617@0.45:enable='${enableExpr}'`);
       });
     });
+
+  return filters.join(",");
+}
+
+function buildMontageBrandOverlayFilter(brandOverlay = null, {
+  width = 1280,
+  height = 720,
+  reelModeEnabled = false
+} = {}) {
+  if (!brandOverlay || typeof brandOverlay !== "object") return "";
+  if (brandOverlay.enabled !== true || !brandOverlay.assetPath || !fs.existsSync(brandOverlay.assetPath)) return "";
+  const sourceWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
+  const defaultBrandWidthPct = reelModeEnabled ? 0.09 : 0.05;
+  const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
+  const overlayWidthPx = Math.max(48, Math.round(sourceWidth * Math.max(0.04, Math.min(0.4, Number(brandOverlay.widthPct || defaultBrandWidthPct) || defaultBrandWidthPct))));
+  const marginPx = Math.max(8, Math.round(sourceWidth * Math.max(0, Math.min(0.2, Number(brandOverlay.marginPct || defaultBrandMarginPct) || defaultBrandMarginPct))));
+  const opacity = Math.max(0, Math.min(1, Number(brandOverlay.opacity ?? 1)));
+  const position = String(brandOverlay.position || "top-right").trim() || "top-right";
+  const xExpr = position.includes("left")
+    ? `${marginPx}`
+    : `W-w-${marginPx}`;
+  const yExpr = position.includes("bottom")
+    ? `H-h-${marginPx}`
+    : `${marginPx}`;
+  return [
+    `[1:v]format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `[0:v][brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[vout]`
+  ].join(";");
+}
+
+async function renderMontageOverlayCards({
+  input = {},
+  finalOutPath = "",
+  tmpDir = "",
+  outExt = "mp4",
+  params = {}
+} = {}) {
+  const cards = Array.isArray(input.overlayCards) ? input.overlayCards : [];
+  if (!cards.length || !finalOutPath) return finalOutPath;
+  const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_overlay_cards_input").catch(() => ({ width: 1280, height: 720 }));
+  const width = Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280));
+  const height = Math.max(2, Math.round(Number(sourceDims.height || 720) || 720));
+  const filters = buildMontageOverlayCardsFilter({
+    cards,
+    width,
+    height,
+    tmpDir
+  });
   if (!filters.length) return finalOutPath;
   const outPath = path.join(tmpDir, `montage-overlay-cards.${outExt}`);
   await runFfmpegCommand([
@@ -10431,188 +10478,195 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       finalOutPath = mixedOutPath;
     }
 
-    if (input.onScreenTextSettings && input.onScreenTextSegments.length) {
-      emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla.");
-      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_onscreen_input").catch(() => ({ width: 1280, height: 720 }));
+    const hasFinalVisualPass = Boolean(
+      (input.onScreenTextSettings && input.onScreenTextSegments.length)
+      || (Array.isArray(input.overlayCards) && input.overlayCards.length)
+      || (input.exportMode === "review" && exportedEntries.length)
+      || (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath))
+    );
+    if (hasFinalVisualPass) {
+      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
-      const onScreenTextSettings = {
-        ...input.onScreenTextSettings,
-        partyKaraoke: input.partyKaraoke !== false,
-        fontSizePx: isReelExport
-          ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
-          : input.onScreenTextSettings?.fontSizePx
-      };
-      const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
-      const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
-      const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
-      const karaokeAssSegments = [];
-      const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
-      const fontSource = fontFile
-        ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
-        : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`; // Fallback to the selected family name
-      if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
-      else console.warn("[backend] drawtext using fallback font hint: Sans");
-      const drawFilters = input.onScreenTextSegments
-        .slice()
-        .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
-        .flatMap((segment) => {
-          const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
-          const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
-          const layout = normalizeMontageOnScreenTextExportLayout({
-            segment,
-            settings: onScreenTextSettings,
-            resolution: input.resolution || "source",
-            sourceDims
-          });
-          const spec = resolveOnScreenTextRenderSpec({
-            settings: onScreenTextSettings,
-            layout,
-            resolution: input.resolution || "source",
-            sourceWidth: sourceDims.width,
-            sourceHeight: sourceDims.height,
-            text: segment.text || "",
-            fallback: ""
-          });
-          const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-          const wordTimings = audioClip?.wordTimings || [];
-          const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
-          if (karaokeEnabled) {
-            karaokeAssSegments.push({
+      const visualDims = input.exportMode === "review"
+        ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
+        : sourceDims;
+      const visualFilters = [];
+
+      if (input.onScreenTextSettings && input.onScreenTextSegments.length) {
+        emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.");
+        const onScreenTextSettings = {
+          ...input.onScreenTextSettings,
+          partyKaraoke: input.partyKaraoke !== false,
+          fontSizePx: isReelExport
+            ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
+            : input.onScreenTextSettings?.fontSizePx
+        };
+        const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
+        const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
+        const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
+        const karaokeAssSegments = [];
+        const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
+        const fontSource = fontFile
+          ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
+          : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`;
+        if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
+        else console.warn("[backend] drawtext using fallback font hint: Sans");
+        const drawFilters = input.onScreenTextSegments
+          .slice()
+          .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
+          .flatMap((segment) => {
+            const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+            const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+            const layout = normalizeMontageOnScreenTextExportLayout({
+              segment,
+              settings: onScreenTextSettings,
+              resolution: input.resolution || "source",
+              sourceDims
+            });
+            const spec = resolveOnScreenTextRenderSpec({
+              settings: onScreenTextSettings,
+              layout,
+              resolution: input.resolution || "source",
+              sourceWidth: sourceDims.width,
+              sourceHeight: sourceDims.height,
+              text: segment.text || "",
+              fallback: ""
+            });
+            const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
+            const wordTimings = audioClip?.wordTimings || [];
+            const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
+            if (karaokeEnabled) {
+              karaokeAssSegments.push({
+                startSec,
+                endSec,
+                spec,
+                wordTimings
+              });
+              return [];
+            }
+            const textPath = textFileResolver(String(spec.wrappedText || "").trim());
+            return buildMontageOnScreenTextDrawFilters({
+              spec,
+              settings: onScreenTextSettings,
+              textPath,
+              fontSource,
+              textColor,
+              strokeColor,
               startSec,
               endSec,
-              spec,
-              wordTimings
+              wordTimings,
+              textFileResolver
             });
-            return [];
-          }
-          const textPath = textFileResolver(String(spec.wrappedText || "").trim());
-          return buildMontageOnScreenTextDrawFilters({
-            spec,
-            settings: onScreenTextSettings,
-            textPath,
-            fontSource,
-            textColor,
-            strokeColor,
-            startSec,
-            endSec,
-            wordTimings,
-            textFileResolver
           });
+        if (karaokeAssSegments.length) {
+          const assPath = path.join(tmpDir, "montage-onscreen-karaoke.ass");
+          try {
+            const assFontsDir = path.resolve(__dirname, "..", "public");
+            fs.writeFileSync(assPath, buildMontageOnScreenTextKaraokeAssFile(karaokeAssSegments, onScreenTextSettings, {
+              resolution: input.resolution || "source",
+              sourceWidth: sourceDims.width,
+              sourceHeight: sourceDims.height
+            }), "utf8");
+            drawFilters.push(`subtitles='${escapeFfmpegFilterPath(assPath)}':fontsdir='${escapeFfmpegFilterPath(assFontsDir)}'`);
+          } catch (err) {
+            console.error("[backend][montage-export] karaoke ass generation failed:", err.message);
+            if (err.stderr) {
+              console.error("[backend][montage-export] karaoke ass stderr:", err.stderr.slice(-2000));
+            }
+            throw err;
+          }
+        }
+        visualFilters.push(...drawFilters);
+      }
+
+      if (input.exportMode === "review" && exportedEntries.length) {
+        emitStage("apply_review_layout", 0.88, "Componiendo layout de revisión.");
+        const reviewTextFileResolver = createMontageReviewTextFileResolver(tmpDir, "review-export");
+        const reviewFilter = buildMontageReviewVideoFilter(exportedEntries, {
+          width: visualDims.width,
+          height: visualDims.height,
+          montageTotalDurationMs,
+          globalCounterMode: "dynamic",
+          textFileResolver: reviewTextFileResolver
         });
-      if (karaokeAssSegments.length) {
-        const assPath = path.join(tmpDir, "montage-onscreen-karaoke.ass");
-        try {
-          const assFontsDir = path.resolve(__dirname, "..", "public");
-          fs.writeFileSync(assPath, buildMontageOnScreenTextKaraokeAssFile(karaokeAssSegments, onScreenTextSettings, {
-            resolution: input.resolution || "source",
-            sourceWidth: sourceDims.width,
-            sourceHeight: sourceDims.height
-          }), "utf8");
-          drawFilters.push(`subtitles='${escapeFfmpegFilterPath(assPath)}':fontsdir='${escapeFfmpegFilterPath(assFontsDir)}'`);
-        } catch (err) {
-          console.error("[backend][montage-export] karaoke ass generation failed:", err.message);
-          if (err.stderr) {
-            console.error("[backend][montage-export] karaoke ass stderr:", err.stderr.slice(-2000));
-          }
-          throw err;
-        }
+        if (reviewFilter) visualFilters.push(reviewFilter);
       }
-      if (drawFilters.length) {
-        const overlayOutPath = path.join(tmpDir, `montage-onscreen-text.${outExt}`);
-        try {
-          await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", drawFilters.join(","), "-map", "0:v:0", "-map", "0:a:0?", "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), overlayOutPath], { stage: "montage_overlay_text" });
-        } catch (err) {
-          console.error("[backend][montage-export] montage_overlay_text stage failed:", err.message);
-          if (err.stderr) {
-            console.error("[backend][montage-export] ffmpeg stderr:", err.stderr.slice(-2000));
-          }
-          throw err;
-        }
-        finalOutPath = overlayOutPath;
+
+      if (Array.isArray(input.overlayCards) && input.overlayCards.length) {
+        emitStage("apply_overlay_cards", 0.9, "Aplicando cards animadas.");
+        const overlayCardsFilter = buildMontageOverlayCardsFilter({
+          cards: input.overlayCards,
+          width: visualDims.width,
+          height: visualDims.height,
+          tmpDir
+        });
+        if (overlayCardsFilter) visualFilters.push(overlayCardsFilter);
       }
-    }
 
-    if (Array.isArray(input.overlayCards) && input.overlayCards.length) {
-      emitStage("apply_overlay_cards", 0.84, "Aplicando cards animadas.");
-      finalOutPath = await renderMontageOverlayCards({
-        input,
-        finalOutPath,
-        tmpDir,
-        outExt,
-        params: intermediateParams
-      });
-    }
+      if (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath)) {
+        emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
+        const brandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
+          width: visualDims.width,
+          height: visualDims.height,
+          reelModeEnabled: isReelExport
+        });
+        if (brandFilter) visualFilters.push(brandFilter);
+      }
 
-    if (input.exportMode === "review" && exportedEntries.length) {
-      emitStage("apply_review_layout", 0.88, "Componiendo layout de revisión.");
-      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_review_input").catch(() => ({ width: 1280, height: 720 }));
-      const canvas = resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height);
-      const reviewOutPath = path.join(tmpDir, `montage-review.${outExt}`);
-      const reviewTextFileResolver = createMontageReviewTextFileResolver(tmpDir, "review-export");
-      const reviewFilter = buildMontageReviewVideoFilter(exportedEntries, {
-        width: canvas.width,
-        height: canvas.height,
-        montageTotalDurationMs,
-        globalCounterMode: "dynamic",
-        textFileResolver: reviewTextFileResolver
-      });
-      await runFfmpegCommand(["-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath, "-vf", reviewFilter, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", "copy", ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []), reviewOutPath], { stage: "montage_review_layout" });
-      finalOutPath = reviewOutPath;
-    }
-
-    if (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath)) {
-      emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
-      const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_brand_overlay_input").catch(() => ({ width: 1280, height: 720 }));
-      const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
-      const defaultBrandWidthPct = isReelExport ? 0.09 : 0.05;
-      const defaultBrandMarginPct = isReelExport ? 0.03 : 0.025;
-      const overlayWidthPx = Math.max(48, Math.round(sourceDims.width * Math.max(0.04, Math.min(0.4, Number(input.brandOverlay.widthPct || defaultBrandWidthPct) || defaultBrandWidthPct))));
-      const marginPx = Math.max(8, Math.round(sourceDims.width * Math.max(0, Math.min(0.2, Number(input.brandOverlay.marginPct || defaultBrandMarginPct) || defaultBrandMarginPct))));
-      const opacity = Math.max(0, Math.min(1, Number(input.brandOverlay.opacity ?? 1)));
-      const position = String(input.brandOverlay.position || "top-right").trim() || "top-right";
-      const xExpr = position.includes("left")
-        ? `${marginPx}`
-        : `W-w-${marginPx}`;
-      const yExpr = position.includes("bottom")
-        ? `H-h-${marginPx}`
-        : `${marginPx}`;
-      const overlayOutPath = path.join(tmpDir, `montage-brand-overlay.${outExt}`);
-      const overlayFilter = [
-        `[1:v]format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
-        `[0:v][brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[vout]`
-      ].join(";");
+      if (visualFilters.length) {
+        emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+        const finalVisualOutPath = path.join(tmpDir, `montage-final-visuals.${outExt}`);
+        await runFfmpegCommand([
+          "-y", "-hide_banner", "-loglevel", "warning",
+          "-i", finalOutPath,
+          "-vf", visualFilters.join(","),
+          "-map", "0:v:0",
+          "-map", "0:a:0?",
+          "-c:v", deliveryParams.vCodec,
+          ...deliveryParams.vArgs,
+          "-pix_fmt", "yuv420p",
+          "-c:a", deliveryParams.aCodec,
+          "-ar", "48000",
+          ...deliveryParams.aArgs,
+          finalVisualOutPath
+        ], { stage: "montage_final_visuals" });
+        finalOutPath = finalVisualOutPath;
+      } else {
+        emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+        const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+        await runFfmpegCommand([
+          "-y", "-hide_banner", "-loglevel", "warning",
+          "-i", finalOutPath,
+          "-map", "0:v:0",
+          "-map", "0:a:0?",
+          "-c:v", deliveryParams.vCodec,
+          ...deliveryParams.vArgs,
+          "-pix_fmt", "yuv420p",
+          "-c:a", deliveryParams.aCodec,
+          "-ar", "48000",
+          ...deliveryParams.aArgs,
+          deliveryOutPath
+        ], { stage: "montage_encode_delivery" });
+        finalOutPath = deliveryOutPath;
+      }
+    } else {
+      emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+      const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning",
         "-i", finalOutPath,
-        "-i", input.brandOverlay.assetPath,
-        "-filter_complex", overlayFilter,
-        "-map", "[vout]",
+        "-map", "0:v:0",
         "-map", "0:a:0?",
-        "-c:v", intermediateParams.vCodec, ...intermediateParams.vArgs,
+        "-c:v", deliveryParams.vCodec,
+        ...deliveryParams.vArgs,
         "-pix_fmt", "yuv420p",
-        "-c:a", "copy",
-        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
-        overlayOutPath
-      ], { stage: "montage_brand_overlay" });
-      finalOutPath = overlayOutPath;
+        "-c:a", deliveryParams.aCodec,
+        "-ar", "48000",
+        ...deliveryParams.aArgs,
+        deliveryOutPath
+      ], { stage: "montage_encode_delivery" });
+      finalOutPath = deliveryOutPath;
     }
-
-    emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
-    const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
-    await runFfmpegCommand([
-      "-y", "-hide_banner", "-loglevel", "warning",
-      "-i", finalOutPath,
-      "-map", "0:v:0",
-      "-map", "0:a:0?",
-      "-c:v", deliveryParams.vCodec,
-      ...deliveryParams.vArgs,
-      "-pix_fmt", "yuv420p",
-      "-c:a", deliveryParams.aCodec,
-      "-ar", "48000",
-      ...deliveryParams.aArgs,
-      deliveryOutPath
-    ], { stage: "montage_encode_delivery" });
-    finalOutPath = deliveryOutPath;
 
     if (context?.previewOnly === true) {
       const previewBuffer = await fs.promises.readFile(finalOutPath);
