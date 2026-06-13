@@ -8378,43 +8378,39 @@ function normalizeMontageExportRequestBody(body = {}) {
   let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
     ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
     : [];
+  if (!onScreenTextSegments.length) {
+    onScreenTextSegments = entries
+      .map((entry, idx) => {
+        const text = clampText(entry?.onScreenText || "", 500);
+        if (!text) return null;
+        const geminiSeg = normalizedGeminiTimelineSegments.find((s) => s.rowId === entry.rowId);
+        const startMs = geminiSeg
+          ? geminiSeg.startMs
+          : Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+        const durationMs = geminiSeg
+          ? geminiSeg.durationMs
+          : Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
+        return {
+          id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
+          rowId: clampText(entry?.rowId || "", 140),
+          sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
+          text,
+          startMs,
+          durationMs,
+          zIndex: idx + 1,
+          layout: {
+            yPct: 0.72,
+            widthPct: 0.58,
+            heightPct: 0.14,
+            xPct: 0.21
+          }
+        };
+      })
+      .filter(Boolean);
+  }
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
     ? onScreenTextTimelineRaw.settings
-    : null;
-  if (!onScreenTextSegments.length) {
-    if (raw.onScreenTextTimeline !== undefined) {
-      onScreenTextSegments = [];
-    } else {
-      onScreenTextSegments = entries
-        .map((entry, idx) => {
-          const text = clampText(entry?.onScreenText || "", 500);
-          if (!text) return null;
-          const geminiSeg = normalizedGeminiTimelineSegments.find((s) => s.rowId === entry.rowId);
-          const startMs = geminiSeg
-            ? geminiSeg.startMs
-            : Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-          const durationMs = geminiSeg
-            ? geminiSeg.durationMs
-            : Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
-          return {
-            id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
-            rowId: clampText(entry?.rowId || "", 140),
-            sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
-            text,
-            startMs,
-            durationMs,
-            zIndex: idx + 1,
-            layout: {
-              yPct: 0.72,
-              widthPct: 0.58,
-              heightPct: 0.14,
-              xPct: 0.21
-            }
-          };
-        })
-        .filter(Boolean);
-    }
-  }
+    : (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null);
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
     const cleanRelativeAssetPath = assetPathRaw.replace(/^[/\\]+/g, "");
