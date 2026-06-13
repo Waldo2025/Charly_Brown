@@ -12340,34 +12340,6 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         storagePath,
         hasRange: Boolean(rangeHeader)
       });
-      if (ignoreRange) {
-        try {
-          const buckets = getStorageBucketCandidates();
-          for (const bucket of buckets) {
-            if (!bucket) continue;
-            const file = bucket.file(storagePath);
-            const [exists] = await file.exists().catch(() => [null]);
-            if (exists === false) continue;
-            const [signedUrl] = await file.getSignedUrl({
-              action: "read",
-              expires: Date.now() + (15 * 60 * 1000),
-              version: "v4"
-            });
-            if (signedUrl) {
-              console.info("[backend][proxy-media] redirecting noRange storage request to signed URL", {
-                storagePath,
-                bucket: String(bucket?.name || "").trim()
-              });
-              return res.redirect(302, signedUrl);
-            }
-          }
-        } catch (error) {
-          console.warn("[backend][proxy-media] signed URL redirect failed, falling back to stream", {
-            storagePath,
-            message: String(error?.message || error)
-          });
-        }
-      }
       try {
         const streamMeta = await openStorageObjectReadStream(storagePath, { metadataOnly: true });
         const mimeType = String(streamMeta?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
