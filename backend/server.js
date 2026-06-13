@@ -10614,15 +10614,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-y", "-hide_banner", "-loglevel", "warning",
           "-i", finalOutPath
         ];
-        const baseVideoLabel = "basev";
         const isReviewVisualPass = Boolean(reviewFilter && input.exportMode === "review");
         const baseVideoChain = isReviewVisualPass
           ? reviewFilter
           : (visualFilters.join(",") || "format=rgba");
-        const filterGraphParts = [`[0:v]${baseVideoChain}[${baseVideoLabel}]`];
         if (hasBrandOverlay) {
           emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
           finalVisualArgs.push("-loop", "1", "-i", input.brandOverlay.assetPath);
+          const baseVideoLabel = "basev";
+          const filterGraphParts = [`[0:v]${baseVideoChain}[${baseVideoLabel}]`];
           const brandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
             width: visualDims.width,
             height: visualDims.height,
@@ -10640,8 +10640,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             finalVisualArgs.push("-map", `[${baseVideoLabel}]`);
           }
         } else {
-          finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
-          finalVisualArgs.push("-map", `[${baseVideoLabel}]`);
+          finalVisualArgs.push("-vf", baseVideoChain);
+          finalVisualArgs.push("-map", "0:v:0");
         }
         finalVisualArgs.push(
           "-map", "0:a:0?",

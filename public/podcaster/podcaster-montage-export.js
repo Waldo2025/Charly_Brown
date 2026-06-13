@@ -849,14 +849,35 @@ export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex
   }).catch(() => { });
 }
 
-function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
+async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
   const entries = Array.isArray(payload?.entries) ? payload.entries : [];
   if (!entries.length) return null;
   const cleanRowId = String(previewRowId || "").trim();
   const selected = entries.find((entry) => String(entry?.rowId || "").trim() === cleanRowId) || entries[0];
   if (!selected || typeof selected !== "object") return null;
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
-  const src = window.resolveStorageVideoUrl(String(video?.url || "").trim(), String(video?.storagePath || "").trim());
+  const directDownloadUrl = String(video?.downloadUrl || "").trim();
+  const rawUrl = String(video?.url || "").trim();
+  const storagePath = String(video?.storagePath || "").trim();
+  let src = directDownloadUrl || rawUrl;
+  const shouldResolveDirectly = !src || src.startsWith("gs://");
+  if (shouldResolveDirectly && typeof window.resolveFirebaseStorageUrl === "function") {
+    try {
+      const bucket = window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app";
+      const gsUrl = src.startsWith("gs://")
+        ? src
+        : (storagePath.startsWith("gs://") ? storagePath : (storagePath ? `gs://${bucket}/${storagePath}` : ""));
+      const resolved = gsUrl ? await window.resolveFirebaseStorageUrl(gsUrl) : "";
+      if (resolved && /^https?:\/\//i.test(String(resolved)) && !String(resolved).includes("/api/assets/proxy-")) {
+        src = String(resolved).trim();
+      }
+    } catch (_) {
+      // fallback below
+    }
+  }
+  if (!src) {
+    src = String(window.resolveStorageVideoUrl(rawUrl, storagePath) || "").trim();
+  }
   if (!src) return null;
   const mediaKind = String(video?.mediaKind || video?.type || "").trim().toLowerCase();
   const mimeType = String(video?.mimeType || "").trim().toLowerCase();
@@ -910,7 +931,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     ...prepared.payload,
     previewRowId
   };
-  const frontendPreview = resolveMontageExportFrontendPreview(payload, previewRowId);
+  const frontendPreview = await resolveMontageExportFrontendPreview(payload, previewRowId);
   if (frontendPreview?.src) {
     setMontageExportPreviewState({
       loading: false,
