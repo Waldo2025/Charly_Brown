@@ -16,7 +16,7 @@ function resolveMontageExportVideoParams(format = "mp4_h264", qualityPreset = "b
   }
 
   let crf = preset === "high" ? 18 : preset === "small" ? 24 : 20;
-  let x264Preset = preset === "high" ? "slow" : preset === "small" ? "fast" : "medium";
+  let x264Preset = preset === "high" ? "medium" : preset === "small" ? "veryfast" : "faster";
   let maxRate = preset === "high" ? "8M" : (preset === "small" ? "2M" : "5M");
   let bufSize = preset === "high" ? "16M" : (preset === "small" ? "4M" : "10M");
   let isCbr = false;
@@ -66,7 +66,7 @@ function resolveMontageIntermediateVideoParams(format = "mp4_h264") {
   return {
     container: "mp4",
     vCodec: "libx264",
-    vArgs: ["-preset", "medium", "-crf", "12", "-movflags", "+faststart"],
+    vArgs: ["-preset", "veryfast", "-crf", "14"],
     aCodec: "aac",
     aArgs: ["-b:a", "192k"]
   };

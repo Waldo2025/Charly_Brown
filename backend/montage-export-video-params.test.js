@@ -11,9 +11,11 @@ test("intermediate montage params favor mezzanine quality for mp4", () => {
   assert.equal(params.container, "mp4");
   assert.equal(params.vCodec, "libx264");
   assert.deepEqual(params.aArgs, ["-b:a", "192k"]);
-  assert.match(params.vArgs.join(" "), /-crf 12/);
+  assert.match(params.vArgs.join(" "), /-preset veryfast/);
+  assert.match(params.vArgs.join(" "), /-crf 14/);
   assert.doesNotMatch(params.vArgs.join(" "), /-maxrate/);
   assert.doesNotMatch(params.vArgs.join(" "), /-bufsize/);
+  assert.doesNotMatch(params.vArgs.join(" "), /-movflags/);
 });
 
 test("delivery montage params keep bitrate caps for final mp4 export", () => {
@@ -21,6 +23,7 @@ test("delivery montage params keep bitrate caps for final mp4 export", () => {
   assert.equal(params.container, "mp4");
   assert.equal(params.vCodec, "libx264");
   assert.match(params.vArgs.join(" "), /-crf 20/);
+  assert.match(params.vArgs.join(" "), /-preset faster/);
   assert.match(params.vArgs.join(" "), /-maxrate 5M/);
   assert.match(params.vArgs.join(" "), /-bufsize 10M/);
 });
