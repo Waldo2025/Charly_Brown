@@ -12,6 +12,7 @@ const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
+const MONTAGE_EXPORT_ACTIVE_JOB_KEY = "cb_podcast_montage_export_active_job_v1";
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
   assetPath: "public/podcaster/logo.png",
@@ -196,6 +197,34 @@ export function loadMontageExportSettings() {
 export function persistMontageExportSettings() {
   try {
     localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(montageExportState)));
+  } catch (_) {
+    // noop
+  }
+}
+
+function loadPersistedMontageExportActiveJob() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY) || "{}");
+    const jobId = String(parsed?.jobId || "").trim();
+    const startedAtMs = Math.max(0, Number(parsed?.startedAtMs || 0) || 0);
+    if (!jobId) return null;
+    return { jobId, startedAtMs };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistMontageExportActiveJob(jobId = "", startedAtMs = 0) {
+  const cleanJobId = String(jobId || "").trim();
+  try {
+    if (!cleanJobId) {
+      localStorage.removeItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY);
+      return;
+    }
+    localStorage.setItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY, JSON.stringify({
+      jobId: cleanJobId,
+      startedAtMs: Math.max(0, Number(startedAtMs || 0) || 0)
+    }));
   } catch (_) {
     // noop
   }
@@ -719,6 +748,7 @@ export async function pollMontageExportJob(jobId = "") {
         warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
       });
       clearMontageExportPolling();
+      persistMontageExportActiveJob("");
       setMontageExportContinueButton({ visible: false });
       const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
       let statusText = "Tu video está listo.";
@@ -772,6 +802,7 @@ export async function pollMontageExportJob(jobId = "") {
         detail: err?.detail || undefined
       }, "error");
       clearMontageExportPolling();
+      persistMontageExportActiveJob("");
       setMontageExportContinueButton({ visible: false });
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
       const failedLabel = failedSubstage
@@ -800,6 +831,7 @@ export async function pollMontageExportJob(jobId = "") {
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
     if (errorStatus === 404) {
       clearMontageExportPolling();
+      persistMontageExportActiveJob("");
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
@@ -859,7 +891,8 @@ export async function pollMontageExportJob(jobId = "") {
 }
 
 export async function continueMontageExportPolling() {
-  const jobId = String(window.montageExportJobState.jobId || "").trim();
+  const persistedJob = loadPersistedMontageExportActiveJob();
+  const jobId = String(window.montageExportJobState.jobId || persistedJob?.jobId || "").trim();
   if (!jobId) {
     setMontageExportStatus(
       "No encontramos un export activo para continuar.",
@@ -871,6 +904,9 @@ export async function continueMontageExportPolling() {
   }
   logMontageExportDevtools("continue_polling_clicked", { jobId });
   clearMontageExportPolling();
+  if (!String(window.montageExportJobState.jobId || "").trim()) {
+    window.montageExportJobState.jobId = jobId;
+  }
   window.montageExportBusy = true;
   setMontageExportBusy(true);
   setMontageExportContinueButton({ visible: false });
@@ -1196,6 +1232,21 @@ export function openMontageExportModal() {
   if (session && typeof window.exportPreviewController?.init === "function") {
     window.exportPreviewController.sync(session);
     window.exportPreviewController.seek(0);
+  }
+  const persistedJob = loadPersistedMontageExportActiveJob();
+  if (persistedJob?.jobId) {
+    window.montageExportJobState.jobId = persistedJob.jobId;
+    window.montageExportJobState.startedAtMs = persistedJob.startedAtMs || Date.now();
+    window.montageExportBusy = true;
+    setMontageExportBusy(true);
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportStatus(
+      "Retomando exportación activa…",
+      "Encontramos un job en curso y estamos consultando su estado.",
+      { tone: "warning" }
+    );
+    continueMontageExportPolling().catch(() => { });
+    return;
   }
   setMontageExportStatus(
     "Listo. Presiona Exportar para generar tu video.",
@@ -1689,6 +1740,7 @@ export async function runMontageExport() {
     const jobId = String(data?.jobId || "").trim();
     if (!jobId) throw new Error("montage_export_job_missing");
     window.montageExportJobState.jobId = jobId;
+    persistMontageExportActiveJob(jobId, Date.now());
     window.montageExportJobState.lastStage = String(data?.stage || "").trim();
     window.montageExportJobState.lastHint = String(data?.hint || "").trim();
     window.montageExportJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
@@ -1741,6 +1793,7 @@ export async function runMontageExport() {
     } else if (status === 429 || code === "backend_busy_with_export") {
       if (activeJobId) {
         window.montageExportJobState.jobId = activeJobId;
+        persistMontageExportActiveJob(activeJobId, Date.now());
         setMontageExportContinueButton({ visible: true, label: "Seguir exportación" });
         setMontageExportStatus(
           "Ya hay una exportación activa.",
@@ -1756,6 +1809,7 @@ export async function runMontageExport() {
         : "Intenta de nuevo manualmente en unos segundos.");
       if (previousJobId) {
         window.montageExportJobState.jobId = previousJobId;
+        persistMontageExportActiveJob(previousJobId, Date.now());
         setMontageExportContinueButton({ visible: true });
       }
     } else if (status === 503 && code === "montage_export_queue_unavailable") {

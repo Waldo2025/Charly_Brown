@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.91",
-  "build": "2026-1.0.10.91",
+  "version": "1.0.10.92",
+  "build": "2026-1.0.10.92",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El preview del modal de export ahora evita desvíos de CORS/QUIC al resolver el media directamente dentro del controlador de reproducción y no pasar por rutas de proxy innecesarias.",
@@ -19,7 +19,8 @@
     "Corregido: El podcaster ahora prioriza downloadUrl públicas de Firebase Storage en vez del proxy-media cuando están disponibles, evitando errores de CORS/QUIC en producción.",
     "Corregido: El polling del export de montage en podcaster ahora corta correctamente ante 404 en Render y muestra el estado perdido en vez de quedarse reintentando indefinidamente.",
     "Corregido: El export de montage ahora envía downloadUrl explícito para video y audio, y el backend lo prioriza antes del storagePath para reducir la dependencia del proxy-media en Render. También se mantiene el fix de party karaoke para conservar el texto sincronizado.",
-    "Corregido: El polling del export en podcaster ya no trata como fallo fatal las caídas de red transitorias como ERR_NETWORK_CHANGED o Failed to fetch; ahora reintenta con backoff y reanuda cuando vuelve la conexión."
+    "Corregido: El polling del export en podcaster ya no trata como fallo fatal las caídas de red transitorias como ERR_NETWORK_CHANGED o Failed to fetch; ahora reintenta con backoff y reanuda cuando vuelve la conexión.",
+    "Mejorado: Si el backend ya tiene un export activo, el modal de podcaster ahora puede retomar automáticamente el job persistido en vez de disparar un segundo POST que devuelve 429 backend_busy_with_export."
   ],
-  "cache_version": "2026-1.0.10.91"
+  "cache_version": "2026-1.0.10.92"
 }
