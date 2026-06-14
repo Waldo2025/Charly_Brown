@@ -257,6 +257,7 @@ let montageExportPreviewState = {
 let montageExportJobState = {
   jobId: "",
   pollTimer: null,
+  resumeOnOnlineHandler: null,
   startedAtMs: 0,
   lastStage: "",
   lastSceneSubstage: "",
@@ -272,6 +273,57 @@ function logMontageExportDevtools(event = "", payload = {}, level = "info") {
   void event;
   void payload;
   void level;
+}
+
+function isTransientMontageExportTransportError(error = null) {
+  const status = Number(error?.status || error?.detail?.status || 0) || 0;
+  if (status === 0) return true;
+  const message = String(
+    error?.code
+    || error?.detail?.error
+    || error?.error
+    || error?.message
+    || ""
+  ).trim().toLowerCase();
+  if (!message) return false;
+  return [
+    "err_network_changed",
+    "err_internet_disconnected",
+    "failed to fetch",
+    "networkerror",
+    "network request failed",
+    "load failed",
+    "fetch failed"
+  ].some((needle) => message.includes(needle));
+}
+
+function scheduleMontageExportPollRetry(jobId = "", failureCount = 0, { transient = false } = {}) {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) return;
+  const delayMs = transient
+    ? Math.min(15000, 2500 + (Math.max(0, failureCount - 1) * 1500))
+    : Math.min(8000, 2000 + (Math.max(0, failureCount) * 600));
+  const shouldResumeOnOnline = transient && typeof window.addEventListener === "function" && !window.montageExportJobState.resumeOnOnlineHandler;
+  if (shouldResumeOnOnline) {
+    const handler = () => {
+      if (window.montageExportJobState.resumeOnOnlineHandler === handler) {
+        window.removeEventListener("online", handler);
+        window.montageExportJobState.resumeOnOnlineHandler = null;
+      }
+      if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+      if (window.montageExportJobState.pollTimer) {
+        window.clearTimeout(window.montageExportJobState.pollTimer);
+        window.montageExportJobState.pollTimer = null;
+      }
+      pollMontageExportJob(cleanJobId).catch(() => { });
+    };
+    window.montageExportJobState.resumeOnOnlineHandler = handler;
+    window.addEventListener("online", handler, { once: true });
+  }
+  window.montageExportJobState.pollTimer = window.setTimeout(() => {
+    if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    pollMontageExportJob(cleanJobId).catch(() => { });
+  }, delayMs);
 }
 
 // Helper sleep function for loader delays
@@ -358,6 +410,10 @@ function clearMontageExportPolling() {
     window.clearTimeout(window.montageExportJobState.pollTimer);
     window.montageExportJobState.pollTimer = null;
   }
+  if (window.montageExportJobState.resumeOnOnlineHandler) {
+    window.removeEventListener("online", window.montageExportJobState.resumeOnOnlineHandler);
+    window.montageExportJobState.resumeOnOnlineHandler = null;
+  }
 }
 
 export function setMontageExportContinueButton({ visible = false, label = "Continuar exportación" } = {}) {
@@ -376,6 +432,7 @@ export function resetMontageExportJobState() {
   window.montageExportJobState = {
     jobId: "",
     pollTimer: null,
+    resumeOnOnlineHandler: null,
     startedAtMs: 0,
     lastStage: "",
     lastSceneSubstage: "",
@@ -757,17 +814,23 @@ export async function pollMontageExportJob(jobId = "") {
       setMontageExportContinueButton({ visible: false });
       return;
     }
+    const transientNetworkError = isTransientMontageExportTransportError(error);
     window.montageExportJobState.pollFailureCount = Math.max(0, Number(window.montageExportJobState.pollFailureCount || 0) || 0) + 1;
     const failureCount = window.montageExportJobState.pollFailureCount;
-    const transientHint = failureCount > 1
-      ? `Reconectando con el export… intento ${failureCount}.`
-      : "Reconectando con el export…";
+    const transientHint = transientNetworkError
+      ? (failureCount > 1
+        ? `Se perdió la conexión temporalmente. Reintentando el export… intento ${failureCount}.`
+        : "Se perdió la conexión temporalmente. Reintentando el export…")
+      : (failureCount > 1
+        ? `Reconectando con el export… intento ${failureCount}.`
+        : "Reconectando con el export…");
     logMontageExportDevtools("poll_failed", {
       failureCount,
+      transient: transientNetworkError,
       status: errorStatus || undefined,
       message: String(error?.message || error?.error || "").trim() || undefined
-    }, "warn");
-    if (failureCount >= 8) {
+    }, transientNetworkError ? "warn" : "error");
+    if (!transientNetworkError && failureCount >= 8) {
       logMontageExportDevtools("poll_failed_stop", { failureCount }, "error");
       clearMontageExportPolling();
       window.montageExportBusy = false;
@@ -787,9 +850,7 @@ export async function pollMontageExportJob(jobId = "") {
       transientHint,
       { tone: "warning" }
     );
-    window.montageExportJobState.pollTimer = window.setTimeout(() => {
-      pollMontageExportJob(cleanJobId).catch(() => { });
-    }, Math.min(8000, 2000 + (failureCount * 600)));
+    scheduleMontageExportPollRetry(cleanJobId, failureCount, { transient: transientNetworkError });
     return;
   }
   window.montageExportJobState.pollTimer = window.setTimeout(() => {
