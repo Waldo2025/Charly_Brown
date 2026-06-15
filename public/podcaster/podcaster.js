@@ -12855,6 +12855,38 @@ exportPreviewController.init(exportPreviewEls, {
   applySceneMediaScaleToStage
 });
 
+function syncMontageExportPreviewOverlayFromMedia(mediaEl = null) {
+  const controller = exportPreviewController;
+  if (!controller || typeof controller.syncOverlay !== "function") return;
+  const previewState = window.montageExportPreviewState || {};
+  const frontendPreview = previewState.frontendPreview || null;
+  const previewRowId = String(frontendPreview?.rowId || previewState?.lastJobPreviewRowId || "").trim();
+  const currentMs = Math.max(
+    0,
+    Math.round(Number(mediaEl?.currentTime || 0) * 1000) || Number(frontendPreview?.timelineStartMs || 0) || 0
+  );
+  controller.syncOverlay(currentMs, {
+    rowId: previewRowId,
+    preferredRowId: previewRowId,
+    forceRow: Boolean(previewRowId)
+  });
+}
+
+function bindMontageExportPreviewMediaOverlaySync(mediaEl = null) {
+  if (!mediaEl || mediaEl.dataset?.overlaySyncBound === "true") return;
+  mediaEl.dataset.overlaySyncBound = "true";
+  const sync = () => syncMontageExportPreviewOverlayFromMedia(mediaEl);
+  mediaEl.addEventListener("loadedmetadata", sync);
+  mediaEl.addEventListener("play", sync);
+  mediaEl.addEventListener("pause", sync);
+  mediaEl.addEventListener("seeked", sync);
+  mediaEl.addEventListener("timeupdate", sync);
+  mediaEl.addEventListener("ended", sync);
+}
+
+bindMontageExportPreviewMediaOverlaySync(els.montageExportPreviewVideo);
+bindMontageExportPreviewMediaOverlaySync(els.montageExportPreviewVideoAlt);
+
 // Eventos del preview de exportación
 if (els.montageExportPreviewPlayBtn) {
   els.montageExportPreviewPlayBtn.addEventListener("click", () => exportPreviewController.play());

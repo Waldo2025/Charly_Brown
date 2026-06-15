@@ -57,6 +57,17 @@ test("karaoke export preserves the scaled background box and alignment from the 
   assert.match(backendSource, /const align = String\(spec\.textAlign \|\| settings\?\.textAlign \|\| "center"\)\.trim\(\)\.toLowerCase\(\);/);
 });
 
+test("montage export preview syncs karaoke overlay from the preview video element", () => {
+  assert.match(
+    podcasterSource,
+    /function syncMontageExportPreviewOverlayFromMedia\(mediaEl = null\)[\s\S]*?controller\.syncOverlay\(currentMs,\s*\{[\s\S]*?forceRow: Boolean\(previewRowId\)[\s\S]*?\}\);/m
+  );
+  assert.match(
+    podcasterSource,
+    /mediaEl\.addEventListener\("timeupdate", sync\);[\s\S]*?mediaEl\.addEventListener\("ended", sync\);/m
+  );
+});
+
 test("playback controller does not re-hardcode bubble width and position outside the shared spec", () => {
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("width",/);
   assert.doesNotMatch(playbackControllerSource, /contentNode\.style\.setProperty\("min-width",/);
