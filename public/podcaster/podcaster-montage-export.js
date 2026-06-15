@@ -9,7 +9,7 @@ import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
-const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
+const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
@@ -209,6 +209,10 @@ function loadPersistedMontageExportActiveJob() {
     const jobId = String(parsed?.jobId || "").trim();
     const startedAtMs = Math.max(0, Number(parsed?.startedAtMs || 0) || 0);
     if (!jobId) return null;
+    if (startedAtMs > 0 && (Date.now() - startedAtMs) > MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS) {
+      localStorage.removeItem(MONTAGE_EXPORT_ACTIVE_JOB_KEY);
+      return null;
+    }
     return { jobId, startedAtMs };
   } catch (_) {
     return null;
@@ -358,14 +362,8 @@ function scheduleMontageExportPollRetry(jobId = "", failureCount = 0, { transien
 }
 
 function scheduleMontageExportJobNotFoundRetry(jobId = "", failureCount = 0) {
-  const cleanJobId = String(jobId || "").trim();
-  if (!cleanJobId) return;
-  const nextFailureCount = Math.max(0, Number(failureCount || 0) || 0);
-  const delayMs = Math.min(12000, 1800 + ((nextFailureCount - 1) * 900));
-  window.montageExportJobState.pollTimer = window.setTimeout(() => {
-    if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
-    pollMontageExportJob(cleanJobId).catch(() => { });
-  }, delayMs);
+  void jobId;
+  void failureCount;
 }
 
 // Helper sleep function for loader delays
@@ -855,23 +853,10 @@ export async function pollMontageExportJob(jobId = "") {
     const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
     if (errorStatus === 404) {
-      const nextNotFoundCount = Math.max(0, Number(window.montageExportJobState.jobNotFoundCount || 0) || 0) + 1;
-      window.montageExportJobState.jobNotFoundCount = nextNotFoundCount;
-      if (nextNotFoundCount < MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES) {
-        const retryHint = nextNotFoundCount === 1
-          ? "Recuperando el estado del export…"
-          : `Recuperando el estado del export… reintento ${nextNotFoundCount}.`;
-        setMontageExportStatus(
-          "Se perdió momentáneamente el estado del export.",
-          retryHint,
-          { tone: "warning" }
-        );
-        persistMontageExportActiveJob(cleanJobId, Math.max(0, Number(window.montageExportJobState.startedAtMs || 0) || Date.now()));
-        scheduleMontageExportJobNotFoundRetry(cleanJobId, nextNotFoundCount);
-        return;
-      }
       clearMontageExportPolling();
       persistMontageExportActiveJob("");
+      window.montageExportJobState.jobId = "";
+      window.montageExportJobState.jobNotFoundCount = 0;
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
@@ -879,7 +864,7 @@ export async function pollMontageExportJob(jobId = "") {
       setMontageExportStatus(
         "Se perdió el estado del export en el backend.",
         errorCode === "job_not_found"
-          ? "No pudimos recuperar el job tras varios intentos. Si el backend se reinició, vuelve a exportar."
+          ? "El job ya no existe en el backend. Inicia una nueva exportación."
           : "El backend respondió 404 al consultar el job. Vuelve a exportar o revisa el log del backend.",
         { tone: "error" }
       );

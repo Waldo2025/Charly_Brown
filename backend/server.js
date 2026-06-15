@@ -11014,7 +11014,13 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
     return null;
   });
 
-  if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+  if (!job) {
+    if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
+      releaseHeavyWorkSlot("montage_export", jobId);
+      console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
+    }
+    return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+  }
   return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
 });
 
