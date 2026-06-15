@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
@@ -718,7 +718,7 @@ export async function pollMontageExportJob(jobId = "") {
     return;
   }
   try {
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
+    const data = await authFetchJson(buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`), {
       auth: false
     });
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;

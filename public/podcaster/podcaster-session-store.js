@@ -287,16 +287,25 @@ function persistSessionsToLocalCache(uid = "", sessions = [], deps = {}, storage
 async function loadCloudSessionsDirect(uid = "", deps = {}) {
   if (!uid) return [];
   const deletedSessionIds = new Set(loadDeletedSessionIds(uid, deps, deps.storageAdapter));
-  const ownedSnap = await deps.getDocs(
-    deps.query(
-      deps.collection(deps.firestoreDb, "podcaster_sessions"),
-      deps.where("ownerId", "==", uid),
-      deps.orderBy("updatedAt", "desc"),
-      deps.limit(40)
-    )
-  );
   const merged = new Map();
-  [...ownedSnap.docs].forEach((docSnap) => {
+  const sessionCollection = deps.collection(deps.firestoreDb, "podcaster_sessions");
+  const [ownedSnap, sharedSnap] = await Promise.all([
+    deps.getDocs(
+      deps.query(
+        sessionCollection,
+        deps.where("ownerId", "==", uid),
+        deps.limit(40)
+      )
+    ),
+    deps.getDocs(
+      deps.query(
+        sessionCollection,
+        deps.where("sharedWithIds", "array-contains", uid),
+        deps.limit(40)
+      )
+    )
+  ]);
+  [...(ownedSnap?.docs || []), ...(sharedSnap?.docs || [])].forEach((docSnap) => {
     const data = docSnap.data() || {};
     const sessionData = data.session && typeof data.session === "object" ? data.session : null;
     const sessionKeys = sessionData ? Object.keys(sessionData) : [];
@@ -332,7 +341,8 @@ async function loadSessionsFromCloud(uid = "", deps = {}) {
       const apiSessions = Array.isArray(response?.sessions) ? response.sessions : [];
       return apiSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     } catch (_) {
-      return [];
+      const directSessions = await loadCloudSessionsDirect(uid, deps).catch(() => []);
+      return directSessions.filter((session) => !deletedSessionIds.has(String(session?.id || "").trim()));
     }
   }
   const directSessions = await loadCloudSessionsDirect(uid, deps);

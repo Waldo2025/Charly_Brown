@@ -154,7 +154,7 @@ export async function authFetchJson(url, options = {}) {
     throw error;
   }
   const { auth = true, ...requestOptions } = options || {};
-  const finalUrl = buildApiUrl(url);
+  const finalUrl = auth ? buildApiUrlPreferRemote(url) : buildApiUrl(url);
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
   const buildRequestInit = async (forceRefresh = false) => {

@@ -37,6 +37,9 @@ function extractFunction(name) {
 }
 
 const context = {
+  buildApiUrl(path) {
+    return `https://example.test${path}`;
+  },
   buildApiUrlPreferRemote(path) {
     return `https://example.test${path}`;
   },
@@ -75,7 +78,7 @@ test("podcaster resolveStorageAudioUrl converts gs:// audio into proxy-media url
   const expectedFirebaseUrl = "https://firebasestorage.googleapis.com/v0/b/bucket-name/o/podcaster%2Fsessions%2Fsession-audio%2Faudio%2Frow-1%2Ffile.wav?alt=media";
   assert.equal(
     resolved,
-    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(expectedFirebaseUrl)}&noRange=1`
+    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(expectedFirebaseUrl)}`
   );
 });
 

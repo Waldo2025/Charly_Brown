@@ -39,7 +39,8 @@ const persistCalls = [];
 
 const context = {
   console,
-  authFetchJson: async () => {
+  authFetchJson: async (url) => {
+    context.__lastAuthFetchUrl = String(url || "");
     context.__fetchCount = (context.__fetchCount || 0) + 1;
     if (context.__fetchCount === 1) {
       const error = new Error("job_not_found");
@@ -58,6 +59,9 @@ const context = {
         filename: "montage.mp4",
       }
     };
+  },
+  buildApiUrlPreferRemote(path = "") {
+    return `https://remote.test${String(path || "").trim()}`;
   },
   describeMontageExportStage(stage = "") {
     return String(stage || "").trim();
@@ -141,6 +145,7 @@ test("montage export polling retries job_not_found before failing", async () => 
 
   assert.equal(context.window.montageExportBusy, true);
   assert.equal(context.window.montageExportJobState.jobNotFoundCount, 1);
+  assert.ok(String(context.__lastAuthFetchUrl || "").startsWith("https://remote.test/api/podcaster/montage/export-status"));
   assert.ok(statusUpdates.some((item) => String(item.title || "").includes("momentáneamente")));
   assert.equal(scheduledTimers.length, 1);
 

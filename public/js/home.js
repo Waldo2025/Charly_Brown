@@ -12,7 +12,7 @@ import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js?v=2026-1.0.0.59";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
-import { authFetchJson, buildApiUrl, hasAvailableApiBase } from "./api-client.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase } from "./api-client.js";
 import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.1.34";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
@@ -5137,7 +5137,7 @@ async function pollExportStatus() {
   if (!exportJobState.jobId) return;
 
   try {
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`, {
+    const data = await authFetchJson(buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`), {
       auth: false
     });
 
