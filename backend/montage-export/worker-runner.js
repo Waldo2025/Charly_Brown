@@ -27,6 +27,12 @@ function createProcessMontageExportJob({
       progress: 0.02,
       hint: "Preparando exportación."
     });
+    console.info("[backend][montage-export][job-start]", {
+      jobId,
+      sessionId: String(data.sessionId || "").trim(),
+      ownerId: String(data.ownerId || "").trim(),
+      entries: Array.isArray(input?.entries) ? input.entries.length : 0
+    });
 
     try {
       const result = await executeMontageExportPipeline(input, {
@@ -34,6 +40,13 @@ function createProcessMontageExportJob({
         jobId,
         baseUrl: String(data.baseUrl || "").trim(),
         onStage: async ({ stage, progress, hint, ...extra }) => {
+          console.info("[backend][montage-export][job-stage]", {
+            jobId,
+            stage: String(stage || "validate_payload").trim() || "validate_payload",
+            progress: Math.max(0, Math.min(1, Number(progress || 0) || 0)),
+            hint: String(hint || "").trim(),
+            ...extra
+          });
           await jobStore.updateJob(jobId, {
             status: stage === "ready" ? "ready" : "running",
             stage,
@@ -57,6 +70,11 @@ function createProcessMontageExportJob({
       });
       return result;
     } catch (error) {
+      console.error("[backend][montage-export][job-error]", {
+        jobId,
+        code: String(error?.code || "").trim() || null,
+        message: String(error?.message || error)
+      });
       const sceneFailure = buildMontageSceneFailure(error, {
         failedSceneIndex: Number(error?.detail?.failedSceneIndex || 0) || 0,
         failedRowId: String(error?.detail?.failedRowId || "").trim(),

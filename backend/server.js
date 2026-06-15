@@ -8939,6 +8939,16 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
     const storagePath = clampText(asset?.storagePath || "", 900);
     const url = String(asset?.downloadUrl || asset?.url || "").trim();
     const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+    const assetTrace = {
+      kind: String(kind || "video").trim() || "video",
+      index: Math.max(0, Number(index || 0) || 0),
+      storagePath,
+      url: url ? redactUrlForLogs(url) : "",
+      hasDataUrl: Boolean(dataUrl),
+      tmpDir: clampText(tmpDir || "", 220),
+      uid: clampText(uid || "", 160)
+    };
+    console.info("[backend][montage-export][asset-download-start]", assetTrace);
     if (!storagePath && !url && !dataUrl) {
       const err = new Error("missing_download_source");
       err.code = "missing_download_source";
@@ -8991,6 +9001,13 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
         return err;
       }
     );
+    const logDownloadFinish = (stage = "", detail = {}) => {
+      console.info("[backend][montage-export][asset-download-finish]", {
+        ...assetTrace,
+        stage,
+        ...detail
+      });
+    };
     const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
       const clean = normalizeStorageFilePath(pathInput);
       const uidClean = String(uidRaw || "").trim();
@@ -9013,8 +9030,14 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
 
     if (dataUrl && dataUrl.startsWith("data:")) {
       try {
+        console.info("[backend][montage-export][asset-download-branch]", {
+          ...assetTrace,
+          branch: "inline_data"
+        });
         await downloadWithTimeout(() => writeDataUrlToFile(dataUrl, outPath), "inline_data");
-        return validateDownloadedAsset(outPath);
+        const validated = await validateDownloadedAsset(outPath);
+        logDownloadFinish("inline_data", { outPath: validated });
+        return validated;
       } catch (inlineError) {
         const inlineCode = String(inlineError?.code || inlineError?.message || "").trim();
         if (!storagePath && !url) {
@@ -9044,8 +9067,14 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
 
     if (url && isDirectHttpUrl(url)) {
       try {
+        console.info("[backend][montage-export][asset-download-branch]", {
+          ...assetTrace,
+          branch: "direct_url"
+        });
         await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
-        return validateDownloadedAsset(outPath);
+        const validated = await validateDownloadedAsset(outPath);
+        logDownloadFinish("direct_url", { outPath: validated });
+        return validated;
       } catch (directUrlError) {
         const directCode = String(directUrlError?.code || directUrlError?.message || "").trim();
         if (storagePath || directCode !== "missing_download_url") {
@@ -9056,18 +9085,31 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
 
     if (storagePath) {
       try {
+        console.info("[backend][montage-export][asset-download-branch]", {
+          ...assetTrace,
+          branch: "storage_path"
+        });
         await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath), "storage_download");
-        return validateDownloadedAsset(outPath);
+        const validated = await validateDownloadedAsset(outPath);
+        logDownloadFinish("storage_path", { outPath: validated });
+        return validated;
       } catch (error) {
         const code = String(error?.code || error?.message || "").trim();
         if (code === "storage_not_found") {
           const altPaths = resolveAlternateOwnerStoragePaths(storagePath, uid);
           for (const altPath of altPaths) {
             try {
+              console.info("[backend][montage-export][asset-download-branch]", {
+                ...assetTrace,
+                branch: "alternate_storage_path",
+                altPath
+              });
               // eslint-disable-next-line no-await-in-loop
               await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath), "storage_download");
               // eslint-disable-next-line no-await-in-loop
-              return await validateDownloadedAsset(outPath);
+              const validated = await validateDownloadedAsset(outPath);
+              logDownloadFinish("alternate_storage_path", { altPath, outPath: validated });
+              return validated;
             } catch (altError) {
               const altCode = String(altError?.code || altError?.message || "").trim();
               if (altCode !== "storage_not_found") {
@@ -9094,11 +9136,23 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
           storagePath,
           url: url ? redactUrlForLogs(url) : ""
         };
+        console.warn("[backend][montage-export][asset-download-error]", {
+          ...assetTrace,
+          branch: "storage_path",
+          code: String(error?.code || error?.message || "").trim(),
+          message: String(error?.message || error)
+        });
         throw error;
       }
     }
+    console.info("[backend][montage-export][asset-download-branch]", {
+      ...assetTrace,
+      branch: "fallback_direct_url"
+    });
     await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
-    return validateDownloadedAsset(outPath);
+    const validated = await validateDownloadedAsset(outPath);
+    logDownloadFinish("fallback_direct_url", { outPath: validated });
+    return validated;
   };
 }
 
@@ -10213,6 +10267,22 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }));
         continue;
       }
+
+      console.info("[backend][montage-export][scene-prepare]", {
+        jobId,
+        sceneIndex,
+        rowId,
+        totalScenes: input.entries.length,
+        mediaKind: isImageAsset ? "image" : "video",
+        videoStoragePath: clampText(videoAsset?.storagePath || "", 900),
+        videoDownloadUrl: redactUrlForLogs(String(videoAsset?.downloadUrl || videoAsset?.url || "").trim()),
+        audioStoragePath: clampText(audioAsset?.storagePath || "", 900),
+        audioDownloadUrl: redactUrlForLogs(String(audioAsset?.downloadUrl || audioAsset?.url || "").trim()),
+        useNativeVideoAudio,
+        veoVolumePct,
+        trimInMs,
+        durationMs
+      });
 
       emitStage("render_scene_segments", 0.18 + ((i / Math.max(1, input.entries.length)) * 0.26), `Renderizando escena ${sceneIndex} de ${input.entries.length}.`, {
         currentSceneIndex: sceneIndex,
@@ -12567,6 +12637,7 @@ app.get("/api/assets/montage-download", async (req, res) => {
 });
 
 app.get("/api/assets/proxy-media", async (req, res) => {
+  const requestId = randomUUID().slice(0, 8);
   try {
     applyAssetCorsHeaders(req, res);
     const ignoreRange = String(req.query?.noRange || "").trim() === "1" || String(req.query?.noRange || "").trim().toLowerCase() === "true";
@@ -12574,14 +12645,30 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const rawUrl = String(req.query?.url || "").trim();
     const normalizedUrl = rawUrl.includes("%25") ? decodeURIComponent(rawUrl) : rawUrl;
     const rangeHeader = ignoreRange ? "" : String(req.headers.range || "").trim();
+    console.info("[backend][proxy-media][request-start]", {
+      requestId,
+      storagePath: storagePath || undefined,
+      rawUrl: rawUrl ? redactUrlForLogs(rawUrl) : undefined,
+      normalizedUrl: normalizedUrl ? redactUrlForLogs(normalizedUrl) : undefined,
+      hasRange: Boolean(rangeHeader),
+      ignoreRange
+    });
 
     if (storagePath) {
       console.info("[backend][proxy-media] attempting storage stream", {
+        requestId,
         storagePath,
         hasRange: Boolean(rangeHeader)
       });
       const storageResult = await streamStorageObjectToResponse(req, res, storagePath, rangeHeader, {
         bucketFromUrl: ""
+      });
+      console.info("[backend][proxy-media][storage-result]", {
+        requestId,
+        storagePath,
+        streamed: Boolean(storageResult?.streamed),
+        aborted: Boolean(storageResult?.aborted),
+        status: storageResult?.status || null
       });
       if (storageResult?.streamed || storageResult?.aborted) {
         return;
@@ -12635,12 +12722,21 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
     if (isPodcasterAsset && objectPath) {
       console.info("[backend][proxy-media] attempting admin storage stream", {
+        requestId,
         objectPath,
         bucketFromUrl: bucketFromUrl || null,
         hasRange: !!rangeHeader
       });
       const storageResult = await streamStorageObjectToResponse(req, res, objectPath, rangeHeader, {
         bucketFromUrl
+      });
+      console.info("[backend][proxy-media][admin-storage-result]", {
+        requestId,
+        objectPath,
+        bucketFromUrl: bucketFromUrl || null,
+        streamed: Boolean(storageResult?.streamed),
+        aborted: Boolean(storageResult?.aborted),
+        status: storageResult?.status || null
       });
       if (storageResult?.streamed || storageResult?.aborted) {
         return;
@@ -12663,6 +12759,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     };
 
     console.info("[backend][proxy-media] fetching upstream", { 
+      requestId,
       host, 
       hasToken: finalRequestUrl.includes("token="),
       hasRange: !!rangeHeader
@@ -12675,6 +12772,12 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     if (!upstream.ok && upstream.status !== 206) {
       applyAssetCorsHeaders(req, res);
       const body = await safeJson(upstream);
+      console.warn("[backend][proxy-media][upstream-nonok]", {
+        requestId,
+        status: upstream.status,
+        host,
+        hasToken: finalRequestUrl.includes("token=")
+      });
       return res.status(upstream.status).json(body);
     }
     const mime = String(upstream.headers.get("content-type") || "application/octet-stream");
@@ -12688,9 +12791,19 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       err.code = "proxy_media_stream_unavailable";
       throw err;
     }
+    console.info("[backend][proxy-media][upstream-ready]", {
+      requestId,
+      status: upstream.status,
+      contentType: mime,
+      contentLength: contentLength || null,
+      contentRange: contentRange || null,
+      acceptRanges
+    });
     req.once("close", () => {
       if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
-        console.info("[backend][proxy-media] request closed, destroying upstream body stream");
+        console.info("[backend][proxy-media] request closed, destroying upstream body stream", {
+          requestId
+        });
         stream.destroy();
       }
     });
@@ -12706,11 +12819,17 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
     if (isPrematureClose) {
       console.info("[backend][proxy-media] request closed before completion", {
+        requestId,
         message: String(error?.message || error)
       });
       return;
     }
     applyAssetCorsHeaders(req, res);
+    console.error("[backend][proxy-media][error]", {
+      requestId,
+      message: String(error?.message || error),
+      code: String(error?.code || "").trim() || null
+    });
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
   }
 });
