@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.107",
-  "build": "2026-1.0.10.107",
+  "version": "1.0.10.108",
+  "build": "2026-1.0.10.108",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: En producción el runtime de API ahora usa el proxy same-origin /api en vez de apuntar directo al dominio de Render, eliminando el CORS del polling de montage export cuando Render responde 503.",
     "Corregido: El export de montage ahora reintenta brevemente cuando el backend responde job_not_found y solo limpia el estado persistido si el job sigue perdido tras varios intentos.",
     "Corregido: Durante la exportación se suspenden los previews del timeline para reducir presión sobre proxy-media y evitar cierres prematuros de streams de Storage.",
     "Corregido: El preview de preguntas de emparejamiento ahora autocalifica correctamente aunque varias parejas compartan la misma respuesta en la columna derecha.",
@@ -37,5 +38,5 @@
     "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas.",
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real."
   ],
-  "cache_version": "2026-1.0.10.107"
+  "cache_version": "2026-1.0.10.108"
 }

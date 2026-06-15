@@ -1,6 +1,7 @@
 (function () {
   if (window.__cbRuntimeConfigLoaderInit) return;
   window.__cbRuntimeConfigLoaderInit = true;
+  const runtimeConfigVersion = "2026-06-15.7";
 
   const host = String(window.location.hostname || "").toLowerCase();
   const isLocalHost = host === "localhost" || host === "127.0.0.1";
@@ -17,7 +18,7 @@
     document.head.appendChild(script);
   }
 
-  injectConfigScript("js/runtime-config.js", "runtime");
+  injectConfigScript(`js/runtime-config.js?v=${encodeURIComponent(runtimeConfigVersion)}`, "runtime");
   if (shouldLoadLocalOverride) {
     (async () => {
       const localCandidates = [

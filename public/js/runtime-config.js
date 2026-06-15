@@ -3,12 +3,13 @@ const __charlyIsLocalRuntime = __charlyHost === "127.0.0.1" || __charlyHost === 
 
 window.__CHARLY_CONFIG__ = Object.assign(
   {
-    // En localhost prioriza el backend local; fuera de localhost usa Render.
+    // En localhost prioriza el backend local; en producción usa el proxy same-origin
+    // de Firebase Hosting para evitar CORS contra Render.
     apiBaseUrl: __charlyIsLocalRuntime
       ? "http://127.0.0.1:8787/api"
-      : "https://charly-brown-gemini-backend.onrender.com/api",
+      : "/api",
     remoteApiBaseUrl: "https://charly-brown-gemini-backend.onrender.com/api",
-    allowSameOriginApi: __charlyIsLocalRuntime,
+    allowSameOriginApi: true,
     allowDirectGemini: false,
     forceDirectGemini: false,
     forceBackendGemini: true
