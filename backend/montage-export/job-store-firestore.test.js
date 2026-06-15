@@ -68,6 +68,33 @@ test("createJob writes a durable queued montage export job", async () => {
   assert.equal(fakeDb.docs.get("job-1").jobId, "job-1");
 });
 
+test("createJob strips undefined values before writing to Firestore", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-undef",
+    sessionId: "session-undef",
+    ownerId: "user-undef",
+    request: {
+      filename: "montage.mp4",
+      currentDownloadUrl: undefined,
+      nested: {
+        currentDownloadUrl: undefined
+      }
+    },
+    totalScenes: 1
+  });
+
+  assert.equal(created.request.filename, "montage.mp4");
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request, "currentDownloadUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.nested, "currentDownloadUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(fakeDb.docs.get("job-undef").request, "currentDownloadUrl"), false);
+});
+
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {
   const fakeDb = createFakeDocStore();
   const timestamps = [

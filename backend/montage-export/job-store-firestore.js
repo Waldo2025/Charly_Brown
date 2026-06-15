@@ -75,7 +75,7 @@ function createMontageExportJobStore({
       totalScenes = 0
     } = {}) {
       const createdAt = nextNow();
-      const job = {
+      const job = stripUndefinedDeep({
         jobId: String(jobId || "").trim(),
         sessionId: String(sessionId || "").trim(),
         ownerId: String(ownerId || "").trim(),
@@ -98,7 +98,7 @@ function createMontageExportJobStore({
         createdAt,
         updatedAt: createdAt,
         expiresAt: nextExpiryFrom(createdAt)
-      };
+      }) || {};
       await collection().doc(job.jobId).set(job);
       return job;
     },

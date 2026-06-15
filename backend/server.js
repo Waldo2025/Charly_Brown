@@ -103,6 +103,23 @@ async function safePipeline(stream, destination) {
   }
 }
 
+function stripUndefinedDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)).filter((item) => item !== undefined);
+  }
+  if (!value || typeof value !== "object") {
+    return value === undefined ? undefined : value;
+  }
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    const clean = stripUndefinedDeep(item);
+    if (clean !== undefined) {
+      result[key] = clean;
+    }
+  }
+  return result;
+}
+
 function resolveFfmpegBinaryPath() {
   let staticPath = "";
   try {
@@ -1577,7 +1594,8 @@ async function persistMontageExportJob(job = null) {
   await ensureMontageExportCacheDir();
   const metaPath = getMontageExportJobMetaPath(jobId);
   if (!metaPath) return;
-  await fs.promises.writeFile(metaPath, JSON.stringify(source), "utf8");
+  const cleanSource = stripUndefinedDeep(source) || {};
+  await fs.promises.writeFile(metaPath, JSON.stringify(cleanSource), "utf8");
 }
 
 async function readPersistedMontageExportJob(jobId = "") {
@@ -1695,8 +1713,9 @@ function cleanupDialogueVideoJobs() {
 function upsertMontageExportJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
+  const cleanPatch = stripUndefinedDeep(patch) || {};
   const heartbeatAt = Object.prototype.hasOwnProperty.call(patch, "heartbeatAt")
-    ? String(patch.heartbeatAt || "").trim() || new Date().toISOString()
+    ? String(cleanPatch.heartbeatAt || "").trim() || new Date().toISOString()
     : new Date().toISOString();
   const prev = montageExportJobs.get(id) || {
     jobId: id,
@@ -1714,14 +1733,14 @@ function upsertMontageExportJob(jobId = "", patch = {}) {
   };
   const next = {
     ...prev,
-    ...patch,
+    ...cleanPatch,
     jobId: id,
-    progress: Math.max(0, Math.min(1, Number(patch?.progress ?? prev.progress ?? 0) || 0)),
+    progress: Math.max(0, Math.min(1, Number(cleanPatch?.progress ?? prev.progress ?? 0) || 0)),
     updatedAt: heartbeatAt,
     heartbeatAt,
     expiresAtMs: Date.now() + MONTAGE_EXPORT_JOB_TTL_MS
   };
-  if (Array.isArray(patch?.warnings)) next.warnings = patch.warnings;
+  if (Array.isArray(cleanPatch?.warnings)) next.warnings = cleanPatch.warnings;
   montageExportJobs.set(id, next);
   void persistMontageExportJob(next).catch((error) => {
     console.warn("[backend][montage-export] persist job failed", {
