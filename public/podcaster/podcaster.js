@@ -3668,7 +3668,7 @@ function normalizeDialogueAudioMap(raw = {}) {
   const next = {};
   if (!raw || typeof raw !== "object") return next;
   Object.entries(raw).forEach(([rowId, clip]) => {
-    const key = String(rowId || "").trim();
+    const key = String(rowId ?? "").trim();
     if (!key || !clip || typeof clip !== "object") return;
     const mediaRef = normalizePersistedMediaReference(clip.downloadUrl || "", clip.storagePath || "");
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
@@ -3702,13 +3702,13 @@ function getDialogueAudioMap(session = null) {
 }
 
 function hasExplicitDialogueAudioForRow(session = null, rowId = "") {
-  const key = String(rowId || "").trim();
+  const key = String(rowId ?? "").trim();
   if (!key) return false;
   return Boolean(getDialogueAudioMap(session)[key]);
 }
 
 function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
-  const key = String(rowId || "").trim();
+  const key = String(rowId ?? "").trim();
   if (!key) return null;
   const cfg = getPodcastVideoConfig(session);
   const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
@@ -3737,13 +3737,13 @@ function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
 }
 
 function resolveDialogueAudioForRow(session = null, rowId = "") {
-  const key = String(rowId || "").trim();
+  const key = String(rowId ?? "").trim();
   if (!key) return null;
   return getDialogueAudioMap(session)[key] || resolveFallbackDialogueAudioForRow(session, key);
 }
 
 function resolveRowAudioDurationMs(rowId = "", session = null) {
-  const key = String(rowId || "").trim();
+  const key = String(rowId ?? "").trim();
   if (!key) return 0;
   const audioClip = resolveDialogueAudioForRow(session, key);
   const storedMs = Math.max(0, Number(audioClip?.durationSec || 0) * 1000);
@@ -3753,7 +3753,7 @@ function resolveRowAudioDurationMs(rowId = "", session = null) {
 }
 
 function resolveDialogueAudioPlaybackRate(session = null, rowId = "") {
-  const key = String(rowId || "").trim();
+  const key = String(rowId ?? "").trim();
   if (!key) return 1;
   const row = getSessionRows(session).find((item) => String(item?.id || "").trim() === key) || null;
   const rowPlaybackRate = Math.max(0.5, Math.min(10, Number(row?.playbackRate || 1) || 1));
@@ -3774,6 +3774,71 @@ function hasStoredMediaSource(asset = null) {
     ["storagePath", "videoStoragePath", "audioStoragePath", "path"]
   );
   return Boolean(String(normalized.downloadUrl || "").trim() || String(normalized.storagePath || "").trim());
+}
+
+function rehydrateGeminiDialogueAudioMap(session = null, options = {}) {
+  const activeSession = session || getActiveSession();
+  if (!activeSession) {
+    return {
+      dialogueAudioMap: {},
+      changed: false
+    };
+  }
+  const rows = getSessionRows(activeSession);
+  if (!rows.length) {
+    return {
+      dialogueAudioMap: getDialogueAudioMap(activeSession),
+      changed: false
+    };
+  }
+  const currentMap = normalizeDialogueAudioMap(activeSession?.dialogueAudioMap || {});
+  const cfg = getPodcastVideoConfig(activeSession);
+  const track = normalizeGeminiDialogueTrack(cfg?.geminiDialogueTrack || {});
+  const nextMap = { ...currentMap };
+  let changed = false;
+  rows.forEach((row, index) => {
+    const rowId = String(row?.id ?? "").trim();
+    if (!rowId) return;
+    const currentClip = nextMap[rowId] || null;
+    const fallbackClip = currentClip || resolveFallbackDialogueAudioForRow(activeSession, rowId) || null;
+    if (!fallbackClip) return;
+    const trackSegment = (track.segments || []).find((segment) => String(segment?.rowId ?? "").trim() === rowId) || null;
+    const nextPlaybackRate = normalizeDialogueAudioPlaybackRate(
+      currentClip?.playbackRate
+      || row?.playbackRate
+      || options?.defaultPlaybackRate
+      || 1
+    );
+    const nextUpdatedAt = String(
+      currentClip?.updatedAt
+      || trackSegment?.updatedAt
+      || track.updatedAt
+      || nowIso()
+    ).trim() || nowIso();
+    const nextClip = {
+      ...fallbackClip,
+      rowId,
+      speaker: String(row?.speaker || fallbackClip?.speaker || "").trim(),
+      mimeType: String(fallbackClip?.mimeType || trackSegment?.mimeType || "audio/wav").trim() || "audio/wav",
+      model: String(fallbackClip?.model || trackSegment?.model || "gemini-track-repair").trim() || "gemini-track-repair",
+      promptVersion: String(fallbackClip?.promptVersion || trackSegment?.promptVersion || "podcaster_live_audio_v1").trim() || "podcaster_live_audio_v1",
+      durationSec: Math.max(
+        0,
+        Number(fallbackClip?.durationSec || 0) || Number(trackSegment?.durationMs || 0) / 1000 || Number(row?.durationSec || 0) || 0
+      ),
+      playbackRate: nextPlaybackRate,
+      targetSpeechLine: String(fallbackClip?.targetSpeechLine || row?.text || "").trim(),
+      updatedAt: nextUpdatedAt
+    };
+    if (JSON.stringify(nextClip) !== JSON.stringify(currentClip || null)) {
+      nextMap[rowId] = nextClip;
+      changed = true;
+    }
+  });
+  return {
+    dialogueAudioMap: nextMap,
+    changed
+  };
 }
 
 function normalizeTransitionsByEdge(raw = {}) {
@@ -7069,6 +7134,22 @@ async function setActiveSession(sessionId) {
     }
   } catch (_) {
     // noop
+  }
+  try {
+    const repairedAudio = rehydrateGeminiDialogueAudioMap(nextSession, { defaultPlaybackRate: 1 });
+    if (repairedAudio.changed) {
+      Object.assign(nextSession, {
+        dialogueAudioMap: repairedAudio.dialogueAudioMap
+      });
+      syncGeminiDialogueTrackWithRuntime({
+        render: false,
+        preserveStartMs: true,
+        forceDurationFromAudio: true
+      });
+      persistSessions();
+    }
+  } catch (error) {
+    console.error("[podcaster] Error reparando audios Gemini al cargar:", error);
   }
   if (typeof playbackController?.sync === "function") {
     playbackController.sync(nextSession, getPodcastVideoConfig(nextSession));

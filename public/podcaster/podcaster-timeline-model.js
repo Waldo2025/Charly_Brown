@@ -1331,7 +1331,7 @@ function shouldAutoRepairTimelineLayout(session = null) {
 
   if (trackIds.size <= 1) {
     const runtime = buildTimelineRuntimeEntries(activeSession)
-      .filter((entry) => Boolean(String(entry?.rowId || "").trim()));
+      .filter((entry) => Boolean(String(entry?.rowId ?? "").trim()));
     const visual = runtime
       .filter((entry) => Boolean(String(entry?.videoSrc || "").trim()))
       .sort((a, b) => (
@@ -1472,7 +1472,7 @@ function buildTimelineRuntimeEntries(session = null, options = {}) {
   });
   const entries = augmentedEntries.map((runtimeEntry, index) => {
     const row = runtimeEntry.row || rows[index] || null;
-    const rowId = String(runtimeEntry?.rowId || row?.id || "").trim();
+    const rowId = String(runtimeEntry?.rowId ?? row?.id ?? "").trim();
     const clip = runtimeEntry?.clip || effectiveConfig.timelineClipsByRowId?.[rowId] || null;
     if (!rowId || !clip) return null;
     const sceneClip = resolveDialogueVideoForRow(activeSession, rowId);

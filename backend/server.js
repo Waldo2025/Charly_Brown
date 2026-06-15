@@ -2385,6 +2385,7 @@ function sanitizePodcasterSession(raw = {}) {
       model: clampText(clip?.model || "gemini-3.1-flash-tts-preview", 140) || "gemini-3.1-flash-tts-preview",
       promptVersion: clampText(clip?.promptVersion || "podcaster_live_audio_v1", 80) || "podcaster_live_audio_v1",
       durationSec: clampNumber(clip?.durationSec, 0, 180, 0),
+      playbackRate: Math.max(0.5, Math.min(10, Number(clip?.playbackRate || 1) || 1)),
       targetSpeechLine: clampText(clip?.targetSpeechLine || "", 2200),
       // wordTimings: normalizeDialogueAudioWordTimings(clip?.wordTimings || clip?.alignment || [])
       wordTimings: normalizeDialogueAudioWordTimings(
