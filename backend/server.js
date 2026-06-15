@@ -12544,6 +12544,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       } catch (_) {
         // noop
       }
+      applyAssetCorsHeaders(req, res);
       const body = await safeJson(upstream);
       return res.status(upstream.status).json(body);
     }
