@@ -1052,16 +1052,18 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
 export async function refreshMontageExportPreviewNow(options = {}) {
   if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity()) {
+    const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
+    const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
     setMontageExportPreviewState({
       loading: false,
       error: "",
-      dataUrl: "",
-      mediaType: "",
+      dataUrl: currentDataUrl,
+      mediaType: currentMediaType,
       mode: window.montageExportState.exportMode,
-      sceneIndex: 0,
+      sceneIndex: Math.max(0, Number(window.montageExportPreviewState.sceneIndex || 0) || 0),
       disabled: true,
       meta: window.montageExportBusy
-        ? "Preview pausado mientras se exporta el video."
+        ? "Preview pausado mientras se exporta el video. Se conserva el último frame visible."
         : "Preview desactivado temporalmente para priorizar la exportación."
     });
     return;
@@ -1176,16 +1178,18 @@ export async function refreshMontageExportPreviewNow(options = {}) {
 export function scheduleMontageExportPreviewRefresh(delayMs = 280) {
   if (shouldSuspendMontagePreviewActivity()) {
     if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
+    const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
+    const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
     setMontageExportPreviewState({
       loading: false,
       error: "",
-      dataUrl: "",
-      mediaType: "",
+      dataUrl: currentDataUrl,
+      mediaType: currentMediaType,
       mode: window.montageExportState.exportMode,
-      sceneIndex: 0,
+      sceneIndex: Math.max(0, Number(window.montageExportPreviewState.sceneIndex || 0) || 0),
       disabled: true,
       meta: window.montageExportBusy
-        ? "Preview pausado mientras se exporta el video."
+        ? "Preview pausado mientras se exporta el video. Se conserva el último frame visible."
         : "Preview desactivado temporalmente para priorizar la exportación."
     });
     return;
