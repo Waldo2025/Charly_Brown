@@ -2,7 +2,7 @@
  * podcaster-script-generator.js
  * Extracted Gemini Script Generation Engine.
  */
-import { authFetchJson } from "../js/api-client.js";
+import { authFetchJson } from "../js/api-client-podcaster.js";
 import {
   registerPodcasterScriptGeneratorApi,
   requirePodcasterScriptGeneratorApiFunction

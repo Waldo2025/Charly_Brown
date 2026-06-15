@@ -1,4 +1,4 @@
-import { authFetchJson } from "../js/api-client.js";
+import { authFetchJson } from "../js/api-client-podcaster.js";
 
 const {
   els,

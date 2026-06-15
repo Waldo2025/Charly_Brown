@@ -4,7 +4,7 @@
  * Emulates the fast-paced, high-retention, example-rich style of Spanish educational YouTubers (Derivando, QuantumFracture, Matemáticas con Juan).
  */
 
-import { authFetchJson } from "../js/api-client.js";
+import { authFetchJson } from "../js/api-client-podcaster.js";
 
 // Expose functions globally for integration
 export function buildReelPodcastSystemInstruction() {

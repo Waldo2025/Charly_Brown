@@ -1,5 +1,5 @@
 
-import { authFetchJson, buildApiUrl } from "../js/api-client.js";
+import { authFetchJson, buildApiUrl } from "../js/api-client-podcaster.js";
 import { requirePodcasterGenerationRuntime } from "./podcaster-runtime-registry.js";
 import { podcasterGenerationShared, registerPodcasterGenerationShared } from "./podcaster-generation-shared.js";
 import { isReelModeEnabled } from "./podcaster-reels.js";
