@@ -8,14 +8,20 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /if \(errorStatus === 404\) \{[\s\S]*?Se perdió el estado del export en el backend\./m,
-  "El polling del export debe detenerse ante cualquier 404 para no quedar en reintento infinito."
+  /const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;/,
+  "El polling del export debe acotar los retries de job_not_found."
 );
 
 assert.match(
   source,
-  /errorCode === "job_not_found"[\s\S]*?El backend se reinició durante la exportación\. Vuelve a exportar\./m,
-  "El 404 job_not_found debe seguir mostrando el mensaje de reinicio del backend."
+  /scheduleMontageExportJobNotFoundRetry\(cleanJobId, jobNotFoundCount\);/,
+  "El polling del export debe reintentar job_not_found antes de fallar."
+);
+
+assert.match(
+  source,
+  /El job ya no existe en el backend\. Inicia una nueva exportación\./,
+  "El 404 job_not_found debe terminar con el mensaje de exportación nueva."
 );
 
 console.log("Podcaster montage export 404 recovery OK.");

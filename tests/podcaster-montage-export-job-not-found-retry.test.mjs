@@ -50,13 +50,13 @@ const context = {
     return {
       ok: true,
       jobId: "job-1",
-      status: "running",
-      stage: "render_scene_segments",
-      progress: 0.42,
-      hint: "Renderizando escena 1.",
-      currentRowId: "row-1",
-      currentSceneIndex: 1,
-      totalScenes: 4
+      status: "ready",
+      stage: "ready",
+      progress: 1,
+      hint: "Video listo.",
+      export: {
+        filename: "montage.mp4",
+      }
     };
   },
   describeMontageExportStage(stage = "") {
@@ -149,7 +149,7 @@ test("montage export polling retries job_not_found before failing", async () => 
   await Promise.resolve();
 
   assert.equal(context.window.montageExportJobState.jobNotFoundCount, 0);
-  assert.equal(context.window.montageExportBusy, true);
-  assert.ok(context.window.montageExportJobState.pollTimer);
-  assert.ok(persistCalls.some((item) => item.jobId === "job-1"));
+  assert.equal(context.window.montageExportBusy, false);
+  assert.equal(context.window.montageExportJobState.jobId, "job-1");
+  assert.ok(persistCalls.some((item) => item.jobId === ""));
 });

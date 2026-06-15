@@ -92,11 +92,18 @@ async function safePipeline(stream, destination) {
   try {
     await pipeline(stream, destination);
   } catch (error) {
+    const errorText = String(error?.code || error?.message || "").trim();
+    const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
     if (destination.headersSent) {
-      console.info("[backend] stream pipeline closed after headers sent:", error?.message);
+      if (!isPrematureClose) {
+        console.info("[backend] stream pipeline closed after headers sent:", error?.message);
+      }
       if (!destination.writableEnded) {
         destination.end();
       }
+      return;
+    }
+    if (isPrematureClose) {
       return;
     }
     throw error;
@@ -1339,6 +1346,120 @@ async function openStorageObjectReadStream(storagePath = "", options = {}) {
     lastError: lastError ? String(lastError?.message || lastError) : ""
   };
   throw err;
+}
+
+async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHeader = "", options = {}) {
+  const cleanStoragePath = normalizeStorageFilePath(storagePath);
+  if (!cleanStoragePath) {
+    return {
+      streamed: false,
+      status: 400,
+      code: "missing_storage_path",
+      detail: { storagePath: "" }
+    };
+  }
+  const candidateBuckets = Array.from(new Set([
+    ...(Array.isArray(options?.bucketNames) ? options.bucketNames : []),
+    ...(options?.bucketFromUrl ? [String(options.bucketFromUrl || "").trim()] : []),
+    ...getStorageBucketCandidates().map((bucket) => String(bucket?.name || "").trim())
+  ].filter(Boolean)))
+    .map((name) => {
+      try {
+        return admin.storage().bucket(name);
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  let lastError = null;
+  let lastAuthError = null;
+  let lastMissingError = null;
+
+  for (const bucket of candidateBuckets) {
+    if (!bucket) continue;
+    const file = bucket.file(cleanStoragePath);
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const [exists] = await file.exists().catch(() => [null]);
+      if (exists === false) {
+        lastMissingError = new Error("storage_not_found");
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      const [meta] = await file.getMetadata();
+      const payload = buildStreamingMediaPayload(parseStorageObjectSize(meta), {
+        mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
+        rangeHeader
+      });
+      Object.entries(payload.headers || {}).forEach(([name, value]) => {
+        if (!name || value == null || value === "") return;
+        res.setHeader(name, value);
+      });
+      const stream = file.createReadStream(payload.range ? {
+        start: Number(payload.range.start || 0),
+        end: Number(payload.range.end || 0)
+      } : undefined);
+      req.once("close", () => {
+        if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
+          stream.destroy();
+        }
+      });
+      await safePipeline(stream, res.status(payload.status || 200));
+      return { streamed: true };
+    } catch (error) {
+      lastError = error;
+      const errorText = String(error?.code || error?.message || "").trim();
+      const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
+      if (isPrematureClose) {
+        return {
+          streamed: false,
+          aborted: true,
+          status: 499,
+          code: "premature_close",
+          detail: {
+            storagePath: cleanStoragePath,
+            bucket: String(bucket?.name || "").trim()
+          }
+        };
+      }
+      const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
+      if (status === 401 || status === 403 || /permission|forbidden/i.test(String(error?.message || ""))) {
+        lastAuthError = error;
+        continue;
+      }
+      if (status === 404 || String(error?.code || "").trim().toLowerCase() === "storage_not_found" || /no such object/i.test(String(error?.message || ""))) {
+        lastMissingError = error;
+        continue;
+      }
+      continue;
+    }
+  }
+
+  if (lastAuthError) {
+    return {
+      streamed: false,
+      status: 403,
+      code: "storage_forbidden",
+      detail: {
+        storagePath: cleanStoragePath,
+        lastError: String(lastAuthError?.message || lastAuthError),
+        bucketsTried: candidateBuckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean)
+      }
+    };
+  }
+
+  return {
+    streamed: false,
+    status: 404,
+    code: "storage_not_found",
+    detail: {
+      storagePath: cleanStoragePath,
+      lastError: lastError ? String(lastError?.message || lastError) : "",
+      bucketsTried: candidateBuckets.map((bucket) => String(bucket?.name || "").trim()).filter(Boolean),
+      lastMissingError: lastMissingError ? String(lastMissingError?.message || lastMissingError) : ""
+    }
+  };
 }
 
 const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
@@ -12388,57 +12509,25 @@ app.get("/api/assets/proxy-media", async (req, res) => {
         storagePath,
         hasRange: Boolean(rangeHeader)
       });
-      try {
-        const streamMeta = await openStorageObjectReadStream(storagePath, { metadataOnly: true });
-        const mimeType = String(streamMeta?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
-        const payload = buildStreamingMediaPayload(streamMeta?.totalBytes, {
-          mimeType,
-          rangeHeader
-        });
-        Object.entries(payload.headers || {}).forEach(([name, value]) => {
-          if (!name || value == null || value === "") return;
-          res.setHeader(name, value);
-        });
-        const rangedStreamMeta = await openStorageObjectReadStream(storagePath, { range: payload.range });
-        const stream = rangedStreamMeta.stream;
-        req.on("close", () => {
-          if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
-            console.info("[backend][proxy-media] request closed, destroying storage stream for", storagePath);
-            stream.destroy();
+      const storageResult = await streamStorageObjectToResponse(req, res, storagePath, rangeHeader, {
+        bucketFromUrl: ""
+      });
+      if (storageResult?.streamed || storageResult?.aborted) {
+        return;
+      }
+      if (storageResult?.status) {
+        applyAssetCorsHeaders(req, res);
+        return res.status(storageResult.status).json({
+          error: storageResult.status === 403 ? "Archivo no accesible en Storage." : "Archivo no encontrado en Storage.",
+          detail: storageResult.detail || {
+            storagePath
           }
         });
-        await safePipeline(stream, res.status(payload.status || 200));
-        return;
-      } catch (error) {
-        const errorText = String(error?.code || error?.message || "").trim();
-        const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
-        if (isPrematureClose) {
-          console.info("[backend][proxy-media] storage stream closed before completion", {
-            storagePath,
-            code: String(error?.code || "").trim() || null,
-            message: String(error?.message || error)
-          });
-          return;
-        }
-        const status = Number(error?.statusCode || error?.status || error?.code || 0) || 0;
-        const isMissing = status === 404 || String(error?.code || "").trim().toLowerCase() === "storage_not_found";
-        console.warn("[backend][proxy-media] storage buffer download failed", {
-          storagePath,
-          status: status || null,
-          code: String(error?.code || "").trim() || null,
-          message: String(error?.message || error)
-        });
-        if (isMissing) {
-          return res.status(404).json({
-            error: "Archivo no encontrado en Storage.",
-            detail: {
-              storagePath,
-              lastError: String(error?.message || error)
-            }
-          });
-        }
-        throw error;
       }
+      return res.status(404).json({
+        error: "Archivo no encontrado en Storage.",
+        detail: { storagePath }
+      });
     }
 
     if (!normalizedUrl) {
@@ -12469,6 +12558,34 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       }
     }
 
+    const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(finalRequestUrl);
+    const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
+    const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
+    const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
+    if (isPodcasterAsset && objectPath) {
+      console.info("[backend][proxy-media] attempting admin storage stream", {
+        objectPath,
+        bucketFromUrl: bucketFromUrl || null,
+        hasRange: !!rangeHeader
+      });
+      const storageResult = await streamStorageObjectToResponse(req, res, objectPath, rangeHeader, {
+        bucketFromUrl
+      });
+      if (storageResult?.streamed || storageResult?.aborted) {
+        return;
+      }
+      if (!finalRequestUrl.includes("token=") && (storageResult?.status === 403 || storageResult?.status === 404)) {
+        applyAssetCorsHeaders(req, res);
+        return res.status(storageResult.status).json({
+          error: storageResult.status === 403 ? "Archivo no accesible en Storage." : "Archivo no encontrado en Storage.",
+          detail: storageResult.detail || {
+            storagePath: objectPath,
+            bucketFromUrl: bucketFromUrl || null
+          }
+        });
+      }
+    }
+
     const proxyHeaders = {
       "User-Agent": "CharlyBrown-Backend/1.0",
       ...(rangeHeader ? { Range: rangeHeader } : {})
@@ -12485,84 +12602,6 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       headers: proxyHeaders
     });
     if (!upstream.ok && upstream.status !== 206) {
-      // Si un link de Firebase Storage (token) expiró o devuelve 403/404,
-      // intenta recuperar el asset por admin SDK usando el object path.
-      try {
-        const shouldTryAdminFallback = upstream.status === 403 || upstream.status === 404;
-        if (shouldTryAdminFallback) {
-          const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(finalRequestUrl);
-          const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
-          const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
-          const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
-          console.info("[backend][proxy-media] upstream failed, trying admin fallback", { 
-            status: upstream.status, 
-            objectPath, 
-            isPodcasterAsset,
-            bucketFromUrl 
-          });
-          if (isPodcasterAsset && objectPath) {
-            const candidates = (() => {
-              const buckets = getStorageBucketCandidates();
-              const extra = bucketFromUrl ? [admin.storage().bucket(bucketFromUrl)] : [];
-              const byName = new Map();
-              [...extra, ...buckets].filter(Boolean).forEach((bucket) => {
-                const name = String(bucket?.name || "").trim();
-                if (!name || byName.has(name)) return;
-                byName.set(name, bucket);
-              });
-              return Array.from(byName.values());
-            })();
-            let lastError = null;
-            for (const bucket of candidates) {
-              if (!bucket) continue;
-              const file = bucket.file(objectPath);
-              const [exists] = await file.exists().catch(() => [null]);
-              if (exists === false) continue;
-              try {
-                const [meta] = await file.getMetadata().catch(() => [{}]);
-                const totalBytes = parseStorageObjectSize(meta);
-                const payload = buildStreamingMediaPayload(totalBytes, {
-                  mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
-                  rangeHeader
-                });
-                Object.entries(payload.headers || {}).forEach(([name, value]) => {
-                  if (!name || value == null || value === "") return;
-                  res.setHeader(name, value);
-                });
-                const stream = file.createReadStream(payload.range ? {
-                  start: Number(payload.range.start || 0),
-                  end: Number(payload.range.end || 0)
-                } : undefined);
-                req.on("close", () => {
-                  if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
-                    console.info("[backend][proxy-media] request closed, destroying admin fallback stream");
-                    stream.destroy();
-                  }
-                });
-                await safePipeline(stream, res.status(payload.status || 200));
-                return;
-              } catch (error) {
-                lastError = error;
-                console.warn("[backend][proxy-media] admin fallback stream failed", {
-                  objectPath,
-                  bucket: String(bucket?.name || "").trim(),
-                  message: String(error?.message || error)
-                });
-              }
-            }
-            // Fallthrough: no se pudo leer por admin, devuelve upstream.
-            if (lastError) {
-              console.warn("[backend][proxy-media] admin fallback failed", {
-                objectPath,
-                bucketFromUrl,
-                message: String(lastError?.message || lastError)
-              });
-            }
-          }
-        }
-      } catch (_) {
-        // noop
-      }
       applyAssetCorsHeaders(req, res);
       const body = await safeJson(upstream);
       return res.status(upstream.status).json(body);
@@ -12578,7 +12617,7 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       err.code = "proxy_media_stream_unavailable";
       throw err;
     }
-    req.on("close", () => {
+    req.once("close", () => {
       if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
         console.info("[backend][proxy-media] request closed, destroying upstream body stream");
         stream.destroy();

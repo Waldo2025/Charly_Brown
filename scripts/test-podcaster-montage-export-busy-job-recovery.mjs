@@ -14,7 +14,13 @@ assert.match(
 
 assert.match(
   source,
-  /if \(activeJobId\) \{[\s\S]*window\.montageExportJobState\.jobId = activeJobId;[\s\S]*await continueMontageExportPolling\(\);[\s\S]*return;/m,
+  /const activeJobKind = String\(detail\?\.kind \|\| apiPayload\?\.kind \|\| ""\)\.trim\(\);/,
+  "La exportación debe leer el kind del backend busy para no confundir otros jobs con montage export."
+);
+
+assert.match(
+  source,
+  /if \(activeJobId && activeJobKind === "montage_export"\) \{[\s\S]*window\.montageExportJobState\.jobId = activeJobId;[\s\S]*await continueMontageExportPolling\(\);[\s\S]*return;/m,
   "Cuando el backend ya tiene un export activo, el frontend debe continuar el polling en vez de fallar."
 );
 

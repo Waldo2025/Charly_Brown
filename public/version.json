@@ -1,9 +1,10 @@
 {
-  "version": "1.0.10.105",
-  "build": "2026-1.0.10.105",
+  "version": "1.0.10.107",
+  "build": "2026-1.0.10.107",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Corregido: El export de montage ahora tolera un 404 job_not_found transitorio con reintentos cortos y recupera el snapshot reciente del backend antes de declarar perdido el job.",
+    "Corregido: El export de montage ahora reintenta brevemente cuando el backend responde job_not_found y solo limpia el estado persistido si el job sigue perdido tras varios intentos.",
+    "Corregido: Durante la exportación se suspenden los previews del timeline para reducir presión sobre proxy-media y evitar cierres prematuros de streams de Storage.",
     "Corregido: El preview de preguntas de emparejamiento ahora autocalifica correctamente aunque varias parejas compartan la misma respuesta en la columna derecha.",
     "Corregido: Los audios Gemini heredados en formato gs:// ahora se resuelven vía proxy-media por URL para evitar 502/CORS al rehidratar escenas guardadas.",
     "Corregido: Los audios Gemini ahora preservan su playbackRate al guardar la sesión y se rehidratan al cargar incluso cuando faltaba la entrada explícita del editor, incluyendo la primera escena.",
@@ -27,6 +28,7 @@
     "Mejorado: Si el backend ya tiene un export activo, el modal de podcaster ahora puede retomar automáticamente el job persistido en vez de disparar un segundo POST que devuelve 429 backend_busy_with_export.",
     "Corregido: El logo de marca del export final ya no puede dejar FFmpeg colgado; el overlay ahora termina con shortest=1 para que el render cierre cuando termina el video base.",
     "Corregido: Si el backend devuelve job_not_found al consultar el export, el frontend ya no insiste con el mismo jobId: limpia el estado activo y pide iniciar una exportación nueva.",
+    "Corregido: El frontend de podcaster ya no adopta el activeJobId de otra tarea pesada como si fuera un montage export; ahora distingue el kind del backend busy antes de retomar el polling.",
     "Corregido: El frontend de podcaster ya no carga el bundle viejo de montage export; se actualizó el cache-buster en podcaster.html y podcaster.js para evitar que siga ejecutándose una versión antigua.",
     "Corregido: proxy-media ahora conserva CORS incluso cuando el upstream de Storage responde 403/404/502/503, para que el navegador no oculte el error real detrás de un bloqueo de CORS.",
     "Corregido: El store de jobs de export ahora elimina valores undefined antes de escribir en Firestore, evitando que el backend se caiga con el error 'Cannot use undefined as a Firestore value' durante el render de escenas.",
@@ -35,5 +37,5 @@
     "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas.",
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real."
   ],
-  "cache_version": "2026-1.0.10.105"
+  "cache_version": "2026-1.0.10.107"
 }

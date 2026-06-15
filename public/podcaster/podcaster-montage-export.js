@@ -10,6 +10,7 @@ const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
+const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
@@ -362,8 +363,19 @@ function scheduleMontageExportPollRetry(jobId = "", failureCount = 0, { transien
 }
 
 function scheduleMontageExportJobNotFoundRetry(jobId = "", failureCount = 0) {
-  void jobId;
-  void failureCount;
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) return;
+  const retries = Math.max(0, Number(failureCount || 0) || 0);
+  if (retries >= MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES) return;
+  const delayMs = Math.min(2500, 350 + (retries * 350));
+  if (window.montageExportJobState.pollTimer) {
+    window.clearTimeout(window.montageExportJobState.pollTimer);
+    window.montageExportJobState.pollTimer = null;
+  }
+  window.montageExportJobState.pollTimer = window.setTimeout(() => {
+    if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    pollMontageExportJob(cleanJobId).catch(() => { });
+  }, delayMs);
 }
 
 // Helper sleep function for loader delays
@@ -794,6 +806,7 @@ export async function pollMontageExportJob(jobId = "") {
           setMontageExportStatus(statusText, hintText, { tone: "warning" });
           window.montageExportBusy = false;
           window.setTimelinePreviewsSuspended(false);
+          setMontageExportPreviewPaused(false);
           setMontageExportBusy(false);
           return;
         }
@@ -801,6 +814,7 @@ export async function pollMontageExportJob(jobId = "") {
       setMontageExportStatus(statusText, hintText, { tone: warningBlock?.skippedEntries?.length ? "warning" : "success" });
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
+      setMontageExportPreviewPaused(false);
       setMontageExportBusy(false);
       return;
     }
@@ -835,6 +849,7 @@ export async function pollMontageExportJob(jobId = "") {
       );
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
+      setMontageExportPreviewPaused(false);
       setMontageExportBusy(false);
       return;
     }
@@ -853,6 +868,21 @@ export async function pollMontageExportJob(jobId = "") {
     const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
     if (errorStatus === 404) {
+      const jobNotFoundCount = Math.max(0, Number(window.montageExportJobState.jobNotFoundCount || 0) || 0) + 1;
+      window.montageExportJobState.jobNotFoundCount = jobNotFoundCount;
+      if (errorCode === "job_not_found" && jobNotFoundCount < MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES) {
+        logMontageExportDevtools("poll_job_not_found_retry", {
+          jobId: cleanJobId,
+          jobNotFoundCount
+        }, "warn");
+        setMontageExportStatus(
+          "Se perdió momentáneamente el estado del export.",
+          `El backend todavía no confirma el job. Reintentando para verificarlo… intento ${jobNotFoundCount}.`,
+          { tone: "warning" }
+        );
+        scheduleMontageExportJobNotFoundRetry(cleanJobId, jobNotFoundCount);
+        return;
+      }
       clearMontageExportPolling();
       persistMontageExportActiveJob("");
       window.montageExportJobState.jobId = "";
@@ -863,12 +893,11 @@ export async function pollMontageExportJob(jobId = "") {
       setMontageExportProgress(null);
       setMontageExportStatus(
         "Se perdió el estado del export en el backend.",
-        errorCode === "job_not_found"
-          ? "El job ya no existe en el backend. Inicia una nueva exportación."
-          : "El backend respondió 404 al consultar el job. Vuelve a exportar o revisa el log del backend.",
+        "El job ya no existe en el backend. Inicia una nueva exportación.",
         { tone: "error" }
       );
       setMontageExportContinueButton({ visible: false });
+      setMontageExportPreviewPaused(false);
       return;
     }
     const transientNetworkError = isTransientMontageExportTransportError(error);
@@ -899,6 +928,7 @@ export async function pollMontageExportJob(jobId = "") {
         { tone: "error" }
       );
       window.setTimelinePreviewsSuspended(false);
+      setMontageExportPreviewPaused(false);
       setMontageExportContinueButton({ visible: true });
       return;
     }
@@ -1746,6 +1776,8 @@ export async function runMontageExport() {
       return;
     }
     setMontageExportBusy(true);
+    setMontageExportPreviewPaused(true);
+    window.setTimelinePreviewsSuspended(true);
     if (window.montageExportPreviewState?.debounceTimer) {
       window.clearTimeout(window.montageExportPreviewState.debounceTimer);
       window.montageExportPreviewState.debounceTimer = null;
@@ -1791,6 +1823,7 @@ export async function runMontageExport() {
     const detail = apiPayload?.detail && typeof apiPayload.detail === "object" ? apiPayload.detail : null;
     const skippedEntries = Array.isArray(detail?.skippedEntries) ? detail.skippedEntries : [];
     const activeJobId = String(detail?.activeJobId || apiPayload?.activeJobId || "").trim();
+    const activeJobKind = String(detail?.kind || apiPayload?.kind || "").trim();
     const status = Number(apiPayload?.status || error?.status || 0) || 0;
     const code = String(apiPayload?.error || error?.error || error?.message || "").trim();
     try {
@@ -1798,6 +1831,7 @@ export async function runMontageExport() {
         console.warn("[podcaster][montage-export] export already active or backend busy", {
           status: status || undefined,
           code: code || undefined,
+          kind: activeJobKind || undefined,
           activeJobId: activeJobId || undefined
         });
       } else {
@@ -1816,7 +1850,7 @@ export async function runMontageExport() {
       hintParts.push(`Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`);
       hintParts.push("Regenera esas escenas y vuelve a exportar.");
     } else if (status === 429 || code === "backend_busy_with_export") {
-      if (activeJobId) {
+      if (activeJobId && activeJobKind === "montage_export") {
         window.montageExportJobState.jobId = activeJobId;
         persistMontageExportActiveJob(activeJobId, Date.now());
         setMontageExportContinueButton({ visible: true, label: "Seguir exportación" });
@@ -1828,7 +1862,13 @@ export async function runMontageExport() {
         await continueMontageExportPolling();
         return;
       }
-      hintParts.push("El servidor está ocupado con otra exportación.");
+      if (activeJobId) {
+        hintParts.push(activeJobKind === "dialogue_video"
+          ? "Hay una generación de video en curso."
+          : "Hay otra tarea pesada en curso.");
+      } else {
+        hintParts.push("El servidor está ocupado con otra exportación.");
+      }
       hintParts.push(previousJobId
         ? "Usa \"Continuar exportación\" para retomar el job activo."
         : "Intenta de nuevo manualmente en unos segundos.");
