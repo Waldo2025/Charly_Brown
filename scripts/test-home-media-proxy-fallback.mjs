@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(
-  "/Users/waldolopez/Documents/CharlyBrown/public/home.js",
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/home.js",
   "utf8"
 );
 
@@ -24,10 +24,11 @@ assert.match(
   "El video del dashboard debe usar proxy-media y fallback por URL en lugar de devolver gs://."
 );
 
-assert.match(
-  source,
-  /function resolveStorageAudioUrl\(downloadUrl, storagePath\) \{[\s\S]*const staleStorageProxyUrl = buildApiUrl\(`\/api\/assets\/proxy-media\?storagePath=\$\{encodeURIComponent\(cleanStoragePath\)\}`\);[\s\S]*if \(isMarkedStaleProxyMediaUrl\(staleStorageProxyUrl\) && clean\) \{[\s\S]*return buildApiUrl\(`\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(parsed\.toString\(\)\)\}`\);/,
-  "El audio del dashboard debe caer al proxy por URL cuando el storagePath ya falló."
+assert.ok(
+  source.includes("const firebaseGsUrl = (() => {")
+  && source.includes('if (firebaseGsUrl) {')
+  && source.includes('/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1'),
+  "El audio del dashboard debe convertir gs:// en una URL proxyable por URL."
 );
 
 assert.match(

@@ -168,8 +168,8 @@ if (cfg.sourceItems[0].volume !== 77 || cfg.sourceItems[0].duckingWhenGeminiPct 
   throw new Error("Home debe respetar overrides de volumen y ducking del track subido activo.");
 }
 
-if (!String(cfg.sourceItems[1].sourceUrl || "").includes("/api/assets/proxy-media?storagePath=")) {
-  throw new Error("Home debe resolver storagePath a proxy-media para segmentos reconstruidos.");
+if (!String(cfg.sourceItems[1].sourceUrl || "").includes("/api/assets/proxy-media?url=")) {
+  throw new Error("Home debe resolver gs:// a proxy-media por URL para segmentos reconstruidos.");
 }
 
 const sceneBackgroundFactor = 1.25;

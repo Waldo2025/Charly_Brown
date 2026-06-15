@@ -5,11 +5,11 @@ const version = JSON.parse(
   fs.readFileSync("/Users/waldolopez/Documents/CharlyBrown/public/version.json", "utf8")
 );
 
-assert.equal(version.version, "1.0.10.94");
-assert.equal(version.cache_version, "2026-1.0.10.94");
+assert.equal(version.version, "1.0.10.95");
+assert.equal(version.cache_version, "2026-1.0.10.95");
 assert.ok(
-  String(version.releaseNotes?.[0] || "").includes("playbackRate"),
-  "La release note más reciente debe reflejar el fix de audios Gemini."
+  String(version.releaseNotes?.[0] || "").includes("gs://"),
+  "La release note más reciente debe reflejar el fix del proxy Gemini para gs://."
 );
 
 console.log("public version.json bumped OK.");

@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.94",
-  "build": "2026-1.0.10.94",
+  "version": "1.0.10.95",
+  "build": "2026-1.0.10.95",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Los audios Gemini heredados en formato gs:// ahora se resuelven vía proxy-media por URL para evitar 502/CORS al rehidratar escenas guardadas.",
     "Corregido: Los audios Gemini ahora preservan su playbackRate al guardar la sesión y se rehidratan al cargar incluso cuando faltaba la entrada explícita del editor, incluyendo la primera escena.",
     "Corregido: El preview del modal de export ahora evita desvíos de CORS/QUIC al resolver el media directamente dentro del controlador de reproducción y no pasar por rutas de proxy innecesarias.",
     "Corregido: El karaoke de texto en pantalla ahora se acelera o desacelera en sincronía con el cambio de velocidad (playbackRate) del audio Gemini al multiplicar el tiempo transcurrido local en la resolución de la palabra activa.",
@@ -24,5 +25,5 @@
     "Mejorado: Si el backend ya tiene un export activo, el modal de podcaster ahora puede retomar automáticamente el job persistido en vez de disparar un segundo POST que devuelve 429 backend_busy_with_export.",
     "Corregido: El logo de marca del export final ya no puede dejar FFmpeg colgado; el overlay ahora termina con shortest=1 para que el render cierre cuando termina el video base."
   ],
-  "cache_version": "2026-1.0.10.94"
+  "cache_version": "2026-1.0.10.95"
 }

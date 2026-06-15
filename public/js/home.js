@@ -2998,12 +2998,21 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
+    const firebaseGsUrl = (() => {
+      const gsSource = String(cleanStoragePath || clean || "").trim();
+      if (!gsSource.startsWith("gs://")) return "";
+      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
+      const slashIndex = withoutScheme.indexOf("/");
+      if (slashIndex < 0) return "";
+      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
+      if (!bucket || !objectPath) return "";
+      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+    })();
+    if (firebaseGsUrl) {
+      return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1`);
+    }
     if (cleanStoragePath) {
-      const staleStorageProxyUrl = buildApiUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(cleanStoragePath)}`);
-      if (isMarkedStaleProxyMediaUrl(staleStorageProxyUrl) && clean) {
-        const parsed = new URL(clean, window.location.origin);
-        return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(parsed.toString())}`);
-      }
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");
     }
     if (clean.startsWith("/api/assets/proxy-media?")) return buildApiUrl(clean);

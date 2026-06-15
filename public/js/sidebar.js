@@ -345,7 +345,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (page === "unidadHome.html") {
           import("./unidadHome.js?v=2026-1.0.0.59");
         } else if (page === "home.html") {
-          import("./home.js?v=2026-1.0.0.59");
+          import("./home.js?v=2026-1.0.1.51");
         }
   
       } catch (error) {

@@ -6442,6 +6442,23 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
   try {
+    const firebaseGsUrl = (() => {
+      const gsSource = String(cleanStoragePath || clean || "").trim();
+      if (!gsSource.startsWith("gs://")) return "";
+      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
+      const slashIndex = withoutScheme.indexOf("/");
+      if (slashIndex < 0) return "";
+      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
+      if (!bucket || !objectPath) return "";
+      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+    })();
+    if (firebaseGsUrl) {
+      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1`);
+      const timestamp = options.updatedAt || options.timestamp || "";
+      if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
+      return proxyUrl;
+    }
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
     }
