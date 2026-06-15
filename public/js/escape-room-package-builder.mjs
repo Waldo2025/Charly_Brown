@@ -1697,10 +1697,11 @@ const ESCAPE_ROOM_FINAL_PASSCODE_IS_FALLBACK = ${finalPasscode.isFallback ? "tru
 
   function checkMatchingQuestion(question, key) {
     const selected = state.questionMatches[key] || {};
-    const selectedValues = Object.values(selected).filter(Boolean);
-    if (selectedValues.length !== question.parejas.length) return false;
-    if (new Set(selectedValues).size !== question.parejas.length) return false;
-    return question.parejas.every((pair, index) => selected[String(index)] === pair.derecha);
+    return question.parejas.every((pair, index) => {
+      const selectedValue = String(selected[String(index)] || "");
+      const correctValue = String(pair.derecha || "");
+      return selectedValue === correctValue;
+    });
   }
 
   function markQuestionComplete(mission, question) {
