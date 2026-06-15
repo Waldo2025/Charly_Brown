@@ -17,6 +17,10 @@ const {
   createMontageExportJobStore
 } = require("./montage-export/job-store-firestore.js");
 const {
+  recoverMontageExportJobSnapshot,
+  DEFAULT_RECENT_SNAPSHOT_GRACE_MS
+} = require("./montage-export/job-snapshot.js");
+const {
   sanitizeMontageExportJobPublicPayload
 } = require("./montage-export/public-payload.js");
 const {
@@ -1324,6 +1328,7 @@ const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cach
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS = DEFAULT_RECENT_SNAPSHOT_GRACE_MS;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_IDLE_TIMEOUT_MS = 90 * 1000;
 const MONTAGE_EXPORT_SCENE_PROBE_TIMEOUT_MS = 30 * 1000;
@@ -1585,11 +1590,16 @@ async function readPersistedMontageExportJob(jobId = "") {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || String(parsed.jobId || "").trim() !== clean) return null;
+    const recovered = recoverMontageExportJobSnapshot(parsed, {
+      nowMs: Date.now(),
+      graceMs: MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS
+    });
+    if (recovered) return recovered;
     if (Number(parsed.expiresAtMs || 0) && Number(parsed.expiresAtMs || 0) < Date.now()) {
       await fs.promises.rm(metaPath, { force: true }).catch(() => {});
       return null;
     }
-    return parsed;
+    return null;
   } catch (_) {
     return null;
   }
@@ -1606,7 +1616,7 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
   if (persistedJob) return persistedJob;
 
   try {
-    return await withTimeout(
+    const snapshot = await withTimeout(
       () => montageExportJobStore.getJob(cleanJobId),
       1200,
       (timeoutMs) => {
@@ -1617,6 +1627,11 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
         return err;
       }
     );
+    const recovered = recoverMontageExportJobSnapshot(snapshot, {
+      nowMs: Date.now(),
+      graceMs: MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS
+    });
+    return recovered;
   } catch (error) {
     const status = Number(error?.status || 500) || 500;
     if (status === 404 || String(error?.code || "").trim() === "job_not_found") {
@@ -1680,6 +1695,9 @@ function cleanupDialogueVideoJobs() {
 function upsertMontageExportJob(jobId = "", patch = {}) {
   const id = clampExportId(jobId);
   if (!id) return null;
+  const heartbeatAt = Object.prototype.hasOwnProperty.call(patch, "heartbeatAt")
+    ? String(patch.heartbeatAt || "").trim() || new Date().toISOString()
+    : new Date().toISOString();
   const prev = montageExportJobs.get(id) || {
     jobId: id,
     status: "queued",
@@ -1690,7 +1708,8 @@ function upsertMontageExportJob(jobId = "", patch = {}) {
     export: null,
     error: null,
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: heartbeatAt,
+    heartbeatAt,
     expiresAtMs: Date.now() + MONTAGE_EXPORT_JOB_TTL_MS
   };
   const next = {
@@ -1698,7 +1717,8 @@ function upsertMontageExportJob(jobId = "", patch = {}) {
     ...patch,
     jobId: id,
     progress: Math.max(0, Math.min(1, Number(patch?.progress ?? prev.progress ?? 0) || 0)),
-    updatedAt: new Date().toISOString(),
+    updatedAt: heartbeatAt,
+    heartbeatAt,
     expiresAtMs: Date.now() + MONTAGE_EXPORT_JOB_TTL_MS
   };
   if (Array.isArray(patch?.warnings)) next.warnings = patch.warnings;
@@ -10923,7 +10943,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
           },
           updateJob: async (id, patch) => {
             upsertMontageExportJob(id, patch);
-            montageExportJobStore.updateJob(id, patch).catch(() => {});
+            await montageExportJobStore.updateJob(id, patch);
           },
           getJob: async (id) => {
             return montageExportJobs.get(id) || await montageExportJobStore.getJob(id);

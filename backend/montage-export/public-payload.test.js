@@ -34,6 +34,7 @@ test("sanitizeMontageExportJobPublicPayload exposes result and error blocks only
     jobId: "job-2",
     status: "error",
     stage: "error",
+    degraded: true,
     error: { code: "scene_download_timeout" },
     result: {
       storagePath: "podcaster/exports/u1/s1/job-2/video.mp4",
@@ -44,4 +45,5 @@ test("sanitizeMontageExportJobPublicPayload exposes result and error blocks only
   assert.deepEqual(payload.error, { code: "scene_download_timeout" });
   assert.equal(payload.result.storagePath, "podcaster/exports/u1/s1/job-2/video.mp4");
   assert.equal(payload.downloadUrl, "https://example.com/video.mp4");
+  assert.equal(payload.degraded, true);
 });

@@ -17,6 +17,7 @@ function sanitizeMontageExportJobPublicPayload(job = null) {
   if (source.currentDownloadUrl) payload.currentDownloadUrl = String(source.currentDownloadUrl || "").trim();
   if (source.heartbeatAt) payload.heartbeatAt = String(source.heartbeatAt || "").trim();
   if (source.lastHeartbeatAt) payload.heartbeatAt = String(source.lastHeartbeatAt || "").trim();
+  if (source.degraded === true) payload.degraded = true;
   if (Number.isFinite(Number(source.failedSceneIndex))) payload.failedSceneIndex = Math.max(0, Math.round(Number(source.failedSceneIndex) || 0));
   if (source.failedRowId) payload.failedRowId = String(source.failedRowId || "").trim();
   if (source.failedSubstage) payload.failedSubstage = String(source.failedSubstage || "").trim();
