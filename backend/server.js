@@ -9853,7 +9853,7 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     : `${marginPx}`;
   return [
     `${brandInputLabel}format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
-    `${baseInputLabel}[brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
+    `${baseInputLabel}[brand]overlay=x=${xExpr}:y=${yExpr}:format=auto:shortest=1[${outputLabel}]`
   ].join(";");
 }
 
