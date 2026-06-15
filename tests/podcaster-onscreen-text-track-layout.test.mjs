@@ -7,6 +7,7 @@ const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.ur
 const onScreenTextSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const editorSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
 const playbackControllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
+const backendSource = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
 
 test("on-screen text drag commits a shared track anchor across layouts", () => {
   assert.match(editorSource, /function syncAnchorAcrossLayouts\(session = null, options = \{\}\)/);
@@ -45,6 +46,15 @@ test("shared preview spec carries bubble geometry as inline css variables", () =
   );
   assert.doesNotMatch(onScreenTextSource, /font-size:\$\{fontSizePx\}px !important/);
   assert.doesNotMatch(onScreenTextSource, /line-height:\$\{metrics\.previewLineHeightPx\}px !important/);
+});
+
+test("karaoke export preserves the scaled background box and alignment from the shared on-screen text spec", () => {
+  assert.match(onScreenTextSource, /const bgScale = clampNumber\(settings\.bgScale, 0\.6, 1\.8, 1\);/);
+  assert.match(onScreenTextSource, /scaledBoxWidthPx/);
+  assert.match(onScreenTextSource, /scaledBoxXPx/);
+  assert.match(backendSource, /function buildMontageOnScreenTextKaraokeBoxFilters\(segments = \[\], settings = \{\}, options = \{\}\)/);
+  assert.match(backendSource, /drawbox=x=\$\{safeX\}:y=\$\{safeY\}:w=\$\{safeWidth\}:h=\$\{safeHeight\}:color=\$\{boxColor\}:t=fill:enable='/);
+  assert.match(backendSource, /const align = String\(spec\.textAlign \|\| settings\?\.textAlign \|\| "center"\)\.trim\(\)\.toLowerCase\(\);/);
 });
 
 test("playback controller does not re-hardcode bubble width and position outside the shared spec", () => {

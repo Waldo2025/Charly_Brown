@@ -550,6 +550,43 @@ function buildMontageOnScreenTextKaraokeAssText(wrappedText = "", wordTimings = 
   }).join("\\N");
 }
 
+function buildMontageOnScreenTextKaraokeBoxFilters(segments = [], settings = {}, options = {}) {
+  const list = Array.isArray(segments) ? segments.filter(Boolean) : [];
+  if (!list.length) return [];
+  const boxOpacity = (() => {
+    const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
+    const bgOpacity = Math.max(0, Math.min(1, Number(settings?.bgOpacity ?? 0) || 0));
+    if (bgPreset === "none" || bgOpacity <= 0.001) return 0;
+    if (bgPreset === "solid") return 0.82 * bgOpacity;
+    return 0.58 * bgOpacity;
+  })();
+  if (boxOpacity <= 0.001) return [];
+  const resolution = String(options?.resolution || "source").trim() || "source";
+  const sourceWidth = Math.max(2, Math.round(Number(options?.sourceWidth || 1280) || 1280));
+  const sourceHeight = Math.max(2, Math.round(Number(options?.sourceHeight || 720) || 720));
+  const boxColor = toFfmpegColor("#020617", boxOpacity, "020617");
+  return list.flatMap((segment) => {
+    const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
+    const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
+    const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
+    const bgScale = Math.max(0.6, Math.min(1.8, Number(spec.bgScale || settings?.bgScale || 1) || 1));
+    const boxWidth = Math.max(1, Math.round(Number(spec.boxWidthPx || 0) || 1));
+    const boxHeight = Math.max(1, Math.round(Number(spec.boxHeightPx || 0) || 1));
+    const scaledBoxWidth = Math.max(1, Math.round(Number(spec.scaledBoxWidthPx || (boxWidth * bgScale)) || 1));
+    const scaledBoxHeight = Math.max(1, Math.round(Number(spec.scaledBoxHeightPx || (boxHeight * bgScale)) || 1));
+    const scaledBoxX = Math.max(0, Math.round(Number(spec.scaledBoxXPx ?? (Number(spec.rawXPx || 0) - ((scaledBoxWidth - boxWidth) / 2))) || 0));
+    const scaledBoxY = Math.max(0, Math.round(Number(spec.scaledBoxYPx ?? (Number(spec.yPx || 0) - ((scaledBoxHeight - boxHeight) / 2))) || 0));
+    const enableExpr = escapeFfmpegExpr(`between(t,${startSec.toFixed(3)},${endSec.toFixed(3)})`);
+    const safeX = Math.min(Math.max(0, scaledBoxX), Math.max(0, sourceWidth - 1));
+    const safeY = Math.min(Math.max(0, scaledBoxY), Math.max(0, sourceHeight - 1));
+    const safeWidth = Math.max(1, Math.min(scaledBoxWidth, Math.max(1, sourceWidth - safeX)));
+    const safeHeight = Math.max(1, Math.min(scaledBoxHeight, Math.max(1, sourceHeight - safeY)));
+    return [
+      `drawbox=x=${safeX}:y=${safeY}:w=${safeWidth}:h=${safeHeight}:color=${boxColor}:t=fill:enable='${enableExpr}'`
+    ];
+  });
+}
+
 function buildMontageOnScreenTextKaraokeAssFile(segments = [], settings = {}, options = {}) {
   const list = Array.isArray(segments) ? segments.filter(Boolean) : [];
   if (!list.length) return "";
@@ -609,9 +646,9 @@ function buildMontageOnScreenTextKaraokeAssFile(segments = [], settings = {}, op
       100,
       0,
       0,
-      boxOpacity > 0 ? 3 : 1,
-      boxOpacity > 0 ? 0 : strokeWidth,
-      boxOpacity > 0 ? 0 : Math.min(4, shadowDepth),
+      1,
+      strokeWidth,
+      Math.min(4, shadowDepth),
       7,
       0,
       0,
@@ -629,17 +666,25 @@ function buildMontageOnScreenTextKaraokeAssFile(segments = [], settings = {}, op
       const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
       const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
       const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
-      const x = Math.max(0, Math.round(Number(spec.rawXPx ?? spec.xExpr ?? 0) || 0));
-      const y = Math.max(0, Math.round(Number(spec.yPx || 0) || 0));
-      const xTag = `\\an7\\pos(${x},${Math.max(0, y)})`;
+      const align = String(spec.textAlign || settings?.textAlign || "center").trim().toLowerCase();
+      const anchor = align === "left" ? 7 : (align === "right" ? 9 : 8);
+      const boxWidth = Math.max(1, Math.round(Number(spec.scaledBoxWidthPx || spec.boxWidthPx || 0) || 0));
+      const boxHeight = Math.max(1, Math.round(Number(spec.scaledBoxHeightPx || spec.boxHeightPx || 0) || 0));
+      const xBase = Math.max(0, Math.round(Number(spec.scaledBoxXPx ?? spec.rawXPx ?? 0) || 0));
+      const yBase = Math.max(0, Math.round(Number(spec.scaledBoxYPx ?? spec.yPx ?? 0) || 0));
+      const x = anchor === 8
+        ? xBase + Math.round(boxWidth / 2)
+        : (anchor === 9 ? xBase + boxWidth : xBase);
+      const y = yBase;
+      const xTag = `\\an${anchor}\\pos(${x},${Math.max(0, y)})`;
       const scaleTag = `\\fs${Math.max(16, Math.round(Number(spec.fontSizePx || fontSize) || fontSize))}`;
       const alignTags = [
         xTag,
         scaleTag,
         `\\b${fontBold}`,
         `\\i${fontItalic}`,
-        `\\bord${boxOpacity > 0 ? 0 : Math.max(0, Math.round(Number(spec.strokeEnabled ? spec.strokeWidthPx : 0) || 0))}`,
-        `\\shad${boxOpacity > 0 ? 0 : (shadowEnabled ? Math.max(1, Math.round(Number(spec.shadowOffsetYPx ?? 6) || 6)) : 0)}`,
+        `\\bord${Math.max(0, Math.round(Number(spec.strokeEnabled ? spec.strokeWidthPx : 0) || 0))}`,
+        `\\shad${shadowEnabled ? Math.max(1, Math.round(Number(spec.shadowOffsetYPx ?? 6) || 6)) : 0}`,
         `\\1c${primaryColor}`,
         `\\2c${activeColor}`,
         `\\3c${outlineColor}`,
@@ -10863,6 +10908,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               textFileResolver
             });
           });
+        if (karaokeAssSegments.length) {
+          visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeAssSegments, onScreenTextSettings, {
+            resolution: input.resolution || "source",
+            sourceWidth: sourceDims.width,
+            sourceHeight: sourceDims.height
+          }));
+        }
         if (karaokeAssSegments.length) {
           const assPath = path.join(tmpDir, "montage-onscreen-karaoke.ass");
           try {

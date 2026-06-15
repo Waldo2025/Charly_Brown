@@ -981,9 +981,9 @@ export function getMontagePreviewRowId() {
 }
 
 export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
-  if (shouldSuspendMontagePreviewActivity()) return;
   const cleanRowId = String(rowId || "").trim();
   if (!cleanRowId || !window.els.montageExportModal || window.els.montageExportModal.hidden) return;
+  if (shouldSuspendMontagePreviewActivity() && !window.montageExportBusy) return;
   const now = Date.now();
   if (window.montageExportPreviewState.loading) return;
   const sameRow = cleanRowId === String(window.montageExportPreviewState.lastJobPreviewRowId || "").trim();
@@ -995,6 +995,7 @@ export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex
   window.montageExportPreviewState.lastJobPreviewAt = now;
   refreshMontageExportPreviewNow({
     previewRowId: cleanRowId,
+    allowDuringExport: true,
     force: true,
     loadingMeta: totalScenes > 0 && sceneIndex > 0
       ? `Actualizando preview con la escena ${sceneIndex} de ${totalScenes}…`
@@ -1051,8 +1052,9 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
 }
 
 export async function refreshMontageExportPreviewNow(options = {}) {
+  const allowDuringExport = options?.allowDuringExport === true;
   if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
-  if (shouldSuspendMontagePreviewActivity()) {
+  if (shouldSuspendMontagePreviewActivity() && !allowDuringExport) {
     const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
     const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
     setMontageExportPreviewState({

@@ -827,6 +827,7 @@
     const strokeEnabled = (settings.strokeEnabled === undefined ? true : isTrue(settings.strokeEnabled)) && strokeWidthPx > 0.001;
     const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
     const bgOpacitySetting = clampNumber(settings.bgOpacity, 0, 1, 0);
+    const bgScale = clampNumber(settings.bgScale, 0.6, 1.8, 1);
     const boxEnabled = bgPreset !== "none" && bgOpacitySetting > 0.001;
     let boxOpacity = 0;
     if (bgPreset === "glass") {
@@ -847,6 +848,10 @@
     const textBlockHeightPx = Math.max(boxHeightPx, renderedLineCount * lineHeightPx);
     const maxYPx = Math.max(0, exportCanvasHeight - textBlockHeightPx - bottomSafetyPx);
     const yPx = Math.max(0, Math.min(maxYPx, rawYPx));
+    const scaledBoxWidthPx = Math.max(1, Math.round(boxWidthPx * bgScale));
+    const scaledBoxHeightPx = Math.max(1, Math.round(boxHeightPx * bgScale));
+    const scaledBoxXPx = Math.max(0, Math.round(rawXPx - ((scaledBoxWidthPx - boxWidthPx) / 2)));
+    const scaledBoxYPx = Math.max(0, Math.round(yPx - ((scaledBoxHeightPx - boxHeightPx) / 2)));
     const textAlign = normalizeTextAlign(settings.textAlign);
     const wrappedText = wrapResult.text;
     let xExpr = `${rawXPx}+(${boxWidthPx}-text_w)/2`;
@@ -885,6 +890,11 @@
       shadowOpacity,
       boxEnabled,
       boxColor,
+      bgScale,
+      scaledBoxWidthPx,
+      scaledBoxHeightPx,
+      scaledBoxXPx,
+      scaledBoxYPx,
       textAlign,
       fontWeight: normalizeFontWeight(settings.fontWeight),
       fontStyle: normalizeFontStyle(settings.fontStyle),
