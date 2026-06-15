@@ -103,6 +103,17 @@ export class PodcasterPlaybackController extends EventEmitter {
     const numeric = Math.round((Number(value) || 1) * 100) / 100;
     return Math.max(1, Math.min(2.5, numeric || 1));
   }
+  buildMediaProxyUrl(path = "") {
+    const clean = String(path || "").trim();
+    if (!clean) return "";
+    if (typeof this.deps?.buildApiUrlPreferRemote === "function") {
+      return this.deps.buildApiUrlPreferRemote(clean);
+    }
+    if (typeof this.deps?.buildApiUrl === "function") {
+      return this.deps.buildApiUrl(clean);
+    }
+    return clean;
+  }
   resolveStageMediaScaleContainer() {
     return this.els?.podcastActiveSpeakerVideo?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
       || this.els?.podcastActiveSpeakerImage?.closest?.(".podcast-video-preview, .player-stage, .montage-export-preview-container")
@@ -376,7 +387,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       
       const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
       if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
-        finalUrl = `/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`;
+        finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
       }
       this.blobCache.set(url, finalUrl);
       const cacheKey = this.resolvePersistentMediaCacheKey(url);
@@ -462,7 +473,7 @@ export class PodcasterPlaybackController extends EventEmitter {
 
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
           if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
-            finalUrl = `/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`;
+            finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
           }
 
           this.blobCache.set(url, finalUrl);
@@ -781,11 +792,11 @@ export class PodcasterPlaybackController extends EventEmitter {
       this.invalidateBlobUrl(url);
       // Purge proxy URL variations
       try {
-        const proxyUrl = `/api/assets/proxy-media?storagePath=${encodeURIComponent(url)}`;
+        const proxyUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(url)}`);
         this.invalidateBlobUrl(proxyUrl);
       } catch (_) { }
       try {
-        const proxyImgUrl = `/api/assets/proxy-image?storagePath=${encodeURIComponent(url)}`;
+        const proxyImgUrl = this.buildMediaProxyUrl(`/api/assets/proxy-image?storagePath=${encodeURIComponent(url)}`);
         this.invalidateBlobUrl(proxyImgUrl);
       } catch (_) { }
     });

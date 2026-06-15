@@ -9,11 +9,11 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
   function buildMediaProxyUrl(path = "") {
     const clean = String(path || "").trim();
     if (!clean) return "";
-    if (typeof deps.buildApiUrl === "function") {
-      return deps.buildApiUrl(clean);
-    }
     if (typeof deps.buildApiUrlPreferRemote === "function") {
       return deps.buildApiUrlPreferRemote(clean);
+    }
+    if (typeof deps.buildApiUrl === "function") {
+      return deps.buildApiUrl(clean);
     }
     return clean;
   }

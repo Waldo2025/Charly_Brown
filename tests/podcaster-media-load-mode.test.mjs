@@ -101,6 +101,20 @@ test("PodcasterPlaybackController.getBlobUrlSync returns correct streaming proxy
   assert.equal(controller.getBlobUrlSync(fbUrl), proxyUrl);
 });
 
+test("PodcasterPlaybackController prefers the remote proxy-media base when available", () => {
+  const controller = new PodcasterPlaybackController();
+  controller.state.config = { mediaLoadMode: "streaming" };
+  controller.deps = {
+    buildApiUrlPreferRemote: (path) => `https://example.test${path}`
+  };
+
+  const fbUrl = "https://firebasestorage.googleapis.com/v0/b/bucket/o/video.mp4?alt=media";
+  assert.equal(
+    controller.getBlobUrlSync(fbUrl),
+    `https://example.test/api/assets/proxy-media?url=${encodeURIComponent(fbUrl)}`
+  );
+});
+
 test("PodcasterPlaybackController.getBlobUrl resolves gs:// and proxies correctly in streaming mode", async () => {
   const controller = new PodcasterPlaybackController();
   controller.state.config = { mediaLoadMode: "streaming" };
