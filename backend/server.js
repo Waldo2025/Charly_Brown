@@ -1465,6 +1465,7 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
 const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
+const MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES = 2_500_000;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS = DEFAULT_RECENT_SNAPSHOT_GRACE_MS;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
@@ -3753,6 +3754,40 @@ function decodeBase64DataUrl(dataUrl = "", maxBytes = SCREENSHOT_MAX_BYTES) {
     throw new Error("Archivo demasiado grande.");
   }
   return { mimeType, buffer };
+}
+
+function decodeInlineDataUrl(dataUrl = "", maxBytes = MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES) {
+  const raw = String(dataUrl || "").trim();
+  const match = raw.match(/^data:([^;,]+)?((?:;[^,]+)*?),(.*)$/i);
+  if (!match) {
+    const err = new Error("invalid_data_url");
+    err.code = "invalid_data_url";
+    err.status = 400;
+    throw err;
+  }
+  const mimeType = String(match[1] || "application/octet-stream").trim().toLowerCase() || "application/octet-stream";
+  const params = String(match[2] || "");
+  const payload = String(match[3] || "");
+  const isBase64 = /;base64/i.test(params);
+  const buffer = isBase64
+    ? Buffer.from(payload, "base64")
+    : Buffer.from(decodeURIComponent(payload), "utf8");
+  const maxAllowed = Math.max(1, Number(maxBytes) || MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES);
+  if (!buffer.length || buffer.length > maxAllowed) {
+    const err = new Error("inline_data_too_large");
+    err.code = "inline_data_too_large";
+    err.status = 413;
+    err.sizeBytes = Number(buffer.length || 0) || 0;
+    err.maxBytes = maxAllowed;
+    throw err;
+  }
+  return { mimeType, buffer };
+}
+
+async function writeDataUrlToFile(dataUrl = "", outPath = "") {
+  const decoded = decodeInlineDataUrl(dataUrl, MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES);
+  await fs.promises.writeFile(outPath, decoded.buffer);
+  return outPath;
 }
 
 function getScreenshotExtension(mimeType = "image/jpeg") {
@@ -8903,11 +8938,12 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
   return async (asset = {}, kind = "video", index = 0) => {
     const storagePath = clampText(asset?.storagePath || "", 900);
     const url = String(asset?.downloadUrl || asset?.url || "").trim();
-    if (!storagePath && !url) {
+    const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+    if (!storagePath && !url && !dataUrl) {
       const err = new Error("missing_download_source");
       err.code = "missing_download_source";
       err.status = 404;
-      err.detail = { kind, index, storagePath: "", url: "" };
+      err.detail = { kind, index, storagePath: "", url: "", dataUrl: "" };
       throw err;
     }
     const normalizedKind = kind === "audio" ? "audio" : (kind === "image" ? "image" : "video");
@@ -8949,6 +8985,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
           index,
           storagePath,
           url: url ? redactUrlForLogs(url) : "",
+          dataUrl: dataUrl ? `data:${String(dataUrl.match(/^data:([^;,]+)/i)?.[1] || "").trim()}` : "",
           label
         };
         return err;
@@ -8973,6 +9010,37 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       const nextOwners = Array.from(new Set(candidates)).filter((owner) => owner && owner !== currentOwner);
       return nextOwners.map((owner) => `${prefix}${owner}${suffix}`);
     };
+
+    if (dataUrl && dataUrl.startsWith("data:")) {
+      try {
+        await downloadWithTimeout(() => writeDataUrlToFile(dataUrl, outPath), "inline_data");
+        return validateDownloadedAsset(outPath);
+      } catch (inlineError) {
+        const inlineCode = String(inlineError?.code || inlineError?.message || "").trim();
+        if (!storagePath && !url) {
+          inlineError.detail = {
+            ...(inlineError?.detail && typeof inlineError.detail === "object" ? inlineError.detail : {}),
+            kind,
+            index,
+            storagePath,
+            url: "",
+            dataUrl: dataUrl ? `data:${String(dataUrl.match(/^data:([^;,]+)/i)?.[1] || "").trim()}` : ""
+          };
+          throw inlineError;
+        }
+        if (inlineCode !== "inline_data_too_large" && inlineCode !== "invalid_data_url") {
+          inlineError.detail = {
+            ...(inlineError?.detail && typeof inlineError.detail === "object" ? inlineError.detail : {}),
+            kind,
+            index,
+            storagePath,
+            url: url ? redactUrlForLogs(url) : "",
+            dataUrl: dataUrl ? `data:${String(dataUrl.match(/^data:([^;,]+)/i)?.[1] || "").trim()}` : ""
+          };
+          throw inlineError;
+        }
+      }
+    }
 
     if (url && isDirectHttpUrl(url)) {
       try {

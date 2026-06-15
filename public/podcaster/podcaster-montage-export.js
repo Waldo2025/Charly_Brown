@@ -718,7 +718,7 @@ export async function pollMontageExportJob(jobId = "") {
     return;
   }
   try {
-    const data = await authFetchJson(buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`), {
+    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
       auth: false
     });
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
@@ -1363,6 +1363,175 @@ export function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
   return preview.join("; ") + suffix;
 }
 
+const MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES = 2_500_000;
+const MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES = 6_000_000;
+
+function estimateMontageDataUrlBytes(dataUrl = "") {
+  const cleanDataUrl = String(dataUrl || "").trim();
+  if (!cleanDataUrl.startsWith("data:")) return 0;
+  const commaIndex = cleanDataUrl.indexOf(",");
+  if (commaIndex < 0) return 0;
+  const meta = cleanDataUrl.slice(0, commaIndex);
+  const payload = cleanDataUrl.slice(commaIndex + 1).replace(/\s+/g, "");
+  if (!payload) return 0;
+  if (/;base64/i.test(meta)) {
+    const padding = payload.endsWith("==") ? 2 : (payload.endsWith("=") ? 1 : 0);
+    return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+  }
+  return payload.length;
+}
+
+function buildMontageMediaCacheCandidates(asset = {}) {
+  const storagePath = String(asset?.storagePath || "").trim();
+  const url = String(asset?.downloadUrl || asset?.url || "").trim();
+  const candidates = [
+    url,
+    storagePath,
+    storagePath ? `/${storagePath.replace(/^\/+/, "")}` : "",
+    storagePath ? `__podcaster_media_cache__/${encodeURIComponent(storagePath)}` : "",
+    storagePath ? `${window.location.origin}/__podcaster_media_cache__/${encodeURIComponent(storagePath)}` : ""
+  ];
+  return Array.from(new Set(candidates.map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
+async function blobToDataUrl(blob = null, mimeType = "application/octet-stream") {
+  if (!blob || typeof blob.arrayBuffer !== "function") return "";
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  const encodeBase64 = typeof btoa === "function"
+    ? btoa
+    : (value) => Buffer.from(value, "binary").toString("base64");
+  return `data:${mimeType};base64,${encodeBase64(binary)}`;
+}
+
+async function resolveCachedMontageMediaDataUrl(asset = {}, kind = "video", budget = {}) {
+  const rawDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+  if (rawDataUrl.startsWith("data:")) {
+    const bytes = estimateMontageDataUrlBytes(rawDataUrl);
+    if (bytes > 0 && bytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES && bytes <= Math.max(0, Number(budget?.remainingBytes || 0) || 0)) {
+      return rawDataUrl;
+    }
+  }
+
+  if (typeof caches === "undefined" || typeof caches.match !== "function") return "";
+
+  const mimeType = String(asset?.mimeType || "").trim() || (kind === "audio" ? "audio/mpeg" : (kind === "image" ? "image/png" : "video/mp4"));
+  for (const candidate of buildMontageMediaCacheCandidates(asset)) {
+    let response = null;
+    try {
+      response = await caches.match(candidate);
+    } catch (_) {
+      response = null;
+    }
+    if (!response) continue;
+    let blob = null;
+    try {
+      blob = await response.blob();
+    } catch (_) {
+      blob = null;
+    }
+    const sizeBytes = Math.max(0, Number(blob?.size || 0) || 0);
+    if (!sizeBytes || sizeBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) continue;
+    if (budget && Number.isFinite(Number(budget.remainingBytes)) && sizeBytes > Number(budget.remainingBytes || 0)) continue;
+    let dataUrl = "";
+    try {
+      dataUrl = await blobToDataUrl(blob, String(response?.headers?.get?.("content-type") || mimeType).trim() || mimeType);
+    } catch (_) {
+      dataUrl = "";
+    }
+    if (!dataUrl.startsWith("data:")) continue;
+    const dataUrlBytes = estimateMontageDataUrlBytes(dataUrl);
+    if (!dataUrlBytes || dataUrlBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) continue;
+    if (budget && Number.isFinite(Number(budget.remainingBytes)) && dataUrlBytes > Number(budget.remainingBytes || 0)) continue;
+    return dataUrl;
+  }
+
+  return "";
+}
+
+async function maybeInlineMontageMediaAsset(asset = null, kind = "video", budget = {}) {
+  if (!asset || typeof asset !== "object") return asset;
+  const directDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+  const inlineDataUrl = await resolveCachedMontageMediaDataUrl(asset, kind, budget);
+  const dataUrl = inlineDataUrl || directDataUrl;
+  if (!dataUrl.startsWith("data:")) return asset;
+  const sizeBytes = estimateMontageDataUrlBytes(dataUrl);
+  if (!sizeBytes || sizeBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) return asset;
+  if (budget && Number.isFinite(Number(budget.remainingBytes)) && sizeBytes > Number(budget.remainingBytes || 0)) return asset;
+  if (budget && Number.isFinite(Number(budget.remainingBytes))) {
+    budget.remainingBytes = Math.max(0, Number(budget.remainingBytes || 0) - sizeBytes);
+  }
+  return {
+    ...asset,
+    dataUrl,
+    localDataUrl: dataUrl
+  };
+}
+
+async function inlineMontageExportPayloadMedia(payload = {}) {
+  if (!payload || typeof payload !== "object") return payload;
+  const budget = { remainingBytes: MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES };
+
+  if (Array.isArray(payload.entries)) {
+    for (let index = 0; index < payload.entries.length; index += 1) {
+      const entry = payload.entries[index];
+      if (!entry || typeof entry !== "object") continue;
+      const nextVideo = await maybeInlineMontageMediaAsset(entry.video, "video", budget);
+      const nextAudio = await maybeInlineMontageMediaAsset(entry.audio, "audio", budget);
+      payload.entries[index] = {
+        ...entry,
+        video: nextVideo,
+        audio: nextAudio
+      };
+    }
+  }
+
+  if (payload.backgroundMusic && typeof payload.backgroundMusic === "object") {
+    payload.backgroundMusic = await maybeInlineMontageMediaAsset(payload.backgroundMusic, "audio", budget);
+  }
+
+  if (payload.dialogueAudioMap && typeof payload.dialogueAudioMap === "object") {
+    const nextDialogueAudioMap = {};
+    for (const [rowId, clip] of Object.entries(payload.dialogueAudioMap)) {
+      nextDialogueAudioMap[rowId] = await maybeInlineMontageMediaAsset(clip, "audio", budget);
+    }
+    payload.dialogueAudioMap = nextDialogueAudioMap;
+  }
+
+  if (payload.audioTimeline && typeof payload.audioTimeline === "object") {
+    const nextAudioTimeline = { ...payload.audioTimeline };
+    if (Array.isArray(nextAudioTimeline.geminiSegments)) {
+      const nextGeminiSegments = [];
+      for (const segment of nextAudioTimeline.geminiSegments) {
+        nextGeminiSegments.push(await maybeInlineMontageMediaAsset(segment, "audio", budget));
+      }
+      nextAudioTimeline.geminiSegments = nextGeminiSegments;
+    }
+    if (Array.isArray(nextAudioTimeline.backgroundSegments)) {
+      const nextBackgroundSegments = [];
+      for (const segment of nextAudioTimeline.backgroundSegments) {
+        nextBackgroundSegments.push(await maybeInlineMontageMediaAsset(segment, "audio", budget));
+      }
+      nextAudioTimeline.backgroundSegments = nextBackgroundSegments;
+    }
+    payload.audioTimeline = nextAudioTimeline;
+  }
+
+  return payload;
+}
+
+async function buildMontageExportPayloadForSubmission(session = null) {
+  const prepared = buildMontageExportPayload(session);
+  if (!prepared?.ok || !prepared?.payload) return prepared;
+  await inlineMontageExportPayloadMedia(prepared.payload);
+  return prepared;
+}
+
 export function buildMontageExportPayload(session = null) {
   const activeSession = session || window.getActiveSession?.();
   if (!activeSession) return { ok: false, error: "No hay sesión activa.", payload: null };
@@ -1762,7 +1931,7 @@ export async function runMontageExport() {
   try {
     const previousJobId = String(window.montageExportJobState.jobId || "").trim();
     const session = window.getActiveSession?.() || null;
-    const prepared = buildMontageExportPayload(session);
+    const prepared = await buildMontageExportPayloadForSubmission(session);
     logMontageExportDevtools("submit_clicked", {
       hasSession: Boolean(session),
       preparedOk: Boolean(prepared?.ok),

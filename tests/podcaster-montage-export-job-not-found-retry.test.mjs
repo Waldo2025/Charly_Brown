@@ -145,7 +145,7 @@ test("montage export polling retries job_not_found before failing", async () => 
 
   assert.equal(context.window.montageExportBusy, true);
   assert.equal(context.window.montageExportJobState.jobNotFoundCount, 1);
-  assert.ok(String(context.__lastAuthFetchUrl || "").startsWith("https://remote.test/api/podcaster/montage/export-status"));
+  assert.equal(String(context.__lastAuthFetchUrl || ""), "/api/podcaster/montage/export-status?jobId=job-1");
   assert.ok(statusUpdates.some((item) => String(item.title || "").includes("momentáneamente")));
   assert.equal(scheduledTimers.length, 1);
 
