@@ -9,6 +9,10 @@ const podcasterSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster.js",
   "utf8"
 );
+const homeSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/js/home.js",
+  "utf8"
+);
 const backendSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/backend/server.js",
   "utf8"
@@ -30,6 +34,18 @@ assert.match(
   podcasterSource,
   /\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(clean\)\}(?!&noRange=1)/,
   "Las URLs de proxy-media del podcaster deben dejar Range habilitado por defecto."
+);
+
+assert.doesNotMatch(
+  podcasterSource,
+  /if\s*\(\s*isFirebaseStorageUrl\s*\)\s*return\s+clean\s*;/,
+  "El podcaster no debe devolver URLs directas de Firebase para video/audio."
+);
+
+assert.doesNotMatch(
+  homeSource,
+  /if\s*\(\s*isFirebaseStorageUrl\s*\)\s*return\s+clean\s*;/,
+  "Home no debe devolver URLs directas de Firebase para video/audio."
 );
 
 assert.match(

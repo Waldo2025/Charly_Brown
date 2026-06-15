@@ -2946,16 +2946,6 @@ function resolveStaleAwareProxyMediaUrl(rawUrl = "", storagePath = "", kind = "m
 
 function resolveStorageVideoUrl(downloadUrl, storagePath) {
   const clean = String(downloadUrl || "").trim();
-  if (/^https?:\/\//i.test(clean)) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const host = String(parsed.hostname || "").toLowerCase();
-      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-      if (isFirebaseStorageUrl) return clean;
-    } catch (_) {
-      // fall through to proxy resolution
-    }
-  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
@@ -2984,16 +2974,6 @@ function resolveStorageVideoUrl(downloadUrl, storagePath) {
 
 function resolveStorageAudioUrl(downloadUrl, storagePath) {
   const clean = String(downloadUrl || "").trim();
-  if (/^https?:\/\//i.test(clean)) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const host = String(parsed.hostname || "").toLowerCase();
-      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-      if (isFirebaseStorageUrl) return clean;
-    } catch (_) {
-      // fall through to proxy resolution
-    }
-  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;
@@ -3010,7 +2990,7 @@ function resolveStorageAudioUrl(downloadUrl, storagePath) {
       return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
     })();
     if (firebaseGsUrl) {
-      return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1`);
+      return buildApiUrl(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}`);
     }
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media");

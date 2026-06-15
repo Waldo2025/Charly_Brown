@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.104",
-  "build": "2026-1.0.10.104",
+  "version": "1.0.10.105",
+  "build": "2026-1.0.10.105",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El export de montage ahora tolera un 404 job_not_found transitorio con reintentos cortos y recupera el snapshot reciente del backend antes de declarar perdido el job.",
@@ -32,7 +32,8 @@
     "Corregido: El store de jobs de export ahora elimina valores undefined antes de escribir en Firestore, evitando que el backend se caiga con el error 'Cannot use undefined as a Firestore value' durante el render de escenas.",
     "Corregido: La persistencia interna del job de montage export en backend/server.js también elimina valores undefined antes de escribir a disco o a Firestore, evitando que el worker se vuelva a caer por currentDownloadUrl u otros campos opcionales.",
     "Corregido: La creación inicial del job de montage export ahora también limpia undefined anidados antes de escribir en Firestore.",
-    "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas."
+    "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas.",
+    "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real."
   ],
-  "cache_version": "2026-1.0.10.104"
+  "cache_version": "2026-1.0.10.105"
 }

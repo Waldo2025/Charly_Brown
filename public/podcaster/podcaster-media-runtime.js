@@ -184,12 +184,14 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         const host = String(parsed.hostname || "").toLowerCase();
         const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
         if (isFirebaseStorageUrl) {
-          let directUrl = clean;
-          if (timestamp && !directUrl.includes("u=")) {
-            const separator = directUrl.includes("?") ? "&" : "?";
-            directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+          if (kind === "image") {
+            let directUrl = clean;
+            if (timestamp && !directUrl.includes("u=")) {
+              const separator = directUrl.includes("?") ? "&" : "?";
+              directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+            }
+            return directUrl;
           }
-          return directUrl;
         }
       } catch (_) {
         // keep proxy fallback for non-URL media refs

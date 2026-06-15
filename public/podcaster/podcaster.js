@@ -6349,16 +6349,6 @@ function resolveStorageMediaUrl(rawUrl = "") {
 
 function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
-  if (/^https?:\/\//i.test(clean)) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const host = String(parsed.hostname || "").toLowerCase();
-      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-      if (isFirebaseStorageUrl) return clean;
-    } catch (_) {
-      // fall through to proxy resolution
-    }
-  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (clean.startsWith("data:")) return clean;
@@ -6428,16 +6418,6 @@ async function resolveFirebaseStorageUrl(gsUrl = "") {
 
 function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
   const clean = String(rawUrl || "").trim();
-  if (/^https?:\/\//i.test(clean)) {
-    try {
-      const parsed = new URL(clean, window.location.origin);
-      const host = String(parsed.hostname || "").toLowerCase();
-      const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
-      if (isFirebaseStorageUrl) return clean;
-    } catch (_) {
-      // fall through to proxy resolution
-    }
-  }
   const cleanStoragePath = deriveStoragePathFromMediaSource(clean, storagePath || "");
   if (!clean && !cleanStoragePath) return "";
   if (!hasAvailableApiBase()) return clean;

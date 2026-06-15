@@ -10031,7 +10031,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       let currentSceneSubstage = isImageAsset ? "scene_download_image" : "scene_download_video";
       try {
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
-        const videoDownloadUrl = String(videoAsset?.url || "").trim();
+        const videoDownloadUrl = String(videoAsset?.downloadUrl || videoAsset?.url || "").trim();
         const sceneProgressBase = 0.18 + ((i / Math.max(1, input.entries.length)) * 0.26);
         const sceneStepStartMs = Date.now();
         emitSceneSubstage({
