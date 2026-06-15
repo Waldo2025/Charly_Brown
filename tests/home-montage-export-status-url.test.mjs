@@ -4,10 +4,13 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/js/home.js", import.meta.url), "utf8");
 
-test("home montage export polling stays on the same-origin /api endpoint", () => {
+test("home montage export polling prefers the remote backend to avoid redirect CORS", () => {
   assert.match(
     source,
-    /authFetchJson\(`\/api\/podcaster\/montage\/export-status\?jobId=\$\{encodeURIComponent\([^`]+\)\}`,\s*\{\s*auth:\s*false\s*\}\)/s
+    /buildApiUrlPreferRemote\(`\/api\/podcaster\/montage\/export-status\?jobId=\$\{encodeURIComponent\([^`]+\)\}`\)/s
   );
-  assert.doesNotMatch(source, /buildApiUrlPreferRemote\(`\/api\/podcaster\/montage\/export-status/);
+  assert.match(
+    source,
+    /authFetchJson\(exportStatusUrl,\s*\{\s*auth:\s*false\s*\}\)/s
+  );
 });

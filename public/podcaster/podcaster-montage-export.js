@@ -718,7 +718,8 @@ export async function pollMontageExportJob(jobId = "") {
     return;
   }
   try {
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
+    const exportStatusUrl = buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    const data = await authFetchJson(exportStatusUrl, {
       auth: false
     });
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
