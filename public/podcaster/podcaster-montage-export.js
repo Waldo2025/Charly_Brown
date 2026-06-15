@@ -599,6 +599,7 @@ export function resetMontageExportPreviewState() {
     debounceTimer: null,
     requestSeq: window.montageExportPreviewState.requestSeq || 0,
     lastJobPreviewRowId: "",
+    lastJobPreviewSceneIndex: 0,
     lastJobPreviewAt: 0
   };
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
@@ -760,7 +761,7 @@ export async function pollMontageExportJob(jobId = "") {
         tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
       });
     }
-    if (stage === "render_scene_segments" && currentRowId && !shouldSuspendMontagePreviewActivity()) {
+    if (stage === "render_scene_segments" && currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()) {
       maybeRefreshMontageExportPreviewFromJob({
         rowId: currentRowId,
         sceneIndex: currentSceneIndex,
@@ -982,32 +983,40 @@ export function getMontagePreviewRowId() {
 
 export function maybeRefreshMontageExportPreviewFromJob({ rowId = "", sceneIndex = 0, totalScenes = 0 } = {}) {
   const cleanRowId = String(rowId || "").trim();
-  if (!cleanRowId || !window.els.montageExportModal || window.els.montageExportModal.hidden) return;
+  const cleanSceneIndex = Math.max(0, Math.round(Number(sceneIndex || 0) || 0));
+  if (!cleanRowId && cleanSceneIndex <= 0) return;
+  if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity() && !window.montageExportBusy) return;
   const now = Date.now();
   if (window.montageExportPreviewState.loading) return;
-  const sameRow = cleanRowId === String(window.montageExportPreviewState.lastJobPreviewRowId || "").trim();
+  const sameRow = cleanRowId && cleanRowId === String(window.montageExportPreviewState.lastJobPreviewRowId || "").trim();
+  const sameScene = cleanSceneIndex > 0 && cleanSceneIndex === Math.max(0, Number(window.montageExportPreviewState.lastJobPreviewSceneIndex || 0) || 0);
   const lastRefreshAt = Math.max(0, Number(window.montageExportPreviewState.lastJobPreviewAt || 0) || 0);
   const elapsedMs = now - lastRefreshAt;
-  const minDelayMs = sameRow ? MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS : 250;
+  const minDelayMs = (sameRow || sameScene) ? MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS : 250;
   if (elapsedMs < minDelayMs) return;
   window.montageExportPreviewState.lastJobPreviewRowId = cleanRowId;
+  window.montageExportPreviewState.lastJobPreviewSceneIndex = cleanSceneIndex;
   window.montageExportPreviewState.lastJobPreviewAt = now;
   refreshMontageExportPreviewNow({
     previewRowId: cleanRowId,
+    previewSceneIndex: cleanSceneIndex,
     allowDuringExport: true,
     force: true,
-    loadingMeta: totalScenes > 0 && sceneIndex > 0
-      ? `Actualizando preview con la escena ${sceneIndex} de ${totalScenes}…`
+    loadingMeta: totalScenes > 0 && cleanSceneIndex > 0
+      ? `Actualizando preview con la escena ${cleanSceneIndex} de ${totalScenes}…`
       : "Actualizando preview de la escena en exportación…"
   }).catch(() => { });
 }
 
-async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "") {
+async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = "", previewSceneIndex = 0) {
   const entries = Array.isArray(payload?.entries) ? payload.entries : [];
   if (!entries.length) return null;
   const cleanRowId = String(previewRowId || "").trim();
-  const selected = entries.find((entry) => String(entry?.rowId || "").trim() === cleanRowId) || entries[0];
+  const cleanSceneIndex = Math.max(0, Math.round(Number(previewSceneIndex || 0) || 0));
+  const selected = (cleanSceneIndex > 0 ? entries[cleanSceneIndex - 1] : null)
+    || entries.find((entry) => String(entry?.rowId || "").trim() === cleanRowId)
+    || entries[0];
   if (!selected || typeof selected !== "object") return null;
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
   const directDownloadUrl = String(video?.downloadUrl || "").trim();
@@ -1084,11 +1093,13 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     return;
   }
   const previewRowId = String(options?.previewRowId || getMontagePreviewRowId()).trim();
+  const previewSceneIndex = Math.max(0, Math.round(Number(options?.previewSceneIndex || 0) || 0));
   const payload = {
     ...prepared.payload,
-    previewRowId
+    previewRowId,
+    previewSceneIndex
   };
-  const frontendPreview = await resolveMontageExportFrontendPreview(payload, previewRowId);
+  const frontendPreview = await resolveMontageExportFrontendPreview(payload, previewRowId, previewSceneIndex);
   if (frontendPreview?.src) {
     setMontageExportPreviewState({
       loading: false,
@@ -1136,6 +1147,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     resolution: payload.resolution,
     qualityPreset: payload.qualityPreset,
     previewRowId: payload.previewRowId,
+    previewSceneIndex: payload.previewSceneIndex,
     entries: (payload.entries || []).map((entry) => ({
       rowId: entry?.rowId,
       trimInMs: entry?.trimInMs,

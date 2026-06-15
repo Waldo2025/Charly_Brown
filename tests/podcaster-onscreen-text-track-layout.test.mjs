@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
+const montageExportSource = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 const onScreenTextSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
 const editorSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
@@ -66,6 +67,12 @@ test("montage export preview syncs karaoke overlay from the preview video elemen
     podcasterSource,
     /mediaEl\.addEventListener\("timeupdate", sync\);[\s\S]*?mediaEl\.addEventListener\("ended", sync\);/m
   );
+});
+
+test("montage export preview falls back to scene index when row id is missing", () => {
+  assert.ok(montageExportSource.includes("currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()"));
+  assert.ok(montageExportSource.includes("previewSceneIndex"));
+  assert.ok(montageExportSource.includes("entries[cleanSceneIndex - 1]"));
 });
 
 test("playback controller does not re-hardcode bubble width and position outside the shared spec", () => {
