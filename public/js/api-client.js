@@ -133,10 +133,14 @@ export function buildApiUrlFromBase(base, path = "") {
 }
 
 export async function getAuthHeaders(extra = {}) {
+  return getAuthHeadersWithRefresh(extra, false);
+}
+
+async function getAuthHeadersWithRefresh(extra = {}, forceRefresh = false) {
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("AUTH_REQUIRED");
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(forceRefresh);
   return {
     ...extra,
     Authorization: `Bearer ${token}`,
@@ -153,14 +157,17 @@ export async function authFetchJson(url, options = {}) {
   const finalUrl = buildApiUrl(url);
   const requestHasBody = Object.prototype.hasOwnProperty.call(requestOptions, "body") && requestOptions.body != null;
   const baseHeaders = requestHasBody ? { "Content-Type": "application/json" } : {};
-  const headers = auth ? await getAuthHeaders(baseHeaders) : baseHeaders;
-  const requestInit = {
-    ...requestOptions,
-    headers: {
-      ...headers,
-      ...(requestOptions.headers || {}),
-    },
+  const buildRequestInit = async (forceRefresh = false) => {
+    const headers = auth ? await getAuthHeadersWithRefresh(baseHeaders, forceRefresh) : baseHeaders;
+    return {
+      ...requestOptions,
+      headers: {
+        ...headers,
+        ...(requestOptions.headers || {}),
+      },
+    };
   };
+  let requestInit = await buildRequestInit(false);
   const contentType = String(requestInit.headers?.["Content-Type"] || requestInit.headers?.["content-type"] || "").toLowerCase();
   const body = requestInit.body;
   const shouldSerializeJson =
@@ -252,8 +259,40 @@ export async function authFetchJson(url, options = {}) {
     }
   }
   const data = await parseJsonSafe(response);
-  if (response.status === 401) {
-    throw buildAuthForbiddenError(response, data);
+  const backendAuthError = response.status === 401 || (response.status === 403 && /^AUTH_/i.test(String(data?.error || data?.code || "").trim()));
+  if (backendAuthError && auth) {
+    try {
+      requestInit = await buildRequestInit(true);
+      const retryResponse = await fetch(finalUrl, requestInit);
+      const retryData = await parseJsonSafe(retryResponse);
+      if (retryResponse.ok) {
+        return retryData;
+      }
+      if (retryResponse.status === 401 || (retryResponse.status === 403 && /^AUTH_/i.test(String(retryData?.error || retryData?.code || "").trim()))) {
+        throw buildAuthForbiddenError(retryResponse, retryData);
+      }
+      if (!retryResponse.ok) {
+        const retryIsMontageQueueUnavailable = retryResponse.status === 503 && retryData && (retryData.error === 'montage_export_queue_unavailable' || retryData.code === 'montage_export_queue_unavailable');
+        const retryIsMontageBusyWithExport = retryResponse.status === 429 && retryData && (retryData.error === 'backend_busy_with_export' || retryData.code === 'backend_busy_with_export');
+        if (!retryIsMontageQueueUnavailable && !retryIsMontageBusyWithExport) {
+          try {
+            console.error("[api-client] request failed", {
+              url: finalUrl,
+              method: String(requestInit?.method || "GET").toUpperCase(),
+              status: Number(retryResponse.status || 0),
+              error: retryData?.error || null,
+              detail: retryData || null
+            });
+          } catch (_) {
+            // no-op
+          }
+        }
+        throw buildHttpError(retryResponse, retryData);
+      }
+      return retryData;
+    } catch (retryError) {
+      throw retryError;
+    }
   }
   if (response.status === 403) {
     const backendError = String(data?.error || data?.error?.message || "").trim();
