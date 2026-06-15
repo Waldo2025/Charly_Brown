@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.103",
-  "build": "2026-1.0.10.103",
+  "version": "1.0.10.104",
+  "build": "2026-1.0.10.104",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El export de montage ahora tolera un 404 job_not_found transitorio con reintentos cortos y recupera el snapshot reciente del backend antes de declarar perdido el job.",
@@ -31,7 +31,8 @@
     "Corregido: proxy-media ahora conserva CORS incluso cuando el upstream de Storage responde 403/404/502/503, para que el navegador no oculte el error real detrás de un bloqueo de CORS.",
     "Corregido: El store de jobs de export ahora elimina valores undefined antes de escribir en Firestore, evitando que el backend se caiga con el error 'Cannot use undefined as a Firestore value' durante el render de escenas.",
     "Corregido: La persistencia interna del job de montage export en backend/server.js también elimina valores undefined antes de escribir a disco o a Firestore, evitando que el worker se vuelva a caer por currentDownloadUrl u otros campos opcionales.",
-    "Corregido: La creación inicial del job de montage export ahora también limpia undefined anidados antes de escribir en Firestore."
+    "Corregido: La creación inicial del job de montage export ahora también limpia undefined anidados antes de escribir en Firestore.",
+    "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas."
   ],
-  "cache_version": "2026-1.0.10.103"
+  "cache_version": "2026-1.0.10.104"
 }

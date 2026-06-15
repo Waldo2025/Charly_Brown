@@ -6454,7 +6454,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
       return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
     })();
     if (firebaseGsUrl) {
-      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}&noRange=1`);
+      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(firebaseGsUrl)}`);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
       return proxyUrl;
@@ -6473,7 +6473,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
     const parsed = new URL(clean, window.location.origin);
     const isStorageUrl = /googleapis\.com|firebasestorage\.app/i.test(String(parsed.hostname || ""));
     if (isStorageUrl) {
-      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}&noRange=1`);
+      let proxyUrl = buildApiUrlPreferRemote(`/api/assets/proxy-media?url=${encodeURIComponent(clean)}`);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp) proxyUrl += `&u=${encodeURIComponent(resolveDateIso(timestamp))}`;
       return proxyUrl;

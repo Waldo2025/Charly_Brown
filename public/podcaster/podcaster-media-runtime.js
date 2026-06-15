@@ -177,7 +177,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const cleanStoragePath = String(storagePath || "").trim();
     const proxyPath = kind === "image" ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
     const timestamp = options.updatedAt || options.timestamp || "";
-    const noRange = options.noRange !== false;
+    const noRange = options.noRange === true;
     if (clean) {
       try {
         const parsed = new URL(clean, window.location.origin);
@@ -222,7 +222,7 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const downloadUrl = String(source?.downloadUrl || "").trim();
     const key = buildDialogueVideoSourceKey(sessionId, rowId, storagePath, downloadUrl);
     if (key) staleDialogueVideoSourceKeys.add(key);
-    const storageProxyUrl = storagePath ? buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}&noRange=1`) : "";
+    const storageProxyUrl = storagePath ? buildMediaProxyUrl(`/api/assets/proxy-media?storagePath=${encodeURIComponent(storagePath)}`) : "";
     const downloadProxyUrl = downloadUrl ? deps.resolveStorageVideoUrl?.(downloadUrl, "") : "";
     [storageProxyUrl, downloadProxyUrl].filter(Boolean).forEach((url) => {
       markStaleProxyMediaUrl(url, reason, {

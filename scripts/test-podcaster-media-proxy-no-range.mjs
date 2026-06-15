@@ -16,8 +16,8 @@ const backendSource = fs.readFileSync(
 
 assert.match(
   frontendRuntime,
-  /proxyPath\}\?storagePath=\$\{encodeURIComponent\(cleanStoragePath\)\}\$\{noRange \? "&noRange=1" : ""\}/,
-  "Los proxies de media deben desactivar Range por defecto para evitar 206 problemáticos en el navegador."
+  /const noRange = options\.noRange === true;[\s\S]*proxyPath\}\?storagePath=\$\{encodeURIComponent\(cleanStoragePath\)\}\$\{noRange \? "&noRange=1" : ""\}/,
+  "Los proxies de media deben dejar Range habilitado por defecto y solo desactivarlo bajo pedido."
 );
 
 assert.match(
@@ -28,8 +28,8 @@ assert.match(
 
 assert.match(
   podcasterSource,
-  /\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(clean\)\}&noRange=1/,
-  "Las URLs de proxy-media deben incluir noRange=1 para los assets remotos."
+  /\/api\/assets\/proxy-media\?url=\$\{encodeURIComponent\(clean\)\}(?!&noRange=1)/,
+  "Las URLs de proxy-media del podcaster deben dejar Range habilitado por defecto."
 );
 
 assert.match(
