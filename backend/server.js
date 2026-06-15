@@ -5414,6 +5414,9 @@ app.use("/api/podcaster", async (req, res, next) => {
   if (req.method === "GET" && String(req.path || "").trim() === "/montage/export-status") {
     return next();
   }
+  if (req.method === "GET" && String(req.path || "").trim() === "/scene-library/list") {
+    return next();
+  }
   try {
     req.authContext = await verifyFirebaseBearer(req);
     return next();
