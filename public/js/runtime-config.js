@@ -16,3 +16,9 @@ window.__CHARLY_CONFIG__ = Object.assign(
   },
   window.__CHARLY_CONFIG__ || {}
 );
+
+if (__charlyIsLocalRuntime) {
+  window.__CHARLY_CONFIG__.apiBaseUrl = "http://127.0.0.1:8787/api";
+} else {
+  window.__CHARLY_CONFIG__.apiBaseUrl = "/api";
+}

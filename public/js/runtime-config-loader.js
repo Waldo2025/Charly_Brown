@@ -1,7 +1,7 @@
 (function () {
   if (window.__cbRuntimeConfigLoaderInit) return;
   window.__cbRuntimeConfigLoaderInit = true;
-  const runtimeConfigVersion = "2026-06-15.7";
+  const runtimeConfigVersion = "2026-06-15.8";
 
   const host = String(window.location.hostname || "").toLowerCase();
   const isLocalHost = host === "localhost" || host === "127.0.0.1";

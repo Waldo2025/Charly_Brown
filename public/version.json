@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.110",
-  "build": "2026-1.0.10.110",
+  "version": "1.0.10.111",
+  "build": "2026-1.0.10.111",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: En producción el runtime de API ahora usa el proxy same-origin /api en vez de apuntar directo al dominio de Render, eliminando el CORS del polling de montage export cuando Render responde 503.",
@@ -28,6 +28,7 @@
     "Corregido: El polling del export en podcaster ya no trata como fallo fatal las caídas de red transitorias como ERR_NETWORK_CHANGED o Failed to fetch; ahora reintenta con backoff y reanuda cuando vuelve la conexión.",
     "Corregido: El cliente HTTP de Podcaster ahora fuerza un refresh de token Firebase cuando el backend responde 401/403 de auth, evitando que usuarios con sesión válida se queden sin cargar sesiones o librerías por tokens viejos.",
     "Corregido: El cliente HTTP de Podcaster ahora se importa a través de un wrapper versionado, para que el navegador no reutilice un bundle viejo de api-client.js aunque cambie solo version.json.",
+    "Corregido: El runtime-config de producción ahora fuerza apiBaseUrl a /api en vez de heredar una URL vieja de Render desde una config previa, evitando que sessions/list vuelva al backend remoto.",
     "Mejorado: Si el backend ya tiene un export activo, el modal de podcaster ahora puede retomar automáticamente el job persistido en vez de disparar un segundo POST que devuelve 429 backend_busy_with_export.",
     "Corregido: El logo de marca del export final ya no puede dejar FFmpeg colgado; el overlay ahora termina con shortest=1 para que el render cierre cuando termina el video base.",
     "Corregido: Si el backend devuelve job_not_found al consultar el export, el frontend ya no insiste con el mismo jobId: limpia el estado activo y pide iniciar una exportación nueva.",
@@ -40,5 +41,5 @@
     "Corregido: El podcaster dejó de forzar noRange=1 en las URLs de video/audio del playback, para que el preview y los `<video>` normales usen Range estándar y eviten errores HTTP/2 al cargar escenas pesadas.",
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real."
   ],
-  "cache_version": "2026-1.0.10.110"
+  "cache_version": "2026-1.0.10.111"
 }
