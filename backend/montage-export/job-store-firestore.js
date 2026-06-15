@@ -13,6 +13,23 @@ function toIsoDate(value) {
   return parsed.toISOString();
 }
 
+function stripUndefinedDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)).filter((item) => item !== undefined);
+  }
+  if (!value || typeof value !== "object") {
+    return value === undefined ? undefined : value;
+  }
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    const clean = stripUndefinedDeep(item);
+    if (clean !== undefined) {
+      result[key] = clean;
+    }
+  }
+  return result;
+}
+
 function createMontageExportJobStore({
   db,
   collectionName = DEFAULT_COLLECTION,
@@ -92,27 +109,28 @@ function createMontageExportJobStore({
       const ref = collection().doc(cleanJobId);
       const snap = await ref.get();
       const existing = snap.exists ? (snap.data() || {}) : { jobId: cleanJobId };
-      const job = normalizeBase(existing, patch);
+      const cleanPatch = stripUndefinedDeep(patch) || {};
+      const job = normalizeBase(existing, cleanPatch);
       if (patch && Object.prototype.hasOwnProperty.call(patch, "warnings")) {
-        job.warnings = Array.isArray(patch.warnings) ? patch.warnings : [];
+        job.warnings = Array.isArray(cleanPatch.warnings) ? cleanPatch.warnings : [];
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "result")) {
-        job.result = patch.result && typeof patch.result === "object" ? patch.result : null;
+        job.result = cleanPatch.result && typeof cleanPatch.result === "object" ? cleanPatch.result : null;
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "error")) {
-        job.error = patch.error && typeof patch.error === "object" ? patch.error : null;
+        job.error = cleanPatch.error && typeof cleanPatch.error === "object" ? cleanPatch.error : null;
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "request")) {
-        job.request = patch.request && typeof patch.request === "object" ? patch.request : null;
+        job.request = cleanPatch.request && typeof cleanPatch.request === "object" ? cleanPatch.request : null;
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "failedSceneIndex")) {
-        job.failedSceneIndex = Math.max(0, Math.round(Number(patch.failedSceneIndex) || 0));
+        job.failedSceneIndex = Math.max(0, Math.round(Number(cleanPatch.failedSceneIndex) || 0));
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "failedRowId")) {
-        job.failedRowId = String(patch.failedRowId || "").trim();
+        job.failedRowId = String(cleanPatch.failedRowId || "").trim();
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, "failedSubstage")) {
-        job.failedSubstage = String(patch.failedSubstage || "").trim();
+        job.failedSubstage = String(cleanPatch.failedSubstage || "").trim();
       }
       await ref.set(job, { merge: true });
       return job;
