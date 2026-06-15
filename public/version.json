@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.98",
-  "build": "2026-1.0.10.98",
+  "version": "1.0.10.99",
+  "build": "2026-1.0.10.99",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El export de montage ahora tolera un 404 job_not_found transitorio con reintentos cortos y recupera el snapshot reciente del backend antes de declarar perdido el job.",
@@ -26,7 +26,8 @@
     "Corregido: El polling del export en podcaster ya no trata como fallo fatal las caídas de red transitorias como ERR_NETWORK_CHANGED o Failed to fetch; ahora reintenta con backoff y reanuda cuando vuelve la conexión.",
     "Mejorado: Si el backend ya tiene un export activo, el modal de podcaster ahora puede retomar automáticamente el job persistido en vez de disparar un segundo POST que devuelve 429 backend_busy_with_export.",
     "Corregido: El logo de marca del export final ya no puede dejar FFmpeg colgado; el overlay ahora termina con shortest=1 para que el render cierre cuando termina el video base.",
-    "Corregido: Si el backend devuelve job_not_found al consultar el export, el frontend ya no insiste con el mismo jobId: limpia el estado activo y pide iniciar una exportación nueva."
+    "Corregido: Si el backend devuelve job_not_found al consultar el export, el frontend ya no insiste con el mismo jobId: limpia el estado activo y pide iniciar una exportación nueva.",
+    "Corregido: El frontend de podcaster ya no carga el bundle viejo de montage export; se actualizó el cache-buster en podcaster.html y podcaster.js para evitar que siga ejecutándose una versión antigua."
   ],
-  "cache_version": "2026-1.0.10.98"
+  "cache_version": "2026-1.0.10.99"
 }
