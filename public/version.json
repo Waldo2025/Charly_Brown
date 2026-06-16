@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.145",
-  "build": "2026-1.0.10.145",
+  "version": "1.0.10.146",
+  "build": "2026-1.0.10.146",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El backend de export de Podcaster ahora detecta jobs estancados sin heartbeat del worker y devuelve un error claro en vez de dejar el seguimiento como conexión perdida indefinidamente.",
     "Actualizado: Se incrementa la versión pública y los cache-busters de Podcaster para publicar la verificación final del fix de exportación con video.",
     "Corregido: El export de montage ahora conserva el stream de video completo al aplicar overlays estáticos de marca/texto, evitando MP4 con audio pero sin video visible.",
     "Corregido: En móvil el footer de Podcaster ahora queda fijo al borde inferior y el transport se redistribuye sin recortar las secciones is-middle y corner.",
@@ -70,5 +71,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.145"
+  "cache_version": "2026-1.0.10.146"
 }

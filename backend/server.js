@@ -1334,6 +1334,10 @@ const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = Math.max(
   60 * 1000,
   Number(process.env.MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS || 6 * 60 * 1000) || 6 * 60 * 1000
 );
+const MONTAGE_EXPORT_STALE_HEARTBEAT_MS = Math.max(
+  10 * 60 * 1000,
+  MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS + (2 * 60 * 1000)
+);
 const montageExportJobs = new Map();
 
 function getMontageExportJobMetaPath(jobId = "") {
@@ -1638,6 +1642,45 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
     }
     throw error;
   }
+}
+
+function getMontageExportJobHeartbeatAgeMs(job = null, nowMs = Date.now()) {
+  const source = job && typeof job === "object" ? job : null;
+  if (!source) return 0;
+  const heartbeatMs = Number(new Date(source.heartbeatAt || source.lastHeartbeatAt || source.updatedAt || 0).getTime() || 0) || 0;
+  if (!heartbeatMs) return 0;
+  return Math.max(0, Number(nowMs || Date.now()) - heartbeatMs);
+}
+
+function isMontageExportJobStale(job = null, nowMs = Date.now()) {
+  const status = String(job?.status || "").trim().toLowerCase();
+  if (!["queued", "running"].includes(status)) return false;
+  const heartbeatAgeMs = getMontageExportJobHeartbeatAgeMs(job, nowMs);
+  return heartbeatAgeMs > MONTAGE_EXPORT_STALE_HEARTBEAT_MS;
+}
+
+function buildStaleMontageExportJobPatch(job = null, nowMs = Date.now()) {
+  const heartbeatAgeMs = getMontageExportJobHeartbeatAgeMs(job, nowMs);
+  return {
+    status: "error",
+    stage: "error",
+    progress: Math.max(0.02, Math.min(0.98, Number(job?.progress || 0) || 0)),
+    hint: "El worker perdió el heartbeat del export. Inicia una nueva exportación.",
+    error: {
+      error: "montage_export_worker_stalled",
+      code: "montage_export_worker_stalled",
+      message: "El worker dejó de reportar progreso durante demasiado tiempo.",
+      detail: {
+        heartbeatAgeMs,
+        staleThresholdMs: MONTAGE_EXPORT_STALE_HEARTBEAT_MS,
+        lastHeartbeatAt: String(job?.heartbeatAt || job?.lastHeartbeatAt || job?.updatedAt || "").trim(),
+        stage: String(job?.stage || "").trim(),
+        sceneSubstage: String(job?.sceneSubstage || "").trim(),
+        currentSceneIndex: Math.max(0, Math.round(Number(job?.currentSceneIndex || 0) || 0)),
+        totalScenes: Math.max(0, Math.round(Number(job?.totalScenes || 0) || 0))
+      }
+    }
+  };
 }
 
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
@@ -11540,6 +11583,30 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
         }
       }
       return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+    }
+    if (isMontageExportJobStale(job) && !(getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId)) {
+      const stalePatch = buildStaleMontageExportJobPatch(job);
+      console.warn("[backend][montage-export] export-status marking stale job", {
+        jobId,
+        heartbeatAgeMs: stalePatch.error?.detail?.heartbeatAgeMs || 0,
+        staleThresholdMs: stalePatch.error?.detail?.staleThresholdMs || MONTAGE_EXPORT_STALE_HEARTBEAT_MS,
+        stage: String(job?.stage || "").trim() || null,
+        sceneSubstage: String(job?.sceneSubstage || "").trim() || null
+      });
+      const staleJob = {
+        ...job,
+        ...stalePatch,
+        updatedAt: new Date().toISOString(),
+        heartbeatAt: String(job?.heartbeatAt || job?.lastHeartbeatAt || job?.updatedAt || "").trim()
+      };
+      upsertMontageExportJob(jobId, staleJob);
+      await montageExportJobStore.updateJob(jobId, stalePatch).catch((error) => {
+        console.warn("[backend][montage-export] stale job persistence failed", {
+          jobId,
+          message: String(error?.message || error)
+        });
+      });
+      return res.status(200).json(sanitizeMontageExportJobPublicPayload(staleJob));
     }
     return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
   } catch (error) {
