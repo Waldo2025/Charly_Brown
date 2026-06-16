@@ -2217,7 +2217,7 @@ function stripInlineMontageMediaRecord(record = null) {
   if (!record || typeof record !== "object") return record;
   const clean = { ...record };
   const hasExplicitSource = Boolean(String(clean.storagePath || "").trim() || String(clean.url || "").trim() || String(clean.downloadUrl || "").trim());
-  if (hasExplicitSource || String(clean.dataUrl || "").trim().startsWith("data:")) {
+  if (hasExplicitSource) {
     clean.dataUrl = "";
     clean.localDataUrl = "";
   }

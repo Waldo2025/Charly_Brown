@@ -245,3 +245,28 @@ test("montage export strips inline media before submission", () => {
   assert.equal(stripped.onScreenTextRenderedSegments.length, 0);
   assert.match(String(payload.entries[0].video.dataUrl || ""), /^data:video\/mp4;base64,/);
 });
+
+test("montage export preserves inline-only media sources", () => {
+  const payload = {
+    entries: [
+      {
+        rowId: "row-inline",
+        video: {
+          dataUrl: "data:video/mp4;base64,AAAA",
+          localDataUrl: "data:video/mp4;base64,BBBB"
+        },
+        audio: {
+          dataUrl: "data:audio/mpeg;base64,CCCC",
+          localDataUrl: "data:audio/mpeg;base64,DDDD"
+        }
+      }
+    ]
+  };
+
+  const stripped = context.stripMontageExportSubmissionPayload(payload);
+
+  assert.equal(stripped.entries[0].video.dataUrl, "data:video/mp4;base64,AAAA");
+  assert.equal(stripped.entries[0].video.localDataUrl, "data:video/mp4;base64,BBBB");
+  assert.equal(stripped.entries[0].audio.dataUrl, "data:audio/mpeg;base64,CCCC");
+  assert.equal(stripped.entries[0].audio.localDataUrl, "data:audio/mpeg;base64,DDDD");
+});
