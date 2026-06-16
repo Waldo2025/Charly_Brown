@@ -2214,6 +2214,17 @@ async function inlineMontageExportPayloadMedia(payload = {}) {
 }
 
 async function buildMontageExportPayloadForSubmission(session = null) {
+  const activeSession = session || window.getActiveSession?.() || null;
+  if (activeSession) {
+    try {
+      window.ensureOnScreenTextClipsByRowId?.(activeSession, { persist: true });
+      window.ensureOnScreenTextLayoutByRowId?.(activeSession, { persist: true });
+    } catch (error) {
+      console.warn("[podcaster][montage-export][text-raster] preflight_sync_failed", {
+        message: String(error?.message || error || "").trim()
+      });
+    }
+  }
   const prepared = buildMontageExportPayload(session);
   if (!prepared?.ok || !prepared?.payload) return prepared;
   await hydrateMontageExportPayloadMedia(prepared.payload);
@@ -2676,7 +2687,13 @@ export async function runMontageExport() {
       entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
       onScreenTextSegments: Array.isArray(prepared?.payload?.onScreenTextTimeline?.segments) ? prepared.payload.onScreenTextTimeline.segments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(prepared?.payload?.onScreenTextRenderedSegments) ? prepared.payload.onScreenTextRenderedSegments.length : 0,
-      exportMode: String(window.montageExportState.exportMode || "").trim() || undefined
+      exportMode: String(window.montageExportState.exportMode || "").trim() || undefined,
+      onlyAudio: window.montageExportState.onlyAudio === true,
+      includeLogo: window.montageExportState.includeLogo !== false,
+      partyKaraoke: window.montageExportState.partyKaraoke !== false,
+      activeRowId: String(window.podcastVideoState?.activeRowId || "").trim() || undefined,
+      sessionRowCount: Array.isArray(session?.script?.rows) ? session.script.rows.length : 0,
+      runtimeEntryCount: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0
     });
     if (!prepared?.ok) {
       setMontageExportProgress(null);

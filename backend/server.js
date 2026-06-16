@@ -10916,11 +10916,25 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       finalOutPath = mixedOutPath;
     }
 
+    const renderedTextSegments = Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments : [];
+    const hasRasterizedTextFrames = renderedTextSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+    const hasBrandOverlay = Boolean(input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath));
     const hasFinalVisualPass = Boolean(
       (input.onScreenTextSettings && input.onScreenTextSegments.length)
+      || hasRasterizedTextFrames
       || (Array.isArray(input.overlayCards) && input.overlayCards.length)
       || (input.exportMode === "review" && exportedEntries.length)
     );
+    console.info("[backend][montage-export][visual-pass-decision]", {
+      hasFinalVisualPass,
+      hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
+      hasRasterizedTextFrames,
+      hasBrandOverlay,
+      overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+      exportMode: input.exportMode,
+      entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
+      renderedTextSegmentCount: renderedTextSegments.length
+    });
     if (hasFinalVisualPass) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const isReelExport = input.reelModeEnabled === true || isMontageReelResolution(input.resolution);
@@ -10939,7 +10953,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
             : input.onScreenTextSettings?.fontSizePx
         };
-        const renderedSegments = Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments : [];
+        const renderedSegments = renderedTextSegments;
         const hasRasterizedText = input.exportMode !== "review"
           && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
           && renderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
@@ -11289,6 +11303,8 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
       overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
       partyKaraoke: input.partyKaraoke !== false,
+      onlyAudio: input.onlyAudio === true,
+      includeLogo: input.brandOverlay?.enabled === true,
       exportMode: input.exportMode
     });
     validateMontageExportRequest(input);
