@@ -11072,44 +11072,69 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 });
 
 app.get("/api/podcaster/montage/export-status", async (req, res) => {
-  const jobId = clampExportId(req.query?.jobId || "");
-  if (!jobId) return res.status(400).json({ error: "Falta jobId." });
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-  res.setHeader("Surrogate-Control", "no-store");
+  try {
+    const jobId = clampExportId(req.query?.jobId || "");
+    if (!jobId) return res.status(400).json({ error: "Falta jobId." });
+    applyAssetCorsHeaders(req, res);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
 
-  const job = await resolveMontageExportJobSnapshot(jobId).catch((error) => {
-    const status = Number(error?.status || 500) || 500;
-    const timeoutFallback = status === 202 || String(error?.code || "").trim() === "montage_export_status_timeout";
-    if (timeoutFallback) {
-      return {
-        ok: true,
+    const job = await resolveMontageExportJobSnapshot(jobId).catch((error) => {
+      const status = Number(error?.status || 500) || 500;
+      const errorCode = String(error?.code || "").trim();
+      const timeoutFallback = status === 202 || errorCode === "montage_export_status_timeout";
+      if (timeoutFallback || status >= 500) {
+        console.warn("[backend][montage-export] export-status degraded fallback", {
+          jobId,
+          status: status || null,
+          code: errorCode || null,
+          message: String(error?.message || error)
+        });
+        return {
+          ok: true,
+          jobId,
+          status: "running",
+          stage: "queued",
+          progress: 0,
+          hint: "Sincronizando estado del export.",
+          degraded: true,
+          degradedStatus: status >= 500 ? status : 202
+        };
+      }
+      console.warn("[backend][montage-export] export-status fallback", {
         jobId,
-        status: "running",
-        stage: "queued",
-        progress: 0,
-        hint: "Sincronizando estado del export.",
-        degraded: true
-      };
+        status: status || null,
+        code: errorCode || null,
+        message: String(error?.message || error)
+      });
+      return null;
+    });
+
+    if (!job) {
+      if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
+        releaseHeavyWorkSlot("montage_export", jobId);
+        console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
+      }
+      return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
     }
-    console.warn("[backend][montage-export] export-status fallback", {
-      jobId,
-      status: status || null,
+    return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
+  } catch (error) {
+    const jobId = clampExportId(req.query?.jobId || "");
+    applyAssetCorsHeaders(req, res);
+    console.error("[backend][montage-export] export-status unhandled error", {
+      jobId: jobId || null,
+      status: Number(error?.status || 500) || 500,
       code: String(error?.code || "").trim() || null,
       message: String(error?.message || error)
     });
-    return null;
-  });
-
-  if (!job) {
-    if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
-      releaseHeavyWorkSlot("montage_export", jobId);
-      console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
-    }
-    return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+    return res.status(503).json({
+      error: "montage_export_status_unavailable",
+      code: String(error?.code || "").trim() || undefined,
+      degraded: true
+    });
   }
-  return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
 });
 
 app.post("/api/podcaster/montage/export-cancel", async (req, res) => {
