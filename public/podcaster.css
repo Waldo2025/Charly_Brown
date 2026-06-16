@@ -10818,3 +10818,322 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   gap: 4px;
   /* Compatibility for --pod-scene-media-scale */
 }
+
+@media (max-width: 768px) {
+  .podcaster-app {
+    top: var(--cb-header-mobile-height, 56px);
+    height: calc(100dvh - var(--cb-header-mobile-height, 56px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #podcastVideoShell.floating-panel-card {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #podcastVideoShell .floating-panel-head {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  #podcastVideoShell .floating-panel-head .floating-panel-session-title {
+    order: 3;
+    flex-basis: 100%;
+    margin: 0;
+    max-width: none;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  #podcastVideoShell .floating-panel-head .composer-mode-switch {
+    flex: 1 1 auto;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .podcast-studio-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: visible;
+    height: auto;
+    padding-bottom: 8px;
+  }
+
+  .podcast-studio-main {
+    padding-right: 0;
+    gap: 12px;
+    order: 1;
+  }
+
+  .podcast-video-stage {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .podcast-video-library {
+    width: 100%;
+    max-height: 240px;
+    padding: 10px;
+    gap: 10px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--pod-border) 60%, transparent 40%);
+    overflow: hidden;
+  }
+
+  .podcast-video-library-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .podcast-video-library-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .podcast-scene-library-color-filter {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    justify-self: stretch;
+  }
+
+  .podcast-scene-library-list {
+    max-height: 180px;
+    overflow: auto;
+    padding-right: 0;
+  }
+
+  .podcast-video-preview-shell {
+    gap: 8px;
+  }
+
+  .podcast-preview-left-toolbar {
+    position: static;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding: 8px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+
+  .podcast-preview-toolbar-btn,
+  .podcast-preview-left-toolbar .podcast-video-library-collapsed-handle,
+  .podcast-preview-left-toolbar .podcast-overlay-card-add-btn {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    border-radius: 10px;
+  }
+
+  .podcast-video-preview {
+    width: 100%;
+    max-height: min(52vh, 420px);
+    border-radius: 16px;
+  }
+
+  .podcast-stage-brand-mark {
+    top: 10px;
+    right: 10px;
+    max-width: 36px;
+  }
+
+  .podcast-stage-fullscreen-btn {
+    right: 10px;
+    bottom: 10px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .podcast-stage-resize-handle {
+    display: none;
+  }
+
+  .podcast-studio-tracks {
+    min-height: 0;
+    padding: 10px;
+    gap: 10px;
+    border-radius: 14px;
+    overflow: visible;
+  }
+
+  .podcast-studio-track-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .podcast-studio-track-head-left,
+  .podcast-studio-track-head-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .podcast-studio-track-head-right {
+    margin-left: 0;
+  }
+
+  .podcast-timeline-view-toggle {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .podcast-timeline-ruler {
+    height: 14px;
+  }
+
+  .podcast-timeline-ruler-zoom-inner {
+    width: min(100%, 180px);
+  }
+
+  .podcast-video-timeline {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+
+  .podcast-video-timeline-canvas {
+    --pod-track-label-width: 92px;
+    min-width: max-content;
+  }
+
+  .podcast-video-track-row {
+    grid-template-columns: 92px minmax(0, max-content);
+  }
+
+  .podcast-video-track-label {
+    width: 92px;
+    min-width: 92px;
+    max-width: 92px;
+    min-height: 72px;
+    height: auto;
+    padding: 8px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .podcast-video-track-lane {
+    min-height: 84px;
+  }
+
+  .podcast-video-transport {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .podcast-video-transport-group,
+  .podcast-video-transport-corner {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .podcast-video-transport-bundle {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .podcast-video-secondary-controls,
+  .studio-speed-wrap,
+  .podcast-studio-scrubber {
+    width: 100%;
+  }
+
+  .podcast-studio-scrubber {
+    flex-wrap: wrap;
+    padding: 10px;
+  }
+
+  .podcast-studio-scrubber span {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .podcast-studio-footer {
+    gap: 10px;
+    padding-top: 12px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  }
+
+  .podcast-studio-footer-header {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .podcast-studio-footer-title {
+    width: 100%;
+    font-size: 10px;
+  }
+
+  .podcast-portrait-strip {
+    grid-auto-columns: minmax(160px, 72vw);
+  }
+
+  .podcast-studio-note {
+    font-size: 10px;
+  }
+
+  .podcast-studio-inspector {
+    width: 100%;
+    max-inline-size: none;
+    min-inline-size: 0;
+    order: 2;
+    padding: 10px;
+  }
+
+  .podcast-studio-inspector-resize-handle {
+    display: none;
+  }
+
+  .podcast-studio-layout .podcast-studio-inspector-collapsed-handle {
+    top: auto;
+    bottom: 12px;
+    right: 12px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .podcast-studio-layout.is-inspector-collapsed .podcast-studio-inspector {
+    display: none;
+  }
+
+  .podcast-studio-layout.is-inspector-collapsed .podcast-studio-main {
+    order: 1;
+  }
+
+  .podcast-studio-layout.is-inspector-collapsed .podcast-studio-inspector-collapsed-handle {
+    position: absolute;
+  }
+
+  .montage-export-panel {
+    width: calc(100vw - 16px);
+    max-width: none;
+  }
+
+  .montage-export-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .montage-export-preview {
+    min-width: 0;
+  }
+
+  .montage-export-preview-stage {
+    max-height: 44vh;
+  }
+
+  .montage-export-preview-transport {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
