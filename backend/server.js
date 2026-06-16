@@ -8355,9 +8355,18 @@ function deriveStoragePathFromMediaSource(url = "", storagePath = "") {
   return normalizeStorageFilePath(parseFirebaseStorageGoogleApisObjectUrl(url)?.objectPath || "");
 }
 
-async function downloadStoragePathToFile(storagePath = "", outPath = "") {
+async function downloadStoragePathToFile(storagePath = "", outPath = "", options = {}) {
   const cleanPath = normalizeStorageFilePath(storagePath);
   const targetPath = String(outPath || "").trim();
+  const shouldAbort = typeof options?.shouldAbort === "function" ? options.shouldAbort : null;
+  const isAborted = () => {
+    if (!shouldAbort) return false;
+    try {
+      return shouldAbort() === true;
+    } catch (_) {
+      return false;
+    }
+  };
   if (!cleanPath || !targetPath) {
     const err = new Error("missing_download_path");
     err.code = "missing_download_path";
@@ -8369,6 +8378,12 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
   let lastMetaError = null;
   for (const bucket of buckets) {
     if (!bucket) continue;
+    if (isAborted()) {
+      const err = new Error("montage_export_cancelled");
+      err.code = "montage_export_cancelled";
+      err.status = 499;
+      throw err;
+    }
     const file = bucket.file(cleanPath);
     try {
       // Validate object metadata first so a wrong/missing bucket is skipped
@@ -8414,11 +8429,18 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
         const writeStream = fs.createWriteStream(targetPath);
         let settled = false;
         let idleTimer = null;
+        let abortTimer = null;
 
         const clearIdleTimer = () => {
           if (idleTimer) {
             clearTimeout(idleTimer);
             idleTimer = null;
+          }
+        };
+        const clearAbortTimer = () => {
+          if (abortTimer) {
+            clearInterval(abortTimer);
+            abortTimer = null;
           }
         };
 
@@ -8442,6 +8464,7 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
           if (settled) return;
           settled = true;
           clearIdleTimer();
+          clearAbortTimer();
           if (error) {
             reject(error);
             return;
@@ -8450,7 +8473,36 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
         };
 
         armIdleTimer();
+        if (shouldAbort) {
+          abortTimer = setInterval(() => {
+            if (settled || !isAborted()) return;
+            const err = new Error("montage_export_cancelled");
+            err.code = "montage_export_cancelled";
+            err.status = 499;
+            err.detail = {
+              storagePath: cleanPath,
+              bucket: String(bucket?.name || "").trim()
+            };
+            try { readStream.destroy(err); } catch (_) {}
+            try { writeStream.destroy(err); } catch (_) {}
+            finish(err);
+          }, 250);
+          if (typeof abortTimer.unref === "function") abortTimer.unref();
+        }
         readStream.on("data", () => {
+          if (isAborted()) {
+            const err = new Error("montage_export_cancelled");
+            err.code = "montage_export_cancelled";
+            err.status = 499;
+            err.detail = {
+              storagePath: cleanPath,
+              bucket: String(bucket?.name || "").trim()
+            };
+            try { readStream.destroy(err); } catch (_) {}
+            try { writeStream.destroy(err); } catch (_) {}
+            finish(err);
+            return;
+          }
           armIdleTimer();
         });
         readStream.on("error", (error) => finish(error));
@@ -8502,9 +8554,18 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "") {
   throw err;
 }
 
-async function downloadUrlToFile(url = "", outPath = "") {
+async function downloadUrlToFile(url = "", outPath = "", options = {}) {
   const cleanUrl = String(url || "").trim();
   const targetPath = String(outPath || "").trim();
+  const shouldAbort = typeof options?.shouldAbort === "function" ? options.shouldAbort : null;
+  const isAborted = () => {
+    if (!shouldAbort) return false;
+    try {
+      return shouldAbort() === true;
+    } catch (_) {
+      return false;
+    }
+  };
   if (!cleanUrl || !targetPath) {
     const err = new Error("missing_download_url");
     err.code = "missing_download_url";
@@ -8536,6 +8597,12 @@ async function downloadUrlToFile(url = "", outPath = "") {
 
   let firebaseAdminAttempted = false;
   let firebaseAdminFallback = "";
+  if (isAborted()) {
+    const err = new Error("montage_export_cancelled");
+    err.code = "montage_export_cancelled";
+    err.status = 499;
+    throw err;
+  }
 
   // Prefer Firebase Admin SDK for Firebase Storage object URLs to avoid
   // depending on public download tokens that may expire/return 403.
@@ -8547,7 +8614,7 @@ async function downloadUrlToFile(url = "", outPath = "") {
         bucket: String(firebaseObject.bucket || "").trim(),
         objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
       });
-      await downloadStoragePathToFile(firebaseObject.objectPath, targetPath);
+      await downloadStoragePathToFile(firebaseObject.objectPath, targetPath, { shouldAbort });
       console.info("[backend][download] admin download ok", {
         objectPath: String(firebaseObject.objectPath || "").slice(0, 900)
       });
@@ -8575,7 +8642,29 @@ async function downloadUrlToFile(url = "", outPath = "") {
     });
   }
 
-  const upstream = await fetchCompat(cleanUrl, { method: "GET" });
+  const controller = shouldAbort ? new AbortController() : null;
+  let abortTimer = null;
+  if (controller) {
+    abortTimer = setInterval(() => {
+      if (!isAborted()) return;
+      try { controller.abort(); } catch (_) {}
+    }, 250);
+    if (typeof abortTimer.unref === "function") abortTimer.unref();
+  }
+  let upstream = null;
+  try {
+    upstream = await fetchCompat(cleanUrl, { method: "GET", signal: controller?.signal });
+  } catch (error) {
+    if (abortTimer) clearInterval(abortTimer);
+    if (String(error?.name || "").trim() === "AbortError" || isAborted()) {
+      const err = new Error("montage_export_cancelled");
+      err.code = "montage_export_cancelled";
+      err.status = 499;
+      throw err;
+    }
+    throw error;
+  }
+  if (abortTimer) clearInterval(abortTimer);
   if (!upstream.ok) {
     let bodySnippet = "";
     try {
@@ -8600,7 +8689,31 @@ async function downloadUrlToFile(url = "", outPath = "") {
     err.code = "download_stream_unavailable";
     throw err;
   }
-  await pipeline(stream, fs.createWriteStream(targetPath));
+  const writeStream = fs.createWriteStream(targetPath);
+  if (controller) {
+    const pipelineAbortTimer = setInterval(() => {
+      if (!isAborted()) return;
+      try { stream.destroy(new Error("montage_export_cancelled")); } catch (_) {}
+      try { writeStream.destroy(new Error("montage_export_cancelled")); } catch (_) {}
+      try { controller.abort(); } catch (_) {}
+    }, 250);
+    if (typeof pipelineAbortTimer.unref === "function") pipelineAbortTimer.unref();
+    try {
+      await pipeline(stream, writeStream, { signal: controller.signal });
+    } catch (error) {
+      clearInterval(pipelineAbortTimer);
+      if (String(error?.name || "").trim() === "AbortError" || isAborted()) {
+        const err = new Error("montage_export_cancelled");
+        err.code = "montage_export_cancelled";
+        err.status = 499;
+        throw err;
+      }
+      throw error;
+    }
+    clearInterval(pipelineAbortTimer);
+    return targetPath;
+  }
+  await pipeline(stream, writeStream);
   return targetPath;
 }
 
@@ -8868,8 +8981,24 @@ function shouldSkipMontageEntryError(error) {
   return code === "storage_not_found" || code === "missing_download_source";
 }
 
-function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
+function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = null } = {}) {
+  const isAborted = () => {
+    if (typeof shouldAbort !== "function") return false;
+    try {
+      return shouldAbort() === true;
+    } catch (_) {
+      return false;
+    }
+  };
+  const createAbortError = (stage = "download") => {
+    const err = new Error("montage_export_cancelled");
+    err.code = "montage_export_cancelled";
+    err.status = 499;
+    err.stage = String(stage || "download").trim() || "download";
+    return err;
+  };
   return async (asset = {}, kind = "video", index = 0) => {
+    if (isAborted()) throw createAbortError("download_start");
     const storagePath = clampText(asset?.storagePath || "", 900);
     const url = String(asset?.downloadUrl || asset?.url || "").trim();
     const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
@@ -8900,6 +9029,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
         : (getVideoExtension(String(asset?.mimeType || "video/mp4")) || "mp4");
     const outPath = path.join(tmpDir, `in-${normalizedKind}-${String(index + 1).padStart(3, "0")}.${ext}`);
     const validateDownloadedAsset = async (targetPath = "") => {
+      if (isAborted()) throw createAbortError("download_validate");
       const stat = await fs.promises.stat(targetPath).catch(() => null);
       if (!stat || !stat.isFile() || Number(stat.size || 0) <= 0) {
         const err = new Error("downloaded_asset_invalid");
@@ -8942,6 +9072,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
         ...detail
       });
     };
+    if (isAborted()) throw createAbortError("download_preflight");
     const resolveAlternateOwnerStoragePaths = (pathInput = "", uidRaw = "") => {
       const clean = normalizeStorageFilePath(pathInput);
       const uidClean = String(uidRaw || "").trim();
@@ -9005,7 +9136,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
           ...assetTrace,
           branch: "direct_url"
         });
-        await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+        await downloadWithTimeout(() => downloadUrlToFile(url, outPath, { shouldAbort: isAborted }), "url_download");
         const validated = await validateDownloadedAsset(outPath);
         logDownloadFinish("direct_url", { outPath: validated });
         return validated;
@@ -9023,7 +9154,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
           ...assetTrace,
           branch: "storage_path"
         });
-        await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath), "storage_download");
+        await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath, { shouldAbort: isAborted }), "storage_download");
         const validated = await validateDownloadedAsset(outPath);
         logDownloadFinish("storage_path", { outPath: validated });
         return validated;
@@ -9039,7 +9170,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
                 altPath
               });
               // eslint-disable-next-line no-await-in-loop
-              await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath), "storage_download");
+              await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath, { shouldAbort: isAborted }), "storage_download");
               // eslint-disable-next-line no-await-in-loop
               const validated = await validateDownloadedAsset(outPath);
               logDownloadFinish("alternate_storage_path", { altPath, outPath: validated });
@@ -9059,7 +9190,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
             }
           }
           if (url && !parseFirebaseStorageGoogleApisObjectUrl(url) && !isDirectHttpUrl(url)) {
-            await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+            await downloadWithTimeout(() => downloadUrlToFile(url, outPath, { shouldAbort: isAborted }), "url_download");
             return validateDownloadedAsset(outPath);
           }
         }
@@ -9083,7 +9214,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "" } = {}) {
       ...assetTrace,
       branch: "fallback_direct_url"
     });
-    await downloadWithTimeout(() => downloadUrlToFile(url, outPath), "url_download");
+    await downloadWithTimeout(() => downloadUrlToFile(url, outPath, { shouldAbort: isAborted }), "url_download");
     const validated = await validateDownloadedAsset(outPath);
     logDownloadFinish("fallback_direct_url", { outPath: validated });
     return validated;
@@ -10008,7 +10139,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
-    const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
+    const downloadInput = createMontageAssetDownloader({ tmpDir, uid, shouldAbort });
     const intermediatePaths = [];
     const skippedEntries = [];
     const exportedEntries = [];

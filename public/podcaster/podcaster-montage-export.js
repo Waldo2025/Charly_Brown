@@ -665,7 +665,8 @@ async function requestMontageExportCancel(jobId = "") {
   try {
     await authFetchJson("/api/podcaster/montage/export-cancel", {
       method: "POST",
-      body: { jobId: cleanJobId }
+      body: { jobId: cleanJobId },
+      keepalive: true
     });
     return true;
   } catch (error) {
