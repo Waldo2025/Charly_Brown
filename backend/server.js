@@ -3918,6 +3918,15 @@ function runFfmpegCommand(args = [], context = {}) {
       reject(err);
       return;
     }
+    const stage = String(context?.stage || "run").trim() || "run";
+    const previewArgs = Array.isArray(args) ? args.slice(0, 24) : [];
+    console.info("[backend][ffmpeg][start]", {
+      stage,
+      timeoutMs: Math.max(0, Number(context?.timeoutMs || 0) || 0) || undefined,
+      argCount: Array.isArray(args) ? args.length : 0,
+      previewArgs,
+      outputPath: Array.isArray(args) ? String(args.at(-1) || "").trim() || undefined : undefined
+    });
     const child = spawn(ffmpegStaticPath, args, {
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -3947,6 +3956,11 @@ function runFfmpegCommand(args = [], context = {}) {
     if (timeoutMs > 0) {
       timeoutId = setTimeout(() => {
         didTimeout = true;
+        console.warn("[backend][ffmpeg][timeout]", {
+          stage,
+          timeoutMs,
+          pid: child.pid || null
+        });
         try {
           child.kill("SIGTERM");
         } catch (_) {}
@@ -3968,6 +3982,10 @@ function runFfmpegCommand(args = [], context = {}) {
         }
         if (!aborted) return;
         didAbort = true;
+        console.warn("[backend][ffmpeg][abort]", {
+          stage,
+          pid: child.pid || null
+        });
         try {
           child.kill("SIGTERM");
         } catch (_) {}
@@ -3988,56 +4006,75 @@ function runFfmpegCommand(args = [], context = {}) {
     child.on("error", (error) => {
       const err = new Error(`ffmpeg_spawn_error: ${String(error?.message || error || "unknown")}`);
       err.code = "ffmpeg_spawn_error";
-      err.stage = String(context?.stage || "spawn").trim() || "spawn";
+      err.stage = stage;
       err.stderr = stderr;
+      console.error("[backend][ffmpeg][error]", {
+        stage,
+        pid: child.pid || null,
+        message: String(error?.message || error || "unknown"),
+        stderrPreview: buildMontageStderrPreview(stderr)
+      });
       finalizeReject(err);
     });
     child.on("close", (code) => {
+      const summary = {
+        stage,
+        pid: child.pid || null,
+        code: Number(code || 0) || 0,
+        didTimeout,
+        didAbort,
+        stderrPreview: buildMontageStderrPreview(stderr),
+        stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
+      };
       if (didTimeout) {
         const err = new Error(`${String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout"}_${timeoutMs}`);
         err.code = String(context?.timeoutCode || "ffmpeg_timeout").trim() || "ffmpeg_timeout";
         err.timeoutMs = timeoutMs;
-        err.stage = String(context?.stage || "run").trim() || "run";
+        err.stage = stage;
         err.stdout = stdout;
         err.stderr = stderr;
         err.detail = {
-          stage: err.stage,
+          stage,
           timeoutMs,
           stderrPreview: buildMontageStderrPreview(stderr),
           stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
         };
+        console.warn("[backend][ffmpeg][close]", summary);
         finalizeReject(err);
         return;
       }
       if (didAbort) {
         const err = new Error("ffmpeg_aborted");
         err.code = "ffmpeg_aborted";
-        err.stage = String(context?.stage || "run").trim() || "run";
+        err.stage = stage;
         err.stdout = stdout;
         err.stderr = stderr;
         err.detail = {
-          stage: err.stage,
+          stage,
           stderrPreview: buildMontageStderrPreview(stderr),
           stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
         };
+        console.warn("[backend][ffmpeg][close]", summary);
         finalizeReject(err);
         return;
       }
       if (Number(code || 0) === 0) {
+        console.info("[backend][ffmpeg][close]", summary);
         finalizeResolve({ stdout, stderr, code: 0 });
         return;
       }
       const err = new Error(`ffmpeg_exit_code_${code}`);
       err.code = "ffmpeg_exit_code";
       err.exitCode = Number(code || 1);
-      err.stage = String(context?.stage || "run").trim() || "run";
+      err.stage = stage;
       err.stdout = stdout;
       err.stderr = stderr;
       err.detail = {
-        stage: err.stage,
+        stage,
         stderrPreview: buildMontageStderrPreview(stderr),
         stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
       };
+      console.warn("[backend][ffmpeg][close]", summary);
       finalizeReject(err);
     });
   });

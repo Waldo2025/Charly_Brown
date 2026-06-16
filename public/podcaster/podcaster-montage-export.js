@@ -293,9 +293,17 @@ let montageExportJobState = {
 };
 
 function logMontageExportDevtools(event = "", payload = {}, level = "info") {
-  void event;
-  void payload;
-  void level;
+  const cleanEvent = String(event || "").trim() || "event";
+  const cleanLevel = ["info", "warn", "error", "debug"].includes(String(level || "").trim())
+    ? String(level || "").trim()
+    : "info";
+  const prefix = `[podcaster][montage-export][${cleanEvent}]`;
+  try {
+    const logger = console[cleanLevel] || console.info;
+    logger.call(console, prefix, payload);
+  } catch (_) {
+    console.info(prefix, payload);
+  }
 }
 
 function isTransientMontageExportTransportError(error = null) {
@@ -740,6 +748,13 @@ export function describeMontageExportSceneSubstage(substage = "", sceneIndex = 0
 export async function pollMontageExportJob(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return;
+  logMontageExportDevtools("poll_start", {
+    jobId: cleanJobId,
+    currentStage: String(window.montageExportJobState.lastStage || "").trim() || undefined,
+    currentSubstage: String(window.montageExportJobState.lastSceneSubstage || "").trim() || undefined,
+    failureCount: Math.max(0, Number(window.montageExportJobState.pollFailureCount || 0) || 0),
+    notFoundCount: Math.max(0, Number(window.montageExportJobState.jobNotFoundCount || 0) || 0)
+  }, "debug");
   const maxPollMs = Math.max(0, Number(MONTAGE_EXPORT_POLL_MAX_MS || 0) || 0);
   const startedAtMs = Math.max(0, Number(window.montageExportJobState.startedAtMs || 0) || 0);
   if (maxPollMs > 0 && startedAtMs > 0 && (Date.now() - startedAtMs) > maxPollMs) {
@@ -759,9 +774,22 @@ export async function pollMontageExportJob(jobId = "") {
   }
   try {
     const exportStatusUrl = buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    logMontageExportDevtools("poll_request", {
+      jobId: cleanJobId,
+      url: exportStatusUrl,
+      auth: false
+    }, "debug");
     const data = await authFetchJson(exportStatusUrl, {
       auth: false
     });
+    logMontageExportDevtools("poll_response", {
+      jobId: cleanJobId,
+      status: String(data?.status || "").trim() || undefined,
+      stage: String(data?.stage || "").trim() || undefined,
+      substage: String(data?.sceneSubstage || "").trim() || undefined,
+      progress: Number.isFinite(Number(data?.progress)) ? Number(data.progress) : undefined,
+      degraded: data?.degraded === true
+    }, "debug");
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     window.montageExportJobState.pollFailureCount = 0;
     window.montageExportJobState.jobNotFoundCount = 0;
@@ -908,6 +936,13 @@ export async function pollMontageExportJob(jobId = "") {
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
+    logMontageExportDevtools("poll_error", {
+      jobId: cleanJobId,
+      status: errorStatus || undefined,
+      code: errorCode || undefined,
+      message: String(error?.message || error?.error || "").trim() || undefined,
+      detailStatus: Number(error?.detail?.status || 0) || undefined
+    }, "warn");
     if (errorStatus === 404) {
       const jobNotFoundCount = Math.max(0, Number(window.montageExportJobState.jobNotFoundCount || 0) || 0) + 1;
       window.montageExportJobState.jobNotFoundCount = jobNotFoundCount;
@@ -957,6 +992,11 @@ export async function pollMontageExportJob(jobId = "") {
       status: errorStatus || undefined,
       message: String(error?.message || error?.error || "").trim() || undefined
     }, transientNetworkError ? "warn" : "error");
+    logMontageExportDevtools("poll_retry_scheduled", {
+      jobId: cleanJobId,
+      failureCount,
+      transient: transientNetworkError
+    }, "debug");
     if (!transientNetworkError && failureCount >= 8) {
       logMontageExportDevtools("poll_failed_stop", { failureCount }, "error");
       clearMontageExportPolling();
