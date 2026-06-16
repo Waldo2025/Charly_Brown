@@ -10421,17 +10421,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         let finalVideoMapLabel = "[vout]";
         const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
         if (hasBrandOverlay) {
-          const brandInputIndex = (!forceSilentAudio && !useNativeVideoAudio && inputAudioPath) ? 3 : 2;
           const sceneBrandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
             width: canvas.width,
             height: canvas.height,
             reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
             baseInputLabel: "[vout]",
-            brandInputLabel: `[${brandInputIndex}:v]`,
             outputLabel: "vbrand"
           });
           if (sceneBrandFilter) {
-            args.push("-loop", "1", "-i", input.brandOverlay.assetPath);
             videoFilterGraph = `${videoFilterGraph};${sceneBrandFilter}`;
             finalVideoMapLabel = "[vbrand]";
           }
@@ -10886,7 +10883,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         );
         console.info("[backend][montage-export][final-visual-ffmpeg]", {
           hasReviewFilter: Boolean(reviewFilter),
-          hasBrandOverlay,
           baseVideoChain,
           filterGraph,
           args: finalVisualArgs
