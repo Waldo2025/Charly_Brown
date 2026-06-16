@@ -10419,8 +10419,26 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             });
         }
 
+        let finalVideoMapLabel = "[vout]";
+        const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
+        if (hasBrandOverlay) {
+          const sceneBrandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
+            width: canvas.width,
+            height: canvas.height,
+            reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+            baseInputLabel: "[vout]",
+            brandInputLabel: "[1:v]",
+            outputLabel: "vbrand"
+          });
+          if (sceneBrandFilter) {
+            args.push("-loop", "1", "-i", input.brandOverlay.assetPath);
+            videoFilterGraph = `${videoFilterGraph};${sceneBrandFilter}`;
+            finalVideoMapLabel = "[vbrand]";
+          }
+        }
+
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
-        args.push("-map", "[vout]", "-map", audioMapLabel);
+        args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
         args.push("-r", "24", "-c:v", intermediateParams.vCodec);
         args.push(...intermediateParams.vArgs, "-pix_fmt", "yuv420p", "-c:a", intermediateParams.aCodec, "-ar", "48000", ...intermediateParams.aArgs, intermediatePath);
         emitSceneSubstage({
@@ -10734,7 +10752,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       (input.onScreenTextSettings && input.onScreenTextSegments.length)
       || (Array.isArray(input.overlayCards) && input.overlayCards.length)
       || (input.exportMode === "review" && exportedEntries.length)
-      || (input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath))
     );
     if (hasFinalVisualPass) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
@@ -10843,8 +10860,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         if (overlayCardsFilter) visualFilters.push(overlayCardsFilter);
       }
 
-      const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
-      if (reviewFilter || visualFilters.length || hasBrandOverlay) {
+      if (reviewFilter || visualFilters.length) {
         emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
         const finalVisualOutPath = path.join(tmpDir, `montage-final-visuals.${outExt}`);
         const finalVisualArgs = [
@@ -10856,32 +10872,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ? reviewFilter
           : (visualFilters.join(",") || "format=rgba");
         let filterGraph = baseVideoChain;
-        if (hasBrandOverlay) {
-          emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
-          finalVisualArgs.push("-loop", "1", "-i", input.brandOverlay.assetPath);
-          const baseVideoLabel = "basev";
-          const filterGraphParts = [`[0:v]${baseVideoChain}[${baseVideoLabel}]`];
-          const brandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
-            width: visualDims.width,
-            height: visualDims.height,
-            reelModeEnabled: isReelExport,
-            baseInputLabel: `[${baseVideoLabel}]`,
-            brandInputLabel: "[1:v]",
-            outputLabel: "vout"
-          });
-          if (brandFilter) {
-            filterGraphParts.push(brandFilter);
-            finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
-            finalVisualArgs.push("-map", "[vout]");
-          } else {
-            finalVisualArgs.push("-filter_complex", filterGraphParts.join(";"));
-            finalVisualArgs.push("-map", `[${baseVideoLabel}]`);
-          }
-          filterGraph = filterGraphParts.join(";");
-        } else {
-          finalVisualArgs.push("-vf", baseVideoChain);
-          finalVisualArgs.push("-map", "0:v:0");
-        }
+        finalVisualArgs.push("-vf", baseVideoChain);
+        finalVisualArgs.push("-map", "0:v:0");
         finalVisualArgs.push(
           "-map", "0:a:0?",
           "-c:v", deliveryParams.vCodec,
