@@ -43,7 +43,8 @@ globalThis.Audio = class {
 await import("../public/podcaster/podcaster-timeline-model.js");
 const { normalizePodcastVideoConfig } = window;
 
-import { PodcasterPlaybackController } from "../public/podcaster/podcaster-playback-controller.js";
+await import("../public/podcaster/podcaster-text-render.js");
+const { PodcasterPlaybackController } = await import("../public/podcaster/podcaster-playback-controller.js");
 
 test("normalizePodcastVideoConfig parses and defaults mediaLoadMode correctly", () => {
   // 1. Defaults to "streaming" when not provided

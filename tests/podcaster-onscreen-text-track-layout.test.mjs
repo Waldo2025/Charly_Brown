@@ -6,6 +6,7 @@ const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js",
 const montageExportSource = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../public/podcaster.css", import.meta.url), "utf8");
 const onScreenTextSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text.js", import.meta.url), "utf8");
+const textRenderSource = readFileSync(new URL("../public/podcaster/podcaster-text-render.js", import.meta.url), "utf8");
 const editorSource = readFileSync(new URL("../public/podcaster/podcaster-on-screen-text-track-editor.js", import.meta.url), "utf8");
 const playbackControllerSource = readFileSync(new URL("../public/podcaster/podcaster-playback-controller.js", import.meta.url), "utf8");
 const backendSource = readFileSync(new URL("../backend/server.js", import.meta.url), "utf8");
@@ -53,11 +54,12 @@ test("karaoke export preserves the scaled background box and alignment from the 
   assert.match(onScreenTextSource, /const bgScale = clampNumber\(settings\.bgScale, 0\.6, 1\.8, 1\);/);
   assert.match(onScreenTextSource, /scaledBoxWidthPx/);
   assert.match(onScreenTextSource, /scaledBoxXPx/);
-  assert.match(backendSource, /function buildMontageOnScreenTextKaraokeBoxFilters\(segments = \[\], settings = \{\}, options = \{\}\)/);
-  assert.match(backendSource, /drawbox=x=\$\{safeX\}:y=\$\{safeY\}:w=\$\{safeWidth\}:h=\$\{safeHeight\}:color=\$\{boxColor\}:t=fill:enable='/);
+  assert.match(backendSource, /podcaster-text-render\.js/);
+  assert.match(backendSource, /buildMontageOnScreenTextKaraokeBoxFilters/);
+  assert.match(textRenderSource, /drawbox=x=\$\{safeX\}:y=\$\{safeY\}:w=\$\{safeWidth\}:h=\$\{safeHeight\}:color=\$\{boxColor\}:t=fill:enable='/);
   assert.match(backendSource, /const karaokeEnabled = input\.partyKaraoke !== false && wordTimings\.length > 0 && String\(spec\.wrappedText \|\| ""\)\.trim\(\);/);
   assert.match(backendSource, /return buildMontageOnScreenTextDrawFilters\(\{/);
-  assert.doesNotMatch(backendSource, /buildMontageOnScreenTextKaraokeAssFile/);
+  assert.doesNotMatch(backendSource, /function generateKaraokeOverlayText\(wrappedText = "", activeWordIndex = -1\)/);
   assert.doesNotMatch(backendSource, /subtitles='[^']*montage-onscreen-karaoke\.ass/);
 });
 

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { buildKaraokeSubtitleMarkup, normalizeKaraokeWordTimings, resolveActiveKaraokeWordIndex } = await import("../public/podcaster/podcaster-karaoke.js");
+const karaokeApi = (await import("../public/podcaster/podcaster-text-render.js")).default;
+const { buildKaraokeSubtitleMarkup, normalizeKaraokeWordTimings, resolveActiveKaraokeWordIndex } = karaokeApi;
 const { PodcasterPlaybackController } = await import("../public/podcaster/podcaster-playback-controller.js");
 
 function createOverlay() {

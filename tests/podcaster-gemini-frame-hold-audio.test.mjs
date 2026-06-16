@@ -30,6 +30,8 @@ class FakeAudio {
   load() {}
 }
 
+await import("../public/podcaster/podcaster-text-render.js");
+
 test("syncAudio keeps Gemini dialogue playing during a frame hold", async () => {
   globalThis.window = globalThis.window || {};
   globalThis.Audio = FakeAudio;

@@ -8,26 +8,32 @@ const source = fs.readFileSync(
 
 assert.match(
   source,
-  /function buildMontageOnScreenTextKaraokeAssFile\(segments = \[\], settings = \{\}, options = \{\}\)/,
-  "El backend debe generar una pista ASS consolidada para karaoke."
+  /podcaster-text-render\.js/,
+  "El backend debe consumir el módulo compartido de texto/karaoke."
 );
 
 assert.match(
   source,
-  /drawFilters\.push\(`subtitles='/,
-  "La exportación debe insertar el karaoke como un filtro de subtítulos único."
+  /buildMontageOnScreenTextDrawFilters/,
+  "La exportación debe reutilizar el builder compartido de drawtext."
 );
 
 assert.match(
   source,
-  /function resolveMontageOnScreenTextFontFile\(settings = \{\}\)/,
-  "La exportación debe resolver una fuente más fiel al estilo configurado."
+  /buildMontageOnScreenTextKaraokeBoxFilters/,
+  "La exportación debe reutilizar el builder compartido de la caja karaoke."
 );
 
 assert.match(
   source,
   /const karaokeEnabled = input\.partyKaraoke !== false && wordTimings\.length > 0/,
-  "El flujo principal debe desviar el karaoke al render consolidado."
+  "El flujo principal debe seguir habilitando karaoke cuando hay timings."
+);
+
+assert.doesNotMatch(
+  source,
+  /function generateKaraokeOverlayText\(wrappedText = "", activeWordIndex = -1\)/,
+  "El backend ya no debe mantener la lógica local de karaoke."
 );
 
 console.log("Podcaster montage export karaoke render OK.");
