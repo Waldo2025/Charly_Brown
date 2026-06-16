@@ -3598,6 +3598,8 @@ function normalizeDialogueVideoMap(raw = {}) {
     "videoDownloadUrl",
     "videoUrl",
     "url",
+    "dataUrl",
+    "localDataUrl",
     "publicSceneVideoUrl",
     "publicSceneThumbUrl",
     "thumbUrl",
@@ -3626,7 +3628,8 @@ function normalizeDialogueVideoMap(raw = {}) {
     );
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
-    if (!storagePath && !downloadUrl) return;
+    const dataUrl = String(clip.dataUrl || clip.localDataUrl || "").trim();
+    if (!storagePath && !downloadUrl && !dataUrl) return;
     const rawSegments = Array.isArray(clip.segments) ? clip.segments : [];
     const segments = rawSegments
       .map((segment, idx) => {
@@ -3669,6 +3672,8 @@ function normalizeDialogueVideoMap(raw = {}) {
       publicSceneTitle: String(clip.publicSceneTitle || "").trim(),
       publicSceneThumbUrl: String(clip.publicSceneThumbUrl || clip.thumbnailUrl || "").trim(),
       publicSceneVideoUrl: String(clip.publicSceneVideoUrl || clip.downloadUrl || "").trim(),
+      dataUrl,
+      localDataUrl: dataUrl,
       videoDirective: String(clip.videoDirective || "").replace(/\s+/g, " ").trim(),
       scenePrompt: String(clip.scenePrompt || "").replace(/\s+/g, " ").trim(),
       imagePrompts: normalizeVideoImagePrompts(clip.imagePrompts || []),
@@ -3797,10 +3802,14 @@ function hasStoredMediaSource(asset = null) {
   if (!asset || typeof asset !== "object") return false;
   const normalized = normalizeMediaReferenceFromRecord(
     asset,
-    ["downloadUrl", "videoDownloadUrl", "videoUrl", "audioSrc", "url"],
+    ["downloadUrl", "videoDownloadUrl", "videoUrl", "audioSrc", "url", "dataUrl", "localDataUrl"],
     ["storagePath", "videoStoragePath", "audioStoragePath", "path"]
   );
-  return Boolean(String(normalized.downloadUrl || "").trim() || String(normalized.storagePath || "").trim());
+  return Boolean(
+    String(normalized.downloadUrl || "").trim()
+    || String(normalized.storagePath || "").trim()
+    || String(asset?.dataUrl || asset?.localDataUrl || "").trim()
+  );
 }
 
 function rehydrateGeminiDialogueAudioMap(session = null, options = {}) {
@@ -6282,6 +6291,8 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
       "thumbnailUrl",
       "imageUrl",
       "sceneImageUrl",
+      "dataUrl",
+      "localDataUrl",
       "downloadUrl",
       "videoDownloadUrl",
       "videoUrl",
@@ -6301,7 +6312,8 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
   );
   const downloadUrl = String(mediaRef.downloadUrl || "").trim();
   const storagePath = String(mediaRef.storagePath || "").trim();
-  if (!downloadUrl && !storagePath) return null;
+  const dataUrl = String(row?.dataUrl || row?.localDataUrl || row?.video?.dataUrl || row?.video?.localDataUrl || "").trim();
+  if (!downloadUrl && !storagePath && !dataUrl) return null;
   const mimeType = String(row?.mimeType || row?.publicSceneMimeType || "").trim().toLowerCase();
   const type = String(row?.type || row?.mediaKind || "").trim().toLowerCase()
     || (mimeType.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|avif)(?:\?|$)/i.test(downloadUrl) ? "image" : "video");
@@ -6319,6 +6331,8 @@ function resolveDialogueVideoForRow(session = null, rowId = "") {
     publicSceneTitle: String(row?.publicSceneTitle || "").trim(),
     publicSceneThumbUrl: String(row?.publicSceneThumbUrl || row?.thumbnailUrl || "").trim(),
     publicSceneVideoUrl: String(row?.publicSceneVideoUrl || row?.downloadUrl || "").trim(),
+    dataUrl,
+    localDataUrl: dataUrl,
     videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
     scenePrompt: String(row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
     imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),

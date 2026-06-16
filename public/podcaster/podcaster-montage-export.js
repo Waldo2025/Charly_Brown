@@ -2506,6 +2506,7 @@ export function buildMontageExportPayload(session = null) {
       const audio = window.resolveDialogueAudioForRow?.(activeSession, rowId) || null;
       const videoStoragePath = String(primarySegment?.storagePath || clip?.storagePath || "").trim();
       const videoDownloadUrl = String(primarySegment?.downloadUrl || clip?.downloadUrl || "").trim();
+      const videoDataUrl = String(primarySegment?.dataUrl || clip?.dataUrl || primarySegment?.localDataUrl || clip?.localDataUrl || "").trim();
       const videoMimeType = String(primarySegment?.mimeType || clip?.mimeType || "video/mp4").trim() || "video/mp4";
       const audioStoragePath = String(audio?.storagePath || "").trim();
       const audioDownloadUrl = String(audio?.downloadUrl || "").trim();
@@ -2536,7 +2537,7 @@ export function buildMontageExportPayload(session = null) {
       const transitionOut = entry?.transitionOut
         || (rowId && nextRowId ? window.getTransitionForEdge?.(activeSession, rowId, nextRowId) : null)
         || null;
-      if (!rowId || !(videoStoragePath || videoDownloadUrl)) {
+      if (!rowId || !(videoStoragePath || videoDownloadUrl || videoDataUrl)) {
         return {
           ok: false,
           error: `La escena ${index + 1} no tiene video generado.`,
@@ -2579,6 +2580,8 @@ export function buildMontageExportPayload(session = null) {
             storagePath: videoStoragePath || "",
             url: videoDownloadUrl || "",
             downloadUrl: videoDownloadUrl || "",
+            dataUrl: videoDataUrl || "",
+            localDataUrl: videoDataUrl || "",
             mimeType: videoMimeType,
             type: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
             mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),

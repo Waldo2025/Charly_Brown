@@ -2328,6 +2328,8 @@ function sanitizePodcasterSession(raw = {}) {
     "videoDownloadUrl",
     "videoUrl",
     "url",
+    "dataUrl",
+    "localDataUrl",
     "publicSceneVideoUrl",
     "publicSceneThumbUrl",
     "thumbUrl",
@@ -2355,7 +2357,8 @@ function sanitizePodcasterSession(raw = {}) {
     });
     const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
     const storagePath = clampText(mediaRef.storagePath || "", 700);
-    if (!storagePath && !downloadUrl) return;
+    const dataUrl = clampText(clip?.dataUrl || clip?.localDataUrl || "", 8_000_000);
+    if (!storagePath && !downloadUrl && !dataUrl) return;
     const segmentsRaw = Array.isArray(clip?.segments) ? clip.segments : [];
     const segments = segmentsRaw.slice(0, 16).map((segment, idx) => {
       const segmentRef = normalizePersistedMediaReference({
@@ -2406,7 +2409,9 @@ function sanitizePodcasterSession(raw = {}) {
       publicScenePublishedAt: clampText(clip?.publicScenePublishedAt || "", 64),
       publicSceneTitle: clampText(clip?.publicSceneTitle || "", 220),
       publicSceneThumbUrl: clampText(clip?.publicSceneThumbUrl || "", 3000),
-      publicSceneVideoUrl: clampText(clip?.publicSceneVideoUrl || "", 3000)
+      publicSceneVideoUrl: clampText(clip?.publicSceneVideoUrl || "", 3000),
+      dataUrl,
+      localDataUrl: dataUrl
     };
   });
   const dialogueAudioMapRaw = raw?.dialogueAudioMap && typeof raw.dialogueAudioMap === "object"
@@ -10395,7 +10400,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         err.status = 400;
         throw err;
       }
-      if (!videoAsset?.storagePath && !videoAsset?.url) {
+      if (!videoAsset?.storagePath && !videoAsset?.url && !videoAsset?.dataUrl && !videoAsset?.localDataUrl) {
         skippedEntries.push(buildMontageSkippedEntry(entry, i, "missing_video_source", {
           kind: isImageAsset ? "image" : "video",
           code: "missing_download_source",
@@ -10413,6 +10418,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         mediaKind: isImageAsset ? "image" : "video",
         videoStoragePath: clampText(videoAsset?.storagePath || "", 900),
         videoDownloadUrl: redactUrlForLogs(String(videoAsset?.downloadUrl || videoAsset?.url || "").trim()),
+        videoHasDataUrl: Boolean(String(videoAsset?.dataUrl || videoAsset?.localDataUrl || "").trim()),
         audioStoragePath: clampText(audioAsset?.storagePath || "", 900),
         audioDownloadUrl: redactUrlForLogs(String(audioAsset?.downloadUrl || audioAsset?.url || "").trim()),
         useNativeVideoAudio,
