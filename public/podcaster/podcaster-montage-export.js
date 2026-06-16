@@ -17,6 +17,7 @@ const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
 const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
+const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
 
 // --- Constants ---
 const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
@@ -223,6 +224,7 @@ function resolveMontageExportRasterDimensions(resolution = "source") {
 
 export function normalizeMontageExportSettings(raw = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const schemaVersion = Math.max(0, Math.floor(Number(source.schemaVersion || 0) || 0));
   const exportMode = ["normal", "review"].includes(String(source.exportMode || "").trim())
     ? String(source.exportMode).trim()
     : "normal";
@@ -252,9 +254,10 @@ export function normalizeMontageExportSettings(raw = {}) {
     minBitrate,
     filename,
     includeReviewExcel,
-    onlyAudio: source.onlyAudio === true,
+    onlyAudio: schemaVersion >= MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION && source.onlyAudio === true,
     includeLogo: source.includeLogo !== false,
-    partyKaraoke: source.partyKaraoke !== false
+    partyKaraoke: source.partyKaraoke !== false,
+    schemaVersion: MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION
   };
 }
 
@@ -395,7 +398,10 @@ export function loadMontageExportSettings() {
 
 export function persistMontageExportSettings() {
   try {
-    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify(normalizeMontageExportSettings(montageExportState)));
+    localStorage.setItem(MONTAGE_EXPORT_STORAGE_KEY, JSON.stringify({
+      ...normalizeMontageExportSettings(montageExportState),
+      schemaVersion: MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION
+    }));
   } catch (_) {
     // noop
   }
