@@ -348,11 +348,12 @@
     const bgScale = Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1) || 1));
     const bgOpacity = Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 0.82) || 0));
     const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
+    const resolvedBgPreset = ["none", "solid", "glass"].includes(bgPreset) ? bgPreset : "none";
     const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
     const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
     const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
-    const contentPadXPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
-    const contentPadYPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
+    const contentPadXPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
+    const contentPadYPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
     const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || widthPx - 2) || widthPx));
     const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || heightPx - 2) || heightPx));
     const bubbleX = Math.max(0, Math.round((widthPx - bubbleWidthPx) / 2));
@@ -363,9 +364,9 @@
     const lineStartY = bubbleY + contentPadYPx + fontSizePx;
     const lineStepY = Math.max(fontSizePx, lineHeightPx);
     const textOffsetYPx = presetClass === "is-style-3d" && bgClass === "is-bg-none" ? Math.round(fontSizePx * 0.16) : 0;
-    const boxFill = bgPreset === "solid"
+    const boxFill = resolvedBgPreset === "solid"
       ? { rgb: "2, 6, 23", opacity: Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3) }
-      : bgPreset === "glass"
+      : resolvedBgPreset === "glass"
         ? { rgb: "15, 23, 42", opacity: Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3) }
         : null;
     const shadowOpacityValue = Math.max(0, Math.min(1, shadowOpacity)).toFixed(3);
@@ -426,7 +427,7 @@
         >${escapeSvgText(line)}</text>
       `;
     }).join("");
-    const bgAttrs = bgPreset === "none"
+    const bgAttrs = resolvedBgPreset === "none" || !boxFill
       ? ""
       : `x="${bubbleX}" y="${bubbleY}" width="${bubbleWidthPx}" height="${bubbleHeightPx}" rx="${Math.max(10, Math.round(fontSizePx * 0.45))}" ry="${Math.max(10, Math.round(fontSizePx * 0.45))}" fill="rgb(${boxFill.rgb})" fill-opacity="${boxFill.opacity}"`;
     return `
@@ -442,7 +443,7 @@
             <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="rgb(255, 214, 10)" flood-opacity="0.55" />
           </filter>
         </defs>
-        ${bgPreset === "none" ? "" : `<rect ${bgAttrs} />`}
+        ${resolvedBgPreset === "none" || !boxFill ? "" : `<rect ${bgAttrs} />`}
         <g transform="translate(0,0)">
           ${shadowLineMarkup}
           ${lineMarkup}

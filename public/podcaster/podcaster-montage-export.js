@@ -81,6 +81,7 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
   const shadowX = Math.round(Number(metrics.previewShadowX ?? settings.shadowOffsetXPx ?? 0) || 0);
   const shadowY = Math.round(Number(metrics.previewShadowY ?? settings.shadowOffsetYPx ?? 0) || 0);
   const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
+  const resolvedBgPreset = ["none", "solid", "glass"].includes(bgPreset) ? bgPreset : "none";
   const bgOpacity = Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 0.82) || 0));
   const bgScale = Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1) || 1));
   const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || canvas.width) || canvas.width));
@@ -88,8 +89,8 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
   const padPx = Math.max(0, Math.round(Number(snapshot.padPx || 0) || 0));
   const bubbleX = padPx;
   const bubbleY = padPx;
-  const contentPadXPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
-  const contentPadYPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
+  const contentPadXPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
+  const contentPadYPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
   const textLeft = bubbleX + contentPadXPx;
   const textRight = bubbleX + bubbleWidthPx - contentPadXPx;
   const lineStartY = bubbleY + contentPadYPx + fontSizePx;
@@ -119,21 +120,25 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  if (bgPreset !== "none") {
-    const boxFill = bgPreset === "solid"
+  if (resolvedBgPreset !== "none") {
+    const boxFill = resolvedBgPreset === "solid"
       ? `rgba(2, 6, 23, ${Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3)})`
-      : `rgba(15, 23, 42, ${Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3)})`;
-    ctx.fillStyle = boxFill;
-    ctx.shadowColor = "transparent";
-    drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
-    ctx.fill();
-    if (bgPreset === "solid") {
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.07)";
-      ctx.lineWidth = 1;
+      : resolvedBgPreset === "glass"
+        ? `rgba(15, 23, 42, ${Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3)})`
+        : null;
+    if (boxFill) {
+      ctx.fillStyle = boxFill;
+      ctx.shadowColor = "transparent";
       drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
-      ctx.stroke();
-      ctx.restore();
+      ctx.fill();
+      if (resolvedBgPreset === "solid") {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,255,255,0.07)";
+        ctx.lineWidth = 1;
+        drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
   const presetIs3d = presetClass.includes("3d");
