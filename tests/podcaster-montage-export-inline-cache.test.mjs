@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8");
+const podcasterSource = readFileSync(new URL("../public/podcaster/podcaster.js", import.meta.url), "utf8");
 
 function extractFunction(name) {
   const signature = `function ${name}`;
@@ -269,4 +270,17 @@ test("montage export preserves inline-only media sources", () => {
   assert.equal(stripped.entries[0].video.localDataUrl, "data:video/mp4;base64,BBBB");
   assert.equal(stripped.entries[0].audio.dataUrl, "data:audio/mpeg;base64,CCCC");
   assert.equal(stripped.entries[0].audio.localDataUrl, "data:audio/mpeg;base64,DDDD");
+});
+
+test("montage export confirm button uses an explicit handler and the modal stays clickable", () => {
+  assert.match(source, /export async function handleMontageExportConfirmClick\(event = null\)/);
+  assert.match(podcasterSource, /confirmMontageExportBtn\.addEventListener\("click", handleMontageExportConfirmClick\)/);
+
+  const persistedJobIndex = source.indexOf("const persistedJob = loadPersistedMontageExportActiveJob();");
+  assert.ok(persistedJobIndex >= 0, "Debe existir la rama de job persistido.");
+  const persistedJobSlice = source.slice(persistedJobIndex, persistedJobIndex + 340);
+  assert.ok(
+    !persistedJobSlice.includes("window.montageExportBusy = true;"),
+    "El modal no debe bloquear el botón al reabrirse por un job persistido."
+  );
 });

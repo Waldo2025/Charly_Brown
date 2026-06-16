@@ -5,6 +5,7 @@
   "releaseNotes": [
     "Corregido: En móvil el footer de Podcaster ahora queda fijo al borde inferior y el transport se redistribuye sin recortar las secciones is-middle y corner.",
     "Corregido: La librería del Podcaster ahora arranca oculta por default en móvil cuando no existe una preferencia explícita guardada.",
+    "Corregido: El botón de exportar montage ahora tiene un handler explícito con feedback visible y el modal ya no bloquea el botón por una exportación persistida fantasma al abrirse.",
     "Corregido: El submit de export de montage ya no borra `dataUrl/localDataUrl` cuando son la única fuente real de una escena o audio, evitando que el export final se quede sin video aunque el preview del editor sí lo muestre.",
     "Mejorado: El transport flotante en móvil ahora fuerza filas completas y botones compactos para que no se corten los controles inferiores.",
     "Mejorado: En móvil el transport inferior de Podcaster ahora queda flotante y visible con exportar/guardar, y el footer de retratos se posiciona encima para no desaparecer fuera de pantalla.",
@@ -66,5 +67,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.141"
+  "cache_version": "2026-1.0.10.142"
 }

@@ -1599,8 +1599,6 @@ export function openMontageExportModal() {
   if (persistedJob?.jobId) {
     window.montageExportJobState.jobId = persistedJob.jobId;
     window.montageExportJobState.startedAtMs = persistedJob.startedAtMs || Date.now();
-    window.montageExportBusy = true;
-    setMontageExportBusy(true);
     setMontageExportContinueButton({ visible: false });
     setMontageExportStatus(
       "Retomando exportación activa…",
@@ -1618,6 +1616,29 @@ export function openMontageExportModal() {
     { tone: "neutral" }
   );
   scheduleMontageExportPreviewRefresh(60);
+}
+
+export async function handleMontageExportConfirmClick(event = null) {
+  if (event && typeof event.preventDefault === "function") event.preventDefault();
+  if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+  if (window.montageExportBusy || montageExportSubmitLocked) {
+    setMontageExportStatus(
+      "La exportación ya está en curso.",
+      "Espera a que termine el job actual o usa \"Continuar exportación\" si quedó uno pendiente.",
+      { tone: "warning" }
+    );
+    return;
+  }
+  try {
+    await runMontageExport();
+  } catch (error) {
+    console.error("[podcaster][montage-export] confirm click failed", error);
+    setMontageExportStatus(
+      "No pudimos iniciar la exportación.",
+      String(error?.message || error || "Revisa el timeline e inténtalo de nuevo.").trim(),
+      { tone: "error" }
+    );
+  }
 }
 
 export function validateMontageExportLinearTimeline(runtimeEntries = []) {
