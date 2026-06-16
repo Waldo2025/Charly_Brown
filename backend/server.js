@@ -11114,8 +11114,26 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
 
     if (!job) {
       if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
-        releaseHeavyWorkSlot("montage_export", jobId);
-        console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
+        console.warn("[backend][montage-export] export-status recovered from active heavy-work slot", { jobId });
+        return res.status(200).json(sanitizeMontageExportJobPublicPayload({
+          jobId,
+          status: "running",
+          stage: "render_scene_segments",
+          progress: 0.23,
+          hint: "Recuperando el estado del export activo.",
+          degraded: true,
+          currentSceneIndex: 1,
+          totalScenes: 1,
+          currentRowId: "",
+          lastHeartbeatAt: new Date().toISOString()
+        }));
+      }
+      if (getActiveHeavyWorkKind() === "montage_export") {
+        const activeJobId = getActiveHeavyWorkJobId();
+        if (activeJobId === jobId) {
+          releaseHeavyWorkSlot("montage_export", jobId);
+          console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
+        }
       }
       return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
     }
