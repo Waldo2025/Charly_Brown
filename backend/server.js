@@ -11404,7 +11404,8 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       } catch (err) {
         console.error("[backend][montage-export] direct export failed", {
           jobId,
-          error: String(err?.message || err)
+          error: String(err?.message || err),
+          stack: String(err?.stack || "").trim() || null
         });
       } finally {
         releaseHeavyWorkSlot("montage_export", jobId);

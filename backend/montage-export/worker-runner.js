@@ -113,7 +113,8 @@ function createProcessMontageExportJob({
       console.error("[backend][montage-export][job-error]", {
         jobId,
         code: String(error?.code || "").trim() || null,
-        message: String(error?.message || error)
+        message: String(error?.message || error),
+        stack: String(error?.stack || "").trim() || null
       });
       const sceneFailure = buildMontageSceneFailure(error, {
         failedSceneIndex: Number(error?.detail?.failedSceneIndex || 0) || 0,
