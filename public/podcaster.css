@@ -10826,7 +10826,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(34vh + env(safe-area-inset-bottom, 0px) + 16px);
+    padding-bottom: calc(58vh + env(safe-area-inset-bottom, 0px) + 24px);
   }
 
   #podcastVideoShell.floating-panel-card {
@@ -11025,6 +11025,18 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   }
 
   .podcast-video-transport {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    z-index: 30;
+    max-height: 24vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--pod-surface) 96%, #0f172a 4%);
+    border: 1px solid color-mix(in srgb, var(--pod-border) 80%, transparent 20%);
+    box-shadow: 0 -14px 40px rgba(2, 6, 23, 0.22);
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -11064,11 +11076,11 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     position: fixed;
     left: 8px;
     right: 8px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
     z-index: 25;
     gap: 10px;
     padding: 10px 12px 12px;
-    max-height: 34vh;
+    max-height: 30vh;
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 18px;
@@ -11098,6 +11110,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
   .podcast-studio-note {
     font-size: 10px;
+  }
+
+  .podcast-video-transport-group,
+  .podcast-video-transport-corner {
+    justify-content: center;
+    align-content: center;
+  }
+
+  .podcast-video-transport-bundle {
+    align-items: center;
   }
 
   .podcast-studio-inspector {
