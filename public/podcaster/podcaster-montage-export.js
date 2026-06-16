@@ -4,6 +4,12 @@
  */
 
 import { authFetchJson, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
+import {
+  buildPodcasterLocalMediaKey,
+  getPodcasterLocalMediaDataUrl,
+  putPodcasterLocalMediaBlob,
+  putPodcasterLocalMediaDataUrl
+} from "./podcaster-local-media-cache.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
@@ -123,6 +129,8 @@ function formatMontageExportTimelineLabel(entry = null) {
 let montageExportXlsxLoaderPromise = null;
 let montageExportSubmitLocked = false;
 let montageExportPreviewPaused = false;
+const montageExportHydratedMediaCache = new Map();
+const montageExportHydratingMediaPromises = new Map();
 
 function ensureMontageExportXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -1098,10 +1106,20 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
     || entries[0];
   if (!selected || typeof selected !== "object") return null;
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
+  const directDataUrl = String(video?.dataUrl || video?.localDataUrl || "").trim();
+  const localMediaCacheKey = String(video?.localMediaCacheKey || "").trim();
   const directDownloadUrl = String(video?.downloadUrl || "").trim();
   const rawUrl = String(video?.url || "").trim();
   const storagePath = String(video?.storagePath || "").trim();
-  let src = directDownloadUrl || rawUrl;
+  let src = directDataUrl;
+  if (!src && localMediaCacheKey) {
+    try {
+      src = String(await getPodcasterLocalMediaDataUrl(localMediaCacheKey) || "").trim();
+    } catch (_) {
+      src = "";
+    }
+  }
+  if (!src) src = directDownloadUrl || rawUrl;
   const shouldResolveDirectly = !src || src.startsWith("gs://");
   if (shouldResolveDirectly && typeof window.resolveFirebaseStorageUrl === "function") {
     try {
@@ -1159,7 +1177,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     });
     return;
   }
-  const prepared = buildMontageExportPayload(window.getActiveSession());
+  const prepared = await buildMontageExportPayloadForSubmission(window.getActiveSession());
   if (!prepared.ok) {
     setMontageExportPreviewState({
       error: prepared.error || "No hay suficiente material para generar preview.",
@@ -1479,6 +1497,266 @@ function buildMontageMediaCacheCandidates(asset = {}) {
   return Array.from(new Set(candidates.map((item) => String(item || "").trim()).filter(Boolean)));
 }
 
+function buildMontageSceneMediaCacheKey(asset = {}, kind = "video") {
+  const activeSession = window.getActiveSession?.() || null;
+  const sessionId = String(asset?.sessionId || activeSession?.id || "").trim() || "session";
+  const rowId = String(asset?.rowId || "").trim() || "scene";
+  const sceneIndex = Math.max(0, Math.round(Number(asset?.sceneIndex || 0) || 0));
+  const storagePath = String(asset?.storagePath || "").trim();
+  const downloadUrl = String(asset?.downloadUrl || asset?.url || "").trim();
+  const sourceId = storagePath || downloadUrl || String(asset?.id || "").trim() || `${sceneIndex || Date.now()}`;
+  return buildPodcasterLocalMediaKey(`podcaster:${sessionId}:montage:${String(kind || "video").trim()}:${rowId}`, sourceId);
+}
+
+function buildMontageStorageGsUrl(storagePath = "") {
+  const cleanStoragePath = String(storagePath || "").trim().replace(/^\/+/, "");
+  if (!cleanStoragePath) return "";
+  if (/^gs:\/\//i.test(cleanStoragePath)) return cleanStoragePath;
+  const bucket = String(window.__CHARLY_CONFIG__?.firebase?.storageBucket || "charly-brown.firebasestorage.app").trim();
+  if (!bucket) return "";
+  return `gs://${bucket}/${cleanStoragePath}`;
+}
+
+async function readMontageCachedMediaDataUrl(cacheKey = "") {
+  const cleanKey = String(cacheKey || "").trim();
+  if (!cleanKey) return "";
+  if (montageExportHydratedMediaCache.has(cleanKey)) {
+    return String(montageExportHydratedMediaCache.get(cleanKey) || "").trim();
+  }
+  if (montageExportHydratingMediaPromises.has(cleanKey)) {
+    return montageExportHydratingMediaPromises.get(cleanKey);
+  }
+  const promise = getPodcasterLocalMediaDataUrl(cleanKey)
+    .then((dataUrl) => {
+      const cleanDataUrl = String(dataUrl || "").trim();
+      if (cleanDataUrl.startsWith("data:")) {
+        montageExportHydratedMediaCache.set(cleanKey, cleanDataUrl);
+      }
+      return cleanDataUrl;
+    })
+    .catch(() => "");
+  montageExportHydratingMediaPromises.set(cleanKey, promise);
+  try {
+    return await promise;
+  } finally {
+    montageExportHydratingMediaPromises.delete(cleanKey);
+  }
+}
+
+async function fetchMontageMediaBlob(sourceUrl = "") {
+  const cleanUrl = String(sourceUrl || "").trim();
+  if (!cleanUrl) return null;
+  const response = await fetch(cleanUrl, { credentials: "same-origin" });
+  if (!response.ok) {
+    const error = new Error(`No se pudo descargar el asset (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  return response.blob();
+}
+
+async function resolveMontageSceneMediaSourceUrl(asset = {}, kind = "video") {
+  const directDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+  if (directDataUrl.startsWith("data:")) return directDataUrl;
+
+  const directDownloadUrl = String(asset?.downloadUrl || asset?.url || "").trim();
+  if (directDownloadUrl && !directDownloadUrl.startsWith("gs://")) {
+    return directDownloadUrl;
+  }
+
+  const storagePath = String(asset?.storagePath || "").trim();
+  const storageGsUrl = directDownloadUrl.startsWith("gs://")
+    ? directDownloadUrl
+    : (storagePath.startsWith("gs://") ? storagePath : buildMontageStorageGsUrl(storagePath));
+  if (storageGsUrl && typeof window.resolveFirebaseStorageUrl === "function") {
+    try {
+      const resolved = String(await window.resolveFirebaseStorageUrl(storageGsUrl) || "").trim();
+      if (resolved) return resolved;
+    } catch (_) {
+      // fallback below
+    }
+  }
+
+  const resolvedProxyUrl = String(window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath) || "").trim()
+    || String(window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath) || "").trim();
+  if (resolvedProxyUrl) return resolvedProxyUrl;
+
+  if (storageGsUrl) return storageGsUrl;
+  return directDownloadUrl;
+}
+
+async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
+  if (!asset || typeof asset !== "object") return asset;
+  const directDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+  const cacheKey = String(asset?.localMediaCacheKey || buildMontageSceneMediaCacheKey(asset, kind) || "").trim();
+  const mimeType = String(asset?.mimeType || (kind === "audio" ? "audio/mpeg" : "video/mp4")).trim() || (kind === "audio" ? "audio/mpeg" : "video/mp4");
+  const directDataUrlBytes = estimateMontageDataUrlBytes(directDataUrl);
+
+  if (directDataUrl.startsWith("data:")) {
+    if (cacheKey && !montageExportHydratedMediaCache.has(cacheKey)) {
+      montageExportHydratedMediaCache.set(cacheKey, directDataUrl);
+      void putPodcasterLocalMediaDataUrl(cacheKey, directDataUrl, {
+        mimeType,
+        sourceUrl: String(asset?.downloadUrl || asset?.url || "").trim(),
+        storagePath: String(asset?.storagePath || "").trim(),
+        kind
+      }).catch(() => { });
+    }
+    if (directDataUrlBytes > 0 && directDataUrlBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+      return {
+        ...asset,
+        dataUrl: directDataUrl,
+        localDataUrl: directDataUrl,
+        localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim()
+      };
+    }
+    return {
+      ...asset,
+      localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+      url: String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: String(asset?.downloadUrl || asset?.url || "").trim()
+    };
+  }
+
+  if (cacheKey) {
+    const cachedDataUrl = await readMontageCachedMediaDataUrl(cacheKey);
+    const cachedDataUrlBytes = estimateMontageDataUrlBytes(cachedDataUrl);
+    if (cachedDataUrl.startsWith("data:") && cachedDataUrlBytes > 0 && cachedDataUrlBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+      return {
+        ...asset,
+        dataUrl: cachedDataUrl,
+        localDataUrl: cachedDataUrl,
+        localMediaCacheKey: cacheKey,
+        url: String(asset?.url || asset?.downloadUrl || "").trim(),
+        downloadUrl: String(asset?.downloadUrl || asset?.url || "").trim()
+      };
+    }
+  }
+
+  const sourceUrl = await resolveMontageSceneMediaSourceUrl(asset, kind);
+
+  if (!sourceUrl || sourceUrl.startsWith("gs://")) {
+    return {
+      ...asset,
+      localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+      url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
+    };
+  }
+
+  try {
+    const blob = await fetchMontageMediaBlob(sourceUrl);
+    if (!(blob instanceof Blob)) {
+      return {
+        ...asset,
+        localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+        url: sourceUrl,
+        downloadUrl: sourceUrl
+      };
+    }
+    if (cacheKey) {
+      await putPodcasterLocalMediaBlob(cacheKey, blob, {
+        mimeType: String(blob.type || mimeType || "").trim() || mimeType,
+        sourceUrl,
+        storagePath: String(asset?.storagePath || "").trim(),
+        kind
+      });
+    }
+    const sizeBytes = Math.max(0, Number(blob?.size || 0) || 0);
+    if (sizeBytes > 0 && sizeBytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) {
+      const dataUrl = await blobToDataUrl(blob, String(blob.type || mimeType || "").trim() || mimeType);
+      if (dataUrl.startsWith("data:")) {
+        if (cacheKey) {
+          montageExportHydratedMediaCache.set(cacheKey, dataUrl);
+          void putPodcasterLocalMediaDataUrl(cacheKey, dataUrl, {
+            mimeType: String(blob.type || mimeType || "").trim() || mimeType,
+            sourceUrl,
+            storagePath: String(asset?.storagePath || "").trim(),
+            kind
+          }).catch(() => { });
+        }
+        return {
+          ...asset,
+          dataUrl,
+          localDataUrl: dataUrl,
+          localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+          url: sourceUrl,
+          downloadUrl: sourceUrl
+        };
+      }
+    }
+    return {
+      ...asset,
+      localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+      url: sourceUrl,
+      downloadUrl: sourceUrl
+    };
+  } catch (_) {
+    if (cacheKey) {
+      const cachedDataUrl = await readMontageCachedMediaDataUrl(cacheKey);
+      if (cachedDataUrl.startsWith("data:")) {
+        return {
+          ...asset,
+          dataUrl: cachedDataUrl,
+          localDataUrl: cachedDataUrl,
+          localMediaCacheKey: cacheKey,
+          url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+          downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
+        };
+      }
+    }
+    return {
+      ...asset,
+      localMediaCacheKey: cacheKey || String(asset?.localMediaCacheKey || "").trim(),
+      url: sourceUrl || String(asset?.url || asset?.downloadUrl || "").trim(),
+      downloadUrl: sourceUrl || String(asset?.downloadUrl || asset?.url || "").trim()
+    };
+  }
+}
+
+async function hydrateMontageExportPayloadMedia(payload = {}) {
+  if (!payload || typeof payload !== "object") return payload;
+  if (Array.isArray(payload.entries)) {
+    for (let index = 0; index < payload.entries.length; index += 1) {
+      const entry = payload.entries[index];
+      if (!entry || typeof entry !== "object") continue;
+      payload.entries[index] = {
+        ...entry,
+        video: await hydrateMontageSceneMediaAsset(entry.video, "video"),
+        audio: await hydrateMontageSceneMediaAsset(entry.audio, "audio")
+      };
+    }
+  }
+  if (payload.backgroundMusic && typeof payload.backgroundMusic === "object") {
+    payload.backgroundMusic = await hydrateMontageSceneMediaAsset(payload.backgroundMusic, "audio");
+  }
+  if (payload.dialogueAudioMap && typeof payload.dialogueAudioMap === "object") {
+    const nextDialogueAudioMap = {};
+    for (const [rowId, clip] of Object.entries(payload.dialogueAudioMap)) {
+      nextDialogueAudioMap[rowId] = await hydrateMontageSceneMediaAsset({
+        ...(clip && typeof clip === "object" ? clip : {}),
+        rowId
+      }, "audio");
+    }
+    payload.dialogueAudioMap = nextDialogueAudioMap;
+  }
+  if (payload.audioTimeline && typeof payload.audioTimeline === "object") {
+    const nextAudioTimeline = { ...payload.audioTimeline };
+    if (Array.isArray(nextAudioTimeline.geminiSegments)) {
+      nextAudioTimeline.geminiSegments = await Promise.all(
+        nextAudioTimeline.geminiSegments.map((segment) => hydrateMontageSceneMediaAsset(segment, "audio"))
+      );
+    }
+    if (Array.isArray(nextAudioTimeline.backgroundSegments)) {
+      nextAudioTimeline.backgroundSegments = await Promise.all(
+        nextAudioTimeline.backgroundSegments.map((segment) => hydrateMontageSceneMediaAsset(segment, "audio"))
+      );
+    }
+    payload.audioTimeline = nextAudioTimeline;
+  }
+  return payload;
+}
+
 async function blobToDataUrl(blob = null, mimeType = "application/octet-stream") {
   if (!blob || typeof blob.arrayBuffer !== "function") return "";
   const buffer = await blob.arrayBuffer();
@@ -1613,6 +1891,7 @@ async function inlineMontageExportPayloadMedia(payload = {}) {
 async function buildMontageExportPayloadForSubmission(session = null) {
   const prepared = buildMontageExportPayload(session);
   if (!prepared?.ok || !prepared?.payload) return prepared;
+  await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
   return prepared;
 }
@@ -1865,6 +2144,22 @@ export function buildMontageExportPayload(session = null) {
       const audioStoragePath = String(audio?.storagePath || "").trim();
       const audioDownloadUrl = String(audio?.downloadUrl || "").trim();
       const audioMimeType = String(audio?.mimeType || "audio/ogg").trim() || "audio/ogg";
+      const videoCacheKey = buildMontageSceneMediaCacheKey({
+        sessionId,
+        rowId,
+        sceneIndex: index + 1,
+        storagePath: videoStoragePath,
+        downloadUrl: videoDownloadUrl,
+        id: primarySegment?.id || clip?.id || rowId
+      }, "video");
+      const audioCacheKey = buildMontageSceneMediaCacheKey({
+        sessionId,
+        rowId,
+        sceneIndex: index + 1,
+        storagePath: audioStoragePath,
+        downloadUrl: audioDownloadUrl,
+        id: audio?.id || rowId
+      }, "audio");
       const durationMs = Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Number(entry?.effectiveDurationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS);
       const trimInMs = Math.max(0, Number(entry?.clip?.trimInMs || 0) || 0);
       const sceneMix = window.resolveTimelineClipMix?.(activeSession, rowId) || null;
@@ -1920,7 +2215,8 @@ export function buildMontageExportPayload(session = null) {
             downloadUrl: videoDownloadUrl || "",
             mimeType: videoMimeType,
             type: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
-            mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video")
+            mediaKind: String(primarySegment?.type || clip?.type || (videoMimeType.startsWith("image/") ? "image" : "video")).trim().toLowerCase() || (videoMimeType.startsWith("image/") ? "image" : "video"),
+            localMediaCacheKey: videoCacheKey
           },
           audio: useTimelineAudio
             ? null
@@ -1928,7 +2224,8 @@ export function buildMontageExportPayload(session = null) {
               storagePath: audioStoragePath || "",
               url: audioDownloadUrl || "",
               downloadUrl: audioDownloadUrl || "",
-              mimeType: audioMimeType
+              mimeType: audioMimeType,
+              localMediaCacheKey: audioCacheKey
             } : null,
           useNativeVideoAudio: useNativeVideoAudio === true,
           veoVolumeOverridePct: resolvedVeoVolumePct
