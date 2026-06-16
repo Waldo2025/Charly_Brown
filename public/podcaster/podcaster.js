@@ -3593,13 +3593,36 @@ function reuseSpeakerPortraitFromOtherSession(session = null, speaker = "", opti
 function normalizeDialogueVideoMap(raw = {}) {
   const next = {};
   if (!raw || typeof raw !== "object") return next;
+  const mediaSourceKeys = [
+    "downloadUrl",
+    "videoDownloadUrl",
+    "videoUrl",
+    "url",
+    "publicSceneVideoUrl",
+    "publicSceneThumbUrl",
+    "thumbUrl",
+    "thumbnailUrl",
+    "imageUrl",
+    "sceneImageUrl"
+  ];
+  const storageSourceKeys = [
+    "storagePath",
+    "videoStoragePath",
+    "path",
+    "publicSceneVideoStoragePath",
+    "publicSceneThumbStoragePath",
+    "thumbStoragePath",
+    "thumbnailStoragePath",
+    "imageStoragePath",
+    "sceneImageStoragePath"
+  ];
   Object.entries(raw).forEach(([rowId, clip]) => {
     const key = String(rowId || "").trim();
     if (!key || !clip || typeof clip !== "object") return;
     const mediaRef = normalizeMediaReferenceFromRecord(
       clip,
-      ["downloadUrl", "videoDownloadUrl", "videoUrl", "url"],
-      ["storagePath", "videoStoragePath", "path"]
+      mediaSourceKeys,
+      storageSourceKeys
     );
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
@@ -3610,30 +3633,34 @@ function normalizeDialogueVideoMap(raw = {}) {
         if (!segment || typeof segment !== "object") return null;
         const segmentRef = normalizeMediaReferenceFromRecord(
           segment,
-          ["downloadUrl", "videoDownloadUrl", "videoUrl", "url"],
-          ["storagePath", "videoStoragePath", "path"]
+          mediaSourceKeys,
+          storageSourceKeys
         );
         const segUrl = String(segmentRef.downloadUrl || "").trim();
         const segPath = String(segmentRef.storagePath || "").trim();
         if (!segPath && !segUrl) return null;
+        const segMimeType = String(segment.mimeType || "").trim().toLowerCase();
+        const segType = String(segment.type || segment.mediaKind || "").trim().toLowerCase();
         return {
           id: String(segment.id || `${key}-seg-${idx + 1}`).trim() || `${key}-seg-${idx + 1}`,
           index: Math.max(0, Number(segment.index) || idx),
           durationSec: Math.max(0, Number(segment.durationSec) || 0),
           downloadUrl: segUrl,
           storagePath: segPath,
-          mimeType: String(segment.mimeType || "video/mp4").trim() || "video/mp4",
+          mimeType: segMimeType || (segType === "image" ? "image/jpeg" : "video/mp4"),
           variant: String(segment.variant || "").trim(),
           targetSpeechLine: String(segment.targetSpeechLine || "").trim()
         };
       })
       .filter(Boolean)
       .sort((a, b) => a.index - b.index);
+    const clipMimeType = String(clip.mimeType || "").trim().toLowerCase();
+    const clipType = String(clip.type || clip.mediaKind || "").trim().toLowerCase();
     next[key] = {
       rowId: key,
       speaker: String(clip.speaker || "").trim(),
-      mimeType: String(clip.mimeType || "video/mp4").trim() || "video/mp4",
-      type: String(clip.type || "").trim().toLowerCase() || null,
+      mimeType: clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"),
+      type: clipType || (clipMimeType.startsWith("image/") ? "image" : null),
       model: String(clip.model || "veo-3.1-generate-preview").trim() || "veo-3.1-generate-preview",
       variant: String(clip.variant || "").trim(),
       promptVersion: String(clip.promptVersion || "podcaster_veo_v1").trim() || "podcaster_veo_v1",
@@ -6241,7 +6268,67 @@ function getOrderedTimelineStartMarkers(entries = []) {
 function resolveDialogueVideoForRow(session = null, rowId = "") {
   const key = String(rowId || "").trim();
   if (!key) return null;
-  return getDialogueVideoMap(session)[key] || null;
+  const existing = getDialogueVideoMap(session)[key] || null;
+  if (existing) return existing;
+  const rows = getSessionRows(session);
+  const row = rows.find((item) => String(item?.id || "").trim() === key) || null;
+  if (!row || typeof row !== "object") return null;
+  const mediaRef = normalizeMediaReferenceFromRecord(
+    row,
+    [
+      "publicSceneVideoUrl",
+      "publicSceneThumbUrl",
+      "thumbUrl",
+      "thumbnailUrl",
+      "imageUrl",
+      "sceneImageUrl",
+      "downloadUrl",
+      "videoDownloadUrl",
+      "videoUrl",
+      "url"
+    ],
+    [
+      "publicSceneVideoStoragePath",
+      "publicSceneThumbStoragePath",
+      "thumbStoragePath",
+      "thumbnailStoragePath",
+      "imageStoragePath",
+      "sceneImageStoragePath",
+      "storagePath",
+      "videoStoragePath",
+      "path"
+    ]
+  );
+  const downloadUrl = String(mediaRef.downloadUrl || "").trim();
+  const storagePath = String(mediaRef.storagePath || "").trim();
+  if (!downloadUrl && !storagePath) return null;
+  const mimeType = String(row?.mimeType || row?.publicSceneMimeType || "").trim().toLowerCase();
+  const type = String(row?.type || row?.mediaKind || "").trim().toLowerCase()
+    || (mimeType.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|avif)(?:\?|$)/i.test(downloadUrl) ? "image" : "video");
+  return {
+    rowId: key,
+    speaker: String(row?.speaker || "").trim(),
+    mimeType: mimeType || (type === "image" ? "image/jpeg" : "video/mp4"),
+    type,
+    mediaKind: type,
+    model: String(row?.model || row?.videoPreset || "fallback").trim() || "fallback",
+    variant: String(row?.variant || "").trim(),
+    promptVersion: String(row?.promptVersion || "").trim() || "fallback",
+    publicSceneLibraryId: String(row?.publicSceneLibraryId || "").trim(),
+    publicScenePublishedAt: String(row?.publicScenePublishedAt || "").trim(),
+    publicSceneTitle: String(row?.publicSceneTitle || "").trim(),
+    publicSceneThumbUrl: String(row?.publicSceneThumbUrl || row?.thumbnailUrl || "").trim(),
+    publicSceneVideoUrl: String(row?.publicSceneVideoUrl || row?.downloadUrl || "").trim(),
+    videoDirective: String(row?.videoDirective || "").replace(/\s+/g, " ").trim(),
+    scenePrompt: String(row?.scenePrompt || "").replace(/\s+/g, " ").trim(),
+    imagePrompts: normalizeVideoImagePrompts(row?.imagePrompts || []),
+    durationSec: Math.max(0, Number(row?.durationSec) || 0),
+    targetSpeechLine: String(row?.targetSpeechLine || row?.voiceOverText || row?.text || "").trim(),
+    segments: [],
+    updatedAt: String(row?.updatedAt || new Date().toISOString()).trim() || new Date().toISOString(),
+    downloadUrl,
+    storagePath
+  };
 }
 
 function resolveDialogueVideoSegments(clip = null) {

@@ -2323,12 +2323,35 @@ function sanitizePodcasterSession(raw = {}) {
     ? raw.dialogueVideoMap
     : {};
   const dialogueVideoMap = {};
+  const mediaSourceKeys = [
+    "downloadUrl",
+    "videoDownloadUrl",
+    "videoUrl",
+    "url",
+    "publicSceneVideoUrl",
+    "publicSceneThumbUrl",
+    "thumbUrl",
+    "thumbnailUrl",
+    "imageUrl",
+    "sceneImageUrl"
+  ];
+  const storageSourceKeys = [
+    "storagePath",
+    "videoStoragePath",
+    "path",
+    "publicSceneVideoStoragePath",
+    "publicSceneThumbStoragePath",
+    "thumbStoragePath",
+    "thumbnailStoragePath",
+    "imageStoragePath",
+    "sceneImageStoragePath"
+  ];
   Object.entries(dialogueVideoMapRaw).slice(0, 800).forEach(([rowId, clip]) => {
     const key = clampText(rowId, 120);
     if (!key || !clip || typeof clip !== "object") return;
     const mediaRef = normalizePersistedMediaReference({
-      downloadUrl: clampText(clip?.downloadUrl || "", 3000),
-      storagePath: clampText(clip?.storagePath || "", 700)
+      downloadUrl: clampText(mediaSourceKeys.map((k) => clip?.[k] || "").find(Boolean) || "", 3000),
+      storagePath: clampText(storageSourceKeys.map((k) => clip?.[k] || "").find(Boolean) || "", 700)
     });
     const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
     const storagePath = clampText(mediaRef.storagePath || "", 700);
@@ -2336,27 +2359,32 @@ function sanitizePodcasterSession(raw = {}) {
     const segmentsRaw = Array.isArray(clip?.segments) ? clip.segments : [];
     const segments = segmentsRaw.slice(0, 16).map((segment, idx) => {
       const segmentRef = normalizePersistedMediaReference({
-        downloadUrl: clampText(segment?.downloadUrl || "", 3000),
-        storagePath: clampText(segment?.storagePath || "", 700)
+        downloadUrl: clampText(mediaSourceKeys.map((k) => segment?.[k] || "").find(Boolean) || "", 3000),
+        storagePath: clampText(storageSourceKeys.map((k) => segment?.[k] || "").find(Boolean) || "", 700)
       });
       const segUrl = clampText(segmentRef.downloadUrl || "", 3000);
       const segPath = clampText(segmentRef.storagePath || "", 700);
       if (!segPath && !segUrl) return null;
+      const segMimeType = String(segment?.mimeType || "").trim().toLowerCase();
+      const segType = String(segment?.type || segment?.mediaKind || "").trim().toLowerCase();
       return {
         id: clampText(segment?.id || `${key}-seg-${idx + 1}`, 120) || `${key}-seg-${idx + 1}`,
         index: Math.max(0, Number(segment?.index) || idx),
         durationSec: clampNumber(segment?.durationSec, 0, 8, 0),
         downloadUrl: segUrl,
         storagePath: segPath,
-        mimeType: clampText(segment?.mimeType || "video/mp4", 120) || "video/mp4",
+        mimeType: clampText(segMimeType || (segType === "image" ? "image/jpeg" : "video/mp4"), 120) || "video/mp4",
         variant: clampText(segment?.variant || "", 120),
         targetSpeechLine: clampText(segment?.targetSpeechLine || "", 2200)
       };
     }).filter(Boolean);
+    const clipMimeType = String(clip?.mimeType || "").trim().toLowerCase();
+    const clipType = String(clip?.type || clip?.mediaKind || "").trim().toLowerCase();
     dialogueVideoMap[key] = {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
-      mimeType: clampText(clip?.mimeType || "video/mp4", 120) || "video/mp4",
+      mimeType: clampText(clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"), 120) || "video/mp4",
+      type: clampText(clipType || (clipMimeType.startsWith("image/") ? "image" : ""), 20) || undefined,
       model: clampText(clip?.model || DEFAULT_PODCASTER_VIDEO_MODEL, 140) || DEFAULT_PODCASTER_VIDEO_MODEL,
       promptVersion: clampText(clip?.promptVersion || "podcaster_veo_v1", 80) || "podcaster_veo_v1",
       videoDirective: clampText(clip?.videoDirective || "", 1400),
