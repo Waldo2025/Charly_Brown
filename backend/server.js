@@ -50,7 +50,6 @@ const {
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-text-render.js"));
-const sharp = require("sharp");
 const {
   resolveSceneMediaRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-scene-media-render-spec.js"));
@@ -10073,16 +10072,39 @@ function buildMontageOverlayCardsFilter({
 async function rasterizeOnScreenTextSvgToDataUrl(svg = "", { density = 144 } = {}) {
   const markup = String(svg || "").trim();
   if (!markup) return "";
+  const tmpPrefix = path.join(os.tmpdir(), `cb-text-raster-${randomUUID()}`);
+  const svgPath = `${tmpPrefix}.svg`;
+  const pngPath = `${tmpPrefix}.png`;
   try {
-    const buffer = await sharp(Buffer.from(markup), {
-      density: Math.max(72, Math.min(288, Math.round(Number(density) || 144)))
-    }).png().toBuffer();
+    await fs.promises.writeFile(svgPath, markup, "utf8");
+    await runFfmpegCommand([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-threads",
+      "1",
+      "-i",
+      svgPath,
+      "-frames:v",
+      "1",
+      pngPath
+    ], {
+      stage: "montage_text_svg_raster",
+      timeoutMs: 120000
+    });
+    const buffer = await fs.promises.readFile(pngPath);
     return `data:image/png;base64,${buffer.toString("base64")}`;
   } catch (error) {
     console.error("[backend][montage-export][text-raster] backend_svg_raster_failed", {
       error: String(error?.message || error || "").trim()
     });
     return "";
+  } finally {
+    await Promise.allSettled([
+      fs.promises.unlink(svgPath),
+      fs.promises.unlink(pngPath)
+    ]);
   }
 }
 
