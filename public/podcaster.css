@@ -11028,11 +11028,10 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     position: fixed;
     left: 8px;
     right: 8px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
     z-index: 30;
-    max-height: 24vh;
-    overflow-y: auto;
-    overflow-x: hidden;
+    max-height: none;
+    overflow: visible;
     border-radius: 18px;
     background: color-mix(in srgb, var(--pod-surface) 96%, #0f172a 4%);
     border: 1px solid color-mix(in srgb, var(--pod-border) 80%, transparent 20%);
@@ -11051,6 +11050,16 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     justify-content: center;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .podcast-video-transport-group.is-middle.is-floating-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0;
+  }
+
+  .podcast-video-transport-group.is-middle.is-floating-toolbar .podcast-video-transport-bundle {
+    width: 100%;
   }
 
   .podcast-video-transport-bundle {
@@ -11082,7 +11091,7 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     position: fixed;
     left: 8px;
     right: 8px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
     z-index: 25;
     gap: 10px;
     padding: 10px 12px 12px;

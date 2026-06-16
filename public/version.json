@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.141",
-  "build": "2026-1.0.10.141",
+  "version": "1.0.10.142",
+  "build": "2026-1.0.10.142",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: En móvil el footer de Podcaster ahora queda fijo al borde inferior y el transport se redistribuye sin recortar las secciones is-middle y corner.",

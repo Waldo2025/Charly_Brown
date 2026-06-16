@@ -7207,9 +7207,17 @@ async function setActiveSession(sessionId) {
       } catch (_) { }
       return null;
     })();
+    const hasExplicitSessionLibraryCollapsed = !!nextSession?.podcastStudioUiState
+      && Object.prototype.hasOwnProperty.call(nextSession.podcastStudioUiState, "libraryCollapsed");
+    const shouldDefaultCollapseLibraryOnMobile = window.innerWidth <= 768
+      && localLibraryCollapsed === null
+      && !hasExplicitSessionLibraryCollapsed;
     setPodcastStudioInspectorCollapsed(localInspectorCollapsed ?? ui.inspectorCollapsed);
     setPodcastStudioInspectorWidth(localInspectorWidthPx ?? ui.inspectorWidthPx, { persist: false });
-    setPodcastVideoLibraryCollapsed(localLibraryCollapsed ?? ui.libraryCollapsed);
+    setPodcastVideoLibraryCollapsed(
+      shouldDefaultCollapseLibraryOnMobile ? true : (localLibraryCollapsed ?? ui.libraryCollapsed),
+      { persist: false }
+    );
     // Sincronizar todos los switches de publicación (header y footer)
     const isPublished = nextSession?.publicar === true;
     document.querySelectorAll("[id^='sessionPublishToggle']").forEach(el => {
