@@ -10044,7 +10044,6 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
   height = 720,
   reelModeEnabled = false,
   baseInputLabel = "[0:v]",
-  brandInputLabel = "[1:v]",
   outputLabel = "vout"
 } = {}) {
   if (!brandOverlay || typeof brandOverlay !== "object") return "";
@@ -10063,7 +10062,7 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     ? `H-h-${marginPx}`
     : `${marginPx}`;
   return [
-    `${brandInputLabel}format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `movie=filename='${escapeFfmpegFilterPath(brandOverlay.assetPath)}',format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
     `${baseInputLabel}[brand]overlay=x=${xExpr}:y=${yExpr}:format=auto:shortest=1[${outputLabel}]`
   ].join(";");
 }
