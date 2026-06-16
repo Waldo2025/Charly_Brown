@@ -11045,15 +11045,21 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
   .podcast-video-transport-group,
   .podcast-video-transport-corner {
+    display: flex;
     width: 100%;
+    min-width: 0;
     justify-content: center;
     flex-wrap: wrap;
+    gap: 8px;
   }
 
   .podcast-video-transport-bundle {
+    display: flex;
     width: 100%;
+    min-width: 0;
     justify-content: center;
     flex-wrap: wrap;
+    gap: 8px;
   }
 
   .podcast-video-secondary-controls,
@@ -11120,6 +11126,33 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
   .podcast-video-transport-bundle {
     align-items: center;
+  }
+
+  .podcast-video-transport .row-icon-btn,
+  .podcast-video-transport .studio-speed-wrap select {
+    flex: 0 0 auto;
+  }
+
+  .podcast-video-transport .row-icon-btn {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 10px;
+  }
+
+  .podcast-video-transport .studio-speed-wrap {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .podcast-video-transport .studio-speed-wrap select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .podcast-video-transport-corner {
+    justify-content: flex-end;
   }
 
   .podcast-studio-inspector {
