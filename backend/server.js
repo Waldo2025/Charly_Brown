@@ -10798,6 +10798,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const hasRasterizedText = input.exportMode !== "review"
           && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
           && renderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+        console.info("[backend][montage-export][text-raster] visual-pass-input", {
+          segmentCount: input.onScreenTextSegments.length,
+          renderedSegmentCount: renderedSegments.length,
+          hasRasterizedText,
+          overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+          partyKaraoke: input.partyKaraoke !== false,
+          exportMode: input.exportMode
+        });
         if (hasRasterizedText) {
           const rasterFilters = [];
           let chainLabel = "[0:v]";
@@ -10869,70 +10877,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             useFilterComplexForVisual = true;
           }
         } else {
-          const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
-          const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
-          const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
-          const karaokeSegments = [];
-          const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
-          const fontSource = fontFile
-            ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
-            : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`;
-          if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
-          else console.warn("[backend] drawtext using fallback font hint: Sans");
-          const drawFilters = input.onScreenTextSegments
-            .slice()
-            .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
-            .flatMap((segment) => {
-              const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
-              const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
-              const layout = normalizeMontageOnScreenTextExportLayout({
-                segment,
-                settings: onScreenTextSettings,
-                resolution: input.resolution || "source",
-                sourceDims
-              });
-              const spec = resolveOnScreenTextRenderSpec({
-                settings: onScreenTextSettings,
-                layout,
-                resolution: input.resolution || "source",
-                sourceWidth: sourceDims.width,
-                sourceHeight: sourceDims.height,
-                text: segment.text || "",
-                fallback: ""
-              });
-              const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-              const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
-              const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
-              if (karaokeEnabled) {
-                karaokeSegments.push({
-                  startSec,
-                  endSec,
-                  spec,
-                  wordTimings
-                });
-              }
-              const textPath = textFileResolver(String(spec.wrappedText || "").trim());
-              return buildMontageOnScreenTextDrawFilters({
-                spec,
-                settings: onScreenTextSettings,
-                textPath,
-                fontSource,
-                textColor,
-                strokeColor,
-                startSec,
-                endSec,
-                wordTimings,
-                textFileResolver
-              });
-            });
-          if (karaokeSegments.length) {
-            visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeSegments, onScreenTextSettings, {
-              resolution: input.resolution || "source",
-              sourceWidth: sourceDims.width,
-              sourceHeight: sourceDims.height
-            }));
-          }
-          visualFilters.push(...drawFilters);
+          const missingRendered = renderedSegments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
+          console.error("[backend][montage-export][text-raster] raster frames missing, aborting without drawtext fallback", {
+            segmentCount: input.onScreenTextSegments.length,
+            renderedSegmentCount: renderedSegments.length,
+            missingCount: missingRendered.length,
+            missingRowIds: missingRendered.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10),
+            overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+            partyKaraoke: input.partyKaraoke !== false,
+            exportMode: input.exportMode
+          });
+          const err = new Error("montage_onscreen_text_raster_missing");
+          err.status = 422;
+          throw err;
         }
       }
 

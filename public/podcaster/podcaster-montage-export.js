@@ -75,6 +75,10 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
   try {
     return canvas.toDataURL("image/png");
   } catch (_) {
+    console.warn("[podcaster][montage-export][text-raster] dataURL export failed", {
+      widthPx: snapshot.widthPx,
+      heightPx: snapshot.heightPx
+    });
     return "";
   }
 }
@@ -1911,6 +1915,13 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
     : null;
   const exportRasterDims = resolveMontageExportRasterDimensions(payload.resolution || "source");
   const nextSegments = [];
+  console.info("[podcaster][montage-export][text-raster] hydrate_start", {
+    segmentCount: timeline.segments.length,
+    resolution: payload.resolution || "source",
+    exportWidthPx: exportRasterDims.width,
+    exportHeightPx: exportRasterDims.height,
+    partyKaraoke: payload.partyKaraoke !== false
+  });
   for (const segment of timeline.segments) {
     if (!segment || typeof segment !== "object") continue;
     const basePlan = buildPlan({
@@ -1928,6 +1939,17 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
     const wordTimings = normalizeKaraokeWordTimings
       ? normalizeKaraokeWordTimings(audioClip, String(segment.text || "").trim())
       : [];
+    console.info("[podcaster][montage-export][text-raster] segment_plan", {
+      rowId: String(segment.rowId || "").trim() || undefined,
+      sceneIndex: Number(segment.sceneIndex || 0) || undefined,
+      text: String(segment.text || "").trim(),
+      presetClass: basePlan.presetClass,
+      bgClass: basePlan.bgClass,
+      bubbleWidthPx: basePlan.bubbleWidthPx,
+      bubbleHeightPx: basePlan.bubbleHeightPx,
+      padPx: basePlan.padPx,
+      wordCount: wordTimings.length
+    });
     const baseDataUrl = await renderOnScreenTextRasterDataUrl(basePlan);
     const renderedFrames = [];
     if (baseDataUrl) {
@@ -1944,6 +1966,16 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
         heightPx: basePlan.heightPx,
         offsetXPx: basePlan.padPx,
         offsetYPx: basePlan.padPx
+      });
+    } else {
+      console.error("[podcaster][montage-export][text-raster] base_frame_failed", {
+        rowId: String(segment.rowId || "").trim() || undefined,
+        sceneIndex: Number(segment.sceneIndex || 0) || undefined,
+        text: String(segment.text || "").trim(),
+        presetClass: basePlan.presetClass,
+        bgClass: basePlan.bgClass,
+        widthPx: basePlan.widthPx,
+        heightPx: basePlan.heightPx
       });
     }
     if (payload.partyKaraoke !== false && wordTimings.length) {
@@ -1978,6 +2010,14 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
           offsetXPx: wordPlan.padPx,
           offsetYPx: wordPlan.padPx
         });
+        console.info("[podcaster][montage-export][text-raster] karaoke_word_frame", {
+          rowId: String(segment.rowId || "").trim() || undefined,
+          sceneIndex: Number(segment.sceneIndex || 0) || undefined,
+          wordIndex: index,
+          text: String(word?.text || "").trim(),
+          startMs,
+          endMs
+        });
       }
     }
     nextSegments.push({
@@ -1986,6 +2026,10 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
     });
   }
   timeline.renderedSegments = nextSegments;
+  console.info("[podcaster][montage-export][text-raster] hydrate_complete", {
+    renderedSegmentCount: nextSegments.length,
+    framesPerSegment: nextSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
+  });
   return payload;
 }
 
@@ -2047,6 +2091,17 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
   await hydrateMontageExportPayloadOnScreenTextRasters(prepared.payload);
+  if (prepared.payload.onScreenTextTimeline?.segments?.length) {
+    const missingFrames = prepared.payload.onScreenTextTimeline.segments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
+    if (missingFrames.length) {
+      console.error("[podcaster][montage-export][text-raster] missing_rendered_frames", {
+        segmentCount: prepared.payload.onScreenTextTimeline.segments.length,
+        missingCount: missingFrames.length,
+        missingRowIds: missingFrames.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10)
+      });
+      throw new Error("montage_onscreen_text_raster_failed");
+    }
+  }
   return prepared;
 }
 
