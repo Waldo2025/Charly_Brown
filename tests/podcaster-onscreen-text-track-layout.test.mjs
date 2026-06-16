@@ -55,7 +55,10 @@ test("karaoke export preserves the scaled background box and alignment from the 
   assert.match(onScreenTextSource, /scaledBoxXPx/);
   assert.match(backendSource, /function buildMontageOnScreenTextKaraokeBoxFilters\(segments = \[\], settings = \{\}, options = \{\}\)/);
   assert.match(backendSource, /drawbox=x=\$\{safeX\}:y=\$\{safeY\}:w=\$\{safeWidth\}:h=\$\{safeHeight\}:color=\$\{boxColor\}:t=fill:enable='/);
-  assert.match(backendSource, /const align = String\(spec\.textAlign \|\| settings\?\.textAlign \|\| "center"\)\.trim\(\)\.toLowerCase\(\);/);
+  assert.match(backendSource, /const karaokeEnabled = input\.partyKaraoke !== false && wordTimings\.length > 0 && String\(spec\.wrappedText \|\| ""\)\.trim\(\);/);
+  assert.match(backendSource, /return buildMontageOnScreenTextDrawFilters\(\{/);
+  assert.doesNotMatch(backendSource, /buildMontageOnScreenTextKaraokeAssFile/);
+  assert.doesNotMatch(backendSource, /subtitles='[^']*montage-onscreen-karaoke\.ass/);
 });
 
 test("montage export preview syncs karaoke overlay from the preview video element", () => {
@@ -73,6 +76,11 @@ test("montage export preview falls back to scene index when row id is missing", 
   assert.ok(montageExportSource.includes("currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()"));
   assert.ok(montageExportSource.includes("previewSceneIndex"));
   assert.ok(montageExportSource.includes("entries[cleanSceneIndex - 1]"));
+  assert.ok(montageExportSource.includes("getMontageExportPreviewMediaTargets"));
+  assert.ok(montageExportSource.includes("window.montageExportBusy && hasReadyPreview"));
+  assert.ok(montageExportSource.includes("montageExportPreviewVideoAlt"));
+  assert.ok(montageExportSource.includes("requestMontageExportCancel"));
+  assert.ok(montageExportSource.includes("/api/podcaster/montage/export-cancel"));
 });
 
 test("playback controller does not re-hardcode bubble width and position outside the shared spec", () => {

@@ -61,3 +61,19 @@ test("recent montage export snapshots report small age", () => {
     graceMs: 60 * 1000
   }), true);
 });
+
+test("cancelled montage export snapshots are terminal", () => {
+  const snapshot = recoverMontageExportJobSnapshot({
+    jobId: "job-3",
+    status: "cancelled",
+    stage: "cancelled",
+    heartbeatAt: "2026-04-27T15:29:40.000Z",
+    updatedAt: "2026-04-27T15:29:40.000Z"
+  }, {
+    nowMs: Date.parse("2026-04-27T15:30:00.000Z"),
+    graceMs: 60 * 1000
+  });
+
+  assert.equal(snapshot.status, "cancelled");
+  assert.equal(snapshot.degraded, undefined);
+});

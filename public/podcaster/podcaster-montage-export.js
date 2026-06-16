@@ -250,21 +250,8 @@ function setMontageExportState(nextState = {}) {
   return montageExportState;
 }
 
-// --- Runtime & Environment Detectors ---
-
-function isRenderBackedApiRuntime() {
-  const apiBase = String(window.__CHARLY_CONFIG__?.apiBaseUrl || "").trim().toLowerCase();
-  return apiBase.includes(".onrender.com/api");
-}
-
-function shouldDisableMontagePreviewInCurrentRuntime() {
-  // El preview del modal se resuelve desde frontend (sin endpoint de render preview),
-  // por lo que no debemos desactivarlo en runtime Render.
-  return false;
-}
-
 function shouldSuspendMontagePreviewActivity() {
-  return montageExportPreviewPaused === true || shouldDisableMontagePreviewInCurrentRuntime();
+  return montageExportPreviewPaused === true;
 }
 
 export function setMontageExportPreviewPaused(isPaused = false) {
@@ -378,9 +365,6 @@ function scheduleMontageExportJobNotFoundRetry(jobId = "", failureCount = 0) {
   }, delayMs);
 }
 
-// Helper sleep function for loader delays
-const safeSleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
 // --- Migrated Montage Export Functions ---
 
 export function buildDefaultMontageBrandOverlay() {
@@ -406,7 +390,16 @@ function isMontageExportReelModeActive() {
   return cfg?.reelModeEnabled === true;
 }
 
-function syncMontageFrontendPreviewMediaLayout(frontendPreview = null) {
+function getMontageExportPreviewMediaTargets(mediaType = "", preferAlt = false) {
+  const isImage = String(mediaType || "").startsWith("image/");
+  const primary = isImage ? window.els.montageExportPreviewImage : window.els.montageExportPreviewVideo;
+  const alt = isImage ? window.els.montageExportPreviewImageAlt : window.els.montageExportPreviewVideoAlt;
+  const target = preferAlt && alt ? alt : (primary || alt || null);
+  const fallback = target === primary ? alt : primary;
+  return { isImage, primary, alt, target, fallback };
+}
+
+function syncMontageFrontendPreviewMediaLayout(frontendPreview = null, mediaEl = null) {
   const preview = frontendPreview && typeof frontendPreview === "object" ? frontendPreview : null;
   const container = document.getElementById("montageExportPreviewContainer");
   const resolver = window.resolveSceneMediaRenderSpec;
@@ -440,14 +433,17 @@ function syncMontageFrontendPreviewMediaLayout(frontendPreview = null) {
     mediaEl.style.setProperty("--pod-scene-media-pan-x-amplitude", `${Number(spec.motion?.amplitudeXPx || 0).toFixed(3)}px`);
     mediaEl.style.setProperty("--pod-scene-media-pan-y-amplitude", `${Number(spec.motion?.amplitudeYPx || 0).toFixed(3)}px`);
   };
-  if (String(preview.mediaType || "").startsWith("image/") && window.els.montageExportPreviewImage) {
-    window.els.montageExportPreviewImage.addEventListener("load", () => applyLayout(window.els.montageExportPreviewImage), { once: true });
-    applyLayout(window.els.montageExportPreviewImage);
+  const targetMediaEl = mediaEl || (String(preview.mediaType || "").startsWith("image/")
+    ? window.els.montageExportPreviewImage
+    : window.els.montageExportPreviewVideo);
+  if (String(preview.mediaType || "").startsWith("image/") && targetMediaEl) {
+    targetMediaEl.addEventListener("load", () => applyLayout(targetMediaEl), { once: true });
+    applyLayout(targetMediaEl);
     return;
   }
-  if (window.els.montageExportPreviewVideo) {
-    window.els.montageExportPreviewVideo.addEventListener("loadedmetadata", () => applyLayout(window.els.montageExportPreviewVideo), { once: true });
-    applyLayout(window.els.montageExportPreviewVideo);
+  if (targetMediaEl) {
+    targetMediaEl.addEventListener("loadedmetadata", () => applyLayout(targetMediaEl), { once: true });
+    applyLayout(targetMediaEl);
   }
 }
 
@@ -539,35 +535,58 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
   }
   const hasReadyPreview = Boolean(window.montageExportPreviewState.dataUrl && !window.montageExportPreviewState.loading && !window.montageExportPreviewState.error);
   const isVideoPreview = hasReadyPreview && window.montageExportPreviewState.mediaType.startsWith("video/");
-  if (window.els.montageExportPreviewVideo) {
+  const preferAltTarget = Boolean(window.montageExportBusy && hasReadyPreview);
+  const mediaTargets = getMontageExportPreviewMediaTargets(window.montageExportPreviewState.mediaType, preferAltTarget);
+  const targetMediaEl = mediaTargets.target;
+  const fallbackMediaEl = mediaTargets.fallback;
+  const mediaLoadSeq = (window.montageExportPreviewState.mediaLoadSeq || 0) + 1;
+  window.montageExportPreviewState.mediaLoadSeq = mediaLoadSeq;
+  const revealTargetMedia = () => {
+    if (window.montageExportPreviewState.mediaLoadSeq !== mediaLoadSeq) return;
+    if (fallbackMediaEl && fallbackMediaEl !== targetMediaEl) {
+      try { fallbackMediaEl.pause?.(); } catch (_) { }
+      fallbackMediaEl.hidden = true;
+    }
+    if (!targetMediaEl) return;
+    targetMediaEl.hidden = false;
     if (isVideoPreview) {
-      const currentSrc = String(window.els.montageExportPreviewVideo.getAttribute("src") || "").trim();
-      if (currentSrc !== window.montageExportPreviewState.dataUrl) {
-        window.els.montageExportPreviewVideo.src = window.montageExportPreviewState.dataUrl;
-        window.els.montageExportPreviewVideo.load();
-      }
-      window.els.montageExportPreviewVideo.hidden = false;
-      window.els.montageExportPreviewVideo.muted = true;
-      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview);
-      const playPromise = window.els.montageExportPreviewVideo.play?.();
+      targetMediaEl.muted = true;
+      const playPromise = targetMediaEl.play?.();
       if (playPromise && typeof playPromise.catch === "function") playPromise.catch(() => { });
+    }
+    syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
+  };
+  if (isVideoPreview && targetMediaEl) {
+    const currentSrc = String(targetMediaEl.getAttribute("src") || "").trim();
+    if (currentSrc !== window.montageExportPreviewState.dataUrl) {
+      targetMediaEl.src = window.montageExportPreviewState.dataUrl;
+      targetMediaEl.load();
+    }
+    targetMediaEl.hidden = false;
+    if (fallbackMediaEl && fallbackMediaEl !== targetMediaEl) {
+      fallbackMediaEl.hidden = false;
+    }
+    if (targetMediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      revealTargetMedia();
     } else {
-      try { window.els.montageExportPreviewVideo.pause?.(); } catch (_) { }
-      window.els.montageExportPreviewVideo.hidden = true;
-      if (!window.montageExportPreviewState.loading) {
-        window.els.montageExportPreviewVideo.removeAttribute("src");
-        try { window.els.montageExportPreviewVideo.load?.(); } catch (_) { }
-      }
+      targetMediaEl.addEventListener("loadeddata", revealTargetMedia, { once: true });
+      targetMediaEl.addEventListener("canplay", revealTargetMedia, { once: true });
     }
   }
-  if (window.els.montageExportPreviewImage) {
-    if (hasReadyPreview && !isVideoPreview) {
-      window.els.montageExportPreviewImage.src = window.montageExportPreviewState.dataUrl;
-      window.els.montageExportPreviewImage.hidden = false;
-      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview);
-    } else {
-      window.els.montageExportPreviewImage.hidden = true;
-      if (!window.montageExportPreviewState.loading) window.els.montageExportPreviewImage.removeAttribute("src");
+  if (!isVideoPreview) {
+    if (targetMediaEl) {
+      const currentSrc = String(targetMediaEl.getAttribute("src") || "").trim();
+      if (currentSrc !== window.montageExportPreviewState.dataUrl) {
+        targetMediaEl.src = window.montageExportPreviewState.dataUrl;
+      }
+      targetMediaEl.hidden = !hasReadyPreview;
+      syncMontageFrontendPreviewMediaLayout(window.montageExportPreviewState.frontendPreview, targetMediaEl);
+    }
+    if (fallbackMediaEl && fallbackMediaEl !== targetMediaEl) {
+      fallbackMediaEl.hidden = true;
+      if (!window.montageExportPreviewState.loading) {
+        fallbackMediaEl.removeAttribute("src");
+      }
     }
   }
   if (window.els.montageExportPreviewPlaceholder) {
@@ -598,6 +617,7 @@ export function resetMontageExportPreviewState() {
     lastSignature: "",
     debounceTimer: null,
     requestSeq: window.montageExportPreviewState.requestSeq || 0,
+    mediaLoadSeq: window.montageExportPreviewState.mediaLoadSeq || 0,
     lastJobPreviewRowId: "",
     lastJobPreviewSceneIndex: 0,
     lastJobPreviewAt: 0
@@ -605,7 +625,11 @@ export function resetMontageExportPreviewState() {
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
 }
 
-export function closeMontageExportModal() {
+export async function closeMontageExportModal() {
+  const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
+  if (window.montageExportBusy && activeJobId) {
+    void requestMontageExportCancel(activeJobId);
+  }
   if (typeof window.exportPreviewController?.stop === "function") {
     window.exportPreviewController.stop();
   }
@@ -616,6 +640,21 @@ export function closeMontageExportModal() {
   window.setTimelinePreviewsSuspended(false);
   setMontageExportBusy(false);
   setMontageExportOpen(false);
+}
+
+async function requestMontageExportCancel(jobId = "") {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) return false;
+  try {
+    await authFetchJson("/api/podcaster/montage/export-cancel", {
+      method: "POST",
+      body: { jobId: cleanJobId }
+    });
+    return true;
+  } catch (error) {
+    console.warn("[podcaster][montage-export] cancel request failed", String(error?.message || error || "unknown"));
+    return false;
+  }
 }
 
 export function setMontageExportStatus(text = "", hint = "", options = {}) {
@@ -1329,20 +1368,7 @@ export function openMontageExportModal() {
       : "Usa el timeline tal como está (escenas + audio).",
     { tone: "neutral" }
   );
-  if (shouldDisableMontagePreviewInCurrentRuntime()) {
-    setMontageExportPreviewState({
-      loading: false,
-      error: "",
-      dataUrl: "",
-      mediaType: "",
-      mode: window.montageExportState.exportMode,
-      sceneIndex: 0,
-      disabled: true,
-      meta: "Preview desactivado temporalmente para priorizar la exportación."
-    });
-  } else {
-    scheduleMontageExportPreviewRefresh(60);
-  }
+  scheduleMontageExportPreviewRefresh(60);
 }
 
 export function validateMontageExportLinearTimeline(runtimeEntries = []) {
@@ -2105,8 +2131,6 @@ Object.assign(window, {
   persistMontageExportSettings,
   montageExportState,
   montageExportBusy,
-  isRenderBackedApiRuntime,
-  shouldDisableMontagePreviewInCurrentRuntime,
   shouldSuspendMontagePreviewActivity,
   montageExportPreviewState,
   montageExportJobState,

@@ -21,6 +21,35 @@ function createProcessMontageExportJob({
       throw new Error("invalid_montage_export_job");
     }
 
+    let cancelRequested = false;
+    let cancelPollTimer = null;
+    const refreshCancelRequested = async () => {
+      if (cancelRequested) return true;
+      const currentJob = await jobStore.getJob(jobId).catch(() => null);
+      if (String(currentJob?.status || "").trim().toLowerCase() === "cancelled") {
+        cancelRequested = true;
+      }
+      return cancelRequested;
+    };
+    cancelPollTimer = setInterval(() => {
+      refreshCancelRequested().catch(() => { });
+    }, 500);
+    if (typeof cancelPollTimer?.unref === "function") cancelPollTimer.unref();
+
+    const isCancellationError = (error = null) => {
+      const code = String(error?.code || "").trim().toLowerCase();
+      return code === "montage_export_cancelled" || code === "ffmpeg_aborted";
+    };
+    const markCancelled = async (hint = "Exportación cancelada por el usuario.") => {
+      cancelRequested = true;
+      await jobStore.updateJob(jobId, {
+        status: "cancelled",
+        stage: "cancelled",
+        progress: Math.max(0, Math.min(1, Number((await jobStore.getJob(jobId).catch(() => null))?.progress || 0) || 0)),
+        hint
+      }).catch(() => { });
+    };
+
     await jobStore.updateJob(jobId, {
       status: "running",
       stage: "validate_payload",
@@ -39,7 +68,9 @@ function createProcessMontageExportJob({
         uid: String(data.ownerId || "").trim(),
         jobId,
         baseUrl: String(data.baseUrl || "").trim(),
+        shouldAbort: () => cancelRequested,
         onStage: async ({ stage, progress, hint, ...extra }) => {
+          if (cancelRequested) return;
           console.info("[backend][montage-export][job-stage]", {
             jobId,
             stage: String(stage || "validate_payload").trim() || "validate_payload",
@@ -55,7 +86,12 @@ function createProcessMontageExportJob({
             ...extra
           });
         }
-      });
+        });
+
+      if (cancelRequested || String((await jobStore.getJob(jobId).catch(() => null))?.status || "").trim().toLowerCase() === "cancelled") {
+        await markCancelled();
+        return null;
+      }
 
       await jobStore.updateJob(jobId, {
         status: "ready",
@@ -70,6 +106,10 @@ function createProcessMontageExportJob({
       });
       return result;
     } catch (error) {
+      if (isCancellationError(error) || cancelRequested || String((await jobStore.getJob(jobId).catch(() => null))?.status || "").trim().toLowerCase() === "cancelled") {
+        await markCancelled();
+        return null;
+      }
       console.error("[backend][montage-export][job-error]", {
         jobId,
         code: String(error?.code || "").trim() || null,
@@ -92,6 +132,11 @@ function createProcessMontageExportJob({
         error: sceneFailure
       });
       throw error;
+    } finally {
+      if (cancelPollTimer) {
+        clearInterval(cancelPollTimer);
+        cancelPollTimer = null;
+      }
     }
   };
 }

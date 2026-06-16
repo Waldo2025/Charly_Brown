@@ -501,55 +501,6 @@ function resolveMontageOnScreenTextFontFile(settings = {}) {
   return resolveFfmpegDrawtextFontFile();
 }
 
-function escapeAssText(value = "") {
-  return String(value || "")
-    .replace(/\\/g, "\\\\")
-    .replace(/{/g, "\\{")
-    .replace(/}/g, "\\}")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/\n/g, "\\N");
-}
-
-function formatAssTimestamp(ms = 0) {
-  const safe = Math.max(0, Math.round(Number(ms || 0) || 0));
-  const hours = Math.floor(safe / 3600000);
-  const minutes = Math.floor((safe % 3600000) / 60000);
-  const seconds = Math.floor((safe % 60000) / 1000);
-  const centiseconds = Math.floor((safe % 1000) / 10);
-  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
-}
-
-function toAssColor(value = "#FFFFFF", alpha = 0) {
-  const safe = String(value || "").trim();
-  const hex = safe.replace(/^#/, "").replace(/[^0-9a-f]/gi, "").slice(0, 6).padEnd(6, "F");
-  const rr = hex.slice(0, 2);
-  const gg = hex.slice(2, 4);
-  const bb = hex.slice(4, 6);
-  const safeAlpha = Math.max(0, Math.min(255, Math.round(Number(alpha || 0) || 0)));
-  return `&H${String(safeAlpha.toString(16).toUpperCase()).padStart(2, "0")}${bb}${gg}${rr}&`;
-}
-
-function buildMontageOnScreenTextKaraokeAssText(wrappedText = "", wordTimings = []) {
-  const timingList = Array.isArray(wordTimings) ? wordTimings : [];
-  const lines = String(wrappedText || "").split("\n");
-  let wordIndex = 0;
-  return lines.map((line) => {
-    const tokens = String(line || "").split(/(\s+)/);
-    const nextTokens = tokens.map((token) => {
-      if (!token) return token;
-      if (/^\s+$/.test(token)) return token;
-      const word = timingList[wordIndex] || null;
-      const durationCs = word
-        ? Math.max(1, Math.round(Math.max(0, Number(word.endMs || 0) - Number(word.startMs || 0)) / 10))
-        : 1;
-      wordIndex += 1;
-      return `{\\k${durationCs}}${escapeAssText(token)}`;
-    });
-    return nextTokens.join("");
-  }).join("\\N");
-}
-
 function buildMontageOnScreenTextKaraokeBoxFilters(segments = [], settings = {}, options = {}) {
   const list = Array.isArray(segments) ? segments.filter(Boolean) : [];
   if (!list.length) return [];
@@ -585,119 +536,6 @@ function buildMontageOnScreenTextKaraokeBoxFilters(segments = [], settings = {},
       `drawbox=x=${safeX}:y=${safeY}:w=${safeWidth}:h=${safeHeight}:color=${boxColor}:t=fill:enable='${enableExpr}'`
     ];
   });
-}
-
-function buildMontageOnScreenTextKaraokeAssFile(segments = [], settings = {}, options = {}) {
-  const list = Array.isArray(segments) ? segments.filter(Boolean) : [];
-  if (!list.length) return "";
-  const sourceWidth = Math.max(2, Math.round(Number(options?.sourceWidth || 1280) || 1280));
-  const sourceHeight = Math.max(2, Math.round(Number(options?.sourceHeight || 720) || 720));
-  const resolution = String(options?.resolution || "source").trim() || "source";
-  const baseFontName = String(settings?.fontFamily || "Sans").trim() || "Sans";
-  const fontSize = Math.max(16, Math.round(Number(settings?.fontSizePx || 44) || 44));
-  const fontWeight = String(settings?.fontWeight || "").trim().toLowerCase();
-  const fontStyle = String(settings?.fontStyle || "").trim().toLowerCase();
-  const fontBold = fontWeight === "bold" ? -1 : 0;
-  const fontItalic = fontStyle === "italic" ? -1 : 0;
-  const strokeWidth = Math.max(0, Math.round(Number(settings?.strokeEnabled === false ? 0 : settings?.strokeWidthPx || 0) || 0));
-  const shadowEnabled = settings?.shadowEnabled !== false && Number(settings?.shadowOpacity || 0) > 0.001;
-  const shadowDepth = shadowEnabled ? Math.max(1, Math.round(Number(settings?.shadowOffsetYPx ?? 8) || 8)) : 0;
-  const outlineColor = toAssColor(settings?.strokeColor || "#0F172A", 0);
-  const primaryColor = toAssColor(settings?.textColor || "#F8FAFC", Math.round((1 - Math.max(0, Math.min(1, Number(settings?.textOpacity ?? 1) || 1))) * 255));
-  const activeColor = toAssColor("#FACC15", 0);
-  const shadowColor = toAssColor("#020617", Math.round((1 - Math.max(0, Math.min(1, Number(settings?.shadowOpacity ?? 0.48) || 0.48))) * 255));
-  const boxOpacity = (() => {
-    const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
-    const bgOpacity = Math.max(0, Math.min(1, Number(settings?.bgOpacity ?? 0) || 0));
-    if (bgPreset === "none" || bgOpacity <= 0.001) return 0;
-    if (bgPreset === "solid") return 0.82 * bgOpacity;
-    return 0.58 * bgOpacity;
-  })();
-  const backColor = toAssColor("#020617", Math.round((1 - boxOpacity) * 255));
-  const widthPct = Math.max(0.08, Math.min(0.96, Number(options?.widthPct || 0.58) || 0.58));
-  const layoutHeightPct = Math.max(0.05, Math.min(0.6, Number(options?.heightPct || 0.14) || 0.14));
-  const bottomSafetyPx = Math.max(
-    Math.round(fontSize * 1.9),
-    Math.round(sourceHeight * 0.035)
-  );
-  const assHeader = [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    `PlayResX: ${sourceWidth}`,
-    `PlayResY: ${sourceHeight}`,
-    "WrapStyle: 2",
-    "ScaledBorderAndShadow: yes",
-    "",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    [
-      "Style: Default",
-      baseFontName,
-      fontSize,
-      primaryColor,
-      activeColor,
-      outlineColor,
-      backColor,
-      fontBold,
-      fontItalic,
-      0,
-      0,
-      100,
-      100,
-      0,
-      0,
-      1,
-      strokeWidth,
-      Math.min(4, shadowDepth),
-      7,
-      0,
-      0,
-      0,
-      1
-    ].join(", "),
-    "",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
-  ].join("\n");
-  const rows = list
-    .slice()
-    .sort((a, b) => Number(a?.startSec || 0) - Number(b?.startSec || 0) || Number(a?.sceneIndex || 0) - Number(b?.sceneIndex || 0))
-    .map((segment) => {
-      const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
-      const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
-      const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
-      const align = String(spec.textAlign || settings?.textAlign || "center").trim().toLowerCase();
-      const anchor = align === "left" ? 7 : (align === "right" ? 9 : 8);
-      const boxWidth = Math.max(1, Math.round(Number(spec.scaledBoxWidthPx || spec.boxWidthPx || 0) || 0));
-      const boxHeight = Math.max(1, Math.round(Number(spec.scaledBoxHeightPx || spec.boxHeightPx || 0) || 0));
-      const xBase = Math.max(0, Math.round(Number(spec.scaledBoxXPx ?? spec.rawXPx ?? 0) || 0));
-      const yBase = Math.max(0, Math.round(Number(spec.scaledBoxYPx ?? spec.yPx ?? 0) || 0));
-      const x = anchor === 8
-        ? xBase + Math.round(boxWidth / 2)
-        : (anchor === 9 ? xBase + boxWidth : xBase);
-      const y = yBase;
-      const xTag = `\\an${anchor}\\pos(${x},${Math.max(0, y)})`;
-      const scaleTag = `\\fs${Math.max(16, Math.round(Number(spec.fontSizePx || fontSize) || fontSize))}`;
-      const alignTags = [
-        xTag,
-        scaleTag,
-        `\\b${fontBold}`,
-        `\\i${fontItalic}`,
-        `\\bord${Math.max(0, Math.round(Number(spec.strokeEnabled ? spec.strokeWidthPx : 0) || 0))}`,
-        `\\shad${shadowEnabled ? Math.max(1, Math.round(Number(spec.shadowOffsetYPx ?? 6) || 6)) : 0}`,
-        `\\1c${primaryColor}`,
-        `\\2c${activeColor}`,
-        `\\3c${outlineColor}`,
-        `\\4c${backColor}`,
-        `\\fn${escapeAssText(baseFontName)}`
-      ].join("");
-      const karaokeText = buildMontageOnScreenTextKaraokeAssText(
-        String(spec.wrappedText || segment?.text || "").trim(),
-        Array.isArray(segment?.wordTimings) ? segment.wordTimings : []
-      );
-      return `Dialogue: 0,${formatAssTimestamp(startSec * 1000)},${formatAssTimestamp(endSec * 1000)},Default,,0,0,0,,{${alignTags}}${karaokeText}`;
-    });
-  return [assHeader, ...rows].join("\n");
 }
 
 function roundEven(value = 0, fallback = 2) {
@@ -4087,18 +3925,23 @@ function runFfmpegCommand(args = [], context = {}) {
     let timeoutId = null;
     let settled = false;
     let didTimeout = false;
+    let didAbort = false;
+    let abortPollTimer = null;
     let stdout = "";
     let stderr = "";
+    const shouldAbort = typeof context?.shouldAbort === "function" ? context.shouldAbort : null;
     const finalizeReject = (error) => {
       if (settled) return;
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
+      if (abortPollTimer) clearInterval(abortPollTimer);
       reject(error);
     };
     const finalizeResolve = (value) => {
       if (settled) return;
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
+      if (abortPollTimer) clearInterval(abortPollTimer);
       resolve(value);
     };
     if (timeoutMs > 0) {
@@ -4113,6 +3956,28 @@ function runFfmpegCommand(args = [], context = {}) {
           } catch (_) {}
         }, 1500).unref?.();
       }, timeoutMs);
+    }
+    if (shouldAbort) {
+      abortPollTimer = setInterval(() => {
+        if (settled || didTimeout || didAbort) return;
+        let aborted = false;
+        try {
+          aborted = shouldAbort() === true;
+        } catch (_) {
+          aborted = false;
+        }
+        if (!aborted) return;
+        didAbort = true;
+        try {
+          child.kill("SIGTERM");
+        } catch (_) {}
+        setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch (_) {}
+        }, 1200).unref?.();
+      }, 400);
+      if (typeof abortPollTimer.unref === "function") abortPollTimer.unref();
     }
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk || "");
@@ -4138,6 +4003,20 @@ function runFfmpegCommand(args = [], context = {}) {
         err.detail = {
           stage: err.stage,
           timeoutMs,
+          stderrPreview: buildMontageStderrPreview(stderr),
+          stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
+        };
+        finalizeReject(err);
+        return;
+      }
+      if (didAbort) {
+        const err = new Error("ffmpeg_aborted");
+        err.code = "ffmpeg_aborted";
+        err.stage = String(context?.stage || "run").trim() || "run";
+        err.stdout = stdout;
+        err.stderr = stderr;
+        err.detail = {
+          stage: err.stage,
           stderrPreview: buildMontageStderrPreview(stderr),
           stdoutPreview: buildMontageStderrPreview(stdout, 8, 1200)
         };
@@ -4266,6 +4145,7 @@ async function extractStoryboardAndKeyframesFromVideo(videoBuffer = Buffer.alloc
       const outputPath = keyframePaths[index];
       try {
         // eslint-disable-next-line no-await-in-loop
+        throwIfCancelled("mix_timeline_audio");
         await runFfmpegCommand([
           "-hide_banner",
           "-y",
@@ -10229,8 +10109,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
   const uid = String(context?.uid || "").trim();
   const jobId = clampExportId(context?.jobId || "");
   const emitStage = createMontageStageReporter(context?.onStage);
+  const shouldAbort = typeof context?.shouldAbort === "function" ? context.shouldAbort : () => false;
+  const createCancellationError = (stage = "cancelled") => {
+    const err = new Error("montage_export_cancelled");
+    err.code = "montage_export_cancelled";
+    err.status = 499;
+    err.stage = String(stage || "cancelled").trim() || "cancelled";
+    err.detail = { stage: err.stage };
+    return err;
+  };
+  const throwIfCancelled = (stage = "cancelled") => {
+    if (shouldAbort()) throw createCancellationError(stage);
+  };
   let tmpDir = "";
   try {
+    throwIfCancelled("validate_payload");
     if (!isFfmpegAvailable()) {
       const err = new Error("ffmpeg_static_missing");
       err.status = 500;
@@ -10278,6 +10171,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     });
 
     for (let i = 0; i < input.entries.length; i += 1) {
+      throwIfCancelled("download_assets");
       const entry = input.entries[i] || {};
       const rowId = clampText(entry?.rowId || "", 140);
       const sceneIndex = Math.max(1, Number(entry?.sceneIndex || i + 1) || i + 1);
@@ -10337,6 +10231,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       logMontageMemory("render_scene_before", { jobId, currentSceneIndex: sceneIndex, currentRowId: rowId });
       let currentSceneSubstage = isImageAsset ? "scene_download_image" : "scene_download_video";
       try {
+        throwIfCancelled(`scene_${sceneIndex}_before_download`);
         const videoStoragePath = clampText(videoAsset?.storagePath || "", 900);
         const videoDownloadUrl = String(videoAsset?.downloadUrl || videoAsset?.url || "").trim();
         const sceneProgressBase = 0.18 + ((i / Math.max(1, input.entries.length)) * 0.26);
@@ -10360,6 +10255,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           substage: currentSceneSubstage
         }));
         const inputVisualPath = await downloadInput(videoAsset, isImageAsset ? "image" : "video", i);
+        throwIfCancelled(`scene_${sceneIndex}_after_download`);
         const downloadedVisualStat = await fs.promises.stat(inputVisualPath).catch(() => null);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
           jobId,
@@ -10409,6 +10305,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             label: `montage_scene_probe_${sceneIndex}`,
             hasAudio: true
           });
+        throwIfCancelled(`scene_${sceneIndex}_after_probe`);
         const sourceDims = sceneProbe.dimensions;
         const videoHasAudio = sceneProbe.hasAudio;
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
@@ -10546,11 +10443,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }));
         const renderStartMs = Date.now();
         currentSceneSubstage = "scene_ffmpeg_render";
+        throwIfCancelled(`scene_${sceneIndex}_before_render`);
         await runFfmpegCommand(args, {
           stage: `montage_scene_${sceneIndex}`,
           timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
-          timeoutCode: "scene_render_timeout"
+          timeoutCode: "scene_render_timeout",
+          shouldAbort: () => shouldAbort()
         });
+        throwIfCancelled(`scene_${sceneIndex}_after_render`);
         const renderedSceneStat = await fs.promises.stat(intermediatePath).catch(() => null);
         console.info("[backend][montage-export][scene-step-finish]", buildMontageSceneTrace({
           jobId,
@@ -10641,6 +10541,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     let concatOutPath = "";
     emitStage("concat_timeline", 0.48, (overlapPlan.hasOverlap || overlapPlan.hasGaps) ? "Componiendo escenas con transiciones o huecos en el timeline." : "Uniendo escenas en un solo timeline.");
     logMontageMemory("concat_timeline_start", { jobId, exportedSceneCount: exportedEntries.length });
+    throwIfCancelled("concat_timeline");
     if (overlapPlan.hasOverlap) {
       concatOutPath = await renderMontageOverlapComposition({
         input,
@@ -10671,7 +10572,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-c:v", "copy", "-c:a", "copy",
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         concatOutPath
-      ], { stage: "montage_concat" });
+      ], { stage: "montage_concat", shouldAbort: () => shouldAbort() });
     }
     logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
 
@@ -10789,7 +10690,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
           ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
           timelineMixedOutPath
-        ], { stage: "montage_mix_timeline_audio" });
+        ], { stage: "montage_mix_timeline_audio", shouldAbort: () => shouldAbort() });
         finalOutPath = timelineMixedOutPath;
       }
       logMontageMemory("mix_timeline_audio_after", {
@@ -10814,6 +10715,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       const mixedOutPath = path.join(tmpDir, `montage-mixed.${outExt}`);
       const audioCodec = outExt === "webm" ? "libopus" : "aac";
       const audioBitrate = outExt === "webm" ? "128k" : "160k";
+      throwIfCancelled("mix_background_music");
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning",
         "-i", finalOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
@@ -10824,7 +10726,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         mixedOutPath
-      ], { stage: "montage_mix_music" });
+      ], { stage: "montage_mix_music", shouldAbort: () => shouldAbort() });
       finalOutPath = mixedOutPath;
     }
 
@@ -10854,7 +10756,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
         const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
         const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
-        const karaokeAssSegments = [];
+        const karaokeSegments = [];
         const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
         const fontSource = fontFile
           ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
@@ -10886,13 +10788,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             const wordTimings = audioClip?.wordTimings || [];
             const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
             if (karaokeEnabled) {
-              karaokeAssSegments.push({
+              karaokeSegments.push({
                 startSec,
                 endSec,
                 spec,
                 wordTimings
               });
-              return [];
             }
             const textPath = textFileResolver(String(spec.wrappedText || "").trim());
             return buildMontageOnScreenTextDrawFilters({
@@ -10908,30 +10809,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               textFileResolver
             });
           });
-        if (karaokeAssSegments.length) {
-          visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeAssSegments, onScreenTextSettings, {
+        if (karaokeSegments.length) {
+          visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeSegments, onScreenTextSettings, {
             resolution: input.resolution || "source",
             sourceWidth: sourceDims.width,
             sourceHeight: sourceDims.height
           }));
-        }
-        if (karaokeAssSegments.length) {
-          const assPath = path.join(tmpDir, "montage-onscreen-karaoke.ass");
-          try {
-            const assFontsDir = path.resolve(__dirname, "..", "public");
-            fs.writeFileSync(assPath, buildMontageOnScreenTextKaraokeAssFile(karaokeAssSegments, onScreenTextSettings, {
-              resolution: input.resolution || "source",
-              sourceWidth: sourceDims.width,
-              sourceHeight: sourceDims.height
-            }), "utf8");
-            drawFilters.push(`subtitles='${escapeFfmpegFilterPath(assPath)}':fontsdir='${escapeFfmpegFilterPath(assFontsDir)}'`);
-          } catch (err) {
-            console.error("[backend][montage-export] karaoke ass generation failed:", err.message);
-            if (err.stderr) {
-              console.error("[backend][montage-export] karaoke ass stderr:", err.stderr.slice(-2000));
-            }
-            throw err;
-          }
         }
         visualFilters.push(...drawFilters);
       }
@@ -11016,11 +10899,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           filterGraph,
           args: finalVisualArgs
         });
-        await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals" });
+        throwIfCancelled("montage_final_visuals");
+        await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals", shouldAbort: () => shouldAbort() });
         finalOutPath = finalVisualOutPath;
       } else {
         emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
         const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+        throwIfCancelled("montage_encode_delivery");
         await runFfmpegCommand([
           "-y", "-hide_banner", "-loglevel", "warning",
           "-i", finalOutPath,
@@ -11033,12 +10918,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-ar", "48000",
           ...deliveryParams.aArgs,
           deliveryOutPath
-        ], { stage: "montage_encode_delivery" });
+        ], { stage: "montage_encode_delivery", shouldAbort: () => shouldAbort() });
         finalOutPath = deliveryOutPath;
       }
     } else {
       emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
       const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
+      throwIfCancelled("montage_encode_delivery");
       await runFfmpegCommand([
         "-y", "-hide_banner", "-loglevel", "warning",
         "-i", finalOutPath,
@@ -11051,7 +10937,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-ar", "48000",
         ...deliveryParams.aArgs,
         deliveryOutPath
-      ], { stage: "montage_encode_delivery" });
+      ], { stage: "montage_encode_delivery", shouldAbort: () => shouldAbort() });
       finalOutPath = deliveryOutPath;
     }
 
@@ -11355,6 +11241,48 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
     return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
   }
   return res.status(200).json(sanitizeMontageExportJobPublicPayload(job));
+});
+
+app.post("/api/podcaster/montage/export-cancel", async (req, res) => {
+  try {
+    const uid = String(req.authContext?.uid || "").trim();
+    const jobId = clampExportId(req.body?.jobId || "");
+    if (!jobId) return res.status(400).json({ error: "Falta jobId." });
+    const job = await resolveMontageExportJobSnapshot(jobId).catch(() => null);
+    if (!job) return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
+    if (String(job.ownerId || "").trim() && String(job.ownerId || "").trim() !== uid) {
+      return res.status(403).json({ error: "job_owner_mismatch", code: "job_owner_mismatch" });
+    }
+    const currentStatus = String(job.status || "").trim().toLowerCase();
+    if (["ready", "error", "failed", "cancelled", "completed"].includes(currentStatus)) {
+      return res.status(200).json({
+        ok: true,
+        job: sanitizeMontageExportJobPublicPayload(job),
+        cancelled: currentStatus === "cancelled"
+      });
+    }
+    const cancelledAt = new Date().toISOString();
+    const cancelledJob = await montageExportJobStore.updateJob(jobId, {
+      status: "cancelled",
+      stage: "cancelled",
+      progress: Math.max(0, Math.min(1, Number(job.progress || 0) || 0)),
+      hint: "Exportación cancelada por el usuario.",
+      error: null,
+      updatedAt: cancelledAt,
+      heartbeatAt: cancelledAt
+    });
+    upsertMontageExportJob(jobId, cancelledJob);
+    return res.status(200).json({
+      ok: true,
+      cancelled: true,
+      job: sanitizeMontageExportJobPublicPayload(cancelledJob)
+    });
+  } catch (error) {
+    return res.status(Number(error?.status || 500)).json({
+      error: String(error?.code || error?.message || "montage_export_cancel_failed").trim(),
+      code: String(error?.code || "").trim() || undefined
+    });
+  }
 });
 
 app.post("/api/podcaster/montage/preview", async (req, res) => {

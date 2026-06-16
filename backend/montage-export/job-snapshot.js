@@ -7,7 +7,7 @@ function toEpochMs(value = "") {
 
 function isTerminalMontageExportStatus(status = "") {
   const clean = String(status || "").trim().toLowerCase();
-  return clean === "ready" || clean === "error" || clean === "completed" || clean === "failed";
+  return clean === "ready" || clean === "error" || clean === "completed" || clean === "failed" || clean === "cancelled";
 }
 
 function getMontageExportJobSnapshotAgeMs(job = null, nowMs = Date.now()) {
