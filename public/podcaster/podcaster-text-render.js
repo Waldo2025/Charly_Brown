@@ -287,6 +287,170 @@
     `;
   }
 
+  function escapeSvgText(value = "") {
+    return escapeHtml(value);
+  }
+
+  function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false) {
+    const safeToken = escapeSvgText(token);
+    return isActive
+      ? `<tspan fill="#fff7bf" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
+      : `<tspan fill="currentColor">${safeToken}</tspan>`;
+  }
+
+  function buildOnScreenTextRasterLineMarkup(line = "", options = {}) {
+    const tokens = tokenizeSubtitleText(line);
+    const activeWordIndex = Number.isFinite(Number(options.activeWordIndex)) ? Number(options.activeWordIndex) : -1;
+    let wordIndex = Number(options.wordIndex || 0) || 0;
+    const parts = tokens.map((token) => {
+      if (/^\s+$/.test(token)) {
+        return `<tspan xml:space="preserve">${escapeSvgText(token)}</tspan>`;
+      }
+      const markup = buildOnScreenTextRasterTokenMarkup(token, wordIndex === activeWordIndex);
+      wordIndex += 1;
+      return markup;
+    });
+    return {
+      markup: parts.join(""),
+      wordIndex
+    };
+  }
+
+  function buildOnScreenTextRasterSvgMarkup(input = {}) {
+    const config = input && typeof input === "object" ? input : {};
+    const resolveFontFamilyCss = typeof onScreenTextApi.getOnScreenTextFontFamilyCss === "function"
+      ? onScreenTextApi.getOnScreenTextFontFamilyCss
+      : (fontFamily) => String(fontFamily || "system-ui, sans-serif");
+    const resolveStylePresetClass = typeof onScreenTextApi.getOnScreenTextStylePresetClass === "function"
+      ? onScreenTextApi.getOnScreenTextStylePresetClass
+      : (stylePreset) => `is-style-${String(stylePreset || "").trim().toLowerCase() || "3d"}`;
+    const resolveBgPresetClass = typeof onScreenTextApi.getOnScreenTextBgPresetClass === "function"
+      ? onScreenTextApi.getOnScreenTextBgPresetClass
+      : (bgPreset) => `is-bg-${String(bgPreset || "").trim().toLowerCase() || "none"}`;
+    const previewSpec = config.previewSpec && typeof config.previewSpec === "object" ? config.previewSpec : {};
+    const metrics = config.metrics && typeof config.metrics === "object" ? config.metrics : {};
+    const settings = config.settings && typeof config.settings === "object" ? config.settings : {};
+    const text = String(config.text || "").trim();
+    const wrappedText = String(config.wrappedText || previewSpec.wrappedText || text).trim();
+    const lines = wrappedText ? wrappedText.split("\n") : [text];
+    const presetClass = String(config.presetClass || previewSpec.presetClass || resolveStylePresetClass(settings.stylePreset) || "is-style-3d").trim() || "is-style-3d";
+    const bgClass = String(config.bgClass || previewSpec.bgClass || resolveBgPresetClass(settings.bgPreset) || "is-bg-none").trim() || "is-bg-none";
+    const widthPx = Math.max(1, Math.round(Number(config.widthPx || previewSpec.widthPx || 0) || 0));
+    const heightPx = Math.max(1, Math.round(Number(config.heightPx || previewSpec.heightPx || 0) || 0));
+    const fontFamily = resolveFontFamilyCss(settings.fontFamily);
+    const fontSizePx = Math.max(16, Number(metrics.previewFontSizePx || metrics.fontSizePx || 44) || 44);
+    const lineHeightPx = Math.max(fontSizePx, Number(metrics.previewLineHeightPx || fontSizePx * 1.22 || 1) || fontSizePx * 1.22);
+    const strokeWidthPx = Math.max(0, Number(metrics.previewBorderWidthPx || metrics.previewStrokeWidthPx || 0) || 0);
+    const shadowOpacity = Math.max(0, Math.min(1, Number(settings.shadowOpacity ?? 0.48) || 0));
+    const shadowBlurPx = Math.max(0, Number(metrics.previewShadowBlurPx || settings.shadowBlurPx || 0) || 0);
+    const shadowX = Number(metrics.previewShadowX ?? settings.shadowOffsetXPx ?? 0) || 0;
+    const shadowY = Number(metrics.previewShadowY ?? settings.shadowOffsetYPx ?? 0) || 0;
+    const bgScale = Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1) || 1));
+    const bgOpacity = Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 0.82) || 0));
+    const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
+    const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
+    const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
+    const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
+    const contentPadXPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
+    const contentPadYPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
+    const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || widthPx - 2) || widthPx));
+    const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || heightPx - 2) || heightPx));
+    const bubbleX = Math.max(0, Math.round((widthPx - bubbleWidthPx) / 2));
+    const bubbleY = Math.max(0, Math.round((heightPx - bubbleHeightPx) / 2));
+    const innerLeft = bubbleX + contentPadXPx;
+    const innerRight = bubbleX + bubbleWidthPx - contentPadXPx;
+    const centerX = bubbleX + (bubbleWidthPx / 2);
+    const lineStartY = bubbleY + contentPadYPx + fontSizePx;
+    const lineStepY = Math.max(fontSizePx, lineHeightPx);
+    const textOffsetYPx = presetClass === "is-style-3d" && bgClass === "is-bg-none" ? Math.round(fontSizePx * 0.16) : 0;
+    const boxFill = bgPreset === "solid"
+      ? { rgb: "2, 6, 23", opacity: Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3) }
+      : bgPreset === "glass"
+        ? { rgb: "15, 23, 42", opacity: Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3) }
+        : null;
+    const shadowOpacityValue = Math.max(0, Math.min(1, shadowOpacity)).toFixed(3);
+    const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
+    let wordIndex = 0;
+    const lineMarkup = lines.map((line, index) => {
+      const current = buildOnScreenTextRasterLineMarkup(line, {
+        activeWordIndex,
+        wordIndex
+      });
+      wordIndex = current.wordIndex;
+      const y = lineStartY + (index * lineStepY) + textOffsetYPx;
+      const anchor = textAlign === "left" ? "start" : (textAlign === "right" ? "end" : "middle");
+      const x = textAlign === "left"
+        ? innerLeft
+        : textAlign === "right"
+          ? innerRight
+          : centerX;
+      return `
+        <text
+          x="${x}"
+          y="${y}"
+          text-anchor="${anchor}"
+          font-family="${escapeSvgText(fontFamily)}"
+          font-size="${fontSizePx}"
+          font-weight="${settings.fontWeight === "bold" ? "700" : "500"}"
+          font-style="${settings.fontStyle === "italic" ? "italic" : "normal"}"
+          fill="${escapeSvgText(textColor)}"
+          stroke="${escapeSvgText(strokeColor)}"
+          stroke-width="${strokeWidthPx}"
+          paint-order="stroke fill"
+          filter="url(#pod-text-shadow)"
+          xml:space="preserve"
+        >${current.markup}</text>
+      `;
+    }).join("");
+    const shadowLineMarkup = lines.map((line, index) => {
+      const y = lineStartY + (index * lineStepY) + textOffsetYPx + Math.max(1, Math.round(shadowY));
+      const anchor = textAlign === "left" ? "start" : (textAlign === "right" ? "end" : "middle");
+      const x = textAlign === "left"
+        ? innerLeft + Math.round(shadowX)
+        : textAlign === "right"
+          ? innerRight + Math.round(shadowX)
+          : centerX + Math.round(shadowX);
+      return `
+        <text
+          x="${x}"
+          y="${y}"
+          text-anchor="${anchor}"
+          font-family="${escapeSvgText(fontFamily)}"
+          font-size="${fontSizePx}"
+          font-weight="${settings.fontWeight === "bold" ? "700" : "500"}"
+          font-style="${settings.fontStyle === "italic" ? "italic" : "normal"}"
+          fill="rgb(2, 6, 23)"
+          opacity="1"
+          filter="url(#pod-shadow-blur)"
+          xml:space="preserve"
+        >${escapeSvgText(line)}</text>
+      `;
+    }).join("");
+    const bgAttrs = bgPreset === "none"
+      ? ""
+      : `x="${bubbleX}" y="${bubbleY}" width="${bubbleWidthPx}" height="${bubbleHeightPx}" rx="${Math.max(10, Math.round(fontSizePx * 0.45))}" ry="${Math.max(10, Math.round(fontSizePx * 0.45))}" fill="rgb(${boxFill.rgb})" fill-opacity="${boxFill.opacity}"`;
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}">
+        <defs>
+          <filter id="pod-shadow-blur" x="-20%" y="-20%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="${Math.max(0.2, shadowBlurPx / 3).toFixed(2)}" />
+          </filter>
+          <filter id="pod-text-shadow" x="-20%" y="-20%" width="160%" height="160%">
+            <feDropShadow dx="${Math.round(shadowX)}" dy="${Math.round(shadowY)}" stdDeviation="${Math.max(0.4, shadowBlurPx / 3).toFixed(2)}" flood-color="rgb(2, 6, 23)" flood-opacity="${shadowOpacityValue}" />
+          </filter>
+          <filter id="pod-karaoke-active" x="-20%" y="-20%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="rgb(255, 214, 10)" flood-opacity="0.55" />
+          </filter>
+        </defs>
+        ${bgPreset === "none" ? "" : `<rect ${bgAttrs} />`}
+        <g transform="translate(0,0)">
+          ${shadowLineMarkup}
+          ${lineMarkup}
+        </g>
+      </svg>
+    `.trim();
+  }
+
   function buildOnScreenTextRasterSnapshotPlan(input = {}) {
     const config = input && typeof input === "object" ? input : {};
     const onScreenTextApi = root?.PodcasterOnScreenTextRenderSpec || root?.PodcasterKaraokeRenderSpec || {};
@@ -372,7 +536,19 @@
       bubbleHeightPx,
       widthPx,
       heightPx,
-      html
+      html,
+      svg: buildOnScreenTextRasterSvgMarkup({
+        previewSpec,
+        metrics,
+        settings,
+        text,
+        wrappedText: previewSpec?.wrappedText || text,
+        presetClass,
+        bgClass,
+        widthPx,
+        heightPx,
+        activeWordIndex
+      })
     };
   }
 

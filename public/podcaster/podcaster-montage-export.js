@@ -46,22 +46,31 @@ async function ensurePodcasterFontsReady() {
 
 async function renderOnScreenTextRasterDataUrl(plan = null) {
   const snapshot = plan && typeof plan === "object" ? plan : null;
-  if (!snapshot?.html || !snapshot.widthPx || !snapshot.heightPx) return "";
+  if (!snapshot?.svg || !snapshot.widthPx || !snapshot.heightPx) {
+    console.error("[podcaster][montage-export][text-raster] missing_svg_snapshot", {
+      hasSvg: Boolean(snapshot?.svg),
+      hasHtml: Boolean(snapshot?.html),
+      widthPx: snapshot?.widthPx,
+      heightPx: snapshot?.heightPx
+    });
+    return "";
+  }
   await ensurePodcasterFontsReady();
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshot.widthPx}" height="${snapshot.heightPx}" viewBox="0 0 ${snapshot.widthPx} ${snapshot.heightPx}">`,
-    `<foreignObject x="0" y="0" width="${snapshot.widthPx}" height="${snapshot.heightPx}">`,
-    snapshot.html,
-    `</foreignObject>`,
-    `</svg>`
-  ].join("");
+  const svg = String(snapshot.svg || "").trim();
   const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   const img = new Image();
   img.decoding = "async";
   img.crossOrigin = "anonymous";
   const loadPromise = new Promise((resolve) => {
     img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
+    img.onerror = () => {
+      console.error("[podcaster][montage-export][text-raster] svg_image_load_failed", {
+        widthPx: snapshot.widthPx,
+        heightPx: snapshot.heightPx,
+        svgLength: svg.length
+      });
+      resolve(false);
+    };
   });
   img.src = svgDataUrl;
   const loaded = await loadPromise;
