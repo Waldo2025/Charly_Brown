@@ -330,7 +330,7 @@ function parseHexColor(value = "", fallback = "F8FAFC") {
 function toFfmpegColor(value = "", alpha = 1, fallback = "F8FAFC") {
   const hex = parseHexColor(value, fallback);
   const a = Math.max(0, Math.min(1, Number(alpha) || 0));
-  return `#${hex}@${a.toFixed(3)}`;
+  return `0x${hex}@${a.toFixed(3)}`;
 }
 
 function escapeFfmpegDrawtextText(value = "") {

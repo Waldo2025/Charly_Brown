@@ -228,8 +228,8 @@
     const settings = options?.settings && typeof options.settings === "object" ? options.settings : {};
     const textPath = String(options?.textPath || "");
     const fontSource = String(options?.fontSource || "");
-    const textColor = String(options?.textColor || "#F8FAFC@1.000");
-    const strokeColor = String(options?.strokeColor || "#0F172A@1.000");
+    const textColor = String(options?.textColor || "0xF8FAFC@1.000");
+    const strokeColor = String(options?.strokeColor || "0x0F172A@1.000");
     const startSec = Math.max(0, Number(options?.startSec || 0) || 0);
     const endSec = Math.max(startSec + 0.1, Number(options?.endSec || 0) || 0);
     const stylePreset = String(settings?.stylePreset || "").trim().toLowerCase();
