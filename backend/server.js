@@ -43,12 +43,14 @@ const {
 const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec,
+  buildOnScreenTextRasterSnapshotPlan,
   normalizeOnScreenTextTrackSettings,
   normalizeKaraokeWordTimings,
   generateKaraokeOverlayText,
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-text-render.js"));
+const sharp = require("sharp");
 const {
   resolveSceneMediaRenderSpec
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-scene-media-render-spec.js"));
@@ -10068,6 +10070,124 @@ function buildMontageOverlayCardsFilter({
   return filters.join(",");
 }
 
+async function rasterizeOnScreenTextSvgToDataUrl(svg = "", { density = 144 } = {}) {
+  const markup = String(svg || "").trim();
+  if (!markup) return "";
+  try {
+    const buffer = await sharp(Buffer.from(markup), {
+      density: Math.max(72, Math.min(288, Math.round(Number(density) || 144)))
+    }).png().toBuffer();
+    return `data:image/png;base64,${buffer.toString("base64")}`;
+  } catch (error) {
+    console.error("[backend][montage-export][text-raster] backend_svg_raster_failed", {
+      error: String(error?.message || error || "").trim()
+    });
+    return "";
+  }
+}
+
+async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims = { width: 1280, height: 720 }) {
+  if (typeof buildOnScreenTextRasterSnapshotPlan !== "function") return [];
+  const segments = Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments : [];
+  if (!segments.length) return [];
+  const timelineSettings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
+    ? input.onScreenTextSettings
+    : {};
+  const exportRasterDims = {
+    width: Math.max(2, Math.round(Number(sourceDims?.width || 1280) || 1280)),
+    height: Math.max(2, Math.round(Number(sourceDims?.height || 720) || 720))
+  };
+  const renderedSegments = [];
+  console.info("[backend][montage-export][text-raster] backend_regen_start", {
+    segmentCount: segments.length,
+    exportWidthPx: exportRasterDims.width,
+    exportHeightPx: exportRasterDims.height,
+    partyKaraoke: input.partyKaraoke !== false
+  });
+  for (const segment of segments) {
+    if (!segment || typeof segment !== "object") continue;
+    const rowId = String(segment.rowId || "").trim();
+    const text = String(segment.text || "").trim();
+    if (!rowId || !text) continue;
+    const audioClip = input.dialogueAudioMap?.[rowId] || null;
+    const wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, text) : [];
+    const basePlan = buildOnScreenTextRasterSnapshotPlan({
+      rowId,
+      settings: timelineSettings,
+      layout: segment.layout || {},
+      text,
+      previewWidthPx: exportRasterDims.width,
+      previewHeightPx: exportRasterDims.height,
+      sourceWidth: exportRasterDims.width,
+      sourceHeight: exportRasterDims.height,
+      resolution: input.resolution || "source"
+    });
+    const baseDataUrl = await rasterizeOnScreenTextSvgToDataUrl(basePlan?.svg || "", {
+      density: Math.max(exportRasterDims.width, exportRasterDims.height) >= 1920 ? 192 : 144
+    });
+    const nextFrames = [];
+    if (baseDataUrl) {
+      nextFrames.push({
+        kind: "base",
+        startMs: Math.max(0, Math.round(Number(segment.startMs || 0) || 0)),
+        endMs: Math.max(
+          Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + 1,
+          Math.round(Number(segment.startMs || 0) + Number(segment.durationMs || 0) || 0)
+        ),
+        dataUrl: baseDataUrl,
+        padPx: basePlan.padPx,
+        widthPx: basePlan.widthPx,
+        heightPx: basePlan.heightPx,
+        offsetXPx: basePlan.padPx,
+        offsetYPx: basePlan.padPx
+      });
+    }
+    for (let index = 0; index < wordTimings.length; index += 1) {
+      const wordPlan = buildOnScreenTextRasterSnapshotPlan({
+        rowId,
+        settings: timelineSettings,
+        layout: segment.layout || {},
+        text,
+        wordTimings,
+        activeWordIndex: index,
+        previewWidthPx: exportRasterDims.width,
+        previewHeightPx: exportRasterDims.height,
+        sourceWidth: exportRasterDims.width,
+        sourceHeight: exportRasterDims.height,
+        resolution: input.resolution || "source"
+      });
+      const wordDataUrl = await rasterizeOnScreenTextSvgToDataUrl(wordPlan?.svg || "", {
+        density: Math.max(exportRasterDims.width, exportRasterDims.height) >= 1920 ? 192 : 144
+      });
+      if (!wordDataUrl) continue;
+      const word = wordTimings[index];
+      const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) + Number(word?.startMs || 0) || 0));
+      const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
+      nextFrames.push({
+        kind: "karaoke-word",
+        wordIndex: index,
+        startMs,
+        endMs,
+        dataUrl: wordDataUrl,
+        padPx: wordPlan.padPx,
+        widthPx: wordPlan.widthPx,
+        heightPx: wordPlan.heightPx,
+        offsetXPx: wordPlan.padPx,
+        offsetYPx: wordPlan.padPx
+      });
+    }
+    renderedSegments.push({
+      ...segment,
+      renderedFrames: nextFrames
+    });
+  }
+  console.info("[backend][montage-export][text-raster] backend_regen_complete", {
+    renderedSegmentCount: renderedSegments.length,
+    framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
+  });
+  return renderedSegments;
+}
+
 function buildMontageBrandOverlayFilter(brandOverlay = null, {
   width = 1280,
   height = 720,
@@ -10809,11 +10929,23 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           partyKaraoke: input.partyKaraoke !== false,
           exportMode: input.exportMode
         });
-        if (hasRasterizedText) {
+        let effectiveRenderedSegments = renderedSegments;
+        if (!hasRasterizedText) {
+          console.warn("[backend][montage-export][text-raster] client_frames_missing_or_empty, regenerating from shared snapshot spec", {
+            renderedSegmentCount: renderedSegments.length,
+            segmentCount: input.onScreenTextSegments.length,
+            overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0
+          });
+          effectiveRenderedSegments = await buildBackendOnScreenTextRenderedSegments(input, sourceDims);
+        }
+        const hasEffectiveRasterizedText = input.exportMode !== "review"
+          && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
+          && effectiveRenderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+        if (hasEffectiveRasterizedText) {
           const rasterFilters = [];
           let chainLabel = "[0:v]";
           let layerIndex = 0;
-          const sortedSegments = renderedSegments
+          const sortedSegments = effectiveRenderedSegments
             .slice()
             .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0));
           for (const segment of sortedSegments) {
@@ -10880,10 +11012,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             useFilterComplexForVisual = true;
           }
         } else {
-          const missingRendered = renderedSegments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
+          const missingRendered = effectiveRenderedSegments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
           console.error("[backend][montage-export][text-raster] raster frames missing, aborting without drawtext fallback", {
             segmentCount: input.onScreenTextSegments.length,
-            renderedSegmentCount: renderedSegments.length,
+            renderedSegmentCount: effectiveRenderedSegments.length,
             missingCount: missingRendered.length,
             missingRowIds: missingRendered.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10),
             overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
