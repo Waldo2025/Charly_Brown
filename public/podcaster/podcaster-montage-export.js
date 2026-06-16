@@ -19,7 +19,7 @@ const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
 const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
 
 // --- Constants ---
-const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v1";
+const MONTAGE_EXPORT_STORAGE_KEY = "cb_podcast_montage_export_v2";
 const MONTAGE_EXPORT_ACTIVE_JOB_KEY = "cb_podcast_montage_export_active_job_v1";
 const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   enabled: true,
