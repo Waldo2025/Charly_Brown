@@ -261,6 +261,10 @@ const SCREENSHOT_PERSONAL_LIMIT = 24;
 const SCREENSHOT_SHARED_LIMIT = 48;
 const ACTIVE_PLAYER_WINDOW_MS = 45 * 1000;
 const FFMPEG_DRAWTEXT_FONT_CANDIDATES = Object.freeze([
+  path.resolve(__dirname, "..", "public", "Radiora.ttf"),
+  path.resolve(__dirname, "..", "public", "Balloon.ttf"),
+  path.resolve(__dirname, "..", "public", "ASC-Cursive-2022.otf"),
+  path.resolve(__dirname, "..", "public", "Ballooning.otf"),
   "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
   "/System/Library/Fonts/Supplemental/Arial.ttf",
   "/System/Library/Fonts/Helvetica.ttc",
