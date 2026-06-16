@@ -46,47 +46,161 @@ async function ensurePodcasterFontsReady() {
 
 async function renderOnScreenTextRasterDataUrl(plan = null) {
   const snapshot = plan && typeof plan === "object" ? plan : null;
-  if (!snapshot?.svg || !snapshot.widthPx || !snapshot.heightPx) {
-    console.error("[podcaster][montage-export][text-raster] missing_svg_snapshot", {
-      hasSvg: Boolean(snapshot?.svg),
-      hasHtml: Boolean(snapshot?.html),
+  if (!snapshot?.widthPx || !snapshot.heightPx) {
+    console.error("[podcaster][montage-export][text-raster] missing_snapshot_dimensions", {
       widthPx: snapshot?.widthPx,
       heightPx: snapshot?.heightPx
     });
     return "";
   }
   await ensurePodcasterFontsReady();
-  const svg = String(snapshot.svg || "").trim();
-  const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  const img = new Image();
-  img.decoding = "async";
-  img.crossOrigin = "anonymous";
-  const loadPromise = new Promise((resolve) => {
-    img.onload = () => resolve(true);
-    img.onerror = () => {
-      console.error("[podcaster][montage-export][text-raster] svg_image_load_failed", {
-        widthPx: snapshot.widthPx,
-        heightPx: snapshot.heightPx,
-        svgLength: svg.length
-      });
-      resolve(false);
-    };
-  });
-  img.src = svgDataUrl;
-  const loaded = await loadPromise;
-  if (!loaded) return "";
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(2, Math.round(snapshot.widthPx));
   canvas.height = Math.max(2, Math.round(snapshot.heightPx));
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const settings = snapshot.settings && typeof snapshot.settings === "object" ? snapshot.settings : {};
+  const metrics = snapshot.metrics && typeof snapshot.metrics === "object" ? snapshot.metrics : {};
+  const previewSpec = snapshot.previewSpec && typeof snapshot.previewSpec === "object" ? snapshot.previewSpec : {};
+  const text = String(snapshot.text || "").trim();
+  const wrappedText = String(snapshot.wrappedText || previewSpec.wrappedText || text).trim();
+  const lines = wrappedText ? wrappedText.split("\n") : (text ? [text] : []);
+  const presetClass = String(snapshot.presetClass || previewSpec.presetClass || "").trim().toLowerCase();
+  const bgClass = String(snapshot.bgClass || previewSpec.bgClass || "").trim().toLowerCase();
+  const fontSizePx = Math.max(16, Math.round(Number(metrics.previewFontSizePx || metrics.fontSizePx || 44) || 44));
+  const fontFamily = String(settings.fontFamily || "Inter").trim() || "Inter";
+  const fontWeight = String(settings.fontWeight || "normal").trim().toLowerCase() === "bold" ? 700 : 500;
+  const fontStyle = String(settings.fontStyle || "normal").trim().toLowerCase() === "italic" ? "italic" : "normal";
+  const lineHeightPx = Math.max(fontSizePx, Math.round(Number(metrics.previewLineHeightPx || metrics.lineHeightPx || (fontSizePx * 1.22)) || (fontSizePx * 1.22)));
+  const strokeWidthPx = Math.max(0, Math.round(Number(metrics.previewBorderWidthPx || metrics.previewStrokeWidthPx || settings.strokeWidthPx || 0) || 0));
+  const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
+  const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
+  const shadowEnabled = settings.shadowEnabled !== false;
+  const shadowOpacity = Math.max(0, Math.min(1, Number(settings.shadowOpacity ?? 0.48) || 0));
+  const shadowBlurPx = Math.max(0, Math.round(Number(metrics.previewShadowBlurPx || settings.shadowBlurPx || 0) || 0));
+  const shadowX = Math.round(Number(metrics.previewShadowX ?? settings.shadowOffsetXPx ?? 0) || 0);
+  const shadowY = Math.round(Number(metrics.previewShadowY ?? settings.shadowOffsetYPx ?? 0) || 0);
+  const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
+  const bgOpacity = Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 0.82) || 0));
+  const bgScale = Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1) || 1));
+  const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || canvas.width) || canvas.width));
+  const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || canvas.height) || canvas.height));
+  const padPx = Math.max(0, Math.round(Number(snapshot.padPx || 0) || 0));
+  const bubbleX = padPx;
+  const bubbleY = padPx;
+  const contentPadXPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
+  const contentPadYPx = bgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
+  const textLeft = bubbleX + contentPadXPx;
+  const textRight = bubbleX + bubbleWidthPx - contentPadXPx;
+  const lineStartY = bubbleY + contentPadYPx + fontSizePx;
+  const lineStepY = Math.max(fontSizePx, lineHeightPx);
+  const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
+  const activeWordIndex = Number.isFinite(Number(snapshot.activeWordIndex)) ? Number(snapshot.activeWordIndex) : -1;
+  const wordsEnabled = Array.isArray(snapshot.wordTimings) ? snapshot.wordTimings.length > 0 : false;
+  const karaokeActiveColor = "#fff7bf";
+  const karaokeAccentColor = "#ffd60a";
+  const measureCtx = ctx;
+  measureCtx.save();
+  measureCtx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
+  measureCtx.textBaseline = "alphabetic";
+  const measureTokenWidth = (token = "") => measureCtx.measureText(String(token || "")).width;
+  const tokenize = (line = "") => String(line || "").match(/(\s+|[^\s]+)/g) || [];
+  const drawRoundedRect = (x, y, w, h, r) => {
+    const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  };
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  if (bgPreset !== "none") {
+    const boxFill = bgPreset === "solid"
+      ? `rgba(2, 6, 23, ${Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3)})`
+      : `rgba(15, 23, 42, ${Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3)})`;
+    ctx.fillStyle = boxFill;
+    ctx.shadowColor = "transparent";
+    drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
+    ctx.fill();
+    if (bgPreset === "solid") {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.lineWidth = 1;
+      drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  const presetIs3d = presetClass.includes("3d");
+  const lineShadowFill = "rgba(2, 6, 23, 0.72)";
+  const lineShadowOffset = presetIs3d ? Math.max(2, Math.round(fontSizePx * 0.06)) : shadowX;
+  const lineShadowY = presetIs3d ? Math.max(2, Math.round(fontSizePx * 0.06) + 1) : shadowY;
+  let globalWordCursor = 0;
+  const drawTokenLine = (line, y) => {
+    const tokens = tokenize(line);
+    const tokenWidths = tokens.map((token) => measureTokenWidth(token));
+    const lineWidth = tokenWidths.reduce((sum, value) => sum + value, 0);
+    const xStart = textAlign === "left"
+      ? textLeft
+      : textAlign === "right"
+        ? textRight - lineWidth
+        : textLeft + ((bubbleWidthPx - (contentPadXPx * 2) - lineWidth) / 2);
+    const baseX = Math.max(textLeft, xStart);
+    const drawPass = (fillColor, strokeColorValue, xOffset = 0, yOffset = 0, withShadow = false, countWords = false) => {
+      let cursor = baseX + xOffset;
+      if (withShadow && shadowEnabled && shadowOpacity > 0.001) {
+        ctx.shadowColor = `rgba(2, 6, 23, ${shadowOpacity.toFixed(3)})`;
+        ctx.shadowBlur = shadowBlurPx;
+        ctx.shadowOffsetX = shadowX;
+        ctx.shadowOffsetY = shadowY;
+      } else {
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      tokens.forEach((token, index) => {
+        if (/^\s+$/.test(token)) {
+          cursor += tokenWidths[index];
+          return;
+        }
+        const isActive = wordsEnabled && activeWordIndex >= 0 && globalWordCursor === activeWordIndex;
+        const tokenFill = isActive ? karaokeActiveColor : fillColor;
+        ctx.fillStyle = tokenFill;
+        ctx.strokeStyle = strokeColorValue;
+        ctx.lineWidth = strokeWidthPx;
+        ctx.strokeText(token, cursor, y);
+        ctx.fillText(token, cursor, y);
+        cursor += tokenWidths[index];
+        if (countWords) globalWordCursor += 1;
+      });
+    };
+    if (presetIs3d) {
+      drawPass(lineShadowFill, "rgba(2, 6, 23, 0.85)", lineShadowOffset, lineShadowY, true, false);
+    }
+    drawPass(textColor, strokeColor, 0, 0, true, true);
+  };
+  lines.forEach((line, index) => {
+    const y = lineStartY + (index * lineStepY) + (presetIs3d && bgClass === "is-bg-none" ? Math.round(fontSizePx * 0.16) : 0);
+    drawTokenLine(line, y);
+  });
+  ctx.restore();
   try {
     return canvas.toDataURL("image/png");
   } catch (_) {
     console.warn("[podcaster][montage-export][text-raster] dataURL export failed", {
       widthPx: snapshot.widthPx,
-      heightPx: snapshot.heightPx
+      heightPx: snapshot.heightPx,
+      text: text,
+      presetClass,
+      bgClass
     });
     return "";
   }
