@@ -30,6 +30,63 @@ const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   opacity: 1
 });
 
+function getPodcasterTextRenderApi() {
+  return window.PodcasterTextRenderSpec || window.PodcasterKaraokeRenderSpec || {};
+}
+
+async function ensurePodcasterFontsReady() {
+  const fonts = document?.fonts;
+  if (!fonts?.ready) return;
+  try {
+    await fonts.ready;
+  } catch (_) {
+    // ignore
+  }
+}
+
+async function renderOnScreenTextRasterDataUrl(plan = null) {
+  const snapshot = plan && typeof plan === "object" ? plan : null;
+  if (!snapshot?.html || !snapshot.widthPx || !snapshot.heightPx) return "";
+  await ensurePodcasterFontsReady();
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshot.widthPx}" height="${snapshot.heightPx}" viewBox="0 0 ${snapshot.widthPx} ${snapshot.heightPx}">`,
+    `<foreignObject x="0" y="0" width="${snapshot.widthPx}" height="${snapshot.heightPx}">`,
+    snapshot.html,
+    `</foreignObject>`,
+    `</svg>`
+  ].join("");
+  const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  const img = new Image();
+  img.decoding = "async";
+  img.crossOrigin = "anonymous";
+  const loadPromise = new Promise((resolve) => {
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+  });
+  img.src = svgDataUrl;
+  const loaded = await loadPromise;
+  if (!loaded) return "";
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(2, Math.round(snapshot.widthPx));
+  canvas.height = Math.max(2, Math.round(snapshot.heightPx));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  try {
+    return canvas.toDataURL("image/png");
+  } catch (_) {
+    return "";
+  }
+}
+
+function resolveMontageExportRasterDimensions(resolution = "source") {
+  const key = String(resolution || "source").trim().toLowerCase();
+  if (key === "1080p") return { width: 1920, height: 1080 };
+  if (key === "720p") return { width: 1280, height: 720 };
+  if (key === "480p") return { width: 854, height: 480 };
+  return { width: 1280, height: 720 };
+}
+
 // --- Helpers & Configuration Normalization ---
 
 export function normalizeMontageExportSettings(raw = {}) {
@@ -1838,6 +1895,100 @@ async function maybeInlineMontageMediaAsset(asset = null, kind = "video", budget
   };
 }
 
+async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
+  if (!payload || typeof payload !== "object") return payload;
+  const timeline = payload.onScreenTextTimeline;
+  if (!timeline || typeof timeline !== "object" || !Array.isArray(timeline.segments) || !timeline.segments.length) {
+    return payload;
+  }
+  const textApi = getPodcasterTextRenderApi();
+  const buildPlan = typeof textApi.buildOnScreenTextRasterSnapshotPlan === "function"
+    ? textApi.buildOnScreenTextRasterSnapshotPlan
+    : null;
+  if (!buildPlan) return payload;
+  const normalizeKaraokeWordTimings = typeof textApi.normalizeKaraokeWordTimings === "function"
+    ? textApi.normalizeKaraokeWordTimings
+    : null;
+  const exportRasterDims = resolveMontageExportRasterDimensions(payload.resolution || "source");
+  const nextSegments = [];
+  for (const segment of timeline.segments) {
+    if (!segment || typeof segment !== "object") continue;
+    const basePlan = buildPlan({
+      rowId: String(segment.rowId || "").trim(),
+      settings: timeline.settings || {},
+      layout: segment.layout || {},
+      text: String(segment.text || "").trim(),
+      previewWidthPx: exportRasterDims.width,
+      previewHeightPx: exportRasterDims.height,
+      sourceWidth: exportRasterDims.width,
+      sourceHeight: exportRasterDims.height,
+      resolution: payload.resolution || "source"
+    });
+    const audioClip = payload.dialogueAudioMap?.[String(segment.rowId || "").trim()] || null;
+    const wordTimings = normalizeKaraokeWordTimings
+      ? normalizeKaraokeWordTimings(audioClip, String(segment.text || "").trim())
+      : [];
+    const baseDataUrl = await renderOnScreenTextRasterDataUrl(basePlan);
+    const renderedFrames = [];
+    if (baseDataUrl) {
+      renderedFrames.push({
+        kind: "base",
+        startMs: Math.max(0, Math.round(Number(segment.startMs || 0) || 0)),
+        endMs: Math.max(
+          Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + 1,
+          Math.round(Number(segment.startMs || 0) + Number(segment.durationMs || 0) || 0)
+        ),
+        dataUrl: baseDataUrl,
+        padPx: basePlan.padPx,
+        widthPx: basePlan.widthPx,
+        heightPx: basePlan.heightPx,
+        offsetXPx: basePlan.padPx,
+        offsetYPx: basePlan.padPx
+      });
+    }
+    if (payload.partyKaraoke !== false && wordTimings.length) {
+      for (let index = 0; index < wordTimings.length; index += 1) {
+        const word = wordTimings[index];
+        const wordPlan = buildPlan({
+          rowId: String(segment.rowId || "").trim(),
+          settings: timeline.settings || {},
+          layout: segment.layout || {},
+          text: String(segment.text || "").trim(),
+          wordTimings,
+          activeWordIndex: index,
+          previewWidthPx: exportRasterDims.width,
+          previewHeightPx: exportRasterDims.height,
+          sourceWidth: exportRasterDims.width,
+          sourceHeight: exportRasterDims.height,
+          resolution: payload.resolution || "source"
+        });
+        const wordDataUrl = await renderOnScreenTextRasterDataUrl(wordPlan);
+        if (!wordDataUrl) continue;
+        const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) + Number(word?.startMs || 0) || 0));
+        const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
+        renderedFrames.push({
+          kind: "karaoke-word",
+          wordIndex: index,
+          startMs,
+          endMs,
+          dataUrl: wordDataUrl,
+          padPx: wordPlan.padPx,
+          widthPx: wordPlan.widthPx,
+          heightPx: wordPlan.heightPx,
+          offsetXPx: wordPlan.padPx,
+          offsetYPx: wordPlan.padPx
+        });
+      }
+    }
+    nextSegments.push({
+      ...segment,
+      renderedFrames
+    });
+  }
+  timeline.renderedSegments = nextSegments;
+  return payload;
+}
+
 async function inlineMontageExportPayloadMedia(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const budget = { remainingBytes: MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES };
@@ -1895,6 +2046,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   if (!prepared?.ok || !prepared?.payload) return prepared;
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
+  await hydrateMontageExportPayloadOnScreenTextRasters(prepared.payload);
   return prepared;
 }
 

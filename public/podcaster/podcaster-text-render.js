@@ -137,6 +137,245 @@
     }).join("");
   }
 
+  function buildOnScreenTextRasterStyleBlock() {
+    return `
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      body {
+        display: block;
+      }
+      .podcaster-onscreen-text-raster-shell {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        background: transparent;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content {
+        position: relative !important;
+        left: auto !important;
+        top: auto !important;
+        transform: none !important;
+        max-width: min(96%, 1400px);
+        display: block;
+        box-sizing: border-box;
+        padding: calc(0.26em * var(--pod-onscreen-text-bg-scale, 1)) calc(0.72em * var(--pod-onscreen-text-bg-scale, 1));
+        border-radius: calc(0.82em * var(--pod-onscreen-text-bg-scale, 1));
+        color: var(--pod-onscreen-text-color, #f8fafc);
+        font-family: var(--pod-onscreen-text-font-family, inherit);
+        font-size: var(--pod-onscreen-text-font-size, 16px);
+        font-weight: var(--pod-onscreen-text-font-weight, 500);
+        font-style: var(--pod-onscreen-text-font-style, normal);
+        text-align: var(--pod-onscreen-text-align, center);
+        letter-spacing: 0;
+        line-height: var(--pod-onscreen-text-line-height, 1.22em);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        text-wrap: pretty;
+        text-shadow: var(--pod-onscreen-text-stroke-shadow), var(--pod-onscreen-text-preset-shadow), var(--pod-onscreen-text-user-shadow);
+        -webkit-text-stroke: 0 transparent;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        user-select: none;
+        width: var(--pod-onscreen-text-bubble-width, auto);
+        height: auto;
+        min-width: 0;
+        min-height: var(--pod-onscreen-text-bubble-height, 0px);
+        opacity: var(--pod-onscreen-text-opacity, 1);
+        display: block;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-bg-solid {
+        background: rgba(2, 6, 23, calc(0.82 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
+        box-shadow:
+          0 14px 30px rgba(2, 6, 23, 0.36),
+          inset 0 1px 0 rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(7px) saturate(1.02) !important;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-bg-glass {
+        background: rgba(15, 23, 42, calc(0.65 * var(--pod-onscreen-text-bg-opacity, 1))) !important;
+        backdrop-filter: blur(12px) saturate(1.1) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-bg-none {
+        background: transparent !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
+        padding-inline: 0 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1400px)) !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        text-align: var(--pod-onscreen-text-align, center);
+        overflow-wrap: break-word;
+        word-break: normal;
+        text-wrap: pretty;
+        --pod-onscreen-text-stroke-color: rgba(2, 6, 23, 0.9);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-3d.is-bg-none {
+        max-width: min(96%, var(--pod-onscreen-text-bubble-width, 1200px)) !important;
+        min-width: 0 !important;
+        transform: translateY(0.16em);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-3d.is-bg-solid {
+        box-sizing: border-box;
+        text-wrap: normal;
+        width: auto;
+        max-width: calc(100% - 8px);
+        padding-inline: calc(0.32em * var(--pod-onscreen-text-bg-scale, 1));
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-flat {
+        --pod-onscreen-text-preset-shadow:
+          0 2px 6px rgba(2, 6, 23, 0.28),
+          0 8px 18px rgba(2, 6, 23, 0.18);
+        --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.48);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-3d {
+        --pod-onscreen-text-preset-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.06),
+          0 2px 6px rgba(2, 6, 23, 0.24),
+          0 10px 20px rgba(2, 6, 23, 0.18);
+        --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.52);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-glow {
+        max-width: min(96%, 1400px) !important;
+        --pod-onscreen-text-preset-shadow:
+          0 0 8px rgba(255, 255, 255, 0.18),
+          0 0 18px rgba(56, 189, 248, 0.24),
+          0 6px 16px rgba(2, 6, 23, 0.24);
+        --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.42);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content.is-style-chrome {
+        --pod-onscreen-text-preset-shadow:
+          0 2px 8px rgba(2, 6, 23, 0.30),
+          0 10px 22px rgba(2, 6, 23, 0.22);
+        --pod-onscreen-text-stroke-color: rgba(15, 23, 42, 0.48);
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content,
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content span,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word {
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-on-screen-text-content span,
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word {
+        display: inline;
+        color: inherit;
+        font-size: inherit !important;
+        font-family: inherit;
+        font-weight: inherit;
+        font-style: inherit;
+      }
+      .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active {
+        color: #fff7bf;
+        filter: brightness(1.08);
+        text-shadow:
+          0 0 0.18em rgba(255, 247, 191, 0.92),
+          0 0 0.6em rgba(255, 214, 10, 0.5),
+          var(--pod-onscreen-text-stroke-shadow),
+          var(--pod-onscreen-text-preset-shadow),
+          var(--pod-onscreen-text-user-shadow);
+      }
+    `;
+  }
+
+  function buildOnScreenTextRasterSnapshotPlan(input = {}) {
+    const config = input && typeof input === "object" ? input : {};
+    const onScreenTextApi = root?.PodcasterOnScreenTextRenderSpec || root?.PodcasterKaraokeRenderSpec || {};
+    const resolvePreviewLayoutSpec = typeof onScreenTextApi.resolveOnScreenTextPreviewLayoutSpec === "function"
+      ? onScreenTextApi.resolveOnScreenTextPreviewLayoutSpec
+      : null;
+    const buildBubbleInlineStyle = typeof onScreenTextApi.buildOnScreenTextBubbleInlineStyle === "function"
+      ? onScreenTextApi.buildOnScreenTextBubbleInlineStyle
+      : null;
+    const getStylePresetClass = typeof onScreenTextApi.getOnScreenTextStylePresetClass === "function"
+      ? onScreenTextApi.getOnScreenTextStylePresetClass
+      : (stylePreset) => `is-style-${String(stylePreset || "").trim().toLowerCase() || "3d"}`;
+    const getBgPresetClass = typeof onScreenTextApi.getOnScreenTextBgPresetClass === "function"
+      ? onScreenTextApi.getOnScreenTextBgPresetClass
+      : (bgPreset) => `is-bg-${String(bgPreset || "").trim().toLowerCase() || "none"}`;
+    const previewSpec = resolvePreviewLayoutSpec
+      ? resolvePreviewLayoutSpec({
+        rowId: String(config?.rowId || config?.layout?.rowId || "").trim(),
+        settings: config.settings || {},
+        layout: config.layout || {},
+        previewWidthPx: config.previewWidthPx,
+        previewHeightPx: config.previewHeightPx,
+        sourceWidth: config.sourceWidth,
+        sourceHeight: config.sourceHeight,
+        resolution: config.resolution || "source",
+        text: String(config.text || "").trim(),
+        fallback: String(config.fallback || "").trim()
+      })
+      : null;
+    const metrics = previewSpec?.metrics || {};
+    const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.bubbleWidthPx || previewSpec?.bubbleWidthPx || metrics.previewBoxWidthPx || 1) || 1));
+    const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.bubbleHeightPx || previewSpec?.bubbleHeightPx || metrics.previewBoxHeightPx || 1) || 1));
+    const padPx = Math.max(
+      18,
+      Math.round(
+        Math.max(
+          Number(metrics.previewBorderWidthPx || 0) * 2.2,
+          Number(metrics.previewShadowBlurPx || 0) * 1.6,
+          Math.abs(Number(metrics.previewShadowX || 0)) + Math.abs(Number(metrics.previewShadowY || 0)),
+          12
+        )
+      )
+    );
+    const widthPx = bubbleWidthPx + (padPx * 2);
+    const heightPx = bubbleHeightPx + (padPx * 2);
+    const settings = config.settings && typeof config.settings === "object" ? config.settings : {};
+    const layout = config.layout && typeof config.layout === "object" ? config.layout : {};
+    const wordTimings = Array.isArray(config.wordTimings) ? config.wordTimings : [];
+    const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
+    const text = String(config.text || "").trim();
+    const contentHtml = wordTimings.length
+      ? buildKaraokeSubtitleMarkup(text, wordTimings, activeWordIndex)
+      : escapeHtml(text);
+    const inlineStyle = buildBubbleInlineStyle
+      ? buildBubbleInlineStyle(settings, {
+        metrics,
+        xPct: 0,
+        yPct: 0
+      })
+      : "";
+    const presetClass = previewSpec?.presetClass || getStylePresetClass(settings.stylePreset);
+    const bgClass = previewSpec?.bgClass || getBgPresetClass(settings.bgPreset);
+    const html = `
+      <style>${buildOnScreenTextRasterStyleBlock()}</style>
+      <div xmlns="http://www.w3.org/1999/xhtml" class="podcaster-onscreen-text-raster-shell" style="width:${widthPx}px;height:${heightPx}px;padding:${padPx}px;">
+        <div class="podcast-on-screen-text-content ${presetClass} ${bgClass}" data-row-id="${escapeHtml(String(config.rowId || layout.rowId || "").trim())}" style="${inlineStyle};position:relative !important;left:auto !important;top:auto !important;transform:none !important;">
+          ${contentHtml}
+        </div>
+      </div>
+    `;
+    return {
+      settings,
+      layout,
+      previewSpec,
+      metrics,
+      text,
+      contentHtml,
+      presetClass,
+      bgClass,
+      inlineStyle,
+      padPx,
+      bubbleWidthPx,
+      bubbleHeightPx,
+      widthPx,
+      heightPx,
+      html
+    };
+  }
+
   function escapeFfmpegExpr(expression = "") {
     return String(expression || "")
       .replace(/\\/g, "\\\\")
@@ -350,6 +589,8 @@
     escapeFfmpegDrawtextText,
     toFfmpegColor,
     generateKaraokeOverlayText,
+    buildOnScreenTextRasterStyleBlock,
+    buildOnScreenTextRasterSnapshotPlan,
     buildMontageOnScreenTextKaraokeBoxFilters,
     buildMontageOnScreenTextDrawFilters
   };

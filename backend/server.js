@@ -8813,7 +8813,26 @@ function normalizeMontageExportRequestBody(body = {}) {
         widthPct: clampNumber(segment?.layout?.widthPct, 0.05, 1, 0.85),
         heightPct: clampNumber(segment?.layout?.heightPct, 0.05, 1, 0.14),
         xPct: clampNumber(segment?.layout?.xPct, 0, 1, 0)
-      }
+      },
+      renderedFrames: Array.isArray(segment?.renderedFrames)
+        ? segment.renderedFrames.slice(0, 200).map((frame, frameIdx) => {
+          if (!frame || typeof frame !== "object") return null;
+          const dataUrl = clampText(frame?.dataUrl || "", 8_000_000);
+          if (!dataUrl.startsWith("data:image/")) return null;
+          return {
+            kind: clampText(frame?.kind || "base", 40) || "base",
+            wordIndex: Number.isFinite(Number(frame?.wordIndex)) ? Math.max(-1, Math.round(Number(frame.wordIndex))) : -1,
+            startMs: Math.max(0, Math.round(Number(frame?.startMs || 0) || 0)),
+            endMs: Math.max(0, Math.round(Number(frame?.endMs || 0) || 0)),
+            dataUrl,
+            padPx: Math.max(0, Math.round(Number(frame?.padPx || 0) || 0)),
+            widthPx: Math.max(1, Math.round(Number(frame?.widthPx || 0) || 1)),
+            heightPx: Math.max(1, Math.round(Number(frame?.heightPx || 0) || 1)),
+            offsetXPx: Math.max(0, Math.round(Number(frame?.offsetXPx || 0) || 0)),
+            offsetYPx: Math.max(0, Math.round(Number(frame?.offsetYPx || 0) || 0))
+          };
+        }).filter(Boolean)
+        : []
     };
   };
 
@@ -8863,6 +8882,12 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
     ? onScreenTextTimelineRaw.settings
     : (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null);
+  const onScreenTextRenderedSegments = Array.isArray(onScreenTextTimelineRaw?.renderedSegments)
+    ? onScreenTextTimelineRaw.renderedSegments.slice(0, 400).map((segment, idx) => {
+      const parsed = normalizeOnScreenTextSegment(segment, idx);
+      return parsed && Array.isArray(parsed.renderedFrames) ? parsed : null;
+    }).filter(Boolean)
+    : [];
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
     const cleanRelativeAssetPath = assetPathRaw.replace(/^[/\\]+/g, "");
@@ -8905,6 +8930,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     normalizedGeminiTimelineSegments,
     useTimelineAudio,
     onScreenTextSegments,
+    onScreenTextRenderedSegments,
     onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
     overlayCards,
     brandOverlay,
@@ -10757,6 +10783,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
         : sourceDims;
       const visualFilters = [];
+      let useFilterComplexForVisual = false;
 
       if (input.onScreenTextSettings && input.onScreenTextSegments.length) {
         emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.");
@@ -10767,22 +10794,18 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             ? Math.min(96, Math.max(16, Math.round((Number(input.onScreenTextSettings?.fontSizePx || 44) || 44) * 1.2)))
             : input.onScreenTextSettings?.fontSizePx
         };
-        const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
-        const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
-        const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
-        const karaokeSegments = [];
-        const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
-        const fontSource = fontFile
-          ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
-          : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`;
-        if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
-        else console.warn("[backend] drawtext using fallback font hint: Sans");
-        const drawFilters = input.onScreenTextSegments
-          .slice()
-          .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
-          .flatMap((segment) => {
-            const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
-            const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+        const renderedSegments = Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments : [];
+        const hasRasterizedText = input.exportMode !== "review"
+          && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
+          && renderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+        if (hasRasterizedText) {
+          const rasterFilters = [];
+          let chainLabel = "[0:v]";
+          let layerIndex = 0;
+          const sortedSegments = renderedSegments
+            .slice()
+            .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0));
+          for (const segment of sortedSegments) {
             const layout = normalizeMontageOnScreenTextExportLayout({
               segment,
               settings: onScreenTextSettings,
@@ -10798,39 +10821,119 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               text: segment.text || "",
               fallback: ""
             });
-            const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-            const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
-            const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
-            if (karaokeEnabled) {
-              karaokeSegments.push({
+            const frames = Array.isArray(segment.renderedFrames) ? segment.renderedFrames : [];
+            const baseFrame = frames.find((frame) => String(frame?.kind || "").trim().toLowerCase() === "base") || frames[0] || null;
+            if (!baseFrame?.dataUrl) continue;
+            const basePath = await downloadInput({
+              dataUrl: baseFrame.dataUrl,
+              mimeType: "image/png",
+              storagePath: `podcaster/montage-export/${jobId}/text/${String(segment.rowId || "segment").trim()}-base.png`
+            }, "image", layerIndex);
+            layerIndex += 1;
+            const baseX = Math.max(0, Math.round(Number(spec.rawXPx || 0) - Number(baseFrame.offsetXPx || 0)));
+            const baseY = Math.max(0, Math.round(Number(spec.yPx || 0) - Number(baseFrame.offsetYPx || 0)));
+            const baseStartSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+            const baseEndSec = baseStartSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+            const baseEnableExpr = escapeFfmpegExpr(`between(t,${baseStartSec.toFixed(3)},${baseEndSec.toFixed(3)})`);
+            const baseFrameLabel = `ontxt_${layerIndex}_base`;
+            const baseOutLabel = `ontxt_${layerIndex}_out`;
+            rasterFilters.push(`movie=filename='${escapeFfmpegFilterPath(basePath)}',format=rgba[${baseFrameLabel}]`);
+            rasterFilters.push(`${chainLabel}[${baseFrameLabel}]overlay=x=${baseX}:y=${baseY}:format=auto:shortest=1:enable='${baseEnableExpr}'[${baseOutLabel}]`);
+            chainLabel = `[${baseOutLabel}]`;
+            if (input.partyKaraoke !== false) {
+              const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
+              const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
+              for (const [wordIndex, word] of wordTimings.entries()) {
+                const wordFrame = frames.find((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word" && Number(frame?.wordIndex || 0) === wordIndex);
+                if (!wordFrame?.dataUrl) continue;
+                const wordPath = await downloadInput({
+                  dataUrl: wordFrame.dataUrl,
+                  mimeType: "image/png",
+                  storagePath: `podcaster/montage-export/${jobId}/text/${String(segment.rowId || "segment").trim()}-word-${wordIndex}.png`
+                }, "image", layerIndex + wordIndex + 1).catch(() => "");
+                if (!wordPath) continue;
+                const wordStartSec = Math.max(0, Number(segment.startMs || 0) / 1000 + Number(word.startMs || 0) / 1000);
+                const wordEndSec = Math.max(wordStartSec + 0.05, Number(segment.startMs || 0) / 1000 + Number(word.endMs || 0) / 1000);
+                const wordEnableExpr = escapeFfmpegExpr(`between(t,${wordStartSec.toFixed(3)},${wordEndSec.toFixed(3)})`);
+                const wordOutLabel = `ontxt_${layerIndex}_w${wordIndex}_out`;
+                const wordFrameLabel = `ontxt_${layerIndex}_w${wordIndex}`;
+                rasterFilters.push(`movie=filename='${escapeFfmpegFilterPath(wordPath)}',format=rgba[${wordFrameLabel}]`);
+                rasterFilters.push(`${chainLabel}[${wordFrameLabel}]overlay=x=${baseX}:y=${baseY}:format=auto:shortest=1:enable='${wordEnableExpr}'[${wordOutLabel}]`);
+                chainLabel = `[${wordOutLabel}]`;
+              }
+            }
+          }
+          if (chainLabel !== "[0:v]" && rasterFilters.length) {
+            rasterFilters.push(`${chainLabel}format=yuv420p[vout]`);
+            visualFilters.push(rasterFilters.join(";"));
+            useFilterComplexForVisual = true;
+          }
+        } else {
+          const textColor = toFfmpegColor(onScreenTextSettings?.textColor || "#F8FAFC", onScreenTextSettings?.textOpacity ?? 1, "F8FAFC");
+          const strokeColor = toFfmpegColor(onScreenTextSettings?.strokeColor || "#0F172A", 1, "0F172A");
+          const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-text");
+          const karaokeSegments = [];
+          const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
+          const fontSource = fontFile
+            ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'`
+            : `:font='${escapeFfmpegDrawtextText(String(onScreenTextSettings?.fontFamily || "Sans"))}'`;
+          if (fontFile) console.log(`[backend] drawtext using fontfile: ${fontFile}`);
+          else console.warn("[backend] drawtext using fallback font hint: Sans");
+          const drawFilters = input.onScreenTextSegments
+            .slice()
+            .sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0) || Number(a.zIndex || 0) - Number(b.zIndex || 0))
+            .flatMap((segment) => {
+              const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+              const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+              const layout = normalizeMontageOnScreenTextExportLayout({
+                segment,
+                settings: onScreenTextSettings,
+                resolution: input.resolution || "source",
+                sourceDims
+              });
+              const spec = resolveOnScreenTextRenderSpec({
+                settings: onScreenTextSettings,
+                layout,
+                resolution: input.resolution || "source",
+                sourceWidth: sourceDims.width,
+                sourceHeight: sourceDims.height,
+                text: segment.text || "",
+                fallback: ""
+              });
+              const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
+              const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
+              const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
+              if (karaokeEnabled) {
+                karaokeSegments.push({
+                  startSec,
+                  endSec,
+                  spec,
+                  wordTimings
+                });
+              }
+              const textPath = textFileResolver(String(spec.wrappedText || "").trim());
+              return buildMontageOnScreenTextDrawFilters({
+                spec,
+                settings: onScreenTextSettings,
+                textPath,
+                fontSource,
+                textColor,
+                strokeColor,
                 startSec,
                 endSec,
-                spec,
-                wordTimings
+                wordTimings,
+                textFileResolver
               });
-            }
-            const textPath = textFileResolver(String(spec.wrappedText || "").trim());
-            return buildMontageOnScreenTextDrawFilters({
-              spec,
-              settings: onScreenTextSettings,
-              textPath,
-              fontSource,
-              textColor,
-              strokeColor,
-              startSec,
-              endSec,
-              wordTimings,
-              textFileResolver
             });
-          });
-        if (karaokeSegments.length) {
-          visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeSegments, onScreenTextSettings, {
-            resolution: input.resolution || "source",
-            sourceWidth: sourceDims.width,
-            sourceHeight: sourceDims.height
-          }));
+          if (karaokeSegments.length) {
+            visualFilters.push(...buildMontageOnScreenTextKaraokeBoxFilters(karaokeSegments, onScreenTextSettings, {
+              resolution: input.resolution || "source",
+              sourceWidth: sourceDims.width,
+              sourceHeight: sourceDims.height
+            }));
+          }
+          visualFilters.push(...drawFilters);
         }
-        visualFilters.push(...drawFilters);
       }
 
       let reviewFilter = "";
@@ -10869,8 +10972,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           ? reviewFilter
           : (visualFilters.join(",") || "format=rgba");
         let filterGraph = baseVideoChain;
-        finalVisualArgs.push("-vf", baseVideoChain);
-        finalVisualArgs.push("-map", "0:v:0");
+        if (!isReviewVisualPass && useFilterComplexForVisual) {
+          finalVisualArgs.push("-filter_complex", baseVideoChain);
+          finalVisualArgs.push("-map", "[vout]");
+        } else {
+          finalVisualArgs.push("-vf", baseVideoChain);
+          finalVisualArgs.push("-map", "0:v:0");
+        }
         finalVisualArgs.push(
           "-map", "0:a:0?",
           "-c:v", deliveryParams.vCodec,
