@@ -10654,7 +10654,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               fallback: ""
             });
             const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-            const wordTimings = audioClip?.wordTimings || [];
+            const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
             const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
             if (karaokeEnabled) {
               karaokeSegments.push({
