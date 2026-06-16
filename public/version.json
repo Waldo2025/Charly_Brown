@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.128",
-  "build": "2026-1.0.10.128",
+  "version": "1.0.10.129",
+  "build": "2026-1.0.10.129",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: El raster del texto karaoke ahora se dibuja directamente en canvas desde el snapshot compartido, evitando el fallo del SVG tainted y preservando el resaltado de palabra activa.",
@@ -54,5 +54,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.128"
+  "cache_version": "2026-1.0.10.129"
 }

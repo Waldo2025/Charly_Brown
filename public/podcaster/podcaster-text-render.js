@@ -364,11 +364,16 @@
     const lineStartY = bubbleY + contentPadYPx + fontSizePx;
     const lineStepY = Math.max(fontSizePx, lineHeightPx);
     const textOffsetYPx = presetClass === "is-style-3d" && bgClass === "is-bg-none" ? Math.round(fontSizePx * 0.16) : 0;
-    const boxFill = resolvedBgPreset === "solid"
-      ? { rgb: "2, 6, 23", opacity: Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3) }
+    const boxFillRgb = resolvedBgPreset === "solid"
+      ? "2, 6, 23"
       : resolvedBgPreset === "glass"
-        ? { rgb: "15, 23, 42", opacity: Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3) }
-        : null;
+        ? "15, 23, 42"
+        : "";
+    const boxFillOpacity = resolvedBgPreset === "solid"
+      ? Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3)
+      : resolvedBgPreset === "glass"
+        ? Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3)
+        : "0.000";
     const shadowOpacityValue = Math.max(0, Math.min(1, shadowOpacity)).toFixed(3);
     const activeWordIndex = Number.isFinite(Number(config.activeWordIndex)) ? Number(config.activeWordIndex) : -1;
     let wordIndex = 0;
@@ -427,9 +432,9 @@
         >${escapeSvgText(line)}</text>
       `;
     }).join("");
-    const bgAttrs = resolvedBgPreset === "none" || !boxFill
+    const bgAttrs = resolvedBgPreset === "none" || !boxFillRgb
       ? ""
-      : `x="${bubbleX}" y="${bubbleY}" width="${bubbleWidthPx}" height="${bubbleHeightPx}" rx="${Math.max(10, Math.round(fontSizePx * 0.45))}" ry="${Math.max(10, Math.round(fontSizePx * 0.45))}" fill="rgb(${boxFill.rgb})" fill-opacity="${boxFill.opacity}"`;
+      : `x="${bubbleX}" y="${bubbleY}" width="${bubbleWidthPx}" height="${bubbleHeightPx}" rx="${Math.max(10, Math.round(fontSizePx * 0.45))}" ry="${Math.max(10, Math.round(fontSizePx * 0.45))}" fill="rgb(${boxFillRgb})" fill-opacity="${boxFillOpacity}"`;
     return `
       <svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}">
         <defs>
@@ -443,7 +448,7 @@
             <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="rgb(255, 214, 10)" flood-opacity="0.55" />
           </filter>
         </defs>
-        ${resolvedBgPreset === "none" || !boxFill ? "" : `<rect ${bgAttrs} />`}
+        ${resolvedBgPreset === "none" || !boxFillRgb ? "" : `<rect ${bgAttrs} />`}
         <g transform="translate(0,0)">
           ${shadowLineMarkup}
           ${lineMarkup}
