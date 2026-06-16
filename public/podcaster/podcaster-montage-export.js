@@ -317,6 +317,7 @@ function logMontageExportDevtools(event = "", payload = {}, level = "info") {
 function isTransientMontageExportTransportError(error = null) {
   const status = Number(error?.status || error?.detail?.status || 0) || 0;
   if (status === 0) return true;
+  if (status >= 500) return true;
   const message = String(
     error?.code
     || error?.detail?.error
