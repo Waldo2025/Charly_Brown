@@ -8882,12 +8882,15 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
     ? onScreenTextTimelineRaw.settings
     : (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null);
-  const onScreenTextRenderedSegments = Array.isArray(onScreenTextTimelineRaw?.renderedSegments)
-    ? onScreenTextTimelineRaw.renderedSegments.slice(0, 400).map((segment, idx) => {
+  const onScreenTextRenderedSegmentsRaw = Array.isArray(raw?.onScreenTextRenderedSegments)
+    ? raw.onScreenTextRenderedSegments
+    : (Array.isArray(onScreenTextTimelineRaw?.renderedSegments) ? onScreenTextTimelineRaw.renderedSegments : []);
+  const onScreenTextRenderedSegments = onScreenTextRenderedSegmentsRaw
+    .slice(0, 400)
+    .map((segment, idx) => {
       const parsed = normalizeOnScreenTextSegment(segment, idx);
       return parsed && Array.isArray(parsed.renderedFrames) ? parsed : null;
-    }).filter(Boolean)
-    : [];
+    }).filter(Boolean);
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
     const cleanRelativeAssetPath = assetPathRaw.replace(/^[/\\]+/g, "");
@@ -11125,6 +11128,15 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
   try {
     const uid = String(req.authContext?.uid || "").trim();
     const input = normalizeMontageExportRequestBody(req.body || {});
+    console.info("[backend][montage-export][request-body]", {
+      sessionId: String(input.sessionId || "").trim(),
+      entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
+      onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,
+      onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
+      overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+      partyKaraoke: input.partyKaraoke !== false,
+      exportMode: input.exportMode
+    });
     validateMontageExportRequest(input);
     const jobId = clampExportId(randomUUID());
     const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;

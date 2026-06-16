@@ -2242,6 +2242,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
       framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
     });
   }
+  prepared.payload.onScreenTextRenderedSegments = renderedSegments;
   return prepared;
 }
 
@@ -2627,6 +2628,7 @@ export function buildMontageExportPayload(session = null) {
       settings: onScreenTextTimeline.settings,
       segments: onScreenTextTimeline.segments
     } : null,
+    onScreenTextRenderedSegments: [],
     dialogueAudioMap,
     overlayCards: window.buildMontageOverlayCardSegments?.(activeSession, runtimeEntries) || overlayCards,
     audioTimeline: useTimelineAudio ? {
@@ -2667,6 +2669,8 @@ export async function runMontageExport() {
       hasSession: Boolean(session),
       preparedOk: Boolean(prepared?.ok),
       entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
+      onScreenTextSegments: Array.isArray(prepared?.payload?.onScreenTextTimeline?.segments) ? prepared.payload.onScreenTextTimeline.segments.length : 0,
+      onScreenTextRenderedSegments: Array.isArray(prepared?.payload?.onScreenTextRenderedSegments) ? prepared.payload.onScreenTextRenderedSegments.length : 0,
       exportMode: String(window.montageExportState.exportMode || "").trim() || undefined
     });
     if (!prepared?.ok) {
