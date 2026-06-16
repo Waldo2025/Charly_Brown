@@ -218,7 +218,10 @@ const BACKEND_BOOT_ISO = new Date().toISOString();
 const BACKEND_BOOT_SIGNATURE = `backend/server.js@${BACKEND_BOOT_ISO}`;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const MAX_BODY = "12mb";
+// Montage exports can carry sizable JSON payloads when they include cached
+// inline media or rendered text snapshots. Keep the global parser roomy enough
+// for those requests, and fail cleanly when a payload still exceeds the limit.
+const MAX_BODY = "48mb";
 const MAX_PAYLOAD_BYTES = 120 * 1024;
 const MAX_PODCASTER_SESSION_BYTES = 900 * 1024;
 const MAX_SPEAKER_PORTRAIT_BYTES = 10 * 1024 * 1024;
@@ -13125,6 +13128,24 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     });
     return res.status(500).json({ error: String(error?.message || "Error en proxy de media.") });
   }
+});
+
+app.use((error, req, res, next) => {
+  const status = Number(error?.status || error?.statusCode || 0) || 0;
+  const errorType = String(error?.type || error?.code || "").trim();
+  const errorName = String(error?.name || "").trim();
+  if (status === 413 || errorType === "entity.too.large" || errorName === "PayloadTooLargeError") {
+    applyAssetCorsHeaders(req, res);
+    return res.status(413).json({
+      error: "payload_too_large",
+      code: "payload_too_large",
+      detail: {
+        limit: MAX_BODY,
+        path: String(req.originalUrl || req.path || "").trim() || undefined
+      }
+    });
+  }
+  return next(error);
 });
 
 if (IS_MAIN_MODULE) {
