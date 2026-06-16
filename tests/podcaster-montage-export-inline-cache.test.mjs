@@ -91,7 +91,9 @@ vm.createContext(context);
   extractMaybeAsyncFunction("blobToDataUrl"),
   extractMaybeAsyncFunction("resolveCachedMontageMediaDataUrl"),
   extractMaybeAsyncFunction("maybeInlineMontageMediaAsset"),
-  extractMaybeAsyncFunction("inlineMontageExportPayloadMedia")
+  extractMaybeAsyncFunction("inlineMontageExportPayloadMedia"),
+  extractFunction("stripInlineMontageMediaRecord"),
+  extractFunction("stripMontageExportSubmissionPayload")
 ].forEach((snippet) => {
   vm.runInContext(`${snippet};`, context);
 });
@@ -160,4 +162,86 @@ test("montage export ignores cache responses that exceed the size cap", async ()
     { remainingBytes: 6_000_000 }
   );
   assert.equal(result, "");
+});
+
+test("montage export strips inline media before submission", () => {
+  const payload = {
+    entries: [
+      {
+        rowId: "row-1",
+        video: {
+          storagePath: "podcaster/sessions/session-1/videos/scene.mp4",
+          downloadUrl: "https://example.com/video.mp4",
+          dataUrl: "data:video/mp4;base64,AAAA"
+        },
+        audio: {
+          storagePath: "podcaster/sessions/session-1/audio/scene.mp3",
+          downloadUrl: "https://example.com/audio.mp3",
+          dataUrl: "data:audio/mpeg;base64,BBBB"
+        }
+      }
+    ],
+    backgroundMusic: {
+      storagePath: "podcaster/library/music/track.mp3",
+      downloadUrl: "https://example.com/music.mp3",
+      dataUrl: "data:audio/mpeg;base64,CCCC"
+    },
+    dialogueAudioMap: {
+      "row-1": {
+        storagePath: "podcaster/sessions/session-1/audio/row-1.mp3",
+        downloadUrl: "https://example.com/dialogue.mp3",
+        dataUrl: "data:audio/mpeg;base64,DDDD"
+      }
+    },
+    audioTimeline: {
+      geminiSegments: [
+        {
+          rowId: "row-1",
+          storagePath: "podcaster/sessions/session-1/audio/row-1.mp3",
+          downloadUrl: "https://example.com/dialogue.mp3",
+          dataUrl: "data:audio/mpeg;base64,EEEE"
+        }
+      ],
+      backgroundSegments: [
+        {
+          rowId: "bg-1",
+          storagePath: "podcaster/library/music/track.mp3",
+          downloadUrl: "https://example.com/music.mp3",
+          dataUrl: "data:audio/mpeg;base64,FFFF"
+        }
+      ]
+    },
+    onScreenTextTimeline: {
+      segments: [],
+      renderedSegments: [
+        {
+          rowId: "row-1",
+          renderedFrames: [
+            { kind: "base", dataUrl: "data:image/png;base64,GGGG" }
+          ]
+        }
+      ]
+    },
+    onScreenTextRenderedSegments: [
+      {
+        rowId: "row-1",
+        renderedFrames: [
+          { kind: "base", dataUrl: "data:image/png;base64,HHHH" }
+        ]
+      }
+    ]
+  };
+
+  const stripped = context.stripMontageExportSubmissionPayload(payload);
+
+  assert.equal(stripped.entries[0].video.dataUrl, "");
+  assert.equal(stripped.entries[0].video.localDataUrl, "");
+  assert.equal(stripped.entries[0].audio.dataUrl, "");
+  assert.equal(stripped.backgroundMusic.dataUrl, "");
+  assert.equal(stripped.dialogueAudioMap["row-1"].dataUrl, "");
+  assert.equal(stripped.audioTimeline.geminiSegments[0].dataUrl, "");
+  assert.equal(stripped.audioTimeline.backgroundSegments[0].dataUrl, "");
+  assert.equal(stripped.onScreenTextTimeline.renderedSegments.length, 0);
+  assert.equal(stripped.onScreenTextRenderedSegments.length, 0);
+  assert.match(String(payload.entries[0].video.dataUrl || ""), /^data:video\/mp4;base64,/);
 });

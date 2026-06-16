@@ -6464,6 +6464,20 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
     || /\.(jpg|jpeg|png|webp|gif)(\?|$|\s)/i.test(combinedSource);
 
   try {
+    const firebaseGsUrl = (() => {
+      const gsSource = String(cleanStoragePath || clean || "").trim();
+      if (!gsSource.startsWith("gs://")) return "";
+      const withoutScheme = gsSource.replace(/^gs:\/\//i, "");
+      const slashIndex = withoutScheme.indexOf("/");
+      if (slashIndex < 0) return "";
+      const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+      const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
+      if (!bucket || !objectPath) return "";
+      return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+    })();
+    if (firebaseGsUrl) {
+      return resolveStaleAwareProxyMediaUrl(firebaseGsUrl, "", treatAsImage ? "image" : "media", options);
+    }
     const isLibraryAsset = /(^|\/)podcaster\/library\//i.test(cleanStoragePath);
     if (cleanStoragePath || isLibraryAsset) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, treatAsImage ? "image" : "media", options);

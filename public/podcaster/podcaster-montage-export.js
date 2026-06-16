@@ -2213,6 +2213,60 @@ async function inlineMontageExportPayloadMedia(payload = {}) {
   return payload;
 }
 
+function stripInlineMontageMediaRecord(record = null) {
+  if (!record || typeof record !== "object") return record;
+  const clean = { ...record };
+  const hasExplicitSource = Boolean(String(clean.storagePath || "").trim() || String(clean.url || "").trim() || String(clean.downloadUrl || "").trim());
+  if (hasExplicitSource || String(clean.dataUrl || "").trim().startsWith("data:")) {
+    clean.dataUrl = "";
+    clean.localDataUrl = "";
+  }
+  return clean;
+}
+
+function stripMontageExportSubmissionPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return payload;
+  const next = { ...payload };
+  if (Array.isArray(next.entries)) {
+    next.entries = next.entries.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry;
+      return {
+        ...entry,
+        video: stripInlineMontageMediaRecord(entry.video),
+        audio: stripInlineMontageMediaRecord(entry.audio)
+      };
+    });
+  }
+  if (next.backgroundMusic && typeof next.backgroundMusic === "object") {
+    next.backgroundMusic = stripInlineMontageMediaRecord(next.backgroundMusic);
+  }
+  if (next.dialogueAudioMap && typeof next.dialogueAudioMap === "object") {
+    const nextDialogueAudioMap = {};
+    for (const [rowId, clip] of Object.entries(next.dialogueAudioMap)) {
+      nextDialogueAudioMap[rowId] = stripInlineMontageMediaRecord(clip);
+    }
+    next.dialogueAudioMap = nextDialogueAudioMap;
+  }
+  if (next.audioTimeline && typeof next.audioTimeline === "object") {
+    const nextAudioTimeline = { ...next.audioTimeline };
+    if (Array.isArray(nextAudioTimeline.geminiSegments)) {
+      nextAudioTimeline.geminiSegments = nextAudioTimeline.geminiSegments.map((segment) => stripInlineMontageMediaRecord(segment));
+    }
+    if (Array.isArray(nextAudioTimeline.backgroundSegments)) {
+      nextAudioTimeline.backgroundSegments = nextAudioTimeline.backgroundSegments.map((segment) => stripInlineMontageMediaRecord(segment));
+    }
+    next.audioTimeline = nextAudioTimeline;
+  }
+  if (next.onScreenTextTimeline && typeof next.onScreenTextTimeline === "object") {
+    next.onScreenTextTimeline = {
+      ...next.onScreenTextTimeline,
+      renderedSegments: []
+    };
+  }
+  next.onScreenTextRenderedSegments = [];
+  return next;
+}
+
 async function buildMontageExportPayloadForSubmission(session = null) {
   const activeSession = session || window.getActiveSession?.() || null;
   if (activeSession) {
@@ -2719,9 +2773,10 @@ export async function runMontageExport() {
       force: true,
       loadingMeta: "Manteniendo el preview del montaje mientras inicia la exportación…"
     }).catch(() => { });
+    const submissionPayload = stripMontageExportSubmissionPayload(prepared.payload);
     const data = await authFetchJson("/api/podcaster/montage/export", {
       method: "POST",
-      body: prepared.payload
+      body: submissionPayload
     });
     const jobId = String(data?.jobId || "").trim();
     if (!jobId) throw new Error("montage_export_job_missing");
