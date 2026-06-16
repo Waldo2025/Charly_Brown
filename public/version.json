@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.135",
-  "build": "2026-1.0.10.135",
+  "version": "1.0.10.136",
+  "build": "2026-1.0.10.136",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Mejorado: El footer de Retratos de Escenas y Personajes ahora queda fijo y accesible en móvil para que el botón de Sport/mostrar panel no desaparezca bajo el scroll.",
     "Mejorado: El editor Snoopy en móvil ahora usa un layout apilado con preview, tracks, transport y footer desplazables para evitar que el montaje previo y los botones queden cortados.",
     "Corregido: El export de montage ahora acepta escenas hidratadas solo como `dataUrl` desde caché/IndexedDB, en lugar de descartarlas por no tener `storagePath` o `downloadUrl`, evitando que una escena con imagen y movimiento se quede fuera del render final.",
     "Corregido: El export de montage ahora conserva también escenas de imagen con movimiento cuando la fuente vive en campos como `publicSceneThumbUrl`, `thumbUrl` o `thumbnailUrl`, evitando que se pierdan como si no tuvieran video.",
@@ -60,5 +61,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.135"
+  "cache_version": "2026-1.0.10.136"
 }
