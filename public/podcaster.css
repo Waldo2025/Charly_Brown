@@ -2855,6 +2855,36 @@ body.is-resizing-podcast-stage {
   grid-template-columns: minmax(0, 1fr) 0;
 }
 
+#togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle {
+  position: absolute;
+  top: 18px;
+  right: calc(clamp(var(--pod-studio-inspector-min), var(--pod-studio-inspector-width), var(--pod-studio-inspector-max)) + 16px);
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--pod-border) 88%, transparent 12%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pod-surface) 98%, #0f172a 2%);
+  color: var(--pod-muted);
+  box-shadow: -4px 10px 25px rgba(15, 23, 42, 0.12);
+  z-index: 2001;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+#togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle:hover,
+#togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle:focus-visible {
+  color: var(--pod-accent);
+  border-color: color-mix(in srgb, var(--pod-accent) 28%, var(--pod-border) 72%);
+  transform: translateX(-1px);
+}
+
+.podcast-studio-layout.is-inspector-collapsed #togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle,
+#togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle[hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .podcast-studio-inspector-collapsed-handle {
   position: absolute;
   top: 18px;
@@ -10466,6 +10496,10 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
   .podcast-studio-inspector-collapsed-handle {
     display: none;
   }
+
+  #togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle {
+    display: none;
+  }
 }
 
 @media (max-width: 768px) {
@@ -11176,10 +11210,19 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
     display: none;
   }
 
+  #togglePodcastStudioInspectorBtn.podcast-studio-inspector-toggle {
+    top: auto;
+    bottom: 12px;
+    right: 12px;
+  }
+
   .podcast-studio-layout .podcast-studio-inspector-collapsed-handle {
     top: auto;
     bottom: 12px;
     right: 12px;
+  }
+
+  .podcast-studio-layout.is-inspector-collapsed .podcast-studio-inspector-collapsed-handle {
     opacity: 1;
     pointer-events: auto;
   }
@@ -11190,10 +11233,6 @@ body.podcast-timeline-resizing-lane .podcast-track-lane-resize-handle {
 
   .podcast-studio-layout.is-inspector-collapsed .podcast-studio-main {
     order: 1;
-  }
-
-  .podcast-studio-layout.is-inspector-collapsed .podcast-studio-inspector-collapsed-handle {
-    position: absolute;
   }
 
   .montage-export-panel {

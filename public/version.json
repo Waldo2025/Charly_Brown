@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.182",
-  "build": "2026-1.0.10.182",
+  "version": "1.0.10.183",
+  "build": "2026-1.0.10.183",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Mejorado: El control para ocultar el inspector de Podcaster ahora vive fuera del panel y se alterna con el handle de inspector colapsado para que no aparezcan simultaneamente.",
     "Corregido: El boton Cancelar del modal de export de Podcaster ahora envia export-cancel al backend para detener el render activo del MP4 antes de cerrar el modal.",
     "Mejorado: El modal de export de Podcaster ahora muestra un boton Descargar MP4 dentro de las acciones solo cuando el archivo ya esta listo.",
     "Corregido: El backend de export de Podcaster ya conserva renderedFrames[].text al normalizar el request, restaurando el texto visible del karaoke en el MP4.",
@@ -107,5 +108,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.182"
+  "cache_version": "2026-1.0.10.183"
 }

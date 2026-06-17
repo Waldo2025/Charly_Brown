@@ -14661,6 +14661,7 @@ function setPodcastStudioInspectorCollapsed(isCollapsed) {
   const layout = els.podcastVideoShell?.querySelector(".podcast-studio-layout");
   layout?.classList.toggle("is-inspector-collapsed", podcastStudioInspectorCollapsed);
   if (els.togglePodcastStudioInspectorBtn) {
+    els.togglePodcastStudioInspectorBtn.hidden = podcastStudioInspectorCollapsed;
     els.togglePodcastStudioInspectorBtn.setAttribute("aria-expanded", podcastStudioInspectorCollapsed ? "false" : "true");
     els.togglePodcastStudioInspectorBtn.setAttribute("title", podcastStudioInspectorCollapsed ? "Mostrar inspector" : "Ocultar inspector");
     const icon = els.togglePodcastStudioInspectorBtn.querySelector("i");
@@ -14679,6 +14680,7 @@ function setPodcastStudioInspectorCollapsed(isCollapsed) {
     }
   }
   if (els.podcastStudioInspectorCollapsedHandle) {
+    els.podcastStudioInspectorCollapsedHandle.hidden = !podcastStudioInspectorCollapsed;
     els.podcastStudioInspectorCollapsedHandle.setAttribute("aria-expanded", podcastStudioInspectorCollapsed ? "false" : "true");
     els.podcastStudioInspectorCollapsedHandle.setAttribute("title", podcastStudioInspectorCollapsed ? "Mostrar inspector" : "Inspector abierto");
   }
