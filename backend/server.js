@@ -10692,7 +10692,8 @@ async function appendMontageSceneOnScreenTextOverlays({
   nextInputIndex = 0,
   downloadInput = null,
   jobId = "",
-  reelModeEnabled = false
+  reelModeEnabled = false,
+  tmpDir = ""
 } = {}) {
   if (input.exportMode === "review") {
     return {
@@ -11277,7 +11278,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             nextInputIndex: nextSceneInputIndex,
             downloadInput,
             jobId,
-            reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || "")
+            reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+            tmpDir
           });
           videoFilterGraph = textOverlayResult.videoFilterGraph;
           finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
