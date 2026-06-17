@@ -32,12 +32,14 @@ import {
   syncMontageExportUi,
   openMontageExportModal,
   closeMontageExportModal,
+  cancelMontageExportFromModal,
   handleMontageExportConfirmClick,
   runMontageExport,
   continueMontageExportPolling,
+  downloadReadyMontageExport,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-17.19";
+} from "./podcaster-montage-export.js?v=2026-06-17.21";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -581,6 +583,7 @@ const els = {
   closeMontageExportBtn: document.getElementById("closeMontageExportBtn"),
   cancelMontageExportBtn: document.getElementById("cancelMontageExportBtn"),
   continueMontageExportBtn: document.getElementById("continueMontageExportBtn"),
+  montageExportDownloadBtn: document.getElementById("montageExportDownloadBtn"),
   confirmMontageExportBtn: document.getElementById("confirmMontageExportBtn"),
   montageExportMode: document.getElementById("montageExportMode"),
   montageExportFormat: document.getElementById("montageExportFormat"),
@@ -16859,7 +16862,9 @@ function attachEvents() {
   }
   if (els.cancelMontageExportBtn) {
     els.cancelMontageExportBtn.addEventListener("click", () => {
-      closeMontageExportModal();
+      cancelMontageExportFromModal().catch((error) => {
+        console.error("[podcaster][montage-export] cancel from modal failed", error);
+      });
     });
   }
   if (els.confirmMontageExportBtn) {
@@ -16868,6 +16873,11 @@ function attachEvents() {
   if (els.continueMontageExportBtn) {
     els.continueMontageExportBtn.addEventListener("click", () => {
       continueMontageExportPolling().catch(() => { });
+    });
+  }
+  if (els.montageExportDownloadBtn) {
+    els.montageExportDownloadBtn.addEventListener("click", () => {
+      downloadReadyMontageExport();
     });
   }
   if (els.montageExportFormat) {

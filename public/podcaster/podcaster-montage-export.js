@@ -497,7 +497,9 @@ let montageExportJobState = {
   jobNotFoundCount: 0,
   reviewExcelEnabled: false,
   reviewExcelPayload: null,
-  reviewExcelFilename: ""
+  reviewExcelFilename: "",
+  readyDownloadUrl: "",
+  readyDownloadFilename: ""
 };
 
 function logMontageExportDevtools(event = "", payload = {}, level = "info") {
@@ -692,6 +694,33 @@ export function setMontageExportContinueButton({ visible = false, label = "Conti
   }
 }
 
+function setMontageExportDownloadButton({ visible = false, url = "", filename = "" } = {}) {
+  if (!window.els.montageExportDownloadBtn) return;
+  const cleanUrl = String(url || "").trim();
+  const cleanFilename = String(filename || "").trim() || "montage.mp4";
+  const shouldShow = Boolean(visible) && Boolean(cleanUrl);
+  window.montageExportJobState.readyDownloadUrl = shouldShow ? cleanUrl : "";
+  window.montageExportJobState.readyDownloadFilename = shouldShow ? cleanFilename : "";
+  window.els.montageExportDownloadBtn.hidden = !shouldShow;
+  window.els.montageExportDownloadBtn.disabled = false;
+  window.els.montageExportDownloadBtn.dataset.downloadUrl = shouldShow ? cleanUrl : "";
+  window.els.montageExportDownloadBtn.dataset.filename = shouldShow ? cleanFilename : "";
+  const textEl = window.els.montageExportDownloadBtn.querySelector("span");
+  if (textEl) textEl.textContent = cleanFilename.toLowerCase().endsWith(".mp4") ? "Descargar MP4" : "Descargar archivo";
+}
+
+export function downloadReadyMontageExport() {
+  const url = String(window.montageExportJobState?.readyDownloadUrl || window.els.montageExportDownloadBtn?.dataset?.downloadUrl || "").trim();
+  if (!url) return;
+  const filename = String(window.montageExportJobState?.readyDownloadFilename || window.els.montageExportDownloadBtn?.dataset?.filename || "montage.mp4").trim() || "montage.mp4";
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 export function resetMontageExportJobState() {
   clearMontageExportPolling();
   window.montageExportJobState = {
@@ -709,9 +738,12 @@ export function resetMontageExportJobState() {
     jobNotFoundCount: 0,
     reviewExcelEnabled: false,
     reviewExcelPayload: null,
-    reviewExcelFilename: ""
+    reviewExcelFilename: "",
+    readyDownloadUrl: "",
+    readyDownloadFilename: ""
   };
   setMontageExportContinueButton({ visible: false });
+  setMontageExportDownloadButton({ visible: false });
 }
 
 export function setMontageExportPreviewState({ loading = false, error = "", dataUrl = "", mediaType = "", mode = window.montageExportState.exportMode, sceneIndex = 0, meta = "", disabled = false, frontendPreview = null } = {}) {
@@ -844,10 +876,12 @@ export function resetMontageExportPreviewState() {
   setMontageExportPreviewState({ mode: window.montageExportState.exportMode, meta: "Así se vería tu video exportado." });
 }
 
-export async function closeMontageExportModal() {
+export async function closeMontageExportModal({ cancelActiveJob = true } = {}) {
   const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
-  if (window.montageExportBusy && activeJobId) {
-    void requestMontageExportCancel(activeJobId);
+  if (cancelActiveJob && window.montageExportBusy && activeJobId) {
+    void requestMontageExportCancel(activeJobId).catch((error) => {
+      console.warn("[podcaster][montage-export] cancel request failed", formatMontageExportCancelError(error));
+    });
   }
   if (typeof window.exportPreviewController?.stop === "function") {
     window.exportPreviewController.stop();
@@ -864,17 +898,48 @@ export async function closeMontageExportModal() {
 async function requestMontageExportCancel(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return false;
-  try {
-    await authFetchJson("/api/podcaster/montage/export-cancel", {
-      method: "POST",
-      body: { jobId: cleanJobId },
-      keepalive: true
-    });
-    return true;
-  } catch (error) {
-    console.warn("[podcaster][montage-export] cancel request failed", String(error?.message || error || "unknown"));
-    return false;
+  await authFetchJson("/api/podcaster/montage/export-cancel", {
+    method: "POST",
+    body: { jobId: cleanJobId },
+    keepalive: true
+  });
+  return true;
+}
+
+function formatMontageExportCancelError(error) {
+  const status = Number(error?.status || error?.detail?.status || 0) || 0;
+  const message = String(error?.message || error || "").trim();
+  const detail = error?.detail && typeof error.detail === "object"
+    ? JSON.stringify(error.detail)
+    : String(error?.detail || "").trim();
+  return [
+    status ? `HTTP ${status}` : "",
+    message,
+    detail && detail !== message ? detail : ""
+  ].filter(Boolean).join(" | ");
+}
+
+export async function cancelMontageExportFromModal() {
+  const activeJobId = String(window.montageExportJobState?.jobId || "").trim();
+  if (activeJobId) {
+    setMontageExportStatus(
+      "Cancelando exportación…",
+      "Enviando la cancelación al backend para detener el render del MP4.",
+      { tone: "warning" }
+    );
+    try {
+      await requestMontageExportCancel(activeJobId);
+    } catch (error) {
+      const cancelError = formatMontageExportCancelError(error);
+      setMontageExportStatus(
+        "No se pudo cancelar la exportación en el backend.",
+        cancelError,
+        { tone: "error" }
+      );
+      throw error;
+    }
   }
+  await closeMontageExportModal({ cancelActiveJob: false });
 }
 
 export function setMontageExportStatus(text = "", hint = "", options = {}) {
@@ -1067,6 +1132,11 @@ export async function pollMontageExportJob(jobId = "") {
       }
       const url = String(data?.downloadUrl || data?.export?.downloadUrl || "").trim();
       const name = String(data?.export?.filename || window.montageExportState.filename || "montage").trim() || "montage";
+      setMontageExportDownloadButton({
+        visible: Boolean(url),
+        url,
+        filename: name
+      });
       if (url) {
         const anchor = document.createElement("a");
         anchor.href = url;
@@ -1114,6 +1184,7 @@ export async function pollMontageExportJob(jobId = "") {
       clearMontageExportPolling();
       persistMontageExportActiveJob("");
       setMontageExportContinueButton({ visible: false });
+      setMontageExportDownloadButton({ visible: false });
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
       const cleanErrorCode = String(err?.code || err?.error || "").trim();
       const failedLabel = failedSubstage
@@ -3019,10 +3090,13 @@ Object.assign(window, {
   setMontageExportOpen,
   clearMontageExportPolling,
   setMontageExportContinueButton,
+  setMontageExportDownloadButton,
+  downloadReadyMontageExport,
   resetMontageExportJobState,
   setMontageExportPreviewState,
   resetMontageExportPreviewState,
   closeMontageExportModal,
+  cancelMontageExportFromModal,
   setMontageExportStatus,
   setMontageExportBusy,
   setMontageExportPreviewPaused,
