@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.156",
-  "build": "2026-1.0.10.156",
+  "version": "1.0.10.157",
+  "build": "2026-1.0.10.157",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Se solucionó el cuelgue (timeout) en la renderización de la escena 1 del export de montage configurando eof_action=repeat por defecto para el logo y quitando loop=0.",
     "Corregido: Se agregó prevención de doble envoltura del proxy en el controlador de reproducción (podcaster-playback-controller.js) al detectar si la URL ya contiene /api/assets/proxy-.",
     "Corregido: Se agregó una comprobación en resolveStaleAwareProxyMediaUrl para evitar el doble enrutamiento de URLs que ya han sido envueltas en proxy del backend.",
     "Corregido: Se solucionó el problema de doble proxy (proxy-media envolviendo proxy-image) y se agregó el fallback de la SDK de administración a /api/assets/proxy-image para descargar imágenes privadas de Firebase Storage sin token.",
@@ -81,5 +82,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.156"
+  "cache_version": "2026-1.0.10.157"
 }
