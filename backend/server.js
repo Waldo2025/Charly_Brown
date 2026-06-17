@@ -1334,6 +1334,10 @@ const MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS = Math.max(
   60 * 1000,
   Number(process.env.MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS || 6 * 60 * 1000) || 6 * 60 * 1000
 );
+const MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS = Math.max(
+  5 * 1000,
+  Number(process.env.MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS || 15 * 1000) || 15 * 1000
+);
 const MONTAGE_EXPORT_STALE_HEARTBEAT_MS = Math.max(
   10 * 60 * 1000,
   MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS + (2 * 60 * 1000)
@@ -3990,14 +3994,19 @@ function runFfmpegCommand(args = [], context = {}) {
     let didTimeout = false;
     let didAbort = false;
     let abortPollTimer = null;
+    let heartbeatTimer = null;
+    let heartbeatInFlight = false;
+    const heartbeatStartedAt = Date.now();
     let stdout = "";
     let stderr = "";
     const shouldAbort = typeof context?.shouldAbort === "function" ? context.shouldAbort : null;
+    const onHeartbeat = typeof context?.onHeartbeat === "function" ? context.onHeartbeat : null;
     const finalizeReject = (error) => {
       if (settled) return;
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
       if (abortPollTimer) clearInterval(abortPollTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       reject(error);
     };
     const finalizeResolve = (value) => {
@@ -4005,6 +4014,7 @@ function runFfmpegCommand(args = [], context = {}) {
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
       if (abortPollTimer) clearInterval(abortPollTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       resolve(value);
     };
     if (timeoutMs > 0) {
@@ -4050,6 +4060,29 @@ function runFfmpegCommand(args = [], context = {}) {
         }, 1200).unref?.();
       }, 400);
       if (typeof abortPollTimer.unref === "function") abortPollTimer.unref();
+    }
+    if (onHeartbeat) {
+      const heartbeatIntervalMs = Math.max(1000, Number(context?.heartbeatIntervalMs || MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS) || MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS);
+      heartbeatTimer = setInterval(() => {
+        if (settled || didTimeout || didAbort || heartbeatInFlight) return;
+        heartbeatInFlight = true;
+        Promise.resolve(onHeartbeat({
+          stage,
+          pid: child.pid || null,
+          elapsedMs: Math.max(0, Date.now() - heartbeatStartedAt),
+          stderr,
+          stdout
+        })).catch((error) => {
+          console.warn("[backend][ffmpeg][heartbeat-failed]", {
+            stage,
+            pid: child.pid || null,
+            message: String(error?.message || error)
+          });
+        }).finally(() => {
+          heartbeatInFlight = false;
+        });
+      }, heartbeatIntervalMs);
+      if (typeof heartbeatTimer.unref === "function") heartbeatTimer.unref();
     }
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk || "");
@@ -10716,7 +10749,29 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           stage: `montage_scene_${sceneIndex}`,
           timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           timeoutCode: "scene_render_timeout",
-          shouldAbort: () => shouldAbort()
+          shouldAbort: () => shouldAbort(),
+          heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+            emitSceneSubstage({
+              sceneIndex,
+              rowId,
+              totalScenes: input.entries.length,
+              substage: "scene_ffmpeg_render",
+              hint: `Renderizando video de la escena ${sceneIndex} de ${input.entries.length}.`,
+              progress: sceneProgressBase + 0.05,
+              storagePath: videoStoragePath,
+              downloadUrl: videoDownloadUrl
+            });
+            console.info("[backend][montage-export][scene-step-heartbeat]", buildMontageSceneTrace({
+              jobId,
+              sceneIndex,
+              rowId,
+              storagePath: videoStoragePath,
+              downloadUrl: videoDownloadUrl,
+              substage: "scene_ffmpeg_render",
+              elapsedMs
+            }));
+          }
         });
         throwIfCancelled(`scene_${sceneIndex}_after_render`);
         const renderedSceneStat = await fs.promises.stat(intermediatePath).catch(() => null);
@@ -11206,7 +11261,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           args: finalVisualArgs
         });
         throwIfCancelled("montage_final_visuals");
-        await runFfmpegCommand(finalVisualArgs, { stage: "montage_final_visuals", shouldAbort: () => shouldAbort() });
+        await runFfmpegCommand(finalVisualArgs, {
+          stage: "montage_final_visuals",
+          shouldAbort: () => shouldAbort(),
+          heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+            emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.", {
+              lastHeartbeatAt: new Date().toISOString()
+            });
+            console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
+              jobId,
+              stage: "montage_final_visuals",
+              elapsedMs
+            });
+          }
+        });
         finalOutPath = finalVisualOutPath;
       } else {
         emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
@@ -11224,7 +11293,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-ar", "48000",
           ...deliveryParams.aArgs,
           deliveryOutPath
-        ], { stage: "montage_encode_delivery", shouldAbort: () => shouldAbort() });
+        ], {
+          stage: "montage_encode_delivery",
+          shouldAbort: () => shouldAbort(),
+          heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+            emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
+              lastHeartbeatAt: new Date().toISOString()
+            });
+            console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
+              jobId,
+              stage: "montage_encode_delivery",
+              elapsedMs
+            });
+          }
+        });
         finalOutPath = deliveryOutPath;
       }
     } else {
@@ -11243,7 +11326,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-ar", "48000",
         ...deliveryParams.aArgs,
         deliveryOutPath
-      ], { stage: "montage_encode_delivery", shouldAbort: () => shouldAbort() });
+      ], {
+        stage: "montage_encode_delivery",
+        shouldAbort: () => shouldAbort(),
+        heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
+        onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+          emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
+            lastHeartbeatAt: new Date().toISOString()
+          });
+          console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
+            jobId,
+            stage: "montage_encode_delivery",
+            elapsedMs
+          });
+        }
+      });
       finalOutPath = deliveryOutPath;
     }
 
