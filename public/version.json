@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.185",
-  "build": "2026-1.0.10.185",
+  "version": "1.0.10.186",
+  "build": "2026-1.0.10.186",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: Se resolvió la ReferenceError: renderedOnScreenTextSegmentMap is not defined en el backend y la ReferenceError: document is not defined en los tests del export del Podcaster.",
@@ -111,5 +111,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.185"
+  "cache_version": "2026-1.0.10.186"
 }
