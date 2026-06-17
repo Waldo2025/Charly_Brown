@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 const karaokeApi = (await import("../public/podcaster/podcaster-text-render.js")).default;
 const {
   buildMontageOnScreenTextAss,
-  normalizeKaraokeWordTimings
+  normalizeKaraokeWordTimings,
+  scaleKaraokeWordTimingsForPlaybackRate
 } = karaokeApi;
 
 test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per-word karaoke events", () => {
@@ -78,4 +79,69 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
   assert.match(ass, /\{\\alpha&H00&\}mundo/);
   assert.doesNotMatch(ass, /\\alpha&H00&\\c&H[0-9A-F]{8}/);
   assert.doesNotMatch(ass, /\\4c&H[0-9A-F]{8}/, "bg-none no debe inyectar caja opaca en los eventos");
+});
+
+test("buildMontageOnScreenTextAss scales karaoke word events using playbackRate", () => {
+  const baseWordTimings = normalizeKaraokeWordTimings({
+    wordTimings: [
+      { text: "Hola", startMs: 0, endMs: 200 },
+      { text: "mundo", startMs: 200, endMs: 400 }
+    ]
+  }, "Hola mundo");
+  const scaledWordTimings = scaleKaraokeWordTimingsForPlaybackRate(baseWordTimings, 2);
+
+  assert.deepEqual(scaledWordTimings.map((item) => [item.startMs, item.endMs]), [
+    [0, 100],
+    [100, 200]
+  ]);
+
+  const ass = buildMontageOnScreenTextAss({
+    width: 1280,
+    height: 720,
+    settings: {
+      fontFamily: "Unbounded",
+      stylePreset: "3d",
+      bgPreset: "none",
+      textColor: "#f8fafc",
+      strokeColor: "#0f172a",
+      textOpacity: 1
+    },
+    segments: [
+      {
+        startSec: 0,
+        endSec: 1,
+        wordTimings: baseWordTimings,
+        playbackRate: 2,
+        settings: {
+          fontFamily: "Unbounded",
+          stylePreset: "3d",
+          bgPreset: "none",
+          textColor: "#f8fafc",
+          strokeColor: "#0f172a",
+          textOpacity: 1
+        },
+        spec: {
+          text: "Hola mundo",
+          wrappedText: "Hola mundo",
+          fontFamily: "Unbounded",
+          fontSizePx: 44,
+          lineSpacingPx: 6,
+          strokeEnabled: true,
+          strokeWidthPx: 2,
+          shadowEnabled: true,
+          shadowX: 0,
+          shadowY: 4,
+          textAlign: "center",
+          rawXPx: 256,
+          boxWidthPx: 768,
+          yPx: 520,
+          boxEnabled: false,
+          bgOpacity: 0
+        }
+      }
+    ]
+  });
+
+  assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.10,KaraokeActive,/);
+  assert.match(ass, /Dialogue: 2,0:00:00\.10,0:00:00\.20,KaraokeActive,/);
 });

@@ -10367,6 +10367,13 @@ function renderOnScreenTextDrawFilters(input, segment, spec, wordTimings, textPa
   });
 }
 
+function resolveMontageKaraokeAudioClip(input = {}, rowId = "") {
+  const key = String(rowId || "").trim();
+  if (!key) return null;
+  const clip = input.dialogueAudioMap?.[key];
+  return clip && typeof clip === "object" ? clip : null;
+}
+
 async function appendMontageSceneOnScreenTextAssFilters({
   input = {},
   entry = {},
@@ -10418,7 +10425,7 @@ async function appendMontageSceneOnScreenTextAssFilters({
       startSec + 0.1,
       (Math.max(0, Number(segment.startMs || 0) || 0) + Math.max(0, Number(segment.durationMs || 0) || 0) - sceneTimelineStartMs) / 1000
     );
-    const audioClip = input.dialogueAudioMap?.[String(segment.rowId || "").trim()] || null;
+    const audioClip = resolveMontageKaraokeAudioClip(input, String(segment.rowId || "").trim());
     const wordTimings = input.partyKaraoke !== false
       ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim())
       : [];
@@ -10426,6 +10433,7 @@ async function appendMontageSceneOnScreenTextAssFilters({
       startSec,
       endSec,
       wordTimings,
+      playbackRate: Math.max(0.5, Math.min(10, Number(audioClip?.playbackRate || 1) || 1)),
       spec,
       settings
     };

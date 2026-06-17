@@ -16,6 +16,23 @@ test("frontend dialogue audio normalization preserves wordTimings", () => {
   assert.match(podcasterSource, /wordTimings:\s*normalizeKaraokeWordTimings\(clip,\s*String\(clip\.targetSpeechLine \|\| ""\)\.trim\(\)\)/);
 });
 
+test("montage export resolves dialogue audio clips through the same row resolver used by preview", () => {
+  assert.match(
+    podcasterSource + textRenderSource,
+    /resolveDialogueAudioForRow/
+  );
+  assert.match(
+    readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8"),
+    /function buildMontageExportDialogueAudioMap\(activeSession = null, rowIds = \[\]\)/,
+    "El export debe reconstruir dialogueAudioMap por rowId usando el resolver compartido."
+  );
+  assert.match(
+    readFileSync(new URL("../public/podcaster/podcaster-montage-export.js", import.meta.url), "utf8"),
+    /const clip = \(resolveDialogueAudio \? resolveDialogueAudio\(activeSession, rowId\) : null\) \|\| baseMap\?\.\[rowId\] \|\| null;/,
+    "El export no debe depender solo del dialogueAudioMap crudo cuando existe fallback Gemini por fila."
+  );
+});
+
 test("podcaster css defines karaoke word and active word states", () => {
   assert.match(cssSource, /\.podcast-karaoke-word\s*\{/);
   assert.match(cssSource, /\.podcast-karaoke-word\.is-active\s*\{/);

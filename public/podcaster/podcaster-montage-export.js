@@ -517,9 +517,11 @@ function buildMontageExportPreviewAssContent(payload = {}) {
         fallback: ""
       });
       const rowId = String(segment.rowId || "").trim();
+      const audioClip = payload?.dialogueAudioMap?.[rowId] || null;
       const wordTimings = payload?.partyKaraoke !== false && normalizeWordTimings
-        ? normalizeWordTimings(payload?.dialogueAudioMap?.[rowId] || null, text)
+        ? normalizeWordTimings(audioClip, text)
         : [];
+      const playbackRate = Math.max(0.5, Math.min(10, Number(audioClip?.playbackRate || 1) || 1));
       const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
       const durationSec = Math.max(0.1, Number(segment.durationMs || 0) / 1000);
       return {
@@ -528,6 +530,7 @@ function buildMontageExportPreviewAssContent(payload = {}) {
         spec,
         settings,
         wordTimings,
+        playbackRate,
         startSec,
         endSec: startSec + durationSec
       };
@@ -2361,6 +2364,38 @@ function stripMontageExportSubmissionPayload(payload = {}) {
   return next;
 }
 
+function buildMontageExportDialogueAudioMap(activeSession = null, rowIds = []) {
+  const baseMap = window.getDialogueAudioMap?.(activeSession) || activeSession?.dialogueAudioMap || {};
+  const resolveDialogueAudio = typeof window.resolveDialogueAudioForRow === "function"
+    ? window.resolveDialogueAudioForRow
+    : null;
+  const normalizeWordTimings = typeof window.normalizeKaraokeWordTimings === "function"
+    ? window.normalizeKaraokeWordTimings
+    : null;
+  const rows = Array.isArray(activeSession?.script?.rows) ? activeSession.script.rows : [];
+  const nextDialogueAudioMap = {};
+  Array.from(new Set((Array.isArray(rowIds) ? rowIds : []).map((rowId) => String(rowId || "").trim()).filter(Boolean))).forEach((rowId) => {
+    const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+    const clip = (resolveDialogueAudio ? resolveDialogueAudio(activeSession, rowId) : null) || baseMap?.[rowId] || null;
+    if (!clip || typeof clip !== "object") return;
+    const targetSpeechLine = String(
+      clip.targetSpeechLine
+      || row?.targetSpeechLine
+      || row?.voiceOverText
+      || row?.text
+      || ""
+    ).trim();
+    nextDialogueAudioMap[rowId] = {
+      ...clip,
+      rowId,
+      targetSpeechLine,
+      playbackRate: Math.max(0.5, Math.min(10, Number(clip?.playbackRate || row?.playbackRate || 1) || 1)),
+      wordTimings: normalizeWordTimings ? normalizeWordTimings(clip, targetSpeechLine) : (Array.isArray(clip?.wordTimings) ? clip.wordTimings : [])
+    };
+  });
+  return nextDialogueAudioMap;
+}
+
 function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, entries = [], geminiTimelineSegments = []) {
   const baseTimeline = onScreenTextTimeline && typeof onScreenTextTimeline === "object"
     ? onScreenTextTimeline
@@ -2458,8 +2493,6 @@ export function buildMontageExportPayload(session = null) {
     enabled: false,
     segments: []
   };
-  const dialogueAudioMap = window.getDialogueAudioMap?.(activeSession) || activeSession?.dialogueAudioMap || {};
-
   const normalizeLegacyPct = (value, fallback = 100, max = 200) => {
     const num = window.toFiniteNumber(value, fallback);
     const ceiling = Math.max(0, Number(max) || 100);
@@ -2781,6 +2814,10 @@ export function buildMontageExportPayload(session = null) {
       warnings: { skippedEntries }
     };
   }
+  const dialogueAudioMap = buildMontageExportDialogueAudioMap(
+    activeSession,
+    validEntries.map((entry) => entry?.rowId)
+  );
   const effectiveOnScreenTextTimeline = onScreenTextTimeline.segments.length
     ? onScreenTextTimeline
     : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments);

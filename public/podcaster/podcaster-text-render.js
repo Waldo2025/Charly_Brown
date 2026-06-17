@@ -113,6 +113,30 @@
     }));
   }
 
+  function scaleKaraokeWordTimingsForPlaybackRate(wordTimings = [], playbackRate = 1) {
+    const safeWordTimings = Array.isArray(wordTimings) ? wordTimings : [];
+    const rate = Math.max(0.5, Math.min(10, Number(playbackRate || 1) || 1));
+    if (!safeWordTimings.length) return [];
+    if (Math.abs(rate - 1) <= 0.0001) {
+      return safeWordTimings.map((item, index) => ({
+        text: String(item?.text || "").trim(),
+        startMs: Math.max(0, Math.round(Number(item?.startMs || 0) || 0)),
+        endMs: Math.max(0, Math.round(Number(item?.endMs || 0) || 0)),
+        tokenIndex: Number.isFinite(Number(item?.tokenIndex)) ? Math.max(0, Math.round(Number(item.tokenIndex))) : index
+      }));
+    }
+    return safeWordTimings.map((item, index) => {
+      const startMs = Math.max(0, Math.round((Number(item?.startMs || 0) || 0) / rate));
+      const endMs = Math.max(startMs + 1, Math.round((Number(item?.endMs || 0) || 0) / rate));
+      return {
+        text: String(item?.text || "").trim(),
+        startMs,
+        endMs,
+        tokenIndex: Number.isFinite(Number(item?.tokenIndex)) ? Math.max(0, Math.round(Number(item.tokenIndex))) : index
+      };
+    });
+  }
+
   function selectKaraokeWordTimingIndicesForExport(wordTimings = [], { maxFrames = 48 } = {}) {
     const safeWordTimings = Array.isArray(wordTimings) ? wordTimings : [];
     if (!safeWordTimings.length) return [];
@@ -925,7 +949,11 @@
       const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}${boxEnabled ? `\\4c${backColor}` : "\\4a&HFF&"}}`;
       events.push(`Dialogue: 1,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
 
-      const wordTimings = Array.isArray(segment?.wordTimings) ? segment.wordTimings : [];
+      const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
+      const wordTimings = scaleKaraokeWordTimingsForPlaybackRate(
+        Array.isArray(segment?.wordTimings) ? segment.wordTimings : [],
+        playbackRate
+      );
       wordTimings.forEach((word, index) => {
         const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
@@ -946,6 +974,7 @@
     normalizeTimingValue,
     estimateProportionalWordTimings,
     normalizeKaraokeWordTimings,
+    scaleKaraokeWordTimingsForPlaybackRate,
     selectKaraokeWordTimingIndicesForExport,
     resolveActiveKaraokeWordIndex,
     buildKaraokeSubtitleMarkup,
