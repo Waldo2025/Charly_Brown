@@ -2320,13 +2320,6 @@ function stripMontageExportSubmissionPayload(payload = {}) {
     }
     next.audioTimeline = nextAudioTimeline;
   }
-  if (next.onScreenTextTimeline && typeof next.onScreenTextTimeline === "object") {
-    next.onScreenTextTimeline = {
-      ...next.onScreenTextTimeline,
-      renderedSegments: []
-    };
-  }
-  next.onScreenTextRenderedSegments = [];
   return next;
 }
 
