@@ -1598,6 +1598,7 @@ async function readPersistedMontageExportJob(jobId = "") {
       graceMs: MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS
     });
     if (recovered) return recovered;
+    if (isMontageExportJobStale(parsed)) return parsed;
     if (Number(parsed.expiresAtMs || 0) && Number(parsed.expiresAtMs || 0) < Date.now()) {
       await fs.promises.rm(metaPath, { force: true }).catch(() => {});
       return null;
@@ -1634,6 +1635,7 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
       nowMs: Date.now(),
       graceMs: MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS
     });
+    if (!recovered && isMontageExportJobStale(snapshot)) return snapshot;
     return recovered;
   } catch (error) {
     const status = Number(error?.status || 500) || 500;

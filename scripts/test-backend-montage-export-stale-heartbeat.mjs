@@ -24,4 +24,9 @@ if (!/export-status marking stale job/.test(source)
   throw new Error("export-status debe persistir y devolver error cuando un job running/queued queda sin heartbeat.");
 }
 
+if (!/if \(isMontageExportJobStale\(parsed\)\) return parsed;/.test(source)
+  || !/if \(!recovered && isMontageExportJobStale\(snapshot\)\) return snapshot;/.test(source)) {
+  throw new Error("Los snapshots viejos no terminales deben llegar al detector stale antes de convertirse en job_not_found.");
+}
+
 console.log("Backend montage export stale heartbeat detection OK.");
