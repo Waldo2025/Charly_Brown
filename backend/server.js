@@ -2589,7 +2589,13 @@ function sanitizePodcasterSession(raw = {}) {
     });
     const downloadUrl = clampText(mediaRef.downloadUrl || "", 3000);
     const storagePath = clampText(mediaRef.storagePath || "", 700);
-    if (!storagePath && !downloadUrl) return;
+    const hasTimingMetadata = Array.isArray(clip?.wordTimings)
+      || Array.isArray(clip?.alignment)
+      || Array.isArray(clip?.alignment?.words)
+      || Array.isArray(clip?.words)
+      || Number.isFinite(Number(clip?.durationSec))
+      || Number.isFinite(Number(clip?.durationMs));
+    if (!storagePath && !downloadUrl && !hasTimingMetadata) return;
     dialogueAudioMap[key] = {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
