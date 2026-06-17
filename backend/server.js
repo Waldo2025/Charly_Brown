@@ -13072,6 +13072,28 @@ app.get("/api/assets/proxy-image", async (req, res) => {
       }
     }
 
+    const firebaseObject = parseFirebaseStorageGoogleApisObjectUrl(finalRequestUrl);
+    const bucketFromUrl = String(firebaseObject?.bucket || "").trim();
+    const objectPath = normalizeStorageFilePath(firebaseObject?.objectPath || "");
+    const isPodcasterAsset = /^podcaster\//i.test(String(objectPath || "").trim());
+    if (isPodcasterAsset && objectPath) {
+      try {
+        const downloaded = await downloadStorageObjectToBuffer(objectPath);
+        if (downloaded && downloaded.buffer) {
+          const mimeType = String(downloaded?.metadata?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Cache-Control", "private, max-age=120");
+          return res.status(200).send(downloaded.buffer);
+        }
+      } catch (e) {
+        console.warn("[backend][proxy-image] admin storage download fallback failed", {
+          url: redactUrlForLogs(finalRequestUrl),
+          objectPath,
+          error: e.message
+        });
+      }
+    }
+
     const upstream = await fetchCompat(finalRequestUrl, { 
       method: "GET",
       headers: { "User-Agent": "CharlyBrown-Backend/1.0" }

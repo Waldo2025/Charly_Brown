@@ -6437,7 +6437,7 @@ function resolveStorageMediaUrl(rawUrl = "") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
   if (!hasAvailableApiBase()) return clean;
-  if (clean.startsWith("/api/assets/proxy-image?")) return buildApiUrl(clean);
+  if (clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-image?")) return buildApiUrl(clean);
   try {
     const parsed = new URL(clean);
     const host = String(parsed.hostname || "").toLowerCase();
@@ -6485,7 +6485,7 @@ function resolveStorageVideoUrl(rawUrl = "", storagePath = "", options = {}) {
     }
 
     // Si ya es una URL de proxy, solo añadimos el timestamp si falta
-    if (clean.startsWith("/api/assets/proxy-media?") || clean.startsWith("/api/assets/proxy-image?")) {
+    if (clean.startsWith("/api/assets/proxy-media?") || clean.startsWith("/api/assets/proxy-image?") || clean.includes("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-image?")) {
       let proxyUrl = buildApiUrl(clean);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp && !proxyUrl.includes("u=")) {
@@ -6558,7 +6558,7 @@ function resolveStorageAudioUrl(rawUrl = "", storagePath = "", options = {}) {
     if (cleanStoragePath) {
       return resolveStaleAwareProxyMediaUrl(clean, cleanStoragePath, "media", options);
     }
-    if (clean.startsWith("/api/assets/proxy-media?")) {
+    if (clean.startsWith("/api/assets/proxy-media?") || clean.includes("/api/assets/proxy-media?")) {
       let proxyUrl = buildApiUrl(clean);
       const timestamp = options.updatedAt || options.timestamp || "";
       if (timestamp && !proxyUrl.includes("u=")) {
