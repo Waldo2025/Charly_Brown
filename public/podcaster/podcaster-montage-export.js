@@ -2192,6 +2192,7 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
         renderedFrames.push({
           kind: "karaoke-word",
           wordIndex,
+          text: String(word?.text || "").trim(),
           startMs,
           endMs,
           dataUrl: wordDataUrl,

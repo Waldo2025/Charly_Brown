@@ -10638,6 +10638,7 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
       nextFrames.push({
         kind: "karaoke-word",
         wordIndex: index,
+        text: String(word?.text || "").trim(),
         startMs,
         endMs,
         dataUrl: wordDataUrl,
@@ -10831,7 +10832,20 @@ async function appendMontageSceneOnScreenTextOverlays({
           }
         }
         const durationCentiseconds = Math.max(1, Math.round((wordEnd - Math.max(wordStart, currentMs)) / 10));
-        const cleanWordText = String(frame.text || "").trim();
+        const cleanWordText = String(frame?.text || "").trim();
+        if (!cleanWordText) {
+          throw createMontageOnScreenTextExportError(
+            "Falta el texto de una palabra karaoke renderizada para exportar esta escena.",
+            "montage_karaoke_word_text_missing",
+            {
+              rowId: String(segment?.rowId || entry?.rowId || "").trim() || undefined,
+              sceneIndex,
+              wordIndex: Math.max(0, Math.round(Number(frame?.wordIndex || idx) || 0)),
+              startMs: Math.max(0, Math.round(Number(frame?.startMs || 0) || 0)),
+              endMs: Math.max(0, Math.round(Number(frame?.endMs || 0) || 0))
+            }
+          );
+        }
         assText += `{\\k${durationCentiseconds}}${cleanWordText}`;
         if (idx < karaokeFrames.length - 1) {
           assText += " ";
