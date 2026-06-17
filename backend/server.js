@@ -10400,8 +10400,8 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     ? `H-h-${marginPx}`
     : `${marginPx}`;
   return [
-    `movie=filename='${escapeFfmpegFilterPath(brandOverlay.assetPath)}':loop=0,format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
-    `${baseInputLabel}[brand]overlay=eof_action=pass:shortest=1:x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
+    `movie=filename='${escapeFfmpegFilterPath(brandOverlay.assetPath)}',format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `${baseInputLabel}[brand]overlay=x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
   ].join(";");
 }
 
