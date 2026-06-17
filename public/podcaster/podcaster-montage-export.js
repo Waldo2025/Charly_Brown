@@ -17,6 +17,8 @@ const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
 const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
+const MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES = 2;
+const MONTAGE_EXPORT_RECENT_POLL_GRACE_MS = 45 * 1000;
 const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
 
 // --- Constants ---
@@ -488,6 +490,8 @@ let montageExportJobState = {
   lastSceneSubstage: "",
   lastHint: "",
   lastProgress: -1,
+  lastPollSuccessAtMs: 0,
+  lastHeartbeatAt: "",
   pollFailureCount: 0,
   jobNotFoundCount: 0,
   reviewExcelEnabled: false,
@@ -698,6 +702,8 @@ export function resetMontageExportJobState() {
     lastSceneSubstage: "",
     lastHint: "",
     lastProgress: -1,
+    lastPollSuccessAtMs: 0,
+    lastHeartbeatAt: "",
     pollFailureCount: 0,
     jobNotFoundCount: 0,
     reviewExcelEnabled: false,
@@ -998,6 +1004,8 @@ export async function pollMontageExportJob(jobId = "") {
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
     window.montageExportJobState.pollFailureCount = 0;
     window.montageExportJobState.jobNotFoundCount = 0;
+    window.montageExportJobState.lastPollSuccessAtMs = Date.now();
+    window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
     const stage = String(data?.stage || "").trim();
     const sceneSubstage = String(data?.sceneSubstage || "").trim();
     const hint = String(data?.hint || "").trim();
@@ -1184,6 +1192,12 @@ export async function pollMontageExportJob(jobId = "") {
     const transientNetworkError = isTransientMontageExportTransportError(error);
     window.montageExportJobState.pollFailureCount = Math.max(0, Number(window.montageExportJobState.pollFailureCount || 0) || 0) + 1;
     const failureCount = window.montageExportJobState.pollFailureCount;
+    const lastPollSuccessAtMs = Math.max(0, Number(window.montageExportJobState.lastPollSuccessAtMs || 0) || 0);
+    const recentPollSuccess = lastPollSuccessAtMs > 0 && (Date.now() - lastPollSuccessAtMs) <= MONTAGE_EXPORT_RECENT_POLL_GRACE_MS;
+    const canKeepLastProgressVisible = transientNetworkError
+      && recentPollSuccess
+      && failureCount <= MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES
+      && String(window.montageExportJobState.lastStage || "").trim();
     const transientHint = transientNetworkError
       ? (failureCount > 1
         ? `Se perdió la conexión temporalmente. Reintentando el export… intento ${failureCount}.`
@@ -1200,7 +1214,8 @@ export async function pollMontageExportJob(jobId = "") {
     logMontageExportDevtools("poll_retry_scheduled", {
       jobId: cleanJobId,
       failureCount,
-      transient: transientNetworkError
+      transient: transientNetworkError,
+      silent: canKeepLastProgressVisible
     }, "debug");
     if (!transientNetworkError && failureCount >= 8) {
       logMontageExportDevtools("poll_failed_stop", { failureCount }, "error");
@@ -1216,6 +1231,10 @@ export async function pollMontageExportJob(jobId = "") {
       window.setTimelinePreviewsSuspended(false);
       setMontageExportPreviewPaused(false);
       setMontageExportContinueButton({ visible: true });
+      return;
+    }
+    if (canKeepLastProgressVisible) {
+      scheduleMontageExportPollRetry(cleanJobId, failureCount, { transient: true });
       return;
     }
     setMontageExportStatus(
@@ -2812,6 +2831,8 @@ export async function runMontageExport() {
     window.montageExportJobState.lastStage = String(data?.stage || "").trim();
     window.montageExportJobState.lastHint = String(data?.hint || "").trim();
     window.montageExportJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
+    window.montageExportJobState.lastPollSuccessAtMs = Date.now();
+    window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
     window.montageExportJobState.reviewExcelEnabled = window.montageExportState.exportMode === "review" && window.montageExportState.includeReviewExcel !== false;
     window.montageExportJobState.reviewExcelPayload = prepared.payload;
     window.montageExportJobState.reviewExcelFilename = String(prepared.payload?.filename || window.montageExportState.filename || "").trim();
