@@ -309,22 +309,23 @@
     return escapeHtml(value);
   }
 
-  function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false) {
+  function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false, textColor = "currentColor") {
     const safeToken = escapeSvgText(token);
     return isActive
       ? `<tspan fill="#fff7bf" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
-      : `<tspan>${safeToken}</tspan>`;
+      : `<tspan fill="${escapeSvgText(textColor)}">${safeToken}</tspan>`;
   }
 
   function buildOnScreenTextRasterLineMarkup(line = "", options = {}) {
     const tokens = tokenizeSubtitleText(line);
     const activeWordIndex = Number.isFinite(Number(options.activeWordIndex)) ? Number(options.activeWordIndex) : -1;
+    const textColor = String(options.textColor || "currentColor").trim();
     let wordIndex = Number(options.wordIndex || 0) || 0;
     const parts = tokens.map((token) => {
       if (/^\s+$/.test(token)) {
         return `<tspan xml:space="preserve">${escapeSvgText(token)}</tspan>`;
       }
-      const markup = buildOnScreenTextRasterTokenMarkup(token, wordIndex === activeWordIndex);
+      const markup = buildOnScreenTextRasterTokenMarkup(token, wordIndex === activeWordIndex, textColor);
       wordIndex += 1;
       return markup;
     });
@@ -398,7 +399,8 @@
     const lineMarkup = lines.map((line, index) => {
       const current = buildOnScreenTextRasterLineMarkup(line, {
         activeWordIndex,
-        wordIndex
+        wordIndex,
+        textColor
       });
       wordIndex = current.wordIndex;
       const y = lineStartY + (index * lineStepY) + textOffsetYPx;
