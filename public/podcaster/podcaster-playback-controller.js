@@ -386,7 +386,7 @@ export class PodcasterPlaybackController extends EventEmitter {
       }
       
       const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
+      if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
         finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
       }
       this.blobCache.set(url, finalUrl);
@@ -472,7 +472,7 @@ export class PodcasterPlaybackController extends EventEmitter {
           }
 
           const isDirectFirebaseUrl = finalUrl.includes('firebasestorage.googleapis.com');
-          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-media')) {
+          if (isDirectFirebaseUrl && !finalUrl.includes('/api/assets/proxy-')) {
             finalUrl = this.buildMediaProxyUrl(`/api/assets/proxy-media?url=${encodeURIComponent(finalUrl)}`);
           }
 

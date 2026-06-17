@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase, getAuthHeaders } from "../js/api-client-podcaster.js";
-import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-17.1";
+import { PodcasterPlaybackController } from "./podcaster-playback-controller.js?v=2026-06-17.2";
 import { normalizeKaraokeWordTimings } from "./podcaster-karaoke.js?v=2026-06-16.15";
 import { createPodcasterSessionStore } from "./podcaster-session-store.js?v=2026-06-12.2";
 import { buildCloudSessionPayload as _buildCloudSessionPayload, compactCloudSessionPayload as _compactCloudSessionPayload } from "./podcaster-session-payload.js?v=2026-06-12.2";
