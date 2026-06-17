@@ -9716,7 +9716,8 @@ function validateMontageNormalExportOnScreenTextRasters(input = {}) {
         .map((frame) => Math.max(0, Math.round(Number(frame?.wordIndex || 0) || 0)))
     );
     const missingWordIndices = expectedWordIndices.filter((wordIndex) => !availableWordIndices.has(wordIndex));
-    if (missingWordIndices.length) {
+    // Solo fallar si NO hay ningún frame de karaoke disponible (el frontend puede enviar índices distintos si el conteo de palabras difiere levemente)
+    if (missingWordIndices.length && availableWordIndices.size === 0) {
       throw createMontageOnScreenTextExportError(
         "Faltan capas rasterizadas del karaoke para exportar esta escena.",
         "montage_karaoke_raster_missing",
@@ -9726,6 +9727,16 @@ function validateMontageNormalExportOnScreenTextRasters(input = {}) {
           missingWordIndices: missingWordIndices.slice(0, 24)
         }
       );
+    }
+    if (missingWordIndices.length) {
+      console.warn("[backend][montage-export][text-raster] karaoke_index_mismatch_tolerated", {
+        rowId: String(segment?.rowId || "").trim() || undefined,
+        sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1)),
+        expectedCount: expectedWordIndices.length,
+        availableCount: availableWordIndices.size,
+        missingCount: missingWordIndices.length,
+        missingWordIndices: missingWordIndices.slice(0, 12)
+      });
     }
   }
 }
