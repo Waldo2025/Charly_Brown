@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.188",
-  "build": "2026-1.0.10.188",
+  "version": "1.0.10.189",
+  "build": "2026-1.0.10.189",
   "branch": "codex-bootstrap",
   "releaseNotes": [
     "Corregido: Se resolvió la ReferenceError: renderedOnScreenTextSegmentMap is not defined en el backend y la ReferenceError: document is not defined en los tests del export del Podcaster.",
@@ -112,5 +112,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El payload del export de montage ahora limita los frames de karaoke a 3 por segmento en el frontend (antes era ilimitado), eliminando el OOM de Render que causaba errores 502/503 en el polling al enviar 10-15 MB de data URLs en el JSON. La validación del backend ahora tolera índices distintos de karaoke si hay frames disponibles."
   ],
-  "cache_version": "2026-1.0.10.188"
+  "cache_version": "2026-1.0.10.189"
 }
