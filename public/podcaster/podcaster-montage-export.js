@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
 import {
   buildPodcasterLocalMediaKey,
   getPodcasterLocalMediaDataUrl,
@@ -1050,7 +1050,11 @@ export async function pollMontageExportJob(jobId = "") {
     return;
   }
   try {
-    const exportStatusUrl = buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    // IMPORTANTE: usar buildApiUrl (proxy same-origin /api) y NO buildApiUrlPreferRemote.
+    // buildApiUrlPreferRemote apunta directo a Render; cuando Render cae con 502/503
+    // no envía headers CORS y el browser bloquea con 'Failed to fetch'.
+    // El proxy de Firebase Hosting reenvía al backend y maneja CORS correctamente.
+    const exportStatusUrl = buildApiUrl(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
     logMontageExportDevtools("poll_request", {
       jobId: cleanJobId,
       url: exportStatusUrl,
