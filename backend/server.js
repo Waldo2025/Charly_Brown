@@ -1346,6 +1346,10 @@ const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
   10 * 1000,
   Number(process.env.MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS || 20 * 1000) || 20 * 1000
 );
+const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
+  2500,
+  Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
+);
 const montageExportJobs = new Map();
 
 function getMontageExportJobMetaPath(jobId = "") {
@@ -1630,7 +1634,7 @@ async function resolveMontageExportJobSnapshot(jobId = "") {
   try {
     const snapshot = await withTimeout(
       () => montageExportJobStore.getJob(cleanJobId),
-      1200,
+      MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS,
       (timeoutMs) => {
         const err = new Error(`montage_export_status_timeout_${timeoutMs}`);
         err.code = "montage_export_status_timeout";
@@ -11671,22 +11675,35 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
       const errorCode = String(error?.code || "").trim();
       const timeoutFallback = status === 202 || errorCode === "montage_export_status_timeout";
       if (timeoutFallback || status >= 500) {
-        console.warn("[backend][montage-export] export-status degraded fallback", {
+        if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
+          console.warn("[backend][montage-export] export-status recovered active worker after status read failure", {
+            jobId,
+            status: status || null,
+            code: errorCode || null,
+            message: String(error?.message || error)
+          });
+          return {
+            jobId,
+            status: "running",
+            stage: "render_scene_segments",
+            progress: 0.23,
+            hint: "Recuperando el estado del export activo.",
+            degraded: true,
+            degradedStatus: status >= 500 ? status : 202,
+            currentSceneIndex: 1,
+            totalScenes: 1,
+            currentRowId: "",
+            heartbeatAt: new Date().toISOString(),
+            lastHeartbeatAt: new Date().toISOString()
+          };
+        }
+        console.warn("[backend][montage-export] export-status read failed without active worker", {
           jobId,
           status: status || null,
           code: errorCode || null,
           message: String(error?.message || error)
         });
-        return {
-          ok: true,
-          jobId,
-          status: "running",
-          stage: "queued",
-          progress: 0,
-          hint: "Sincronizando estado del export.",
-          degraded: true,
-          degradedStatus: status >= 500 ? status : 202
-        };
+        throw error;
       }
       console.warn("[backend][montage-export] export-status fallback", {
         jobId,

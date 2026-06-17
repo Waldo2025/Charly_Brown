@@ -17,6 +17,18 @@ assert.match(
 
 assert.match(
   source,
+  /const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math\.max\(/,
+  "La lectura de estado debe tener timeout configurable y suficientemente amplio para Firestore"
+);
+
+assert.match(
+  source,
+  /MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS,\s*\n\s*\(timeoutMs\) =>/,
+  "resolveMontageExportJobSnapshot debe usar el timeout configurable al leer Firestore"
+);
+
+assert.match(
+  source,
   /function isMontageExportJobInterruptedByBackendRestart\(job = null/,
   "Debe existir detector de jobs interrumpidos por restart del backend"
 );
@@ -37,6 +49,18 @@ assert.match(
   source,
   /isMontageExportJobInterruptedByBackendRestart\(job\) && !hasActiveMontageWorkerForJob/,
   "export-status debe marcar inmediatamente jobs running previos al restart sin worker activo"
+);
+
+assert.doesNotMatch(
+  source,
+  /status:\s*"running",\s*\n\s*stage:\s*"queued",\s*\n\s*progress:\s*0,\s*\n\s*hint:\s*"Sincronizando estado del export\."/,
+  "export-status no debe inventar un job running/queued cuando la lectura de Firestore falla"
+);
+
+assert.match(
+  source,
+  /export-status read failed without active worker/,
+  "Si falla la lectura de estado sin worker vivo, debe propagarse el error en vez de ocultar el estado real"
 );
 
 console.log("ok - montage export backend restart interruption is detected");
