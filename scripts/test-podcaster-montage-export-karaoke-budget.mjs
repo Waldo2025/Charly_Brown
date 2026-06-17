@@ -47,4 +47,16 @@ assert.match(
   "El backend debe reutilizar el selector compartido al regenerar y aplicar karaoke."
 );
 
+assert.match(
+  backendSource,
+  /function filterMontageOnScreenTextRenderedFramesForExport\(\{[\s\S]*?selectKaraokeWordTimingIndicesForExport\(wordTimings, \{\s*maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT/s,
+  "El backend debe recortar también los renderedFrames entrantes al presupuesto karaoke efectivo."
+);
+
+assert.match(
+  backendSource,
+  /renderedFrames:\s*filterMontageOnScreenTextRenderedFramesForExport\(\{/s,
+  "La resolución de segmentos de escena debe aplicar el filtro de renderedFrames antes de lanzar FFmpeg."
+);
+
 console.log("ok - montage export karaoke coverage is configurable");

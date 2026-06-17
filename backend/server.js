@@ -9635,6 +9635,33 @@ function findMontageRenderedOnScreenTextSegment(segment = {}, renderedSegmentMap
   return bestRowIdCandidate || null;
 }
 
+function filterMontageOnScreenTextRenderedFramesForExport({
+  input = {},
+  segment = {},
+  renderedFrames = []
+} = {}) {
+  const safeFrames = Array.isArray(renderedFrames) ? renderedFrames : [];
+  if (!safeFrames.length) return [];
+  const baseFrames = safeFrames.filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "base");
+  const karaokeFrames = safeFrames
+    .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word")
+    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.wordIndex || 0) - Number(b?.wordIndex || 0));
+  if (input.partyKaraoke === false || !karaokeFrames.length) {
+    return [...baseFrames, ...karaokeFrames];
+  }
+  const audioClip = input.dialogueAudioMap?.[String(segment?.rowId || "").trim()] || null;
+  const wordTimings = normalizeKaraokeWordTimings(audioClip, String(segment?.text || "").trim());
+  const expectedWordIndices = selectKaraokeWordTimingIndicesForExport(wordTimings, {
+    maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
+  });
+  if (!expectedWordIndices.length) {
+    return [...baseFrames, ...karaokeFrames];
+  }
+  const allowedWordIndices = new Set(expectedWordIndices.map((wordIndex) => Math.max(0, Math.round(Number(wordIndex || 0) || 0))));
+  const filteredKaraokeFrames = karaokeFrames.filter((frame) => allowedWordIndices.has(Math.max(0, Math.round(Number(frame?.wordIndex || 0) || 0))));
+  return [...baseFrames, ...filteredKaraokeFrames];
+}
+
 function validateMontageNormalExportOnScreenTextRasters(input = {}) {
   if (input.exportMode === "review") return;
   if (!input.onScreenTextSettings || !Array.isArray(input.onScreenTextSegments) || !input.onScreenTextSegments.length) return;
@@ -9730,7 +9757,11 @@ function resolveMontageSceneOnScreenTextSegments({
       }
       return {
         ...segment,
-        renderedFrames: Array.isArray(renderedSegment?.renderedFrames) ? renderedSegment.renderedFrames : []
+        renderedFrames: filterMontageOnScreenTextRenderedFramesForExport({
+          input,
+          segment,
+          renderedFrames: Array.isArray(renderedSegment?.renderedFrames) ? renderedSegment.renderedFrames : []
+        })
       };
     })
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
