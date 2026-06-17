@@ -179,6 +179,9 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     const timestamp = options.updatedAt || options.timestamp || "";
     const noRange = options.noRange === true;
     if (clean) {
+      if (clean.includes("/api/assets/proxy-image") || clean.includes("/api/assets/proxy-media")) {
+        return clean;
+      }
       try {
         const parsed = new URL(clean, window.location.origin);
         const host = String(parsed.hostname || "").toLowerCase();
