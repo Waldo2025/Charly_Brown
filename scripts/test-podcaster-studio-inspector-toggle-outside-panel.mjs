@@ -24,7 +24,7 @@ assert.ok(
 
 assert.match(
   htmlSource,
-  /podcaster\.css\?v=2026-1\.0\.10\.183/,
+  /podcaster\.css\?v=2026-1\.0\.10\.184/,
   "podcaster.html debe cargar el CSS con cache-buster nuevo."
 );
 
@@ -36,8 +36,14 @@ assert.match(
 
 assert.match(
   cssSource,
-  /#togglePodcastStudioInspectorBtn\.podcast-studio-inspector-toggle[\s\S]*?position:\s*absolute;/,
-  "El toggle externo debe tener estilo propio fuera del panel."
+  /#togglePodcastStudioInspectorBtn\.podcast-studio-inspector-toggle[\s\S]*?position:\s*absolute;[\s\S]*?right:\s*calc\(clamp\(var\(--pod-studio-inspector-min\), var\(--pod-studio-inspector-width\), var\(--pod-studio-inspector-max\)\) - 16px\);[\s\S]*?width:\s*32px;[\s\S]*?height:\s*64px;/,
+  "El toggle externo debe usar el mismo tamaño vertical del handle y anclarse al borde del inspector, no sobre el preview."
+);
+
+assert.match(
+  cssSource,
+  /#togglePodcastStudioInspectorBtn\.podcast-studio-inspector-toggle[\s\S]*?border:\s*1px solid color-mix\(in srgb, var\(--pod-border\) 88%, transparent 12%\);[\s\S]*?border-radius:\s*999px;[\s\S]*?background:\s*color-mix\(in srgb, var\(--pod-surface\) 98%, #0f172a 2%\);[\s\S]*?box-shadow:\s*-4px 10px 25px rgba\(15, 23, 42, 0\.15\);/,
+  "El toggle externo debe compartir el estilo visual base del handle colapsado."
 );
 
 assert.match(
