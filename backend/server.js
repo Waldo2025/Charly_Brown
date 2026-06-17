@@ -10767,14 +10767,14 @@ async function appendMontageSceneOnScreenTextOverlays({
         mimeType: "image/png",
         storagePath: `podcaster/montage-export/${jobId}/scene-text/${String(segment.rowId || sceneIndex).trim() || sceneIndex}-${String(frame.kind || "frame").trim()}-${Number.isFinite(Number(frame.wordIndex)) ? Math.max(0, Math.round(Number(frame.wordIndex))) : "base"}.png`
       }, "image", nextInputIndex);
-      args.push("-loop", "1", "-framerate", "24", "-i", framePath);
+      args.push("-i", framePath);
       const frameLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}`;
       const outLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}_out`;
       const frameEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
       const baseX = Math.max(0, Math.round((Number(spec.rawXPx || 0) - Number(frame?.offsetXPx || 0)) || 0));
       const baseY = Math.max(0, Math.round((Number(spec.yPx || 0) - Number(frame?.offsetYPx || 0)) || 0));
       overlayFilters.push(`[${nextInputIndex}:v]format=rgba[${frameLabel}]`);
-      overlayFilters.push(`${chainLabel}[${frameLabel}]overlay=format=auto:enable='${frameEnableExpr}':x=${baseX}:y=${baseY}[${outLabel}]`);
+      overlayFilters.push(`${chainLabel}[${frameLabel}]overlay=format=auto:eof_action=repeat:enable='${frameEnableExpr}':x=${baseX}:y=${baseY}[${outLabel}]`);
       chainLabel = `[${outLabel}]`;
       nextInputIndex += 1;
       appliedOverlayCount += 1;
