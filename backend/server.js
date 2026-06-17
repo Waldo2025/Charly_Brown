@@ -9606,6 +9606,11 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
   return map;
 }
 
+function shouldUseMontageSceneDrawtextFilters(input = {}) {
+  if (String(input?.exportMode || "").trim() === "review") return false;
+  return Boolean(input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
+}
+
 function findMontageRenderedOnScreenTextSegment(segment = {}, renderedSegmentMap = new Map()) {
   const exact = renderedSegmentMap.get(buildMontageOnScreenTextSegmentLookupKey(segment));
   if (exact) return exact;
@@ -9675,6 +9680,7 @@ function filterMontageOnScreenTextRenderedFramesForExport({
 function validateMontageNormalExportOnScreenTextRasters(input = {}) {
   if (input.exportMode === "review") return;
   if (!input.onScreenTextSettings || !Array.isArray(input.onScreenTextSegments) || !input.onScreenTextSegments.length) return;
+  if (shouldUseMontageSceneDrawtextFilters(input)) return;
   const renderedSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
   for (const segment of input.onScreenTextSegments) {
     const renderedSegment = findMontageRenderedOnScreenTextSegment(segment, renderedSegmentMap);
@@ -9762,9 +9768,16 @@ function resolveMontageSceneOnScreenTextSegments({
   renderedSegmentMap = new Map()
 } = {}) {
   const segments = Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments : [];
+  const useDrawtextSceneFilters = shouldUseMontageSceneDrawtextFilters(input);
   return segments
     .filter((segment) => doesMontageOnScreenTextSegmentBelongToScene(segment, entry, sceneIndex, sceneStartMs, sceneEndMs))
     .map((segment) => {
+      if (useDrawtextSceneFilters) {
+        return {
+          ...segment,
+          renderedFrames: []
+        };
+      }
       const renderedSegment = findMontageRenderedOnScreenTextSegment(segment, renderedSegmentMap);
       if (!renderedSegment) {
         throw createMontageOnScreenTextExportError(
@@ -10690,6 +10703,153 @@ function renderOnScreenTextDrawFilters(input, segment, spec, wordTimings, textPa
   });
 }
 
+async function appendMontageSceneOnScreenTextDrawtextFilters({
+  input = {},
+  entry = {},
+  sceneIndex = 1,
+  sceneTimelineStartMs = 0,
+  sceneTimelineEndMs = 0,
+  canvas = { width: 1280, height: 720 },
+  videoFilterGraph = "",
+  baseVideoMapLabel = "[vout]",
+  tmpDir = ""
+} = {}) {
+  const sceneSegments = resolveMontageSceneOnScreenTextSegments({
+    input,
+    entry,
+    sceneIndex,
+    sceneStartMs: sceneTimelineStartMs,
+    sceneEndMs: sceneTimelineEndMs,
+    renderedSegmentMap: new Map()
+  });
+  if (!sceneSegments.length) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      appliedOverlayCount: 0
+    };
+  }
+
+  const settings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
+    ? input.onScreenTextSettings
+    : {};
+  const textFileResolver = createMontageReviewTextFileResolver(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-onscreen`);
+  const localFilters = [];
+  let chainLabel = baseVideoMapLabel;
+  let filterIndex = 0;
+  let appliedOverlayCount = 0;
+
+  const boxSegments = sceneSegments.map((segment) => {
+    const layout = normalizeMontageOnScreenTextExportLayout({
+      segment,
+      settings,
+      resolution: input.resolution || "source",
+      sourceDims: canvas
+    });
+    const spec = resolveOnScreenTextRenderSpec({
+      settings,
+      layout,
+      resolution: input.resolution || "source",
+      sourceWidth: canvas.width,
+      sourceHeight: canvas.height,
+      text: segment.text || "",
+      fallback: ""
+    });
+    const startSec = Math.max(0, (Math.max(0, Number(segment.startMs || 0) || 0) - sceneTimelineStartMs) / 1000);
+    const endSec = Math.max(
+      startSec + 0.1,
+      (Math.max(0, Number(segment.startMs || 0) || 0) + Math.max(0, Number(segment.durationMs || 0) || 0) - sceneTimelineStartMs) / 1000
+    );
+    return { startSec, endSec, spec };
+  });
+  const boxFilters = buildMontageOnScreenTextKaraokeBoxFilters(boxSegments, settings, {
+    sourceWidth: canvas.width,
+    sourceHeight: canvas.height
+  });
+  for (const boxFilter of boxFilters) {
+    filterIndex += 1;
+    const outLabel = `scene_ontxt_box_${sceneIndex}_${filterIndex}`;
+    localFilters.push(`${chainLabel}${boxFilter}[${outLabel}]`);
+    chainLabel = `[${outLabel}]`;
+    appliedOverlayCount += 1;
+  }
+
+  for (const segment of sceneSegments) {
+    const layout = normalizeMontageOnScreenTextExportLayout({
+      segment,
+      settings,
+      resolution: input.resolution || "source",
+      sourceDims: canvas
+    });
+    const spec = resolveOnScreenTextRenderSpec({
+      settings,
+      layout,
+      resolution: input.resolution || "source",
+      sourceWidth: canvas.width,
+      sourceHeight: canvas.height,
+      text: segment.text || "",
+      fallback: ""
+    });
+    const startSec = Math.max(0, (Math.max(0, Number(segment.startMs || 0) || 0) - sceneTimelineStartMs) / 1000);
+    const endSec = Math.max(
+      startSec + 0.1,
+      (Math.max(0, Number(segment.startMs || 0) || 0) + Math.max(0, Number(segment.durationMs || 0) || 0) - sceneTimelineStartMs) / 1000
+    );
+    const audioClip = input.dialogueAudioMap?.[String(segment.rowId || "").trim()] || null;
+    const wordTimings = input.partyKaraoke !== false
+      ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim())
+      : [];
+    const textPath = textFileResolver(spec.wrappedText || spec.text || "");
+    const fontFile = resolveMontageOnScreenTextFontFile(settings);
+    const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
+    const drawFilters = renderOnScreenTextDrawFilters(
+      input,
+      segment,
+      spec,
+      wordTimings,
+      textPath,
+      fontSource,
+      startSec,
+      endSec,
+      textFileResolver
+    );
+    for (const drawFilter of drawFilters) {
+      filterIndex += 1;
+      const outLabel = `scene_ontxt_draw_${sceneIndex}_${filterIndex}`;
+      localFilters.push(`${chainLabel}${drawFilter}[${outLabel}]`);
+      chainLabel = `[${outLabel}]`;
+      appliedOverlayCount += 1;
+    }
+  }
+
+  if (!localFilters.length) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      appliedOverlayCount: 0
+    };
+  }
+
+  let newFilterGraph = videoFilterGraph;
+  if (newFilterGraph) {
+    newFilterGraph += `;${localFilters.join(";")}`;
+  } else {
+    newFilterGraph = localFilters.join(";");
+  }
+
+  console.info("[backend][montage-export][scene-text-drawtext]", {
+    sceneIndex,
+    rowId: String(entry?.rowId || "").trim() || undefined,
+    appliedOverlayCount
+  });
+
+  return {
+    videoFilterGraph: newFilterGraph,
+    finalVideoMapLabel: chainLabel,
+    appliedOverlayCount
+  };
+}
+
 async function appendMontageSceneOnScreenTextOverlays({
   args = [],
   input = {},
@@ -11211,27 +11371,43 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         let finalVideoMapLabel = "[vout]";
         let nextSceneInputIndex = !forceSilentAudio && !useNativeVideoAudio && inputAudioPath ? 3 : 2;
         if (shouldBurnSceneOnScreenText) {
-          const textOverlayResult = await appendMontageSceneOnScreenTextOverlays({
-            args,
-            input,
-            entry,
-            sceneIndex,
-            sceneDurationSec: durSec,
-            sceneTimelineStartMs,
-            sceneTimelineEndMs,
-            canvas,
-            renderedSegmentMap: renderedOnScreenTextSegmentMap,
-            videoFilterGraph,
-            baseVideoMapLabel: finalVideoMapLabel,
-            nextInputIndex: nextSceneInputIndex,
-            downloadInput,
-            jobId,
-            reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
-            tmpDir
-          });
-          videoFilterGraph = textOverlayResult.videoFilterGraph;
-          finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
-          nextSceneInputIndex = textOverlayResult.nextInputIndex;
+          if (shouldUseMontageSceneDrawtextFilters(input)) {
+            const textOverlayResult = await appendMontageSceneOnScreenTextDrawtextFilters({
+              input,
+              entry,
+              sceneIndex,
+              sceneTimelineStartMs,
+              sceneTimelineEndMs,
+              canvas,
+              videoFilterGraph,
+              baseVideoMapLabel: finalVideoMapLabel,
+              tmpDir
+            });
+            videoFilterGraph = textOverlayResult.videoFilterGraph;
+            finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
+          } else {
+            const textOverlayResult = await appendMontageSceneOnScreenTextOverlays({
+              args,
+              input,
+              entry,
+              sceneIndex,
+              sceneDurationSec: durSec,
+              sceneTimelineStartMs,
+              sceneTimelineEndMs,
+              canvas,
+              renderedSegmentMap: renderedOnScreenTextSegmentMap,
+              videoFilterGraph,
+              baseVideoMapLabel: finalVideoMapLabel,
+              nextInputIndex: nextSceneInputIndex,
+              downloadInput,
+              jobId,
+              reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
+              tmpDir
+            });
+            videoFilterGraph = textOverlayResult.videoFilterGraph;
+            finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
+            nextSceneInputIndex = textOverlayResult.nextInputIndex;
+          }
         }
         const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
         if (hasBrandOverlay) {

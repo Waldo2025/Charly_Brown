@@ -17,20 +17,20 @@ assert.match(
 
 assert.match(
   backendSource,
-  /await appendMontageSceneOnScreenTextOverlays\(\{/,
-  "El render de escena debe inyectar capas rasterizadas del texto en pantalla."
+  /await appendMontageSceneOnScreenTextDrawtextFilters\(\{/,
+  "El render de escena debe usar drawtext compartido para el texto en pantalla."
 );
 
-assert.doesNotMatch(
+assert.match(
   backendSource,
-  /const hasEffectiveRasterizedText = input\.exportMode !== "review"[\s\S]*?&& false;/,
-  "El pass final no debe conservar la ruta desactivada basada en movie=filename."
+  /if \(shouldUseMontageSceneDrawtextFilters\(input\)\) \{[\s\S]*appendMontageSceneOnScreenTextDrawtextFilters\([\s\S]*\} else \{[\s\S]*appendMontageSceneOnScreenTextOverlays\(/,
+  "El export normal debe usar drawtext como ruta principal y dejar raster solo como fallback."
 );
 
 assert.doesNotMatch(
   backendSource,
   /raster frames missing, falling back to native drawtext overlay/,
-  "El export normal no debe degradar silenciosamente a drawtext."
+  "La ruta nueva no debe depender de una degradación silenciosa desde rasters."
 );
 
 console.log("Podcaster montage final visuals keep normal text out of final drawtext pass OK.");

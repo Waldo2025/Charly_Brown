@@ -2464,36 +2464,7 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   if (!prepared?.ok || !prepared?.payload) return prepared;
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
-  await hydrateMontageExportPayloadOnScreenTextRasters(prepared.payload);
-  const originalTextSegments = Array.isArray(prepared.payload.onScreenTextTimeline?.segments)
-    ? prepared.payload.onScreenTextTimeline.segments
-    : [];
-  const renderedSegments = Array.isArray(prepared.payload.onScreenTextTimeline?.renderedSegments)
-    ? prepared.payload.onScreenTextTimeline.renderedSegments
-    : [];
-  if (originalTextSegments.length) {
-    if (!renderedSegments.length) {
-      console.error("[podcaster][montage-export][text-raster] rendered_segments_missing", {
-        segmentCount: originalTextSegments.length,
-        originalRowIds: originalTextSegments.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10)
-      });
-      throw new Error("montage_onscreen_text_raster_failed");
-    }
-    const missingFrames = renderedSegments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
-    if (missingFrames.length) {
-      console.error("[podcaster][montage-export][text-raster] missing_rendered_frames", {
-        segmentCount: renderedSegments.length,
-        missingCount: missingFrames.length,
-        missingRowIds: missingFrames.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10)
-      });
-      throw new Error("montage_onscreen_text_raster_failed");
-    }
-    console.info("[podcaster][montage-export][text-raster] rendered_segments_ready", {
-      segmentCount: renderedSegments.length,
-      framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
-    });
-  }
-  prepared.payload.onScreenTextRenderedSegments = renderedSegments;
+  prepared.payload.onScreenTextRenderedSegments = [];
   return prepared;
 }
 

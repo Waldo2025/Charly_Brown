@@ -14,20 +14,20 @@ assert.match(
 
 assert.doesNotMatch(
   source,
-  /next\.onScreenTextRenderedSegments = \[\];/,
-  "El submit del export no debe vaciar los rasters de texto en pantalla."
+  /await hydrateMontageExportPayloadOnScreenTextRasters\(prepared\.payload\);/,
+  "El submit del export ya no debe rasterizar texto en pantalla antes de enviar el job."
 );
 
 assert.doesNotMatch(
   source,
-  /renderedSegments:\s*\[\]/,
-  "El submit del export no debe vaciar los renderedSegments del timeline."
+  /throw new Error\("montage_onscreen_text_raster_failed"\)/,
+  "El submit del export no debe abortar por ausencia de rasters karaoke."
 );
 
-assert.match(
+assert.doesNotMatch(
   source,
   /prepared\.payload\.onScreenTextRenderedSegments = renderedSegments;/,
-  "El payload preparado debe seguir promoviendo los rasters compartidos al nivel superior."
+  "El payload preparado ya no debe promover renderedSegments rasterizados al nivel superior."
 );
 
-console.log("Podcaster montage export preserves on-screen raster payload OK.");
+console.log("Podcaster montage export no longer requires raster payload OK.");

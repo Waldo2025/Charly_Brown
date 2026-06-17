@@ -32,8 +32,14 @@ assert.match(
 
 assert.match(
   source,
-  /appendMontageSceneOnScreenTextOverlays[\s\S]*karaoke-word/,
-  "El render por escena debe seguir usando las capas rasterizadas de karaoke."
+  /async function appendMontageSceneOnScreenTextDrawtextFilters\([\s\S]*?const drawFilters = renderOnScreenTextDrawFilters\(/,
+  "El render por escena debe quemar el karaoke con drawtext compartido."
+);
+
+assert.match(
+  source,
+  /if \(shouldUseMontageSceneDrawtextFilters\(input\)\) \{[\s\S]*appendMontageSceneOnScreenTextDrawtextFilters\(/,
+  "El export normal debe priorizar la ruta drawtext para texto en pantalla."
 );
 
 assert.doesNotMatch(
