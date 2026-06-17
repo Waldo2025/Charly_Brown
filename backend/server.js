@@ -24,6 +24,10 @@ const {
   sanitizeMontageExportJobPublicPayload
 } = require("./montage-export/public-payload.js");
 const {
+  canAutoResumeInterruptedMontageExportJob,
+  buildAutoResumeInterruptedMontageExportJobPatch
+} = require("./montage-export/restart-recovery.js");
+const {
   createProcessMontageExportJob
 } = require("./montage-export/worker-runner.js");
 const {
@@ -1737,6 +1741,62 @@ function buildRestartInterruptedMontageExportJobPatch(job = null) {
       }
     }
   };
+}
+
+function createDirectMontageExportJobStoreBridge() {
+  return {
+    createJob: async (args) => {
+      const job = await montageExportJobStore.createJob(args);
+      upsertMontageExportJob(job.jobId, job);
+      return job;
+    },
+    updateJob: async (id, patch) => {
+      upsertMontageExportJob(id, patch);
+      await montageExportJobStore.updateJob(id, patch);
+    },
+    getJob: async (id) => {
+      return montageExportJobs.get(id) || await montageExportJobStore.getJob(id);
+    }
+  };
+}
+
+function runMontageExportDirectJob({
+  jobId = "",
+  uid = "",
+  sessionId = "",
+  input = null,
+  baseUrl = ""
+} = {}) {
+  const cleanJobId = clampExportId(jobId);
+  if (!cleanJobId || !input || typeof input !== "object") return false;
+  setImmediate(async () => {
+    try {
+      const directJobStore = createDirectMontageExportJobStoreBridge();
+      const processFn = createProcessMontageExportJob({
+        jobStore: directJobStore,
+        executeMontageExportPipeline,
+        buildMontageSceneFailure
+      });
+      await processFn({
+        data: {
+          jobId: cleanJobId,
+          sessionId: String(sessionId || input.sessionId || "").trim(),
+          ownerId: String(uid || "").trim(),
+          input,
+          baseUrl: String(baseUrl || "").trim()
+        }
+      });
+    } catch (err) {
+      console.error("[backend][montage-export] direct export failed", {
+        jobId: cleanJobId,
+        error: String(err?.message || err),
+        stack: String(err?.stack || "").trim() || null
+      });
+    } finally {
+      releaseHeavyWorkSlot("montage_export", cleanJobId);
+    }
+  });
+  return true;
 }
 
 function upsertDialogueVideoJob(jobId = "", patch = {}) {
@@ -11654,6 +11714,10 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       jobId,
       sessionId: input.sessionId,
       ownerId: uid,
+      request: {
+        input,
+        baseUrl
+      },
       totalScenes: input.entries.length
     });
     upsertMontageExportJob(jobId, initial);
@@ -11727,45 +11791,12 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       });
     }
 
-    setImmediate(async () => {
-      try {
-        const directJobStore = {
-          createJob: async (args) => {
-            const job = await montageExportJobStore.createJob(args);
-            upsertMontageExportJob(job.jobId, job);
-            return job;
-          },
-          updateJob: async (id, patch) => {
-            upsertMontageExportJob(id, patch);
-            await montageExportJobStore.updateJob(id, patch);
-          },
-          getJob: async (id) => {
-            return montageExportJobs.get(id) || await montageExportJobStore.getJob(id);
-          }
-        };
-        const processFn = createProcessMontageExportJob({
-          jobStore: directJobStore,
-          executeMontageExportPipeline,
-          buildMontageSceneFailure
-        });
-        await processFn({
-          data: {
-            jobId,
-            sessionId: input.sessionId,
-            ownerId: uid,
-            input,
-            baseUrl
-          }
-        });
-      } catch (err) {
-        console.error("[backend][montage-export] direct export failed", {
-          jobId,
-          error: String(err?.message || err),
-          stack: String(err?.stack || "").trim() || null
-        });
-      } finally {
-        releaseHeavyWorkSlot("montage_export", jobId);
-      }
+    runMontageExportDirectJob({
+      jobId,
+      uid,
+      sessionId: input.sessionId,
+      input,
+      baseUrl
     });
 
     return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
@@ -11859,6 +11890,40 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
     }
     const hasActiveMontageWorkerForJob = getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId;
     if (isMontageExportJobInterruptedByBackendRestart(job) && !hasActiveMontageWorkerForJob) {
+      if (canAutoResumeInterruptedMontageExportJob(job, { queueAvailable: Boolean(montageExportQueue) })) {
+        const request = job.request && typeof job.request === "object" ? job.request : null;
+        const input = request?.input && typeof request.input === "object" ? request.input : null;
+        const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+        if (slot.ok && input) {
+          const restartPatch = buildAutoResumeInterruptedMontageExportJobPatch(job);
+          const resumedJob = {
+            ...job,
+            ...restartPatch,
+            updatedAt: new Date().toISOString()
+          };
+          console.warn("[backend][montage-export] export-status auto-resuming interrupted direct job", {
+            jobId,
+            backendBootAt: BACKEND_BOOT_ISO,
+            stage: String(job?.stage || "").trim() || null,
+            sceneSubstage: String(job?.sceneSubstage || "").trim() || null
+          });
+          upsertMontageExportJob(jobId, resumedJob);
+          await montageExportJobStore.updateJob(jobId, restartPatch).catch((error) => {
+            console.warn("[backend][montage-export] auto-resume job persistence failed", {
+              jobId,
+              message: String(error?.message || error)
+            });
+          });
+          runMontageExportDirectJob({
+            jobId,
+            uid: String(job?.ownerId || "").trim(),
+            sessionId: String(job?.sessionId || input.sessionId || "").trim(),
+            input,
+            baseUrl: String(request?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`
+          });
+          return res.status(200).json(sanitizeMontageExportJobPublicPayload(resumedJob));
+        }
+      }
       const restartPatch = buildRestartInterruptedMontageExportJobPatch(job);
       console.warn("[backend][montage-export] export-status marking restarted job", {
         jobId,

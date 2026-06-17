@@ -9,6 +9,9 @@ test("worker runner writes ready result after pipeline success", async () => {
   const updates = [];
   const processor = createProcessMontageExportJob({
     jobStore: {
+      async getJob() {
+        return { status: "running", progress: 0.5 };
+      },
       async updateJob(jobId, patch) {
         updates.push({ jobId, patch });
         return patch;
@@ -52,6 +55,9 @@ test("worker runner writes durable error details after pipeline failure", async 
   const updates = [];
   const processor = createProcessMontageExportJob({
     jobStore: {
+      async getJob() {
+        return { status: "running", progress: 0.5 };
+      },
       async updateJob(jobId, patch) {
         updates.push({ jobId, patch });
         return patch;
