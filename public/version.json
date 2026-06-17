@@ -1,9 +1,9 @@
 {
-  "version": "1.0.10.159",
-  "build": "2026-1.0.10.159",
+  "version": "1.0.10.160",
+  "build": "2026-1.0.10.160",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Corregido: Se limitó FFmpeg a -threads 1 de forma global en runFfmpegCommand para evitar picos de memoria (OOM) y cierres repentinos del backend de Render durante la composición final.",
+    "Corregido: Se implementó un fallback robusto con drawtext nativo en el backend si la rasterización de SVGs no está disponible o falla, solucionando el problema de exportación sin subtítulos de karaoke.",
     "Diagnóstico: Se agregaron console logs con la salida de stderr y stdout de FFmpeg en tiempo real en los heartbeats del backend para identificar la causa exacta del retraso en la escena 1.",
     "Corregido: Se solucionó el cuelgue (timeout) en la renderización de la escena 1 del export de montage configurando eof_action=repeat por defecto para el logo y quitando loop=0.",
     "Corregido: Se agregó prevención de doble envoltura del proxy en el controlador de reproducción (podcaster-playback-controller.js) al detectar si la URL ya contiene /api/assets/proxy-.",

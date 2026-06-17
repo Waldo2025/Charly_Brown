@@ -10381,6 +10381,22 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
   return renderedSegments;
 }
 
+function renderOnScreenTextDrawFilters(input, segment, spec, wordTimings, textPath, fontSource, startSec, endSec, textFileResolver) {
+  const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
+  return buildMontageOnScreenTextDrawFilters({
+    spec,
+    settings: input.onScreenTextSettings,
+    textPath,
+    fontSource,
+    textColor: toFfmpegColor(input.onScreenTextSettings?.textColor || "#f8fafc", 1),
+    strokeColor: toFfmpegColor(input.onScreenTextSettings?.strokeColor || "#0f172a", 1),
+    startSec,
+    endSec,
+    wordTimings,
+    textFileResolver
+  });
+}
+
 function buildMontageBrandOverlayFilter(brandOverlay = null, {
   width = 1280,
   height = 720,
@@ -11251,19 +11267,98 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             useFilterComplexForVisual = true;
           }
         } else {
-          const missingRendered = effectiveRenderedSegments.filter((segment) => !Array.isArray(segment?.renderedFrames) || !segment.renderedFrames.length);
-          console.error("[backend][montage-export][text-raster] raster frames missing, aborting without drawtext fallback", {
-            segmentCount: input.onScreenTextSegments.length,
-            renderedSegmentCount: effectiveRenderedSegments.length,
-            missingCount: missingRendered.length,
-            missingRowIds: missingRendered.map((segment) => String(segment?.rowId || "").trim()).filter(Boolean).slice(0, 10),
-            overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
-            partyKaraoke: input.partyKaraoke !== false,
-            exportMode: input.exportMode
+          console.warn("[backend][montage-export][text-raster] raster frames missing, falling back to native drawtext overlay");
+          const textFileResolver = createMontageReviewTextFileResolver(tmpDir, "onscreen-drawtext");
+          const boxSegments = effectiveRenderedSegments.map((segment) => {
+            const layout = normalizeMontageOnScreenTextExportLayout({
+              segment,
+              settings: onScreenTextSettings,
+              resolution: input.resolution || "source",
+              sourceDims
+            });
+            const spec = resolveOnScreenTextRenderSpec({
+              settings: onScreenTextSettings,
+              layout,
+              resolution: input.resolution || "source",
+              sourceWidth: sourceDims.width,
+              sourceHeight: sourceDims.height,
+              text: segment.text || "",
+              fallback: ""
+            });
+            return {
+              startSec: Math.max(0, Number(segment.startMs || 0) / 1000),
+              endSec: Math.max(0, Number(segment.startMs || 0) / 1000) + Math.max(0.1, Number(segment.durationMs || 0) / 1000),
+              spec
+            };
           });
-          const err = new Error("montage_onscreen_text_raster_missing");
-          err.status = 422;
-          throw err;
+          const boxFilters = buildMontageOnScreenTextKaraokeBoxFilters(boxSegments, onScreenTextSettings, {
+            sourceWidth: sourceDims.width,
+            sourceHeight: sourceDims.height
+          });
+          
+          let chainLabel = "[0:v]";
+          let filterIndex = 0;
+          const localFilters = [];
+          
+          if (boxFilters.length) {
+            for (const boxFilter of boxFilters) {
+              filterIndex += 1;
+              const outLabel = `ontxt_box_${filterIndex}`;
+              localFilters.push(`${chainLabel}${boxFilter}[${outLabel}]`);
+              chainLabel = `[${outLabel}]`;
+            }
+          }
+          
+          for (const segment of effectiveRenderedSegments) {
+            const layout = normalizeMontageOnScreenTextExportLayout({
+              segment,
+              settings: onScreenTextSettings,
+              resolution: input.resolution || "source",
+              sourceDims
+            });
+            const spec = resolveOnScreenTextRenderSpec({
+              settings: onScreenTextSettings,
+              layout,
+              resolution: input.resolution || "source",
+              sourceWidth: sourceDims.width,
+              sourceHeight: sourceDims.height,
+              text: segment.text || "",
+              fallback: ""
+            });
+            const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+            const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+            const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
+            const wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim()) : [];
+            const textPath = textFileResolver(spec.wrappedText || spec.text || "");
+            
+            const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
+            const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
+            
+            const segmentDrawFilters = renderOnScreenTextDrawFilters(
+              input,
+              segment,
+              spec,
+              wordTimings,
+              textPath,
+              fontSource,
+              startSec,
+              endSec,
+              textFileResolver
+            );
+            
+            for (const drawFilter of segmentDrawFilters) {
+              filterIndex += 1;
+              const outLabel = `ontxt_draw_${filterIndex}`;
+              localFilters.push(`${chainLabel}${drawFilter}[${outLabel}]`);
+              chainLabel = `[${outLabel}]`;
+            }
+          }
+          
+          if (chainLabel !== "[0:v]" && localFilters.length) {
+            localFilters.push(`${chainLabel}format=yuv420p[vout]`);
+            visualFilters.push(localFilters.join(";"));
+            useFilterComplexForVisual = true;
+          }
         }
       }
 
