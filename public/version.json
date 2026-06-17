@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.179",
-  "build": "2026-1.0.10.179",
+  "version": "1.0.10.180",
+  "build": "2026-1.0.10.180",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El backend de export de Podcaster ya conserva renderedFrames[].text al normalizar el request, restaurando el texto visible del karaoke en el MP4.",
     "Corregido: El export MP4 de Podcaster conserva el texto de cada frame karaoke y falla con montage_karaoke_word_text_missing si una palabra renderizada llega sin texto, evitando degradaciones silenciosas.",
     "Corregido: Se solucionó el desfase al exportar video normal/reel invalidando la caché interna del cliente cuando se cambia la opción del switch de Reel, asegurando que se persista en Firestore el valor correcto.",
     "Corregido: Se añade un cap de seguridad en el backend para limitar el número de frames de karaoke overlays por segmento para evitar OOM de FFmpeg en Render, manteniendo la persistencia limpia de Firestore.",
@@ -104,5 +105,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.179"
+  "cache_version": "2026-1.0.10.180"
 }

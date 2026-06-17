@@ -9065,6 +9065,7 @@ function normalizeMontageExportRequestBody(body = {}) {
           if (!dataUrl.startsWith("data:image/")) return null;
           return {
             kind: clampText(frame?.kind || "base", 40) || "base",
+            text: clampText(frame?.text || "", 500),
             wordIndex: Number.isFinite(Number(frame?.wordIndex)) ? Math.max(-1, Math.round(Number(frame.wordIndex))) : -1,
             startMs: Math.max(0, Math.round(Number(frame?.startMs || 0) || 0)),
             endMs: Math.max(0, Math.round(Number(frame?.endMs || 0) || 0)),

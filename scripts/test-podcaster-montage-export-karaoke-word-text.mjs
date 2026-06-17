@@ -18,6 +18,12 @@ assert.match(
 
 assert.match(
   backendSource,
+  /kind:\s*clampText\(frame\?\.kind \|\| "base", 40\)[\s\S]*?text:\s*clampText\(frame\?\.text \|\| "", 500\)/,
+  "La normalización del request backend debe conservar renderedFrames[].text."
+);
+
+assert.match(
+  backendSource,
   /throw createMontageOnScreenTextExportError\(\s*"Falta el texto de una palabra karaoke renderizada para exportar esta escena\."\s*,\s*"montage_karaoke_word_text_missing"/,
   "Si falta el texto de un frame karaoke, el backend debe fallar con un error exacto."
 );

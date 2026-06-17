@@ -227,7 +227,8 @@ test("montage export strips inline media before submission", () => {
       {
         rowId: "row-1",
         renderedFrames: [
-          { kind: "base", dataUrl: "data:image/png;base64,HHHH" }
+          { kind: "base", dataUrl: "data:image/png;base64,HHHH" },
+          { kind: "karaoke-word", wordIndex: 0, text: "Hola", dataUrl: "data:image/png;base64,IIII" }
         ]
       }
     ]
@@ -242,8 +243,12 @@ test("montage export strips inline media before submission", () => {
   assert.equal(stripped.dialogueAudioMap["row-1"].dataUrl, "");
   assert.equal(stripped.audioTimeline.geminiSegments[0].dataUrl, "");
   assert.equal(stripped.audioTimeline.backgroundSegments[0].dataUrl, "");
-  assert.equal(stripped.onScreenTextTimeline.renderedSegments.length, 0);
-  assert.equal(stripped.onScreenTextRenderedSegments.length, 0);
+  assert.equal(stripped.onScreenTextTimeline.renderedSegments.length, 1);
+  assert.equal(stripped.onScreenTextRenderedSegments.length, 1);
+  assert.equal(stripped.onScreenTextRenderedSegments[0].renderedFrames.length, 2);
+  assert.equal(stripped.onScreenTextRenderedSegments[0].renderedFrames[1].text, "Hola");
+  assert.match(stripped.onScreenTextRenderedSegments[0].renderedFrames[0].dataUrl, /^data:image\/png;base64,/);
+  assert.match(stripped.onScreenTextRenderedSegments[0].renderedFrames[1].dataUrl, /^data:image\/png;base64,/);
   assert.match(String(payload.entries[0].video.dataUrl || ""), /^data:video\/mp4;base64,/);
 });
 
