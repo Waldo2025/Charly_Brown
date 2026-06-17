@@ -14,7 +14,8 @@ const {
   sanitizeDialogueVideoJobPublicPayload
 } = require("./dialogue-video-job-state.js");
 const {
-  createMontageExportJobStore
+  createMontageExportJobStore,
+  sanitizeMontageExportPersistedRequest
 } = require("./montage-export/job-store-firestore.js");
 const {
   recoverMontageExportJobSnapshot,
@@ -11927,14 +11928,15 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
     validateMontageExportRequest(input);
     const jobId = clampExportId(randomUUID());
     const baseUrl = resolvePublicBaseUrl(req) || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
+    const persistedRequest = sanitizeMontageExportPersistedRequest({
+      input,
+      baseUrl
+    });
     const initial = await montageExportJobStore.createJob({
       jobId,
       sessionId: input.sessionId,
       ownerId: uid,
-      request: {
-        input,
-        baseUrl
-      },
+      request: persistedRequest,
       totalScenes: input.entries.length
     });
     upsertMontageExportJob(jobId, initial);

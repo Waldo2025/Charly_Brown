@@ -36,6 +36,24 @@ test("canAutoResumeInterruptedMontageExportJob returns false when the restart wa
   assert.equal(result, false);
 });
 
+test("canAutoResumeInterruptedMontageExportJob returns false when inline rasters were redacted from persisted input", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "render_scene_segments",
+    request: {
+      input: {
+        sessionId: "session-1",
+        entries: [{ rowId: "row-1" }],
+        persistedInlineRastersRedacted: true
+      }
+    }
+  }, {
+    queueAvailable: false
+  });
+
+  assert.equal(result, false);
+});
+
 test("buildAutoResumeInterruptedMontageExportJobPatch keeps the request and marks the job as restarting", () => {
   const patch = buildAutoResumeInterruptedMontageExportJobPatch({
     request: {

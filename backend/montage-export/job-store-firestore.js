@@ -30,6 +30,107 @@ function stripUndefinedDeep(value) {
   return result;
 }
 
+function sanitizePersistedRenderedFrames(renderedFrames = []) {
+  let redactedFrameCount = 0;
+  const sanitizedFrames = Array.isArray(renderedFrames)
+    ? renderedFrames.map((frame) => {
+      const source = frame && typeof frame === "object" ? frame : null;
+      if (!source) return source;
+      const nextFrame = { ...source };
+      if (typeof nextFrame.dataUrl === "string" && nextFrame.dataUrl.trim().startsWith("data:image/")) {
+        delete nextFrame.dataUrl;
+        redactedFrameCount += 1;
+      }
+      return nextFrame;
+    })
+    : [];
+  return {
+    sanitizedFrames,
+    redactedFrameCount
+  };
+}
+
+function sanitizePersistedRenderedSegments(renderedSegments = []) {
+  let redactedFrameCount = 0;
+  let redactedSegmentCount = 0;
+  const sanitizedSegments = Array.isArray(renderedSegments)
+    ? renderedSegments.map((segment) => {
+      const source = segment && typeof segment === "object" ? segment : null;
+      if (!source) return source;
+      const {
+        sanitizedFrames,
+        redactedFrameCount: segmentRedactedFrameCount
+      } = sanitizePersistedRenderedFrames(source.renderedFrames);
+      if (segmentRedactedFrameCount > 0) {
+        redactedSegmentCount += 1;
+        redactedFrameCount += segmentRedactedFrameCount;
+      }
+      return {
+        ...source,
+        renderedFrames: sanitizedFrames
+      };
+    })
+    : [];
+  return {
+    sanitizedSegments,
+    redactedFrameCount,
+    redactedSegmentCount
+  };
+}
+
+function sanitizeMontageExportPersistedInput(input = null) {
+  const source = input && typeof input === "object" ? input : null;
+  if (!source) return null;
+  const nextInput = { ...source };
+  let redactedFrameCount = 0;
+  let redactedSegmentCount = 0;
+
+  if (Object.prototype.hasOwnProperty.call(nextInput, "entriesRaw")) {
+    delete nextInput.entriesRaw;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextInput, "audioTimelineRaw")) {
+    delete nextInput.audioTimelineRaw;
+  }
+
+  if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
+    const sanitized = sanitizePersistedRenderedSegments(nextInput.onScreenTextRenderedSegments);
+    nextInput.onScreenTextRenderedSegments = sanitized.sanitizedSegments;
+    redactedFrameCount += sanitized.redactedFrameCount;
+    redactedSegmentCount += sanitized.redactedSegmentCount;
+  }
+
+  if (nextInput.onScreenTextTimelineRaw && typeof nextInput.onScreenTextTimelineRaw === "object") {
+    const timelineRaw = { ...nextInput.onScreenTextTimelineRaw };
+    if (Array.isArray(timelineRaw.renderedSegments)) {
+      const sanitized = sanitizePersistedRenderedSegments(timelineRaw.renderedSegments);
+      redactedFrameCount += sanitized.redactedFrameCount;
+      redactedSegmentCount += sanitized.redactedSegmentCount;
+      delete timelineRaw.renderedSegments;
+    }
+    nextInput.onScreenTextTimelineRaw = timelineRaw;
+  }
+
+  if (redactedFrameCount > 0) {
+    nextInput.persistedInlineRastersRedacted = true;
+    nextInput.persistedInlineRasterFrameCount = redactedFrameCount;
+    nextInput.persistedInlineRasterSegmentCount = redactedSegmentCount;
+  }
+
+  return nextInput;
+}
+
+function sanitizeMontageExportPersistedRequest(request = null) {
+  const source = request && typeof request === "object" ? request : null;
+  if (!source) return null;
+  const nextRequest = {
+    ...source
+  };
+  if (Object.prototype.hasOwnProperty.call(nextRequest, "input")) {
+    nextRequest.input = sanitizeMontageExportPersistedInput(nextRequest.input);
+  }
+  return nextRequest;
+}
+
 function createMontageExportJobStore({
   db,
   collectionName = DEFAULT_COLLECTION,
@@ -75,6 +176,7 @@ function createMontageExportJobStore({
       totalScenes = 0
     } = {}) {
       const createdAt = nextNow();
+      const persistedRequest = sanitizeMontageExportPersistedRequest(request);
       const job = stripUndefinedDeep({
         jobId: String(jobId || "").trim(),
         sessionId: String(sessionId || "").trim(),
@@ -93,7 +195,7 @@ function createMontageExportJobStore({
         warnings: [],
         result: null,
         error: null,
-        request: request && typeof request === "object" ? request : null,
+        request: persistedRequest,
         heartbeatAt: createdAt,
         createdAt,
         updatedAt: createdAt,
@@ -109,7 +211,13 @@ function createMontageExportJobStore({
       const ref = collection().doc(cleanJobId);
       const snap = await ref.get();
       const existing = snap.exists ? (snap.data() || {}) : { jobId: cleanJobId };
-      const cleanPatch = stripUndefinedDeep(patch) || {};
+      const sanitizedPatch = patch && typeof patch === "object" && Object.prototype.hasOwnProperty.call(patch, "request")
+        ? {
+          ...patch,
+          request: sanitizeMontageExportPersistedRequest(patch.request)
+        }
+        : patch;
+      const cleanPatch = stripUndefinedDeep(sanitizedPatch) || {};
       const job = normalizeBase(existing, cleanPatch);
       if (patch && Object.prototype.hasOwnProperty.call(patch, "warnings")) {
         job.warnings = Array.isArray(cleanPatch.warnings) ? cleanPatch.warnings : [];
@@ -154,5 +262,7 @@ function createMontageExportJobStore({
 module.exports = {
   createMontageExportJobStore,
   DEFAULT_COLLECTION,
-  DEFAULT_JOB_TTL_MS
+  DEFAULT_JOB_TTL_MS,
+  sanitizeMontageExportPersistedRequest,
+  sanitizeMontageExportPersistedInput
 };

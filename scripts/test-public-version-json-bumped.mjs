@@ -8,8 +8,8 @@ const version = JSON.parse(
 assert.match(version.version, /^1\.0\.10\.\d+$/);
 assert.equal(version.cache_version, version.build);
 assert.ok(
-  String(version.releaseNotes?.[0] || "").includes("overlays karaoke"),
-  "La release note más reciente debe reflejar el nuevo fix del pass final de texto/karaoke."
+  String(version.releaseNotes?.[0] || "").includes("Firestore"),
+  "La release note más reciente debe reflejar el nuevo fix del persistido del job de export."
 );
 assert.ok(
   version.releaseNotes?.some((note) => String(note || "").includes("same-origin")),

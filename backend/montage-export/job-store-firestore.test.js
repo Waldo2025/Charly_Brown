@@ -95,6 +95,70 @@ test("createJob strips undefined values before writing to Firestore", async () =
   assert.equal(Object.prototype.hasOwnProperty.call(fakeDb.docs.get("job-undef").request, "currentDownloadUrl"), false);
 });
 
+test("createJob strips inline on-screen raster payloads from persisted request input", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-raster-redact",
+    sessionId: "session-raster",
+    ownerId: "user-raster",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-raster",
+        entriesRaw: [{ rowId: "row-1", noisy: true }],
+        audioTimelineRaw: { enabled: true },
+        onScreenTextTimelineRaw: {
+          enabled: true,
+          renderedSegments: [{
+            rowId: "row-1",
+            renderedFrames: [{
+              kind: "base",
+              dataUrl: "data:image/png;base64,QUJDRA=="
+            }]
+          }]
+        },
+        onScreenTextRenderedSegments: [{
+          rowId: "row-1",
+          renderedFrames: [{
+            kind: "base",
+            wordIndex: -1,
+            dataUrl: "data:image/png;base64,QUJDRA=="
+          }, {
+            kind: "karaoke-word",
+            wordIndex: 0,
+            dataUrl: "data:image/png;base64,QUJDREU="
+          }]
+        }]
+      }
+    },
+    totalScenes: 1
+  });
+
+  assert.equal(created.request.input.sessionId, "session-raster");
+  assert.equal(created.request.input.persistedInlineRastersRedacted, true);
+  assert.equal(created.request.input.persistedInlineRasterFrameCount, 3);
+  assert.equal(created.request.input.persistedInlineRasterSegmentCount, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "entriesRaw"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "audioTimelineRaw"), false);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextTimelineRaw || {}, "renderedSegments"),
+    false
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextRenderedSegments[0].renderedFrames[0], "dataUrl"),
+    false
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(fakeDb.docs.get("job-raster-redact").request.input.onScreenTextRenderedSegments[0].renderedFrames[1], "dataUrl"),
+    false
+  );
+});
+
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {
   const fakeDb = createFakeDocStore();
   const timestamps = [
