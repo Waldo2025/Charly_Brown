@@ -11231,7 +11231,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             const baseFrameLabel = `ontxt_${layerIndex}_base`;
             const baseOutLabel = `ontxt_${layerIndex}_out`;
             rasterFilters.push(`movie=filename='${escapeFfmpegFilterPath(basePath)}',format=rgba[${baseFrameLabel}]`);
-            rasterFilters.push(`${chainLabel}[${baseFrameLabel}]overlay=eof_action=pass:shortest=0:x=${baseX}:y=${baseY}:format=auto:enable='${baseEnableExpr}'[${baseOutLabel}]`);
+            rasterFilters.push(`${chainLabel}[${baseFrameLabel}]overlay=eof_action=repeat:shortest=0:x=${baseX}:y=${baseY}:format=auto:enable='${baseEnableExpr}'[${baseOutLabel}]`);
             chainLabel = `[${baseOutLabel}]`;
             if (input.partyKaraoke !== false) {
               const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
@@ -11256,7 +11256,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
                 const wordOutLabel = `ontxt_${layerIndex}_w${wordIndex}_out`;
                 const wordFrameLabel = `ontxt_${layerIndex}_w${wordIndex}`;
                 rasterFilters.push(`movie=filename='${escapeFfmpegFilterPath(wordPath)}',format=rgba[${wordFrameLabel}]`);
-                rasterFilters.push(`${chainLabel}[${wordFrameLabel}]overlay=eof_action=pass:shortest=0:x=${baseX}:y=${baseY}:format=auto:enable='${wordEnableExpr}'[${wordOutLabel}]`);
+                rasterFilters.push(`${chainLabel}[${wordFrameLabel}]overlay=eof_action=repeat:shortest=0:x=${baseX}:y=${baseY}:format=auto:enable='${wordEnableExpr}'[${wordOutLabel}]`);
                 chainLabel = `[${wordOutLabel}]`;
               }
             }
