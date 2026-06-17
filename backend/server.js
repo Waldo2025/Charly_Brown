@@ -11170,9 +11170,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             : input.onScreenTextSettings?.fontSizePx
         };
         const renderedSegments = renderedTextSegments;
-        const hasRasterizedText = input.exportMode !== "review"
-          && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
-          && renderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+        const hasRasterizedText = false;
         console.info("[backend][montage-export][text-raster] visual-pass-input", {
           segmentCount: input.onScreenTextSegments.length,
           renderedSegmentCount: renderedSegments.length,
@@ -11181,18 +11179,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           partyKaraoke: input.partyKaraoke !== false,
           exportMode: input.exportMode
         });
-        let effectiveRenderedSegments = renderedSegments;
-        if (!hasRasterizedText) {
-          console.warn("[backend][montage-export][text-raster] client_frames_missing_or_empty, regenerating from shared snapshot spec", {
-            renderedSegmentCount: renderedSegments.length,
-            segmentCount: input.onScreenTextSegments.length,
-            overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0
-          });
-          effectiveRenderedSegments = await buildBackendOnScreenTextRenderedSegments(input, sourceDims);
-        }
+        const effectiveRenderedSegments = Array.isArray(input.onScreenTextSegments)
+          ? input.onScreenTextSegments
+          : [];
         const hasEffectiveRasterizedText = input.exportMode !== "review"
           && (!Array.isArray(input.overlayCards) || !input.overlayCards.length)
-          && effectiveRenderedSegments.some((segment) => Array.isArray(segment?.renderedFrames) && segment.renderedFrames.length);
+          && false;
         if (hasEffectiveRasterizedText) {
           const rasterFilters = [];
           let chainLabel = "[0:v]";
