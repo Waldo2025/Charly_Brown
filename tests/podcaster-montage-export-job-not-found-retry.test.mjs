@@ -85,6 +85,8 @@ const context = {
     context.window.montageExportProgress = value;
   },
   setMontageExportContinueButton() {},
+  setMontageExportDownloadButton() {},
+  downloadMontageReviewExcel() {},
   clearMontageExportPolling() {
     context.window.montageExportJobState.pollTimer = null;
   },
@@ -98,6 +100,17 @@ const context = {
   maybeRefreshMontageExportPreviewFromJob() {},
   logMontageExportDevtools() {},
   scheduleMontageExportPollRetry() {},
+  document: {
+    createElement() {
+      return {
+        click() {},
+        remove() {}
+      };
+    },
+    body: {
+      appendChild() {}
+    }
+  },
   window: {
     montageExportState: { exportMode: "normal" },
     montageExportBusy: true,

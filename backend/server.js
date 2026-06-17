@@ -11684,6 +11684,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         const effectiveRenderedSegments = Array.isArray(input.onScreenTextSegments)
           ? input.onScreenTextSegments
           : [];
+        const renderedOnScreenTextSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
 
         if (input.exportMode !== "review") {
           // Normal mode: Generate and burn ASS subtitles globally
