@@ -10426,7 +10426,8 @@ async function appendMontageSceneOnScreenTextAssFilters({
       startSec,
       endSec,
       wordTimings,
-      spec
+      spec,
+      settings
     };
   }).filter((segment) => String(segment?.spec?.wrappedText || segment?.spec?.text || "").trim());
 
@@ -10441,6 +10442,7 @@ async function appendMontageSceneOnScreenTextAssFilters({
   const assContent = buildMontageOnScreenTextAss({
     width: canvas.width,
     height: canvas.height,
+    settings,
     segments: assSegments
   });
   if (!String(assContent || "").trim()) {

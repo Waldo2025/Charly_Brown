@@ -817,6 +817,23 @@
       .replace(/\}/g, "\\}");
   }
 
+  function resolveAssFontFamily(value = "", fallback = "Arial") {
+    const first = String(value || "").split(",")[0]?.trim() || "";
+    return first.replace(/^['"]|['"]$/g, "").trim() || String(fallback || "Arial").trim() || "Arial";
+  }
+
+  function resolveAssAlignment(textAlign = "center") {
+    const safeAlign = String(textAlign || "").trim().toLowerCase();
+    if (safeAlign === "left") return 7;
+    if (safeAlign === "right") return 9;
+    return 8;
+  }
+
+  function formatAssOverridePoint(value = 0) {
+    const numeric = Number(value || 0) || 0;
+    return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2).replace(/\.?0+$/, "");
+  }
+
   function buildAssInvisibleWordOverlayText(text = "", activeWordIndex = -1) {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
@@ -839,7 +856,8 @@
     const segments = Array.isArray(options?.segments) ? options.segments.filter(Boolean) : [];
     if (!segments.length) return "";
 
-    const defaultFont = String(options?.defaultFontFamily || "Arial").trim() || "Arial";
+    const defaultSettings = options?.settings && typeof options.settings === "object" ? options.settings : {};
+    const defaultFont = resolveAssFontFamily(options?.defaultFontFamily || defaultSettings.fontFamily || "Arial");
     const scriptInfo = [
       "[Script Info]",
       "ScriptType: v4.00+",
@@ -850,8 +868,8 @@
       "",
       "[V4+ Styles]",
       "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-      `Style: KaraokeBase,${defaultFont},44,${toAssColor("#94A3B8", 1, "94A3B8")},${toAssColor("#94A3B8", 1, "94A3B8")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#020617", 0.82, "020617")},0,0,0,0,100,100,0,0,3,2,4,2,0,0,0,1`,
-      `Style: KaraokeActive,${defaultFont},44,${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#000000", 0, "000000")},0,0,0,0,100,100,0,0,1,2,4,2,0,0,0,1`,
+      `Style: KaraokeBase,${defaultFont},44,${toAssColor("#F8FAFC", 1, "F8FAFC")},${toAssColor("#F8FAFC", 1, "F8FAFC")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#000000", 0, "000000")},0,0,0,0,100,100,0,0,1,2,3,8,0,0,0,1`,
+      `Style: KaraokeActive,${defaultFont},44,${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#000000", 0, "000000")},0,0,0,0,100,100,0,0,1,2,3,8,0,0,0,1`,
       "",
       "[Events]",
       "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -860,31 +878,52 @@
     const events = [];
     segments.forEach((segment) => {
       const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
+      const settings = segment?.settings && typeof segment.settings === "object"
+        ? segment.settings
+        : defaultSettings;
       const wrappedText = String(spec.wrappedText || spec.text || segment?.text || "").trim();
       if (!wrappedText) return;
-      const fontFamily = String(spec.fontFamily || defaultFont).trim() || defaultFont;
+      const fontFamily = resolveAssFontFamily(spec.fontFamily || settings.fontFamily || defaultFont, defaultFont);
       const fontSizePx = Math.max(16, Math.round(Number(spec.fontSizePx || 44) || 44));
       const outlinePx = Math.max(0, Number(spec.strokeEnabled === false ? 0 : spec.strokeWidthPx || 0) || 0);
       const shadowPx = Math.max(0, Number(spec.shadowEnabled === false ? 0 : spec.shadowY || 0) || 0);
+      const shadowX = Math.max(0, Number(spec.shadowEnabled === false ? 0 : spec.shadowX || 0) || 0);
       const textAlign = String(spec.textAlign || "center").trim().toLowerCase();
-      const alignment = textAlign === "left" ? 1 : textAlign === "right" ? 3 : 2;
+      const alignment = resolveAssAlignment(textAlign);
       const posX = textAlign === "left"
         ? Math.round(Number(spec.rawXPx || 0) || 0)
         : textAlign === "right"
           ? Math.round((Number(spec.rawXPx || 0) || 0) + (Number(spec.boxWidthPx || 0) || 0))
           : Math.round((Number(spec.rawXPx || 0) || 0) + ((Number(spec.boxWidthPx || 0) || 0) / 2));
       const posY = Math.round(Number(spec.yPx || 0) || 0);
-      const baseColor = toAssColor("#94A3B8", Number(spec.textOpacity ?? 1) || 1, "94A3B8");
+      const stylePreset = String(settings?.stylePreset || "").trim().toLowerCase();
+      const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
+      const textOpacity = Math.max(0, Math.min(1, Number(settings?.textOpacity ?? spec.textOpacity ?? 1) || 0));
+      const baseColor = toAssColor(settings?.textColor || "#F8FAFC", textOpacity, "F8FAFC");
       const activeColor = toAssColor("#FACC15", 1, "FACC15");
-      const outlineColor = toAssColor(spec.strokeColor || "#0F172A", 1, "0F172A");
-      const backColor = spec.boxEnabled === false
-        ? toAssColor("#000000", 0, "000000")
-        : toAssColor("#020617", Math.max(0, Math.min(1, Number(spec.bgOpacity ?? 0.82) || 0.82)), "020617");
+      const outlineColor = toAssColor(settings?.strokeColor || spec.strokeColor || "#0F172A", 1, "0F172A");
+      const depthColor = toAssColor("#020617", 0.58, "020617");
+      const shadowColor = toAssColor("#020617", 0.62, "020617");
+      const boxOpacity = bgPreset === "solid"
+        ? Math.max(0, Math.min(1, Number(settings?.bgOpacity ?? 1) || 0)) * 0.82
+        : bgPreset === "glass"
+          ? Math.max(0, Math.min(1, Number(settings?.bgOpacity ?? 1) || 0)) * 0.58
+          : 0;
+      const backColor = toAssColor("#020617", boxOpacity, "020617");
+      const boxEnabled = spec.boxEnabled !== false && bgPreset !== "none" && boxOpacity > 0.001;
       const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
       const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
       const baseText = escapeAssText(wrappedText);
-      const baseOverrides = `{\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\pos(${posX},${posY})\\bord${outlinePx}\\shad${shadowPx}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}\\4c${backColor}}`;
-      events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
+      const visibleStrokeWidth = Math.max(outlinePx, stylePreset === "3d" ? Math.round(fontSizePx * 0.055) : outlinePx, stylePreset === "3d" ? 2 : 0);
+      const depthOffset = stylePreset === "3d" ? Math.max(2, Math.round(fontSizePx * 0.06)) : 0;
+      const baseCommon = `\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\q2\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\fsp0`;
+      const boxOverride = boxEnabled ? `\\bord${Math.max(visibleStrokeWidth, 2)}\\shad${Math.max(shadowPx, 2)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}\\4c${backColor}` : "";
+      if (stylePreset === "3d") {
+        const depthOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX + depthOffset)},${formatAssOverridePoint(posY + depthOffset)})\\bord${visibleStrokeWidth + 1}\\shad0\\c${depthColor}\\2c${depthColor}\\3c${toAssColor("#020617", 0.78, "020617")}\\4a&HFF&}`;
+        events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${depthOverrides}${baseText}`);
+      }
+      const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}${boxEnabled ? `\\4c${backColor}` : "\\4a&HFF&"}}`;
+      events.push(`Dialogue: 1,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
 
       const wordTimings = Array.isArray(segment?.wordTimings) ? segment.wordTimings : [];
       wordTimings.forEach((word, index) => {
@@ -892,8 +931,8 @@
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
         const activeText = buildAssInvisibleWordOverlayText(wrappedText, index);
-        const activeOverrides = `{\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\pos(${posX},${posY})\\bord${outlinePx}\\shad${shadowPx}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
-        events.push(`Dialogue: 1,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
+        const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
+        events.push(`Dialogue: 2,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });
     });
 

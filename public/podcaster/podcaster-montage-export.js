@@ -526,6 +526,7 @@ function buildMontageExportPreviewAssContent(payload = {}) {
         ...segment,
         text,
         spec,
+        settings,
         wordTimings,
         startSec,
         endSec: startSec + durationSec
@@ -537,6 +538,7 @@ function buildMontageExportPreviewAssContent(payload = {}) {
     width: dims.width,
     height: dims.height,
     defaultFontFamily: resolveMontageExportAssFontFamily(settings.fontFamily),
+    settings,
     segments: preparedSegments
   });
 }
