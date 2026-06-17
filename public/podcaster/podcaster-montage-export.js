@@ -102,8 +102,8 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
   const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
   const activeWordIndex = Number.isFinite(Number(snapshot.activeWordIndex)) ? Number(snapshot.activeWordIndex) : -1;
   const wordsEnabled = Array.isArray(snapshot.wordTimings) ? snapshot.wordTimings.length > 0 : false;
-  const karaokeActiveColor = "#fff7bf";
-  const karaokeAccentColor = "#ffd60a";
+  const karaokeActiveColor = "#facc15";
+  const karaokeAccentColor = "#facc15";
   const measureCtx = ctx;
   measureCtx.save();
   measureCtx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;

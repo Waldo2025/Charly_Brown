@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.165",
-  "build": "2026-1.0.10.165",
+  "version": "1.0.10.166",
+  "build": "2026-1.0.10.166",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El modo karaoke de Podcaster vuelve a remarcar claramente la palabra activa en los overlays karaoke con un acento amarillo fuerte y glow más visible, alineado entre preview, raster y export.",
     "Corregido: El export de Podcaster vuelve a renderizar todos los overlays karaoke palabra por palabra; se quitó el muestreo por segmento y se incrementaron los cache-busters para forzar el frontend nuevo en producción.",
     "Corregido: Se pasó explícitamente el color de texto (textColor) a cada token del tspan en SVG, en lugar de confiar en la herencia de fill, para asegurar que el texto no inactivo no se pinte de negro en el backend.",
     "Corregido: Removido el filtro redundante pod-text-shadow del texto principal en SVG para resolver el problema de renderizado de texto invisible en el export del backend.",
@@ -89,5 +90,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.165"
+  "cache_version": "2026-1.0.10.166"
 }

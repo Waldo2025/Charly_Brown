@@ -297,11 +297,11 @@
         font-style: inherit;
       }
       .podcaster-onscreen-text-raster-shell .podcast-karaoke-word.is-active {
-        color: #fff7bf;
+        color: #facc15;
         filter: brightness(1.08);
         text-shadow:
-          0 0 0.18em rgba(255, 247, 191, 0.92),
-          0 0 0.6em rgba(255, 214, 10, 0.5),
+          0 0 0.2em rgba(250, 204, 21, 0.96),
+          0 0 0.72em rgba(250, 204, 21, 0.62),
           var(--pod-onscreen-text-stroke-shadow),
           var(--pod-onscreen-text-preset-shadow),
           var(--pod-onscreen-text-user-shadow);
@@ -316,7 +316,7 @@
   function buildOnScreenTextRasterTokenMarkup(token = "", isActive = false, textColor = "currentColor") {
     const safeToken = escapeSvgText(token);
     return isActive
-      ? `<tspan fill="#fff7bf" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
+      ? `<tspan fill="#FACC15" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
       : `<tspan fill="${escapeSvgText(textColor)}">${safeToken}</tspan>`;
   }
 
@@ -468,7 +468,7 @@
             <feDropShadow dx="${Math.round(shadowX)}" dy="${Math.round(shadowY)}" stdDeviation="${Math.max(0.4, shadowBlurPx / 3).toFixed(2)}" flood-color="rgb(2, 6, 23)" flood-opacity="${shadowOpacityValue}" />
           </filter>
           <filter id="pod-karaoke-active" x="-20%" y="-20%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="rgb(255, 214, 10)" flood-opacity="0.55" />
+            <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="rgb(250, 204, 21)" flood-opacity="0.72" />
           </filter>
         </defs>
         ${resolvedBgPreset === "none" || !boxFillRgb ? "" : `<rect ${bgAttrs} />`}
