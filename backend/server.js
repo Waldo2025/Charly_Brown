@@ -10718,9 +10718,7 @@ async function appendMontageSceneOnScreenTextOverlays({
       appliedOverlayCount: 0
     };
   }
-  const overlayFilters = [];
-  let chainLabel = baseVideoMapLabel;
-  let appliedOverlayCount = 0;
+
   const settings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
     ? input.onScreenTextSettings
     : {};
@@ -10728,9 +10726,51 @@ async function appendMontageSceneOnScreenTextOverlays({
     width: Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(canvas?.height || 720) || 720))
   };
-  for (const segment of sceneSegments) {
+
+  const toAssColor = (hexStr, defaultHex = "FFFFFF") => {
+    let hex = String(hexStr || "").trim().replace("#", "");
+    if (hex.length === 3) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    if (hex.length !== 6) {
+      hex = defaultHex;
+    }
+    const r = hex.substring(0, 2);
+    const g = hex.substring(2, 4);
+    const b = hex.substring(4, 6);
+    return `&H00${b}${g}${r}`;
+  };
+
+  const formatAssTimestamp = (totalSeconds) => {
+    const ms = Math.max(0, Math.round(totalSeconds * 1000));
+    const centis = Math.floor((ms % 1000) / 10);
+    const secs = Math.floor((ms % 60000) / 1000);
+    const mins = Math.floor((ms % 3600000) / 60000);
+    const hrs = Math.floor(ms / 3600000);
+    const pad = (n, w = 2) => String(n).padStart(w, "0");
+    return `${hrs}:${pad(mins)}:${pad(secs)}.${pad(centis)}`;
+  };
+
+  const assLines = [];
+  assLines.push("[Script Info]");
+  assLines.push("ScriptType: v4.00+");
+  assLines.push(`PlayResX: ${sceneDims.width}`);
+  assLines.push(`PlayResY: ${sceneDims.height}`);
+  assLines.push("");
+  assLines.push("[V4+ Styles]");
+  assLines.push("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
+
+  // Style mapping
+  const fontName = settings.fontFamily || "Outfit";
+  let fontSize = 48;
+  let borderStyle = 1;
+  let outline = 2;
+  let shadow = 3;
+  let bold = 0;
+
+  if (sceneSegments.length > 0) {
     const layout = normalizeMontageOnScreenTextExportLayout({
-      segment,
+      segment: sceneSegments[0],
       settings,
       resolution: input.resolution || "source",
       sourceDims: sceneDims
@@ -10741,62 +10781,96 @@ async function appendMontageSceneOnScreenTextOverlays({
       resolution: input.resolution || "source",
       sourceWidth: sceneDims.width,
       sourceHeight: sceneDims.height,
-      text: segment.text || "",
+      text: sceneSegments[0].text || "",
       fallback: ""
     });
+    fontSize = spec.fontSizePx || 48;
+    borderStyle = spec.boxEnabled ? 3 : 1;
+    outline = spec.strokeEnabled ? (spec.strokeWidthPx || 2) : 0;
+    shadow = spec.shadowEnabled ? Math.max(spec.shadowX || 0, spec.shadowY || 0) : 0;
+    bold = spec.fontWeight === "bold" || settings.fontWeight === "bold" ? 1 : 0;
+  }
+
+  const primaryAssColor = toAssColor(settings.activeColor || "#FACC15", "FACC15"); // Active karaoke color
+  const secondaryAssColor = toAssColor(settings.textColor || "#F8FAFC", "F8FAFC"); // Default/inactive color
+  const outlineAssColor = toAssColor(settings.strokeColor || "#0F172A", "0F172A");
+  const backAssColor = toAssColor(settings.shadowColor || "#020617", "020617");
+
+  assLines.push(`Style: Default,${fontName},${fontSize},${primaryAssColor},${secondaryAssColor},${outlineAssColor},${backAssColor},${bold},0,0,0,100,100,0,0,${borderStyle},${outline},${shadow},2,10,10,30,1`);
+  assLines.push("");
+  assLines.push("[Events]");
+  assLines.push("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+
+  for (const segment of sceneSegments) {
+    const startSecRaw = (Math.max(0, Number(segment?.startMs || 0) || 0) - sceneTimelineStartMs) / 1000;
+    const endSecRaw = (Math.max(0, Number(segment?.endMs || 0) || 0) - sceneTimelineStartMs) / 1000;
+    if (startSecRaw >= sceneDurationSec || endSecRaw <= 0) continue;
+    const clampedStartSec = Math.max(0, startSecRaw);
+    const clampedEndSec = Math.min(sceneDurationSec, Math.max(clampedStartSec + 0.05, endSecRaw));
+    
+    const startAss = formatAssTimestamp(clampedStartSec);
+    const endAss = formatAssTimestamp(clampedEndSec);
+
     const frames = Array.isArray(segment?.renderedFrames) ? segment.renderedFrames : [];
-    const orderedFrames = [
-      ...frames.filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "base"),
-      ...frames
-        .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word")
-        .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.wordIndex || 0) - Number(b?.wordIndex || 0))
-    ];
-    for (const frame of orderedFrames) {
-      const frameStartSecRaw = (Math.max(0, Number(frame?.startMs || 0) || 0) - sceneTimelineStartMs) / 1000;
-      const frameEndSecRaw = (Math.max(0, Number(frame?.endMs || 0) || 0) - sceneTimelineStartMs) / 1000;
-      if (frameStartSecRaw >= sceneDurationSec || frameEndSecRaw <= 0) continue;
-      const clampedStartSec = Math.max(0, frameStartSecRaw);
-      const clampedEndSec = Math.min(sceneDurationSec, Math.max(clampedStartSec + 0.05, frameEndSecRaw));
-      const framePath = await downloadInput({
-        dataUrl: frame.dataUrl,
-        mimeType: "image/png",
-        storagePath: `podcaster/montage-export/${jobId}/scene-text/${String(segment.rowId || sceneIndex).trim() || sceneIndex}-${String(frame.kind || "frame").trim()}-${Number.isFinite(Number(frame.wordIndex)) ? Math.max(0, Math.round(Number(frame.wordIndex))) : "base"}.png`
-      }, "image", nextInputIndex);
-      args.push("-loop", "1", "-framerate", "24", "-i", framePath);
-      const frameLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}`;
-      const outLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}_out`;
-      const frameEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
-      const baseX = Math.max(0, Math.round((Number(spec.rawXPx || 0) - Number(frame?.offsetXPx || 0)) || 0));
-      const baseY = Math.max(0, Math.round((Number(spec.yPx || 0) - Number(frame?.offsetYPx || 0)) || 0));
-      overlayFilters.push(`[${nextInputIndex}:v]format=rgba[${frameLabel}]`);
-      overlayFilters.push(`${chainLabel}[${frameLabel}]overlay=format=auto:enable='${frameEnableExpr}':x=${baseX}:y=${baseY}[${outLabel}]`);
-      chainLabel = `[${outLabel}]`;
-      nextInputIndex += 1;
-      appliedOverlayCount += 1;
+    const karaokeFrames = frames
+      .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word")
+      .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.wordIndex || 0) - Number(b?.wordIndex || 0));
+
+    let assText = "";
+    if (input.partyKaraoke !== false && karaokeFrames.length > 0) {
+      let currentMs = Number(segment.startMs || 0);
+      for (let idx = 0; idx < karaokeFrames.length; idx += 1) {
+        const frame = karaokeFrames[idx];
+        const wordStart = Number(frame.startMs || 0);
+        const wordEnd = Number(frame.endMs || 0);
+        if (wordStart > currentMs) {
+          const gapCentiseconds = Math.max(0, Math.round((wordStart - currentMs) / 10));
+          if (gapCentiseconds > 0) {
+            assText += `{\\k${gapCentiseconds}}`;
+          }
+        }
+        const durationCentiseconds = Math.max(1, Math.round((wordEnd - Math.max(wordStart, currentMs)) / 10));
+        const cleanWordText = String(frame.text || "").trim();
+        assText += `{\\k${durationCentiseconds}}${cleanWordText}`;
+        if (idx < karaokeFrames.length - 1) {
+          assText += " ";
+        }
+        currentMs = wordEnd;
+      }
+    } else {
+      assText = String(segment.text || "").trim();
     }
+
+    assLines.push(`Dialogue: 0,${startAss},${endAss},Default,,0,0,0,,${assText}`);
   }
-  if (!overlayFilters.length) {
-    return {
-      videoFilterGraph,
-      finalVideoMapLabel: baseVideoMapLabel,
-      nextInputIndex,
-      appliedOverlayCount: 0
-    };
+
+  const assFilePath = path.join(tmpDir, `subtitles_scene_${sceneIndex}.ass`);
+  fs.writeFileSync(assFilePath, assLines.join("\n"), "utf8");
+
+  const assFilter = `ass=filename='${escapeFfmpegFilterPath(assFilePath)}'`;
+  const outLabel = `ontxt_scene_${sceneIndex}_final`;
+
+  let newFilterGraph = videoFilterGraph;
+  if (newFilterGraph) {
+    newFilterGraph += `;${baseVideoMapLabel}${assFilter}[${outLabel}]`;
+  } else {
+    newFilterGraph = `${baseVideoMapLabel}${assFilter}[${outLabel}]`;
   }
+
   console.info("[backend][montage-export][scene-text-raster]", {
     jobId,
     sceneIndex,
     rowId: String(entry?.rowId || "").trim() || undefined,
-    appliedOverlayCount,
+    appliedOverlayCount: sceneSegments.length,
     reelModeEnabled,
-    karaokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT,
-    renderRuntimeSafeCapActive: IS_RENDER_RUNTIME && !Number.isFinite(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
+    assPath: assFilePath
   });
+
   return {
-    videoFilterGraph: `${videoFilterGraph};${overlayFilters.join(";")}`,
-    finalVideoMapLabel: chainLabel,
+    videoFilterGraph: newFilterGraph,
+    finalVideoMapLabel: `[${outLabel}]`,
     nextInputIndex,
-    appliedOverlayCount
+    appliedOverlayCount: sceneSegments.length
   };
 }
 
