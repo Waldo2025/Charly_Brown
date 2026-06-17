@@ -12,21 +12,21 @@ assert.match(
 );
 
 assert.match(
-  frontendExportSource,
-  /const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = 48;/,
-  "El frontend debe limitar los frames karaoke por segmento antes de enviar el payload."
+  textRenderSource,
+  /if \(!Number\.isFinite\(cleanMaxFrames\) \|\| cleanMaxFrames <= 0\) \{\s*return safeWordTimings\.map\(\(_, index\) => index\);\s*\}/s,
+  "El selector compartido debe permitir cobertura completa cuando el cap es 0 o invalido."
 );
 
 assert.match(
   frontendExportSource,
   /selectKaraokeWordTimingIndicesForExport\(wordTimings, \{\s*maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT/s,
-  "El frontend debe muestrear las palabras karaoke para export."
+  "El frontend debe delegar la cobertura karaoke al selector compartido."
 );
 
 assert.match(
   backendSource,
-  /const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = Math\.max\(/,
-  "El backend debe tener un limite configurable de overlays karaoke por segmento."
+  /const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = Math\.max\(\s*0,/s,
+  "El backend debe permitir desactivar el cap de overlays karaoke."
 );
 
 assert.match(
@@ -35,4 +35,4 @@ assert.match(
   "El backend debe reutilizar el selector compartido al regenerar y aplicar karaoke."
 );
 
-console.log("ok - montage export karaoke overlay budget is enforced");
+console.log("ok - montage export karaoke coverage is configurable");
