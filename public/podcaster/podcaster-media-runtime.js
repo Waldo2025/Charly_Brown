@@ -185,12 +185,15 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
         const isFirebaseStorageUrl = host.endsWith("googleapis.com") || host.endsWith("firebasestorage.app");
         if (isFirebaseStorageUrl) {
           if (kind === "image") {
-            let directUrl = clean;
-            if (timestamp && !directUrl.includes("u=")) {
-              const separator = directUrl.includes("?") ? "&" : "?";
-              directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+            const hasToken = clean.includes("token=") || clean.includes("downloadToken=");
+            if (hasToken) {
+              let directUrl = clean;
+              if (timestamp && !directUrl.includes("u=")) {
+                const separator = directUrl.includes("?") ? "&" : "?";
+                directUrl = `${directUrl}${separator}u=${encodeURIComponent(deps.resolveDateIso?.(timestamp) || timestamp)}`;
+              }
+              return directUrl;
             }
-            return directUrl;
           }
         }
       } catch (_) {

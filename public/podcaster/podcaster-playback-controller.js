@@ -541,6 +541,12 @@ export class PodcasterPlaybackController extends EventEmitter {
             } else if (originalUrl && originalUrl.startsWith('http') && !originalUrl.includes('/api/assets/proxy')) {
               finalUrl = originalUrl;
             }
+            if (isDirectFirebaseUrl && finalUrl.includes('firebasestorage.googleapis.com') && !finalUrl.includes('token=') && !finalUrl.includes('downloadToken=')) {
+              if (storagePath) {
+                const proxyPath = isImageLikeUrl ? "/api/assets/proxy-image" : "/api/assets/proxy-media";
+                finalUrl = this.buildMediaProxyUrl(`${proxyPath}?storagePath=${encodeURIComponent(storagePath)}`);
+              }
+            }
           } catch (e) { }
         }
 
