@@ -37,7 +37,7 @@ import {
   continueMontageExportPolling,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-17.16";
+} from "./podcaster-montage-export.js?v=2026-06-17.17";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -5074,6 +5074,7 @@ function setReelModeEnabled(enabled = false) {
     persist: true,
     autosaveReason: "reel-mode-toggle"
   });
+  window.invalidateStudioRuntimeCache?.();
   syncReelModeUi(getActiveSession());
 }
 
