@@ -113,6 +113,24 @@
     }));
   }
 
+  function selectKaraokeWordTimingIndicesForExport(wordTimings = [], { maxFrames = 48 } = {}) {
+    const safeWordTimings = Array.isArray(wordTimings) ? wordTimings : [];
+    const cleanMaxFrames = Math.max(1, Math.round(Number(maxFrames || 0) || 48));
+    if (!safeWordTimings.length) return [];
+    if (safeWordTimings.length <= cleanMaxFrames) {
+      return safeWordTimings.map((_, index) => index);
+    }
+    if (cleanMaxFrames === 1) {
+      return [safeWordTimings.length - 1];
+    }
+    const selected = new Set([0, safeWordTimings.length - 1]);
+    for (let frameIndex = 0; frameIndex < cleanMaxFrames; frameIndex += 1) {
+      const mappedIndex = Math.round((frameIndex * (safeWordTimings.length - 1)) / Math.max(1, cleanMaxFrames - 1));
+      selected.add(Math.max(0, Math.min(safeWordTimings.length - 1, mappedIndex)));
+    }
+    return Array.from(selected).sort((a, b) => a - b);
+  }
+
   function resolveActiveKaraokeWordIndex(wordTimings = [], currentMs = 0, clipStartMs = 0, clipPlaybackRate = 1) {
     const safeWordTimings = Array.isArray(wordTimings) ? wordTimings : [];
     const rate = Number(clipPlaybackRate || 1);
@@ -764,6 +782,7 @@
     normalizeTimingValue,
     estimateProportionalWordTimings,
     normalizeKaraokeWordTimings,
+    selectKaraokeWordTimingIndicesForExport,
     resolveActiveKaraokeWordIndex,
     buildKaraokeSubtitleMarkup,
     escapeFfmpegExpr,

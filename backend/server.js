@@ -46,6 +46,7 @@ const {
   buildOnScreenTextRasterSnapshotPlan,
   normalizeOnScreenTextTrackSettings,
   normalizeKaraokeWordTimings,
+  selectKaraokeWordTimingIndicesForExport,
   generateKaraokeOverlayText,
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
@@ -1345,6 +1346,10 @@ const MONTAGE_EXPORT_STALE_HEARTBEAT_MS = Math.max(
 const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
   10 * 1000,
   Number(process.env.MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS || 20 * 1000) || 20 * 1000
+);
+const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = Math.max(
+  1,
+  Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT || 48) || 48
 );
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
@@ -10290,6 +10295,9 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
     if (!rowId || !text) continue;
     const audioClip = input.dialogueAudioMap?.[rowId] || null;
     const wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, text) : [];
+    const exportWordIndices = selectKaraokeWordTimingIndicesForExport(wordTimings, {
+      maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
+    });
     const basePlan = buildOnScreenTextRasterSnapshotPlan({
       rowId,
       settings: timelineSettings,
@@ -10321,7 +10329,9 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
         offsetYPx: basePlan.padPx
       });
     }
-    for (let index = 0; index < wordTimings.length; index += 1) {
+    for (const index of exportWordIndices) {
+      const word = wordTimings[index];
+      if (!word) continue;
       const wordPlan = buildOnScreenTextRasterSnapshotPlan({
         rowId,
         settings: timelineSettings,
@@ -10339,7 +10349,6 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
         density: Math.max(exportRasterDims.width, exportRasterDims.height) >= 1920 ? 192 : 144
       });
       if (!wordDataUrl) continue;
-      const word = wordTimings[index];
       const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) + Number(word?.startMs || 0) || 0));
       const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
       nextFrames.push({
@@ -10362,7 +10371,8 @@ async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims =
   }
   console.info("[backend][montage-export][text-raster] backend_regen_complete", {
     renderedSegmentCount: renderedSegments.length,
-    framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
+    framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0),
+    karaokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
   });
   return renderedSegments;
 }
@@ -11202,7 +11212,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             if (input.partyKaraoke !== false) {
               const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
               const wordTimings = normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim());
-              for (const [wordIndex, word] of wordTimings.entries()) {
+              const exportWordIndices = selectKaraokeWordTimingIndicesForExport(wordTimings, {
+                maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
+              });
+              for (const wordIndex of exportWordIndices) {
+                const word = wordTimings[wordIndex];
+                if (!word) continue;
                 const wordFrame = frames.find((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word" && Number(frame?.wordIndex || 0) === wordIndex);
                 if (!wordFrame?.dataUrl) continue;
                 const wordPath = await downloadInput({

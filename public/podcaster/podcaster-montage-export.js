@@ -13,6 +13,7 @@ import {
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
+const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = 48;
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
@@ -2093,6 +2094,9 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
   const normalizeKaraokeWordTimings = typeof textApi.normalizeKaraokeWordTimings === "function"
     ? textApi.normalizeKaraokeWordTimings
     : null;
+  const selectKaraokeWordTimingIndicesForExport = typeof textApi.selectKaraokeWordTimingIndicesForExport === "function"
+    ? textApi.selectKaraokeWordTimingIndicesForExport
+    : null;
   const exportRasterDims = resolveMontageExportRasterDimensions(payload.resolution || "source");
   const nextSegments = [];
   console.info("[podcaster][montage-export][text-raster] hydrate_start", {
@@ -2119,6 +2123,11 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
     const wordTimings = normalizeKaraokeWordTimings
       ? normalizeKaraokeWordTimings(audioClip, String(segment.text || "").trim())
       : [];
+    const exportWordIndices = selectKaraokeWordTimingIndicesForExport
+      ? selectKaraokeWordTimingIndicesForExport(wordTimings, {
+        maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
+      })
+      : wordTimings.map((_, index) => index);
     console.info("[podcaster][montage-export][text-raster] segment_plan", {
       rowId: String(segment.rowId || "").trim() || undefined,
       sceneIndex: Number(segment.sceneIndex || 0) || undefined,
@@ -2128,7 +2137,8 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
       bubbleWidthPx: basePlan.bubbleWidthPx,
       bubbleHeightPx: basePlan.bubbleHeightPx,
       padPx: basePlan.padPx,
-      wordCount: wordTimings.length
+      wordCount: wordTimings.length,
+      exportWordFrameCount: exportWordIndices.length
     });
     const baseDataUrl = await renderOnScreenTextRasterDataUrl(basePlan);
     const renderedFrames = [];
@@ -2158,16 +2168,17 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
         heightPx: basePlan.heightPx
       });
     }
-    if (payload.partyKaraoke !== false && wordTimings.length) {
-      for (let index = 0; index < wordTimings.length; index += 1) {
-        const word = wordTimings[index];
+    if (payload.partyKaraoke !== false && exportWordIndices.length) {
+      for (const wordIndex of exportWordIndices) {
+        const word = wordTimings[wordIndex];
+        if (!word) continue;
         const wordPlan = buildPlan({
           rowId: String(segment.rowId || "").trim(),
           settings: timeline.settings || {},
           layout: segment.layout || {},
           text: String(segment.text || "").trim(),
           wordTimings,
-          activeWordIndex: index,
+          activeWordIndex: wordIndex,
           previewWidthPx: exportRasterDims.width,
           previewHeightPx: exportRasterDims.height,
           sourceWidth: exportRasterDims.width,
@@ -2180,7 +2191,7 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
         const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
         renderedFrames.push({
           kind: "karaoke-word",
-          wordIndex: index,
+          wordIndex,
           startMs,
           endMs,
           dataUrl: wordDataUrl,
@@ -2193,7 +2204,7 @@ async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
         console.info("[podcaster][montage-export][text-raster] karaoke_word_frame", {
           rowId: String(segment.rowId || "").trim() || undefined,
           sceneIndex: Number(segment.sceneIndex || 0) || undefined,
-          wordIndex: index,
+          wordIndex,
           text: String(word?.text || "").trim(),
           startMs,
           endMs

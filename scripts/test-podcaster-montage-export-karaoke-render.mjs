@@ -26,8 +26,8 @@ assert.match(
 
 assert.match(
   source,
-  /const karaokeEnabled = input\.partyKaraoke !== false && wordTimings\.length > 0/,
-  "El flujo principal debe seguir habilitando karaoke cuando hay timings."
+  /if \(input\.partyKaraoke !== false\) \{[\s\S]*normalizeKaraokeWordTimings\(/,
+  "El flujo principal debe seguir habilitando karaoke cuando party karaoke está activo y hay timings."
 );
 
 assert.doesNotMatch(

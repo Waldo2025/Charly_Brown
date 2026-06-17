@@ -9,6 +9,7 @@ export const tokenizeSubtitleText = api.tokenizeSubtitleText;
 export const normalizeTimingValue = api.normalizeTimingValue;
 export const estimateProportionalWordTimings = api.estimateProportionalWordTimings;
 export const normalizeKaraokeWordTimings = api.normalizeKaraokeWordTimings;
+export const selectKaraokeWordTimingIndicesForExport = api.selectKaraokeWordTimingIndicesForExport;
 export const resolveActiveKaraokeWordIndex = api.resolveActiveKaraokeWordIndex;
 export const buildKaraokeSubtitleMarkup = api.buildKaraokeSubtitleMarkup;
 export const generateKaraokeOverlayText = api.generateKaraokeOverlayText;
