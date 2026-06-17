@@ -991,7 +991,7 @@ export async function pollMontageExportJob(jobId = "") {
       url: exportStatusUrl,
       auth: false
     }, "debug");
-    const data = await authFetchJson(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`, {
+    const data = await authFetchJson(exportStatusUrl, {
       auth: false
     });
     logMontageExportDevtools("poll_response", {

@@ -9655,6 +9655,15 @@ function filterMontageOnScreenTextRenderedFramesForExport({
     maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
   });
   if (!expectedWordIndices.length) {
+    const maxFrames = MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT;
+    if (maxFrames > 0 && karaokeFrames.length > maxFrames) {
+      const selectedFrames = [];
+      for (let i = 0; i < maxFrames; i += 1) {
+        const idx = Math.round((i * (karaokeFrames.length - 1)) / (maxFrames - 1));
+        selectedFrames.push(karaokeFrames[idx]);
+      }
+      return [...baseFrames, ...selectedFrames];
+    }
     return [...baseFrames, ...karaokeFrames];
   }
   const allowedWordIndices = new Set(expectedWordIndices.map((wordIndex) => Math.max(0, Math.round(Number(wordIndex || 0) || 0))));

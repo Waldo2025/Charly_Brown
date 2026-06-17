@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.171",
-  "build": "2026-1.0.10.171",
+  "version": "1.0.10.173",
+  "build": "2026-1.0.10.173",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Se añade un cap de seguridad en el backend para limitar el número de frames de karaoke overlays por segmento para evitar OOM de FFmpeg en Render, manteniendo la persistencia limpia de Firestore.",
+    "Corregido: Se soluciona el error de CORS en el polling de export-status apuntando a la URL del backend remoto, resolviendo el flujo de exportación y manteniendo la persistencia limpia de Firestore.",
     "Corregido: El backend de export de Podcaster ahora sanea el request persistido del job antes de escribirlo en Firestore, removiendo rasters inline y payload raw duplicado para evitar el error 500/code 3 al arrancar exports karaoke.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el fix del persistido de jobs de export.",
     "Corregido: El payload de export de Podcaster ahora reconstruye los overlays karaoke/onScreenTextTimeline.segments desde entries cuando faltan clips persistidos del track, alineando frontend y backend para evitar montage_onscreen_text_raster_missing en escenas con onScreenText.",
@@ -100,5 +102,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.171"
+  "cache_version": "2026-1.0.10.173"
 }
