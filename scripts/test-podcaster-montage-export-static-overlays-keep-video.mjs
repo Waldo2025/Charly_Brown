@@ -16,12 +16,16 @@ if (!/overlay=eof_action=pass:shortest=0:x=\$\{xExpr\}:y=\$\{yExpr\}:format=auto
   throw new Error("El overlay de marca debe conservar el video base completo con eof_action=pass:shortest=0.");
 }
 
-if (!/overlay=eof_action=pass:shortest=0:x=\$\{baseX\}:y=\$\{baseY\}:format=auto:enable='\$\{baseEnableExpr\}'/.test(source)) {
-  throw new Error("El overlay rasterizado base de texto debe conservar el video base completo.");
+if (/movie=filename='[\s\S]{0,400}\[ontxt_/.test(source)) {
+  throw new Error("El texto en pantalla normal ya no debe usar movie=filename dentro de FFmpeg.");
 }
 
-if (!/overlay=eof_action=pass:shortest=0:x=\$\{baseX\}:y=\$\{baseY\}:format=auto:enable='\$\{wordEnableExpr\}'/.test(source)) {
-  throw new Error("El overlay rasterizado de karaoke debe conservar el video base completo.");
+if (!/args\.push\("-loop", "1", "-framerate", "24", "-i", framePath\);/.test(source)) {
+  throw new Error("Las capas rasterizadas de texto deben entrar como inputs explicitos de escena.");
+}
+
+if (!/overlay=format=auto:enable='\$\{frameEnableExpr\}'/.test(source)) {
+  throw new Error("Las capas rasterizadas por escena deben activarse por tiempo local sin cortar el video base.");
 }
 
 console.log("Podcaster montage export static overlays keep video OK.");

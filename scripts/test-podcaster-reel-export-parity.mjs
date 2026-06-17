@@ -58,19 +58,21 @@ if (!/function isMontageReelResolution/.test(serverSource)
 
 if (!/let onScreenTextSegments = Array\.isArray\(onScreenTextTimelineRaw\?\.segments\)/.test(serverSource)
   || !/if \(!onScreenTextSegments\.length\) \{[\s\S]*entry\?\.onScreenText/.test(serverSource)
-  || !/if \(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\)/.test(serverSource)) {
+  || !/const shouldBurnSceneOnScreenText = input\.exportMode !== "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/.test(serverSource)
+  || !/const reviewOnScreenTextEnabled = input\.exportMode === "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/.test(serverSource)) {
   throw new Error("El backend debe quemar texto en pantalla aunque falte el flag enabled del timeline y debe reconstruir segmentos desde entries.");
 }
 
-if (!/fontSizePx: isReelExport[\s\S]*\* 1\.2/.test(serverSource)) {
-  throw new Error("El overlay de subtítulos debe escalar fuente 1.2x en export reel.");
+if (!/const shouldBurnSceneOnScreenText = input\.exportMode !== "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/.test(serverSource)
+  || !/await appendMontageSceneOnScreenTextOverlays\(\{[\s\S]*reelModeEnabled: input\?\.reelModeEnabled === true \|\| isMontageReelResolution\(input\?\.resolution \|\| ""\)/.test(serverSource)) {
+  throw new Error("El export reel debe componer el texto en pantalla dentro del render por escena.");
 }
 
-if (!/function buildMontageOnScreenTextDrawFilters/.test(serverSource)
-  || !/stylePreset === "3d" && bgPreset === "none"/.test(serverSource)
-  || !/visibleStrokeWidth/.test(serverSource)
-  || !/\.flatMap\(\(segment\) => \{[\s\S]*buildMontageOnScreenTextDrawFilters/.test(serverSource)) {
-  throw new Error("El export debe renderizar texto 3D sin fondo con capas drawtext visibles.");
+if (!/buildMontageOnScreenTextDrawFilters/.test(serverSource)
+  || !/renderOnScreenTextDrawFilters/.test(serverSource)
+  || !/const reviewOnScreenTextEnabled = input\.exportMode === "review"/.test(serverSource)
+  || !/const textFileResolver = createMontageReviewTextFileResolver\(tmpDir, "onscreen-drawtext"\)/.test(serverSource)) {
+  throw new Error("El backend debe conservar drawtext solo para review y overlays textuales secundarios.");
 }
 
 if (!/function normalizeMontageOnScreenTextExportLayout/.test(serverSource)
@@ -79,8 +81,7 @@ if (!/function normalizeMontageOnScreenTextExportLayout/.test(serverSource)
   throw new Error("El backend debe normalizar el layout del texto en pantalla con alto automatico antes de drawtext.");
 }
 
-if (!/defaultBrandWidthPct = isReelExport \? 0\.09 : 0\.05/.test(serverSource)
-  || !/defaultBrandWidthPct = reelModeEnabled \? 0\.09 : 0\.05/.test(serverSource)) {
+if (!/defaultBrandWidthPct = reelModeEnabled \? 0\.09 : 0\.05/.test(serverSource)) {
   throw new Error("El backend debe usar logo 0.09 en reel y 0.05 en normal.");
 }
 

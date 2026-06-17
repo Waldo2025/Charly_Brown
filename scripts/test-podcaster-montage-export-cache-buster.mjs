@@ -16,19 +16,19 @@ const montageExportSource = fs.readFileSync(
 
 assert.match(
   htmlSource,
-  /src="podcaster\/podcaster\.js\?v=2026-06-16\.23"/,
+  /src="podcaster\/podcaster\.js\?v=2026-06-17\.7"/,
   "El entrypoint del podcaster debe romper caché con la versión nueva."
 );
 
 assert.match(
   htmlSource,
-  /src="podcaster\/podcaster-montage-export\.js\?v=2026-06-16\.23"/,
+  /src="podcaster\/podcaster-montage-export\.js\?v=2026-06-17\.7"/,
   "El módulo de export debe usar el mismo cache-buster que el bundle principal."
 );
 
 assert.match(
   podcasterSource,
-  /from "\.\/podcaster-montage-export\.js\?v=2026-06-16\.23";/,
+  /from "\.\/podcaster-montage-export\.js\?v=2026-06-17\.7";/,
   "El bundle principal debe importar la versión nueva del módulo de export."
 );
 

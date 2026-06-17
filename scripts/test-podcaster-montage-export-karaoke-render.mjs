@@ -26,8 +26,14 @@ assert.match(
 
 assert.match(
   source,
-  /if \(input\.partyKaraoke !== false\) \{[\s\S]*normalizeKaraokeWordTimings\(/,
-  "El flujo principal debe seguir habilitando karaoke cuando party karaoke está activo y hay timings."
+  /const expectedWordIndices = input\.partyKaraoke !== false[\s\S]*normalizeKaraokeWordTimings\(/,
+  "El export normal debe seguir habilitando karaoke cuando party karaoke está activo y hay timings."
+);
+
+assert.match(
+  source,
+  /appendMontageSceneOnScreenTextOverlays[\s\S]*karaoke-word/,
+  "El render por escena debe seguir usando las capas rasterizadas de karaoke."
 );
 
 assert.doesNotMatch(

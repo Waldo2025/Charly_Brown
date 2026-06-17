@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.167",
-  "build": "2026-1.0.10.167",
+  "version": "1.0.10.168",
+  "build": "2026-1.0.10.168",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El export final de Podcaster ahora compone por escena los overlays karaoke rasterizados y valida explícitamente sus assets, retirando drawtext del export normal para preservar tipografía, signos y resaltado palabra por palabra en el MP4.",
+    "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el nuevo pipeline de overlays karaoke por escena.",
     "Corregido: El backend de export de Podcaster ahora conserva los wordTimings del diálogo aunque el audio viva solo en audioTimeline, restaurando el resaltado karaoke palabra por palabra en el MP4 exportado.",
     "Actualizado: Se incrementan version.json y los cache-busters de Podcaster para forzar la carga del frontend alineado con el último fix de karaoke/export.",
     "Corregido: El modo karaoke de Podcaster vuelve a remarcar claramente la palabra activa en los overlays karaoke con un acento amarillo fuerte y glow más visible, alineado entre preview, raster y export.",
@@ -92,5 +94,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.167"
+  "cache_version": "2026-1.0.10.168"
 }

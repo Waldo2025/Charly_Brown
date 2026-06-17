@@ -29,9 +29,9 @@ if (!/resolveOnScreenTextRenderMetrics\([\s\S]*previewWidthPx,[\s\S]*previewHeig
 }
 
 if (!/const spec = resolveOnScreenTextRenderSpec\(\{[\s\S]*resolution,[\s\S]*sourceWidth,[\s\S]*sourceHeight,[\s\S]*text: segment\.text\s*\|\|\s*""/m.test(back)
-  || !/fontsize=.*spec\.fontSizePx/.test(back)
-  || !/line_spacing=\$\{spec\.lineSpacingPx\}/.test(back)) {
-  throw new Error("El backend debe usar la misma spec compartida para construir drawtext.");
+  || !/const baseX = Math\.max\(0, Math\.round\(\(Number\(spec\.rawXPx \|\| 0\) - Number\(frame\?\.offsetXPx \|\| 0\)\) \|\| 0\)\);/.test(back)
+  || !/const baseY = Math\.max\(0, Math\.round\(\(Number\(spec\.yPx \|\| 0\) - Number\(frame\?\.offsetYPx \|\| 0\)\) \|\| 0\)\);/.test(back)) {
+  throw new Error("El backend debe usar la misma spec compartida para posicionar los rasters exportados.");
 }
 
 console.log("Podcast onscreen resolution sync OK.");
