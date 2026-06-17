@@ -180,7 +180,7 @@ async function renderOnScreenTextRasterDataUrl(plan = null) {
           cursor += tokenWidths[index];
           return;
         }
-        const isActive = wordsEnabled && activeWordIndex >= 0 && globalWordCursor === activeWordIndex;
+        const isActive = countWords && wordsEnabled && activeWordIndex >= 0 && globalWordCursor === activeWordIndex;
         const tokenFill = isActive ? karaokeActiveColor : fillColor;
         ctx.fillStyle = tokenFill;
         ctx.strokeStyle = strokeColorValue;

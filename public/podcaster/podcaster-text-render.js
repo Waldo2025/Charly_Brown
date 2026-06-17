@@ -313,7 +313,7 @@
     const safeToken = escapeSvgText(token);
     return isActive
       ? `<tspan fill="#fff7bf" filter="url(#pod-karaoke-active)">${safeToken}</tspan>`
-      : `<tspan fill="currentColor">${safeToken}</tspan>`;
+      : `<tspan>${safeToken}</tspan>`;
   }
 
   function buildOnScreenTextRasterLineMarkup(line = "", options = {}) {
