@@ -1342,6 +1342,10 @@ const MONTAGE_EXPORT_STALE_HEARTBEAT_MS = Math.max(
   10 * 60 * 1000,
   MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS + (2 * 60 * 1000)
 );
+const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
+  10 * 1000,
+  Number(process.env.MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS || 20 * 1000) || 20 * 1000
+);
 const montageExportJobs = new Map();
 
 function getMontageExportJobMetaPath(jobId = "") {
@@ -1658,6 +1662,19 @@ function getMontageExportJobHeartbeatAgeMs(job = null, nowMs = Date.now()) {
   return Math.max(0, Number(nowMs || Date.now()) - heartbeatMs);
 }
 
+function isMontageExportJobInterruptedByBackendRestart(job = null, bootMs = Date.parse(BACKEND_BOOT_ISO) || Date.now()) {
+  const source = job && typeof job === "object" ? job : null;
+  if (!source) return false;
+  const status = String(source.status || "").trim().toLowerCase();
+  if (!["queued", "running"].includes(status)) return false;
+  const stage = String(source.stage || "").trim().toLowerCase();
+  if (!stage || stage === "queued") return false;
+  const heartbeatMs = Number(new Date(source.heartbeatAt || source.lastHeartbeatAt || source.updatedAt || 0).getTime() || 0) || 0;
+  if (!heartbeatMs || !Number.isFinite(heartbeatMs)) return false;
+  const cleanBootMs = Number(bootMs || Date.now()) || Date.now();
+  return heartbeatMs < (cleanBootMs - MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS);
+}
+
 function isMontageExportJobStale(job = null, nowMs = Date.now()) {
   const status = String(job?.status || "").trim().toLowerCase();
   if (!["queued", "running"].includes(status)) return false;
@@ -1679,6 +1696,28 @@ function buildStaleMontageExportJobPatch(job = null, nowMs = Date.now()) {
       detail: {
         heartbeatAgeMs,
         staleThresholdMs: MONTAGE_EXPORT_STALE_HEARTBEAT_MS,
+        lastHeartbeatAt: String(job?.heartbeatAt || job?.lastHeartbeatAt || job?.updatedAt || "").trim(),
+        stage: String(job?.stage || "").trim(),
+        sceneSubstage: String(job?.sceneSubstage || "").trim(),
+        currentSceneIndex: Math.max(0, Math.round(Number(job?.currentSceneIndex || 0) || 0)),
+        totalScenes: Math.max(0, Math.round(Number(job?.totalScenes || 0) || 0))
+      }
+    }
+  };
+}
+
+function buildRestartInterruptedMontageExportJobPatch(job = null) {
+  return {
+    status: "error",
+    stage: "error",
+    progress: Math.max(0.02, Math.min(0.98, Number(job?.progress || 0) || 0)),
+    hint: "El worker de export se reinició durante el render. Inicia una nueva exportación.",
+    error: {
+      error: "montage_export_worker_restarted",
+      code: "montage_export_worker_restarted",
+      message: "El backend se reinició mientras FFmpeg procesaba el export.",
+      detail: {
+        backendBootAt: BACKEND_BOOT_ISO,
         lastHeartbeatAt: String(job?.heartbeatAt || job?.lastHeartbeatAt || job?.updatedAt || "").trim(),
         stage: String(job?.stage || "").trim(),
         sceneSubstage: String(job?.sceneSubstage || "").trim(),
@@ -11683,7 +11722,32 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
       }
       return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
     }
-    if (isMontageExportJobStale(job) && !(getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId)) {
+    const hasActiveMontageWorkerForJob = getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId;
+    if (isMontageExportJobInterruptedByBackendRestart(job) && !hasActiveMontageWorkerForJob) {
+      const restartPatch = buildRestartInterruptedMontageExportJobPatch(job);
+      console.warn("[backend][montage-export] export-status marking restarted job", {
+        jobId,
+        backendBootAt: BACKEND_BOOT_ISO,
+        lastHeartbeatAt: restartPatch.error?.detail?.lastHeartbeatAt || "",
+        stage: String(job?.stage || "").trim() || null,
+        sceneSubstage: String(job?.sceneSubstage || "").trim() || null
+      });
+      const restartedJob = {
+        ...job,
+        ...restartPatch,
+        updatedAt: new Date().toISOString(),
+        heartbeatAt: String(job?.heartbeatAt || job?.lastHeartbeatAt || job?.updatedAt || "").trim()
+      };
+      upsertMontageExportJob(jobId, restartedJob);
+      await montageExportJobStore.updateJob(jobId, restartPatch).catch((error) => {
+        console.warn("[backend][montage-export] restarted job persistence failed", {
+          jobId,
+          message: String(error?.message || error)
+        });
+      });
+      return res.status(200).json(sanitizeMontageExportJobPublicPayload(restartedJob));
+    }
+    if (isMontageExportJobStale(job) && !hasActiveMontageWorkerForJob) {
       const stalePatch = buildStaleMontageExportJobPatch(job);
       console.warn("[backend][montage-export] export-status marking stale job", {
         jobId,

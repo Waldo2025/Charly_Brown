@@ -39,4 +39,10 @@ assert.match(
   "Los microcortes iniciales deben reintentar sin sobrescribir la UI con perdida temporal"
 );
 
+assert.match(
+  source,
+  /cleanErrorCode === "montage_export_worker_restarted"/,
+  "La UI debe distinguir un restart real del backend de un microcorte temporal"
+);
+
 console.log("ok - montage export transient poll UI keeps last progress visible");

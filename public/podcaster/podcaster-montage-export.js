@@ -1114,12 +1114,18 @@ export async function pollMontageExportJob(jobId = "") {
       persistMontageExportActiveJob("");
       setMontageExportContinueButton({ visible: false });
       const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
+      const cleanErrorCode = String(err?.code || err?.error || "").trim();
       const failedLabel = failedSubstage
         ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
         : "";
       setMontageExportProgress(null);
       setMontageExportStatus(
         "No pudimos exportar tu video.",
+        cleanErrorCode === "montage_export_worker_restarted"
+          ? "El backend se reinició durante el render de la escena. Inicia una nueva exportación."
+          : cleanErrorCode === "montage_export_worker_stalled"
+            ? "El worker dejó de reportar progreso. Inicia una nueva exportación."
+            :
         skippedEntries.length
           ? `Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`
           : [
