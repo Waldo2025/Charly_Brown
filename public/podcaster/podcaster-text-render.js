@@ -817,7 +817,7 @@
       .replace(/\}/g, "\\}");
   }
 
-  function buildAssInvisibleWordOverlayText(text = "", activeWordIndex = -1, activeColor = "&H000000FF") {
+  function buildAssInvisibleWordOverlayText(text = "", activeWordIndex = -1) {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
     let wordIndex = 0;
@@ -827,7 +827,7 @@
       const isActive = wordIndex === activeWordIndex;
       wordIndex += 1;
       if (isActive) {
-        return `{\\alpha&H00&\\c${activeColor}}${escaped}`;
+        return `{\\alpha&H00&}${escaped}`;
       }
       return `{\\alpha&HFF&}${escaped}{\\alpha&H00&}`;
     }).join("");
@@ -891,7 +891,7 @@
         const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
-        const activeText = buildAssInvisibleWordOverlayText(wrappedText, index, activeColor);
+        const activeText = buildAssInvisibleWordOverlayText(wrappedText, index);
         const activeOverrides = `{\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\pos(${posX},${posY})\\bord${outlinePx}\\shad${shadowPx}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
         events.push(`Dialogue: 1,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });

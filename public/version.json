@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.193",
-  "build": "2026-1.0.10.193",
+  "version": "1.0.10.194",
+  "build": "2026-1.0.10.194",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del fix de karaoke JASSUB con resaltado palabra por palabra y sincronía corregida con el audio Gemini.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el preview JASSUB y la corrección de rutas locales.",
     "Corregido: El modal de export de Podcaster ahora usa preview ASS con JASSUB vendorizado y se corrigió la ruta local de abslink para evitar el 404 que impedía cargar podcaster.js.",
     "Corregido: El export normal de Podcaster ahora prioriza drawtext compartido por escena para karaoke y texto en pantalla, reduciendo el costo y la fragilidad del render completo en Render.",
@@ -116,5 +117,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.193"
+  "cache_version": "2026-1.0.10.194"
 }

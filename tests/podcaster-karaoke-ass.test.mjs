@@ -54,4 +54,7 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
   assert.match(ass, /Dialogue: 0,0:00:00\.00,0:00:01\.20,KaraokeBase,/);
   assert.match(ass, /Dialogue: 1,0:00:00\.00,0:00:00\.18,KaraokeActive,/);
   assert.match(ass, /Dialogue: 1,0:00:00\.18,0:00:00\.42,KaraokeActive,/);
+  assert.match(ass, /\{\\alpha&HFF&\}Hola\{\\alpha&H00&\}/);
+  assert.match(ass, /\{\\alpha&H00&\}mundo/);
+  assert.doesNotMatch(ass, /\\alpha&H00&\\c&H[0-9A-F]{8}/);
 });

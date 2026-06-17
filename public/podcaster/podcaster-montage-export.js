@@ -459,15 +459,19 @@ function getMontageExportPreviewCanvasSize() {
 
 function getMontageExportPreviewCurrentTimeMs() {
   const seekbarValue = Number(window.els?.montageExportPreviewSeekbar?.value || 0) || 0;
+  const timelineStartMs = Math.max(
+    0,
+    Number(window.montageExportPreviewState?.frontendPreview?.timelineStartMs || 0) || 0
+  );
   const visibleVideo = [window.els?.montageExportPreviewVideo, window.els?.montageExportPreviewVideoAlt]
     .find((video) => video && !video.hidden && String(video.getAttribute("src") || "").trim());
   if (visibleVideo && Number.isFinite(Number(visibleVideo.currentTime))) {
-    return Math.max(0, Math.round(Number(visibleVideo.currentTime || 0) * 1000));
+    return Math.max(0, timelineStartMs + Math.round(Number(visibleVideo.currentTime || 0) * 1000));
   }
   return Math.max(
     0,
     seekbarValue,
-    Number(window.montageExportPreviewState?.frontendPreview?.timelineStartMs || 0) || 0
+    timelineStartMs
   );
 }
 
