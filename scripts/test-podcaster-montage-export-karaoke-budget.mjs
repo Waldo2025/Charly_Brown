@@ -31,6 +31,18 @@ assert.match(
 
 assert.match(
   backendSource,
+  /const IS_RENDER_RUNTIME = Boolean\(\s*String\(process\.env\.RENDER_EXTERNAL_HOSTNAME \|\| process\.env\.RENDER_SERVICE_ID \|\| ""\)\.trim\(\)\s*\);/s,
+  "El backend debe detectar el runtime de Render para aplicar un presupuesto seguro por defecto."
+);
+
+assert.match(
+  backendSource,
+  /: \(IS_RENDER_RUNTIME \? MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP : 0\)/s,
+  "Si no hay override explícito, Render debe usar un cap seguro para overlays karaoke."
+);
+
+assert.match(
+  backendSource,
   /selectKaraokeWordTimingIndicesForExport\(wordTimings, \{\s*maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT/s,
   "El backend debe reutilizar el selector compartido al regenerar y aplicar karaoke."
 );

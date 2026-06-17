@@ -1351,11 +1351,20 @@ const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
   10 * 1000,
   Number(process.env.MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS || 20 * 1000) || 20 * 1000
 );
+const IS_RENDER_RUNTIME = Boolean(
+  String(process.env.RENDER_EXTERNAL_HOSTNAME || process.env.RENDER_SERVICE_ID || "").trim()
+);
+const MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP = Math.max(
+  1,
+  Number.isFinite(Number(process.env.MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP))
+    ? Math.round(Number(process.env.MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP))
+    : 8
+);
 const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = Math.max(
   0,
   Number.isFinite(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
     ? Math.round(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
-    : 0
+    : (IS_RENDER_RUNTIME ? MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP : 0)
 );
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
@@ -10739,7 +10748,9 @@ async function appendMontageSceneOnScreenTextOverlays({
     sceneIndex,
     rowId: String(entry?.rowId || "").trim() || undefined,
     appliedOverlayCount,
-    reelModeEnabled
+    reelModeEnabled,
+    karaokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT,
+    renderRuntimeSafeCapActive: IS_RENDER_RUNTIME && !Number.isFinite(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
   });
   return {
     videoFilterGraph: `${videoFilterGraph};${overlayFilters.join(";")}`,
@@ -13826,6 +13837,8 @@ if (IS_MAIN_MODULE) {
       pid: process.pid,
       startedAt: BACKEND_BOOT_ISO,
       startupSignature: BACKEND_BOOT_SIGNATURE,
+      montageRenderRuntime: IS_RENDER_RUNTIME ? "render" : "non-render",
+      montageKaraokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT,
       moodleModuleGraphicsRoute: true,
       podcasterDialogueAudioRoute: true
     });
