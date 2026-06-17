@@ -4033,7 +4033,11 @@ function runFfmpegCommand(args = [], context = {}) {
       previewArgs,
       outputPath: Array.isArray(args) ? String(args.at(-1) || "").trim() || undefined : undefined
     });
-    const child = spawn(ffmpegStaticPath, args, {
+    const ffmpegArgs = Array.isArray(args) ? args.slice() : [];
+    if (!ffmpegArgs.includes("-threads")) {
+      ffmpegArgs.unshift("-threads", "1");
+    }
+    const child = spawn(ffmpegStaticPath, ffmpegArgs, {
       stdio: ["ignore", "pipe", "pipe"]
     });
     const timeoutMs = Math.max(0, Number(context?.timeoutMs || 0) || 0);

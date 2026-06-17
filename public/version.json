@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.158",
-  "build": "2026-1.0.10.158",
+  "version": "1.0.10.159",
+  "build": "2026-1.0.10.159",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: Se limitó FFmpeg a -threads 1 de forma global en runFfmpegCommand para evitar picos de memoria (OOM) y cierres repentinos del backend de Render durante la composición final.",
     "Diagnóstico: Se agregaron console logs con la salida de stderr y stdout de FFmpeg en tiempo real en los heartbeats del backend para identificar la causa exacta del retraso en la escena 1.",
     "Corregido: Se solucionó el cuelgue (timeout) en la renderización de la escena 1 del export de montage configurando eof_action=repeat por defecto para el logo y quitando loop=0.",
     "Corregido: Se agregó prevención de doble envoltura del proxy en el controlador de reproducción (podcaster-playback-controller.js) al detectar si la URL ya contiene /api/assets/proxy-.",
@@ -83,5 +84,5 @@
     "Corregido: El preview de video/audio del podcaster ya no devuelve URLs directas de Firebase Storage para escenas montadas; ahora se resuelven por proxy del backend para evitar saltos de CORS/QUIC y mantener estable el montaje en tiempo real.",
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media."
   ],
-  "cache_version": "2026-1.0.10.158"
+  "cache_version": "2026-1.0.10.159"
 }
