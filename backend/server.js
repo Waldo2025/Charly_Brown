@@ -10804,7 +10804,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           timeoutCode: "scene_render_timeout",
           shouldAbort: () => shouldAbort(),
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitSceneSubstage({
               sceneIndex,
               rowId,
@@ -10822,7 +10822,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
               storagePath: videoStoragePath,
               downloadUrl: videoDownloadUrl,
               substage: "scene_ffmpeg_render",
-              elapsedMs
+              elapsedMs,
+              extra: {
+                stderrPreview: buildMontageStderrPreview(stderr),
+                stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
+              }
             }));
           }
         });
@@ -11323,14 +11327,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           stage: "montage_final_visuals",
           shouldAbort: () => shouldAbort(),
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.", {
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
               jobId,
               stage: "montage_final_visuals",
-              elapsedMs
+              elapsedMs,
+              stderrPreview: buildMontageStderrPreview(stderr),
+              stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
             });
           }
         });
@@ -11355,14 +11361,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           stage: "montage_encode_delivery",
           shouldAbort: () => shouldAbort(),
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-          onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+          onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
               jobId,
               stage: "montage_encode_delivery",
-              elapsedMs
+              elapsedMs,
+              stderrPreview: buildMontageStderrPreview(stderr),
+              stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
             });
           }
         });
@@ -11388,14 +11396,16 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         stage: "montage_encode_delivery",
         shouldAbort: () => shouldAbort(),
         heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
-        onHeartbeat: ({ elapsedMs = 0 } = {}) => {
+        onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
           emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
             lastHeartbeatAt: new Date().toISOString()
           });
           console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
             jobId,
             stage: "montage_encode_delivery",
-            elapsedMs
+            elapsedMs,
+            stderrPreview: buildMontageStderrPreview(stderr),
+            stdoutPreview: buildMontageStderrPreview(stdout, 4, 300)
           });
         }
       });
