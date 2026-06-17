@@ -2323,6 +2323,55 @@ function stripMontageExportSubmissionPayload(payload = {}) {
   return next;
 }
 
+function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, entries = [], geminiTimelineSegments = []) {
+  const baseTimeline = onScreenTextTimeline && typeof onScreenTextTimeline === "object"
+    ? onScreenTextTimeline
+    : { settings: null, segments: [] };
+  const existingSegments = Array.isArray(baseTimeline.segments) ? baseTimeline.segments.filter(Boolean) : [];
+  if (existingSegments.length) return {
+    settings: baseTimeline.settings || null,
+    segments: existingSegments
+  };
+  const segmentByRowId = new Map(
+    (Array.isArray(geminiTimelineSegments) ? geminiTimelineSegments : [])
+      .map((segment) => [String(segment?.rowId || "").trim(), segment])
+      .filter(([rowId]) => rowId)
+  );
+  const fallbackSegments = (Array.isArray(entries) ? entries : [])
+    .map((entry, idx) => {
+      const text = String(entry?.onScreenText || "").replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      const rowId = String(entry?.rowId || "").trim();
+      const geminiSeg = segmentByRowId.get(rowId) || null;
+      const startMs = geminiSeg
+        ? Math.max(0, Math.round(Number(geminiSeg?.startMs || 0) || 0))
+        : Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      const durationMs = geminiSeg
+        ? Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(geminiSeg?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS))
+        : Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.durationMs || 0) || STUDIO_TIMELINE_MIN_CLIP_MS));
+      return {
+        id: String(entry?.id || `${rowId || idx + 1}-entry-text`).trim() || `${rowId || idx + 1}-entry-text`,
+        rowId,
+        sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
+        text,
+        startMs,
+        durationMs,
+        zIndex: Math.max(1, Math.round(Number(entry?.zIndex || idx + 1) || idx + 1)),
+        layout: {
+          yPct: 0.72,
+          widthPct: 0.58,
+          heightPct: 0.14,
+          xPct: 0.21
+        }
+      };
+    })
+    .filter(Boolean);
+  return {
+    settings: baseTimeline.settings || (fallbackSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    segments: fallbackSegments
+  };
+}
+
 async function buildMontageExportPayloadForSubmission(session = null) {
   const activeSession = session || window.getActiveSession?.() || null;
   if (activeSession) {
@@ -2723,6 +2772,9 @@ export function buildMontageExportPayload(session = null) {
       warnings: { skippedEntries }
     };
   }
+  const effectiveOnScreenTextTimeline = onScreenTextTimeline.segments.length
+    ? onScreenTextTimeline
+    : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments);
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
@@ -2752,10 +2804,10 @@ export function buildMontageExportPayload(session = null) {
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
     filename: String(window.montageExportState.filename || defaultMontageExportFilename()).trim(),
-    onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
+    onScreenTextTimeline: effectiveOnScreenTextTimeline.segments.length ? {
       enabled: true,
-      settings: onScreenTextTimeline.settings,
-      segments: onScreenTextTimeline.segments
+      settings: effectiveOnScreenTextTimeline.settings,
+      segments: effectiveOnScreenTextTimeline.segments
     } : null,
     onScreenTextRenderedSegments: [],
     dialogueAudioMap,
