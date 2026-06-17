@@ -1,9 +1,9 @@
 {
-  "version": "1.0.10.174",
-  "build": "2026-1.0.10.174",
+  "version": "1.0.10.175",
+  "build": "2026-1.0.10.175",
   "branch": "codex-bootstrap",
   "releaseNotes": [
-    "Corregido: Se reduce el cap de seguridad de frames de karaoke overlays por segmento a 3 en Render para asegurar que la instancia gratuita de 512MB no lance error de memoria con FFmpeg, conservando el persistido limpio de Firestore.",
+    "Corregido: Se migró la superposición de karaoke en el render de FFmpeg de múltiples imágenes en loop (que causaba OOM de memoria) a subtítulos ASS nativos temporales procesados por libass, asegurando la consistencia con el persistido en Firestore.",
     "Corregido: Se añade un cap de seguridad en el backend para limitar el número de frames de karaoke overlays por segmento para evitar OOM de FFmpeg en Render, manteniendo la persistencia limpia de Firestore.",
     "Corregido: Se soluciona el error de CORS en el polling de export-status apuntando a la URL del backend remoto, resolviendo el flujo de exportación y manteniendo la persistencia limpia de Firestore.",
     "Corregido: El backend de export de Podcaster ahora sanea el request persistido del job antes de escribirlo en Firestore, removiendo rasters inline y payload raw duplicado para evitar el error 500/code 3 al arrancar exports karaoke.",
@@ -103,5 +103,5 @@
     "Actualizado: Se incrementa el cache-buster del frontend del podcaster para forzar la carga de los bundles nuevos después de los cambios de export y proxy-media.",
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode."
   ],
-  "cache_version": "2026-1.0.10.174"
+  "cache_version": "2026-1.0.10.175"
 }
