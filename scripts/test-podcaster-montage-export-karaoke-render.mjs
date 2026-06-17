@@ -14,38 +14,32 @@ assert.match(
 
 assert.match(
   source,
-  /buildMontageOnScreenTextDrawFilters/,
-  "La exportación debe reutilizar el builder compartido de drawtext."
+  /buildMontageOnScreenTextAss/,
+  "La exportación debe reutilizar el builder compartido de ASS."
 );
 
 assert.match(
   source,
-  /buildMontageOnScreenTextKaraokeBoxFilters/,
-  "La exportación debe reutilizar el builder compartido de la caja karaoke."
+  /const wordTimings = input\.partyKaraoke !== false[\s\S]*normalizeKaraokeWordTimings\(/,
+  "El export normal debe seguir habilitando karaoke palabra por palabra cuando party karaoke está activo."
 );
 
 assert.match(
   source,
-  /const expectedWordIndices = input\.partyKaraoke !== false[\s\S]*normalizeKaraokeWordTimings\(/,
-  "El export normal debe seguir habilitando karaoke cuando party karaoke está activo y hay timings."
+  /async function appendMontageSceneOnScreenTextAssFilters\([\s\S]*?const assContent = buildMontageOnScreenTextAss\(/,
+  "El render por escena debe generar subtítulos ASS compartidos."
 );
 
 assert.match(
   source,
-  /async function appendMontageSceneOnScreenTextDrawtextFilters\([\s\S]*?const drawFilters = renderOnScreenTextDrawFilters\(/,
-  "El render por escena debe quemar el karaoke con drawtext compartido."
-);
-
-assert.match(
-  source,
-  /if \(shouldUseMontageSceneDrawtextFilters\(input\)\) \{[\s\S]*appendMontageSceneOnScreenTextDrawtextFilters\(/,
-  "El export normal debe priorizar la ruta drawtext para texto en pantalla."
+  /await appendMontageSceneOnScreenTextAssFilters\(\{/,
+  "El export normal debe usar ASS/libass para texto en pantalla."
 );
 
 assert.doesNotMatch(
   source,
-  /function generateKaraokeOverlayText\(wrappedText = "", activeWordIndex = -1\)/,
-  "El backend ya no debe mantener la lógica local de karaoke."
+  /appendMontageSceneOnScreenTextOverlays\(/,
+  "El backend ya no debe mantener la ruta rasterizada del karaoke por escena."
 );
 
 console.log("Podcaster montage export karaoke render OK.");

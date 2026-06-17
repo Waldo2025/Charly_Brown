@@ -30,4 +30,4 @@ assert.doesNotMatch(
   "El payload preparado ya no debe promover renderedSegments rasterizados al nivel superior."
 );
 
-console.log("Podcaster montage export no longer requires raster payload OK.");
+console.log("Podcaster montage export no-raster payload contract OK.");

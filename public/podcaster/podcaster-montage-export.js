@@ -4,6 +4,7 @@
  */
 
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
+import JASSUB from "../vendor/jassub/jassub.js";
 import {
   buildPodcasterLocalMediaKey,
   getPodcasterLocalMediaDataUrl,
@@ -13,7 +14,6 @@ import {
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
-const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = 3; // Limitar frames de karaoke para no saturar el payload JSON enviado al backend (evita OOM en Render)
 const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
@@ -33,195 +33,6 @@ const DEFAULT_MONTAGE_BRAND_OVERLAY = Object.freeze({
   widthPct: 0.05,
   opacity: 1
 });
-
-function getPodcasterTextRenderApi() {
-  return window.PodcasterTextRenderSpec || window.PodcasterKaraokeRenderSpec || {};
-}
-
-async function ensurePodcasterFontsReady() {
-  const fonts = document?.fonts;
-  if (!fonts?.ready) return;
-  try {
-    await fonts.ready;
-  } catch (_) {
-    // ignore
-  }
-}
-
-async function renderOnScreenTextRasterDataUrl(plan = null) {
-  const snapshot = plan && typeof plan === "object" ? plan : null;
-  if (!snapshot?.widthPx || !snapshot.heightPx) {
-    console.error("[podcaster][montage-export][text-raster] missing_snapshot_dimensions", {
-      widthPx: snapshot?.widthPx,
-      heightPx: snapshot?.heightPx
-    });
-    return "";
-  }
-  await ensurePodcasterFontsReady();
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(2, Math.round(snapshot.widthPx));
-  canvas.height = Math.max(2, Math.round(snapshot.heightPx));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-  const settings = snapshot.settings && typeof snapshot.settings === "object" ? snapshot.settings : {};
-  const metrics = snapshot.metrics && typeof snapshot.metrics === "object" ? snapshot.metrics : {};
-  const previewSpec = snapshot.previewSpec && typeof snapshot.previewSpec === "object" ? snapshot.previewSpec : {};
-  const text = String(snapshot.text || "").trim();
-  const wrappedText = String(snapshot.wrappedText || previewSpec.wrappedText || text).trim();
-  const lines = wrappedText ? wrappedText.split("\n") : (text ? [text] : []);
-  const presetClass = String(snapshot.presetClass || previewSpec.presetClass || "").trim().toLowerCase();
-  const bgClass = String(snapshot.bgClass || previewSpec.bgClass || "").trim().toLowerCase();
-  const fontSizePx = Math.max(16, Math.round(Number(metrics.previewFontSizePx || metrics.fontSizePx || 44) || 44));
-  const fontFamily = String(settings.fontFamily || "Inter").trim() || "Inter";
-  const fontWeight = String(settings.fontWeight || "normal").trim().toLowerCase() === "bold" ? 700 : 500;
-  const fontStyle = String(settings.fontStyle || "normal").trim().toLowerCase() === "italic" ? "italic" : "normal";
-  const lineHeightPx = Math.max(fontSizePx, Math.round(Number(metrics.previewLineHeightPx || metrics.lineHeightPx || (fontSizePx * 1.22)) || (fontSizePx * 1.22)));
-  const strokeWidthPx = Math.max(0, Math.round(Number(metrics.previewBorderWidthPx || metrics.previewStrokeWidthPx || settings.strokeWidthPx || 0) || 0));
-  const textColor = String(settings.textColor || "#f8fafc").trim() || "#f8fafc";
-  const strokeColor = String(settings.strokeColor || "#0f172a").trim() || "#0f172a";
-  const shadowEnabled = settings.shadowEnabled !== false;
-  const shadowOpacity = Math.max(0, Math.min(1, Number(settings.shadowOpacity ?? 0.48) || 0));
-  const shadowBlurPx = Math.max(0, Math.round(Number(metrics.previewShadowBlurPx || settings.shadowBlurPx || 0) || 0));
-  const shadowX = Math.round(Number(metrics.previewShadowX ?? settings.shadowOffsetXPx ?? 0) || 0);
-  const shadowY = Math.round(Number(metrics.previewShadowY ?? settings.shadowOffsetYPx ?? 0) || 0);
-  const bgPreset = String(settings.bgPreset || "").trim().toLowerCase();
-  const resolvedBgPreset = ["none", "solid", "glass"].includes(bgPreset) ? bgPreset : "none";
-  const bgOpacity = Math.max(0, Math.min(1, Number(settings.bgOpacity ?? 0.82) || 0));
-  const bgScale = Math.max(0.6, Math.min(1.8, Number(settings.bgScale ?? 1) || 1));
-  const bubbleWidthPx = Math.max(1, Math.round(Number(metrics.previewBoxWidthPx || metrics.bubbleWidthPx || canvas.width) || canvas.width));
-  const bubbleHeightPx = Math.max(1, Math.round(Number(metrics.previewBoxHeightPx || metrics.bubbleHeightPx || canvas.height) || canvas.height));
-  const padPx = Math.max(0, Math.round(Number(snapshot.padPx || 0) || 0));
-  const bubbleX = padPx;
-  const bubbleY = padPx;
-  const contentPadXPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.72 * bgScale));
-  const contentPadYPx = resolvedBgPreset === "none" ? 0 : Math.max(0, Math.round(fontSizePx * 0.26 * bgScale));
-  const textLeft = bubbleX + contentPadXPx;
-  const textRight = bubbleX + bubbleWidthPx - contentPadXPx;
-  const lineStartY = bubbleY + contentPadYPx + fontSizePx;
-  const lineStepY = Math.max(fontSizePx, lineHeightPx);
-  const textAlign = String(metrics.textAlign || settings.textAlign || "center").trim().toLowerCase();
-  const activeWordIndex = Number.isFinite(Number(snapshot.activeWordIndex)) ? Number(snapshot.activeWordIndex) : -1;
-  const wordsEnabled = Array.isArray(snapshot.wordTimings) ? snapshot.wordTimings.length > 0 : false;
-  const karaokeActiveColor = "#facc15";
-  const karaokeAccentColor = "#facc15";
-  const measureCtx = ctx;
-  measureCtx.save();
-  measureCtx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  measureCtx.textBaseline = "alphabetic";
-  const measureTokenWidth = (token = "") => measureCtx.measureText(String(token || "")).width;
-  const tokenize = (line = "") => String(line || "").match(/(\s+|[^\s]+)/g) || [];
-  const drawRoundedRect = (x, y, w, h, r) => {
-    const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.arcTo(x + w, y, x + w, y + h, radius);
-    ctx.arcTo(x + w, y + h, x, y + h, radius);
-    ctx.arcTo(x, y + h, x, y, radius);
-    ctx.arcTo(x, y, x + w, y, radius);
-    ctx.closePath();
-  };
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  if (resolvedBgPreset !== "none") {
-    const boxFill = resolvedBgPreset === "solid"
-      ? `rgba(2, 6, 23, ${Math.max(0, Math.min(1, 0.82 * bgOpacity)).toFixed(3)})`
-      : resolvedBgPreset === "glass"
-        ? `rgba(15, 23, 42, ${Math.max(0, Math.min(1, 0.65 * bgOpacity)).toFixed(3)})`
-        : null;
-    if (boxFill) {
-      ctx.fillStyle = boxFill;
-      ctx.shadowColor = "transparent";
-      drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
-      ctx.fill();
-      if (resolvedBgPreset === "solid") {
-        ctx.save();
-        ctx.strokeStyle = "rgba(255,255,255,0.07)";
-        ctx.lineWidth = 1;
-        drawRoundedRect(bubbleX, bubbleY, bubbleWidthPx, bubbleHeightPx, Math.max(10, Math.round(fontSizePx * 0.45)));
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
-  }
-  const presetIs3d = presetClass.includes("3d");
-  const lineShadowFill = "rgba(2, 6, 23, 0.72)";
-  const lineShadowOffset = presetIs3d ? Math.max(2, Math.round(fontSizePx * 0.06)) : shadowX;
-  const lineShadowY = presetIs3d ? Math.max(2, Math.round(fontSizePx * 0.06) + 1) : shadowY;
-  let globalWordCursor = 0;
-  const drawTokenLine = (line, y) => {
-    const tokens = tokenize(line);
-    const tokenWidths = tokens.map((token) => measureTokenWidth(token));
-    const lineWidth = tokenWidths.reduce((sum, value) => sum + value, 0);
-    const xStart = textAlign === "left"
-      ? textLeft
-      : textAlign === "right"
-        ? textRight - lineWidth
-        : textLeft + ((bubbleWidthPx - (contentPadXPx * 2) - lineWidth) / 2);
-    const baseX = Math.max(textLeft, xStart);
-    const drawPass = (fillColor, strokeColorValue, xOffset = 0, yOffset = 0, withShadow = false, countWords = false) => {
-      let cursor = baseX + xOffset;
-      if (withShadow && shadowEnabled && shadowOpacity > 0.001) {
-        ctx.shadowColor = `rgba(2, 6, 23, ${shadowOpacity.toFixed(3)})`;
-        ctx.shadowBlur = shadowBlurPx;
-        ctx.shadowOffsetX = shadowX;
-        ctx.shadowOffsetY = shadowY;
-      } else {
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-      }
-      ctx.lineJoin = "round";
-      ctx.miterLimit = 2;
-      tokens.forEach((token, index) => {
-        if (/^\s+$/.test(token)) {
-          cursor += tokenWidths[index];
-          return;
-        }
-        const isActive = countWords && wordsEnabled && activeWordIndex >= 0 && globalWordCursor === activeWordIndex;
-        const tokenFill = isActive ? karaokeActiveColor : fillColor;
-        ctx.fillStyle = tokenFill;
-        ctx.strokeStyle = strokeColorValue;
-        ctx.lineWidth = strokeWidthPx;
-        ctx.strokeText(token, cursor, y);
-        ctx.fillText(token, cursor, y);
-        cursor += tokenWidths[index];
-        if (countWords) globalWordCursor += 1;
-      });
-    };
-    if (presetIs3d) {
-      drawPass(lineShadowFill, "rgba(2, 6, 23, 0.85)", lineShadowOffset, lineShadowY, true, false);
-    }
-    drawPass(textColor, strokeColor, 0, 0, true, true);
-  };
-  lines.forEach((line, index) => {
-    const y = lineStartY + (index * lineStepY) + (presetIs3d && bgClass === "is-bg-none" ? Math.round(fontSizePx * 0.16) : 0);
-    drawTokenLine(line, y);
-  });
-  ctx.restore();
-  try {
-    return canvas.toDataURL("image/png");
-  } catch (_) {
-    console.warn("[podcaster][montage-export][text-raster] dataURL export failed", {
-      widthPx: snapshot.widthPx,
-      heightPx: snapshot.heightPx,
-      text: text,
-      presetClass,
-      bgClass
-    });
-    return "";
-  }
-}
-
-function resolveMontageExportRasterDimensions(resolution = "source") {
-  const key = String(resolution || "source").trim().toLowerCase();
-  if (key === "1080p") return { width: 1920, height: 1080 };
-  if (key === "720p") return { width: 1280, height: 720 };
-  if (key === "480p") return { width: 854, height: 480 };
-  return { width: 1280, height: 720 };
-}
 
 // --- Helpers & Configuration Normalization ---
 
@@ -482,6 +293,18 @@ let montageExportPreviewState = {
   lastJobPreviewAt: 0
 };
 
+let montageExportJassubState = {
+  instance: null,
+  trackSignature: "",
+  lastRenderSignature: "",
+  loopHandle: 0,
+  resizeObserver: null,
+  bound: false,
+  enabled: false,
+  payload: null,
+  rendering: false
+};
+
 let montageExportJobState = {
   jobId: "",
   pollTimer: null,
@@ -607,6 +430,269 @@ function isMontageExportReelModeActive() {
   const session = window.getActiveSession?.() || null;
   const cfg = window.getPodcastVideoConfig?.(session) || session?.podcastVideoConfig || {};
   return cfg?.reelModeEnabled === true;
+}
+
+function getMontageExportTextRenderApi() {
+  return window.PodcasterTextRenderSpec || window.PodcasterKaraokeRenderSpec || {};
+}
+
+function getMontageExportPreviewContainer() {
+  return document.getElementById("montageExportPreviewContainer");
+}
+
+function getMontageExportPreviewSubtitleCanvas() {
+  return document.getElementById("montageExportPreviewSubtitleCanvas");
+}
+
+function resolveMontageExportAssFontFamily(value = "") {
+  const first = String(value || "").split(",")[0]?.trim() || "";
+  return first.replace(/^['"]|['"]$/g, "").trim() || "Arial";
+}
+
+function getMontageExportPreviewCanvasSize() {
+  const container = getMontageExportPreviewContainer();
+  return {
+    width: Math.max(2, Math.round(Number(container?.clientWidth || 0) || 1280)),
+    height: Math.max(2, Math.round(Number(container?.clientHeight || 0) || 720))
+  };
+}
+
+function getMontageExportPreviewCurrentTimeMs() {
+  const seekbarValue = Number(window.els?.montageExportPreviewSeekbar?.value || 0) || 0;
+  const visibleVideo = [window.els?.montageExportPreviewVideo, window.els?.montageExportPreviewVideoAlt]
+    .find((video) => video && !video.hidden && String(video.getAttribute("src") || "").trim());
+  if (visibleVideo && Number.isFinite(Number(visibleVideo.currentTime))) {
+    return Math.max(0, Math.round(Number(visibleVideo.currentTime || 0) * 1000));
+  }
+  return Math.max(
+    0,
+    seekbarValue,
+    Number(window.montageExportPreviewState?.frontendPreview?.timelineStartMs || 0) || 0
+  );
+}
+
+function isMontageExportPreviewJassubActive() {
+  return montageExportJassubState.enabled === true && Boolean(montageExportJassubState.instance);
+}
+
+function shouldUseMontageExportPreviewJassub(payload = {}) {
+  if (payload?.onlyAudio === true) return false;
+  if (String(payload?.exportMode || "").trim() === "review") return false;
+  return Boolean(Array.isArray(payload?.onScreenTextTimeline?.segments) && payload.onScreenTextTimeline.segments.length);
+}
+
+function buildMontageExportPreviewAssContent(payload = {}) {
+  const timeline = payload?.onScreenTextTimeline;
+  const settings = timeline?.settings && typeof timeline.settings === "object" ? timeline.settings : {};
+  const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (!segments.length) return "";
+  const textApi = getMontageExportTextRenderApi();
+  const buildAss = typeof textApi.buildMontageOnScreenTextAss === "function" ? textApi.buildMontageOnScreenTextAss : null;
+  const normalizeWordTimings = typeof textApi.normalizeKaraokeWordTimings === "function"
+    ? textApi.normalizeKaraokeWordTimings
+    : null;
+  const resolveSpec = typeof window.resolveOnScreenTextRenderSpec === "function"
+    ? window.resolveOnScreenTextRenderSpec
+    : null;
+  if (!buildAss || !resolveSpec) return "";
+  const dims = getMontageExportPreviewCanvasSize();
+  const preparedSegments = segments
+    .map((segment) => {
+      if (!segment || typeof segment !== "object") return null;
+      const text = String(segment.text || "").trim();
+      if (!text) return null;
+      const spec = resolveSpec({
+        settings,
+        layout: segment.layout || {},
+        resolution: payload?.resolution || "source",
+        sourceWidth: dims.width,
+        sourceHeight: dims.height,
+        previewWidthPx: dims.width,
+        previewHeightPx: dims.height,
+        text,
+        fallback: ""
+      });
+      const rowId = String(segment.rowId || "").trim();
+      const wordTimings = payload?.partyKaraoke !== false && normalizeWordTimings
+        ? normalizeWordTimings(payload?.dialogueAudioMap?.[rowId] || null, text)
+        : [];
+      const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
+      const durationSec = Math.max(0.1, Number(segment.durationMs || 0) / 1000);
+      return {
+        ...segment,
+        text,
+        spec,
+        wordTimings,
+        startSec,
+        endSec: startSec + durationSec
+      };
+    })
+    .filter(Boolean);
+  if (!preparedSegments.length) return "";
+  return buildAss({
+    width: dims.width,
+    height: dims.height,
+    defaultFontFamily: resolveMontageExportAssFontFamily(settings.fontFamily),
+    segments: preparedSegments
+  });
+}
+
+async function destroyMontageExportPreviewJassub({ preserveFrame = false } = {}) {
+  if (montageExportJassubState.loopHandle) {
+    window.cancelAnimationFrame(montageExportJassubState.loopHandle);
+    montageExportJassubState.loopHandle = 0;
+  }
+  if (montageExportJassubState.resizeObserver) {
+    montageExportJassubState.resizeObserver.disconnect();
+    montageExportJassubState.resizeObserver = null;
+  }
+  const current = montageExportJassubState.instance;
+  montageExportJassubState.instance = null;
+  montageExportJassubState.trackSignature = "";
+  montageExportJassubState.lastRenderSignature = "";
+  montageExportJassubState.enabled = false;
+  montageExportJassubState.payload = null;
+  montageExportJassubState.rendering = false;
+  const canvas = getMontageExportPreviewSubtitleCanvas();
+  const container = getMontageExportPreviewContainer();
+  if (container) container.dataset.subtitleRenderer = "dom";
+  if (canvas && preserveFrame !== true) canvas.hidden = true;
+  if (current && typeof current.destroy === "function") {
+    try {
+      await current.destroy();
+    } catch (error) {
+      console.warn("[podcaster][montage-export][jassub] destroy_failed", {
+        message: String(error?.message || error || "").trim()
+      });
+    }
+  }
+}
+
+async function renderMontageExportPreviewJassub(force = false) {
+  const instance = montageExportJassubState.instance;
+  if (!instance || montageExportJassubState.rendering) return;
+  const canvas = getMontageExportPreviewSubtitleCanvas();
+  if (!canvas || canvas.hidden) return;
+  const dims = getMontageExportPreviewCanvasSize();
+  const currentTimeMs = getMontageExportPreviewCurrentTimeMs();
+  const renderSignature = `${dims.width}x${dims.height}@${currentTimeMs}`;
+  if (!force && renderSignature === montageExportJassubState.lastRenderSignature) return;
+  montageExportJassubState.rendering = true;
+  try {
+    await instance.manualRender({
+      expectedDisplayTime: performance.now(),
+      width: dims.width,
+      height: dims.height,
+      mediaTime: currentTimeMs / 1000
+    }, force);
+    montageExportJassubState.lastRenderSignature = renderSignature;
+  } catch (error) {
+    console.warn("[podcaster][montage-export][jassub] render_failed", {
+      message: String(error?.message || error || "").trim()
+    });
+  } finally {
+    montageExportJassubState.rendering = false;
+  }
+}
+
+function isMontageExportPreviewPlaying() {
+  const visibleVideo = [window.els?.montageExportPreviewVideo, window.els?.montageExportPreviewVideoAlt]
+    .find((video) => video && !video.hidden && String(video.getAttribute("src") || "").trim());
+  if (visibleVideo) return visibleVideo.paused === false && visibleVideo.ended !== true;
+  return Boolean(window.els?.montageExportPreviewPauseBtn && window.els.montageExportPreviewPauseBtn.hidden === false);
+}
+
+function scheduleMontageExportPreviewJassubLoop() {
+  if (!isMontageExportPreviewJassubActive()) return;
+  if (montageExportJassubState.loopHandle) return;
+  const tick = () => {
+    montageExportJassubState.loopHandle = 0;
+    void renderMontageExportPreviewJassub().finally(() => {
+      if (isMontageExportPreviewJassubActive() && isMontageExportPreviewPlaying()) {
+        montageExportJassubState.loopHandle = window.requestAnimationFrame(tick);
+      }
+    });
+  };
+  montageExportJassubState.loopHandle = window.requestAnimationFrame(tick);
+}
+
+async function syncMontageExportPreviewJassub(payload = null) {
+  if (!shouldUseMontageExportPreviewJassub(payload)) {
+    await destroyMontageExportPreviewJassub();
+    return false;
+  }
+  const assContent = buildMontageExportPreviewAssContent(payload);
+  if (!assContent) {
+    await destroyMontageExportPreviewJassub();
+    return false;
+  }
+  const canvas = getMontageExportPreviewSubtitleCanvas();
+  const container = getMontageExportPreviewContainer();
+  if (!canvas || !container) return false;
+  const dims = getMontageExportPreviewCanvasSize();
+  canvas.width = dims.width;
+  canvas.height = dims.height;
+  canvas.hidden = false;
+  container.dataset.subtitleRenderer = "jassub";
+  const signature = JSON.stringify({
+    assContent,
+    width: dims.width,
+    height: dims.height,
+    resolution: payload?.resolution || "source",
+    exportMode: payload?.exportMode || "normal",
+    partyKaraoke: payload?.partyKaraoke !== false
+  });
+  if (!montageExportJassubState.instance) {
+    const settings = payload?.onScreenTextTimeline?.settings || {};
+    montageExportJassubState.instance = new JASSUB({
+      canvas,
+      subContent: assContent,
+      defaultFont: resolveMontageExportAssFontFamily(settings.fontFamily),
+      queryFonts: "local"
+    });
+    await montageExportJassubState.instance.ready;
+    montageExportJassubState.resizeObserver = new ResizeObserver(() => {
+      void renderMontageExportPreviewJassub(true);
+    });
+    montageExportJassubState.resizeObserver.observe(container);
+  } else if (signature !== montageExportJassubState.trackSignature) {
+    await montageExportJassubState.instance.ready;
+    await montageExportJassubState.instance.renderer.setTrack(assContent);
+  }
+  montageExportJassubState.trackSignature = signature;
+  montageExportJassubState.payload = payload;
+  montageExportJassubState.enabled = true;
+  await renderMontageExportPreviewJassub(true);
+  scheduleMontageExportPreviewJassubLoop();
+  return true;
+}
+
+function bindMontageExportPreviewJassub() {
+  if (montageExportJassubState.bound) return;
+  montageExportJassubState.bound = true;
+  const syncNow = () => {
+    if (!isMontageExportPreviewJassubActive()) return;
+    void renderMontageExportPreviewJassub(true);
+  };
+  const syncLoop = () => {
+    if (!isMontageExportPreviewJassubActive()) return;
+    scheduleMontageExportPreviewJassubLoop();
+  };
+  [window.els?.montageExportPreviewVideo, window.els?.montageExportPreviewVideoAlt].forEach((video) => {
+    if (!video) return;
+    video.addEventListener("loadedmetadata", syncNow);
+    video.addEventListener("loadeddata", syncNow);
+    video.addEventListener("play", syncLoop);
+    video.addEventListener("pause", syncNow);
+    video.addEventListener("seeked", syncNow);
+    video.addEventListener("timeupdate", syncNow);
+    video.addEventListener("ended", syncNow);
+  });
+  window.els?.montageExportPreviewPlayBtn?.addEventListener("click", syncLoop);
+  window.els?.montageExportPreviewPauseBtn?.addEventListener("click", syncNow);
+  window.els?.montageExportPreviewStopBtn?.addEventListener("click", syncNow);
+  window.els?.montageExportPreviewSeekbar?.addEventListener("input", syncNow);
+  window.addEventListener("resize", syncNow);
 }
 
 function getMontageExportPreviewMediaTargets(mediaType = "", preferAlt = false) {
@@ -853,6 +939,7 @@ export function setMontageExportPreviewState({ loading = false, error = "", data
 }
 
 export function resetMontageExportPreviewState() {
+  void destroyMontageExportPreviewJassub();
   if (window.montageExportPreviewState.debounceTimer) {
     window.clearTimeout(window.montageExportPreviewState.debounceTimer);
   }
@@ -1459,6 +1546,13 @@ export async function refreshMontageExportPreviewNow(options = {}) {
   const allowDuringExport = options?.allowDuringExport === true;
   if (!window.els.montageExportModal || window.els.montageExportModal.hidden) return;
   if (shouldSuspendMontagePreviewActivity() && !allowDuringExport) {
+    if (isMontageExportPreviewJassubActive()) {
+      if (montageExportJassubState.loopHandle) {
+        window.cancelAnimationFrame(montageExportJassubState.loopHandle);
+        montageExportJassubState.loopHandle = 0;
+      }
+      void renderMontageExportPreviewJassub(true);
+    }
     const currentDataUrl = String(window.montageExportPreviewState.dataUrl || "").trim();
     const currentMediaType = String(window.montageExportPreviewState.mediaType || "").trim();
     setMontageExportPreviewState({
@@ -1477,6 +1571,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
   }
   const prepared = await buildMontageExportPayloadForSubmission(window.getActiveSession());
   if (!prepared.ok) {
+    await destroyMontageExportPreviewJassub();
     setMontageExportPreviewState({
       error: prepared.error || "No hay suficiente material para generar preview.",
       mode: window.montageExportState.exportMode,
@@ -1534,6 +1629,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
       }
       window.els.montageExportPreviewImage.className = className;
     }
+    await syncMontageExportPreviewJassub(payload);
     return;
   }
   const signature = JSON.stringify({
@@ -1583,6 +1679,7 @@ export async function refreshMontageExportPreviewNow(options = {}) {
     sceneIndex: 0,
     meta: "Puedes exportar aunque el preview no esté disponible."
   });
+  await destroyMontageExportPreviewJassub();
 }
 
 export function scheduleMontageExportPreviewRefresh(delayMs = 280) {
@@ -1658,6 +1755,9 @@ export function syncMontageExportUi() {
   if (window.els.montageExportPreviewBox) {
     window.els.montageExportPreviewBox.hidden = onlyAudio;
   }
+  if (onlyAudio) {
+    void destroyMontageExportPreviewJassub();
+  }
 
   if (!window.montageExportBusy) {
     if (onlyAudio) {
@@ -1696,6 +1796,7 @@ export function openMontageExportModal() {
   setMontageExportPreviewPaused(false);
   setMontageExportBusy(false);
   setMontageExportProgress(null);
+  bindMontageExportPreviewJassub();
 
   const session = window.getActiveSession();
   if (session && typeof window.exportPreviewController?.init === "function") {
@@ -2153,151 +2254,6 @@ async function maybeInlineMontageMediaAsset(asset = null, kind = "video", budget
     dataUrl,
     localDataUrl: dataUrl
   };
-}
-
-async function hydrateMontageExportPayloadOnScreenTextRasters(payload = {}) {
-  if (!payload || typeof payload !== "object") return payload;
-  const timeline = payload.onScreenTextTimeline;
-  if (!timeline || typeof timeline !== "object" || !Array.isArray(timeline.segments) || !timeline.segments.length) {
-    return payload;
-  }
-  const textApi = getPodcasterTextRenderApi();
-  const buildPlan = typeof textApi.buildOnScreenTextRasterSnapshotPlan === "function"
-    ? textApi.buildOnScreenTextRasterSnapshotPlan
-    : null;
-  if (!buildPlan) return payload;
-  const normalizeKaraokeWordTimings = typeof textApi.normalizeKaraokeWordTimings === "function"
-    ? textApi.normalizeKaraokeWordTimings
-    : null;
-  const selectKaraokeWordTimingIndicesForExport = typeof textApi.selectKaraokeWordTimingIndicesForExport === "function"
-    ? textApi.selectKaraokeWordTimingIndicesForExport
-    : null;
-  const exportRasterDims = resolveMontageExportRasterDimensions(payload.resolution || "source");
-  const nextSegments = [];
-  console.info("[podcaster][montage-export][text-raster] hydrate_start", {
-    segmentCount: timeline.segments.length,
-    resolution: payload.resolution || "source",
-    exportWidthPx: exportRasterDims.width,
-    exportHeightPx: exportRasterDims.height,
-    partyKaraoke: payload.partyKaraoke !== false
-  });
-  for (const segment of timeline.segments) {
-    if (!segment || typeof segment !== "object") continue;
-    const basePlan = buildPlan({
-      rowId: String(segment.rowId || "").trim(),
-      settings: timeline.settings || {},
-      layout: segment.layout || {},
-      text: String(segment.text || "").trim(),
-      previewWidthPx: exportRasterDims.width,
-      previewHeightPx: exportRasterDims.height,
-      sourceWidth: exportRasterDims.width,
-      sourceHeight: exportRasterDims.height,
-      resolution: payload.resolution || "source"
-    });
-    const audioClip = payload.dialogueAudioMap?.[String(segment.rowId || "").trim()] || null;
-    const wordTimings = normalizeKaraokeWordTimings
-      ? normalizeKaraokeWordTimings(audioClip, String(segment.text || "").trim())
-      : [];
-    const exportWordIndices = selectKaraokeWordTimingIndicesForExport
-      ? selectKaraokeWordTimingIndicesForExport(wordTimings, {
-        maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
-      })
-      : wordTimings.map((_, index) => index);
-    console.info("[podcaster][montage-export][text-raster] segment_plan", {
-      rowId: String(segment.rowId || "").trim() || undefined,
-      sceneIndex: Number(segment.sceneIndex || 0) || undefined,
-      text: String(segment.text || "").trim(),
-      presetClass: basePlan.presetClass,
-      bgClass: basePlan.bgClass,
-      bubbleWidthPx: basePlan.bubbleWidthPx,
-      bubbleHeightPx: basePlan.bubbleHeightPx,
-      padPx: basePlan.padPx,
-      wordCount: wordTimings.length,
-      exportWordFrameCount: exportWordIndices.length
-    });
-    const baseDataUrl = await renderOnScreenTextRasterDataUrl(basePlan);
-    const renderedFrames = [];
-    if (baseDataUrl) {
-      renderedFrames.push({
-        kind: "base",
-        startMs: Math.max(0, Math.round(Number(segment.startMs || 0) || 0)),
-        endMs: Math.max(
-          Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + 1,
-          Math.round(Number(segment.startMs || 0) + Number(segment.durationMs || 0) || 0)
-        ),
-        dataUrl: baseDataUrl,
-        padPx: basePlan.padPx,
-        widthPx: basePlan.widthPx,
-        heightPx: basePlan.heightPx,
-        offsetXPx: basePlan.padPx,
-        offsetYPx: basePlan.padPx
-      });
-    } else {
-      console.error("[podcaster][montage-export][text-raster] base_frame_failed", {
-        rowId: String(segment.rowId || "").trim() || undefined,
-        sceneIndex: Number(segment.sceneIndex || 0) || undefined,
-        text: String(segment.text || "").trim(),
-        presetClass: basePlan.presetClass,
-        bgClass: basePlan.bgClass,
-        widthPx: basePlan.widthPx,
-        heightPx: basePlan.heightPx
-      });
-    }
-    if (payload.partyKaraoke !== false && exportWordIndices.length) {
-      for (const wordIndex of exportWordIndices) {
-        const word = wordTimings[wordIndex];
-        if (!word) continue;
-        const wordPlan = buildPlan({
-          rowId: String(segment.rowId || "").trim(),
-          settings: timeline.settings || {},
-          layout: segment.layout || {},
-          text: String(segment.text || "").trim(),
-          wordTimings,
-          activeWordIndex: wordIndex,
-          previewWidthPx: exportRasterDims.width,
-          previewHeightPx: exportRasterDims.height,
-          sourceWidth: exportRasterDims.width,
-          sourceHeight: exportRasterDims.height,
-          resolution: payload.resolution || "source"
-        });
-        const wordDataUrl = await renderOnScreenTextRasterDataUrl(wordPlan);
-        if (!wordDataUrl) continue;
-        const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) + Number(word?.startMs || 0) || 0));
-        const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
-        renderedFrames.push({
-          kind: "karaoke-word",
-          wordIndex,
-          text: String(word?.text || "").trim(),
-          startMs,
-          endMs,
-          dataUrl: wordDataUrl,
-          padPx: wordPlan.padPx,
-          widthPx: wordPlan.widthPx,
-          heightPx: wordPlan.heightPx,
-          offsetXPx: wordPlan.padPx,
-          offsetYPx: wordPlan.padPx
-        });
-        console.info("[podcaster][montage-export][text-raster] karaoke_word_frame", {
-          rowId: String(segment.rowId || "").trim() || undefined,
-          sceneIndex: Number(segment.sceneIndex || 0) || undefined,
-          wordIndex,
-          text: String(word?.text || "").trim(),
-          startMs,
-          endMs
-        });
-      }
-    }
-    nextSegments.push({
-      ...segment,
-      renderedFrames
-    });
-  }
-  timeline.renderedSegments = nextSegments;
-  console.info("[podcaster][montage-export][text-raster] hydrate_complete", {
-    renderedSegmentCount: nextSegments.length,
-    framesPerSegment: nextSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0)
-  });
-  return payload;
 }
 
 async function inlineMontageExportPayloadMedia(payload = {}) {
@@ -2889,8 +2845,8 @@ export function buildMontageExportPayload(session = null) {
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
   montageExportSubmitLocked = true;
+  const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
-    const previousJobId = String(window.montageExportJobState.jobId || "").trim();
     const session = window.getActiveSession?.() || null;
     const prepared = await buildMontageExportPayloadForSubmission(session);
     logMontageExportDevtools("submit_clicked", {
@@ -3035,6 +2991,7 @@ export async function runMontageExport() {
     setMontageExportProgress(null);
     setMontageExportStatus("No pudimos exportar tu video.", hintParts.join(" "), { tone: "error" });
     window.setTimelinePreviewsSuspended?.(false);
+    setMontageExportPreviewPaused(false);
     setMontageExportBusy(false);
   } finally {
     montageExportSubmitLocked = false;

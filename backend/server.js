@@ -48,10 +48,9 @@ const {
 const {
   resolveOnScreenTextExportCanvasSize,
   resolveOnScreenTextRenderSpec,
-  buildOnScreenTextRasterSnapshotPlan,
   normalizeOnScreenTextTrackSettings,
   normalizeKaraokeWordTimings,
-  selectKaraokeWordTimingIndicesForExport,
+  buildMontageOnScreenTextAss,
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
 } = require(path.resolve(__dirname, "..", "public", "podcaster", "podcaster-text-render.js"));
@@ -1353,18 +1352,6 @@ const MONTAGE_EXPORT_RESTART_INTERRUPT_GRACE_MS = Math.max(
 );
 const IS_RENDER_RUNTIME = Boolean(
   String(process.env.RENDER_EXTERNAL_HOSTNAME || process.env.RENDER_SERVICE_ID || "").trim()
-);
-const MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP = Math.max(
-  1,
-  Number.isFinite(Number(process.env.MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP))
-    ? Math.round(Number(process.env.MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP))
-    : 3
-);
-const MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT = Math.max(
-  0,
-  Number.isFinite(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
-    ? Math.round(Number(process.env.MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT))
-    : (IS_RENDER_RUNTIME ? MONTAGE_EXPORT_RENDER_SAFE_KARAOKE_WORD_FRAME_CAP : 0)
 );
 const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   2500,
@@ -9232,7 +9219,6 @@ function validateMontageExportRequest(input = {}) {
     err.status = 413;
     throw err;
   }
-  validateMontageNormalExportOnScreenTextRasters(input);
 }
 
 function buildMontageSkippedEntry(entry = {}, index = 0, reason = "scene_asset_unavailable", detail = {}) {
@@ -9575,17 +9561,6 @@ function normalizeMontageOnScreenTextExportLayout(options = {}) {
   };
 }
 
-function createMontageOnScreenTextExportError(message = "montage_onscreen_text_raster_missing", code = "montage_onscreen_text_raster_missing", detail = {}) {
-  const err = new Error(String(message || code || "montage_onscreen_text_raster_missing").trim() || "montage_onscreen_text_raster_missing");
-  err.code = String(code || "montage_onscreen_text_raster_missing").trim() || "montage_onscreen_text_raster_missing";
-  err.status = 422;
-  err.detail = {
-    stage: "validate_payload",
-    ...detail
-  };
-  return err;
-}
-
 function buildMontageOnScreenTextSegmentLookupKey(segment = {}) {
   const id = clampText(segment?.id || "", 140);
   if (id) return `id:${id}`;
@@ -9606,145 +9581,9 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
   return map;
 }
 
-function shouldUseMontageSceneDrawtextFilters(input = {}) {
+function shouldUseMontageSceneAssSubtitles(input = {}) {
   if (String(input?.exportMode || "").trim() === "review") return false;
   return Boolean(input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
-}
-
-function findMontageRenderedOnScreenTextSegment(segment = {}, renderedSegmentMap = new Map()) {
-  const exact = renderedSegmentMap.get(buildMontageOnScreenTextSegmentLookupKey(segment));
-  if (exact) return exact;
-  const rowId = String(segment?.rowId || "").trim();
-  const sceneIndex = Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1));
-  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-  let bestRowIdCandidate = null;
-  let bestRowIdDelta = Number.POSITIVE_INFINITY;
-  for (const rendered of renderedSegmentMap.values()) {
-    if (!rendered || typeof rendered !== "object") continue;
-    const renderedSceneIndex = Math.max(1, Math.round(Number(rendered?.sceneIndex || 1) || 1));
-    const renderedStartMs = Math.max(0, Math.round(Number(rendered?.startMs || 0) || 0));
-    if (rowId && String(rendered?.rowId || "").trim() === rowId) {
-      if (renderedSceneIndex === sceneIndex && renderedStartMs === startMs) {
-        return rendered;
-      }
-      const delta = Math.abs(renderedStartMs - startMs);
-      if (delta < bestRowIdDelta) {
-        bestRowIdCandidate = rendered;
-        bestRowIdDelta = delta;
-      }
-      continue;
-    }
-    if (renderedSceneIndex === sceneIndex && renderedStartMs === startMs) {
-      return rendered;
-    }
-  }
-  return bestRowIdCandidate || null;
-}
-
-function filterMontageOnScreenTextRenderedFramesForExport({
-  input = {},
-  segment = {},
-  renderedFrames = []
-} = {}) {
-  const safeFrames = Array.isArray(renderedFrames) ? renderedFrames : [];
-  if (!safeFrames.length) return [];
-  const baseFrames = safeFrames.filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "base");
-  const karaokeFrames = safeFrames
-    .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word")
-    .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.wordIndex || 0) - Number(b?.wordIndex || 0));
-  if (input.partyKaraoke === false || !karaokeFrames.length) {
-    return [...baseFrames, ...karaokeFrames];
-  }
-  const audioClip = input.dialogueAudioMap?.[String(segment?.rowId || "").trim()] || null;
-  const wordTimings = normalizeKaraokeWordTimings(audioClip, String(segment?.text || "").trim());
-  const expectedWordIndices = selectKaraokeWordTimingIndicesForExport(wordTimings, {
-    maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
-  });
-  if (!expectedWordIndices.length) {
-    const maxFrames = MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT;
-    if (maxFrames > 0 && karaokeFrames.length > maxFrames) {
-      const selectedFrames = [];
-      for (let i = 0; i < maxFrames; i += 1) {
-        const idx = Math.round((i * (karaokeFrames.length - 1)) / (maxFrames - 1));
-        selectedFrames.push(karaokeFrames[idx]);
-      }
-      return [...baseFrames, ...selectedFrames];
-    }
-    return [...baseFrames, ...karaokeFrames];
-  }
-  const allowedWordIndices = new Set(expectedWordIndices.map((wordIndex) => Math.max(0, Math.round(Number(wordIndex || 0) || 0))));
-  const filteredKaraokeFrames = karaokeFrames.filter((frame) => allowedWordIndices.has(Math.max(0, Math.round(Number(frame?.wordIndex || 0) || 0))));
-  return [...baseFrames, ...filteredKaraokeFrames];
-}
-
-function validateMontageNormalExportOnScreenTextRasters(input = {}) {
-  if (input.exportMode === "review") return;
-  if (!input.onScreenTextSettings || !Array.isArray(input.onScreenTextSegments) || !input.onScreenTextSegments.length) return;
-  if (shouldUseMontageSceneDrawtextFilters(input)) return;
-  const renderedSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
-  for (const segment of input.onScreenTextSegments) {
-    const renderedSegment = findMontageRenderedOnScreenTextSegment(segment, renderedSegmentMap);
-    const renderedFrames = Array.isArray(renderedSegment?.renderedFrames) ? renderedSegment.renderedFrames : [];
-    if (!renderedSegment || !renderedFrames.length) {
-      throw createMontageOnScreenTextExportError(
-        "Faltan los rasters del texto en pantalla para exportar esta escena.",
-        "montage_onscreen_text_raster_missing",
-        {
-          rowId: String(segment?.rowId || "").trim() || undefined,
-          sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1))
-        }
-      );
-    }
-    const hasBaseFrame = renderedFrames.some((frame) => String(frame?.kind || "").trim().toLowerCase() === "base" && String(frame?.dataUrl || "").startsWith("data:image/"));
-    if (!hasBaseFrame) {
-      throw createMontageOnScreenTextExportError(
-        "Falta el raster base del texto en pantalla para exportar esta escena.",
-        "montage_onscreen_text_raster_missing",
-        {
-          rowId: String(segment?.rowId || "").trim() || undefined,
-          sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1))
-        }
-      );
-    }
-    const audioClip = input.dialogueAudioMap?.[String(segment?.rowId || "").trim()] || null;
-    const wordTimings = input.partyKaraoke !== false
-      ? normalizeKaraokeWordTimings(audioClip, String(segment?.text || "").trim())
-      : [];
-    const expectedWordIndices = input.partyKaraoke !== false
-      ? selectKaraokeWordTimingIndicesForExport(wordTimings, {
-        maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
-      })
-      : [];
-    if (!expectedWordIndices.length) continue;
-    const availableWordIndices = new Set(
-      renderedFrames
-        .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word" && String(frame?.dataUrl || "").startsWith("data:image/"))
-        .map((frame) => Math.max(0, Math.round(Number(frame?.wordIndex || 0) || 0)))
-    );
-    const missingWordIndices = expectedWordIndices.filter((wordIndex) => !availableWordIndices.has(wordIndex));
-    // Solo fallar si NO hay ningún frame de karaoke disponible (el frontend puede enviar índices distintos si el conteo de palabras difiere levemente)
-    if (missingWordIndices.length && availableWordIndices.size === 0) {
-      throw createMontageOnScreenTextExportError(
-        "Faltan capas rasterizadas del karaoke para exportar esta escena.",
-        "montage_karaoke_raster_missing",
-        {
-          rowId: String(segment?.rowId || "").trim() || undefined,
-          sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1)),
-          missingWordIndices: missingWordIndices.slice(0, 24)
-        }
-      );
-    }
-    if (missingWordIndices.length) {
-      console.warn("[backend][montage-export][text-raster] karaoke_index_mismatch_tolerated", {
-        rowId: String(segment?.rowId || "").trim() || undefined,
-        sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || 1) || 1)),
-        expectedCount: expectedWordIndices.length,
-        availableCount: availableWordIndices.size,
-        missingCount: missingWordIndices.length,
-        missingWordIndices: missingWordIndices.slice(0, 12)
-      });
-    }
-  }
 }
 
 function doesMontageOnScreenTextSegmentBelongToScene(segment = {}, entry = {}, sceneIndex = 1, sceneStartMs = 0, sceneEndMs = 0) {
@@ -9764,40 +9603,12 @@ function resolveMontageSceneOnScreenTextSegments({
   entry = {},
   sceneIndex = 1,
   sceneStartMs = 0,
-  sceneEndMs = 0,
-  renderedSegmentMap = new Map()
+  sceneEndMs = 0
 } = {}) {
   const segments = Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments : [];
-  const useDrawtextSceneFilters = shouldUseMontageSceneDrawtextFilters(input);
   return segments
     .filter((segment) => doesMontageOnScreenTextSegmentBelongToScene(segment, entry, sceneIndex, sceneStartMs, sceneEndMs))
-    .map((segment) => {
-      if (useDrawtextSceneFilters) {
-        return {
-          ...segment,
-          renderedFrames: []
-        };
-      }
-      const renderedSegment = findMontageRenderedOnScreenTextSegment(segment, renderedSegmentMap);
-      if (!renderedSegment) {
-        throw createMontageOnScreenTextExportError(
-          "No se encontró el bundle rasterizado del texto en pantalla para esta escena.",
-          "montage_onscreen_text_raster_missing",
-          {
-            rowId: String(segment?.rowId || "").trim() || undefined,
-            sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || sceneIndex) || sceneIndex))
-          }
-        );
-      }
-      return {
-        ...segment,
-        renderedFrames: filterMontageOnScreenTextRenderedFramesForExport({
-          input,
-          segment,
-          renderedFrames: Array.isArray(renderedSegment?.renderedFrames) ? renderedSegment.renderedFrames : []
-        })
-      };
-    })
+    .map((segment) => ({ ...segment }))
     .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.zIndex || 0) - Number(b?.zIndex || 0));
 }
 
@@ -10540,153 +10351,6 @@ function buildMontageOverlayCardsFilter({
   return filters.join(",");
 }
 
-async function rasterizeOnScreenTextSvgToDataUrl(svg = "", { density = 144 } = {}) {
-  const markup = String(svg || "").trim();
-  if (!markup) return "";
-  const tmpPrefix = path.join(os.tmpdir(), `cb-text-raster-${randomUUID()}`);
-  const svgPath = `${tmpPrefix}.svg`;
-  const pngPath = `${tmpPrefix}.png`;
-  try {
-    await fs.promises.writeFile(svgPath, markup, "utf8");
-    await runFfmpegCommand([
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-threads",
-      "1",
-      "-i",
-      svgPath,
-      "-frames:v",
-      "1",
-      pngPath
-    ], {
-      stage: "montage_text_svg_raster",
-      timeoutMs: 120000
-    });
-    const buffer = await fs.promises.readFile(pngPath);
-    return `data:image/png;base64,${buffer.toString("base64")}`;
-  } catch (error) {
-    console.error("[backend][montage-export][text-raster] backend_svg_raster_failed", {
-      error: String(error?.message || error || "").trim()
-    });
-    return "";
-  } finally {
-    await Promise.allSettled([
-      fs.promises.unlink(svgPath),
-      fs.promises.unlink(pngPath)
-    ]);
-  }
-}
-
-async function buildBackendOnScreenTextRenderedSegments(input = {}, sourceDims = { width: 1280, height: 720 }) {
-  if (typeof buildOnScreenTextRasterSnapshotPlan !== "function") return [];
-  const segments = Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments : [];
-  if (!segments.length) return [];
-  const timelineSettings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
-    ? input.onScreenTextSettings
-    : {};
-  const exportRasterDims = {
-    width: Math.max(2, Math.round(Number(sourceDims?.width || 1280) || 1280)),
-    height: Math.max(2, Math.round(Number(sourceDims?.height || 720) || 720))
-  };
-  const renderedSegments = [];
-  console.info("[backend][montage-export][text-raster] backend_regen_start", {
-    segmentCount: segments.length,
-    exportWidthPx: exportRasterDims.width,
-    exportHeightPx: exportRasterDims.height,
-    partyKaraoke: input.partyKaraoke !== false
-  });
-  for (const segment of segments) {
-    if (!segment || typeof segment !== "object") continue;
-    const rowId = String(segment.rowId || "").trim();
-    const text = String(segment.text || "").trim();
-    if (!rowId || !text) continue;
-    const audioClip = input.dialogueAudioMap?.[rowId] || null;
-    const wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, text) : [];
-    const exportWordIndices = selectKaraokeWordTimingIndicesForExport(wordTimings, {
-      maxFrames: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
-    });
-    const basePlan = buildOnScreenTextRasterSnapshotPlan({
-      rowId,
-      settings: timelineSettings,
-      layout: segment.layout || {},
-      text,
-      previewWidthPx: exportRasterDims.width,
-      previewHeightPx: exportRasterDims.height,
-      sourceWidth: exportRasterDims.width,
-      sourceHeight: exportRasterDims.height,
-      resolution: input.resolution || "source"
-    });
-    const baseDataUrl = await rasterizeOnScreenTextSvgToDataUrl(basePlan?.svg || "", {
-      density: Math.max(exportRasterDims.width, exportRasterDims.height) >= 1920 ? 192 : 144
-    });
-    const nextFrames = [];
-    if (baseDataUrl) {
-      nextFrames.push({
-        kind: "base",
-        startMs: Math.max(0, Math.round(Number(segment.startMs || 0) || 0)),
-        endMs: Math.max(
-          Math.max(0, Math.round(Number(segment.startMs || 0) || 0)) + 1,
-          Math.round(Number(segment.startMs || 0) + Number(segment.durationMs || 0) || 0)
-        ),
-        dataUrl: baseDataUrl,
-        padPx: basePlan.padPx,
-        widthPx: basePlan.widthPx,
-        heightPx: basePlan.heightPx,
-        offsetXPx: basePlan.padPx,
-        offsetYPx: basePlan.padPx
-      });
-    }
-    for (const index of exportWordIndices) {
-      const word = wordTimings[index];
-      if (!word) continue;
-      const wordPlan = buildOnScreenTextRasterSnapshotPlan({
-        rowId,
-        settings: timelineSettings,
-        layout: segment.layout || {},
-        text,
-        wordTimings,
-        activeWordIndex: index,
-        previewWidthPx: exportRasterDims.width,
-        previewHeightPx: exportRasterDims.height,
-        sourceWidth: exportRasterDims.width,
-        sourceHeight: exportRasterDims.height,
-        resolution: input.resolution || "source"
-      });
-      const wordDataUrl = await rasterizeOnScreenTextSvgToDataUrl(wordPlan?.svg || "", {
-        density: Math.max(exportRasterDims.width, exportRasterDims.height) >= 1920 ? 192 : 144
-      });
-      if (!wordDataUrl) continue;
-      const startMs = Math.max(0, Math.round(Number(segment.startMs || 0) + Number(word?.startMs || 0) || 0));
-      const endMs = Math.max(startMs + 1, Math.round(Number(segment.startMs || 0) + Number(word?.endMs || 0) || 0));
-      nextFrames.push({
-        kind: "karaoke-word",
-        wordIndex: index,
-        text: String(word?.text || "").trim(),
-        startMs,
-        endMs,
-        dataUrl: wordDataUrl,
-        padPx: wordPlan.padPx,
-        widthPx: wordPlan.widthPx,
-        heightPx: wordPlan.heightPx,
-        offsetXPx: wordPlan.padPx,
-        offsetYPx: wordPlan.padPx
-      });
-    }
-    renderedSegments.push({
-      ...segment,
-      renderedFrames: nextFrames
-    });
-  }
-  console.info("[backend][montage-export][text-raster] backend_regen_complete", {
-    renderedSegmentCount: renderedSegments.length,
-    framesPerSegment: renderedSegments.map((segment) => Array.isArray(segment?.renderedFrames) ? segment.renderedFrames.length : 0),
-    karaokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT
-  });
-  return renderedSegments;
-}
-
 function renderOnScreenTextDrawFilters(input, segment, spec, wordTimings, textPath, fontSource, startSec, endSec, textFileResolver) {
   const karaokeEnabled = input.partyKaraoke !== false && wordTimings.length > 0 && String(spec.wrappedText || "").trim();
   return buildMontageOnScreenTextDrawFilters({
@@ -10703,7 +10367,7 @@ function renderOnScreenTextDrawFilters(input, segment, spec, wordTimings, textPa
   });
 }
 
-async function appendMontageSceneOnScreenTextDrawtextFilters({
+async function appendMontageSceneOnScreenTextAssFilters({
   input = {},
   entry = {},
   sceneIndex = 1,
@@ -10733,48 +10397,7 @@ async function appendMontageSceneOnScreenTextDrawtextFilters({
   const settings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
     ? input.onScreenTextSettings
     : {};
-  const textFileResolver = createMontageReviewTextFileResolver(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-onscreen`);
-  const localFilters = [];
-  let chainLabel = baseVideoMapLabel;
-  let filterIndex = 0;
-  let appliedOverlayCount = 0;
-
-  const boxSegments = sceneSegments.map((segment) => {
-    const layout = normalizeMontageOnScreenTextExportLayout({
-      segment,
-      settings,
-      resolution: input.resolution || "source",
-      sourceDims: canvas
-    });
-    const spec = resolveOnScreenTextRenderSpec({
-      settings,
-      layout,
-      resolution: input.resolution || "source",
-      sourceWidth: canvas.width,
-      sourceHeight: canvas.height,
-      text: segment.text || "",
-      fallback: ""
-    });
-    const startSec = Math.max(0, (Math.max(0, Number(segment.startMs || 0) || 0) - sceneTimelineStartMs) / 1000);
-    const endSec = Math.max(
-      startSec + 0.1,
-      (Math.max(0, Number(segment.startMs || 0) || 0) + Math.max(0, Number(segment.durationMs || 0) || 0) - sceneTimelineStartMs) / 1000
-    );
-    return { startSec, endSec, spec };
-  });
-  const boxFilters = buildMontageOnScreenTextKaraokeBoxFilters(boxSegments, settings, {
-    sourceWidth: canvas.width,
-    sourceHeight: canvas.height
-  });
-  for (const boxFilter of boxFilters) {
-    filterIndex += 1;
-    const outLabel = `scene_ontxt_box_${sceneIndex}_${filterIndex}`;
-    localFilters.push(`${chainLabel}${boxFilter}[${outLabel}]`);
-    chainLabel = `[${outLabel}]`;
-    appliedOverlayCount += 1;
-  }
-
-  for (const segment of sceneSegments) {
+  const assSegments = sceneSegments.map((segment) => {
     const layout = normalizeMontageOnScreenTextExportLayout({
       segment,
       settings,
@@ -10799,30 +10422,15 @@ async function appendMontageSceneOnScreenTextDrawtextFilters({
     const wordTimings = input.partyKaraoke !== false
       ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim())
       : [];
-    const textPath = textFileResolver(spec.wrappedText || spec.text || "");
-    const fontFile = resolveMontageOnScreenTextFontFile(settings);
-    const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
-    const drawFilters = renderOnScreenTextDrawFilters(
-      input,
-      segment,
-      spec,
-      wordTimings,
-      textPath,
-      fontSource,
+    return {
       startSec,
       endSec,
-      textFileResolver
-    );
-    for (const drawFilter of drawFilters) {
-      filterIndex += 1;
-      const outLabel = `scene_ontxt_draw_${sceneIndex}_${filterIndex}`;
-      localFilters.push(`${chainLabel}${drawFilter}[${outLabel}]`);
-      chainLabel = `[${outLabel}]`;
-      appliedOverlayCount += 1;
-    }
-  }
+      wordTimings,
+      spec
+    };
+  }).filter((segment) => String(segment?.spec?.wrappedText || segment?.spec?.text || "").trim());
 
-  if (!localFilters.length) {
+  if (!assSegments.length) {
     return {
       videoFilterGraph,
       finalVideoMapLabel: baseVideoMapLabel,
@@ -10830,156 +10438,36 @@ async function appendMontageSceneOnScreenTextDrawtextFilters({
     };
   }
 
-  let newFilterGraph = videoFilterGraph;
-  if (newFilterGraph) {
-    newFilterGraph += `;${localFilters.join(";")}`;
-  } else {
-    newFilterGraph = localFilters.join(";");
+  const assContent = buildMontageOnScreenTextAss({
+    width: canvas.width,
+    height: canvas.height,
+    segments: assSegments
+  });
+  if (!String(assContent || "").trim()) {
+    return {
+      videoFilterGraph,
+      finalVideoMapLabel: baseVideoMapLabel,
+      appliedOverlayCount: 0
+    };
   }
 
-  console.info("[backend][montage-export][scene-text-drawtext]", {
+  const assPath = path.join(tmpDir, `scene-${String(sceneIndex).padStart(3, "0")}-onscreen.ass`);
+  await fs.promises.writeFile(assPath, assContent, "utf8");
+  const outLabel = `scene_ontxt_ass_${sceneIndex}`;
+  const assFilter = `${baseVideoMapLabel}ass=filename='${escapeFfmpegFilterPath(assPath)}'[${outLabel}]`;
+  const newFilterGraph = videoFilterGraph ? `${videoFilterGraph};${assFilter}` : assFilter;
+
+  console.info("[backend][montage-export][scene-text-ass]", {
     sceneIndex,
     rowId: String(entry?.rowId || "").trim() || undefined,
-    appliedOverlayCount
+    segmentCount: assSegments.length,
+    eventfulWordCount: assSegments.reduce((sum, segment) => sum + (Array.isArray(segment.wordTimings) ? segment.wordTimings.length : 0), 0)
   });
 
   return {
     videoFilterGraph: newFilterGraph,
-    finalVideoMapLabel: chainLabel,
-    appliedOverlayCount
-  };
-}
-
-async function appendMontageSceneOnScreenTextOverlays({
-  args = [],
-  input = {},
-  entry = {},
-  sceneIndex = 1,
-  sceneDurationSec = 0,
-  sceneTimelineStartMs = 0,
-  sceneTimelineEndMs = 0,
-  canvas = { width: 1280, height: 720 },
-  renderedSegmentMap = new Map(),
-  videoFilterGraph = "",
-  baseVideoMapLabel = "[vout]",
-  nextInputIndex = 0,
-  downloadInput = null,
-  jobId = "",
-  reelModeEnabled = false,
-  tmpDir = ""
-} = {}) {
-  if (input.exportMode === "review") {
-    return {
-      videoFilterGraph,
-      finalVideoMapLabel: baseVideoMapLabel,
-      nextInputIndex,
-      appliedOverlayCount: 0
-    };
-  }
-  const sceneSegments = resolveMontageSceneOnScreenTextSegments({
-    input,
-    entry,
-    sceneIndex,
-    sceneStartMs: sceneTimelineStartMs,
-    sceneEndMs: sceneTimelineEndMs,
-    renderedSegmentMap
-  });
-  if (!sceneSegments.length) {
-    return {
-      videoFilterGraph,
-      finalVideoMapLabel: baseVideoMapLabel,
-      nextInputIndex,
-      appliedOverlayCount: 0
-    };
-  }
-
-  const overlayFilters = [];
-  let chainLabel = baseVideoMapLabel;
-  let appliedOverlayCount = 0;
-  const settings = input.onScreenTextSettings && typeof input.onScreenTextSettings === "object"
-    ? input.onScreenTextSettings
-    : {};
-  const sceneDims = {
-    width: Math.max(2, Math.round(Number(canvas?.width || 1280) || 1280)),
-    height: Math.max(2, Math.round(Number(canvas?.height || 720) || 720))
-  };
-
-  for (const segment of sceneSegments) {
-    const layout = normalizeMontageOnScreenTextExportLayout({
-      segment,
-      settings,
-      resolution: input.resolution || "source",
-      sourceDims: sceneDims
-    });
-    const spec = resolveOnScreenTextRenderSpec({
-      settings,
-      layout,
-      resolution: input.resolution || "source",
-      sourceWidth: sceneDims.width,
-      sourceHeight: sceneDims.height,
-      text: segment.text || "",
-      fallback: ""
-    });
-    const frames = Array.isArray(segment?.renderedFrames) ? segment.renderedFrames : [];
-    const orderedFrames = [
-      ...frames.filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "base"),
-      ...frames
-        .filter((frame) => String(frame?.kind || "").trim().toLowerCase() === "karaoke-word")
-        .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0) || Number(a?.wordIndex || 0) - Number(b?.wordIndex || 0))
-    ];
-    for (const frame of orderedFrames) {
-      const frameStartSecRaw = (Math.max(0, Number(frame?.startMs || 0) || 0) - sceneTimelineStartMs) / 1000;
-      const frameEndSecRaw = (Math.max(0, Number(frame?.endMs || 0) || 0) - sceneTimelineStartMs) / 1000;
-      if (frameStartSecRaw >= sceneDurationSec || frameEndSecRaw <= 0) continue;
-      const clampedStartSec = Math.max(0, frameStartSecRaw);
-      const clampedEndSec = Math.min(sceneDurationSec, Math.max(clampedStartSec + 0.05, frameEndSecRaw));
-      const framePath = await downloadInput({
-        dataUrl: frame.dataUrl,
-        mimeType: "image/png",
-        storagePath: `podcaster/montage-export/${jobId}/scene-text/${String(segment.rowId || sceneIndex).trim() || sceneIndex}-${String(frame.kind || "frame").trim()}-${Number.isFinite(Number(frame.wordIndex)) ? Math.max(0, Math.round(Number(frame.wordIndex))) : "base"}.png`
-      }, "image", nextInputIndex);
-      args.push("-i", framePath);
-      const frameLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}`;
-      const outLabel = `ontxt_scene_${sceneIndex}_${nextInputIndex}_out`;
-      const frameEnableExpr = escapeFfmpegExpr(`between(t,${clampedStartSec.toFixed(3)},${clampedEndSec.toFixed(3)})`);
-      const baseX = Math.max(0, Math.round((Number(spec.rawXPx || 0) - Number(frame?.offsetXPx || 0)) || 0));
-      const baseY = Math.max(0, Math.round((Number(spec.yPx || 0) - Number(frame?.offsetYPx || 0)) || 0));
-      overlayFilters.push(`[${nextInputIndex}:v]format=rgba[${frameLabel}]`);
-      overlayFilters.push(`${chainLabel}[${frameLabel}]overlay=format=auto:eof_action=repeat:enable='${frameEnableExpr}':x=${baseX}:y=${baseY}[${outLabel}]`);
-      chainLabel = `[${outLabel}]`;
-      nextInputIndex += 1;
-      appliedOverlayCount += 1;
-    }
-  }
-  if (!overlayFilters.length) {
-    return {
-      videoFilterGraph,
-      finalVideoMapLabel: baseVideoMapLabel,
-      nextInputIndex,
-      appliedOverlayCount: 0
-    };
-  }
-
-  let newFilterGraph = videoFilterGraph;
-  if (newFilterGraph) {
-    newFilterGraph += `;${overlayFilters.join(";")}`;
-  } else {
-    newFilterGraph = overlayFilters.join(";");
-  }
-
-  console.info("[backend][montage-export][scene-text-raster]", {
-    jobId,
-    sceneIndex,
-    rowId: String(entry?.rowId || "").trim() || undefined,
-    appliedOverlayCount,
-    reelModeEnabled
-  });
-
-  return {
-    videoFilterGraph: newFilterGraph,
-    finalVideoMapLabel: chainLabel,
-    nextInputIndex,
-    appliedOverlayCount
+    finalVideoMapLabel: `[${outLabel}]`,
+    appliedOverlayCount: assSegments.length
   };
 }
 
@@ -11083,7 +10571,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     const shouldBurnSceneOnScreenText = input.exportMode !== "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const renderedOnScreenTextSegmentMap = buildMontageOnScreenTextRenderedSegmentMap(input.onScreenTextRenderedSegments || []);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, shouldAbort });
     const intermediatePaths = [];
     const skippedEntries = [];
@@ -11369,45 +10856,20 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         }
 
         let finalVideoMapLabel = "[vout]";
-        let nextSceneInputIndex = !forceSilentAudio && !useNativeVideoAudio && inputAudioPath ? 3 : 2;
         if (shouldBurnSceneOnScreenText) {
-          if (shouldUseMontageSceneDrawtextFilters(input)) {
-            const textOverlayResult = await appendMontageSceneOnScreenTextDrawtextFilters({
-              input,
-              entry,
-              sceneIndex,
-              sceneTimelineStartMs,
-              sceneTimelineEndMs,
-              canvas,
-              videoFilterGraph,
-              baseVideoMapLabel: finalVideoMapLabel,
-              tmpDir
-            });
-            videoFilterGraph = textOverlayResult.videoFilterGraph;
-            finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
-          } else {
-            const textOverlayResult = await appendMontageSceneOnScreenTextOverlays({
-              args,
-              input,
-              entry,
-              sceneIndex,
-              sceneDurationSec: durSec,
-              sceneTimelineStartMs,
-              sceneTimelineEndMs,
-              canvas,
-              renderedSegmentMap: renderedOnScreenTextSegmentMap,
-              videoFilterGraph,
-              baseVideoMapLabel: finalVideoMapLabel,
-              nextInputIndex: nextSceneInputIndex,
-              downloadInput,
-              jobId,
-              reelModeEnabled: input?.reelModeEnabled === true || isMontageReelResolution(input?.resolution || ""),
-              tmpDir
-            });
-            videoFilterGraph = textOverlayResult.videoFilterGraph;
-            finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
-            nextSceneInputIndex = textOverlayResult.nextInputIndex;
-          }
+          const textOverlayResult = await appendMontageSceneOnScreenTextAssFilters({
+            input,
+            entry,
+            sceneIndex,
+            sceneTimelineStartMs,
+            sceneTimelineEndMs,
+            canvas,
+            videoFilterGraph,
+            baseVideoMapLabel: finalVideoMapLabel,
+            tmpDir
+          });
+          videoFilterGraph = textOverlayResult.videoFilterGraph;
+          finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
         }
         const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
         if (hasBrandOverlay) {
@@ -14081,7 +13543,6 @@ if (IS_MAIN_MODULE) {
       startedAt: BACKEND_BOOT_ISO,
       startupSignature: BACKEND_BOOT_SIGNATURE,
       montageRenderRuntime: IS_RENDER_RUNTIME ? "render" : "non-render",
-      montageKaraokeWordFrameCap: MONTAGE_EXPORT_MAX_KARAOKE_WORD_FRAMES_PER_SEGMENT,
       moodleModuleGraphicsRoute: true,
       podcasterDialogueAudioRoute: true
     });

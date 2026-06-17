@@ -780,6 +780,126 @@
     return filters;
   }
 
+  function padAssTime(value = 0) {
+    return String(Math.max(0, Math.floor(Number(value || 0) || 0))).padStart(2, "0");
+  }
+
+  function formatAssTime(seconds = 0) {
+    const totalCentiseconds = Math.max(0, Math.round((Number(seconds || 0) || 0) * 100));
+    const hours = Math.floor(totalCentiseconds / 360000);
+    const minutes = Math.floor((totalCentiseconds % 360000) / 6000);
+    const secs = Math.floor((totalCentiseconds % 6000) / 100);
+    const centiseconds = totalCentiseconds % 100;
+    return `${hours}:${padAssTime(minutes)}:${padAssTime(secs)}.${padAssTime(centiseconds)}`;
+  }
+
+  function normalizeAssHexColor(value = "", fallback = "FFFFFF") {
+    const source = String(value || "").trim();
+    const match = source.match(/^#?([0-9a-f]{6})$/i);
+    return match ? match[1].toUpperCase() : String(fallback || "FFFFFF").trim().toUpperCase();
+  }
+
+  function toAssColor(value = "", opacity = 1, fallback = "FFFFFF") {
+    const hex = normalizeAssHexColor(value, fallback);
+    const cleanOpacity = Math.max(0, Math.min(1, Number(opacity ?? 1) || 0));
+    const alpha = Math.max(0, Math.min(255, Math.round((1 - cleanOpacity) * 255)));
+    const rr = hex.slice(0, 2);
+    const gg = hex.slice(2, 4);
+    const bb = hex.slice(4, 6);
+    return `&H${alpha.toString(16).padStart(2, "0").toUpperCase()}${bb}${gg}${rr}`;
+  }
+
+  function escapeAssText(value = "") {
+    return String(value ?? "")
+      .replace(/\\/g, "\\\\")
+      .replace(/\r\n|\r|\n/g, "\\N")
+      .replace(/\{/g, "\\{")
+      .replace(/\}/g, "\\}");
+  }
+
+  function buildAssInvisibleWordOverlayText(text = "", activeWordIndex = -1, activeColor = "&H000000FF") {
+    const tokens = tokenizeSubtitleText(text);
+    if (!tokens.length) return "";
+    let wordIndex = 0;
+    return tokens.map((token) => {
+      if (!token || /^\s+$/.test(token)) return token.replace(/\n/g, "\\N");
+      const escaped = escapeAssText(token);
+      const isActive = wordIndex === activeWordIndex;
+      wordIndex += 1;
+      if (isActive) {
+        return `{\\alpha&H00&\\c${activeColor}}${escaped}`;
+      }
+      return `{\\alpha&HFF&}${escaped}{\\alpha&H00&}`;
+    }).join("");
+  }
+
+  function buildMontageOnScreenTextAss(options = {}) {
+    const sourceWidth = Math.max(2, Math.round(Number(options?.width || options?.sourceWidth || 1280) || 1280));
+    const sourceHeight = Math.max(2, Math.round(Number(options?.height || options?.sourceHeight || 720) || 720));
+    const segments = Array.isArray(options?.segments) ? options.segments.filter(Boolean) : [];
+    if (!segments.length) return "";
+
+    const defaultFont = String(options?.defaultFontFamily || "Arial").trim() || "Arial";
+    const scriptInfo = [
+      "[Script Info]",
+      "ScriptType: v4.00+",
+      "WrapStyle: 2",
+      "ScaledBorderAndShadow: yes",
+      `PlayResX: ${sourceWidth}`,
+      `PlayResY: ${sourceHeight}`,
+      "",
+      "[V4+ Styles]",
+      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      `Style: KaraokeBase,${defaultFont},44,${toAssColor("#94A3B8", 1, "94A3B8")},${toAssColor("#94A3B8", 1, "94A3B8")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#020617", 0.82, "020617")},0,0,0,0,100,100,0,0,3,2,4,2,0,0,0,1`,
+      `Style: KaraokeActive,${defaultFont},44,${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#FACC15", 1, "FACC15")},${toAssColor("#0F172A", 1, "0F172A")},${toAssColor("#000000", 0, "000000")},0,0,0,0,100,100,0,0,1,2,4,2,0,0,0,1`,
+      "",
+      "[Events]",
+      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    ];
+
+    const events = [];
+    segments.forEach((segment) => {
+      const spec = segment?.spec && typeof segment.spec === "object" ? segment.spec : {};
+      const wrappedText = String(spec.wrappedText || spec.text || segment?.text || "").trim();
+      if (!wrappedText) return;
+      const fontFamily = String(spec.fontFamily || defaultFont).trim() || defaultFont;
+      const fontSizePx = Math.max(16, Math.round(Number(spec.fontSizePx || 44) || 44));
+      const outlinePx = Math.max(0, Number(spec.strokeEnabled === false ? 0 : spec.strokeWidthPx || 0) || 0);
+      const shadowPx = Math.max(0, Number(spec.shadowEnabled === false ? 0 : spec.shadowY || 0) || 0);
+      const textAlign = String(spec.textAlign || "center").trim().toLowerCase();
+      const alignment = textAlign === "left" ? 1 : textAlign === "right" ? 3 : 2;
+      const posX = textAlign === "left"
+        ? Math.round(Number(spec.rawXPx || 0) || 0)
+        : textAlign === "right"
+          ? Math.round((Number(spec.rawXPx || 0) || 0) + (Number(spec.boxWidthPx || 0) || 0))
+          : Math.round((Number(spec.rawXPx || 0) || 0) + ((Number(spec.boxWidthPx || 0) || 0) / 2));
+      const posY = Math.round(Number(spec.yPx || 0) || 0);
+      const baseColor = toAssColor("#94A3B8", Number(spec.textOpacity ?? 1) || 1, "94A3B8");
+      const activeColor = toAssColor("#FACC15", 1, "FACC15");
+      const outlineColor = toAssColor(spec.strokeColor || "#0F172A", 1, "0F172A");
+      const backColor = spec.boxEnabled === false
+        ? toAssColor("#000000", 0, "000000")
+        : toAssColor("#020617", Math.max(0, Math.min(1, Number(spec.bgOpacity ?? 0.82) || 0.82)), "020617");
+      const startSec = Math.max(0, Number(segment?.startSec || 0) || 0);
+      const endSec = Math.max(startSec + 0.1, Number(segment?.endSec || 0) || 0);
+      const baseText = escapeAssText(wrappedText);
+      const baseOverrides = `{\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\pos(${posX},${posY})\\bord${outlinePx}\\shad${shadowPx}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}\\4c${backColor}}`;
+      events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
+
+      const wordTimings = Array.isArray(segment?.wordTimings) ? segment.wordTimings : [];
+      wordTimings.forEach((word, index) => {
+        const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
+        const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
+        if (wordEndSec <= wordStartSec) return;
+        const activeText = buildAssInvisibleWordOverlayText(wrappedText, index, activeColor);
+        const activeOverrides = `{\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\pos(${posX},${posY})\\bord${outlinePx}\\shad${shadowPx}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
+        events.push(`Dialogue: 1,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
+      });
+    });
+
+    return `${scriptInfo.join("\n")}\n${events.join("\n")}\n`;
+  }
+
   const api = {
     ...onScreenTextApi,
     escapeHtml,
@@ -798,7 +918,8 @@
     buildOnScreenTextRasterStyleBlock,
     buildOnScreenTextRasterSnapshotPlan,
     buildMontageOnScreenTextKaraokeBoxFilters,
-    buildMontageOnScreenTextDrawFilters
+    buildMontageOnScreenTextDrawFilters,
+    buildMontageOnScreenTextAss
   };
 
   return api;

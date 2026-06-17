@@ -64,7 +64,7 @@ if (!/let onScreenTextSegments = Array\.isArray\(onScreenTextTimelineRaw\?\.segm
 }
 
 if (!/const shouldBurnSceneOnScreenText = input\.exportMode !== "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/.test(serverSource)
-  || !/await appendMontageSceneOnScreenTextOverlays\(\{[\s\S]*reelModeEnabled: input\?\.reelModeEnabled === true \|\| isMontageReelResolution\(input\?\.resolution \|\| ""\)/.test(serverSource)) {
+  || !/await appendMontageSceneOnScreenTextAssFilters\(\{/.test(serverSource)) {
   throw new Error("El export reel debe componer el texto en pantalla dentro del render por escena.");
 }
 

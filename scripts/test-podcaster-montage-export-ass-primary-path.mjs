@@ -17,20 +17,32 @@ assert.match(
 
 assert.match(
   backendSource,
-  /await appendMontageSceneOnScreenTextDrawtextFilters\(\{/,
-  "El render de escena debe usar drawtext compartido para el texto en pantalla."
+  /async function appendMontageSceneOnScreenTextAssFilters\(\{/,
+  "El render de escena debe construir un archivo ASS temporal por escena."
 );
 
 assert.match(
   backendSource,
-  /if \(shouldUseMontageSceneDrawtextFilters\(input\)\) \{[\s\S]*appendMontageSceneOnScreenTextDrawtextFilters\([\s\S]*\} else \{[\s\S]*appendMontageSceneOnScreenTextOverlays\(/,
-  "El export normal debe usar drawtext como ruta principal y dejar raster solo como fallback."
+  /const assContent = buildMontageOnScreenTextAss\(\{/,
+  "La ruta de export principal debe reutilizar el builder compartido de ASS."
+);
+
+assert.match(
+  backendSource,
+  /ass=filename='/,
+  "El render por escena debe quemar el karaoke con libass."
 );
 
 assert.doesNotMatch(
   backendSource,
-  /raster frames missing, falling back to native drawtext overlay/,
-  "La ruta nueva no debe depender de una degradación silenciosa desde rasters."
+  /appendMontageSceneOnScreenTextDrawtextFilters\(/,
+  "El export normal ya no debe conservar la ruta drawtext por escena."
 );
 
-console.log("Podcaster montage final visuals keep normal text out of final drawtext pass OK.");
+assert.doesNotMatch(
+  backendSource,
+  /appendMontageSceneOnScreenTextOverlays\(/,
+  "El export normal ya no debe conservar la ruta rasterizada por escena."
+);
+
+console.log("Podcaster montage export ASS primary path contract OK.");
