@@ -421,7 +421,6 @@
           stroke="${escapeSvgText(strokeColor)}"
           stroke-width="${strokeWidthPx}"
           paint-order="stroke fill"
-          filter="url(#pod-text-shadow)"
           xml:space="preserve"
         >${current.markup}</text>
       `;
