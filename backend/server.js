@@ -75,6 +75,11 @@ const {
   resolveMontageIntermediateVideoParams
 } = require("./montage-export-video-params.js");
 const {
+  normalizeMontageRenderMode,
+  shouldUseBrowserMontageRenderer,
+  renderMontageBrowserOverlayVideo
+} = require("./montage-browser-render.js");
+const {
   ANALIZAR_PDF_MAPPING_TOOL_NAME,
   buildResultSummary,
   buildDefaultStyleMappingSeeds,
@@ -9067,6 +9072,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const format = requestedFormat === "webm_vp9" ? "webm_vp9" : "mp4_h264";
   const qualityPreset = String(raw?.qualityPreset || "balanced").trim();
   const resolution = String(raw?.resolution || "source").trim();
+  const renderMode = normalizeMontageRenderMode(raw?.renderMode || "browser");
   const reelModeEnabled = raw?.reelModeEnabled === true || isMontageReelResolution(resolution);
   const includeBackgroundMusic = raw?.includeBackgroundMusic === true;
   const partyKaraoke = raw?.partyKaraoke !== false;
@@ -9260,6 +9266,7 @@ function normalizeMontageExportRequestBody(body = {}) {
 
   return {
     sessionId,
+    renderMode,
     exportMode,
     format,
     qualityPreset,
@@ -9321,6 +9328,11 @@ function validateMontageExportRequest(input = {}) {
   }
   if (!new Set(["source", "1080p", "720p", "480p", "1080x1920", "720x1280", "480x854"]).has(String(input?.resolution || "").trim())) {
     const err = new Error("Resolución inválida.");
+    err.status = 400;
+    throw err;
+  }
+  if (!new Set(["browser", "ffmpeg-legacy"]).has(normalizeMontageRenderMode(input?.renderMode || "browser"))) {
+    const err = new Error("Render mode inválido.");
     err.status = 400;
     throw err;
   }
@@ -10687,6 +10699,82 @@ async function renderMontageOverlayCards({
   return outPath;
 }
 
+async function renderMontageBrowserFinalVisualPass({
+  input = {},
+  finalOutPath = "",
+  tmpDir = "",
+  outExt = "mp4",
+  deliveryParams = {},
+  emitStage = () => {},
+  shouldAbort = () => false
+} = {}) {
+  const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_browser_visual_input").catch(() => ({ width: 1280, height: 720 }));
+  const viewport = {
+    width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
+    height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
+  };
+  const browserPayload = {
+    ...input,
+    renderMode: "browser",
+    brandOverlay: input?.brandOverlay?.assetPath
+      ? {
+        ...input.brandOverlay,
+        assetUrl: `file://${path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()).replace(/\\/g, "/")}`
+      }
+      : input?.brandOverlay
+  };
+  const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
+  const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
+  const totalDurationMs = Math.max(
+    1000,
+    Math.round((Array.isArray(input?.entries) ? input.entries : []).reduce((max, entry) => {
+      const startMs = Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
+      const durationMs = Math.max(0, Math.round(Number(entry?.durationMs || 0) || 0));
+      return Math.max(max, startMs + durationMs);
+    }, 0)) || 1000
+  );
+  emitStage("boot_renderer", 0.8, "Iniciando renderer fiel al preview.");
+  throwIfCancelled("boot_renderer");
+  const renderedVideoPath = await renderMontageBrowserOverlayVideo({
+    publicRoot: path.resolve(process.cwd(), "public"),
+    payload: browserPayload,
+    baseVideoPath: finalOutPath,
+    bootstrapHtmlPath,
+    outputDir: renderOutputDir,
+    viewport,
+    timeoutMs: Math.max(120000, totalDurationMs + 45000)
+  });
+  if (!renderedVideoPath) {
+    const err = new Error("browser_render_output_missing");
+    err.code = "browser_render_output_missing";
+    throw err;
+  }
+  emitStage("capture_timeline", 0.88, "Capturando montaje final en navegador.");
+  throwIfCancelled("capture_timeline");
+  const browserFinalOutPath = path.join(tmpDir, `montage-browser-final.${outExt}`);
+  emitStage("transcode_final", 0.96, "Empaquetando video final.");
+  throwIfCancelled("transcode_final");
+  await runFfmpegCommand([
+    "-y", "-hide_banner", "-loglevel", "warning",
+    "-i", renderedVideoPath,
+    "-i", finalOutPath,
+    "-map", "0:v:0",
+    "-map", "1:a:0?",
+    "-c:v", deliveryParams.vCodec,
+    ...deliveryParams.vArgs,
+    "-pix_fmt", "yuv420p",
+    "-c:a", deliveryParams.aCodec,
+    "-ar", "48000",
+    ...deliveryParams.aArgs,
+    ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+    browserFinalOutPath
+  ], {
+    stage: "montage_browser_transcode",
+    shouldAbort: () => shouldAbort()
+  });
+  return browserFinalOutPath;
+}
+
 async function executeMontageExportPipeline(rawInput = {}, context = {}) {
   const input = rawInput && typeof rawInput === "object" ? rawInput : {};
   const uid = String(context?.uid || "").trim();
@@ -11368,23 +11456,58 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     }
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
+    const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
+      ? input.overlayCards.segments
+      : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
+    const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()));
+    const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
+    const hasBrowserVisualPass = shouldAttemptBrowserRenderer && Boolean(
+      Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length)
+      || overlayCardSegments.length
+      || hasBrandOverlay
+    );
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
-      || (Array.isArray(input.overlayCards) && input.overlayCards.length)
+      || overlayCardSegments.length
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
     );
     console.info("[backend][montage-export][visual-pass-decision]", {
       hasFinalVisualPass,
+      hasBrowserVisualPass,
+      renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       reviewOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
-      overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+      overlayCardCount: overlayCardSegments.length,
       exportMode: input.exportMode,
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
       hasBrandOverlay
     });
-    if (hasFinalVisualPass) {
+    let browserVisualCompleted = false;
+    if (hasBrowserVisualPass) {
+      try {
+        finalOutPath = await renderMontageBrowserFinalVisualPass({
+          input: {
+            ...input,
+            overlayCards: overlayCardSegments
+          },
+          finalOutPath,
+          tmpDir,
+          outExt,
+          deliveryParams,
+          emitStage,
+          shouldAbort
+        });
+        browserVisualCompleted = true;
+      } catch (browserRenderError) {
+        console.warn("[backend][montage-export][browser-render-fallback]", {
+          jobId,
+          message: String(browserRenderError?.message || browserRenderError),
+          code: String(browserRenderError?.code || "").trim() || null
+        });
+      }
+    }
+    if (hasFinalVisualPass && !browserVisualCompleted) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const visualDims = input.exportMode === "review"
         ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
@@ -11507,10 +11630,10 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         });
       }
 
-      if (Array.isArray(input.overlayCards) && input.overlayCards.length) {
+      if (overlayCardSegments.length) {
         emitStage("apply_overlay_cards", 0.9, "Aplicando cards animadas.");
         const overlayCardsFilter = buildMontageOverlayCardsFilter({
-          cards: input.overlayCards,
+          cards: overlayCardSegments,
           width: visualDims.width,
           height: visualDims.height,
           tmpDir
@@ -11679,7 +11802,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       };
     }
 
-    emitStage("cache_output", 0.96, "Guardando archivo final para descarga.");
+    emitStage("upload_result", 0.98, "Subiendo archivo final.");
     logMontageMemory("cache_output_start", { jobId, exportedSceneCount: exportedEntries.length });
     const stored = await storeMontageExportResult(finalOutPath, input, context);
     logMontageMemory("cache_output_after", { jobId, exportId: String(stored?.exportId || "").trim() });
@@ -11803,10 +11926,11 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
     const input = normalizeMontageExportRequestBody(req.body || {});
     console.info("[backend][montage-export][request-body]", {
       sessionId: String(input.sessionId || "").trim(),
+      renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
       onScreenTextSegments: Array.isArray(input.onScreenTextSegments) ? input.onScreenTextSegments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(input.onScreenTextRenderedSegments) ? input.onScreenTextRenderedSegments.length : 0,
-      overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
+      overlayCardCount: Array.isArray(input.overlayCards?.segments) ? input.overlayCards.segments.length : (Array.isArray(input.overlayCards) ? input.overlayCards.length : 0),
       partyKaraoke: input.partyKaraoke !== false,
       onlyAudio: input.onlyAudio === true,
       includeLogo: input.brandOverlay?.enabled === true,

@@ -11,6 +11,11 @@ import {
   putPodcasterLocalMediaBlob,
   putPodcasterLocalMediaDataUrl
 } from "./podcaster-local-media-cache.js";
+import {
+  buildMontageRenderAssContent,
+  normalizeMontageRenderMode,
+  resolveMontageRenderEntryAtTime
+} from "./podcaster-montage-render-surface.js";
 import { resolveEffectiveExportResolution } from "./podcaster-reels.js";
 
 const STUDIO_TIMELINE_MIN_CLIP_MS = 500;
@@ -57,6 +62,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     : "vbr";
   const maxBitrate = Math.max(0.1, Math.min(50, Number(source.maxBitrate || 5) || 5));
   const minBitrate = Math.max(0, Math.min(51, Number(source.minBitrate || 20) || 20));
+  const renderMode = normalizeMontageRenderMode(source.renderMode || "browser");
 
   return {
     exportMode,
@@ -66,6 +72,7 @@ export function normalizeMontageExportSettings(raw = {}) {
     bitrateMode,
     maxBitrate,
     minBitrate,
+    renderMode,
     filename,
     includeReviewExcel,
     onlyAudio: schemaVersion >= MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION && source.onlyAudio === true,
@@ -508,63 +515,17 @@ function shouldUseMontageExportPreviewJassub(payload = {}) {
 }
 
 function buildMontageExportPreviewAssContent(payload = {}) {
-  const timeline = payload?.onScreenTextTimeline;
-  const settings = timeline?.settings && typeof timeline.settings === "object" ? timeline.settings : {};
-  const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
-  if (!segments.length) return "";
-  const textApi = getMontageExportTextRenderApi();
-  const buildAss = typeof textApi.buildMontageOnScreenTextAss === "function" ? textApi.buildMontageOnScreenTextAss : null;
-  const normalizeWordTimings = typeof textApi.normalizeKaraokeWordTimings === "function"
-    ? textApi.normalizeKaraokeWordTimings
-    : null;
   const resolveSpec = typeof window.resolveOnScreenTextRenderSpec === "function"
     ? window.resolveOnScreenTextRenderSpec
     : null;
-  if (!buildAss || !resolveSpec) return "";
+  if (!resolveSpec) return "";
   const dims = getMontageExportPreviewCanvasSize();
-  const preparedSegments = segments
-    .map((segment) => {
-      if (!segment || typeof segment !== "object") return null;
-      const text = String(segment.text || "").trim();
-      if (!text) return null;
-      const spec = resolveSpec({
-        settings,
-        layout: segment.layout || {},
-        resolution: payload?.resolution || "source",
-        sourceWidth: dims.width,
-        sourceHeight: dims.height,
-        previewWidthPx: dims.width,
-        previewHeightPx: dims.height,
-        text,
-        fallback: ""
-      });
-      const rowId = String(segment.rowId || "").trim();
-      const audioClip = payload?.dialogueAudioMap?.[rowId] || null;
-      const wordTimings = payload?.partyKaraoke !== false && normalizeWordTimings
-        ? normalizeWordTimings(audioClip, text)
-        : [];
-      const playbackRate = Math.max(0.5, Math.min(10, Number(audioClip?.playbackRate || 1) || 1));
-      const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
-      const durationSec = Math.max(0.1, Number(segment.durationMs || 0) / 1000);
-      return {
-        ...segment,
-        text,
-        spec,
-        settings,
-        wordTimings,
-        playbackRate,
-        startSec,
-        endSec: startSec + durationSec
-      };
-    })
-    .filter(Boolean);
-  if (!preparedSegments.length) return "";
-  return buildAss({
+  return buildMontageRenderAssContent({
+    payload,
     width: dims.width,
     height: dims.height,
-    defaultFontFamily: resolveMontageExportAssFontFamily(settings.fontFamily),
-    settings,
-    segments: preparedSegments
+    resolveSpec,
+    defaultFontFamily: resolveMontageExportAssFontFamily(payload?.onScreenTextTimeline?.settings?.fontFamily)
   });
 }
 
@@ -1116,8 +1077,12 @@ export function describeMontageExportStage(stage = "", mode = window.montageExpo
     concat_timeline: "Uniendo timeline final…",
     mix_timeline_audio: "Mezclando narración del timeline…",
     mix_background_music: "Mezclando música de fondo…",
+    boot_renderer: "Iniciando renderer fiel al preview…",
+    capture_timeline: "Capturando montaje final en navegador…",
+    transcode_final: "Empaquetando video final…",
     apply_onscreen_text: "Aplicando texto en pantalla…",
     apply_review_layout: "Componiendo layout de revisión…",
+    upload_result: "Subiendo archivo final…",
     cache_output: "Preparando descarga final…",
     ready: "Tu video está listo.",
     error: "No pudimos exportar tu video."
@@ -1522,9 +1487,10 @@ async function resolveMontageExportFrontendPreview(payload = {}, previewRowId = 
   if (!entries.length) return null;
   const cleanRowId = String(previewRowId || "").trim();
   const cleanSceneIndex = Math.max(0, Math.round(Number(previewSceneIndex || 0) || 0));
-  const selected = (cleanSceneIndex > 0 ? entries[cleanSceneIndex - 1] : null)
-    || entries.find((entry) => String(entry?.rowId || "").trim() === cleanRowId)
-    || entries[0];
+  const selected = resolveMontageRenderEntryAtTime(payload, 0, {
+    previewRowId: cleanRowId,
+    previewSceneIndex: cleanSceneIndex
+  });
   if (!selected || typeof selected !== "object") return null;
   const video = selected?.video && typeof selected.video === "object" ? selected.video : null;
   const directDataUrl = String(video?.dataUrl || video?.localDataUrl || "").trim();
@@ -2889,6 +2855,7 @@ export function buildMontageExportPayload(session = null) {
   const reelModeEnabled = videoCfg?.reelModeEnabled === true;
   const payload = {
     sessionId,
+    renderMode: normalizeMontageRenderMode(window.montageExportState.renderMode || "browser"),
     exportMode: window.montageExportState.exportMode,
     onlyAudio: window.montageExportState.onlyAudio === true,
     format: effectiveFormat,
