@@ -1152,10 +1152,39 @@ async function downloadStorageObjectToBuffer(storagePath = "") {
   for (const bucket of buckets) {
     if (!bucket) continue;
     try {
-      // eslint-disable-next-line no-await-in-loop
-      const [downloaded] = await withRetry(() => bucket.file(cleanStoragePath).download());
+      const file = bucket.file(cleanStoragePath);
+      let buffer = null;
+      let metadata = {};
+
+      try {
+        const [signedUrl] = await file.getSignedUrl({
+          version: "v4",
+          action: "read",
+          expires: Date.now() + 5 * 60 * 1000
+        });
+        const headRes = await fetchCompat(signedUrl, { method: "HEAD" });
+        if (headRes.ok) {
+          metadata.contentType = headRes.headers.get("content-type");
+          metadata.size = Number(headRes.headers.get("content-length"));
+        }
+        const getRes = await fetchCompat(signedUrl, { method: "GET" });
+        if (getRes.ok) {
+          buffer = Buffer.from(await getRes.arrayBuffer());
+        } else {
+          throw new Error(`Signed URL fetch failed: ${getRes.status} ${getRes.statusText}`);
+        }
+      } catch (signErr) {
+        // eslint-disable-next-line no-await-in-loop
+        const [downloaded] = await withRetry(() => file.download());
+        buffer = Buffer.from(downloaded);
+        // eslint-disable-next-line no-await-in-loop
+        const [meta] = await withRetry(() => file.getMetadata()).catch(() => [{}]);
+        metadata = meta;
+      }
+
       return {
-        buffer: Buffer.from(downloaded),
+        buffer,
+        metadata,
         bucket
       };
     } catch (error) {
@@ -1267,31 +1296,80 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
     if (!bucket) continue;
     const file = bucket.file(cleanStoragePath);
     try {
-      // eslint-disable-next-line no-await-in-loop
-      const [exists] = await withRetry(() => file.exists()).catch(() => [null]);
+      let exists = null;
+      let meta = {};
+      let signedUrl = "";
+
+      // Try offline signing first
+      try {
+        const [url] = await file.getSignedUrl({
+          version: "v4",
+          action: "read",
+          expires: Date.now() + 5 * 60 * 1000
+        });
+        const headRes = await fetchCompat(url, { method: "HEAD" });
+        if (headRes.ok) {
+          exists = true;
+          meta.contentType = headRes.headers.get("content-type");
+          meta.size = Number(headRes.headers.get("content-length"));
+          signedUrl = url;
+        } else if (headRes.status === 404) {
+          exists = false;
+        } else {
+          throw new Error(`HEAD request failed: ${headRes.status}`);
+        }
+      } catch (signErr) {
+        // eslint-disable-next-line no-await-in-loop
+        const [ex] = await withRetry(() => file.exists()).catch(() => [null]);
+        exists = ex;
+        if (exists !== false) {
+          // eslint-disable-next-line no-await-in-loop
+          const [metadata] = await withRetry(() => file.getMetadata());
+          meta = metadata;
+        }
+      }
+
       if (exists === false) {
         lastMissingError = new Error("storage_not_found");
         continue;
       }
-      // eslint-disable-next-line no-await-in-loop
-      const [meta] = await withRetry(() => file.getMetadata());
+
       const payload = buildStreamingMediaPayload(parseStorageObjectSize(meta), {
         mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
         rangeHeader
       });
+
       Object.entries(payload.headers || {}).forEach(([name, value]) => {
         if (!name || value == null || value === "") return;
         res.setHeader(name, value);
       });
-      const stream = file.createReadStream(payload.range ? {
-        start: Number(payload.range.start || 0),
-        end: Number(payload.range.end || 0)
-      } : undefined);
+
+      let stream = null;
+      if (signedUrl) {
+        const headers = {};
+        if (payload.range) {
+          headers.Range = `bytes=${payload.range.start}-${payload.range.end}`;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const getRes = await fetchCompat(signedUrl, { method: "GET", headers });
+        if (getRes.ok || getRes.status === 206) {
+          stream = coerceReadableStream(getRes.body);
+        } else {
+          throw new Error(`Signed URL GET failed: ${getRes.status}`);
+        }
+      } else {
+        stream = file.createReadStream(payload.range ? {
+          start: Number(payload.range.start || 0),
+          end: Number(payload.range.end || 0)
+        } : undefined);
+      }
+
       req.once("close", () => {
         if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
           stream.destroy();
         }
       });
+
       await safePipeline(stream, res.status(payload.status || 200));
       return { streamed: true };
     } catch (error) {
