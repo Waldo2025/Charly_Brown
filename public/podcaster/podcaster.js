@@ -39,7 +39,7 @@ import {
   downloadReadyMontageExport,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-18.2";
+} from "./podcaster-montage-export.js?v=2026-06-18.5";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
@@ -3663,11 +3663,14 @@ function normalizeDialogueVideoMap(raw = {}) {
       .sort((a, b) => a.index - b.index);
     const clipMimeType = String(clip.mimeType || "").trim().toLowerCase();
     const clipType = String(clip.type || clip.mediaKind || "").trim().toLowerCase();
+    const normalizedType = clipType === "image"
+      ? "image"
+      : (clipType === "video" ? "video" : (clipMimeType.startsWith("image/") ? "image" : "video"));
     next[key] = {
       rowId: key,
       speaker: String(clip.speaker || "").trim(),
       mimeType: clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"),
-      type: clipType || (clipMimeType.startsWith("image/") ? "image" : null),
+      type: normalizedType,
       model: String(clip.model || "veo-3.1-generate-preview").trim() || "veo-3.1-generate-preview",
       variant: String(clip.variant || "").trim(),
       promptVersion: String(clip.promptVersion || "podcaster_veo_v1").trim() || "podcaster_veo_v1",

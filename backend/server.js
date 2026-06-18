@@ -65,6 +65,9 @@ const {
   buildStreamingMediaPayload
 } = require("./proxy-media-buffer.js");
 const {
+  shouldDestroyProxyMediaUpstream
+} = require("./proxy-media-lifecycle.js");
+const {
   resolveMontageExportVideoParams,
   resolveMontageIntermediateVideoParams
 } = require("./montage-export-video-params.js");
@@ -2643,11 +2646,14 @@ function sanitizePodcasterSession(raw = {}) {
     }).filter(Boolean);
     const clipMimeType = String(clip?.mimeType || "").trim().toLowerCase();
     const clipType = String(clip?.type || clip?.mediaKind || "").trim().toLowerCase();
+    const normalizedType = clipType === "image"
+      ? "image"
+      : (clipType === "video" ? "video" : (clipMimeType.startsWith("image/") ? "image" : "video"));
     dialogueVideoMap[key] = {
       rowId: key,
       speaker: clampText(clip?.speaker || "", 80),
       mimeType: clampText(clipMimeType || (clipType === "image" ? "image/jpeg" : "video/mp4"), 120) || "video/mp4",
-      type: clampText(clipType || (clipMimeType.startsWith("image/") ? "image" : ""), 20) || undefined,
+      type: normalizedType,
       model: clampText(clip?.model || DEFAULT_PODCASTER_VIDEO_MODEL, 140) || DEFAULT_PODCASTER_VIDEO_MODEL,
       promptVersion: clampText(clip?.promptVersion || "podcaster_veo_v1", 80) || "podcaster_veo_v1",
       videoDirective: clampText(clip?.videoDirective || "", 1400),
@@ -13644,13 +13650,30 @@ app.get("/api/assets/proxy-media", async (req, res) => {
       contentRange: contentRange || null,
       acceptRanges
     });
-    req.once("close", () => {
+    let responseFinished = false;
+    res.once("finish", () => {
+      responseFinished = true;
+    });
+    const maybeDestroyUpstream = (reason = "response-close") => {
+      const shouldDestroy = shouldDestroyProxyMediaUpstream({
+        requestAborted: req.destroyed === true || reason === "request-aborted",
+        responseFinished,
+        responseClosed: reason === "response-close"
+      });
+      if (!shouldDestroy) return;
       if (stream && typeof stream.destroy === "function" && !stream.destroyed) {
-        console.info("[backend][proxy-media] request closed, destroying upstream body stream", {
-          requestId
+        console.info("[backend][proxy-media] closing upstream body stream", {
+          requestId,
+          reason
         });
         stream.destroy();
       }
+    };
+    req.once("aborted", () => {
+      maybeDestroyUpstream("request-aborted");
+    });
+    res.once("close", () => {
+      maybeDestroyUpstream("response-close");
     });
     res.setHeader("Content-Type", mime);
     if (contentLength) res.setHeader("Content-Length", contentLength);

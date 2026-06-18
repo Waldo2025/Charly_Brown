@@ -2347,12 +2347,34 @@ async function inlineMontageExportPayloadMedia(payload = {}) {
 function stripInlineMontageMediaRecord(record = null) {
   if (!record || typeof record !== "object") return record;
   const clean = { ...record };
+  clean.url = normalizeMontageSubmissionMediaUrl(clean.url);
+  clean.downloadUrl = normalizeMontageSubmissionMediaUrl(clean.downloadUrl);
   const hasExplicitSource = Boolean(String(clean.storagePath || "").trim() || String(clean.url || "").trim() || String(clean.downloadUrl || "").trim());
   if (hasExplicitSource) {
     clean.dataUrl = "";
     clean.localDataUrl = "";
   }
   return clean;
+}
+
+function normalizeMontageSubmissionMediaUrl(value = "") {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return "";
+  if (/^(?:data:|https?:\/\/|gs:\/\/)/i.test(cleanValue)) return cleanValue;
+  if (!cleanValue.startsWith("/api/")) return cleanValue;
+  try {
+    if (typeof buildApiUrlPreferRemote === "function") {
+      const absolute = String(buildApiUrlPreferRemote(cleanValue) || "").trim();
+      if (absolute) return absolute;
+    }
+  } catch (_) {
+    // fallback below
+  }
+  try {
+    return new URL(cleanValue, window.location.origin).toString();
+  } catch (_) {
+    return cleanValue;
+  }
 }
 
 function stripMontageExportSubmissionPayload(payload = {}) {

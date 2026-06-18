@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.204",
-  "build": "2026-1.0.10.205",
+  "version": "1.0.10.205",
+  "build": "2026-1.0.10.206",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Podcaster ahora sanea dialogueVideoMap para no guardar type undefined en Firestore y proxy-media deja de cerrar streams válidos de forma prematura durante exportaciones con mezcla de audio timeline.",
     "Corregido: Se solucionó de raíz el error 403 Forbidden y Premature close en proxy-image y proxy-media mediante la firma offline y local de las URLs de Firebase Storage y su descarga/transmisión directa via HTTPS, lo que evita por completo la necesidad de contactar al endpoint de tokens de Google que se interrumpía en Render.",
     "Corregido: Se solucionó el error 403 Forbidden y Premature close al consultar imágenes privadas a través de proxy-image y proxy-media implementando reintentos con backoff exponencial para operaciones de almacenamiento y corrigiendo la detección errónea de cancelación de solicitudes en el backend.",
     "Corregido: Se solucionó un error 403 Forbidden al consultar imágenes privadas a través de /api/assets/proxy-image agregando el código 403 al detector de fallos de GCS, permitiendo la conmutación exitosa al bucket activo.",
@@ -10,6 +11,8 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El guardado manual de sesiones de Podcaster ya no falla por dialogueVideoMap.type undefined y el export evita cierres prematuros de stream en proxy-media durante la mezcla de audio.",
+    "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del hotfix de guardado y exportación.",
     "Corregido: Se solucionó el problema en /api/assets/proxy-image que impedía a los usuarios cargar portadas de sesión en desarrollo y producción.",
     "Corregido: Se solucionó el problema por el cual los videos verticales (Reels) seguidos de una exportación normal conservaban el aspecto vertical.",
     "Corregido: El logo o marca de agua ahora se superpone encima de las overlay cards en modo Reel en lugar de quedar cubierto.",
@@ -135,5 +138,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.204"
+  "cache_version": "2026-1.0.10.205"
 }

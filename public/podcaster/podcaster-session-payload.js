@@ -48,6 +48,24 @@ function stripInlineMediaRecordListMap(value = {}) {
   );
 }
 
+function normalizeDialogueVideoMapForCloud(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return Object.fromEntries(
+    Object.entries(source).map(([rowId, clip]) => {
+      if (!clip || typeof clip !== "object") return [rowId, clip];
+      const clipMimeType = String(clip?.mimeType || "").trim().toLowerCase();
+      const clipType = String(clip?.type || clip?.mediaKind || "").trim().toLowerCase();
+      const normalizedType = clipType === "image"
+        ? "image"
+        : (clipType === "video" ? "video" : (clipMimeType.startsWith("image/") ? "image" : "video"));
+      return [rowId, {
+        ...clip,
+        type: normalizedType
+      }];
+    })
+  );
+}
+
 export function buildCloudSessionPayload(source = null, panelMusicState = {}, chatState = [], deps = {}) {
   if (!source || typeof source !== "object") return null;
 
@@ -312,7 +330,7 @@ export function buildCloudSessionPayload(source = null, panelMusicState = {}, ch
     rowReferenceImageMap: stripInlineMediaRecordMap(getRowReferenceImageMap?.(source) || {}),
     rowReferenceVideoMap: stripInlineMediaRecordMap(getRowReferenceVideoMap?.(source) || {}),
     rowReferenceModeByRowId: getRowReferenceModeByRowId?.(source) || {},
-    dialogueVideoMap: getDialogueVideoMap?.(source) || {},
+    dialogueVideoMap: normalizeDialogueVideoMapForCloud(getDialogueVideoMap?.(source) || {}),
     dialogueAudioMap: getDialogueAudioMap?.(source) || {},
     podcastVideoConfig: normalizePodcastVideoConfig?.(source?.podcastVideoConfig || {}) || {},
     creativeVideoConfig: normalizeCreativeVideoConfig?.(source?.creativeVideoConfig || {}) || {},

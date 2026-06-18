@@ -43,6 +43,7 @@ const context = {
   console,
   Buffer,
   btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+  buildApiUrlPreferRemote: (path) => `https://remote.test${path}`,
   window: {
     location: {
       origin: "https://charly-brown.web.app"
@@ -93,6 +94,7 @@ vm.createContext(context);
   extractMaybeAsyncFunction("resolveCachedMontageMediaDataUrl"),
   extractMaybeAsyncFunction("maybeInlineMontageMediaAsset"),
   extractMaybeAsyncFunction("inlineMontageExportPayloadMedia"),
+  extractFunction("normalizeMontageSubmissionMediaUrl"),
   extractFunction("stripInlineMontageMediaRecord"),
   extractFunction("stripMontageExportSubmissionPayload")
 ].forEach((snippet) => {
@@ -275,6 +277,47 @@ test("montage export preserves inline-only media sources", () => {
   assert.equal(stripped.entries[0].video.localDataUrl, "data:video/mp4;base64,BBBB");
   assert.equal(stripped.entries[0].audio.dataUrl, "data:audio/mpeg;base64,CCCC");
   assert.equal(stripped.entries[0].audio.localDataUrl, "data:audio/mpeg;base64,DDDD");
+});
+
+test("montage export normalizes relative proxy-media urls for backend submission", () => {
+  const payload = {
+    backgroundMusic: {
+      url: "/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3",
+      downloadUrl: "/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3",
+      dataUrl: "data:audio/mpeg;base64,AAAA"
+    },
+    audioTimeline: {
+      backgroundSegments: [
+        {
+          rowId: "bg-1",
+          url: "/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia",
+          downloadUrl: "/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia",
+          dataUrl: "data:audio/mpeg;base64,BBBB"
+        }
+      ]
+    }
+  };
+
+  const stripped = context.stripMontageExportSubmissionPayload(payload);
+
+  assert.equal(stripped.backgroundMusic.dataUrl, "");
+  assert.equal(
+    stripped.backgroundMusic.url,
+    "https://remote.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
+  );
+  assert.equal(
+    stripped.backgroundMusic.downloadUrl,
+    "https://remote.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
+  );
+  assert.equal(stripped.audioTimeline.backgroundSegments[0].dataUrl, "");
+  assert.equal(
+    stripped.audioTimeline.backgroundSegments[0].url,
+    "https://remote.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
+  );
+  assert.equal(
+    stripped.audioTimeline.backgroundSegments[0].downloadUrl,
+    "https://remote.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
+  );
 });
 
 test("montage export confirm button uses an explicit handler and the modal stays clickable", () => {
