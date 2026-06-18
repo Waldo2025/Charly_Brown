@@ -9358,7 +9358,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     .filter(Boolean);
   const dialogueAudioMap = normalizeExportDialogueAudioMap(dialogueAudioMapRaw);
   const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => !isTimelineBackgroundAudioKind(segment?.kind));
-  const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
+  const useTimelineAudio = timelineAudioSegments.length > 0 && audioTimelineRaw?.enabled !== false;
   let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
     ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
     : [];
