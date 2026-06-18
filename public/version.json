@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.207",
-  "build": "2026-1.0.10.208",
+  "version": "1.0.10.208",
+  "build": "2026-1.0.10.209",
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: El export de Podcaster incorpora un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke y cards mucho más fieles al preview, con fallback automático a ffmpeg-legacy si Chromium falla.",
@@ -144,5 +144,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.207"
+  "cache_version": "2026-1.0.10.208"
 }
