@@ -1080,7 +1080,7 @@ let resolvedWritableStorageBucketPromise = null;
 function isMissingBucketError(error) {
   const message = String(error?.message || "").toLowerCase();
   const status = Number(error?.code || error?.statusCode || error?.status || 0) || 0;
-  return status === 404 || message.includes("bucket does not exist") || message.includes("specified bucket does not exist");
+  return status === 404 || status === 403 || message.includes("bucket does not exist") || message.includes("specified bucket does not exist") || message.includes("permission") || message.includes("forbidden");
 }
 
 async function resolveWritableStorageBucket() {
