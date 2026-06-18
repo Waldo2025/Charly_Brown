@@ -9580,9 +9580,11 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
     const storagePath = clampText(asset?.storagePath || "", 900);
     const rawUrl = String(asset?.downloadUrl || asset?.url || "").trim();
     const proxySource = resolveProxyMediaSource(rawUrl);
-    const url = String(proxySource.storagePath && !proxySource.url ? "" : (proxySource.url || rawUrl)).trim();
+    const urlCandidate = String(proxySource.storagePath && !proxySource.url ? "" : (proxySource.url || rawUrl)).trim();
+    const inlineUrlData = urlCandidate.startsWith("data:") ? urlCandidate : "";
+    const url = inlineUrlData ? "" : urlCandidate;
     const resolvedStoragePath = clampText(storagePath || proxySource.storagePath || "", 900);
-    const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
+    const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || inlineUrlData || "").trim();
     const assetTrace = {
       kind: String(kind || "video").trim() || "video",
       index: Math.max(0, Number(index || 0) || 0),

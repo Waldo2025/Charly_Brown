@@ -119,6 +119,27 @@ test("montage downloader writes inline data before network sources", async () =>
   }
 });
 
+test("montage downloader accepts inline data carried in asset url", async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), "cb-montage-inline-url-"));
+  try {
+    const downloadInput = context.createMontageAssetDownloader({ tmpDir, uid: "user-1" });
+    const outPath = await downloadInput(
+      {
+        url: "data:audio/mpeg;base64,SGVsbG8=",
+        mimeType: "audio/mpeg"
+      },
+      "audio",
+      0
+    );
+
+    assert.equal(readFileSync(outPath, "utf8"), "Hello");
+    assert.equal(context.__downloadUrlCalls || 0, 0);
+    assert.equal(context.__downloadStorageCalls || 0, 0);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("inline data url helper rejects oversized payloads", () => {
   const oversized = `data:text/plain,${"a".repeat(2_500_001)}`;
   assert.throws(() => context.decodeInlineDataUrl(oversized), /inline_data_too_large/);

@@ -26,8 +26,8 @@ assert.match(
 
 assert.match(
   source,
-  /const url = String\(proxySource\.storagePath && !proxySource\.url \? "" : \(proxySource\.url \|\| rawUrl\)\)\.trim\(\);[\s\S]*const resolvedStoragePath = clampText\(storagePath \|\| proxySource\.storagePath \|\| "", 900\);/,
-  "El downloader del export debe preferir fuentes durables al normalizar el audio."
+  /const urlCandidate = String\(proxySource\.storagePath && !proxySource\.url \? "" : \(proxySource\.url \|\| rawUrl\)\)\.trim\(\);[\s\S]*const inlineUrlData = urlCandidate\.startsWith\("data:"\) \? urlCandidate : "";\s*const url = inlineUrlData \? "" : urlCandidate;[\s\S]*const resolvedStoragePath = clampText\(storagePath \|\| proxySource\.storagePath \|\| "", 900\);[\s\S]*const dataUrl = String\(asset\?\.dataUrl \|\| asset\?\.localDataUrl \|\| inlineUrlData \|\| ""\)\.trim\(\);/,
+  "El downloader del export debe preferir fuentes durables y tratar data URLs inline al normalizar el audio."
 );
 
 console.log("Podcaster montage export audio timeline fallback OK.");
