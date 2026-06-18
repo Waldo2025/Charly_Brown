@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {
   buildPodcasterLocalMediaKey,
@@ -360,6 +360,28 @@ function isTransientMontageExportTransportError(error = null) {
     "load failed",
     "fetch failed"
   ].some((needle) => message.includes(needle));
+}
+
+function isMontageExportStatusRedirectFailure(error = null) {
+  const message = String(
+    error?.code
+    || error?.detail?.error
+    || error?.error
+    || error?.message
+    || ""
+  ).trim().toLowerCase();
+  const status = Number(error?.status || error?.detail?.status || 0) || 0;
+  const sameOriginApiBase = String(resolveApiBase() || "").trim() === "/api";
+  const remoteApiBase = String(getRemoteApiBase() || "").trim().toLowerCase();
+  const pointsToRender = remoteApiBase.includes(".onrender.com/api");
+  return sameOriginApiBase
+    && pointsToRender
+    && (status === 0 || status === 502 || status === 503)
+    && (
+      message.includes("failed to fetch")
+      || message.includes("fetch failed")
+      || message.includes("networkerror")
+    );
 }
 
 function scheduleMontageExportPollRetry(jobId = "", failureCount = 0, { transient = false } = {}) {
@@ -1146,10 +1168,10 @@ export async function pollMontageExportJob(jobId = "") {
     return;
   }
   try {
-    // IMPORTANTE: usar buildApiUrl (proxy same-origin /api) y NO buildApiUrlPreferRemote.
-    // buildApiUrlPreferRemote apunta directo a Render; cuando Render cae con 502/503
-    // no envía headers CORS y el browser bloquea con 'Failed to fetch'.
-    // El proxy de Firebase Hosting reenvía al backend y maneja CORS correctamente.
+    // IMPORTANTE: aquí usamos /api para respetar la configuración activa del runtime.
+    // En Hosting esto hoy termina en un redirect 302 hacia Render, no en un reverse proxy real.
+    // Si Render responde 502/503, el navegador puede terminar mostrando un Failed to fetch por CORS
+    // aunque el job haya arrancado bien en el backend.
     const exportStatusUrl = buildApiUrl(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
     logMontageExportDevtools("poll_request", {
       jobId: cleanJobId,
@@ -1376,10 +1398,15 @@ export async function pollMontageExportJob(jobId = "") {
       && recentPollSuccess
       && failureCount <= MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES
       && String(window.montageExportJobState.lastStage || "").trim();
-    const transientHint = transientNetworkError
+    const redirectFailure = isMontageExportStatusRedirectFailure(error);
+    const transientHint = redirectFailure
       ? (failureCount > 1
-        ? `Se perdió la conexión temporalmente. Reintentando el export… intento ${failureCount}.`
-        : "Se perdió la conexión temporalmente. Reintentando el export…")
+        ? `El job sí arrancó, pero Hosting redirigió export-status a Render y la respuesta 502 quedó bloqueada por CORS. Reintentando… intento ${failureCount}.`
+        : "El job sí arrancó, pero export-status fue redirigido a Render y la respuesta falló por CORS/502. Reintentando…")
+      : transientNetworkError
+        ? (failureCount > 1
+          ? `Se perdió la conexión temporalmente. Reintentando el export… intento ${failureCount}.`
+          : "Se perdió la conexión temporalmente. Reintentando el export…")
       : (failureCount > 1
         ? `Reconectando con el export… intento ${failureCount}.`
         : "Reconectando con el export…");

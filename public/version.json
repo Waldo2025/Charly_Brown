@@ -1,8 +1,10 @@
 {
-  "version": "1.0.10.197",
-  "build": "2026-1.0.10.197",
+  "version": "1.0.10.198",
+  "build": "2026-1.0.10.198",
   "branch": "codex-bootstrap",
   "releaseNotes": [
+    "Corregido: El modal de export de Podcaster ahora diagnostica explícitamente cuando export-status cae por redirect de Hosting hacia Render y la respuesta 502/503 queda bloqueada por CORS, evitando un fallo ambiguo de seguimiento.",
+    "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del ajuste de diagnóstico del polling de export-status.",
     "Corregido: Firebase Hosting ahora permite wasm-unsafe-eval en la CSP para que el worker WASM de JASSUB pueda instanciar libass sin romper el preview del modal de export.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del fix CSP/WASM de JASSUB.",
     "Corregido: El export de karaoke en Podcaster ahora reutiliza el mismo resolver de audio Gemini del preview y ajusta los wordTimings por playbackRate, restaurando el resaltado palabra por palabra en el MP4 final.",
@@ -123,5 +125,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.197"
+  "cache_version": "2026-1.0.10.198"
 }
