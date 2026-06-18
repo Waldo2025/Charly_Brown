@@ -1554,6 +1554,131 @@ async function cleanupMontageExportCache() {
   };
 }
 
+function getMontageExportCacheMetaPath(exportId = "") {
+  const clean = clampExportId(exportId);
+  if (!clean) return "";
+  return path.join(MONTAGE_EXPORT_CACHE_DIR, `${clean}.json`);
+}
+
+function getMontageExportCacheFilePath(exportId = "", outExt = "mp4") {
+  const clean = clampExportId(exportId);
+  if (!clean) return "";
+  const safeExt = String(outExt || "mp4").trim().replace(/[^a-z0-9]+/gi, "") || "mp4";
+  return path.join(MONTAGE_EXPORT_CACHE_DIR, `${clean}.${safeExt}`);
+}
+
+async function writeMontageExportCacheArtifact({
+  exportId = "",
+  sourcePath = "",
+  token = "",
+  filename = "",
+  mimeType = "",
+  expiresAt = "",
+  outExt = "mp4"
+} = {}) {
+  const cleanExportId = clampExportId(exportId);
+  const cleanSourcePath = String(sourcePath || "").trim();
+  if (!cleanExportId || !cleanSourcePath) return null;
+
+  await ensureMontageExportCacheDir();
+  const cacheFilePath = getMontageExportCacheFilePath(cleanExportId, outExt);
+  const metaPath = getMontageExportCacheMetaPath(cleanExportId);
+  if (!cacheFilePath || !metaPath) return null;
+
+  await fs.promises.rm(cacheFilePath, { force: true }).catch(() => {});
+  try {
+    await fs.promises.rename(cleanSourcePath, cacheFilePath);
+  } catch (renameError) {
+    try {
+      await fs.promises.copyFile(cleanSourcePath, cacheFilePath);
+    } catch (copyError) {
+      throw copyError || renameError;
+    }
+  }
+
+  const meta = {
+    exportId: cleanExportId,
+    token: String(token || "").trim(),
+    filename: String(filename || "").trim(),
+    mimeType: String(mimeType || "").trim(),
+    expiresAt: String(expiresAt || "").trim(),
+    filePath: cacheFilePath
+  };
+  await fs.promises.writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8");
+  return meta;
+}
+
+async function tryStreamMontageExportCacheDownload(req, res, {
+  exportId = "",
+  token = "",
+  fallbackFilename = "",
+  fallbackMimeType = ""
+} = {}) {
+  const cleanExportId = clampExportId(exportId);
+  const cleanToken = clampText(String(token || "").trim(), 180);
+  if (!cleanExportId || !cleanToken) return false;
+
+  const metaPath = getMontageExportCacheMetaPath(cleanExportId);
+  const raw = await fs.promises.readFile(metaPath, "utf8").catch(() => "");
+  if (!raw) return false;
+
+  let meta = null;
+  try {
+    meta = JSON.parse(raw);
+  } catch (_) {
+    meta = null;
+  }
+  if (!meta || String(meta.exportId || "") !== cleanExportId) {
+    return false;
+  }
+  if (String(meta.token || "") !== cleanToken) {
+    applyAssetCorsHeaders(req, res);
+    return res.status(403).json({ error: "Token inválido para descarga." });
+  }
+  const expiresAtMs = Number(new Date(meta.expiresAt || 0).getTime() || 0) || 0;
+  if (expiresAtMs && expiresAtMs < Date.now()) {
+    applyAssetCorsHeaders(req, res);
+    return res.status(404).json({ error: "Export expirado." });
+  }
+  const filePath = String(meta.filePath || "").trim();
+  if (!filePath) {
+    return false;
+  }
+  const stat = await fs.promises.stat(filePath).catch(() => null);
+  if (!stat || !stat.isFile()) {
+    applyAssetCorsHeaders(req, res);
+    return res.status(404).json({ error: "Export no encontrado o expirado." });
+  }
+
+  const rangeHeader = String(req.headers.range || "").trim();
+  const mimeType = String(meta.mimeType || fallbackMimeType || "application/octet-stream").trim() || "application/octet-stream";
+  const filename = String(meta.filename || fallbackFilename || `montage-${cleanExportId}`).trim() || `montage-${cleanExportId}`;
+  applyAssetCorsHeaders(req, res);
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
+
+  const total = Number(stat.size || 0) || 0;
+  if (rangeHeader) {
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
+    if (match) {
+      const start = Math.max(0, Number(match[1] || 0));
+      const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
+      if (start <= end && end < total) {
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+        res.setHeader("Content-Length", String(end - start + 1));
+        fs.createReadStream(filePath, { start, end }).pipe(res);
+        return true;
+      }
+    }
+  }
+  res.setHeader("Content-Length", String(total));
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
+
 function sanitizeMontageJobPublicPayload(job = null) {
   const source = job && typeof job === "object" ? job : {};
   const payload = {
@@ -9825,6 +9950,23 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
   if (lastUploadError) throw lastUploadError;
   const base = String(context?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
   const downloadUrl = `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
+  let cacheArtifact = null;
+  try {
+    cacheArtifact = await writeMontageExportCacheArtifact({
+      exportId,
+      sourcePath: finalOutPath,
+      token,
+      filename,
+      mimeType,
+      expiresAt: expiresAtIso,
+      outExt
+    });
+  } catch (cacheError) {
+    console.warn("[backend][storage] export cache artifact write failed", {
+      exportId,
+      message: String(cacheError?.message || cacheError)
+    });
+  }
   return {
     exportId,
     downloadUrl,
@@ -9834,7 +9976,8 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     expiresAtIso,
     filename,
     mimeType,
-    sizeBytes: Math.max(0, Number(stat?.size || 0) || 0)
+    sizeBytes: Math.max(0, Number(stat?.size || 0) || 0),
+    cacheFilePath: cacheArtifact?.filePath || ""
   };
 }
 
@@ -13683,15 +13826,23 @@ app.get("/api/assets/montage-download", async (req, res) => {
             });
           }
         }
+        const filename = String(result.filename || `${jobId}.${getMontageExportExtension(job.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
+        const mimeType = String(result.mimeType || meta?.contentType || "application/octet-stream").trim() || "application/octet-stream";
         if (!meta || !file) {
+          const localExportId = String(result?.exportId || jobId).trim();
+          const localFallbackStreamed = await tryStreamMontageExportCacheDownload(req, res, {
+            exportId: localExportId,
+            token,
+            fallbackFilename: filename,
+            fallbackMimeType: mimeType
+          });
+          if (localFallbackStreamed) return;
           applyAssetCorsHeaders(req, res);
           return res.status(404).json({
             error: "El archivo final no está disponible en el almacenamiento.",
             code: "montage_export_storage_object_not_found"
           });
         }
-        const filename = String(result.filename || `${jobId}.${getMontageExportExtension(job.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
-        const mimeType = String(result.mimeType || meta.contentType || "application/octet-stream").trim() || "application/octet-stream";
         res.setHeader("Content-Type", mimeType);
         res.setHeader("Accept-Ranges", "bytes");
         res.setHeader("Cache-Control", "private, max-age=60");
@@ -13708,62 +13859,18 @@ app.get("/api/assets/montage-download", async (req, res) => {
       jobId,
       hasToken: !!token
     });
-
-    await cleanupMontageExportCache();
     const exportId = clampExportId(req.query?.exportId || req.query?.jobId || req.query?.id || "");
     const legacyToken = clampText(String(req.query?.token || "").trim(), 180);
     if (!exportId || !legacyToken) {
       return res.status(400).json({ error: "Falta exportId o token." });
     }
-    await ensureMontageExportCacheDir();
-    const metaPath = path.join(MONTAGE_EXPORT_CACHE_DIR, `${exportId}.json`);
-    const raw = await fs.promises.readFile(metaPath, "utf8").catch(() => "");
-    if (!raw) return res.status(404).json({ error: "Export no encontrado o expirado." });
-    let meta = null;
-    try {
-      meta = JSON.parse(raw);
-    } catch (_) {
-      meta = null;
-    }
-    if (!meta || String(meta.exportId || "") !== exportId) {
-      return res.status(404).json({ error: "Export no encontrado o expirado." });
-    }
-    if (String(meta.token || "") !== legacyToken) {
-      return res.status(403).json({ error: "Token inválido para descarga." });
-    }
-    const expiresAtMs = Number(new Date(meta.expiresAt || 0).getTime() || 0) || 0;
-    if (expiresAtMs && expiresAtMs < Date.now()) {
-      return res.status(404).json({ error: "Export expirado." });
-    }
-    const filePath = String(meta.filePath || "").trim();
-    if (!filePath) return res.status(404).json({ error: "Export no encontrado o expirado." });
-    const stat = await fs.promises.stat(filePath).catch(() => null);
-    if (!stat || !stat.isFile()) return res.status(404).json({ error: "Export no encontrado o expirado." });
-
-    const rangeHeader = String(req.headers.range || "").trim();
-    const mimeType = String(meta.mimeType || "application/octet-stream").trim() || "application/octet-stream";
-    const filename = String(meta.filename || `montage-${exportId}`).trim() || `montage-${exportId}`;
-    res.setHeader("Content-Type", mimeType);
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "private, max-age=60");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
-
-    const total = Number(stat.size || 0) || 0;
-    if (rangeHeader) {
-      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
-      if (match) {
-        const start = Math.max(0, Number(match[1] || 0));
-        const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
-        if (start <= end && end < total) {
-          res.status(206);
-          res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
-          res.setHeader("Content-Length", String(end - start + 1));
-          return fs.createReadStream(filePath, { start, end }).pipe(res);
-        }
-      }
-    }
-    res.setHeader("Content-Length", String(total));
-    return fs.createReadStream(filePath).pipe(res);
+    await cleanupMontageExportCache();
+    const legacyStreamed = await tryStreamMontageExportCacheDownload(req, res, {
+      exportId,
+      token: legacyToken
+    });
+    if (legacyStreamed) return;
+    return res.status(404).json({ error: "Export no encontrado o expirado." });
   } catch (error) {
     return res.status(500).json({ error: String(error?.message || "No se pudo descargar el montaje.") });
   }
@@ -14025,5 +14132,9 @@ module.exports = {
   executeMontageExportPipeline,
   buildMontageSceneFailure,
   getBackendPublicBaseUrl,
-  buildBackendPodcasterStudioScenePrompt
+  buildBackendPodcasterStudioScenePrompt,
+  getMontageExportCacheMetaPath,
+  getMontageExportCacheFilePath,
+  writeMontageExportCacheArtifact,
+  tryStreamMontageExportCacheDownload
 };
