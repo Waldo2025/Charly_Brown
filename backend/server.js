@@ -1077,6 +1077,29 @@ function getStorageBucketCandidates() {
 let resolvedWritableStorageBucket = null;
 let resolvedWritableStorageBucketPromise = null;
 
+async function withRetry(fn, retries = 3, delayMs = 200) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || "").toLowerCase();
+      const code = String(err?.code || "").toLowerCase();
+      const isTransient = /premature close|econnreset|etimedout|epipe|enotfound|eaddrinfo|socket hang up|fetch/i.test(msg) || 
+                          /econnreset|etimedout|epipe|enotfound|eaddrinfo/i.test(code);
+      if (!isTransient || attempt === retries) {
+        throw err;
+      }
+      console.warn(`[backend][storage-retry] transient error on attempt ${attempt}: ${err.message}. Retrying in ${delayMs}ms...`);
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs = delayMs * 2;
+    }
+  }
+  throw lastErr;
+}
+
 function isMissingBucketError(error) {
   const message = String(error?.message || "").toLowerCase();
   const status = Number(error?.code || error?.statusCode || error?.status || 0) || 0;
@@ -1130,7 +1153,7 @@ async function downloadStorageObjectToBuffer(storagePath = "") {
     if (!bucket) continue;
     try {
       // eslint-disable-next-line no-await-in-loop
-      const [downloaded] = await bucket.file(cleanStoragePath).download();
+      const [downloaded] = await withRetry(() => bucket.file(cleanStoragePath).download());
       return {
         buffer: Buffer.from(downloaded),
         bucket
@@ -1245,13 +1268,13 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
     const file = bucket.file(cleanStoragePath);
     try {
       // eslint-disable-next-line no-await-in-loop
-      const [exists] = await file.exists().catch(() => [null]);
+      const [exists] = await withRetry(() => file.exists()).catch(() => [null]);
       if (exists === false) {
         lastMissingError = new Error("storage_not_found");
         continue;
       }
       // eslint-disable-next-line no-await-in-loop
-      const [meta] = await file.getMetadata();
+      const [meta] = await withRetry(() => file.getMetadata());
       const payload = buildStreamingMediaPayload(parseStorageObjectSize(meta), {
         mimeType: String(meta?.contentType || "application/octet-stream").trim() || "application/octet-stream",
         rangeHeader
@@ -1274,8 +1297,8 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
     } catch (error) {
       lastError = error;
       const errorText = String(error?.code || error?.message || "").trim();
-      const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
-      if (isPrematureClose) {
+      const isClientAbort = req.destroyed || error?.code === "ERR_STREAM_PREMATURE_CLOSE";
+      if (isClientAbort) {
         return {
           streamed: false,
           aborted: true,
@@ -2207,8 +2230,8 @@ async function loadOptionalImageReference({ storagePath = "", url = "", dataUrl 
   if (cleanStoragePath) {
     try {
       const file = storageBucket.file(cleanStoragePath);
-      const [meta] = await file.getMetadata().catch(() => [{}]);
-      const [downloaded] = await file.download();
+      const [meta] = await withRetry(() => file.getMetadata()).catch(() => [{}]);
+      const [downloaded] = await withRetry(() => file.download());
       buffer = Buffer.from(downloaded);
       mimeType = String(meta?.contentType || "image/png").trim().toLowerCase();
     } catch (_) {
@@ -13560,8 +13583,8 @@ app.get("/api/assets/proxy-media", async (req, res) => {
     return;
   } catch (error) {
     const errorText = String(error?.code || error?.message || "").trim();
-    const isPrematureClose = /ERR_STREAM_PREMATURE_CLOSE|Premature close|aborted|ECONNRESET/i.test(errorText);
-    if (isPrematureClose) {
+    const isClientAbort = req.destroyed || error?.code === "ERR_STREAM_PREMATURE_CLOSE";
+    if (isClientAbort) {
       console.info("[backend][proxy-media] request closed before completion", {
         requestId,
         message: String(error?.message || error)

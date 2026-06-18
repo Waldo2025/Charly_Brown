@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.202",
-  "build": "2026-1.0.10.203",
+  "version": "1.0.10.203",
+  "build": "2026-1.0.10.204",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Se solucionó el error 403 Forbidden y Premature close al consultar imágenes privadas a través de proxy-image y proxy-media implementando reintentos con backoff exponencial para operaciones de almacenamiento y corrigiendo la detección errónea de cancelación de solicitudes en el backend.",
     "Corregido: Se solucionó un error 403 Forbidden al consultar imágenes privadas a través de /api/assets/proxy-image agregando el código 403 al detector de fallos de GCS, permitiendo la conmutación exitosa al bucket activo.",
     "Corregido: Se actualizó el formato de las etiquetas de anulación de color en ASS a formato estándar (\\1c y \\1a) para corregir el resaltado amarillo del karaoke en exportación. Se movió la superposición del logo/marca al final del pipeline de composición para que quede encima de las tarjetas (overlay cards) en Reels. Se corrigió resolveMontageCanvasSize para respetar el toggle de reelModeEnabled al exportar videos verticales en modo normal.",
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
@@ -133,5 +134,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.201"
+  "cache_version": "2026-1.0.10.203"
 }
