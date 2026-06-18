@@ -9093,9 +9093,53 @@ function normalizeMontageExportRequestBody(body = {}) {
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
     ? raw.brandOverlay
     : null;
+  const dialogueAudioMapRaw = raw?.dialogueAudioMap && typeof raw.dialogueAudioMap === "object"
+    ? raw.dialogueAudioMap
+    : {};
   const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
   const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
   const repoRoot = path.resolve(__dirname, "..");
+
+  const normalizeExportDialogueAudioMap = (sourceMap = {}) => {
+    const nextMap = {};
+    Object.entries(sourceMap).slice(0, 800).forEach(([rowId, clip]) => {
+      const key = clampText(rowId, 120);
+      if (!key || !clip || typeof clip !== "object") return;
+      const targetSpeechLine = clampText(clip?.targetSpeechLine || "", 2200);
+      const durationSec = clampNumber(clip?.durationSec, 0, 180, 0);
+      const durationMs = Math.max(0, Math.round(Number(clip?.durationMs || (durationSec ? durationSec * 1000 : 0)) || 0));
+      const alignmentWords = Array.isArray(clip?.alignment?.words) ? clip.alignment.words.slice(0, 1200) : [];
+      const alignment = Array.isArray(clip?.alignment)
+        ? clip.alignment.slice(0, 1200)
+        : (alignmentWords.length ? { words: alignmentWords } : []);
+      const words = Array.isArray(clip?.words) ? clip.words.slice(0, 1200) : alignmentWords;
+      const wordTimingSource = Array.isArray(clip?.wordTimings)
+        ? clip.wordTimings
+        : (alignment.length ? alignment : (alignmentWords.length ? alignmentWords : words));
+      const wordTimings = normalizeDialogueAudioWordTimings(
+        wordTimingSource,
+        targetSpeechLine,
+        durationSec || (durationMs > 0 ? durationMs / 1000 : 0)
+      );
+      const downloadUrl = clampText(clip?.downloadUrl || clip?.url || "", 3000);
+      const storagePath = clampText(clip?.storagePath || "", 900);
+      if (!downloadUrl && !storagePath && !wordTimings.length && !durationSec && !durationMs) return;
+      nextMap[key] = {
+        rowId: key,
+        targetSpeechLine,
+        durationSec,
+        durationMs,
+        playbackRate: Math.max(0.5, Math.min(10, Number(clip?.playbackRate || 1) || 1)),
+        wordTimings,
+        alignment,
+        words,
+        downloadUrl,
+        storagePath,
+        mimeType: clampText(clip?.mimeType || "audio/wav", 120) || "audio/wav"
+      };
+    });
+    return nextMap;
+  };
 
   const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
@@ -9187,6 +9231,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     .slice(0, 600)
     .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
     .filter(Boolean);
+  const dialogueAudioMap = normalizeExportDialogueAudioMap(dialogueAudioMapRaw);
   const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => !isTimelineBackgroundAudioKind(segment?.kind));
   const useTimelineAudio = audioTimelineRaw?.enabled === true && timelineAudioSegments.length > 0;
   let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
@@ -9279,6 +9324,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     onScreenTextSegments,
     onScreenTextRenderedSegments,
     onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    dialogueAudioMap,
     overlayCards,
     brandOverlay,
     backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,

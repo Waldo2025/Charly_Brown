@@ -12,6 +12,29 @@ test("backend persists wordTimings inside dialogueAudioMap normalization", () =>
   assert.match(serverSource, /wordTimings:\s*normalizeDialogueAudioWordTimings\(clip\?\.wordTimings \|\| clip\?\.alignment \|\| \[\]\)/);
 });
 
+test("backend export request preserves dialogueAudioMap for karaoke ASS rendering", () => {
+  assert.match(
+    serverSource,
+    /function normalizeMontageExportRequestBody\(body = \{\}\)[\s\S]*?const dialogueAudioMapRaw = raw\?\.dialogueAudioMap && typeof raw\.dialogueAudioMap === "object"/,
+    "El normalizador del request de export debe leer raw.dialogueAudioMap."
+  );
+  assert.match(
+    serverSource,
+    /const normalizeExportDialogueAudioMap = \(sourceMap = \{\}\) => \{[\s\S]*?wordTimings = normalizeDialogueAudioWordTimings\(/,
+    "El request de export debe normalizar wordTimings para karaoke."
+  );
+  assert.match(
+    serverSource,
+    /const dialogueAudioMap = normalizeExportDialogueAudioMap\(dialogueAudioMapRaw\);[\s\S]*?return \{[\s\S]*?dialogueAudioMap,/,
+    "El input normalizado del export debe devolver dialogueAudioMap al render por escena."
+  );
+  assert.match(
+    serverSource,
+    /function resolveMontageKaraokeAudioClip\(input = \{\}, rowId = ""\)[\s\S]*?input\.dialogueAudioMap\?\.\[key\]/,
+    "El render ASS por escena debe consumir el dialogueAudioMap normalizado."
+  );
+});
+
 test("frontend dialogue audio normalization preserves wordTimings", () => {
   assert.match(podcasterSource, /wordTimings:\s*normalizeKaraokeWordTimings\(clip,\s*String\(clip\.targetSpeechLine \|\| ""\)\.trim\(\)\)/);
 });
