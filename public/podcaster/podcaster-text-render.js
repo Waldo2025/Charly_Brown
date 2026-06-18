@@ -943,10 +943,14 @@
       const baseCommon = `\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\q2\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\fsp0`;
       const boxOverride = boxEnabled ? `\\bord${Math.max(visibleStrokeWidth, 2)}\\shad${Math.max(shadowPx, 2)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}\\4c${backColor}` : "";
       if (stylePreset === "3d") {
-        const depthOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX + depthOffset)},${formatAssOverridePoint(posY + depthOffset)})\\bord${visibleStrokeWidth + 1}\\shad0\\c${depthColor}\\2c${depthColor}\\3c${toAssColor("#020617", 0.78, "020617")}\\4a&HFF&}`;
-        events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${depthOverrides}${baseText}`);
+        const softShadowOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\bord0\\shad0\\xshad0\\yshad${Math.max(4, Math.round(fontSizePx * 0.15))}\\blur12\\c${depthColor}\\2c${depthColor}\\3c${depthColor}\\4a&HFF&}`;
+        events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${softShadowOverrides}${baseText}`);
+        for (let i = depthOffset; i >= 1; i--) {
+          const depthOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX + i)},${formatAssOverridePoint(posY + i)})\\bord${visibleStrokeWidth + 1}\\shad0\\c${depthColor}\\2c${depthColor}\\3c${toAssColor("#020617", 0.78, "020617")}\\4a&HFF&}`;
+          events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${depthOverrides}${baseText}`);
+        }
       }
-      const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}${boxEnabled ? `\\4c${backColor}` : "\\4a&HFF&"}}`;
+      const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}${boxEnabled ? `\\4c${backColor}` : "\\4a&HFF&"}}`;
       events.push(`Dialogue: 1,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
 
       const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
@@ -959,7 +963,7 @@
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
         const activeText = buildAssInvisibleWordOverlayText(wrappedText, index);
-        const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? depthOffset + 1 : shadowPx)}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
+        const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
         events.push(`Dialogue: 2,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });
     });

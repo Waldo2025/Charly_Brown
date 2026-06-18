@@ -11309,7 +11309,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           }
         }
 
-        for (const segment of effectiveRenderedSegments) {
+        const assSegments = effectiveRenderedSegments.map((segment) => {
           const layout = normalizeMontageOnScreenTextExportLayout({
             segment,
             settings: onScreenTextSettings,
@@ -11330,32 +11330,30 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
           let wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim()) : [];
           const playbackRate = Math.max(0.5, Math.min(10, Number(segment.playbackRate || audioClip?.playbackRate || 1) || 1));
-          if (wordTimings.length > 0 && Math.abs(playbackRate - 1) > 0.001) {
-            wordTimings = scaleKaraokeWordTimingsForPlaybackRate(wordTimings, playbackRate);
-          }
-          const textPath = textFileResolver(spec.wrappedText || spec.text || "");
-
-          const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
-          const fontSource = fontFile ? `:fontfile='${escapeFfmpegFilterPath(fontFile)}'` : ":font='Sans'";
-
-          const segmentDrawFilters = renderOnScreenTextDrawFilters(
-            input,
-            segment,
-            spec,
-            wordTimings,
-            textPath,
-            fontSource,
+          return {
             startSec,
             endSec,
-            textFileResolver
-          );
+            wordTimings,
+            playbackRate,
+            spec,
+            settings: onScreenTextSettings
+          };
+        }).filter((segment) => String(segment?.spec?.wrappedText || segment?.spec?.text || "").trim());
 
-          for (const drawFilter of segmentDrawFilters) {
-            filterIndex += 1;
-            const outLabel = `ontxt_draw_${filterIndex}`;
-            localFilters.push(`${chainLabel}${drawFilter}[${outLabel}]`);
-            chainLabel = `[${outLabel}]`;
-          }
+        const assContent = buildMontageOnScreenTextAss({
+          width: sourceDims.width,
+          height: sourceDims.height,
+          settings: onScreenTextSettings,
+          segments: assSegments
+        });
+
+        if (String(assContent || "").trim()) {
+          const assPath = path.join(workingDir, `montage_onscreen_text.ass`);
+          fs.writeFileSync(assPath, assContent, "utf8");
+          filterIndex += 1;
+          const outLabel = `ontxt_ass_${filterIndex}`;
+          localFilters.push(`${chainLabel}ass='${escapeFfmpegFilterPath(assPath)}'[${outLabel}]`);
+          chainLabel = `[${outLabel}]`;
         }
 
         if (chainLabel !== "[0:v]" && localFilters.length) {
