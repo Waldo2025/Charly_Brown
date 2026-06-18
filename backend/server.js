@@ -68,6 +68,9 @@ const {
   shouldDestroyProxyMediaUpstream
 } = require("./proxy-media-lifecycle.js");
 const {
+  uploadFileToBucketNonResumable
+} = require("./storage-upload.js");
+const {
   resolveMontageExportVideoParams,
   resolveMontageIntermediateVideoParams
 } = require("./montage-export-video-params.js");
@@ -9736,11 +9739,11 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     `${exportId}.${outExt}`
   ].join("/");
   const targetBucket = await resolveWritableStorageBucket();
-  await targetBucket.upload(finalOutPath, {
+  await uploadFileToBucketNonResumable({
+    bucket: targetBucket,
     destination: storagePath,
-    metadata: {
-      contentType: mimeType
-    }
+    filePath: finalOutPath,
+    contentType: mimeType
   });
   const uploadedFile = targetBucket.file(storagePath);
   const [meta] = await uploadedFile.getMetadata().catch(() => [{}]);
