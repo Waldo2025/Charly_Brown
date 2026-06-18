@@ -9674,24 +9674,50 @@ function buildMontagePreviewPipelineInput(rawInput = {}) {
   };
 }
 
-function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolution = "source") {
+function resolveMontageCanvasSize(sourceWidth = 1280, sourceHeight = 720, resolution = "source", reelModeEnabled = false) {
   const safeWidth = Math.max(2, Math.round(Number(sourceWidth || 1280) || 1280));
   const safeHeight = Math.max(2, Math.round(Number(sourceHeight || 720) || 720));
   const even = (value = 0) => Math.max(2, Math.round(value / 2) * 2);
   const key = String(resolution || "source").trim().toLowerCase();
-  if (key === "1080x1920") return { width: 1080, height: 1920 };
-  if (key === "720x1280") return { width: 720, height: 1280 };
-  if (key === "480x854") return { width: 480, height: 854 };
-  if (key === "1080p") {
-    return { width: 1920, height: 1080 };
+
+  let w = even(safeWidth);
+  let h = even(safeHeight);
+
+  if (key === "1080x1920") {
+    w = 1080;
+    h = 1920;
+  } else if (key === "720x1280") {
+    w = 720;
+    h = 1280;
+  } else if (key === "480x854") {
+    w = 480;
+    h = 854;
+  } else if (key === "1080p") {
+    w = 1920;
+    h = 1080;
+  } else if (key === "720p") {
+    w = 1280;
+    h = 720;
+  } else if (key === "480p") {
+    w = 854;
+    h = 480;
   }
-  if (key === "720p") {
-    return { width: 1280, height: 720 };
+
+  if (reelModeEnabled) {
+    if (w > h) {
+      const temp = w;
+      w = h;
+      h = temp;
+    }
+  } else {
+    if (w < h) {
+      const temp = w;
+      w = h;
+      h = temp;
+    }
   }
-  if (key === "480p") {
-    return { width: 854, height: 480 };
-  }
-  return { width: even(safeWidth), height: even(safeHeight) };
+
+  return { width: even(w), height: even(h) };
 }
 
 function isMontageReelResolution(resolution = "") {
@@ -10124,7 +10150,12 @@ async function renderMontageOverlapComposition({
     return "";
   }
   const firstDims = await probeMediaVideoDimensionsWithFfmpeg(intermediatePaths[0], "montage_overlap_probe").catch(() => ({ width: 1280, height: 720 }));
-  const canvas = resolveMontageCanvasSize(firstDims?.width || 1280, firstDims?.height || 720, input?.resolution || "source");
+  const canvas = resolveMontageCanvasSize(
+    firstDims?.width || 1280,
+    firstDims?.height || 720,
+    input?.resolution || "source",
+    input?.reelModeEnabled === true
+  );
   const totalSec = Math.max(0.25, plan.totalDurationMs / 1000);
   const colorInputIndex = intermediatePaths.length;
   const silentAudioInputIndex = intermediatePaths.length + 1;
@@ -10766,7 +10797,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           }
         }));
         if (!globalCanvas) {
-          globalCanvas = resolveMontageCanvasSize(sourceDims?.width || 1280, sourceDims?.height || 720, input?.resolution || "source");
+          globalCanvas = resolveMontageCanvasSize(
+            sourceDims?.width || 1280,
+            sourceDims?.height || 720,
+            input?.resolution || "source",
+            input?.reelModeEnabled === true
+          );
         }
         const canvas = globalCanvas;
         const mediaScale = normalizeMontageMediaScale(entry?.mediaScale || entry?.clip?.mediaScale || 1);
@@ -10882,20 +10918,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           videoFilterGraph = textOverlayResult.videoFilterGraph;
           finalVideoMapLabel = textOverlayResult.finalVideoMapLabel;
         }
-        const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
-        if (hasBrandOverlay) {
-          const sceneBrandFilter = buildMontageBrandOverlayFilter(input.brandOverlay, {
-            width: canvas.width,
-            height: canvas.height,
-            reelModeEnabled: sceneReelModeEnabled,
-            baseInputLabel: finalVideoMapLabel,
-            outputLabel: "vbrand"
-          });
-          if (sceneBrandFilter) {
-            videoFilterGraph = `${videoFilterGraph};${sceneBrandFilter}`;
-            finalVideoMapLabel = "[vbrand]";
-          }
-        }
+
 
         args.push("-filter_complex", `${videoFilterGraph};${audioFilterGraph}`);
         args.push("-map", finalVideoMapLabel, "-map", audioMapLabel);
@@ -11235,10 +11258,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     }
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(input.brandOverlay.assetPath);
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || (Array.isArray(input.overlayCards) && input.overlayCards.length)
       || (input.exportMode === "review" && exportedEntries.length)
+      || hasBrandOverlay
     );
     console.info("[backend][montage-export][visual-pass-decision]", {
       hasFinalVisualPass,
@@ -11246,7 +11271,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
       overlayCardCount: Array.isArray(input.overlayCards) ? input.overlayCards.length : 0,
       exportMode: input.exportMode,
-      entryCount: Array.isArray(input.entries) ? input.entries.length : 0
+      entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
+      hasBrandOverlay
     });
     if (hasFinalVisualPass) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
@@ -11255,6 +11281,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         : sourceDims;
       const visualFilters = [];
       let useFilterComplexForVisual = false;
+      let currentLabel = "[0:v]";
+      let filterIndex = 0;
+      const filterSegments = [];
 
       if (reviewOnScreenTextEnabled) {
         emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.");
@@ -11296,16 +11325,12 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           sourceHeight: sourceDims.height
         });
 
-        let chainLabel = "[0:v]";
-        let filterIndex = 0;
-        const localFilters = [];
-
         if (boxFilters.length) {
           for (const boxFilter of boxFilters) {
             filterIndex += 1;
-            const outLabel = `ontxt_box_${filterIndex}`;
-            localFilters.push(`${chainLabel}${boxFilter}[${outLabel}]`);
-            chainLabel = `[${outLabel}]`;
+            const outLabel = `[ontxt_box_${filterIndex}]`;
+            filterSegments.push(`${currentLabel}${boxFilter}${outLabel}`);
+            currentLabel = outLabel;
           }
         }
 
@@ -11348,19 +11373,15 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         });
 
         if (String(assContent || "").trim()) {
-          const assPath = path.join(workingDir, `montage_onscreen_text.ass`);
+          const assPath = path.join(tmpDir, `montage_onscreen_text.ass`);
           fs.writeFileSync(assPath, assContent, "utf8");
           filterIndex += 1;
-          const outLabel = `ontxt_ass_${filterIndex}`;
-          localFilters.push(`${chainLabel}ass='${escapeFfmpegFilterPath(assPath)}'[${outLabel}]`);
-          chainLabel = `[${outLabel}]`;
+          const outLabel = `[ontxt_ass_${filterIndex}]`;
+          filterSegments.push(`${currentLabel}ass='${escapeFfmpegFilterPath(assPath)}'${outLabel}`);
+          currentLabel = outLabel;
         }
 
-        if (chainLabel !== "[0:v]" && localFilters.length) {
-          localFilters.push(`${chainLabel}format=yuv420p[vout]`);
-          visualFilters.push(localFilters.join(";"));
-          useFilterComplexForVisual = true;
-        }
+        useFilterComplexForVisual = true;
       }
 
       let reviewFilter = "";
@@ -11384,7 +11405,34 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           height: visualDims.height,
           tmpDir
         });
-        if (overlayCardsFilter) visualFilters.push(overlayCardsFilter);
+        if (overlayCardsFilter) {
+          filterIndex += 1;
+          const outLabel = `[cards_${filterIndex}]`;
+          filterSegments.push(`${currentLabel}${overlayCardsFilter}${outLabel}`);
+          currentLabel = outLabel;
+          useFilterComplexForVisual = true;
+        }
+      }
+
+      if (hasBrandOverlay) {
+        const brandFilterComplex = buildMontageBrandOverlayFilter(input.brandOverlay, {
+          width: visualDims.width,
+          height: visualDims.height,
+          reelModeEnabled: input.reelModeEnabled === true,
+          baseInputLabel: currentLabel,
+          outputLabel: `brand_out_${filterIndex + 1}`
+        });
+        if (brandFilterComplex) {
+          filterIndex += 1;
+          filterSegments.push(brandFilterComplex);
+          currentLabel = `[brand_out_${filterIndex}]`;
+          useFilterComplexForVisual = true;
+        }
+      }
+
+      if (useFilterComplexForVisual && filterSegments.length) {
+        filterSegments.push(`${currentLabel}format=yuv420p[vout]`);
+        visualFilters.push(filterSegments.join(";"));
       }
 
       if (reviewFilter || visualFilters.length) {
@@ -11573,7 +11621,7 @@ async function renderMontagePreviewImage(rawInput = {}, context = {}) {
     const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, "montage_preview_input").catch(() => ({ width: 1280, height: 720 }));
     const previewCanvas = input.exportMode === "review"
       ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
-      : resolveMontageCanvasSize(sourceDims.width, sourceDims.height, input.resolution);
+      : resolveMontageCanvasSize(sourceDims.width, sourceDims.height, input.resolution, input.reelModeEnabled === true);
     const previewPath = path.join(tmpDir, "preview.jpg");
     const baseFilter = input.exportMode === "review"
       ? buildMontageReviewVideoFilter([{

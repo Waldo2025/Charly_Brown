@@ -72,12 +72,11 @@ test("buildMontageOnScreenTextAss creates ASS subtitle content with base and per
   assert.match(ass, /Dialogue: 1,0:00:00\.00,0:00:01\.20,KaraokeBase,/);
   assert.match(ass, /Dialogue: 2,0:00:00\.00,0:00:00\.18,KaraokeActive,/);
   assert.match(ass, /Dialogue: 2,0:00:00\.18,0:00:00\.42,KaraokeActive,/);
-  assert.match(ass, /\\c&H00FCFAF8/);
-  assert.match(ass, /\\c&H0015CCFA/);
+  assert.match(ass, /\\1c&HFCFAF8&/);
+  assert.match(ass, /\\1c&H15CCFA&/);
   assert.match(ass, /\\4a&HFF&/);
-  assert.match(ass, /\{\\alpha&HFF&\}Hola\{\\alpha&H00&\}/);
-  assert.match(ass, /\{\\alpha&H00&\}mundo/);
-  assert.doesNotMatch(ass, /\\alpha&H00&\\c&H[0-9A-F]{8}/);
+  assert.match(ass, /\{\\1c&H15CCFA&\\1a&H00&\\2c&H15CCFA&\\2a&H00&\}Hola/);
+  assert.match(ass, /\{\\1c&HFCFAF8&\\1a&H00&\\2c&HFCFAF8&\\2a&H00&\}mundo/);
   assert.doesNotMatch(ass, /\\4c&H[0-9A-F]{8}/, "bg-none no debe inyectar caja opaca en los eventos");
 });
 

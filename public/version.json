@@ -1,13 +1,14 @@
 {
-  "version": "1.0.10.200",
-  "build": "2026-1.0.10.201",
+  "version": "1.0.10.201",
+  "build": "2026-1.0.10.202",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Se actualizó el formato de las etiquetas de anulación de color en ASS a formato estándar (\\1c y \\1a) para corregir el resaltado amarillo del karaoke en exportación. Se movió la superposición del logo/marca al final del pipeline de composición para que quede encima de las tarjetas (overlay cards) en Reels. Se corrigió resolveMontageCanvasSize para respetar el toggle de reelModeEnabled al exportar videos verticales en modo normal.",
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
-    "Corregido: El export de montaje ahora utiliza formato ASS nativo para textos en pantalla y karaoke, arreglando el problema donde el resaltado de palabras perdía alineación y asegurando que el estilo 3D y los brillos se procesen fielmente.",
-    "Corregido: El export MP4 normal de Podcaster ahora escala correctamente los tiempos de las palabras (wordTimings) de acuerdo al playbackRate del clip de audio, restaurando el resaltado palabra por palabra del modo karaoke.",
+    "Corregido: Se solucionó el problema por el cual los videos verticales (Reels) seguidos de una exportación normal conservaban el aspecto vertical.",
+    "Corregido: El logo o marca de agua ahora se superpone encima de las overlay cards en modo Reel en lugar de quedar cubierto.",
     "Corregido: El modal de export de Podcaster ahora diagnostica explícitamente cuando export-status cae por redirect de Hosting hacia Render y la respuesta 502/503 queda bloqueada por CORS, evitando un fallo ambiguo de seguimiento.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del ajuste de diagnóstico del polling de export-status.",
     "Corregido: Firebase Hosting ahora permite wasm-unsafe-eval en la CSP para que el worker WASM de JASSUB pueda instanciar libass sin romper el preview del modal de export.",

@@ -858,6 +858,15 @@
     return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2).replace(/\.?0+$/, "");
   }
 
+  function formatAssOverrideColor(colorStr, targetTag = "1") {
+    if (!colorStr || !colorStr.startsWith("&H")) return "";
+    const clean = colorStr.replace(/&H|&/g, "");
+    if (clean.length < 8) return "";
+    const aa = clean.slice(0, 2);
+    const bbggrr = clean.slice(2, 8);
+    return `\\${targetTag}c&H${bbggrr}&\\${targetTag}a&H${aa}&`;
+  }
+
   function buildAssActiveWordColorOverlayText(text = "", activeWordIndex = -1, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8") {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
@@ -868,9 +877,9 @@
       const isActive = wordIndex === activeWordIndex;
       wordIndex += 1;
       if (isActive) {
-        return `{\\c${activeColor}\\2c${activeColor}}${escaped}`;
+        return `{${formatAssOverrideColor(activeColor, "1")}${formatAssOverrideColor(activeColor, "2")}}${escaped}`;
       }
-      return `{\\c${baseColor}\\2c${baseColor}}${escaped}`;
+      return `{${formatAssOverrideColor(baseColor, "1")}${formatAssOverrideColor(baseColor, "2")}}${escaped}`;
     }).join("");
   }
 
@@ -941,16 +950,16 @@
       const visibleStrokeWidth = Math.max(outlinePx, stylePreset === "3d" ? Math.round(fontSizePx * 0.055) : outlinePx, stylePreset === "3d" ? 2 : 0);
       const depthOffset = stylePreset === "3d" ? Math.max(2, Math.round(fontSizePx * 0.06)) : 0;
       const baseCommon = `\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\q2\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\fsp0`;
-      const boxOverride = boxEnabled ? `\\bord${Math.max(visibleStrokeWidth, 2)}\\shad${Math.max(shadowPx, 2)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}\\4c${backColor}` : "";
+      const boxOverride = boxEnabled ? `\\bord${Math.max(visibleStrokeWidth, 2)}\\shad${Math.max(shadowPx, 2)}${formatAssOverrideColor(baseColor, "1")}${formatAssOverrideColor(baseColor, "2")}${formatAssOverrideColor(outlineColor, "3")}${formatAssOverrideColor(backColor, "4")}` : "";
       if (stylePreset === "3d") {
-        const softShadowOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\bord0\\shad0\\xshad0\\yshad${Math.max(4, Math.round(fontSizePx * 0.15))}\\blur12\\c${depthColor}\\2c${depthColor}\\3c${depthColor}\\4a&HFF&}`;
+        const softShadowOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\bord0\\shad0\\xshad0\\yshad${Math.max(4, Math.round(fontSizePx * 0.15))}\\blur12${formatAssOverrideColor(depthColor, "1")}${formatAssOverrideColor(depthColor, "2")}${formatAssOverrideColor(depthColor, "3")}\\4a&HFF&}`;
         events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${softShadowOverrides}${baseText}`);
         for (let i = depthOffset; i >= 1; i--) {
-          const depthOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX + i)},${formatAssOverridePoint(posY + i)})\\bord${visibleStrokeWidth + 1}\\shad0\\c${depthColor}\\2c${depthColor}\\3c${toAssColor("#020617", 0.78, "020617")}\\4a&HFF&}`;
+          const depthOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX + i)},${formatAssOverridePoint(posY + i)})\\bord${visibleStrokeWidth + 1}\\shad0${formatAssOverrideColor(depthColor, "1")}${formatAssOverrideColor(depthColor, "2")}${formatAssOverrideColor(toAssColor("#020617", 0.78, "020617"), "3")}\\4a&HFF&}`;
           events.push(`Dialogue: 0,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${depthOverrides}${baseText}`);
         }
       }
-      const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\c${baseColor}\\2c${baseColor}\\3c${outlineColor}${boxEnabled ? `\\4c${backColor}` : "\\4a&HFF&"}}`;
+      const baseOverrides = `{${baseCommon}\\bord${boxEnabled ? Math.max(visibleStrokeWidth, 2) : visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}${formatAssOverrideColor(baseColor, "1")}${formatAssOverrideColor(baseColor, "2")}${formatAssOverrideColor(outlineColor, "3")}${boxEnabled ? formatAssOverrideColor(backColor, "4") : "\\4a&HFF&"}}`;
       events.push(`Dialogue: 1,${formatAssTime(startSec)},${formatAssTime(endSec)},KaraokeBase,,0,0,0,,${baseOverrides}${baseText}`);
 
       const playbackRate = Math.max(0.5, Math.min(10, Number(segment?.playbackRate || 1) || 1));
@@ -963,7 +972,7 @@
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
         const activeText = buildAssActiveWordColorOverlayText(wrappedText, index, activeColor, baseColor);
-        const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
+        const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}${formatAssOverrideColor(activeColor, "1")}${formatAssOverrideColor(activeColor, "2")}${formatAssOverrideColor(outlineColor, "3")}\\4a&HFF&}`;
         events.push(`Dialogue: 2,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });
     });
