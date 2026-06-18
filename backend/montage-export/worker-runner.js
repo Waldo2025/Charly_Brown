@@ -79,7 +79,7 @@ function createProcessMontageExportJob({
             ...extra
           });
           await jobStore.updateJob(jobId, {
-            status: stage === "ready" ? "ready" : "running",
+            status: "running",
             stage,
             progress,
             hint,

@@ -11870,7 +11870,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     logMontageMemory("cache_output_start", { jobId, exportedSceneCount: exportedEntries.length });
     const stored = await storeMontageExportResult(finalOutPath, input, context);
     logMontageMemory("cache_output_after", { jobId, exportId: String(stored?.exportId || "").trim() });
-    emitStage("ready", 1, "Exportación lista.");
+    emitStage("finalize_result", 0.99, "Finalizando entrega del archivo.");
     return {
       export: {
         filename: stored.filename,
@@ -13600,7 +13600,21 @@ app.get("/api/assets/montage-download", async (req, res) => {
 
   try {
     if (jobId && token) {
-      const job = await resolveMontageExportJobSnapshot(jobId).catch(() => null);
+      let job = null;
+      try {
+        job = await resolveMontageExportJobSnapshot(jobId);
+      } catch (lookupError) {
+        console.error("[backend][montage-download] job snapshot lookup failed", {
+          jobId,
+          code: String(lookupError?.code || "").trim() || null,
+          message: String(lookupError?.message || lookupError).trim()
+        });
+        applyAssetCorsHeaders(req, res);
+        return res.status(503).json({
+          error: "No se pudo consultar temporalmente el estado del export.",
+          code: "montage_export_lookup_unavailable"
+        });
+      }
       console.info("[backend][montage-download] resolved job snapshot", {
         jobId,
         exists: !!job,
@@ -13608,7 +13622,21 @@ app.get("/api/assets/montage-download", async (req, res) => {
       });
 
       if (job) {
+        const jobStatus = String(job.status || "").trim().toLowerCase();
         const result = job.result && typeof job.result === "object" ? job.result : job.export && typeof job.export === "object" ? job.export : null;
+        if (!result) {
+          applyAssetCorsHeaders(req, res);
+          return res.status(409).json({
+            error: jobStatus === "ready"
+              ? "El resultado del export está incompleto."
+              : "El export todavía no está listo para descarga.",
+            code: jobStatus === "ready"
+              ? "montage_export_result_incomplete"
+              : "montage_export_not_ready",
+            status: jobStatus || "running",
+            stage: String(job.stage || "").trim() || undefined
+          });
+        }
         const storagePath = normalizeStorageFilePath(result?.storagePath || "");
         const expectedToken = clampText(String(result?.downloadToken || "").trim(), 180);
         console.info("[backend][montage-download] resolved job assets", {
@@ -13618,51 +13646,61 @@ app.get("/api/assets/montage-download", async (req, res) => {
           tokenMatches: expectedToken === token
         });
 
-        if (result && storagePath && expectedToken) {
-          if (expectedToken !== token) {
-            return res.status(403).json({ error: "Token inválido para descarga." });
-          }
-          const rangeHeader = String(req.headers.range || "").trim();
-          const buckets = getStorageBucketCandidates();
-          let file = null;
-          let meta = null;
-          for (const bucket of buckets) {
-            if (!bucket) continue;
-            try {
-              const candidateMeta = await bucket.file(storagePath).getMetadata();
-              if (Array.isArray(candidateMeta) && candidateMeta[0]) {
-                file = bucket.file(storagePath);
-                meta = candidateMeta[0];
-                console.info("[backend][montage-download] metadata match on bucket candidate", {
-                  jobId,
-                  bucketName: bucket.name,
-                  sizeBytes: meta.size,
-                  contentType: meta.contentType
-                });
-                break;
-              }
-            } catch (bucketErr) {
-              console.warn("[backend][montage-download] bucket candidate metadata fetch failed", {
+        if (!storagePath || !expectedToken) {
+          applyAssetCorsHeaders(req, res);
+          return res.status(409).json({
+            error: "El resultado del export está incompleto.",
+            code: "montage_export_result_incomplete"
+          });
+        }
+        if (expectedToken !== token) {
+          return res.status(403).json({ error: "Token inválido para descarga." });
+        }
+        const rangeHeader = String(req.headers.range || "").trim();
+        const buckets = getStorageBucketCandidates();
+        let file = null;
+        let meta = null;
+        for (const bucket of buckets) {
+          if (!bucket) continue;
+          try {
+            const candidateMeta = await bucket.file(storagePath).getMetadata();
+            if (Array.isArray(candidateMeta) && candidateMeta[0]) {
+              file = bucket.file(storagePath);
+              meta = candidateMeta[0];
+              console.info("[backend][montage-download] metadata match on bucket candidate", {
                 jobId,
                 bucketName: bucket.name,
-                message: bucketErr.message
+                sizeBytes: meta.size,
+                contentType: meta.contentType
               });
+              break;
             }
-          }
-          if (meta) {
-            const filename = String(result.filename || `${jobId}.${getMontageExportExtension(job.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
-            const mimeType = String(result.mimeType || meta.contentType || "application/octet-stream").trim() || "application/octet-stream";
-            res.setHeader("Content-Type", mimeType);
-            res.setHeader("Accept-Ranges", "bytes");
-            res.setHeader("Cache-Control", "private, max-age=60");
-            res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
-            await streamStorageFileToResponse(file, res, {
-              metadata: meta,
-              rangeHeader
+          } catch (bucketErr) {
+            console.warn("[backend][montage-download] bucket candidate metadata fetch failed", {
+              jobId,
+              bucketName: bucket.name,
+              message: bucketErr.message
             });
-            return;
           }
         }
+        if (!meta || !file) {
+          applyAssetCorsHeaders(req, res);
+          return res.status(404).json({
+            error: "El archivo final no está disponible en el almacenamiento.",
+            code: "montage_export_storage_object_not_found"
+          });
+        }
+        const filename = String(result.filename || `${jobId}.${getMontageExportExtension(job.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
+        const mimeType = String(result.mimeType || meta.contentType || "application/octet-stream").trim() || "application/octet-stream";
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "private, max-age=60");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
+        await streamStorageFileToResponse(file, res, {
+          metadata: meta,
+          rangeHeader
+        });
+        return;
       }
     }
 

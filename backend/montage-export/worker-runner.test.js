@@ -51,6 +51,51 @@ test("worker runner writes ready result after pipeline success", async () => {
   assert.equal(updates.at(-1).patch.result.storagePath, "podcaster/exports/u/s/job-1.mp4");
 });
 
+test("worker runner does not publish ready before the durable result exists", async () => {
+  const updates = [];
+  const processor = createProcessMontageExportJob({
+    jobStore: {
+      async getJob() {
+        return { status: "running", progress: 0.98 };
+      },
+      async updateJob(jobId, patch) {
+        updates.push({ jobId, patch });
+        return patch;
+      }
+    },
+    executeMontageExportPipeline: async (_input, { onStage }) => {
+      await onStage({
+        stage: "ready",
+        progress: 1,
+        hint: "Exportación lista."
+      });
+      return {
+        export: {
+          storagePath: "podcaster/exports/u/s/job-early-ready.mp4",
+          downloadUrl: "https://example.com/video.mp4",
+          downloadToken: "token-1"
+        },
+        downloadUrl: "https://example.com/video.mp4"
+      };
+    },
+    buildMontageSceneFailure: (error) => ({ error: error.message })
+  });
+
+  await processor({
+    data: {
+      jobId: "job-early-ready",
+      ownerId: "user-1",
+      baseUrl: "https://example.com",
+      input: { sessionId: "session-1" }
+    }
+  });
+
+  const readyUpdates = updates.filter(({ patch }) => patch.status === "ready");
+  assert.equal(readyUpdates.length, 1);
+  assert.equal(readyUpdates[0].patch.result.storagePath, "podcaster/exports/u/s/job-early-ready.mp4");
+  assert.equal(readyUpdates[0].patch.downloadUrl, "https://example.com/video.mp4");
+});
+
 test("worker runner writes durable error details after pipeline failure", async () => {
   const updates = [];
   const processor = createProcessMontageExportJob({
