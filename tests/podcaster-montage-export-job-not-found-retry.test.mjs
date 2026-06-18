@@ -60,8 +60,17 @@ const context = {
       }
     };
   },
+  buildApiUrl(path = "") {
+    return `https://remote.test${String(path || "").trim()}`;
+  },
   buildApiUrlPreferRemote(path = "") {
     return `https://remote.test${String(path || "").trim()}`;
+  },
+  resolveApiBase() {
+    return "/api";
+  },
+  getRemoteApiBase() {
+    return "https://charly-brown-gemini-backend.onrender.com/api";
   },
   describeMontageExportStage(stage = "") {
     return String(stage || "").trim();
@@ -147,6 +156,7 @@ vm.createContext(context);
 [
   "const MONTAGE_EXPORT_POLL_MAX_MS = 0;",
   "const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;",
+  extractFunction("isMontageExportStatusRedirectFailure"),
   extractFunction("scheduleMontageExportJobNotFoundRetry"),
   `${/async\s+function\s+pollMontageExportJob/.test(source) ? "async " : ""}${extractFunction("pollMontageExportJob")}`
 ].forEach((snippet) => {

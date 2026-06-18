@@ -1,6 +1,6 @@
 import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, deleteDoc, orderBy } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js';
-import { buildApiUrl } from "./api-client.js";
+import { buildApiUrlPreferRemote } from "./api-client.js";
 import { db, auth, storage } from './firebase-instance.js';
 import setupImageGenerator from './imageGenerator.js';
 import { sanitizeHtml, sanitizeRichText, sanitizeTextInput, escapeHtml, sanitizeAssistantHtml, setSanitizedHtml } from './security-utils.js';
@@ -194,7 +194,7 @@ async function postGeminiWithModelFallback({ mensajes, selectId = "selectGeminiE
     for (let intento = 0; intento < maxIntentosPorModelo; intento += 1) {
       try {
         const headers = await _geminiAuthHeaders();
-        const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+        const response = await fetch(buildApiUrlPreferRemote("/api/gemini/generate"), {
           method: "POST",
           headers,
           body: JSON.stringify({

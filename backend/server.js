@@ -38,6 +38,11 @@ const {
   buildDialogueVideoPromptBundle
 } = require("./dialogue-video-prompt.js");
 const {
+  buildGeminiUpstreamRetryDelays,
+  fetchGeminiWithRetry,
+  isRetryableGeminiUpstreamStatus
+} = require("./gemini-upstream-retry.js");
+const {
   createHeavyWorkCoordinator,
   validateDialogueVideoInlineReferenceBudget
 } = require("./podcaster-stability.js");
@@ -13305,7 +13310,20 @@ app.post("/api/gemini/generate", async (req, res) => {
       return { upstream, data };
     };
 
-    let { upstream, data } = await doRequest(serialized);
+    let { upstream, data } = await fetchGeminiWithRetry({
+      requestFn: async ({ attempt }) => {
+        const result = await doRequest(serialized);
+        if (!result?.upstream?.ok && isRetryableGeminiUpstreamStatus(result?.upstream?.status)) {
+          console.warn("[GEMINI] transient upstream failure", {
+            status: result?.upstream?.status,
+            attempt: attempt + 1,
+            model
+          });
+        }
+        return result;
+      },
+      retryDelaysMs: buildGeminiUpstreamRetryDelays(3, 450)
+    });
     if (!upstream.ok) {
       console.error(`[GEMINI] HTTP ${upstream.status}:`, JSON.stringify(data, null, 2));
     }
@@ -13525,50 +13543,90 @@ app.get("/api/assets/proxy-image", async (req, res) => {
 });
 
 app.get("/api/assets/montage-download", async (req, res) => {
+  const queryJobId = req.query?.jobId || req.query?.exportId || req.query?.id || "";
+  const jobId = clampExportId(queryJobId);
+  const token = clampText(String(req.query?.token || "").trim(), 180);
+  console.info("[backend][montage-download] incoming request", {
+    queryJobId,
+    resolvedJobId: jobId || null,
+    hasToken: !!token
+  });
+
   try {
-    const jobId = clampExportId(req.query?.jobId || "");
-    const token = clampText(String(req.query?.token || "").trim(), 180);
     if (jobId && token) {
-      const job = await montageExportJobStore.getJob(jobId);
-      const result = job?.result && typeof job.result === "object" ? job.result : job?.export && typeof job.export === "object" ? job.export : null;
-      const storagePath = normalizeStorageFilePath(result?.storagePath || "");
-      const expectedToken = clampText(String(result?.downloadToken || "").trim(), 180);
-      if (!job || !result || !storagePath || !expectedToken) {
-        return res.status(404).json({ error: "Export no encontrado o expirado." });
-      }
-      if (expectedToken !== token) {
-        return res.status(403).json({ error: "Token inválido para descarga." });
-      }
-      const rangeHeader = String(req.headers.range || "").trim();
-      const buckets = getStorageBucketCandidates();
-      let file = null;
-      let meta = null;
-      for (const bucket of buckets) {
-        if (!bucket) continue;
-        // eslint-disable-next-line no-await-in-loop
-        const candidateMeta = await bucket.file(storagePath).getMetadata().catch(() => null);
-        if (Array.isArray(candidateMeta) && candidateMeta[0]) {
-          file = bucket.file(storagePath);
-          meta = candidateMeta[0];
-          break;
+      const job = await resolveMontageExportJobSnapshot(jobId).catch(() => null);
+      console.info("[backend][montage-download] resolved job snapshot", {
+        jobId,
+        exists: !!job,
+        status: job?.status || null
+      });
+
+      if (job) {
+        const result = job.result && typeof job.result === "object" ? job.result : job.export && typeof job.export === "object" ? job.export : null;
+        const storagePath = normalizeStorageFilePath(result?.storagePath || "");
+        const expectedToken = clampText(String(result?.downloadToken || "").trim(), 180);
+        console.info("[backend][montage-download] resolved job assets", {
+          jobId,
+          storagePath,
+          expectedToken,
+          tokenMatches: expectedToken === token
+        });
+
+        if (result && storagePath && expectedToken) {
+          if (expectedToken !== token) {
+            return res.status(403).json({ error: "Token inválido para descarga." });
+          }
+          const rangeHeader = String(req.headers.range || "").trim();
+          const buckets = getStorageBucketCandidates();
+          let file = null;
+          let meta = null;
+          for (const bucket of buckets) {
+            if (!bucket) continue;
+            try {
+              const candidateMeta = await bucket.file(storagePath).getMetadata();
+              if (Array.isArray(candidateMeta) && candidateMeta[0]) {
+                file = bucket.file(storagePath);
+                meta = candidateMeta[0];
+                console.info("[backend][montage-download] metadata match on bucket candidate", {
+                  jobId,
+                  bucketName: bucket.name,
+                  sizeBytes: meta.size,
+                  contentType: meta.contentType
+                });
+                break;
+              }
+            } catch (bucketErr) {
+              console.warn("[backend][montage-download] bucket candidate metadata fetch failed", {
+                jobId,
+                bucketName: bucket.name,
+                message: bucketErr.message
+              });
+            }
+          }
+          if (meta) {
+            const filename = String(result.filename || `${jobId}.${getMontageExportExtension(job.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
+            const mimeType = String(result.mimeType || meta.contentType || "application/octet-stream").trim() || "application/octet-stream";
+            res.setHeader("Content-Type", mimeType);
+            res.setHeader("Accept-Ranges", "bytes");
+            res.setHeader("Cache-Control", "private, max-age=60");
+            res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
+            await streamStorageFileToResponse(file, res, {
+              metadata: meta,
+              rangeHeader
+            });
+            return;
+          }
         }
       }
-      if (!meta) return res.status(404).json({ error: "Export no encontrado o expirado." });
-      const filename = String(result?.filename || `${jobId}.${getMontageExportExtension(job?.request?.format || "mp4_h264")}`).trim() || `${jobId}.mp4`;
-      const mimeType = String(result?.mimeType || meta?.contentType || "application/octet-stream").trim() || "application/octet-stream";
-      res.setHeader("Content-Type", mimeType);
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Cache-Control", "private, max-age=60");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\"/g, "")}"`);
-      await streamStorageFileToResponse(file, res, {
-        metadata: meta,
-        rangeHeader
-      });
-      return;
     }
 
+    console.info("[backend][montage-download] falling back to legacy cache check", {
+      jobId,
+      hasToken: !!token
+    });
+
     await cleanupMontageExportCache();
-    const exportId = clampExportId(req.query?.exportId || "");
+    const exportId = clampExportId(req.query?.exportId || req.query?.jobId || req.query?.id || "");
     const legacyToken = clampText(String(req.query?.token || "").trim(), 180);
     if (!exportId || !legacyToken) {
       return res.status(400).json({ error: "Falta exportId o token." });

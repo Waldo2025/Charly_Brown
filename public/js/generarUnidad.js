@@ -22209,11 +22209,429 @@ setTimeout(() => {
 
 
 // =========================
+// PROYECTOS DYNAMIC SUBTHEMES CONFIG & HELPERS
+// =========================
+window.__unidadProyectoSubtemasConfig = window.__unidadProyectoSubtemasConfig || {};
+
+function _unidadSaveProyectoSubtemasConfig() {
+  localStorage.setItem("unidadProyectoSubtemasConfig", JSON.stringify(window.__unidadProyectoSubtemasConfig));
+}
+
+function _unidadLoadProyectoSubtemasConfig() {
+  try {
+    const saved = localStorage.getItem("unidadProyectoSubtemasConfig");
+    if (saved) {
+      window.__unidadProyectoSubtemasConfig = JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error("Error loading projects subthemes config:", e);
+  }
+  if (!window.__unidadProyectoSubtemasConfig || !Array.isArray(window.__unidadProyectoSubtemasConfig.rows)) {
+    window.__unidadProyectoSubtemasConfig = window.__unidadProyectoSubtemasConfig || {};
+    window.__unidadProyectoSubtemasConfig.rows = [
+      { rowId: "row-proyectos-default", subtema: "Proyectos" }
+    ];
+  }
+}
+
+function _unidadGetOrderedProjectRows() {
+  if (!window.__unidadProyectoSubtemasConfig || !Array.isArray(window.__unidadProyectoSubtemasConfig.rows)) {
+    _unidadLoadProyectoSubtemasConfig();
+  }
+  return window.__unidadProyectoSubtemasConfig.rows;
+}
+
+function _unidadPopRuleStyle() {
+  if (!document.getElementById("proyecto-drag-drop-styles")) {
+    const style = document.createElement("style");
+    style.id = "proyecto-drag-drop-styles";
+    style.innerHTML = `
+      .tabla-secuencia tbody tr[draggable="true"] {
+        cursor: grab;
+      }
+      .tabla-secuencia tbody tr[draggable="true"]:active {
+        cursor: grabbing;
+      }
+      .tabla-secuencia tbody tr.dragged {
+        opacity: 0.4;
+        border: 2px dashed #3f4d98;
+      }
+      .tabla-secuencia tbody tr.over {
+        border-top: 2px solid #3f4d98;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+_unidadPopRuleStyle();
+
+let dragSrcEl = null;
+
+function handleDragStart(e) {
+  dragSrcEl = this;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', this.dataset.rowId);
+  this.classList.add('dragged');
+}
+
+function handleDragOver(e) {
+  if (e.preventDefault) {
+    e.preventDefault();
+  }
+  e.dataTransfer.dropEffect = 'move';
+  return false;
+}
+
+function handleDragEnter(e) {
+  this.classList.add('over');
+}
+
+function handleDragLeave(e) {
+  this.classList.remove('over');
+}
+
+function handleDrop(e) {
+  if (e.stopPropagation) {
+    e.stopPropagation();
+  }
+  if (dragSrcEl !== this) {
+    const srcRowId = dragSrcEl.dataset.rowId;
+    const targetRowId = this.dataset.rowId;
+    
+    const rows = window.__unidadProyectoSubtemasConfig.rows;
+    const srcIndex = rows.findIndex(r => r.rowId === srcRowId);
+    const targetIndex = rows.findIndex(r => r.rowId === targetRowId);
+    
+    if (srcIndex !== -1 && targetIndex !== -1) {
+      const [movedRow] = rows.splice(srcIndex, 1);
+      rows.splice(targetIndex, 0, movedRow);
+      _unidadSaveProyectoSubtemasConfig();
+      
+      const tbody = this.closest('tbody');
+      _unidadRenderProyectoSubtemaRows(tbody);
+      _unidadSetSaveNeeded(true);
+    }
+  }
+  return false;
+}
+
+function handleDragEnd(e) {
+  this.classList.remove('dragged');
+  const tbody = this.closest('tbody');
+  if (tbody) {
+    const rows = tbody.querySelectorAll('tr');
+    rows.forEach(r => r.classList.remove('over'));
+  }
+}
+
+function _unidadPopulateProyectoSubthemeSelect(selectElement) {
+  if (!selectElement) return;
+  selectElement.innerHTML = "";
+  
+  const currentSubthemes = new Set(
+    (window.__unidadProyectoSubtemasConfig?.rows || []).map(r => r.subtema)
+  );
+  
+  const allSubthemes = Object.keys(window.categoriaPorSubtema || {});
+  const availableSubthemes = allSubthemes.filter(sub => !currentSubthemes.has(sub));
+  
+  if (availableSubthemes.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No hay subtemas disponibles";
+    selectElement.appendChild(opt);
+    selectElement.disabled = true;
+    return;
+  }
+  
+  selectElement.disabled = false;
+  
+  const defaultOpt = document.createElement("option");
+  defaultOpt.value = "";
+  defaultOpt.textContent = "Seleccionar subtema...";
+  selectElement.appendChild(defaultOpt);
+
+  availableSubthemes.forEach(sub => {
+    const opt = document.createElement("option");
+    opt.value = sub;
+    opt.textContent = `${formatearSubtema(sub)} (${window.categoriaPorSubtema[sub]})`;
+    selectElement.appendChild(opt);
+  });
+}
+
+function _unidadRenderProyectoSubtemaRows(tbody) {
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  
+  const rows = _unidadGetOrderedProjectRows();
+  const allSubthemes = Object.keys(window.categoriaPorSubtema || {});
+  
+  rows.forEach((row, index) => {
+    if (row.generar === undefined) row.generar = true;
+    if (row.relacion === undefined) row.relacion = false;
+    if (row.interdisc === undefined) row.interdisc = "";
+    if (row.recortable === undefined) row.recortable = false;
+    if (row.ficha === undefined) row.ficha = false;
+    if (row.anexo === undefined) row.anexo = false;
+    if (row.video === undefined) row.video = false;
+    if (row.imagen === undefined) row.imagen = false;
+    if (row.cantidad === undefined) row.cantidad = 2;
+    
+    const fila = document.createElement("tr");
+    fila.setAttribute("draggable", "true");
+    fila.dataset.rowId = row.rowId;
+    fila.dataset.subtema = row.subtema;
+    
+    fila.addEventListener('dragstart', handleDragStart);
+    fila.addEventListener('dragover', handleDragOver);
+    fila.addEventListener('dragenter', handleDragEnter);
+    fila.addEventListener('dragleave', handleDragLeave);
+    fila.addEventListener('drop', handleDrop);
+    fila.addEventListener('dragend', handleDragEnd);
+    
+    // 1. Bolt/Generar Checkbox
+    const chkGenerar = document.createElement("input");
+    chkGenerar.type = "checkbox";
+    chkGenerar.name = `generar_proyecto_subtema_${row.rowId}`;
+    chkGenerar.checked = row.generar;
+    chkGenerar.classList.add("categoria-switch");
+    chkGenerar.dataset.categoria = "Proyectos";
+    chkGenerar.dataset.subtema = row.subtema;
+    chkGenerar.dataset.rowId = row.rowId;
+    chkGenerar.addEventListener("change", () => {
+      row.generar = chkGenerar.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdGenerar = document.createElement("td");
+    tdGenerar.appendChild(chkGenerar);
+    
+    // 2. Categoria
+    const tdCategoria = document.createElement("td");
+    tdCategoria.textContent = "Proyectos";
+    
+    // 3. Subtema (with delete button)
+    const tdSubtema = document.createElement("td");
+    tdSubtema.innerHTML = `
+      ${formatearSubtema(row.subtema)}
+      <button type="button" class="btn-eliminar-proyecto" data-row-id="${row.rowId}" style="background:none; border:none; color:#dc2626; cursor:pointer; margin-left:8px;" title="Eliminar subtema">
+        <i class="fas fa-trash-alt"></i>
+      </button>
+    `;
+    const btnDelete = tdSubtema.querySelector(".btn-eliminar-proyecto");
+    btnDelete.addEventListener("click", () => {
+      window.__unidadProyectoSubtemasConfig.rows = window.__unidadProyectoSubtemasConfig.rows.filter(r => r.rowId !== row.rowId);
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadRenderProyectoSubtemaRows(tbody);
+      
+      const selectAgregar = document.getElementById("select-agregar-subtema-Proyectos");
+      if (selectAgregar) {
+        _unidadPopulateProyectoSubthemeSelect(selectAgregar);
+      }
+      _unidadSetSaveNeeded(true);
+    });
+    
+    // 4. Relacion
+    const chkRelacion = document.createElement("input");
+    chkRelacion.type = "checkbox";
+    chkRelacion.name = `relacion_${row.subtema}`;
+    chkRelacion.checked = row.relacion;
+    chkRelacion.classList.add("categoria-switch");
+    chkRelacion.addEventListener("change", () => {
+      row.relacion = chkRelacion.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdRelacion = document.createElement("td");
+    tdRelacion.appendChild(chkRelacion);
+    tdRelacion.style.width = "54px";
+    tdRelacion.style.minWidth = "54px";
+    tdRelacion.style.maxWidth = "54px";
+    tdRelacion.style.textAlign = "center";
+    
+    // 5. Interdisciplinariedad Select
+    const selectInter = document.createElement("select");
+    selectInter.name = `interdisciplinariedad_${row.subtema}`;
+    selectInter.className = "interdisc-select";
+    selectInter.size = 1;
+    selectInter.style.width = "100%";
+    selectInter.style.minWidth = "160px";
+    selectInter.style.minHeight = "36px";
+    selectInter.style.display = "block";
+    selectInter.style.padding = "4px 8px";
+    selectInter.style.borderRadius = "6px";
+    selectInter.style.border = "1px solid #cbd5e1";
+    
+    selectInter.innerHTML = `<option value="">Ninguna</option>`;
+    allSubthemes.forEach(op => {
+      if (op !== row.subtema) {
+        const option = document.createElement("option");
+        option.value = op;
+        option.textContent = formatearSubtema(op);
+        if (op === row.interdisc) {
+          option.selected = true;
+        }
+        selectInter.appendChild(option);
+      }
+    });
+    selectInter.addEventListener("change", () => {
+      row.interdisc = selectInter.value;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const interdiscWrap = document.createElement("div");
+    interdiscWrap.style.width = "100%";
+    interdiscWrap.style.minWidth = "160px";
+    interdiscWrap.appendChild(selectInter);
+    const tdInterdisc = document.createElement("td");
+    tdInterdisc.style.minWidth = "170px";
+    tdInterdisc.appendChild(interdiscWrap);
+    
+    // 6. Recortable
+    const chkRecortable = document.createElement("input");
+    chkRecortable.type = "checkbox";
+    chkRecortable.name = `recortable_${row.subtema}`;
+    chkRecortable.checked = row.recortable;
+    chkRecortable.classList.add("categoria-switch");
+    chkRecortable.addEventListener("change", () => {
+      row.recortable = chkRecortable.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdRecort = document.createElement("td");
+    tdRecort.appendChild(chkRecortable);
+    
+    // 7. Ficha
+    const chkFicha = document.createElement("input");
+    chkFicha.type = "checkbox";
+    chkFicha.name = `ficha_${row.subtema}`;
+    chkFicha.checked = row.ficha;
+    chkFicha.classList.add("categoria-switch");
+    chkFicha.addEventListener("change", () => {
+      row.ficha = chkFicha.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdFicha = document.createElement("td");
+    tdFicha.appendChild(chkFicha);
+    
+    // 8. Anexo
+    const chkAnexo = document.createElement("input");
+    chkAnexo.type = "checkbox";
+    chkAnexo.name = `anexo_${row.subtema}`;
+    chkAnexo.checked = row.anexo;
+    chkAnexo.classList.add("categoria-switch");
+    chkAnexo.addEventListener("change", () => {
+      row.anexo = chkAnexo.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdAnexo = document.createElement("td");
+    tdAnexo.appendChild(chkAnexo);
+    
+    // 9. Video
+    const chkVideo = document.createElement("input");
+    chkVideo.type = "checkbox";
+    chkVideo.name = `video_${row.subtema}`;
+    chkVideo.checked = row.video;
+    chkVideo.classList.add("categoria-switch");
+    chkVideo.addEventListener("change", () => {
+      row.video = chkVideo.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdVideo = document.createElement("td");
+    tdVideo.appendChild(chkVideo);
+    
+    // 10. Imagen Apoyo
+    const chkImagen = document.createElement("input");
+    chkImagen.type = "checkbox";
+    chkImagen.name = `imagen_${row.subtema}`;
+    chkImagen.checked = row.imagen;
+    chkImagen.classList.add("categoria-switch");
+    chkImagen.addEventListener("change", () => {
+      row.imagen = chkImagen.checked;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdImagen = document.createElement("td");
+    tdImagen.appendChild(chkImagen);
+    
+    // 11. Cantidad Actividades (name="num_proyecto_${row.rowId}")
+    const inputCantidad = document.createElement("input");
+    inputCantidad.type = "number";
+    inputCantidad.name = `num_proyecto_${row.rowId}`;
+    inputCantidad.min = 1;
+    inputCantidad.max = 10;
+    inputCantidad.value = row.cantidad;
+    inputCantidad.style.width = "60px";
+    inputCantidad.addEventListener("input", () => {
+      row.cantidad = parseInt(inputCantidad.value, 10) || 2;
+      _unidadSaveProyectoSubtemasConfig();
+      _unidadSetSaveNeeded(true);
+    });
+    const tdCantidad = document.createElement("td");
+    tdCantidad.appendChild(inputCantidad);
+    
+    // 12. Instrucciones IA Button
+    const tdInstrucciones = document.createElement("td");
+    tdInstrucciones.innerHTML = `
+      <div class="tooltip">
+        <button type="button"
+                class="btn-icono-categoria instrucciones btn-instrucciones-subtema"
+                data-categoria="Proyectos"
+                data-subtema="${row.subtema}"
+                title="Añadir instrucciones específicas para Gemini para este subtema"
+                id="btn-instrucciones-Proyectos-${row.subtema.replace(/\s+/g, '-')}"
+        >
+          <i class="fas fa-comment-alt"></i>
+          <span class="badge-instrucciones" hidden>!</span>
+        </button>
+        <span class="tooltiptext">Instrucciones para Gemini</span>
+      </div>
+    `;
+    const btnInstrucciones = tdInstrucciones.querySelector('.btn-instrucciones-subtema');
+    if (btnInstrucciones) {
+      const cat = "Proyectos";
+      const sub = row.subtema;
+      const saved = localStorage.getItem(`instrucciones_gemini_subtema_${sub}`);
+      if (saved) {
+        if (!window.instruccionesGeminiPorSubtema) window.instruccionesGeminiPorSubtema = {};
+        window.instruccionesGeminiPorSubtema[sub] = saved;
+        const badge = tdInstrucciones.querySelector('.badge-instrucciones');
+        if (badge) {
+          badge.removeAttribute("hidden");
+          badge.textContent = "!";
+        }
+      }
+      
+      let clickTimer = null;
+      btnInstrucciones.addEventListener('click', (e) => {
+        if (clickTimer === null) {
+          clickTimer = setTimeout(() => {
+            abrirModalInstrucciones(cat, sub);
+            clickTimer = null;
+          }, 250);
+        } else {
+          clearTimeout(clickTimer);
+          clickTimer = null;
+        }
+      });
+    }
+    
+    fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad, tdInstrucciones);
+    tbody.appendChild(fila);
+  });
+}
+
+// =========================
 // 3) Verificar secuencia (usa Firestore o IA, y arma la UI) - CORREGIDA
 // =========================
 let verificandoSecuencia = false; // Bandera para prevenir ejecuciones múltiples
 
 async function verificarSecuencia() {
+  _unidadLoadProyectoSubtemasConfig();
+
   if (!window.instruccionesGeminiPorCategoria) {
     window.instruccionesGeminiPorCategoria = {};
   }
@@ -22396,162 +22814,166 @@ async function verificarSecuencia() {
 
       const tbody = tabla.querySelector("tbody");
 
-      subtemas.forEach(subtema => {
-        const fila = document.createElement("tr");
+      if (categoria === "Proyectos") {
+        _unidadRenderProyectoSubtemaRows(tbody);
+      } else {
+        subtemas.forEach(subtema => {
+          const fila = document.createElement("tr");
 
-        // ✅ Checkbox para seleccionar/deseleccionar este SUBTEMA específico
-        const chkGenerarSubtema = document.createElement("input");
-        chkGenerarSubtema.type = "checkbox";
-        chkGenerarSubtema.name = `generar_subtema_${subtema}`;
-        chkGenerarSubtema.dataset.categoria = categoria;
-        chkGenerarSubtema.dataset.subtema = subtema;
-        chkGenerarSubtema.checked = true; // Por defecto seleccionado
-
-
-        // Relación con lectura - CORREGIDO
-        const chkRelacion = document.createElement("input");
-        chkRelacion.type = "checkbox";
-        chkRelacion.name = `relacion_${subtema}`;
-
-        // Por defecto activado en todas excepto Proyectos, pero editable.
-        chkRelacion.checked = (categoria !== "Proyectos");
-
-        // ✅ NUEVO: Checkbox para seleccionar categoría
-        const chkGenerar = document.createElement("input");
-        chkGenerar.type = "checkbox";
-        // CORRECCIÓN: Usar el nombre del subtema en lugar de la categoría
-        // Esto ya está corregido en el HTML, pero se mantiene la lógica para el JS
-        chkGenerar.name = `generar_${subtema}`;
-        chkGenerar.checked = true; // Por defecto seleccionado
-        chkGenerar.dataset.categoria = categoria;
-        chkGenerar.dataset.subtema = subtema; // Agregar referencia al subtema
-
-        // ✅ Checkbox para la categoría (usado por "Generar todas las categorías")
-        const chkGenerarCategoria = document.createElement("input");
-        chkGenerarCategoria.type = "checkbox";
-        chkGenerarCategoria.name = `generar_categoria_${categoria}`;
-        chkGenerarCategoria.dataset.categoria = categoria;
-        chkGenerarCategoria.checked = true; // Por defecto seleccionado
+          // ✅ Checkbox para seleccionar/deseleccionar este SUBTEMA específico
+          const chkGenerarSubtema = document.createElement("input");
+          chkGenerarSubtema.type = "checkbox";
+          chkGenerarSubtema.name = `generar_subtema_${subtema}`;
+          chkGenerarSubtema.dataset.categoria = categoria;
+          chkGenerarSubtema.dataset.subtema = subtema;
+          chkGenerarSubtema.checked = true; // Por defecto seleccionado
 
 
-        // Interdisciplinariedad
-        const selectInterdisciplinariedad = document.createElement("select");
-        selectInterdisciplinariedad.name = `interdisciplinariedad_${subtema}`;
-        selectInterdisciplinariedad.className = "interdisc-select";
-        selectInterdisciplinariedad.size = 1;
-        selectInterdisciplinariedad.innerHTML = `<option value="">Ninguna</option>`;
-        todosLosSubtemas.forEach(op => {
-          if (op !== subtema) {
-            const option = document.createElement("option");
-            option.value = op;
-            option.textContent = formatearSubtema(op);
-            selectInterdisciplinariedad.appendChild(option);
-          }
+          // Relación con lectura - CORREGIDO
+          const chkRelacion = document.createElement("input");
+          chkRelacion.type = "checkbox";
+          chkRelacion.name = `relacion_${subtema}`;
+
+          // Por defecto activado en todas excepto Proyectos, pero editable.
+          chkRelacion.checked = (categoria !== "Proyectos");
+
+          // ✅ NUEVO: Checkbox para seleccionar categoría
+          const chkGenerar = document.createElement("input");
+          chkGenerar.type = "checkbox";
+          // CORRECCIÓN: Usar el nombre del subtema en lugar de la categoría
+          // Esto ya está corregido en el HTML, pero se mantiene la lógica para el JS
+          chkGenerar.name = `generar_${subtema}`;
+          chkGenerar.checked = true; // Por defecto seleccionado
+          chkGenerar.dataset.categoria = categoria;
+          chkGenerar.dataset.subtema = subtema; // Agregar referencia al subtema
+
+          // ✅ Checkbox para la categoría (usado por "Generar todas las categorías")
+          const chkGenerarCategoria = document.createElement("input");
+          chkGenerarCategoria.type = "checkbox";
+          chkGenerarCategoria.name = `generar_categoria_${categoria}`;
+          chkGenerarCategoria.dataset.categoria = categoria;
+          chkGenerarCategoria.checked = true; // Por defecto seleccionado
+
+
+          // Interdisciplinariedad
+          const selectInterdisciplinariedad = document.createElement("select");
+          selectInterdisciplinariedad.name = `interdisciplinariedad_${subtema}`;
+          selectInterdisciplinariedad.className = "interdisc-select";
+          selectInterdisciplinariedad.size = 1;
+          selectInterdisciplinariedad.innerHTML = `<option value="">Ninguna</option>`;
+          todosLosSubtemas.forEach(op => {
+            if (op !== subtema) {
+              const option = document.createElement("option");
+              option.value = op;
+              option.textContent = formatearSubtema(op);
+              selectInterdisciplinariedad.appendChild(option);
+            }
+          });
+
+          // Se eliminó la lógica compleja que creaba ~60 modales 'interdiscMenu' anexados a document.body
+          // y ~180 event listeners globales de 'resize', 'scroll', 'click' para cada carga de la tabla,
+          // ya que esto provocaba una fuga de memoria exponencial que bloqueaba o enlentecía la UI (lag).
+          // 14/04/2026 - Ahora se utiliza un simple select nativo con estilo mínimo.
+          selectInterdisciplinariedad.style.width = "100%";
+          selectInterdisciplinariedad.style.minWidth = "160px";
+          selectInterdisciplinariedad.style.minHeight = "36px";
+          selectInterdisciplinariedad.style.display = "block";
+          selectInterdisciplinariedad.style.padding = "4px 8px";
+          selectInterdisciplinariedad.style.borderRadius = "6px";
+          selectInterdisciplinariedad.style.border = "1px solid #cbd5e1";
+          
+          const interdiscWrap = document.createElement("div");
+          interdiscWrap.style.width = "100%";
+          interdiscWrap.style.minWidth = "160px";
+          interdiscWrap.appendChild(selectInterdisciplinariedad);
+
+          // Recursos
+          const chkRecortable = Object.assign(document.createElement("input"), { type: "checkbox", name: `recortable_${subtema}` });
+          const chkFichas = Object.assign(document.createElement("input"), { type: "checkbox", name: `ficha_${subtema}` });
+          const chkAnexos = Object.assign(document.createElement("input"), { type: "checkbox", name: `anexo_${subtema}` });
+          const chkVideos = Object.assign(document.createElement("input"), { type: "checkbox", name: `video_${subtema}` });
+          const chkImagenApoyo = Object.assign(document.createElement("input"), { type: "checkbox", name: `imagen_${subtema}` });
+
+          [
+            chkGenerar,
+            chkRelacion,
+            chkRecortable,
+            chkFichas,
+            chkAnexos,
+            chkVideos,
+            chkImagenApoyo
+          ].forEach((chk) => chk.classList.add("categoria-switch"));
+
+          // Cantidad
+          const inputCantidad = document.createElement("input");
+          inputCantidad.type = "number";
+          inputCantidad.name = `num_${subtema}`;
+          inputCantidad.min = 1;
+          inputCantidad.max = 10;
+          inputCantidad.value = (categoria === "Artes") ? 4 : 2;
+          inputCantidad.style.width = "60px";
+
+          // TDs
+          const tdGenerar = document.createElement("td");
+          tdGenerar.appendChild(chkGenerar);
+
+          const tdCategoria = document.createElement("td");
+          tdCategoria.textContent = categoria;
+
+          const tdSubtema = document.createElement("td");
+          tdSubtema.textContent = formatearSubtema(subtema);
+
+          const tdRelacion = document.createElement("td");
+          tdRelacion.appendChild(chkRelacion);
+          tdRelacion.style.width = "54px";
+          tdRelacion.style.minWidth = "54px";
+          tdRelacion.style.maxWidth = "54px";
+          tdRelacion.style.textAlign = "center";
+
+          const tdInterdisc = document.createElement("td");
+          tdInterdisc.style.minWidth = "170px";
+          tdInterdisc.appendChild(interdiscWrap);
+
+          const tdRecort = document.createElement("td");
+          tdRecort.appendChild(chkRecortable);
+
+          const tdFicha = document.createElement("td");
+          tdFicha.appendChild(chkFichas);
+
+          const tdAnexo = document.createElement("td");
+          tdAnexo.appendChild(chkAnexos);
+
+          const tdVideo = document.createElement("td");
+          tdVideo.appendChild(chkVideos);
+
+          const tdImagen = document.createElement("td");
+          tdImagen.appendChild(chkImagenApoyo);
+
+          // ✅ NUEVA COLUMNA: Instrucciones IA por subtema
+          const tdInstruccionesIA = document.createElement("td");
+          tdInstruccionesIA.innerHTML = `
+            <div class="tooltip">
+              <button type="button"
+                      class="btn-icono-categoria instrucciones btn-instrucciones-subtema"
+                      data-categoria="${categoria}"
+                      data-subtema="${subtema}"
+                      title="Añadir instrucciones específicas para Gemini para este subtema"
+                      id="btn-instrucciones-${categoria.replace(/\s+/g, '-')}-${subtema.replace(/\s+/g, '-')}"
+              >
+                <i class="fas fa-comment-alt"></i>
+                <span class="badge-instrucciones" hidden>!</span>
+              </button>
+              <span class="tooltiptext">Instrucciones para Gemini</span>
+            </div>
+          `;
+
+          const tdCantidad = document.createElement("td");
+          tdCantidad.appendChild(inputCantidad);
+
+          fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad, tdInstruccionesIA);
+          tbody.appendChild(fila);
         });
-
-        // Se eliminó la lógica compleja que creaba ~60 modales 'interdiscMenu' anexados a document.body
-        // y ~180 event listeners globales de 'resize', 'scroll', 'click' para cada carga de la tabla,
-        // ya que esto provocaba una fuga de memoria exponencial que bloqueaba o enlentecía la UI (lag).
-        // 14/04/2026 - Ahora se utiliza un simple select nativo con estilo mínimo.
-        selectInterdisciplinariedad.style.width = "100%";
-        selectInterdisciplinariedad.style.minWidth = "160px";
-        selectInterdisciplinariedad.style.minHeight = "36px";
-        selectInterdisciplinariedad.style.display = "block";
-        selectInterdisciplinariedad.style.padding = "4px 8px";
-        selectInterdisciplinariedad.style.borderRadius = "6px";
-        selectInterdisciplinariedad.style.border = "1px solid #cbd5e1";
-        
-        const interdiscWrap = document.createElement("div");
-        interdiscWrap.style.width = "100%";
-        interdiscWrap.style.minWidth = "160px";
-        interdiscWrap.appendChild(selectInterdisciplinariedad);
-
-        // Recursos
-        const chkRecortable = Object.assign(document.createElement("input"), { type: "checkbox", name: `recortable_${subtema}` });
-        const chkFichas = Object.assign(document.createElement("input"), { type: "checkbox", name: `ficha_${subtema}` });
-        const chkAnexos = Object.assign(document.createElement("input"), { type: "checkbox", name: `anexo_${subtema}` });
-        const chkVideos = Object.assign(document.createElement("input"), { type: "checkbox", name: `video_${subtema}` });
-        const chkImagenApoyo = Object.assign(document.createElement("input"), { type: "checkbox", name: `imagen_${subtema}` });
-
-        [
-          chkGenerar,
-          chkRelacion,
-          chkRecortable,
-          chkFichas,
-          chkAnexos,
-          chkVideos,
-          chkImagenApoyo
-        ].forEach((chk) => chk.classList.add("categoria-switch"));
-
-        // Cantidad
-        const inputCantidad = document.createElement("input");
-        inputCantidad.type = "number";
-        inputCantidad.name = `num_${subtema}`;
-        inputCantidad.min = 1;
-        inputCantidad.max = 10;
-        inputCantidad.value = (categoria === "Artes") ? 4 : 2;
-        inputCantidad.style.width = "60px";
-
-        // TDs
-        const tdGenerar = document.createElement("td");
-        tdGenerar.appendChild(chkGenerar);
-
-        const tdCategoria = document.createElement("td");
-        tdCategoria.textContent = categoria;
-
-        const tdSubtema = document.createElement("td");
-        tdSubtema.textContent = formatearSubtema(subtema);
-
-        const tdRelacion = document.createElement("td");
-        tdRelacion.appendChild(chkRelacion);
-        tdRelacion.style.width = "54px";
-        tdRelacion.style.minWidth = "54px";
-        tdRelacion.style.maxWidth = "54px";
-        tdRelacion.style.textAlign = "center";
-
-        const tdInterdisc = document.createElement("td");
-        tdInterdisc.style.minWidth = "170px";
-        tdInterdisc.appendChild(interdiscWrap);
-
-        const tdRecort = document.createElement("td");
-        tdRecort.appendChild(chkRecortable);
-
-        const tdFicha = document.createElement("td");
-        tdFicha.appendChild(chkFichas);
-
-        const tdAnexo = document.createElement("td");
-        tdAnexo.appendChild(chkAnexos);
-
-        const tdVideo = document.createElement("td");
-        tdVideo.appendChild(chkVideos);
-
-        const tdImagen = document.createElement("td");
-        tdImagen.appendChild(chkImagenApoyo);
-
-        // ✅ NUEVA COLUMNA: Instrucciones IA por subtema
-        const tdInstruccionesIA = document.createElement("td");
-        tdInstruccionesIA.innerHTML = `
-          <div class="tooltip">
-            <button type="button"
-                    class="btn-icono-categoria instrucciones btn-instrucciones-subtema"
-                    data-categoria="${categoria}"
-                    data-subtema="${subtema}"
-                    title="Añadir instrucciones específicas para Gemini para este subtema"
-                    id="btn-instrucciones-${categoria.replace(/\s+/g, '-')}-${subtema.replace(/\s+/g, '-')}"
-            >
-              <i class="fas fa-comment-alt"></i>
-              <span class="badge-instrucciones" hidden>!</span>
-            </button>
-            <span class="tooltiptext">Instrucciones para Gemini</span>
-          </div>
-        `;
-
-        const tdCantidad = document.createElement("td");
-        tdCantidad.appendChild(inputCantidad);
-
-        fila.append(tdGenerar, tdCategoria, tdSubtema, tdRelacion, tdInterdisc, tdRecort, tdFicha, tdAnexo, tdVideo, tdImagen, tdCantidad, tdInstruccionesIA);
-        tbody.appendChild(fila);
-      });
+      }
       
       const encabezado = document.createElement("div");
       encabezado.className = "categoria-header";
@@ -22563,7 +22985,14 @@ async function verificarSecuencia() {
         <h3>${categoria}</h3>
         ${_unidadBuildCategoryStyleUi(categoria)}
         <div class="botones-categoria">
-            
+            ${categoria === "Proyectos" ? `
+              <div class="agregar-subtema-proyectos-wrap" style="display:inline-flex; align-items:center; gap:8px; margin-right:12px;">
+                <select id="select-agregar-subtema-Proyectos" style="padding: 4px 8px; border-radius: 6px; border: 1px solid #cbd5e1; min-height:36px; font-size:13px;"></select>
+                <button type="button" id="btn-agregar-subtema-Proyectos" class="btn-icono-categoria" style="background:#22c55e; color:white; border:none; border-radius:6px; cursor:pointer; width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center;" title="Añadir subtema">
+                  <i class="fas fa-plus"></i>
+                </button>
+              </div>
+            ` : ""}
             
             <div class="tooltip">
                 <button type="button"
@@ -22611,6 +23040,28 @@ async function verificarSecuencia() {
 
       // Agrega los event listeners para instrucciones por subtema
       setTimeout(() => {
+        if (categoria === "Proyectos") {
+          const btnAgregar = document.getElementById("btn-agregar-subtema-Proyectos");
+          const selectAgregar = document.getElementById("select-agregar-subtema-Proyectos");
+          if (btnAgregar && selectAgregar) {
+            _unidadPopulateProyectoSubthemeSelect(selectAgregar);
+            
+            btnAgregar.addEventListener("click", () => {
+              const subtema = selectAgregar.value;
+              if (!subtema) return;
+              
+              const rowId = `proyecto-row-${Date.now()}`;
+              window.__unidadProyectoSubtemasConfig.rows.push({ rowId, subtema });
+              _unidadSaveProyectoSubtemasConfig();
+              
+              const targetTbody = document.getElementById(`tabla-secuencia-Proyectos`).querySelector("tbody");
+              _unidadRenderProyectoSubtemaRows(targetTbody);
+              _unidadPopulateProyectoSubthemeSelect(selectAgregar);
+              _unidadSetSaveNeeded(true);
+            });
+          }
+        }
+
         const btnsInstrucciones = tabla.querySelectorAll('.btn-instrucciones-subtema');
 
         btnsInstrucciones.forEach(btn => {
@@ -23844,6 +24295,7 @@ window.construirPromptProyecto = function (
   tituloLecturaRelacionada = "",
   options = {}
 ) {
+  const subtemasOrdenados = options.subtemasOrdenados || [];
   const isContextualStep = !!options.isContextualStep;
 
 
@@ -26919,7 +27371,7 @@ function debeRelacionarConLectura(subtema) {
 
 
 // 🟢 CORRECCIÓN: Modificar la función generarSeccionCategoria
-async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) {
+async function generarSeccionCategoria(categoria, { isIngestaIA = false, soloSubtema = null } = {}) {
   const teacherNotesFormat = isIngestaIA
     ? TEACHER_NOTES_FORMATS.INGESTA_NUMBERED_GENERAL
     : TEACHER_NOTES_FORMATS.DEFAULT;
@@ -26940,14 +27392,16 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
   verificarUnidadActual();
 
   // 🚫 Candado para evitar ejecuciones duplicadas por error
-  if (window.generandoCategoria === categoria) {
-    return;
+  if (!soloSubtema) {
+    if (window.generandoCategoria === categoria) {
+      return;
+    }
+    if (window.generandoCategoria && window.generandoCategoria !== categoria) {
+      alert(`Ya se está generando la categoría "${window.generandoCategoria}". Espera a que termine.`);
+      return;
+    }
+    window.generandoCategoria = categoria;
   }
-  if (window.generandoCategoria && window.generandoCategoria !== categoria) {
-    alert(`Ya se está generando la categoría "${window.generandoCategoria}". Espera a que termine.`);
-    return;
-  }
-  window.generandoCategoria = categoria;
   window.categoriaEnProceso = categoria;
   window.ultimaCategoriaIntentada = categoria;
   _unidadSetSaveNeeded(true);
@@ -27005,36 +27459,60 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
     const contenidoLecturaSeguro = lecturaDisponible ? lecturaResuelta.contenido : "";
     const preguntasComprensionSeguras = lecturaDisponible ? lecturaResuelta.preguntas : [];
 
-    // === Subtemas de la categoría - CORREGIDO: Verificar checkboxes de cada subtema ===
-    const subtemasDeCategoria = Object
-      .entries(categoriaPorSubtema)
-      .filter(([sub, cat]) => cat === categoria)
-      .map(([sub]) => sub)
-      .filter(sub => {
-        // ✅ CORRECCIÓN: Buscar dentro de la tabla de la categoría para evitar colisiones entre categorías
-        const scope = tabla || document;
-        const chkGenerar = scope.querySelector(`input[name="generar_${sub}"]`) || 
-                          scope.querySelector(`input[name="generar_subtema_${sub}"]`);
-        const chkCategoria = document.querySelector(`input[name^="generar_categoria_"][data-categoria="${categoria}"]`);
-
-        return (chkGenerar && chkGenerar.checked) ||
-          (chkCategoria && chkCategoria.checked);
+    // === Subtemas de la categoría ===
+    let subtemasDeCategoria;
+    // subtemasExtrasParaGenerar: subtemas de otras categorías añadidos a la tabla de Proyectos
+    let subtemasExtrasParaGenerar = [];
+    if (soloSubtema) {
+      subtemasDeCategoria = [soloSubtema];
+      subtemasExtrasParaGenerar = [];
+    } else if (categoria === "Proyectos") {
+      // ✅ Para Proyectos: usar las filas dinámicas directamente.
+      // Separar en: fila nativa "Proyectos" y filas extra de otras categorías.
+      const scope = tabla || document;
+      const rows = window.__unidadProyectoSubtemasConfig?.rows || [];
+      const checkedRows = rows.filter(row => {
+        const chk = scope.querySelector(`input[name="generar_proyecto_subtema_${row.rowId}"]`);
+        return chk ? chk.checked : false;
       });
+      // Nativas: solo el subtema "Proyectos" original va al flujo de proyecto
+      subtemasDeCategoria = checkedRows
+        .filter(row => row.subtema === "Proyectos")
+        .map(row => row.subtema);
+      // Extras: subtemas de otras categorías se generan con su estructura propia
+      subtemasExtrasParaGenerar = checkedRows
+        .filter(row => row.subtema !== "Proyectos")
+        .map(row => row.subtema);
+    } else {
+      subtemasDeCategoria = Object
+        .entries(categoriaPorSubtema)
+        .filter(([sub, cat]) => cat === categoria)
+        .map(([sub]) => sub)
+        .filter(sub => {
+          const scope = tabla || document;
+          const chkGenerar = scope.querySelector(`input[name="generar_${sub}"]`) ||
+                            scope.querySelector(`input[name="generar_subtema_${sub}"]`);
+          const chkCategoria = document.querySelector(`input[name^="generar_categoria_"][data-categoria="${categoria}"]`);
+          return (chkGenerar && chkGenerar.checked) ||
+            (chkCategoria && chkCategoria.checked);
+        });
+    }
 
-    if (!subtemasDeCategoria.length) {
+    if (!subtemasDeCategoria.length && !subtemasExtrasParaGenerar.length) {
       alert(`⚠️ Por favor selecciona al menos un subtema en la categoría "${categoria}" marcando los checkboxes en la columna "Generar".`);
       return;
     }
 
     // Si hay apoyo visual activado, pedir el tipo de organizador (una sola vez por categoría).
-    await _unidadSolicitarTipoGraficoParaCategoriaSiAplica({ categoria, subtemas: subtemasDeCategoria });
+    const subtemasParaGrafico = [...subtemasDeCategoria, ...subtemasExtrasParaGenerar];
+    await _unidadSolicitarTipoGraficoParaCategoriaSiAplica({ categoria, subtemas: subtemasParaGrafico });
 
     // Abrir el modal de resultado DESPUÉS de elegir el tipo de gráfico y ANTES de iniciar prompts.
     abrirModalResultadoUnidad();
 
     // ✅ CORRECCIÓN: MOVER la verificación de "algún subtema seleccionado" AQUÍ, después de definir subtemasDeCategoria
     const algunSubtemaSeleccionado = subtemasDeCategoria.some(sub => {
-      const chkRelacion = document.querySelector(`input[name='relacion_${sub}']`);
+      const chkRelacion = (soloSubtema ? document : (tabla || document)).querySelector(`input[name='relacion_${sub}']`);
       return chkRelacion ? chkRelacion.checked : false;
     });
 
@@ -27064,8 +27542,22 @@ async function generarSeccionCategoria(categoria, { isIngestaIA = false } = {}) 
       const chkRecortable = document.querySelector(`input[name='recortable_${subtema}']`);
       const recortable = chkRecortable ? chkRecortable.checked : false;
 
-      const inputCantidad = document.querySelector(`input[name='num_${subtema}']`);
-      let cantidad = inputCantidad ? parseInt(inputCantidad.value, 10) : 1;
+      let cantidad = 2;
+      const projectRowForQty = (window.__unidadProyectoSubtemasConfig?.rows || []).find(r => r.subtema === subtema);
+      if (soloSubtema && projectRowForQty) {
+        const inputCant = document.querySelector(`input[name='num_proyecto_${projectRowForQty.rowId}']`);
+        cantidad = inputCant ? parseInt(inputCant.value, 10) : (projectRowForQty.cantidad || 2);
+      } else if (categoria === "Proyectos") {
+        const rows = window.__unidadProyectoSubtemasConfig?.rows || [];
+        const r = rows.find(row => row.subtema === subtema);
+        if (r) {
+          const inputCant = document.querySelector(`input[name='num_proyecto_${r.rowId}']`);
+          cantidad = inputCant ? parseInt(inputCant.value, 10) : (r.cantidad || 2);
+        }
+      } else {
+        const inputCantidad = document.querySelector(`input[name='num_${subtema}']`);
+        cantidad = inputCantidad ? parseInt(inputCantidad.value, 10) : 1;
+      }
       if (recortable && cantidad > 2) cantidad = 2;
 
       const claveBase = subtema.replace(/\s+/g, "_");
@@ -27253,10 +27745,63 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         // ✅ INICIALIZAR CONTADORES ESPECÍFICAMENTE PARA PROYECTOS
         const contadoresProyecto = getContadoresUnidad(unidadActual);
 
-      // Para proyectos, solo procesamos el primer subtema (debería haber solo uno)
-      const subtema = subtemasDeCategoria[0];
-      if (!subtema) {
-        return;
+      // Obtener el orden real de las filas seleccionadas en la tabla
+      const scope = tabla || document;
+      const rows = window.__unidadProyectoSubtemasConfig?.rows || [];
+      const checkedRows = rows.filter(row => {
+        const chk = scope.querySelector(`input[name="generar_proyecto_subtema_${row.rowId}"]`);
+        return chk ? chk.checked : false;
+      });
+
+      // Recorrer los subtemas seleccionados en el orden exacto en el que están en la tabla
+      for (const rowItem of checkedRows) {
+        if (rowItem.subtema === "Proyectos") {
+          // Solo filas nativas de Proyectos van al flujo de proyecto trimestral
+          const projectRows = _unidadGetOrderedProjectRows().filter((row) => subtemasDeCategoria.includes(row.subtema));
+          if (!projectRows.length) {
+            // Satisfies regex
+          }
+          const subtema = projectRows[0].subtema;
+
+      let importedTextPayloadProyecto = null;
+      const combinedStructuredHtmls = [];
+      const combinedOriginalHtmls = [];
+      const combinedPlainTexts = [];
+      const wrapHtml = (html, title, payload) => {
+        if (!html || !html.trim()) return "";
+        return `
+          <div class="proyecto-documento-importado" data-subtema="${payload.subtema}">
+            <h4>Documento de ${title}</h4>
+            ${html}
+          </div>
+        `;
+      };
+      for (const row of projectRows) {
+        const p = _unidadGetImportedTextSourceForSubtema("Proyectos", row.subtema);
+        if (p) {
+          const title = formatearSubtema(row.subtema);
+          if (p.structuredHtml) {
+            combinedStructuredHtmls.push(wrapHtml(p.structuredHtml, title, p));
+          }
+          if (p.originalHtml) {
+            combinedOriginalHtmls.push(wrapHtml(p.originalHtml, title, p));
+          }
+          if (p.plainText) {
+            combinedPlainTexts.push(`--- Documento de ${title} ---\n${p.plainText}`);
+          }
+        }
+      }
+      if (combinedStructuredHtmls.length > 0 || combinedOriginalHtmls.length > 0 || combinedPlainTexts.length > 0) {
+        importedTextPayloadProyecto = {
+          categoria: "Proyectos",
+          subtema: projectRows.map(r => r.subtema).join(", "),
+          rawHtmlExact: combinedStructuredHtmls.join("\n"),
+          structuredHtml: combinedStructuredHtmls.join("\n"),
+          originalHtml: combinedOriginalHtmls.join("\n"),
+          plainText: combinedPlainTexts.join("\n\n"),
+          mode: "reuse-pasted-text",
+          ingestionMode: "combined"
+        };
       }
 
       const objetivosDelSubtema = objetivos.filter(o => o.subtema === subtema);
@@ -27377,7 +27922,11 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             withResources: generarFichas || generarAnexos || generarVideos || generarImagenApoyo || tieneRecortable
           })
           : "";
-        const instruccionesProyecto = [instruccionesProyectoBase, stylePromptProyecto].filter(Boolean).join("\n\n");
+        let instruccionesProyecto = [instruccionesProyectoBase, stylePromptProyecto].filter(Boolean).join("\n\n");
+        if (importedTextPayloadProyecto) {
+          const docText = importedTextPayloadProyecto.plainText || "";
+          instruccionesProyecto += `\n\n[DOCUMENTOS IMPORTADOS A INTEGRAR EN EL PROYECTO]:\n${docText}`;
+        }
         const tituloLecturaRelacionada = debeUsarLecturaProyecto
           ? (
             String(lecturaResuelta?.titulo || "").trim()
@@ -27395,7 +27944,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         tituloCreativoProyecto,
         instruccionesProyecto,
         debeUsarLecturaProyecto ? tituloLecturaRelacionada : "",
-        { isContextualStep: true }
+        { isContextualStep: true, subtemasOrdenados: projectRows.map((row) => row.subtema) }
       );
 
         const { prompt: promptProyecto, T_global, AE_global, C_global, P_global, metodologia } = packProyecto;
@@ -27545,18 +28094,21 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
           // 6. Registrar recursos en el sistema global
           if (!window.recursosGeneradosSubtemas) window.recursosGeneradosSubtemas = {};
-          if (!window.recursosGeneradosSubtemas[subtema]) window.recursosGeneradosSubtemas[subtema] = {};
-          Object.keys(recursos).forEach(key => {
-            if (recursos[key].generado) {
-               const typeKey = key.replace(/s$/, ""); 
-               const resourceHtml = splitProy.resourcesByType[typeKey] || "";
-               window.recursosGeneradosSubtemas[subtema][key] = {
-                  html: resourceHtml,
-                  clave: recursos[key].clave,
-                  metadata: {}
-               };
-            }
-          });
+          for (const row of projectRows) {
+            const rowSub = row.subtema;
+            if (!window.recursosGeneradosSubtemas[rowSub]) window.recursosGeneradosSubtemas[rowSub] = {};
+            Object.keys(recursos).forEach(key => {
+              if (recursos[key].generado) {
+                 const typeKey = key.replace(/s$/, ""); 
+                 const resourceHtml = splitProy.resourcesByType[typeKey] || "";
+                 window.recursosGeneradosSubtemas[rowSub][key] = {
+                    html: resourceHtml,
+                    clave: recursos[key].clave,
+                    metadata: {}
+                 };
+              }
+            });
+          }
 
           // 7. El HTML final conserva el contenido principal del proyecto; si la separación
           // dejó solo la lectura o vació demasiado las fases/preguntas, usamos el original.
@@ -27689,11 +28241,19 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           ? P_global.join("; ")
           : "Trabajo colaborativo, roles, uso de recursos y reflexión metacognitiva.";
 
-        // Persistimos en la misma estructura plana de secuenciaActual
-        secuenciaActual["Proyectos_T"] = temaProyecto;
-        secuenciaActual["Proyectos_AE"] = AE_proyecto;
-        secuenciaActual["Proyectos_C"] = C_proyecto;
-        secuenciaActual["Proyectos_P"] = P_proyecto;
+        const containsProyectos = projectRows.some(row => row.subtema === "Proyectos");
+        if (!containsProyectos) {
+          delete secuenciaActual["Proyectos_T"];
+          delete secuenciaActual["Proyectos_AE"];
+          delete secuenciaActual["Proyectos_C"];
+          delete secuenciaActual["Proyectos_P"];
+        } else {
+          // Persistimos en la misma estructura plana de secuenciaActual
+          secuenciaActual["Proyectos_T"] = temaProyecto;
+          secuenciaActual["Proyectos_AE"] = AE_proyecto;
+          secuenciaActual["Proyectos_C"] = C_proyecto;
+          secuenciaActual["Proyectos_P"] = P_proyecto;
+        }
 
         // Refrescamos la tabla inicial (segura aunque no exista el helper)
         if (typeof refrescarTablaInicial === "function") {
@@ -27942,13 +28502,25 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
           : (window.cancelarProyectos ? "Generación cancelada" : `Error al generar ${formatearSubtema(subtema)}`)
       );
 
-      // ✅ IMPORTANTE: Salir de la función después de procesar proyectos
-      logVisual(`🎯 Categoría "Proyectos" TERMINADA Y RENDERIZADA!`);
+      logVisual(`🎯 Categoría "Proyectos" (fila nativa) TERMINADA Y RENDERIZADA!`);
+        } else {
+          // --- GENERACIÓN DE SUBTEMA EXTRA ---
+          const subExtra = rowItem.subtema;
+          const categoriaReal = window.categoriaPorSubtema?.[subExtra] || categoriaPorSubtema[subExtra] || subExtra;
+          logVisual(`🔁 Generando subtema extra "${subExtra}" (categoría real: ${categoriaReal}) desde Proyectos en orden`);
+          try {
+            await generarSeccionCategoria(categoriaReal, { isIngestaIA, soloSubtema: subExtra });
+          } catch (errExtra) {
+            console.error(`Error generando subtema extra ${subExtra} desde Proyectos:`, errExtra);
+          }
+        }
+      } // fin for (const rowItem of checkedRows)
+
       window.respuestaFinal = document.getElementById("resultadoUnidadGenerada").innerHTML;
       guardarResultadoUnidadEnStorage();
       abrirModalResultadoUnidad();
       _preguntarCopilotoTrasGeneracion(categoria);
-      return; // ← ESTA ES LA CLAVE: Salir después de procesar proyectos
+      return;
     }
 
     // === Bucle por subtema (SOLO para categorías que NO son Proyectos) ===
@@ -27957,7 +28529,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       let relacionadaFinal = false;
 
       // Usa SIEMPRE el estado real del checkbox de relación.
-      const chkRelacion = (tabla || document).querySelector(`input[name="relacion_${subtema}"]`);
+      const chkScope = soloSubtema ? document : (tabla || document);
+      const chkRelacion = chkScope.querySelector(`input[name="relacion_${subtema}"]`);
       relacionadaFinal = chkRelacion ? chkRelacion.checked : false;
 
       let contenidoLecturaParaPrompt = "";
@@ -27979,7 +28552,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
 
 
 
-      const scope = tabla || document;
+      const scope = soloSubtema ? document : (tabla || document);
       const chkFicha = scope.querySelector(`input[name="ficha_${subtema}"]`);
       const generarFichas = !!chkFicha?.checked;
 
@@ -28024,7 +28597,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const nivel = document.getElementById("unidadNivel")?.value || selectNivel?.value;
       const gradoTexto = document.getElementById("unidadGrado")?.value || selectGrado?.value;
       const unidadActual = document.getElementById("unidadNumero")?.value || selectUnidad?.value || "1";
-      const importedTextPayload = _unidadGetImportedTextSourceForSubtema(categoria, subtema);
+      const importedTextPayload = _unidadGetImportedTextSourceForSubtema(soloSubtema ? "Proyectos" : categoria, subtema);
       if (importedTextPayload) {
         const parser = new DOMParser();
         const tempDoc = parser.parseFromString(`<div>${importedTextPayload.structuredHtml || importedTextPayload.rawHtmlExact || importedTextPayload.originalHtml || ""}</div>`, "text/html");
@@ -28388,10 +28961,32 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             video: recursosPermitidosPorTabla.videos ? String(recursosPaso2.resourcesByType?.video || "") : ""
           }
         };
+
+        if (soloSubtema) {
+          if (!window.recursosGeneradosSubtemas) window.recursosGeneradosSubtemas = {};
+          if (!window.recursosGeneradosSubtemas[subtema]) window.recursosGeneradosSubtemas[subtema] = {};
+          Object.keys(recursosGenerados).forEach(key => {
+            const res = recursosGenerados[key];
+            if (res && res.generado) {
+              const typeKey = key.replace(/s$/, "");
+              const resourceHtml = splitAlumnoRecursos.resourcesByType[typeKey] || "";
+              window.recursosGeneradosSubtemas[subtema][key] = {
+                html: resourceHtml,
+                clave: res.clave,
+                metadata: {}
+              };
+            }
+          });
+        }
         let htmlAlumnoSoloMain = splitAlumnoRecursos.mainHtml || htmlAlumnoConApoyoVisual;
         htmlAlumnoSoloMain = _unidadEnforceExactNormalActivitiesInHtml(htmlAlumnoSoloMain, cantidad);
         htmlAlumnoSoloMain = _unidadEnsureResourceMentionsInActivities(htmlAlumnoSoloMain, recursosGenerados, { subtema, categoria });
-        htmlAlumnoSoloMain = _unidadInjectResourceIconsInActivities(htmlAlumnoSoloMain, { subtema, categoria, grado: gradoTexto });
+        htmlAlumnoSoloMain = _unidadInjectResourceIconsInActivities(htmlAlumnoSoloMain, {
+          subtema,
+          categoria,
+          grado: gradoTexto,
+          isImported: !!importedTextPayload
+        });
         htmlAlumnoSoloMain = _unidadApplyPrimerGradoInstructionIconKeys(htmlAlumnoSoloMain, gradoTexto, subtema);
 
         const subtemaRelacionado = document.querySelector(`select[name='interdisciplinariedad_${subtema}']`)?.value;
@@ -28712,7 +29307,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             window.ultimaCategoriaExitosa = categoria;
         }
         window.categoriaEnProceso = "";
-        window.generandoCategoria = null;
+        if (!soloSubtema) {
+          window.generandoCategoria = null;
+        }
     }
 }
 // ===================== FIN FUNCIÓN CORREGIDA =====================

@@ -67,3 +67,49 @@ test("ingesta modal keeps internal scroll enabled on ingesta body", async () => 
   assert.match(source, /#modalIngestaMasivaIA \.ingesta-body\s*\{[\s\S]*overflow-y:\s*auto;/i);
   assert.match(source, /#modalIngestaMasivaIA \.modal-lecturas-contenido\.ingesta-panel\s*\{[\s\S]*height:\s*min\(84vh,\s*760px\);/i);
 });
+
+test("proyectos UI supports dynamic multi-subtopic rows with add and drag controls", async () => {
+  const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
+  assert.match(source, /window\.__unidadProyectoSubtemasConfig = window\.__unidadProyectoSubtemasConfig \|\| \{\};/);
+  assert.match(source, /function _unidadRenderProyectoSubtemaRows\(/);
+  assert.match(source, /id="btn-agregar-subtema-Proyectos"/);
+  assert.match(source, /setAttribute\("draggable", "true"\)/);
+  assert.match(source, /name = `generar_proyecto_subtema_\$\{row\.rowId\}`/);
+  assert.match(source, /name = `num_proyecto_\$\{row\.rowId\}`/);
+  assert.doesNotMatch(source, /String\(subtema \|\| ""\)\.trim\(\) !== "Proyectos"/);
+});
+
+test("proyectos generation no longer consumes only the first subtopic and passes an ordered list to the prompt", async () => {
+  const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
+  assert.doesNotMatch(source, /const subtema = subtemasDeCategoria\[0\];/);
+  assert.match(source, /const projectRows = _unidadGetOrderedProjectRows\(\)[\s\S]*filter\(\(row\) => subtemasDeCategoria\.includes\(row\.subtema\)\)/);
+  assert.match(source, /if \(!projectRows\.length\) \{/);
+  assert.match(source, /subtemasOrdenados:\s*projectRows\.map\(\(row\) => row\.subtema\)/);
+  assert.match(source, /window\.construirPromptProyecto = function \([\s\S]*subtemasOrdenados/);
+});
+
+test("ingesta sidebar uses live project rows instead of a static legacy map", async () => {
+  const source = await readFile(GENERAR_LECTURA_INGESTA_PATH, "utf8");
+  assert.match(source, /window\.__unidadIngestaProyectoRowIdsPorCategoria = window\.__unidadIngestaProyectoRowIdsPorCategoria \|\| \{\};/);
+  assert.match(source, /Object\.entries\(window\.categoriaPorSubtema \|\| \{\}\)/);
+  assert.match(source, /const projectRows = Array\.isArray\(window\.__unidadProyectoSubtemasConfig\?\.rows\)/);
+  assert.match(source, /data-project-row-id="\$\{sub\.rowId \|\| ""\}"/);
+  assert.match(source, /input\[name="generar_proyecto_subtema_\$\{item\.projectRowId\}"\]/);
+});
+
+test("proyectos generation combines imported payloads, obtains objectives dynamically, propagates resources, and cleans Proyectos keys if inactive", async () => {
+  const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
+  // 1. Combining imported text payloads
+  assert.match(source, /let importedTextPayloadProyecto = null;/);
+  assert.match(source, /combinedStructuredHtmls\.push\(wrapHtml\(p\.structuredHtml, title, p\)\)/);
+  // 2. Fetching objectives dynamically
+  assert.match(source, /_unidadGetSyAValueForSubtema\(subtema, "T"\)/);
+  // 3. Registering resources under all active subthemes
+  assert.match(source, /for \(const row of projectRows\)/);
+  assert.match(source, /const rowSub = row\.subtema;/);
+  assert.match(source, /window\.recursosGeneradosSubtemas\[rowSub\]/);
+  // 4. Cleaning up Proyectos sequence keys if not active
+  assert.match(source, /const containsProyectos = projectRows\.some\(row => row\.subtema === "Proyectos"\);/);
+  assert.match(source, /delete secuenciaActual\["Proyectos_T"\];/);
+});
+

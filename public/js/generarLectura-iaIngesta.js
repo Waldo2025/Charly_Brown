@@ -3,8 +3,17 @@
 import { db, auth } from './generarLectura.js';
 import { buildApiUrlPreferRemote } from "./api-client.js";
 import { collection, getDocs, doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
+import {
+    hasSelectedReadingForUnidad,
+    buildResetIngestaUiState
+} from "./generarLectura-iaIngesta-helpers.mjs";
 
 document.addEventListener("DOMContentLoaded", () => {
+    const IMPORTED_TEXT_LOCALSTORAGE_MAX_CHARS = 180000;
+    const IMPORTED_TEXT_LOCALSTORAGE_PLAINTEXT_MAX_CHARS = 120000;
+    const IMPORTED_TEXT_LOCALSTORAGE_MINIMAL_PLAINTEXT_MAX_CHARS = 12000;
+    window.__unidadIngestaSubtemasPorCategoria = window.__unidadIngestaSubtemasPorCategoria || {};
+    window.__unidadIngestaProyectoRowIdsPorCategoria = window.__unidadIngestaProyectoRowIdsPorCategoria || {};
     const btnOpen = document.getElementById("btnIngestaMasivaIA");
     const modal = document.getElementById("modalIngestaMasivaIA");
     const btnCerrar = document.getElementById("cerrarModalIngestaIA");
@@ -20,6 +29,86 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let analisisActual = null;
     let categoriaContexto = "";
+
+    function _safeLocalStorageSet(key, value) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22) {
+                console.info(`localStorage quota reached for "${key}".`);
+                try {
+                    const keysToRemove = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (!k) continue;
+                        if (
+                            k.startsWith('unidad_ingesta_texto_') ||
+                            k.startsWith('cb_lectura_cache_') ||
+                            k === 'cb_lectura_cache_v1' ||
+                            k === 'lectura_cache' ||
+                            k === 'cb_lecturas_catalog_cache_v1' ||
+                            k === 'cb_lecturas_cache_list_v1' ||
+                            k.startsWith('instrucciones_gemini_subtema_')
+                        ) {
+                            keysToRemove.push(k);
+                        }
+                    }
+                    if (keysToRemove.length > 0) {
+                        console.warn(`Pruning ${keysToRemove.length} non-essential cache key(s) from localStorage due to QuotaExceededError.`);
+                        keysToRemove.forEach((k) => {
+                            try {
+                                localStorage.removeItem(k);
+                            } catch (_) {}
+                        });
+                        localStorage.setItem(key, value);
+                        console.log(`Successfully saved key "${key}" after pruning cache.`);
+                        return true;
+                    }
+                } catch (retryErr) {
+                    console.error("Failed to save to localStorage even after pruning:", retryErr);
+                }
+            } else {
+                console.warn("localStorage.setItem failed for key:", key, e);
+            }
+            return false;
+        }
+    }
+
+    function _buildCompactImportedPayloadForStorage(payload = {}) {
+        const plainText = String(payload.plainText || "").trim();
+        return {
+            categoria: String(payload.categoria || "").trim(),
+            subtema: String(payload.subtema || "").trim(),
+            rawHtmlExact: "",
+            originalHtml: "",
+            plainText: plainText.slice(0, IMPORTED_TEXT_LOCALSTORAGE_PLAINTEXT_MAX_CHARS),
+            structuredHtml: "",
+            createdAt: Number(payload.createdAt || 0) || Date.now(),
+            mode: String(payload.mode || "").trim(),
+            ingestionMode: String(payload.ingestionMode || "").trim(),
+            storageMode: "compact-plain-text",
+            wasTrimmedForStorage: true
+        };
+    }
+
+    function _buildMinimalImportedPayloadForStorage(payload = {}) {
+        const plainText = String(payload.plainText || "").trim();
+        return {
+            categoria: String(payload.categoria || "").trim(),
+            subtema: String(payload.subtema || "").trim(),
+            rawHtmlExact: "",
+            originalHtml: "",
+            plainText: plainText.slice(0, IMPORTED_TEXT_LOCALSTORAGE_MINIMAL_PLAINTEXT_MAX_CHARS),
+            structuredHtml: "",
+            createdAt: Number(payload.createdAt || 0) || Date.now(),
+            mode: String(payload.mode || "").trim(),
+            ingestionMode: String(payload.ingestionMode || "").trim(),
+            storageMode: "minimal-plain-text",
+            wasTrimmedForStorage: true,
+            onlySessionHasFullDocument: true
+        };
+    }
 
     txtIngesta?.addEventListener("input", () => {
         analisisActual = null;
@@ -122,12 +211,22 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCerrarLower?.addEventListener("click", closeMod);
 
     function resetUI() {
-        txtIngesta.innerHTML = "";
+        const nextState = buildResetIngestaUiState({
+            txtIngestaHtml: txtIngesta?.innerHTML || "",
+            fileInputValue: fileInput?.value || "",
+            analisisActual
+        });
+        if (txtIngesta) {
+            txtIngesta.innerHTML = nextState.txtIngestaHtml;
+        }
+        if (fileInput) {
+            fileInput.value = nextState.fileInputValue;
+        }
         resultado.classList.remove("hidden");
         btnContinuar.classList.remove("hidden");
         loading.classList.add("hidden");
         listaResultados.innerHTML = "";
-        analisisActual = null;
+        analisisActual = nextState.analisisActual;
         _actualizarResumenSeleccion();
     }
 
@@ -213,8 +312,10 @@ document.addEventListener("DOMContentLoaded", () => {
             2. Actividades principales: Envuelve cada actividad principal identificada en un elemento <div class="activity">.
             3. Instrucción principal: La instrucción de cada actividad debe estar en un párrafo en negrita: <p><strong>...</strong></p>.
             4. Pasos o subinstrucciones: Si la actividad contiene incisos, pasos, preguntas secundarias o listados, organízalos obligatoriamente en una única lista ordenada continua: <ol class="steps" type="a"><li>...</li></ol>. No crees múltiples listas <ol> separadas para la misma actividad, todo debe pertenecer a la misma lista continua.
-            5. Respuestas esperadas: Si hay respuestas en el texto (por ejemplo, al lado de la pregunta o debajo de ella, o etiquetadas como "Respuesta: ...", "Respuesta personal", "R. ejemplo: ...", etc.), colócalas en un bloque <div class="answer"><span style="color:mediumvioletred;">...</span></div> obligatoriamente anidado y ubicado DENTRO del mismo elemento <li> de ese paso (es decir, justo al final del contenido del <li>, antes de la etiqueta de cierre </li>). NUNCA cierres la etiqueta </ol> ni rompas la lista para colocar la respuesta fuera de ella. Toda la lista debe ser continua con las respuestas dentro de sus respectivos incisos.
+            5. Respuestas esperadas: Si hay respuestas en el texto (por ejemplo, al lado de la pregunta o debajo de ella, o etiquetadas como "Respuesta: ...", "Respuesta personal", "R. ejemplo: ...", etc.), colócalas en un bloque <div class="answer"><span style="color:mediumvioletred;">...</span></div> obligatoriamente anidado y ubicado DENTRO del mismo elemento <li> de ese paso (es decir, justo al final del contenido del <li>, antes de la etiqueta de cierre </li>). NUNCA cierres la etiqueta </ol> ni rompas la lista para colocar la respuesta fuera de ella. Toda la lista debe ser continua con las respuestas dentro de sus respectivos incisos. Si el texto original NO contiene respuestas o solucionarios (explícitas o implícitas deducibles), NO inventes respuestas de relleno ni agregues bloques de respuesta vacíos o artificiales.
             6. Habilidad cognitiva asociada: Si en el texto original se especifica la habilidad cognitiva (por ejemplo, una línea con "DUM", "ERS", "DCS" o similar), consérvala intacta al principio del texto de salida de forma visible, por ejemplo: "Habilidad cognitiva asociada: DUM", de tal forma que el analizador la encuentre fácilmente. ¡NUNCA omitas, cambies o ignores esta habilidad!
+            7. Tablas: Si el texto original contiene tablas, cuadros de doble entrada o datos organizados en columnas y filas, presérvalos obligatoriamente como tablas HTML limpias (<table>, <tr>, <th>, <td>). Las tablas deben estar anidadas dentro de la actividad (<div class="activity">) a la que correspondan.
+            8. Estrategias y sugerencias didácticas: Si el texto original contiene estrategias, sugerencias didácticas, notas para el maestro u orientaciones pedagógicas (por ejemplo, "Estrategias de aprendizaje", "Sugerencia didáctica:", etc.), estructúralas en un bloque destacado con estilo CSS básico: <div class="estrategia-box" style="border: 2px solid #cce4ff; padding: 15px; margin: 15px 0; border-radius: 8px; background-color: #f0f7ff; font-style: italic;"><strong>Estrategia/Sugerencia didáctica:</strong> ...</div>.
             
             Reglas absolutas:
             - NO inventes texto nuevo.
@@ -266,13 +367,23 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        // Si no está estructurado con IA aún, estructurarlo en este momento
+        let analysis = analisisActual;
+        if (!analysis) {
+            analysis = await _prepararTextoConGeminiSiHaceFalta();
+            if (!analysis) {
+                return; // Cancelar si falló la llamada a Gemini
+            }
+        }
+
         const items = seleccionados.map((node) => ({
             subtema: node.value,
             categoria: node.dataset.categoria,
+            projectRowId: String(node.dataset.projectRowId || "").trim(),
             rawHtmlExact,
             plainText,
-            structuredHtml: analisisActual?.structuredHtml || "",
-            originalHtml: analisisActual?.originalHtml || rawHtmlExact || "",
+            structuredHtml: analysis?.structuredHtml || "",
+            originalHtml: analysis?.originalHtml || rawHtmlExact || "",
             ingestionMode: "raw-html-exact"
         }));
 
@@ -303,28 +414,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function _obtenerSubtemasDisponibles() {
-        const mapa = {
-            Proyectos: "Proyectos",
-            Artes: "Lenguaje y comunicación",
-            Ortografía: "Lenguaje y comunicación",
-            Gramatica: "Lenguaje y comunicación",
-            ExpresionEscrita: "Lenguaje y comunicación",
-            TrazosDeLetras: "Lenguaje y comunicación",
-            ComprensionLectora: "Lenguaje y comunicación",
-            ExpresionOral: "Lenguaje y comunicación",
-            Habilidades: "Lenguaje y comunicación",
-            Naturales: "Ciencias experimentales",
-            ConocimientoDelMedio: "Ciencias experimentales",
-            MiLocalidad: "Ciencias experimentales",
-            Socioemocional: "Formación socioemocional",
-            CivicaEtica: "Formación socioemocional",
-            Historia: "Ciencias sociales",
-            Geografia: "Ciencias sociales",
-            Matematicas: "Matemáticas"
-        };
         const dedup = new Map();
 
-        Object.entries(mapa).forEach(([subtema, categoria]) => {
+        Object.entries(window.categoriaPorSubtema || {}).forEach(([subtema, categoria]) => {
             const categoriaSafe = String(categoria || "").trim();
             const subtemaSafe = String(subtema || "").trim();
             if (!categoriaSafe || !subtemaSafe) return;
@@ -336,6 +428,21 @@ document.addEventListener("DOMContentLoaded", () => {
                     etiqueta: _formatearSubtemaLocal(subtemaSafe)
                 });
             }
+        });
+
+        const projectRows = Array.isArray(window.__unidadProyectoSubtemasConfig?.rows)
+            ? window.__unidadProyectoSubtemasConfig.rows
+            : [];
+        projectRows.forEach((row, index) => {
+            const subtemaSafe = String(row?.subtema || "").trim();
+            const rowId = String(row?.rowId || "").trim() || `proyecto-fila-${index + 1}`;
+            if (!subtemaSafe) return;
+            dedup.set(`proyectos::${_normalizar(subtemaSafe)}`, {
+                categoria: "Proyectos",
+                subtema: subtemaSafe,
+                etiqueta: _formatearSubtemaLocal(subtemaSafe),
+                rowId
+            });
         });
 
         return Array.from(dedup.values());
@@ -381,7 +488,7 @@ document.addEventListener("DOMContentLoaded", () => {
             card.className = "ingesta-subcat-card";
             card.setAttribute("aria-pressed", "false");
             card.innerHTML = `
-                <input type="checkbox" name="subcategoriaSelect" value="${sub.subtema}" data-categoria="${sub.categoria}" class="ingesta-checkbox">
+                <input type="checkbox" name="subcategoriaSelect" value="${sub.subtema}" data-categoria="${sub.categoria}" data-project-row-id="${sub.rowId || ""}" class="ingesta-checkbox">
                 <div class="ingesta-subcat-top">
                     <span class="ingesta-subcat-categoria">${sub.categoria}</span>
                     <span class="ingesta-subcat-check"><i class="fas fa-check"></i></span>
@@ -421,17 +528,34 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function _hayLecturaSeleccionadaParaUnidad() {
-        const lecturaPrincipalId = String(document.getElementById("tema")?.value || "").trim();
-        const lecturaAscId = String(document.getElementById("temaASC")?.value || "").trim();
+        const lecturaPrincipalId = String(
+            document.getElementById("unidadTema")?.value
+            || document.getElementById("unidadTemaTexto")?.value
+            || document.getElementById("tema")?.value
+            || ""
+        ).trim();
+        const lecturaAscId = String(
+            document.getElementById("unidadTemaASC")?.value
+            || document.getElementById("temaASC")?.value
+            || ""
+        ).trim();
         const lecturaPrompt = !!window.lecturaNuevaCoincidenteGlobal;
-        const lecturaCache = (() => {
+        const lecturaCacheId = (() => {
             try {
-                return !!JSON.parse(localStorage.getItem("cb_lectura_cache_v1") || "null")?.id;
+                const cacheId = JSON.parse(localStorage.getItem("cb_lectura_cache_v1") || "null")?.id;
+                return String(cacheId || localStorage.getItem("unidad_unidadTemaTexto") || "").trim();
             } catch (_) {
-                return false;
+                return String(localStorage.getItem("unidad_unidadTemaTexto") || "").trim();
             }
         })();
-        return !!(lecturaPrincipalId || lecturaAscId || lecturaPrompt || lecturaCache);
+        return hasSelectedReadingForUnidad({
+            unidadTemaTextoId: lecturaPrincipalId,
+            unidadTemaASCId: lecturaAscId,
+            legacyTemaId: String(document.getElementById("tema")?.value || "").trim(),
+            legacyTemaAscId: String(document.getElementById("temaASC")?.value || "").trim(),
+            lecturaPrompt,
+            lecturaCacheId
+        });
     }
 
     async function _esperarControlesCategoria({ categorias = [], timeoutMs = 15000 } = {}) {
@@ -521,7 +645,9 @@ document.addEventListener("DOMContentLoaded", () => {
         items.forEach((item) => {
             if (!item?.categoria || categoriasVistas.has(item.categoria)) return;
             categoriasVistas.add(item.categoria);
-            const checksEnCategoria = document.querySelectorAll(`input[name^='generar_'][data-categoria="${item.categoria}"]`);
+            const checksEnCategoria = item.categoria === "Proyectos"
+                ? document.querySelectorAll(`input[name^="generar_proyecto_subtema_"]`)
+                : document.querySelectorAll(`input[name^='generar_'][data-categoria="${item.categoria}"]`);
             checksEnCategoria.forEach((chk) => {
                 chk.checked = false;
                 chk.dispatchEvent(new Event('change', { bubbles: true }));
@@ -531,7 +657,9 @@ document.addEventListener("DOMContentLoaded", () => {
         let subtemasEncontrados = 0;
 
         items.forEach((item) => {
-            const chk = document.querySelector(`input[name="generar_${item.subtema}"]`);
+            const chk = item.categoria === "Proyectos" && item.projectRowId
+                ? document.querySelector(`input[name="generar_proyecto_subtema_${item.projectRowId}"]`)
+                : document.querySelector(`input[name="generar_${item.subtema}"]`);
             if (!chk) return;
 
             subtemasEncontrados += 1;
@@ -550,12 +678,37 @@ document.addEventListener("DOMContentLoaded", () => {
                 mode: "reuse-pasted-text",
                 ingestionMode: item.ingestionMode || "raw-html-exact"
             };
-            window.__unidadTextoImportadoPorSubtema[_storageKeyForImportedText(item.categoria, item.subtema)] = importedPayload;
+            const storageKey = _storageKeyForImportedText(item.categoria, item.subtema);
+            window.__unidadTextoImportadoPorSubtema[storageKey] = importedPayload;
+            window.__unidadIngestaSubtemasPorCategoria[item.categoria] = window.__unidadIngestaSubtemasPorCategoria[item.categoria] || new Set();
+            window.__unidadIngestaSubtemasPorCategoria[item.categoria].add(item.subtema);
+            if (item.categoria === "Proyectos" && item.projectRowId) {
+                window.__unidadIngestaProyectoRowIdsPorCategoria[item.categoria] = window.__unidadIngestaProyectoRowIdsPorCategoria[item.categoria] || new Set();
+                window.__unidadIngestaProyectoRowIdsPorCategoria[item.categoria].add(item.projectRowId);
+            }
 
-            localStorage.setItem(
-                _storageKeyForImportedText(item.categoria, item.subtema),
-                JSON.stringify(importedPayload)
-            );
+            const fullPayloadJson = JSON.stringify(importedPayload);
+            const shouldUseCompactStorage = fullPayloadJson.length > IMPORTED_TEXT_LOCALSTORAGE_MAX_CHARS;
+            const storagePayload = shouldUseCompactStorage ? _buildCompactImportedPayloadForStorage(importedPayload) : importedPayload;
+            let persistedOk = _safeLocalStorageSet(storageKey, JSON.stringify(storagePayload));
+
+            if (!persistedOk && !shouldUseCompactStorage) {
+                persistedOk = _safeLocalStorageSet(
+                    storageKey,
+                    JSON.stringify(_buildCompactImportedPayloadForStorage(importedPayload))
+                );
+            }
+
+            if (!persistedOk) {
+                persistedOk = _safeLocalStorageSet(
+                    storageKey,
+                    JSON.stringify(_buildMinimalImportedPayloadForStorage(importedPayload))
+                );
+            }
+
+            if (!persistedOk) {
+                console.warn(`[ingesta-ia] No se pudo persistir en localStorage el documento importado para ${item.categoria} / ${item.subtema}. Se mantiene solo en memoria para esta sesión.`);
+            }
 
             const btnInstrucciones = document.getElementById(`btn-instrucciones-${item.categoria.replace(/\s+/g, '-')}`);
             if (btnInstrucciones) {
