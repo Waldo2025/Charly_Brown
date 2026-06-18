@@ -116,6 +116,21 @@ export function createPodcasterMediaRuntimeApi(deps = {}) {
     if (parsed?.bucket && parsed?.storagePath) {
       return `gs://${parsed.bucket}/${parsed.storagePath}`;
     }
+    try {
+      const proxyParsed = new URL(String(rawUrl || "").trim(), window.location.origin);
+      const proxyPath = String(proxyParsed.pathname || "").toLowerCase();
+      if (proxyPath.includes("/api/assets/proxy-media") || proxyPath.includes("/api/assets/proxy-image")) {
+        const proxyStoragePath = String(proxyParsed.searchParams.get("storagePath") || "").trim();
+        if (proxyStoragePath) return proxyStoragePath;
+        const nestedUrl = String(proxyParsed.searchParams.get("url") || "").trim();
+        const nestedParsed = parseFirebaseStorageObjectUrl(nestedUrl);
+        if (nestedParsed?.bucket && nestedParsed?.storagePath) {
+          return `gs://${nestedParsed.bucket}/${nestedParsed.storagePath}`;
+        }
+      }
+    } catch (_) {
+      // noop
+    }
     if (cleanStoragePath) return cleanStoragePath;
     return String(parsed?.storagePath || "").trim();
   }

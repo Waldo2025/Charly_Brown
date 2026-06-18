@@ -39,13 +39,13 @@ import {
   downloadReadyMontageExport,
   setMontageExportProgress,
   setMontageExportStatus
-} from "./podcaster-montage-export.js?v=2026-06-18.8";
+} from "./podcaster-montage-export.js?v=2026-06-18.9";
 import * as PodcasterResize from "./podcaster-resize.js";
 import { createPodcasterStageFullscreenController } from "./podcaster-fullscreen.js";
 import { createPodcasterMediaReferenceApi } from "./podcaster-media-reference.js?v=2026-05-18.1";
 import { createPodcasterHistoryApi } from "./podcaster-history.js";
-import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-17.2";
-import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js";
+import { createPodcasterMediaRuntimeApi } from "./podcaster-media-runtime.js?v=2026-06-18.3";
+import { createPodcasterPanelMusicApi } from "./podcaster-panel-music.js?v=2026-06-18.1";
 import { removeDialogueAudioForRow } from "./podcaster-audioGemini-timeline.js?v=2026-06-12.2";
 import { createPodcasterPromptComposerApi } from "./podcaster-prompt-composer.js";
 import { createPodcasterSessionRailApi } from "./podcaster-session-rail.js?v=2026-05-30-1";

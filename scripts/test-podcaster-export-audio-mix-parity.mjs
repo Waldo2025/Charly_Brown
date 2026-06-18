@@ -14,6 +14,23 @@ if (!/shouldKeepNativeVideoAudioForRow/.test(exportSource)
   throw new Error("El export debe conservar audio VEO cuando el mix de la escena lo activa.");
 }
 
+if (!/const src = String\(\s*storedAudio\?\.downloadUrl\s*\|\|\s*storedAudio\?\.storagePath\s*\|\|\s*segment\?\.audioSrc\s*\|\|\s*runtime\?\.audioSrc\s*\|\|\s*""\s*\)\.trim\(\);/.test(exportSource)) {
+  throw new Error("Los segmentos Gemini exportados deben preservar fuentes durables antes de construir el timeline de audio.");
+}
+
+if (!exportSource.includes("storagePath: String(panelMusic?.storagePath || \"\").trim(),")
+  || !exportSource.includes("downloadUrl: String(panelMusic?.downloadUrl || \"\").trim(),")
+  || !exportSource.includes("localDataUrl: String(panelMusic?.localDataUrl || \"\").trim(),")) {
+  throw new Error("La configuración de música de export debe preservar downloadUrl/storagePath/localDataUrl explícitos.");
+}
+
+if (!/const trackUrl = String\(panelMusic\?\.downloadUrl \|\| panelMusic\?\.storagePath \|\| panelMusic\?\.sourceUrl \|\| ""\)\.trim\(\);/.test(exportSource)
+  || !exportSource.includes("backgroundMusic = includeBackgroundMusic ? {")
+  || !exportSource.includes("storagePath: String(panelMusic?.storagePath || \"\").trim(),")
+  || !exportSource.includes("downloadUrl: String(panelMusic?.downloadUrl || \"\").trim(),")) {
+  throw new Error("El background music de export debe exponer fuentes durables para el mezclador.");
+}
+
 if (!/const sceneMix = window\.resolveTimelineClipMix\?\.\(activeSession, rowId\) \|\| null;/.test(exportSource)
   || !/veoVolumeOverridePct: resolvedVeoVolumePct/.test(exportSource)) {
   throw new Error("El export debe usar el mix efectivo de escena para el volumen VEO, no solo el runtime clip cacheado.");

@@ -2599,8 +2599,13 @@ export function buildMontageExportPayload(session = null) {
         if (!rowId) return null;
         const runtime = runtimeByRowId.get(rowId) || null;
         const storedAudio = window.resolveDialogueAudioForRow(activeSession, rowId);
-        const storedSrc = window.resolveStorageAudioUrl(storedAudio?.downloadUrl || "", storedAudio?.storagePath || "");
-        const src = String(storedSrc || segment?.audioSrc || runtime?.audioSrc || "").trim();
+        const src = String(
+          storedAudio?.downloadUrl
+          || storedAudio?.storagePath
+          || segment?.audioSrc
+          || runtime?.audioSrc
+          || ""
+        ).trim();
         if (!src) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const durationMs = Math.max(
@@ -2647,7 +2652,7 @@ export function buildMontageExportPayload(session = null) {
     if (!Array.isArray(segments) || !segments.length) return [];
     return splitBackgroundSegmentsByScene(segments
       .map((segment, idx) => {
-        const src = String(window.resolveStorageAudioUrl(segment?.downloadUrl || "", segment?.storagePath || "") || "").trim();
+        const src = String(segment?.downloadUrl || segment?.storagePath || "").trim();
         if (!src) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) || 0));
@@ -2688,7 +2693,7 @@ export function buildMontageExportPayload(session = null) {
 
   const buildTrackBackgroundSegments = () => {
     const panelMusic = window.getPanelMontageMusicConfig();
-    const src = String(panelMusic?.sourceUrl || "").trim();
+    const src = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || "").trim();
     const volumePct = normalizeLegacyPct(panelMusic?.volume ?? 0, 0);
     if (panelMusic?.sourceType !== "track" || !src || volumePct <= 0.0001) return [];
     if (Array.isArray(panelMusic?.sourceItems) && panelMusic.sourceItems.length) return [];
@@ -2718,8 +2723,8 @@ export function buildMontageExportPayload(session = null) {
         id: `track-bg-loop-${loopIndex}-${cursorMs}`,
         rowId: "",
         url: src,
-        storagePath: "",
-        downloadUrl: src,
+        storagePath: String(panelMusic?.storagePath || "").trim(),
+        downloadUrl: String(panelMusic?.downloadUrl || src || "").trim(),
         mimeType: "audio/mpeg",
         startMs: cursorMs,
         endMs: cursorMs + chunkDurationMs,
@@ -2874,12 +2879,14 @@ export function buildMontageExportPayload(session = null) {
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
-  const trackUrl = String(panelMusic?.sourceUrl || "").trim();
+  const trackUrl = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || "").trim();
   const trackVolumePct = Math.max(0, Math.min(200, Math.round(Number(panelMusic?.volume ?? 0))));
   const includeBackgroundMusic = Boolean(canUseTrackMusic && trackUrl && trackVolumePct > 0 && trackBackgroundSegments.length === 0);
   const backgroundMusic = includeBackgroundMusic ? {
-    storagePath: "",
+    storagePath: String(panelMusic?.storagePath || "").trim(),
+    downloadUrl: String(panelMusic?.downloadUrl || "").trim(),
     url: trackUrl,
+    localDataUrl: String(panelMusic?.localDataUrl || "").trim(),
     volumePct: trackVolumePct,
     duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60)))
   } : null;

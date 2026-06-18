@@ -1180,6 +1180,9 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         ? String(panelMusicState.preset).trim()
         : "ambient",
       sourceUrl: String(sourceUrl || "").trim(),
+      downloadUrl: String(activeTrack?.downloadUrl || "").trim(),
+      storagePath: String(activeTrack?.storagePath || "").trim(),
+      localDataUrl: String(activeTrack?.localDataUrl || "").trim(),
       sourceItems,
       volume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),
       montageVolume: Math.max(0, Math.min(100, Number(panelMusicState.montageVolume ?? 0))),

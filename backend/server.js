@@ -9546,22 +9546,54 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
     err.stage = String(stage || "download").trim() || "download";
     return err;
   };
+  const resolveProxyMediaSource = (assetUrl = "") => {
+    const initialUrl = String(assetUrl || "").trim();
+    if (!initialUrl) return { url: "", storagePath: "" };
+    let currentUrl = initialUrl;
+    let resolvedStoragePath = "";
+    for (let i = 0; i < 3; i += 1) {
+      let parsed = null;
+      try {
+        parsed = new URL(currentUrl, "http://127.0.0.1");
+      } catch (_) {
+        break;
+      }
+      const pathname = String(parsed.pathname || "").toLowerCase();
+      const isProxyMedia = pathname.includes("/api/assets/proxy-media") || pathname.includes("/api/assets/proxy-image");
+      if (!isProxyMedia) break;
+      const proxyStoragePath = clampText(parsed.searchParams.get("storagePath") || "", 900);
+      if (proxyStoragePath) {
+        resolvedStoragePath = proxyStoragePath;
+        break;
+      }
+      const nestedUrl = String(parsed.searchParams.get("url") || "").trim();
+      if (!nestedUrl) break;
+      currentUrl = nestedUrl;
+    }
+    return {
+      url: currentUrl === initialUrl ? "" : currentUrl,
+      storagePath: resolvedStoragePath
+    };
+  };
   return async (asset = {}, kind = "video", index = 0) => {
     if (isAborted()) throw createAbortError("download_start");
     const storagePath = clampText(asset?.storagePath || "", 900);
-    const url = String(asset?.downloadUrl || asset?.url || "").trim();
+    const rawUrl = String(asset?.downloadUrl || asset?.url || "").trim();
+    const proxySource = resolveProxyMediaSource(rawUrl);
+    const url = String(proxySource.storagePath && !proxySource.url ? "" : (proxySource.url || rawUrl)).trim();
+    const resolvedStoragePath = clampText(storagePath || proxySource.storagePath || "", 900);
     const dataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
     const assetTrace = {
       kind: String(kind || "video").trim() || "video",
       index: Math.max(0, Number(index || 0) || 0),
-      storagePath,
+      storagePath: resolvedStoragePath,
       url: url ? redactUrlForLogs(url) : "",
       hasDataUrl: Boolean(dataUrl),
       tmpDir: clampText(tmpDir || "", 220),
       uid: clampText(uid || "", 160)
     };
     console.info("[backend][montage-export][asset-download-start]", assetTrace);
-    if (!storagePath && !url && !dataUrl) {
+    if (!resolvedStoragePath && !url && !dataUrl) {
       const err = new Error("missing_download_source");
       err.code = "missing_download_source";
       err.status = 404;
@@ -9697,20 +9729,20 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
       }
     }
 
-    if (storagePath) {
+    if (resolvedStoragePath) {
       try {
         console.info("[backend][montage-export][asset-download-branch]", {
           ...assetTrace,
           branch: "storage_path"
         });
-        await downloadWithTimeout(() => downloadStoragePathToFile(storagePath, outPath, { shouldAbort: isAborted }), "storage_download");
+        await downloadWithTimeout(() => downloadStoragePathToFile(resolvedStoragePath, outPath, { shouldAbort: isAborted }), "storage_download");
         const validated = await validateDownloadedAsset(outPath);
         logDownloadFinish("storage_path", { outPath: validated });
         return validated;
       } catch (error) {
         const code = String(error?.code || error?.message || "").trim();
         if (code === "storage_not_found") {
-          const altPaths = resolveAlternateOwnerStoragePaths(storagePath, uid);
+          const altPaths = resolveAlternateOwnerStoragePaths(resolvedStoragePath, uid);
           for (const altPath of altPaths) {
             try {
               console.info("[backend][montage-export][asset-download-branch]", {
@@ -9719,7 +9751,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
                 altPath
               });
               // eslint-disable-next-line no-await-in-loop
-              await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath, { shouldAbort: isAborted }), "storage_download");
+                await downloadWithTimeout(() => downloadStoragePathToFile(altPath, outPath, { shouldAbort: isAborted }), "storage_download");
               // eslint-disable-next-line no-await-in-loop
               const validated = await validateDownloadedAsset(outPath);
               logDownloadFinish("alternate_storage_path", { altPath, outPath: validated });
@@ -9747,7 +9779,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
           ...(error?.detail && typeof error.detail === "object" ? error.detail : {}),
           kind,
           index,
-          storagePath,
+          storagePath: resolvedStoragePath,
           url: url ? redactUrlForLogs(url) : ""
         };
         console.warn("[backend][montage-export][asset-download-error]", {

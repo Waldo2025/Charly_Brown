@@ -12,4 +12,16 @@ assert.match(
   "El backend debe activar la mezcla de audio cuando existen segmentos, aunque el flag enabled falte."
 );
 
+assert.match(
+  source,
+  /const resolveProxyMediaSource = \(assetUrl = ""\) => \{[\s\S]*\/api\/assets\/proxy-media[\s\S]*storagePath/,
+  "El downloader del export debe resolver proxy-media hacia storagePath o URL original antes de mezclar."
+);
+
+assert.match(
+  source,
+  /const url = String\(proxySource\.storagePath && !proxySource\.url \? "" : \(proxySource\.url \|\| rawUrl\)\)\.trim\(\);[\s\S]*const resolvedStoragePath = clampText\(storagePath \|\| proxySource\.storagePath \|\| "", 900\);/,
+  "El downloader del export debe preferir fuentes durables al normalizar el audio."
+);
+
 console.log("Podcaster montage export audio timeline fallback OK.");
