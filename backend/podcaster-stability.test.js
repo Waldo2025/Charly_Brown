@@ -21,13 +21,27 @@ test("heavy work coordinator blocks incompatible concurrent jobs", () => {
   assert.equal(second.ok, false);
   assert.equal(second.error.code, "backend_busy");
   assert.equal(second.error.status, 503);
-  assert.equal(second.error.detail.kind, "dialogue_video");
+  assert.equal(second.error.detail.kind, "montage_export");
+  assert.equal(second.error.detail.requestedKind, "dialogue_video");
   assert.equal(second.error.detail.activeJobId, "job-export-1");
 
   coordinator.releaseHeavyWorkSlot("montage_export", "job-export-1");
 
   const third = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-1");
   assert.equal(third.ok, true);
+});
+
+test("heavy work coordinator reports dialogue video as the blocking job kind", () => {
+  const coordinator = createHeavyWorkCoordinator();
+
+  const first = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-1");
+  assert.equal(first.ok, true);
+
+  const second = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
+  assert.equal(second.ok, false);
+  assert.equal(second.error.detail.kind, "dialogue_video");
+  assert.equal(second.error.detail.requestedKind, "montage_export");
+  assert.equal(second.error.detail.activeJobId, "job-video-1");
 });
 
 test("estimateDataUrlBytes returns decoded payload size", () => {

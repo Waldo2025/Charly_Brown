@@ -15,13 +15,21 @@ function createHeavyWorkCoordinator() {
   };
 
   const getActiveJobId = () => String(state.activeMontageExportJobId || state.activeDialogueVideoJobId || "").trim();
+  const getActiveKind = () => {
+    if (String(state.activeMontageExportJobId || "").trim()) return "montage_export";
+    if (String(state.activeDialogueVideoJobId || "").trim()) return "dialogue_video";
+    return "";
+  };
 
   const buildHeavyWorkBusyError = (kind = "", activeJobId = "") => {
+    const resolvedActiveKind = getActiveKind();
+    const resolvedRequestedKind = String(kind || "").trim();
     const error = new Error("backend_busy");
     error.code = "backend_busy";
     error.status = 503;
     error.detail = {
-      kind: String(kind || "").trim() || "unknown",
+      kind: resolvedActiveKind || resolvedRequestedKind || "unknown",
+      requestedKind: resolvedRequestedKind || undefined,
       activeJobId: String(activeJobId || "").trim(),
       retryable: true
     };

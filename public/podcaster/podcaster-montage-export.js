@@ -23,6 +23,7 @@ const MONTAGE_EXPORT_POLL_MAX_MS = 0;
 const MONTAGE_EXPORT_PREVIEW_REFRESH_MIN_MS = 2200;
 const MONTAGE_EXPORT_ACTIVE_JOB_MAX_AGE_MS = 15 * 60 * 1000;
 const MONTAGE_EXPORT_JOB_NOT_FOUND_MAX_RETRIES = 4;
+const MONTAGE_EXPORT_BUSY_HANDOFF_RECOVERY_MAX_RETRIES = 1;
 const MONTAGE_EXPORT_TRANSIENT_SILENT_RETRIES = 2;
 const MONTAGE_EXPORT_RECENT_POLL_GRACE_MS = 45 * 1000;
 const MONTAGE_EXPORT_SETTINGS_SCHEMA_VERSION = 3;
@@ -325,6 +326,8 @@ let montageExportJobState = {
   lastHeartbeatAt: "",
   pollFailureCount: 0,
   jobNotFoundCount: 0,
+  recoverySource: "",
+  busyHandoffRecoveryCount: 0,
   reviewExcelEnabled: false,
   reviewExcelPayload: null,
   reviewExcelFilename: "",
@@ -814,6 +817,8 @@ export function resetMontageExportJobState() {
     lastHeartbeatAt: "",
     pollFailureCount: 0,
     jobNotFoundCount: 0,
+    recoverySource: "",
+    busyHandoffRecoveryCount: 0,
     reviewExcelEnabled: false,
     reviewExcelPayload: null,
     reviewExcelFilename: "",
@@ -1337,10 +1342,40 @@ export async function pollMontageExportJob(jobId = "") {
         scheduleMontageExportJobNotFoundRetry(cleanJobId, jobNotFoundCount);
         return;
       }
+      const recoverySource = String(window.montageExportJobState.recoverySource || "").trim();
+      const busyHandoffRecoveryCount = Math.max(0, Number(window.montageExportJobState.busyHandoffRecoveryCount || 0) || 0);
+      if (
+        errorCode === "job_not_found"
+        && recoverySource === "busy_handoff"
+        && busyHandoffRecoveryCount < MONTAGE_EXPORT_BUSY_HANDOFF_RECOVERY_MAX_RETRIES
+      ) {
+        clearMontageExportPolling();
+        persistMontageExportActiveJob("");
+        window.montageExportJobState.jobId = "";
+        window.montageExportJobState.jobNotFoundCount = 0;
+        window.montageExportJobState.recoverySource = "";
+        window.montageExportJobState.busyHandoffRecoveryCount = busyHandoffRecoveryCount + 1;
+        window.montageExportBusy = false;
+        window.setTimelinePreviewsSuspended(false);
+        setMontageExportBusy(false);
+        setMontageExportProgress(null);
+        setMontageExportStatus(
+          "El backend reportó un export activo que ya no existe.",
+          "Reintentando iniciar una exportación nueva.",
+          { tone: "warning" }
+        );
+        setMontageExportContinueButton({ visible: false });
+        setMontageExportPreviewPaused(false);
+        window.setTimeout(() => {
+          runMontageExport().catch(() => { });
+        }, 200);
+        return;
+      }
       clearMontageExportPolling();
       persistMontageExportActiveJob("");
       window.montageExportJobState.jobId = "";
       window.montageExportJobState.jobNotFoundCount = 0;
+      window.montageExportJobState.recoverySource = "";
       window.montageExportBusy = false;
       window.setTimelinePreviewsSuspended(false);
       setMontageExportBusy(false);
@@ -2957,6 +2992,8 @@ export async function runMontageExport() {
     window.montageExportJobState.lastProgress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
     window.montageExportJobState.lastPollSuccessAtMs = Date.now();
     window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
+    window.montageExportJobState.recoverySource = "";
+    window.montageExportJobState.busyHandoffRecoveryCount = 0;
     window.montageExportJobState.reviewExcelEnabled = window.montageExportState.exportMode === "review" && window.montageExportState.includeReviewExcel !== false;
     window.montageExportJobState.reviewExcelPayload = prepared.payload;
     window.montageExportJobState.reviewExcelFilename = String(prepared.payload?.filename || window.montageExportState.filename || "").trim();
@@ -3008,6 +3045,7 @@ export async function runMontageExport() {
     } else if (status === 429 || code === "backend_busy_with_export") {
       if (activeJobId && activeJobKind === "montage_export") {
         window.montageExportJobState.jobId = activeJobId;
+        window.montageExportJobState.recoverySource = "busy_handoff";
         persistMontageExportActiveJob(activeJobId, Date.now());
         setMontageExportContinueButton({ visible: true, label: "Seguir exportación" });
         setMontageExportStatus(
