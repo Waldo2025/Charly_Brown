@@ -1,8 +1,8 @@
 
 // generarLectura-iaIngesta.js
 import { db, auth } from './generarLectura.js';
+import { buildApiUrlPreferRemote } from "./api-client.js";
 import { collection, getDocs, doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js';
-import { buildApiUrl } from './api-client.js';
 
 document.addEventListener("DOMContentLoaded", () => {
     const btnOpen = document.getElementById("btnIngestaMasivaIA");
@@ -260,17 +260,20 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        const prepared = await _prepararTextoConGeminiSiHaceFalta();
-        if (!prepared && !String(txtIngesta.innerHTML || "").trim() && !String(txtIngesta.textContent || "").trim()) {
+        const rawHtmlExact = txtIngesta.innerHTML.trim() || "";
+        const plainText = String(txtIngesta.textContent || "").trim();
+        if (!rawHtmlExact && !plainText) {
             return;
         }
 
         const items = seleccionados.map((node) => ({
             subtema: node.value,
             categoria: node.dataset.categoria,
-            textoExtraido: prepared?.structuredHtml || analisisActual?.structuredHtml || txtIngesta.innerHTML.trim() || "",
-            textoOriginalHtml: prepared?.originalHtml || analisisActual?.originalHtml || txtIngesta.innerHTML.trim() || "",
-            textoPlano: prepared?.plainText || analisisActual?.plainText || String(txtIngesta.textContent || "").trim()
+            rawHtmlExact,
+            plainText,
+            structuredHtml: analisisActual?.structuredHtml || "",
+            originalHtml: analisisActual?.originalHtml || rawHtmlExact || "",
+            ingestionMode: "raw-html-exact"
         }));
 
         _procesarGeneracionMultipleIA(items);
@@ -343,7 +346,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!user) throw new Error("No autenticado");
         const token = await user.getIdToken();
 
-        const response = await fetch(buildApiUrl("/api/gemini/generate"), {
+        const response = await fetch(buildApiUrlPreferRemote("/api/gemini/generate"), {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -539,11 +542,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const importedPayload = {
                 categoria: item.categoria,
                 subtema: item.subtema,
-                originalHtml: item.textoOriginalHtml || "",
-                plainText: item.textoPlano || "",
-                structuredHtml: item.textoExtraido || "",
+                rawHtmlExact: item.rawHtmlExact || "",
+                originalHtml: item.originalHtml || item.rawHtmlExact || "",
+                plainText: item.plainText || "",
+                structuredHtml: item.structuredHtml || "",
                 createdAt: Date.now(),
-                mode: "reuse-pasted-text"
+                mode: "reuse-pasted-text",
+                ingestionMode: item.ingestionMode || "raw-html-exact"
             };
             window.__unidadTextoImportadoPorSubtema[_storageKeyForImportedText(item.categoria, item.subtema)] = importedPayload;
 

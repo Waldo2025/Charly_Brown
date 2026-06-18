@@ -5,7 +5,7 @@ import { initializeFirestore, getFirestore, addDoc, collection, doc, getDoc, get
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, listAll } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 import { createUnidadAgentController } from "./unidadAgentController.js";
-import { buildApiUrl } from "./api-client.js";
+import { buildApiUrl, buildApiUrlPreferRemote } from "./api-client.js";
 import { sanitizeHtml } from "./security-utils.js";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js";
 import {
@@ -215,7 +215,7 @@ function shouldShortCircuitGeminiBackendFetch() {
 }
 
 function isGeminiBackendLocalTarget() {
-  const url = String(buildApiUrl("/api/gemini/generate") || "").trim();
+  const url = String(buildApiUrlPreferRemote("/api/gemini/generate") || "").trim();
   return /^https?:\/\/(?:127\.0\.0\.1|localhost):8787\//i.test(url) || url === "/api/gemini/generate";
 }
 
@@ -356,7 +356,7 @@ function shouldUseGeminiBackend() {
 }
 
 function _geminiGenerateLocalFallbackUrl() {
-  const current = String(buildApiUrl("/api/gemini/generate") || "").trim();
+  const current = String(buildApiUrlPreferRemote("/api/gemini/generate") || "").trim();
   if (!current) return "";
   const host = String(window.location.hostname || "").toLowerCase();
   const isLocalHost = host === "127.0.0.1" || host === "localhost";
@@ -397,7 +397,7 @@ async function geminiGenerateViaApi(model, payload, signal = null) {
     }),
     ...(signal ? { signal } : {})
   };
-  const primaryUrl = buildApiUrl("/api/gemini/generate");
+  const primaryUrl = buildApiUrlPreferRemote("/api/gemini/generate");
   if (!primaryUrl) {
     throw new Error("API_UNAVAILABLE");
   }
@@ -2057,7 +2057,8 @@ function buildGenerationConfig(modelo) {
 }
 
 function getGeminiEndpoint(modeloOverride) {
-  return buildApiUrl("/api/gemini/generate");
+  void modeloOverride;
+  return buildApiUrlPreferRemote("/api/gemini/generate");
 }
 
 
@@ -23155,17 +23156,20 @@ function _unidadGetImportedTextSourceForSubtema(categoria = "", subtema = "") {
     const runtimeKey = _unidadImportedTextStorageKey(categoria, subtema);
     const runtimePayload = runtimeMap?.[runtimeKey];
     if (runtimePayload && typeof runtimePayload === "object") {
+      const rawHtmlExact = String(runtimePayload.rawHtmlExact || "").trim();
       const structuredHtml = String(runtimePayload.structuredHtml || "").trim();
       const originalHtml = String(runtimePayload.originalHtml || "").trim();
       const plainText = String(runtimePayload.plainText || "").trim();
-      if (structuredHtml || originalHtml || plainText) {
+      if (rawHtmlExact || structuredHtml || originalHtml || plainText) {
         return {
           categoria: String(runtimePayload.categoria || categoria || "").trim(),
           subtema: String(runtimePayload.subtema || subtema || "").trim(),
+          rawHtmlExact,
           structuredHtml,
           originalHtml,
           plainText,
           mode: String(runtimePayload.mode || "").trim(),
+          ingestionMode: String(runtimePayload.ingestionMode || "").trim(),
           createdAt: Number(runtimePayload.createdAt || 0) || 0
         };
       }
@@ -23175,17 +23179,20 @@ function _unidadGetImportedTextSourceForSubtema(categoria = "", subtema = "") {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
+    const rawHtmlExact = String(parsed.rawHtmlExact || "").trim();
     const structuredHtml = String(parsed.structuredHtml || "").trim();
     const originalHtml = String(parsed.originalHtml || "").trim();
     const plainText = String(parsed.plainText || "").trim();
-    if (!structuredHtml && !originalHtml && !plainText) return null;
+    if (!rawHtmlExact && !structuredHtml && !originalHtml && !plainText) return null;
     return {
       categoria: String(parsed.categoria || categoria || "").trim(),
       subtema: String(parsed.subtema || subtema || "").trim(),
+      rawHtmlExact,
       structuredHtml,
       originalHtml,
       plainText,
       mode: String(parsed.mode || "").trim(),
+      ingestionMode: String(parsed.ingestionMode || "").trim(),
       createdAt: Number(parsed.createdAt || 0) || 0
     };
   } catch (_) {
@@ -23209,7 +23216,7 @@ function _unidadBuildPromptDeCategoriaDesdeTextoImportado({
   generarVideos = false,
   tieneRecortable = false
 } = {}) {
-  const fuenteHtml = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
+  const fuenteHtml = String(payload?.rawHtmlExact || payload?.structuredHtml || payload?.originalHtml || "").trim();
   const fuentePlano = String(payload?.plainText || "").trim();
   const fuente = fuenteHtml || _escapeHtmlUnidad(fuentePlano);
   const subtemaFormateado = formatearSubtema(subtema);
@@ -23275,7 +23282,7 @@ Devuelve ÚNICAMENTE el HTML final reescrito al formato ASC para "${tituloFinal}
 }
 
 function _unidadExtractImportedOwnTitle(payload = null, fallback = "") {
-  const source = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
+  const source = String(payload?.rawHtmlExact || payload?.structuredHtml || payload?.originalHtml || "").trim();
   const fallbackTitle = String(fallback || "").trim();
   if (!source) return fallbackTitle;
 
@@ -23322,7 +23329,7 @@ function _unidadExtractImportedOwnTitle(payload = null, fallback = "") {
 }
 
 function _unidadImportedPayloadHasOwnHeading(payload = null) {
-  const source = String(payload?.structuredHtml || payload?.originalHtml || "").trim();
+  const source = String(payload?.rawHtmlExact || payload?.structuredHtml || payload?.originalHtml || "").trim();
   if (!source || typeof DOMParser === "undefined") return false;
   try {
     const parser = new DOMParser();
@@ -23540,6 +23547,26 @@ function _unidadConvertImportedTextToAscHtml(source = "", options = {}) {
     ${introHtml}
     ${activitiesHtml}
   `.trim(), options);
+}
+
+function _unidadRenderImportedAlumnoHtmlExact(source = "", options = {}) {
+  const raw = String(source || "").trim();
+  if (!raw) return "";
+
+  const sanitized = typeof sanitizeHtml === "function"
+    ? sanitizeHtml(raw)
+    : raw.replace(/<script[\s\S]*?<\/script>/gi, "");
+
+  if (/<[a-z][\s\S]*>/i.test(sanitized)) {
+    return sanitized;
+  }
+
+  const fallbackTitle = String(options?.fallbackTitle || "").trim();
+  const escaped = _escapeHtmlUnidad(sanitized).replace(/\r?\n/g, "<br>");
+  return `
+    ${fallbackTitle ? `<h4>${_escapeHtmlUnidad(fallbackTitle)}</h4>` : ""}
+    <p>${escaped}</p>
+  `.trim();
 }
 
 function _unidadDemoteImportedActivityHeadings(html = "") {
@@ -26743,6 +26770,144 @@ async function _unidadGenerarNotasMaestroCompartidas(options = {}) {
   return _unidadGenerarNotasMaestroSeccion(options);
 }
 
+function _unidadBuildPromptNotasMaestroDesdeDocumentoImportado({
+  documentoFuente = "",
+  categoria = "",
+  subtema = "",
+  tituloSeccion = "",
+  grado = "",
+  nivel = "",
+  teacherNotesFormat = TEACHER_NOTES_FORMATS.DEFAULT
+} = {}) {
+  const safeTeacherNotesFormat = normalizeTeacherNotesFormat(teacherNotesFormat);
+  const generalHeadingLabel = getTeacherGeneralHeading(safeTeacherNotesFormat);
+  const safeTitulo = String(tituloSeccion || formatearSubtema(subtema)).trim() || formatearSubtema(subtema);
+  return `
+Eres un especialista en notas pedagógicas para docentes.
+Analiza el documento completo del alumno y genera notas del maestro SOLAMENTE para la subcategoría "${formatearSubtema(subtema)}" de la categoría "${categoria}".
+
+REGLAS OBLIGATORIAS:
+- Usa el documento completo como fuente de análisis, pero ignora secciones que no pertenezcan a la subcategoría actual.
+- No copies textualmente el documento del alumno.
+- Redacta siempre en segunda persona dirigida al docente con verbos de acción.
+- Si el documento mezcla varias áreas o bloques, quédate solo con lo relevante para "${formatearSubtema(subtema)}".
+- No dependas de que el documento venga en formato ASC ni de que existan clases ".activity".
+- Devuelve HTML limpio, sin markdown.
+
+ESTRUCTURA OBLIGATORIA:
+<h3>${generalHeadingLabel}</h3>
+- Si el formato es de ingesta, genera párrafos numerados 1., 2., 3. empezando con verbo en imperativo.
+- Enfoca cada párrafo en una orientación docente específica derivada del contenido pertinente al subtema.
+<h3>Actividad de ampliación</h3>
+<h3>Actividad de refuerzo</h3>
+<h3>Neurología aplicada</h3>
+<h3>Atención a la diversidad y accesibilidad</h3>
+
+CONTEXTO:
+- Nivel: ${nivel}
+- Grado: ${grado}
+- Título de sección: ${safeTitulo}
+- Categoría: ${categoria}
+- Subcategoría objetivo: ${formatearSubtema(subtema)}
+
+DOCUMENTO COMPLETO DEL ALUMNO:
+${documentoFuente}
+  `;
+}
+
+function _unidadBuildTeacherNotesImportedFallbackHtml({
+  categoria = "",
+  subtema = "",
+  tituloSeccion = "",
+  teacherNotesFormat = TEACHER_NOTES_FORMATS.DEFAULT
+} = {}) {
+  const safeTeacherNotesFormat = normalizeTeacherNotesFormat(teacherNotesFormat);
+  const generalHeadingLabel = getTeacherGeneralHeading(safeTeacherNotesFormat);
+  const safeTitulo = String(tituloSeccion || formatearSubtema(subtema)).trim() || formatearSubtema(subtema);
+  return `
+    <div class="unidad-teacher-notes">
+      <h3>${generalHeadingLabel}</h3>
+      <p>1. Dirija la revisión del contenido completo del alumno y seleccione únicamente las consignas, ejemplos y evidencias que sí correspondan a ${_escapeHtmlUnidad(formatearSubtema(subtema))}, para conducir la explicación sin mezclar otras subcategorías del documento.</p>
+      <p>2. Guíe la lectura de tablas, listas, párrafos o apoyos visuales relevantes a ${_escapeHtmlUnidad(formatearSubtema(subtema))}, modelando cómo identificar ideas clave, vocabulario y relaciones importantes antes de pedir una respuesta del grupo.</p>
+      <h3>Actividad de ampliación</h3>
+      <p>Proponga una variante de mayor reto a partir del contenido pertinente a ${_escapeHtmlUnidad(formatearSubtema(subtema))}, pidiendo al grupo transferir la idea principal a un ejemplo nuevo, comparar información o justificar una respuesta con evidencia del documento.</p>
+      <h3>Actividad de refuerzo</h3>
+      <p>Diseñe una práctica breve y más guiada centrada solo en ${_escapeHtmlUnidad(formatearSubtema(subtema))}, retomando una instrucción esencial del documento para reforzar comprensión, secuencia o vocabulario con apoyo directo del docente.</p>
+      <h3>Neurología aplicada</h3>
+      <p>Active recuperación, modelado y andamiaje breve antes de cada respuesta importante; anticipe palabras clave, divida la tarea en pasos pequeños y use repetición espaciada para sostener atención, memoria de trabajo y comprensión del contenido relevante.</p>
+      <h3>Atención a la diversidad y accesibilidad</h3>
+      <p>Ofrezca lectura acompañada, apoyos visuales, tiempos fragmentados, opciones de respuesta oral o señalada y mediación individual cuando el documento resulte denso, para que estudiantes con distintas necesidades puedan participar sin perder el foco en ${_escapeHtmlUnidad(formatearSubtema(subtema))}.</p>
+    </div>
+  `.trim();
+}
+
+async function _unidadGenerarNotasMaestroDesdeDocumentoImportado({
+  importedTextPayload = null,
+  categoria = "",
+  subtema = "",
+  tituloCreativo = "",
+  grado = "",
+  nivel = "",
+  teacherNotesFormat = TEACHER_NOTES_FORMATS.DEFAULT
+} = {}) {
+  const safeTeacherNotesFormat = normalizeTeacherNotesFormat(teacherNotesFormat);
+  const documentoFuente = String(
+    importedTextPayload?.rawHtmlExact
+    || importedTextPayload?.structuredHtml
+    || importedTextPayload?.originalHtml
+    || importedTextPayload?.plainText
+    || ""
+  ).trim();
+  if (!documentoFuente) {
+    return _unidadFinalizeTeacherNotesHtml(
+      _unidadBuildTeacherNotesImportedFallbackHtml({
+        categoria,
+        subtema,
+        tituloSeccion: tituloCreativo,
+        teacherNotesFormat: safeTeacherNotesFormat
+      }),
+      { categoria, subtema, grado }
+    );
+  }
+
+  const prompt = _unidadBuildPromptNotasMaestroDesdeDocumentoImportado({
+    documentoFuente,
+    categoria,
+    subtema,
+    tituloSeccion: tituloCreativo,
+    grado,
+    nivel,
+    teacherNotesFormat: safeTeacherNotesFormat
+  });
+
+  let respuesta = "";
+  try {
+    respuesta = await enviarPrompt([{ role: "user", text: prompt }]);
+  } catch (_) {
+    respuesta = "";
+  }
+
+  const cleanTeacherHtml = (html = "") => String(html || "").replace(/<\/?(html|body|head|h2)[^>]*>/gi, "").trim();
+  const htmlRespuesta = _unidadCleanTeacherNotesHtml(
+    cleanTeacherHtml(String(respuesta || "").replace(/```html|```/g, "").trim())
+  );
+
+  if (_unidadTeacherNotesMatchesSharedTemplate(htmlRespuesta, safeTeacherNotesFormat)
+    && _unidadTeacherNotesHasMinimumBody(htmlRespuesta, safeTeacherNotesFormat)) {
+    return _unidadFinalizeTeacherNotesHtml(htmlRespuesta, { categoria, subtema, grado });
+  }
+
+  return _unidadFinalizeTeacherNotesHtml(
+    _unidadBuildTeacherNotesImportedFallbackHtml({
+      categoria,
+      subtema,
+      tituloSeccion: tituloCreativo,
+      teacherNotesFormat: safeTeacherNotesFormat
+    }),
+    { categoria, subtema, grado }
+  );
+}
+
 
 // ===================== FUNCIÓN CORREGIDA - EVITA GENERACIÓN DUPLICADA =====================
 function debeRelacionarConLectura(subtema) {
@@ -27862,7 +28027,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
       const importedTextPayload = _unidadGetImportedTextSourceForSubtema(categoria, subtema);
       if (importedTextPayload) {
         const parser = new DOMParser();
-        const tempDoc = parser.parseFromString(`<div>${importedTextPayload.structuredHtml || importedTextPayload.originalHtml || ""}</div>`, "text/html");
+        const tempDoc = parser.parseFromString(`<div>${importedTextPayload.structuredHtml || importedTextPayload.rawHtmlExact || importedTextPayload.originalHtml || ""}</div>`, "text/html");
         const count = tempDoc.querySelectorAll(".activity").length;
         if (count > 0) {
           cantidad = count;
@@ -28031,6 +28196,9 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         const habilidadSubcategoriaAlumno = _unidadRenderHabilidadCognitivaHTML(subtema, categoria, { lectura: relacionadaFinal });
         const habilidadSubcategoriaMaestro = _unidadRenderHabilidadCognitivaHTML(subtema, categoria, { lectura: relacionadaFinal });
 
+        const importedAlumnoHeadingHtml = importedTextPayload && importedUsesOwnHeading
+          ? ""
+          : `<h4>${tituloCreativoLimpioBase}</h4>`;
         document.getElementById(bloqueId).innerHTML = `
               <div class="bloque-subtema" style="display:flex; gap:20px; align-items:flex-start; margin-bottom:40px; flex-wrap:wrap;">
                   <div class="col-alumno" style="flex:1; min-width:300px;">
@@ -28042,7 +28210,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                       </div>
-                      ${importedTextPayload ? `<h4>${tituloCreativoLimpioBase}</h4>` : `<h4>${tituloCreativoLimpioBase}</h4>`}
+                      ${importedAlumnoHeadingHtml}
                       ${importedTextPayload ? "" : `<h5 style="color:#666;font-weight:normal;">${objetivoT}</h5>`}
                       <div id="${previewAlumnoId}" style="white-space:pre-wrap;"></div>
                   </div>
@@ -28064,12 +28232,13 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         let htmlAlumno = "";
         if (importedTextPayload) {
           const importedSource = String(
-            importedTextPayload.structuredHtml
+            importedTextPayload.rawHtmlExact
+            || importedTextPayload.structuredHtml
             || importedTextPayload.originalHtml
             || importedTextPayload.plainText
             || ""
           ).trim();
-          htmlAlumno = _unidadConvertImportedTextToAscHtml(importedSource, {
+          htmlAlumno = _unidadRenderImportedAlumnoHtmlExact(importedSource, {
             fallbackTitle: importedOwnTitle || formatearSubtema(subtema)
           });
           logVisual(`✅ Contenido del alumno reutilizado desde texto importado (${htmlAlumno.length} caracteres)`);
@@ -28266,7 +28435,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
                         ${habilidadSubcategoriaAlumno}
                         ${competenciaSubcategoriaAlumno}
                     </div>
-                    <h4>${tituloCreativoLimpioBase}</h4>
+                    ${importedTextPayload && importedUsesOwnHeading ? "" : `<h4>${tituloCreativoLimpioBase}</h4>`}
                     ${importedTextPayload ? "" : `<h5 style="color:#666;font-weight:normal;">${T}</h5>`}
                     ${importedUsesOwnHeading ? "" : etiquetaInterdisc}
                     <div id="${colAlumnoContenidoId}"></div>
@@ -28310,18 +28479,28 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
         let notasFinalesColMaestro = "";
         if (htmlAlumnoSoloMain.trim()) {
-          notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion({
-            promptContenidoActividades: htmlAlumnoSoloMain,
-            fallbackContenidoActividades: htmlAlumnoSoloMain,
-            categoria,
-            subtema,
-            tituloCreativo: tituloCreativoLimpioBase,
-            tituloSeccion: tituloCreativoLimpioBase,
-            grado: gradoTexto,
-            nivel,
-            expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad,
-            teacherNotesFormat
-          });
+          notasFinalesColMaestro = importedTextPayload
+            ? await _unidadGenerarNotasMaestroDesdeDocumentoImportado({
+              importedTextPayload,
+              categoria,
+              subtema,
+              tituloCreativo: tituloCreativoLimpioBase,
+              grado: gradoTexto,
+              nivel,
+              teacherNotesFormat
+            })
+            : await _unidadGenerarNotasMaestroSeccion({
+              promptContenidoActividades: htmlAlumnoSoloMain,
+              fallbackContenidoActividades: htmlAlumnoSoloMain,
+              categoria,
+              subtema,
+              tituloCreativo: tituloCreativoLimpioBase,
+              tituloSeccion: tituloCreativoLimpioBase,
+              grado: gradoTexto,
+              nivel,
+              expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad,
+              teacherNotesFormat
+            });
         }
 
         if (String(categoria || "").trim() === "Matemáticas") {
