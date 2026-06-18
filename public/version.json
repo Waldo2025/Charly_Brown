@@ -1,12 +1,14 @@
 {
-  "version": "1.0.10.201",
-  "build": "2026-1.0.10.202",
+  "version": "1.0.10.202",
+  "build": "2026-1.0.10.203",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: Se solucionó un error 403 Forbidden al consultar imágenes privadas a través de /api/assets/proxy-image agregando el código 403 al detector de fallos de GCS, permitiendo la conmutación exitosa al bucket activo.",
     "Corregido: Se actualizó el formato de las etiquetas de anulación de color en ASS a formato estándar (\\1c y \\1a) para corregir el resaltado amarillo del karaoke en exportación. Se movió la superposición del logo/marca al final del pipeline de composición para que quede encima de las tarjetas (overlay cards) en Reels. Se corrigió resolveMontageCanvasSize para respetar el toggle de reelModeEnabled al exportar videos verticales en modo normal.",
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: Se solucionó el problema en /api/assets/proxy-image que impedía a los usuarios cargar portadas de sesión en desarrollo y producción.",
     "Corregido: Se solucionó el problema por el cual los videos verticales (Reels) seguidos de una exportación normal conservaban el aspecto vertical.",
     "Corregido: El logo o marca de agua ahora se superpone encima de las overlay cards en modo Reel en lugar de quedar cubierto.",
     "Corregido: El modal de export de Podcaster ahora diagnostica explícitamente cuando export-status cae por redirect de Hosting hacia Render y la respuesta 502/503 queda bloqueada por CORS, evitando un fallo ambiguo de seguimiento.",
