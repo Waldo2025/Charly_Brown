@@ -858,7 +858,7 @@
     return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2).replace(/\.?0+$/, "");
   }
 
-  function buildAssInvisibleWordOverlayText(text = "", activeWordIndex = -1) {
+  function buildAssActiveWordColorOverlayText(text = "", activeWordIndex = -1, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8") {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
     let wordIndex = 0;
@@ -868,9 +868,9 @@
       const isActive = wordIndex === activeWordIndex;
       wordIndex += 1;
       if (isActive) {
-        return `{\\alpha&H00&}${escaped}`;
+        return `{\\c${activeColor}\\2c${activeColor}}${escaped}`;
       }
-      return `{\\alpha&HFF&}${escaped}{\\alpha&H00&}`;
+      return `{\\c${baseColor}\\2c${baseColor}}${escaped}`;
     }).join("");
   }
 
@@ -962,7 +962,7 @@
         const wordStartSec = startSec + (Math.max(0, Number(word?.startMs || 0) || 0) / 1000);
         const wordEndSec = startSec + (Math.max(0, Number(word?.endMs || 0) || 0) / 1000);
         if (wordEndSec <= wordStartSec) return;
-        const activeText = buildAssInvisibleWordOverlayText(wrappedText, index);
+        const activeText = buildAssActiveWordColorOverlayText(wrappedText, index, activeColor, baseColor);
         const activeOverrides = `{${baseCommon}\\bord${visibleStrokeWidth}\\shad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\xshad${shadowX}\\yshad${Math.max(shadowPx, stylePreset === "3d" ? 1 : shadowPx)}\\c${activeColor}\\2c${activeColor}\\3c${outlineColor}\\4a&HFF&}`;
         events.push(`Dialogue: 2,${formatAssTime(wordStartSec)},${formatAssTime(wordEndSec)},KaraokeActive,,0,0,0,,${activeOverrides}${activeText}`);
       });
