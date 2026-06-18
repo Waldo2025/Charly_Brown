@@ -1124,22 +1124,11 @@ async function resolveWritableStorageBucket() {
     const buckets = getStorageBucketCandidates();
     for (const bucket of buckets) {
       if (!bucket) continue;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await bucket.getMetadata();
-        resolvedWritableStorageBucket = bucket;
-        console.info("[backend][storage] resolved writable bucket", {
-          bucket: String(bucket.name || "").trim()
-        });
-        return bucket;
-      } catch (error) {
-        if (!isMissingBucketError(error)) {
-          console.warn("[backend][storage] bucket probe failed", {
-            bucket: String(bucket?.name || "").trim(),
-            message: String(error?.message || error)
-          });
-        }
-      }
+      resolvedWritableStorageBucket = bucket;
+      console.info("[backend][storage] selected writable bucket candidate", {
+        bucket: String(bucket.name || "").trim()
+      });
+      return bucket;
     }
     resolvedWritableStorageBucket = storageBucket;
     return storageBucket;
@@ -9750,15 +9739,39 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     normalizeStorageSegment(String(input?.sessionId || "").trim(), "session"),
     `${exportId}.${outExt}`
   ].join("/");
-  const targetBucket = await resolveWritableStorageBucket();
-  await uploadFileToBucketNonResumable({
-    bucket: targetBucket,
-    destination: storagePath,
-    filePath: finalOutPath,
-    contentType: mimeType
-  });
-  const uploadedFile = targetBucket.file(storagePath);
-  const [meta] = await uploadedFile.getMetadata().catch(() => [{}]);
+  const stat = await fs.promises.stat(finalOutPath).catch(() => null);
+  const candidateBuckets = getStorageBucketCandidates();
+  let targetBucket = await resolveWritableStorageBucket();
+  let lastUploadError = null;
+  for (const candidateBucket of candidateBuckets) {
+    if (!candidateBucket) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await uploadFileToBucketNonResumable({
+        bucket: candidateBucket,
+        destination: storagePath,
+        filePath: finalOutPath,
+        contentType: mimeType
+      });
+      targetBucket = candidateBucket;
+      resolvedWritableStorageBucket = candidateBucket;
+      lastUploadError = null;
+      break;
+    } catch (error) {
+      lastUploadError = error;
+      console.warn("[backend][storage] export upload failed on bucket candidate", {
+        bucket: String(candidateBucket?.name || "").trim(),
+        message: String(error?.message || error),
+        code: String(error?.code || "").trim() || null,
+        status: Number(error?.status || 0) || undefined
+      });
+      const status = Number(error?.status || 0) || 0;
+      const code = String(error?.code || "").trim();
+      const isRetryableCandidateFailure = code === "signed_url_upload_failed" && (status === 404 || status === 403);
+      if (!isRetryableCandidateFailure) throw error;
+    }
+  }
+  if (lastUploadError) throw lastUploadError;
   const base = String(context?.baseUrl || "").trim() || getBackendPublicBaseUrl() || `http://127.0.0.1:${PORT}`;
   const downloadUrl = `${base}/api/assets/montage-download?jobId=${encodeURIComponent(exportId)}&token=${encodeURIComponent(token)}`;
   return {
@@ -9770,7 +9783,7 @@ async function storeMontageExportResult(finalOutPath = "", input = {}, context =
     expiresAtIso,
     filename,
     mimeType,
-    sizeBytes: Math.max(0, Number(meta?.size || 0) || 0)
+    sizeBytes: Math.max(0, Number(stat?.size || 0) || 0)
   };
 }
 
