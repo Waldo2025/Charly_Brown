@@ -50,6 +50,7 @@ const {
   resolveOnScreenTextRenderSpec,
   normalizeOnScreenTextTrackSettings,
   normalizeKaraokeWordTimings,
+  scaleKaraokeWordTimingsForPlaybackRate,
   buildMontageOnScreenTextAss,
   buildMontageOnScreenTextDrawFilters,
   buildMontageOnScreenTextKaraokeBoxFilters
@@ -11327,7 +11328,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
           const endSec = startSec + Math.max(0.1, Number(segment.durationMs || 0) / 1000);
           const audioClip = input.dialogueAudioMap?.[segment.rowId] || null;
-          const wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim()) : [];
+          let wordTimings = input.partyKaraoke !== false ? normalizeKaraokeWordTimings(audioClip, String(spec.wrappedText || spec.text || "").trim()) : [];
+          const playbackRate = Math.max(0.5, Math.min(10, Number(segment.playbackRate || audioClip?.playbackRate || 1) || 1));
+          if (wordTimings.length > 0 && Math.abs(playbackRate - 1) > 0.001) {
+            wordTimings = scaleKaraokeWordTimingsForPlaybackRate(wordTimings, playbackRate);
+          }
           const textPath = textFileResolver(spec.wrappedText || spec.text || "");
 
           const fontFile = resolveMontageOnScreenTextFontFile(onScreenTextSettings);
