@@ -20,6 +20,12 @@ assert.match(
 
 assert.match(
   source,
+  /const url = String\(segment\?\.url \|\| segment\?\.downloadUrl \|\| segment\?\.localDataUrl \|\| segment\?\.dataUrl \|\| ""\)\.trim\(\);/,
+  "La normalización del timeline de audio debe aceptar downloadUrl y localDataUrl además de url."
+);
+
+assert.match(
+  source,
   /const url = String\(proxySource\.storagePath && !proxySource\.url \? "" : \(proxySource\.url \|\| rawUrl\)\)\.trim\(\);[\s\S]*const resolvedStoragePath = clampText\(storagePath \|\| proxySource\.storagePath \|\| "", 900\);/,
   "El downloader del export debe preferir fuentes durables al normalizar el audio."
 );

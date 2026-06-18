@@ -9268,7 +9268,7 @@ function normalizeMontageExportRequestBody(body = {}) {
 
   const normalizeTimelineAudioSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
-    const url = String(segment?.url || "").trim();
+    const url = String(segment?.url || segment?.downloadUrl || segment?.localDataUrl || segment?.dataUrl || "").trim();
     const storagePath = clampText(segment?.storagePath || "", 900);
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
