@@ -10954,15 +10954,24 @@ async function renderMontageBrowserFinalVisualPass({
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
   };
-  const browserPayload = {
+  const browserOverlayPayload = {
     ...input,
+    // Export normal already burns on-screen text per scene via ASS/libass.
+    // The browser visual pass should only add overlays/branding on top of that result.
+    onScreenTextTimeline: null,
+    onScreenTextSettings: null,
+    onScreenTextSegments: [],
+    onScreenTextRenderedSegments: []
+  };
+  const browserPayload = {
+    ...browserOverlayPayload,
     renderMode: "browser",
-    brandOverlay: input?.brandOverlay?.assetPath
+    brandOverlay: browserOverlayPayload?.brandOverlay?.assetPath
       ? {
-        ...input.brandOverlay,
-        assetUrl: `file://${path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()).replace(/\\/g, "/")}`
+        ...browserOverlayPayload.brandOverlay,
+        assetUrl: `file://${path.resolve(process.cwd(), String(browserOverlayPayload.brandOverlay.assetPath || "").trim()).replace(/\\/g, "/")}`
       }
-      : input?.brandOverlay
+      : browserOverlayPayload?.brandOverlay
   };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
@@ -11703,8 +11712,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()));
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const hasBrowserVisualPass = shouldAttemptBrowserRenderer && Boolean(
-      Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length)
-      || overlayCardSegments.length
+      overlayCardSegments.length
       || hasBrandOverlay
     );
     const hasFinalVisualPass = Boolean(

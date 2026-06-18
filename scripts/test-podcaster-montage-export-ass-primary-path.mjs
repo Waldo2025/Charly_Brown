@@ -17,8 +17,20 @@ assert.match(
 
 assert.match(
   backendSource,
+  /const hasBrowserVisualPass = shouldAttemptBrowserRenderer && Boolean\(\s*overlayCardSegments\.length\s*\|\|\s*hasBrandOverlay\s*\);/,
+  "El browser visual pass no debe re-renderizar texto en pantalla en export normal."
+);
+
+assert.match(
+  backendSource,
   /async function appendMontageSceneOnScreenTextAssFilters\(\{/,
   "El render de escena debe construir un archivo ASS temporal por escena."
+);
+
+assert.match(
+  backendSource,
+  /const browserOverlayPayload = \{[\s\S]*onScreenTextTimeline: null,[\s\S]*onScreenTextSettings: null,[\s\S]*onScreenTextSegments: \[\],[\s\S]*onScreenTextRenderedSegments: \[\][\s\S]*\};/,
+  "La pasada visual de navegador debe recibir el video ya quemado sin volver a montar karaoke/texto."
 );
 
 assert.match(
