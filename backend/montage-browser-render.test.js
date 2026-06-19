@@ -11,7 +11,7 @@ const {
 
 test("normalizeMontageRenderMode defaults invalid values to browser", () => {
   assert.equal(normalizeMontageRenderMode("browser"), "browser");
-  assert.equal(normalizeMontageRenderMode("ffmpeg-legacy"), "browser");
+  assert.equal(normalizeMontageRenderMode("ffmpeg-legacy"), "ffmpeg-legacy");
   assert.equal(normalizeMontageRenderMode("invalid"), "browser");
 });
 

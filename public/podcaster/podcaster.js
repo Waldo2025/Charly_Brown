@@ -621,6 +621,7 @@ const els = {
   montageExportHint: document.getElementById("montageExportHint"),
   montageExportProgressBar: document.getElementById("montageExportProgressBar"),
   montageExportOnlyAudio: document.getElementById("montageExportOnlyAudio"),
+  montageExportRenderMode: document.getElementById("montageExportRenderMode"),
   podcastStudioScrubber: document.getElementById("podcastStudioScrubber"),
   podcastStudioTime: document.getElementById("podcastStudioTime"),
   podcastStudioInspectorScene: document.getElementById("podcastStudioInspectorScene"),
@@ -16935,6 +16936,13 @@ function attachEvents() {
           { tone: "neutral" }
         );
       }
+      scheduleMontageExportPreviewRefresh();
+    });
+  }
+  if (els.montageExportRenderMode) {
+    els.montageExportRenderMode.addEventListener("change", () => {
+      montageExportState.renderMode = String(els.montageExportRenderMode.value || "browser").trim();
+      syncMontageExportUi();
       scheduleMontageExportPreviewRefresh();
     });
   }

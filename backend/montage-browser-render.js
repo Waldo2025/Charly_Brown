@@ -45,6 +45,7 @@ function buildRendererUnavailableState({
 
 function normalizeMontageRenderMode(value = "", fallback = "browser") {
   const cleanValue = String(value || "").trim().toLowerCase();
+  if (cleanValue === "ffmpeg-legacy") return "ffmpeg-legacy";
   if (cleanValue === "browser") return "browser";
   return "browser";
 }

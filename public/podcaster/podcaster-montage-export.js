@@ -1835,6 +1835,7 @@ export function syncMontageExportUi() {
     state.filename = "";
   }
   if (window.els.montageExportMode) window.els.montageExportMode.value = state.exportMode;
+  if (window.els.montageExportRenderMode) window.els.montageExportRenderMode.value = state.renderMode;
   if (window.els.montageExportFormat) window.els.montageExportFormat.value = state.format;
   if (window.els.montageExportResolution) window.els.montageExportResolution.value = state.resolution;
   if (window.els.montageExportBitrateMode) window.els.montageExportBitrateMode.value = state.bitrateMode;
