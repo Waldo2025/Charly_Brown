@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.210",
-  "build": "2026-1.0.10.211",
+  "version": "1.0.10.211",
+  "build": "2026-1.0.10.212",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
     "Corregido: El export de Podcaster incorpora un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke y cards mucho más fieles al preview, con fallback automático a ffmpeg-legacy si Chromium falla.",
     "Corregido: El export final de Podcaster ahora guarda el MP4 en Storage mediante upload no resumable, evitando el fetch OAuth a googleapis.com/oauth2/v4/token que estaba cerrándose prematuramente en Render.",
     "Corregido: Podcaster ahora sanea dialogueVideoMap para no guardar type undefined en Firestore y proxy-media deja de cerrar streams válidos de forma prematura durante exportaciones con mezcla de audio timeline.",
@@ -13,6 +14,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El seguimiento del montage export ahora usa un fallback por Firestore para `podcaster_export_jobs` cuando `export-status` se rompe por redirect/CORS entre Hosting y Render. Se incrementan cache-busters para forzar la carga del frontend nuevo.",
     "Corregido: El submit final del export de Podcaster ya no borra dataUrl/localDataUrl de los audios Gemini hidratados; el job ahora puede reutilizar el audio inline en Render en lugar de caer de nuevo al gs:// faltante. Se incrementan cache-busters para forzar la carga del fix.",
     "Corregido: El export de Podcaster ya no deja pasar gs:// como URL final del audio Gemini al hidratar assets de audio; ahora prioriza resolveStorageAudioUrl, reutiliza mejor el blob local y fuerza la carga del frontend nuevo con cache-busters actualizados.",
     "Corregido: Podcaster ahora intenta exportar la capa visual final con un renderer headless basado en navegador para acercar el MP4 al preview real del montaje y reducir la deriva del karaoke y overlays.",
@@ -146,5 +148,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.210"
+  "cache_version": "2026-1.0.10.211"
 }

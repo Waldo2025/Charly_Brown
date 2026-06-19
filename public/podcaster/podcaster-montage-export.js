@@ -4,6 +4,7 @@
  */
 
 import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
+import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {
   buildPodcasterLocalMediaKey,
@@ -143,8 +144,13 @@ function formatMontageExportTimelineLabel(entry = null) {
 let montageExportXlsxLoaderPromise = null;
 let montageExportSubmitLocked = false;
 let montageExportPreviewPaused = false;
+let montageExportFirestoreDb = null;
 const montageExportHydratedMediaCache = new Map();
 const montageExportHydratingMediaPromises = new Map();
+
+export function configureMontageExportRuntime({ firestoreDb = null } = {}) {
+  montageExportFirestoreDb = firestoreDb || null;
+}
 
 function ensureMontageExportXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -392,6 +398,233 @@ function isMontageExportStatusRedirectFailure(error = null) {
       || message.includes("fetch failed")
       || message.includes("networkerror")
     );
+}
+
+function sanitizeMontageExportJobFirestorePayload(job = null) {
+  const source = job && typeof job === "object" ? job : {};
+  const payload = {
+    ok: true,
+    jobId: String(source.jobId || "").trim(),
+    status: String(source.status || "queued").trim() || "queued",
+    stage: String(source.stage || "queued").trim() || "queued",
+    progress: Math.max(0, Math.min(1, Number(source.progress || 0) || 0)),
+    hint: String(source.hint || "").trim(),
+    updatedAt: String(source.updatedAt || "").trim() || new Date().toISOString()
+  };
+  if (Number.isFinite(Number(source.currentSceneIndex))) payload.currentSceneIndex = Math.max(0, Math.round(Number(source.currentSceneIndex) || 0));
+  if (Number.isFinite(Number(source.totalScenes))) payload.totalScenes = Math.max(0, Math.round(Number(source.totalScenes) || 0));
+  if (source.currentRowId) payload.currentRowId = String(source.currentRowId || "").trim();
+  if (source.sceneSubstage) payload.sceneSubstage = String(source.sceneSubstage || "").trim();
+  if (source.currentStoragePath) payload.currentStoragePath = String(source.currentStoragePath || "").trim();
+  if (source.currentDownloadUrl) payload.currentDownloadUrl = String(source.currentDownloadUrl || "").trim();
+  if (source.heartbeatAt) payload.heartbeatAt = String(source.heartbeatAt || "").trim();
+  if (source.lastHeartbeatAt) payload.heartbeatAt = String(source.lastHeartbeatAt || "").trim();
+  if (source.degraded === true) payload.degraded = true;
+  if (Number.isFinite(Number(source.failedSceneIndex))) payload.failedSceneIndex = Math.max(0, Math.round(Number(source.failedSceneIndex) || 0));
+  if (source.failedRowId) payload.failedRowId = String(source.failedRowId || "").trim();
+  if (source.failedSubstage) payload.failedSubstage = String(source.failedSubstage || "").trim();
+  if (Array.isArray(source.warnings) && source.warnings.length) payload.warnings = source.warnings;
+  if (source.error && typeof source.error === "object") payload.error = source.error;
+  if (source.result && typeof source.result === "object") payload.result = source.result;
+  if (source.export && typeof source.export === "object") payload.export = source.export;
+  if (source.downloadUrl) payload.downloadUrl = String(source.downloadUrl || "").trim();
+  else if (payload.result?.downloadUrl) payload.downloadUrl = String(payload.result.downloadUrl || "").trim();
+  return payload;
+}
+
+async function loadMontageExportJobStatusFromFirestore(jobId = "") {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId || !montageExportFirestoreDb) return null;
+  const snap = await firestoreGetDoc(firestoreDoc(montageExportFirestoreDb, "podcaster_export_jobs", cleanJobId));
+  if (!snap.exists()) return null;
+  const data = snap.data() || null;
+  if (!data || typeof data !== "object") return null;
+  return sanitizeMontageExportJobFirestorePayload(data);
+}
+
+async function loadMontageExportJobStatusFallback(jobId = "", error = null) {
+  const cleanJobId = String(jobId || "").trim();
+  if (!cleanJobId) return null;
+  const redirectFailure = isMontageExportStatusRedirectFailure(error);
+  if (!redirectFailure) return null;
+  try {
+    const fallback = await loadMontageExportJobStatusFromFirestore(cleanJobId);
+    if (!fallback) return null;
+    logMontageExportDevtools("poll_firestore_fallback", {
+      jobId: cleanJobId,
+      status: String(fallback?.status || "").trim() || undefined,
+      stage: String(fallback?.stage || "").trim() || undefined,
+      substage: String(fallback?.sceneSubstage || "").trim() || undefined,
+      progress: Number.isFinite(Number(fallback?.progress)) ? Number(fallback.progress) : undefined
+    }, "warn");
+    return fallback;
+  } catch (fallbackError) {
+    logMontageExportDevtools("poll_firestore_fallback_failed", {
+      jobId: cleanJobId,
+      message: String(fallbackError?.message || fallbackError || "").trim() || undefined
+    }, "warn");
+    return null;
+  }
+}
+
+async function applyMontageExportPolledStatus(data = null, cleanJobId = "") {
+  if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return true;
+  window.montageExportJobState.pollFailureCount = 0;
+  window.montageExportJobState.jobNotFoundCount = 0;
+  window.montageExportJobState.lastPollSuccessAtMs = Date.now();
+  window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
+  const stage = String(data?.stage || "").trim();
+  const sceneSubstage = String(data?.sceneSubstage || "").trim();
+  const hint = String(data?.hint || "").trim();
+  const progress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
+  const currentRowId = String(data?.currentRowId || "").trim();
+  const currentSceneIndex = Math.max(0, Number(data?.currentSceneIndex || 0) || 0);
+  const totalScenes = Math.max(0, Number(data?.totalScenes || 0) || 0);
+  const failedSceneIndex = Math.max(0, Number(data?.failedSceneIndex || data?.error?.detail?.failedSceneIndex || 0) || 0);
+  const failedSubstage = String(data?.failedSubstage || data?.error?.detail?.failedSubstage || "").trim();
+  const changed = stage !== window.montageExportJobState.lastStage || sceneSubstage !== window.montageExportJobState.lastSceneSubstage || hint !== window.montageExportJobState.lastHint || Math.abs(progress - window.montageExportJobState.lastProgress) > 0.001;
+  if (changed) {
+    window.montageExportJobState.lastStage = stage;
+    window.montageExportJobState.lastSceneSubstage = sceneSubstage;
+    window.montageExportJobState.lastHint = hint;
+    window.montageExportJobState.lastProgress = progress;
+    logMontageExportDevtools("stage_transition", {
+      status: String(data?.status || "").trim(),
+      stage,
+      substage: sceneSubstage || undefined,
+      progress,
+      currentSceneIndex,
+      totalScenes,
+      currentRowId: currentRowId || undefined,
+      failedSceneIndex: failedSceneIndex || undefined,
+      failedSubstage: failedSubstage || undefined,
+      hint: hint || undefined
+    });
+    setMontageExportProgress(progress);
+    const stageLabel = stage === "render_scene_segments" && sceneSubstage
+      ? describeMontageExportSceneSubstage(sceneSubstage, currentSceneIndex, totalScenes) || describeMontageExportStage(stage, window.montageExportState.exportMode)
+      : describeMontageExportStage(stage, window.montageExportState.exportMode);
+    setMontageExportStatus(stageLabel, hint, {
+      tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
+    });
+  }
+  if (stage === "render_scene_segments" && currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()) {
+    maybeRefreshMontageExportPreviewFromJob({
+      rowId: currentRowId,
+      sceneIndex: currentSceneIndex,
+      totalScenes
+    });
+  }
+  if (String(data?.status || "").trim() === "ready") {
+    logMontageExportDevtools("export_ready", {
+      stage,
+      progress,
+      warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
+    });
+    clearMontageExportPolling();
+    persistMontageExportActiveJob("");
+    setMontageExportContinueButton({ visible: false });
+    const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
+    let statusText = "Tu video está listo.";
+    let hintText = "";
+    if (warningBlock?.skippedEntries?.length) {
+      statusText = `Tu video está listo. Omitimos ${warningBlock.skippedEntries.length} escena(s).`;
+      hintText = formatMontageSkippedEntries(warningBlock.skippedEntries, 3);
+    }
+    const url = String(data?.downloadUrl || data?.export?.downloadUrl || "").trim();
+    const name = String(data?.export?.filename || window.montageExportState.filename || "montage").trim() || "montage";
+    setMontageExportDownloadButton({
+      visible: Boolean(url),
+      url,
+      filename: name
+    });
+    if (url) {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    }
+    if (window.montageExportJobState.reviewExcelEnabled === true && window.montageExportState.exportMode === "review") {
+      try {
+        await downloadMontageReviewExcel(
+          window.montageExportJobState.reviewExcelPayload,
+          window.montageExportJobState.reviewExcelFilename || name
+        );
+        if (!hintText) hintText = "También descargamos el Excel de revisión por escena.";
+      } catch (error) {
+        void error;
+        const extra = "El video sí se descargó, pero no pudimos generar el Excel de revisión.";
+        hintText = hintText ? `${hintText} ${extra}` : extra;
+        setMontageExportStatus(statusText, hintText, { tone: "warning" });
+        window.montageExportBusy = false;
+        window.setTimelinePreviewsSuspended(false);
+        setMontageExportPreviewPaused(false);
+        setMontageExportBusy(false);
+        return true;
+      }
+    }
+    setMontageExportStatus(statusText, hintText, { tone: warningBlock?.skippedEntries?.length ? "warning" : "success" });
+    window.montageExportBusy = false;
+    window.setTimelinePreviewsSuspended(false);
+    setMontageExportPreviewPaused(false);
+    setMontageExportBusy(false);
+    return true;
+  }
+  if (String(data?.status || "").trim() === "error") {
+    const err = data?.error && typeof data.error === "object" ? data.error : null;
+    logMontageExportDevtools("export_error", {
+      stage,
+      progress,
+      failedSceneIndex: failedSceneIndex || undefined,
+      failedSubstage: failedSubstage || undefined,
+      error: err?.error || err?.code || undefined,
+      detail: err?.detail || undefined
+    }, "error");
+    clearMontageExportPolling();
+    persistMontageExportActiveJob("");
+    setMontageExportContinueButton({ visible: false });
+    setMontageExportDownloadButton({ visible: false });
+    const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
+    const cleanErrorCode = String(err?.code || err?.error || "").trim();
+    const failedLabel = failedSubstage
+      ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
+      : "";
+    setMontageExportProgress(null);
+    setMontageExportStatus(
+      "No pudimos exportar tu video.",
+      cleanErrorCode === "montage_export_worker_restarted"
+        ? "El backend se reinició durante el render de la escena. Inicia una nueva exportación."
+        : cleanErrorCode === "montage_export_worker_stalled"
+          ? "El worker dejó de reportar progreso. Inicia una nueva exportación."
+          :
+        skippedEntries.length
+          ? `Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`
+          : [
+            failedLabel ? `${failedLabel}` : "",
+            failedSceneIndex > 0 ? `Fallo en la escena ${failedSceneIndex}.` : "",
+            String(err?.detail?.stderrPreview || hint || err?.error || "Revisa la composición review y vuelve a intentar.").trim()
+          ].filter(Boolean).join(" "),
+      { tone: "error" }
+    );
+    window.montageExportBusy = false;
+    window.setTimelinePreviewsSuspended(false);
+    setMontageExportPreviewPaused(false);
+    setMontageExportBusy(false);
+    return true;
+  }
+  if (data?.degraded === true && String(data?.status || "").trim() === "running") {
+    const degradedHint = String(data?.hint || "").trim() || "Recuperando el estado del export…";
+    setMontageExportStatus(
+      describeMontageExportStage(stage, window.montageExportState.exportMode),
+      degradedHint,
+      { tone: "warning" }
+    );
+    scheduleMontageExportPollRetry(cleanJobId, 0, { transient: false });
+    return true;
+  }
+  return false;
 }
 
 function scheduleMontageExportPollRetry(jobId = "", failureCount = 0, { transient = false } = {}) {
@@ -1159,164 +1392,13 @@ export async function pollMontageExportJob(jobId = "") {
       progress: Number.isFinite(Number(data?.progress)) ? Number(data.progress) : undefined,
       degraded: data?.degraded === true
     }, "debug");
-    if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
-    window.montageExportJobState.pollFailureCount = 0;
-    window.montageExportJobState.jobNotFoundCount = 0;
-    window.montageExportJobState.lastPollSuccessAtMs = Date.now();
-    window.montageExportJobState.lastHeartbeatAt = String(data?.heartbeatAt || data?.updatedAt || "").trim();
-    const stage = String(data?.stage || "").trim();
-    const sceneSubstage = String(data?.sceneSubstage || "").trim();
-    const hint = String(data?.hint || "").trim();
-    const progress = Math.max(0, Math.min(1, Number(data?.progress || 0) || 0));
-    const currentRowId = String(data?.currentRowId || "").trim();
-    const currentSceneIndex = Math.max(0, Number(data?.currentSceneIndex || 0) || 0);
-    const totalScenes = Math.max(0, Number(data?.totalScenes || 0) || 0);
-    const failedSceneIndex = Math.max(0, Number(data?.failedSceneIndex || data?.error?.detail?.failedSceneIndex || 0) || 0);
-    const failedSubstage = String(data?.failedSubstage || data?.error?.detail?.failedSubstage || "").trim();
-    const changed = stage !== window.montageExportJobState.lastStage || sceneSubstage !== window.montageExportJobState.lastSceneSubstage || hint !== window.montageExportJobState.lastHint || Math.abs(progress - window.montageExportJobState.lastProgress) > 0.001;
-    if (changed) {
-      window.montageExportJobState.lastStage = stage;
-      window.montageExportJobState.lastSceneSubstage = sceneSubstage;
-      window.montageExportJobState.lastHint = hint;
-      window.montageExportJobState.lastProgress = progress;
-      logMontageExportDevtools("stage_transition", {
-        status: String(data?.status || "").trim(),
-        stage,
-        substage: sceneSubstage || undefined,
-        progress,
-        currentSceneIndex,
-        totalScenes,
-        currentRowId: currentRowId || undefined,
-        failedSceneIndex: failedSceneIndex || undefined,
-        failedSubstage: failedSubstage || undefined,
-        hint: hint || undefined
-      });
-      setMontageExportProgress(progress);
-      const stageLabel = stage === "render_scene_segments" && sceneSubstage
-        ? describeMontageExportSceneSubstage(sceneSubstage, currentSceneIndex, totalScenes) || describeMontageExportStage(stage, window.montageExportState.exportMode)
-        : describeMontageExportStage(stage, window.montageExportState.exportMode);
-      setMontageExportStatus(stageLabel, hint, {
-        tone: stage === "ready" ? (Array.isArray(data?.warnings) && data.warnings.length ? "warning" : "success") : stage === "error" ? "error" : "neutral"
-      });
-    }
-    if (stage === "render_scene_segments" && currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()) {
-      maybeRefreshMontageExportPreviewFromJob({
-        rowId: currentRowId,
-        sceneIndex: currentSceneIndex,
-        totalScenes
-      });
-    }
-    if (String(data?.status || "").trim() === "ready") {
-      logMontageExportDevtools("export_ready", {
-        stage,
-        progress,
-        warnings: Array.isArray(data?.warnings) ? data.warnings.length : 0
-      });
-      clearMontageExportPolling();
-      persistMontageExportActiveJob("");
-      setMontageExportContinueButton({ visible: false });
-      const warningBlock = Array.isArray(data?.warnings) && data.warnings.length ? data.warnings[0] : null;
-      let statusText = "Tu video está listo.";
-      let hintText = "";
-      if (warningBlock?.skippedEntries?.length) {
-        statusText = `Tu video está listo. Omitimos ${warningBlock.skippedEntries.length} escena(s).`;
-        hintText = formatMontageSkippedEntries(warningBlock.skippedEntries, 3);
-      }
-      const url = String(data?.downloadUrl || data?.export?.downloadUrl || "").trim();
-      const name = String(data?.export?.filename || window.montageExportState.filename || "montage").trim() || "montage";
-      setMontageExportDownloadButton({
-        visible: Boolean(url),
-        url,
-        filename: name
-      });
-      if (url) {
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = name;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-      }
-      if (window.montageExportJobState.reviewExcelEnabled === true && window.montageExportState.exportMode === "review") {
-        try {
-          await downloadMontageReviewExcel(
-            window.montageExportJobState.reviewExcelPayload,
-            window.montageExportJobState.reviewExcelFilename || name
-          );
-          if (!hintText) hintText = "También descargamos el Excel de revisión por escena.";
-        } catch (error) {
-          void error;
-          const extra = "El video sí se descargó, pero no pudimos generar el Excel de revisión.";
-          hintText = hintText ? `${hintText} ${extra}` : extra;
-          setMontageExportStatus(statusText, hintText, { tone: "warning" });
-          window.montageExportBusy = false;
-          window.setTimelinePreviewsSuspended(false);
-          setMontageExportPreviewPaused(false);
-          setMontageExportBusy(false);
-          return;
-        }
-      }
-      setMontageExportStatus(statusText, hintText, { tone: warningBlock?.skippedEntries?.length ? "warning" : "success" });
-      window.montageExportBusy = false;
-      window.setTimelinePreviewsSuspended(false);
-      setMontageExportPreviewPaused(false);
-      setMontageExportBusy(false);
-      return;
-    }
-    if (String(data?.status || "").trim() === "error") {
-      const err = data?.error && typeof data.error === "object" ? data.error : null;
-      logMontageExportDevtools("export_error", {
-        stage,
-        progress,
-        failedSceneIndex: failedSceneIndex || undefined,
-        failedSubstage: failedSubstage || undefined,
-        error: err?.error || err?.code || undefined,
-        detail: err?.detail || undefined
-      }, "error");
-      clearMontageExportPolling();
-      persistMontageExportActiveJob("");
-      setMontageExportContinueButton({ visible: false });
-      setMontageExportDownloadButton({ visible: false });
-      const skippedEntries = Array.isArray(err?.detail?.skippedEntries) ? err.detail.skippedEntries : [];
-      const cleanErrorCode = String(err?.code || err?.error || "").trim();
-      const failedLabel = failedSubstage
-        ? describeMontageExportSceneSubstage(failedSubstage, failedSceneIndex, totalScenes) || failedSubstage
-        : "";
-      setMontageExportProgress(null);
-      setMontageExportStatus(
-        "No pudimos exportar tu video.",
-        cleanErrorCode === "montage_export_worker_restarted"
-          ? "El backend se reinició durante el render de la escena. Inicia una nueva exportación."
-          : cleanErrorCode === "montage_export_worker_stalled"
-            ? "El worker dejó de reportar progreso. Inicia una nueva exportación."
-            :
-        skippedEntries.length
-          ? `Omitimos escenas con archivos faltantes: ${formatMontageSkippedEntries(skippedEntries, 3)}`
-          : [
-            failedLabel ? `${failedLabel}` : "",
-            failedSceneIndex > 0 ? `Fallo en la escena ${failedSceneIndex}.` : "",
-            String(err?.detail?.stderrPreview || hint || err?.error || "Revisa la composición review y vuelve a intentar.").trim()
-          ].filter(Boolean).join(" "),
-        { tone: "error" }
-      );
-      window.montageExportBusy = false;
-      window.setTimelinePreviewsSuspended(false);
-      setMontageExportPreviewPaused(false);
-      setMontageExportBusy(false);
-      return;
-    }
-    if (data?.degraded === true && String(data?.status || "").trim() === "running") {
-      const hint = String(data?.hint || "").trim() || "Recuperando el estado del export…";
-      setMontageExportStatus(
-        describeMontageExportStage(stage, window.montageExportState.exportMode),
-        hint,
-        { tone: "warning" }
-      );
-      scheduleMontageExportPollRetry(cleanJobId, 0, { transient: false });
-      return;
-    }
+    if (await applyMontageExportPolledStatus(data, cleanJobId)) return;
   } catch (error) {
     if (String(window.montageExportJobState.jobId || "").trim() !== cleanJobId) return;
+    const firestoreFallback = await loadMontageExportJobStatusFallback(cleanJobId, error);
+    if (firestoreFallback) {
+      if (await applyMontageExportPolledStatus(firestoreFallback, cleanJobId)) return;
+    }
     const errorCode = String(error?.detail?.error || error?.error || error?.message || "").trim();
     const errorStatus = Number(error?.status || error?.detail?.status || 0) || 0;
     logMontageExportDevtools("poll_error", {

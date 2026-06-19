@@ -318,6 +318,13 @@ service cloud.firestore {
       );
     }
 
+    match /podcaster_export_jobs/{jobId} {
+      allow read: if isEditor() || (
+        isSignedIn() &&
+        isOwner(resource.data.ownerId)
+      );
+    }
+
     match /analizarPDF/{sessionId} {
       allow read: if isEditor() || (
         isSignedIn() &&
