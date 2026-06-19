@@ -2610,7 +2610,14 @@ async function buildMontageExportPayloadForSubmission(session = null) {
   if (!prepared?.ok || !prepared?.payload) return prepared;
   await hydrateMontageExportPayloadMedia(prepared.payload);
   await inlineMontageExportPayloadMedia(prepared.payload);
-  prepared.payload.onScreenTextRenderedSegments = [];
+  const renderedSegments = Array.isArray(prepared.payload.onScreenTextRenderedSegments)
+    ? prepared.payload.onScreenTextRenderedSegments.filter(Boolean)
+    : [];
+  if (!renderedSegments.length && Array.isArray(prepared.payload.onScreenTextTimeline?.renderedSegments)) {
+    prepared.payload.onScreenTextRenderedSegments = prepared.payload.onScreenTextTimeline.renderedSegments.filter(Boolean);
+  } else {
+    prepared.payload.onScreenTextRenderedSegments = renderedSegments;
+  }
   return prepared;
 }
 

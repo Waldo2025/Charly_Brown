@@ -12429,6 +12429,12 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 
     return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
   } catch (error) {
+    console.error("[backend][montage-export] request failed", {
+      status: Number(error?.status || 500) || 500,
+      code: String(error?.code || "").trim() || null,
+      message: String(error?.message || error || "montage_export_failed").trim(),
+      detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
+    });
     return res.status(Number(error?.status || 500)).json({
       error: String(error?.code || error?.message || "montage_export_failed").trim(),
       code: String(error?.code || "").trim() || undefined,

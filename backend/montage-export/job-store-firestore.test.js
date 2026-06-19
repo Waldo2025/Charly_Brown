@@ -353,6 +353,62 @@ test("createJob compacts heavy montage request arrays to avoid oversized Firesto
   assert.deepEqual(created.request.input.overlayCards, { segmentCount: 15 });
 });
 
+test("createJob drops derived timeline arrays that can duplicate inline export payloads", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-06-19T13:30:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-derived-arrays-redact",
+    sessionId: "session-derived",
+    ownerId: "user-derived",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-derived",
+        timelineAudioSegments: [{
+          rowId: "row-1",
+          dataUrl: "data:audio/mpeg;base64,AAAA",
+          localDataUrl: "data:audio/mpeg;base64,BBBB"
+        }],
+        normalizedGeminiTimelineSegments: [{
+          rowId: "row-1",
+          dataUrl: "data:audio/mpeg;base64,CCCC",
+          localDataUrl: "data:audio/mpeg;base64,DDDD"
+        }],
+        onScreenTextSegments: [{
+          rowId: "row-1",
+          text: "Hola",
+          layout: { xPct: 0.2, yPct: 0.7 }
+        }],
+        entries: [{
+          rowId: "row-1",
+          video: {
+            downloadUrl: "https://example.com/video.mp4",
+            dataUrl: "data:video/mp4;base64,EEEE"
+          }
+        }]
+      }
+    },
+    totalScenes: 1
+  });
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input, "timelineAudioSegments"),
+    false
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input, "normalizedGeminiTimelineSegments"),
+    false
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(created.request.input, "onScreenTextSegments"),
+    false
+  );
+});
+
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {
   const fakeDb = createFakeDocStore();
   const timestamps = [

@@ -14,20 +14,20 @@ assert.match(
 
 assert.doesNotMatch(
   source,
-  /await hydrateMontageExportPayloadOnScreenTextRasters\(prepared\.payload\);/,
-  "El submit del export ya no debe rasterizar texto en pantalla antes de enviar el job."
+  /prepared\.payload\.onScreenTextRenderedSegments = \[\];/,
+  "El submit del export no debe vaciar onScreenTextRenderedSegments antes del POST."
 );
 
-assert.doesNotMatch(
+assert.match(
   source,
-  /throw new Error\("montage_onscreen_text_raster_failed"\)/,
-  "El submit del export no debe abortar por ausencia de rasters karaoke."
+  /const renderedSegments = Array\.isArray\(prepared\.payload\.onScreenTextRenderedSegments\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = renderedSegments;/,
+  "El submit del export debe conservar los overlays rasterizados ya preparados."
 );
 
-assert.doesNotMatch(
+assert.match(
   source,
-  /prepared\.payload\.onScreenTextRenderedSegments = renderedSegments;/,
-  "El payload preparado ya no debe promover renderedSegments rasterizados al nivel superior."
+  /if \(!renderedSegments\.length && Array\.isArray\(prepared\.payload\.onScreenTextTimeline\?\.renderedSegments\)\)[\s\S]*prepared\.payload\.onScreenTextRenderedSegments = prepared\.payload\.onScreenTextTimeline\.renderedSegments\.filter\(Boolean\);/,
+  "El submit del export debe promover renderedSegments del timeline al nivel superior cuando falten en el payload."
 );
 
-console.log("Podcaster montage export no-raster payload contract OK.");
+console.log("Podcaster montage export rendered-overlay payload contract OK.");

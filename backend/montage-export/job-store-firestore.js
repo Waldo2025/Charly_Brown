@@ -150,6 +150,15 @@ function sanitizeMontageExportPersistedInput(input = null) {
   if (Object.prototype.hasOwnProperty.call(nextInput, "audioTimelineRaw")) {
     delete nextInput.audioTimelineRaw;
   }
+  if (Object.prototype.hasOwnProperty.call(nextInput, "timelineAudioSegments")) {
+    delete nextInput.timelineAudioSegments;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextInput, "normalizedGeminiTimelineSegments")) {
+    delete nextInput.normalizedGeminiTimelineSegments;
+  }
+  if (Object.prototype.hasOwnProperty.call(nextInput, "onScreenTextSegments")) {
+    delete nextInput.onScreenTextSegments;
+  }
 
   if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
     const sanitized = sanitizePersistedRenderedSegments(nextInput.onScreenTextRenderedSegments);

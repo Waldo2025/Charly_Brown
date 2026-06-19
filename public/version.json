@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.211",
-  "build": "2026-1.0.10.212",
+  "version": "1.0.10.212",
+  "build": "2026-1.0.10.213",
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
@@ -14,6 +14,8 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El modal de exportación de Podcaster ya no vacía onScreenTextRenderedSegments antes del POST y ahora promueve renderedSegments existentes del timeline para evitar payloads desalineados al iniciar la exportación.",
+    "Actualizado: Se incrementan los cache-busters principales de podcaster.html y podcaster.js para forzar la carga del fix del modal de exportación.",
     "Corregido: El seguimiento del montage export ahora usa un fallback por Firestore para `podcaster_export_jobs` cuando `export-status` se rompe por redirect/CORS entre Hosting y Render. Se incrementan cache-busters para forzar la carga del frontend nuevo.",
     "Corregido: El submit final del export de Podcaster ya no borra dataUrl/localDataUrl de los audios Gemini hidratados; el job ahora puede reutilizar el audio inline en Render en lugar de caer de nuevo al gs:// faltante. Se incrementan cache-busters para forzar la carga del fix.",
     "Corregido: El export de Podcaster ya no deja pasar gs:// como URL final del audio Gemini al hidratar assets de audio; ahora prioriza resolveStorageAudioUrl, reutiliza mejor el blob local y fuerza la carga del frontend nuevo con cache-busters actualizados.",
