@@ -81,8 +81,11 @@ function getMontageBrowserRendererAvailability() {
     } catch (error) {
       executablePath = "";
     }
-    if (!executablePath) {
-      executablePath = resolveBundledChromiumExecutableFromBrowserPath(process.env.PLAYWRIGHT_BROWSERS_PATH || "");
+    if (!executablePath || !fs.existsSync(executablePath)) {
+      const fallbackPath = resolveBundledChromiumExecutableFromBrowserPath(process.env.PLAYWRIGHT_BROWSERS_PATH || "");
+      if (fallbackPath) {
+        executablePath = fallbackPath;
+      }
     }
     const executablePresent = Boolean(executablePath) && fs.existsSync(executablePath);
     if (!executablePresent) {
