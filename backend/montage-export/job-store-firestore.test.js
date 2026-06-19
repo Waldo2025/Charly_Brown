@@ -159,6 +159,66 @@ test("createJob strips inline on-screen raster payloads from persisted request i
   );
 });
 
+test("createJob strips inline audio and media payloads from persisted request input", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-inline-media-redact",
+    sessionId: "session-inline-media",
+    ownerId: "user-inline-media",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-inline-media",
+        entries: [{
+          rowId: "row-1",
+          video: {
+            downloadUrl: "https://example.com/video.mp4",
+            dataUrl: "data:video/mp4;base64,AAAA"
+          },
+          audio: {
+            storagePath: "gs://bucket/audio.wav",
+            localDataUrl: "data:audio/wav;base64,BBBB"
+          }
+        }],
+        backgroundMusic: {
+          localDataUrl: "data:audio/mp3;base64,CCCC"
+        },
+        dialogueAudioMap: {
+          "row-1": {
+            downloadUrl: "https://example.com/audio.wav",
+            dataUrl: "data:audio/wav;base64,DDDD"
+          }
+        },
+        audioTimeline: {
+          geminiSegments: [{
+            rowId: "row-1",
+            localDataUrl: "data:audio/wav;base64,EEEE"
+          }],
+          backgroundSegments: [{
+            id: "bg-1",
+            dataUrl: "data:audio/mp3;base64,FFFF"
+          }]
+        }
+      }
+    },
+    totalScenes: 1
+  });
+
+  assert.equal(created.request.input.persistedInlineMediaRedacted, true);
+  assert.equal(created.request.input.persistedInlineMediaRecordCount, 6);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].video, "dataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].audio, "localDataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.backgroundMusic, "localDataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.dialogueAudioMap["row-1"], "dataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.geminiSegments[0], "localDataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.backgroundSegments[0], "dataUrl"), false);
+});
+
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {
   const fakeDb = createFakeDocStore();
   const timestamps = [

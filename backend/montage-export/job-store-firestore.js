@@ -78,12 +78,32 @@ function sanitizePersistedRenderedSegments(renderedSegments = []) {
   };
 }
 
+function sanitizePersistedMediaRecord(record = null) {
+  const source = record && typeof record === "object" ? record : null;
+  if (!source) return source;
+  const nextRecord = { ...source };
+  let redacted = false;
+  if (typeof nextRecord.dataUrl === "string" && nextRecord.dataUrl.trim().startsWith("data:")) {
+    delete nextRecord.dataUrl;
+    redacted = true;
+  }
+  if (typeof nextRecord.localDataUrl === "string" && nextRecord.localDataUrl.trim().startsWith("data:")) {
+    delete nextRecord.localDataUrl;
+    redacted = true;
+  }
+  return {
+    sanitizedRecord: nextRecord,
+    redacted
+  };
+}
+
 function sanitizeMontageExportPersistedInput(input = null) {
   const source = input && typeof input === "object" ? input : null;
   if (!source) return null;
   const nextInput = { ...source };
   let redactedFrameCount = 0;
   let redactedSegmentCount = 0;
+  let redactedMediaRecordCount = 0;
 
   if (Object.prototype.hasOwnProperty.call(nextInput, "entriesRaw")) {
     delete nextInput.entriesRaw;
@@ -114,6 +134,68 @@ function sanitizeMontageExportPersistedInput(input = null) {
     nextInput.persistedInlineRastersRedacted = true;
     nextInput.persistedInlineRasterFrameCount = redactedFrameCount;
     nextInput.persistedInlineRasterSegmentCount = redactedSegmentCount;
+  }
+
+  if (Array.isArray(nextInput.entries)) {
+    nextInput.entries = nextInput.entries.map((entry) => {
+      const sourceEntry = entry && typeof entry === "object" ? entry : null;
+      if (!sourceEntry) return sourceEntry;
+      const {
+        sanitizedRecord: video,
+        redacted: redactedVideo
+      } = sanitizePersistedMediaRecord(sourceEntry.video);
+      const {
+        sanitizedRecord: audio,
+        redacted: redactedAudio
+      } = sanitizePersistedMediaRecord(sourceEntry.audio);
+      if (redactedVideo) redactedMediaRecordCount += 1;
+      if (redactedAudio) redactedMediaRecordCount += 1;
+      return {
+        ...sourceEntry,
+        video,
+        audio
+      };
+    });
+  }
+
+  if (nextInput.backgroundMusic && typeof nextInput.backgroundMusic === "object") {
+    const sanitized = sanitizePersistedMediaRecord(nextInput.backgroundMusic);
+    nextInput.backgroundMusic = sanitized.sanitizedRecord;
+    if (sanitized.redacted) redactedMediaRecordCount += 1;
+  }
+
+  if (nextInput.dialogueAudioMap && typeof nextInput.dialogueAudioMap === "object") {
+    const nextDialogueAudioMap = {};
+    Object.entries(nextInput.dialogueAudioMap).forEach(([rowId, clip]) => {
+      const sanitized = sanitizePersistedMediaRecord(clip);
+      nextDialogueAudioMap[rowId] = sanitized.sanitizedRecord;
+      if (sanitized.redacted) redactedMediaRecordCount += 1;
+    });
+    nextInput.dialogueAudioMap = nextDialogueAudioMap;
+  }
+
+  if (nextInput.audioTimeline && typeof nextInput.audioTimeline === "object") {
+    const nextAudioTimeline = { ...nextInput.audioTimeline };
+    if (Array.isArray(nextAudioTimeline.geminiSegments)) {
+      nextAudioTimeline.geminiSegments = nextAudioTimeline.geminiSegments.map((segment) => {
+        const sanitized = sanitizePersistedMediaRecord(segment);
+        if (sanitized.redacted) redactedMediaRecordCount += 1;
+        return sanitized.sanitizedRecord;
+      });
+    }
+    if (Array.isArray(nextAudioTimeline.backgroundSegments)) {
+      nextAudioTimeline.backgroundSegments = nextAudioTimeline.backgroundSegments.map((segment) => {
+        const sanitized = sanitizePersistedMediaRecord(segment);
+        if (sanitized.redacted) redactedMediaRecordCount += 1;
+        return sanitized.sanitizedRecord;
+      });
+    }
+    nextInput.audioTimeline = nextAudioTimeline;
+  }
+
+  if (redactedMediaRecordCount > 0) {
+    nextInput.persistedInlineMediaRedacted = true;
+    nextInput.persistedInlineMediaRecordCount = redactedMediaRecordCount;
   }
 
   return nextInput;
