@@ -12,7 +12,9 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=400
+        value: --max-old-space-size=256
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
       - key: API_HOST
         value: 0.0.0.0
       - key: FIREBASE_PROJECT_ID
@@ -46,7 +48,9 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=400
+        value: --max-old-space-size=256
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
       - key: FIREBASE_PROJECT_ID
         value: charly-brown
       - key: FIREBASE_STORAGE_BUCKET

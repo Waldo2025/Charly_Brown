@@ -990,6 +990,8 @@ function buildBackendHealthPayload() {
     moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true,
     podcasterMusicGenerateRoute: true,
+    montageExportQueueAvailable: Boolean(montageExportQueue),
+    montageExportQueueConfigured,
     browserRendererAvailable: browserRenderer.available === true,
     browserRendererCode: browserRenderer.available === true ? null : (browserRenderer.code || null),
     browserRendererMessage: browserRenderer.available === true ? null : (browserRenderer.message || null),
@@ -1080,9 +1082,11 @@ const montageExportJobStore = createMontageExportJobStore({ db });
 
 // Initialize BullMQ queue if Redis is configured
 let montageExportQueue = null;
+let montageExportQueueConfigured = false;
 try {
   const { resolveRedisConnectionUrl, createBullMqQueue, createMontageExportQueue } = require("./montage-export/queue-bullmq.js");
-  if (resolveRedisConnectionUrl()) {
+  montageExportQueueConfigured = Boolean(resolveRedisConnectionUrl());
+  if (montageExportQueueConfigured) {
     const queue = createBullMqQueue();
     montageExportQueue = createMontageExportQueue({ queue });
     console.info("[backend] BullMQ montage export queue initialized successfully using Redis connection string.");
@@ -14338,6 +14342,8 @@ if (IS_MAIN_MODULE) {
       montageRenderRuntime: IS_RENDER_RUNTIME ? "render" : "non-render",
       moodleModuleGraphicsRoute: true,
       podcasterDialogueAudioRoute: true,
+      montageExportQueueAvailable: healthPayload.montageExportQueueAvailable,
+      montageExportQueueConfigured: healthPayload.montageExportQueueConfigured,
       browserRendererAvailable: healthPayload.browserRendererAvailable,
       browserRendererCode: healthPayload.browserRendererCode,
       playwrightModuleAvailable: healthPayload.playwrightModuleAvailable,

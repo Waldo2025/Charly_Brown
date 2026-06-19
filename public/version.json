@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.213",
-  "build": "2026-1.0.10.214",
+  "version": "1.0.10.214",
+  "build": "2026-1.0.10.215",
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
@@ -14,6 +14,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con los fixes de memoria, cola de export y runtime del browser renderer en Render.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el endurecimiento del browser renderer y la persistencia fiel del payload de export.",
     "Corregido: El modal de exportación de Podcaster ya no vacía onScreenTextRenderedSegments antes del POST y ahora promueve renderedSegments existentes del timeline para evitar payloads desalineados al iniciar la exportación.",
     "Actualizado: Se incrementan los cache-busters principales de podcaster.html y podcaster.js para forzar la carga del fix del modal de exportación.",

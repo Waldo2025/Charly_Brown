@@ -11,8 +11,8 @@ test("intermediate montage params favor mezzanine quality for mp4", () => {
   assert.equal(params.container, "mp4");
   assert.equal(params.vCodec, "libx264");
   assert.deepEqual(params.aArgs, ["-b:a", "192k"]);
-  assert.match(params.vArgs.join(" "), /-preset veryfast/);
-  assert.match(params.vArgs.join(" "), /-crf 14/);
+  assert.match(params.vArgs.join(" "), /-preset ultrafast/);
+  assert.match(params.vArgs.join(" "), /-crf 18/);
   assert.doesNotMatch(params.vArgs.join(" "), /-maxrate/);
   assert.doesNotMatch(params.vArgs.join(" "), /-bufsize/);
   assert.doesNotMatch(params.vArgs.join(" "), /-movflags/);
