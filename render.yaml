@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: npm install --prefix backend && npx --prefix backend playwright install chromium
+    buildCommand: PLAYWRIGHT_BROWSERS_PATH=0 npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=0 npx --prefix backend playwright install chromium
     startCommand: node backend/server.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -41,7 +41,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: npm install --prefix backend && npx --prefix backend playwright install chromium
+    buildCommand: PLAYWRIGHT_BROWSERS_PATH=0 npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=0 npx --prefix backend playwright install chromium
     startCommand: node backend/workers/podcaster-montage-export-worker.js
     autoDeploy: true
     envVars:

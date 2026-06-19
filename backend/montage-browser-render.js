@@ -5,6 +5,15 @@ const path = require("node:path");
 
 let cachedMontageBrowserRendererAvailability = null;
 
+function ensureRenderPlaywrightBrowserPathEnv() {
+  const isRenderRuntime = Boolean(
+    String(process.env.RENDER_EXTERNAL_HOSTNAME || process.env.RENDER_SERVICE_ID || "").trim()
+  );
+  if (!isRenderRuntime) return;
+  if (String(process.env.PLAYWRIGHT_BROWSERS_PATH || "").trim()) return;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
+}
+
 function buildRendererUnavailableState({
   code = "playwright_unavailable",
   message = "playwright_unavailable",
@@ -44,6 +53,7 @@ function pathToFileUrl(targetPath = "") {
 function getMontageBrowserRendererAvailability() {
   if (cachedMontageBrowserRendererAvailability) return cachedMontageBrowserRendererAvailability;
   try {
+    ensureRenderPlaywrightBrowserPathEnv();
     const playwright = require("playwright");
     const playwrightModuleAvailable = true;
     const chromium = playwright?.chromium || null;
