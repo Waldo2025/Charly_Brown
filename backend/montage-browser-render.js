@@ -11,7 +11,17 @@ function ensureRenderPlaywrightBrowserPathEnv() {
   );
   if (!isRenderRuntime) return;
   if (String(process.env.PLAYWRIGHT_BROWSERS_PATH || "").trim()) return;
-  process.env.PLAYWRIGHT_BROWSERS_PATH = path.resolve(process.cwd(), "backend", ".playwright-browsers");
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.resolve(__dirname, ".playwright-browsers");
+}
+
+function resolveBundledChromiumExecutableFromBrowserPath(browserPath = "") {
+  const baseDir = path.resolve(String(browserPath || "").trim());
+  if (!baseDir || !fs.existsSync(baseDir)) return "";
+  const candidates = fs.readdirSync(baseDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("chromium-"))
+    .map((entry) => path.join(baseDir, entry.name, "chrome-linux64", "chrome"))
+    .filter((candidate) => fs.existsSync(candidate));
+  return candidates[0] || "";
 }
 
 function buildRendererUnavailableState({
@@ -69,13 +79,10 @@ function getMontageBrowserRendererAvailability() {
     try {
       executablePath = String(chromium.executablePath?.() || "").trim();
     } catch (error) {
-      cachedMontageBrowserRendererAvailability = buildRendererUnavailableState({
-        code: "playwright_chromium_unavailable",
-        message: String(error?.message || error || "playwright_chromium_unavailable"),
-        rawCode: String(error?.code || "").trim(),
-        playwrightModuleAvailable
-      });
-      return cachedMontageBrowserRendererAvailability;
+      executablePath = "";
+    }
+    if (!executablePath) {
+      executablePath = resolveBundledChromiumExecutableFromBrowserPath(process.env.PLAYWRIGHT_BROWSERS_PATH || "");
     }
     const executablePresent = Boolean(executablePath) && fs.existsSync(executablePath);
     if (!executablePresent) {
