@@ -9,7 +9,6 @@ function canAutoResumeInterruptedMontageExportJob(job = null, {
   const input = request?.input && typeof request.input === "object" ? request.input : null;
   if (!input) return false;
   if (input.persistedInlineRastersRedacted === true) return false;
-  if (input.persistedRequestCompacted === true) return false;
   const restartResumeCount = Math.max(0, Math.round(Number(source.restartResumeCount || 0) || 0));
   return restartResumeCount < 1;
 }
