@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npx --prefix backend playwright install chromium
+    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && mkdir -p /opt/render/project/src/backend/.playwright-browsers && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npx --prefix backend playwright install chromium && find /opt/render/project/src/backend/.playwright-browsers -maxdepth 3 -type f -path '*/chrome-linux64/chrome' -print -quit | grep -q .
     startCommand: node backend/server.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -41,7 +41,7 @@ services:
     runtime: node
     plan: starter
     rootDir: .
-    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npx --prefix backend playwright install chromium
+    buildCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npm install --prefix backend && mkdir -p /opt/render/project/src/backend/.playwright-browsers && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/backend/.playwright-browsers npx --prefix backend playwright install chromium && find /opt/render/project/src/backend/.playwright-browsers -maxdepth 3 -type f -path '*/chrome-linux64/chrome' -print -quit | grep -q .
     startCommand: node backend/workers/podcaster-montage-export-worker.js
     autoDeploy: true
     envVars:
