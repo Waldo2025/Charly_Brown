@@ -749,6 +749,175 @@
     };
   }
 
+  function normalizeWrappedTextValue(value = "") {
+    return String(value || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter((line, index, lines) => line || lines.length === 1 || index < lines.length - 1)
+      .join("\n")
+      .trim();
+  }
+
+  function createOnScreenTextWrapMeasurer() {
+    const doc = typeof document === "object" && document ? document : null;
+    if (!doc || typeof doc.createElement !== "function") return null;
+    const host = doc.body || doc.documentElement;
+    if (!host || typeof host.appendChild !== "function") return null;
+    const el = doc.createElement("div");
+    if (!el || !el.style) return null;
+    el.setAttribute?.("aria-hidden", "true");
+    Object.assign(el.style, {
+      position: "absolute",
+      left: "-99999px",
+      top: "0",
+      visibility: "hidden",
+      pointerEvents: "none",
+      whiteSpace: "pre",
+      width: "auto",
+      maxWidth: "none",
+      minWidth: "0",
+      padding: "0",
+      margin: "0",
+      border: "0",
+      boxSizing: "border-box"
+    });
+    host.appendChild(el);
+    return el;
+  }
+
+  function resolveOnScreenTextMeasuredWrapResult(text, options = {}) {
+    const config = options && typeof options === "object" ? options : {};
+    const fallback = String(config.fallback || "").trim();
+    const maxLines = Math.max(1, Math.round(Number(config.maxLines || 2) || 2));
+    const shouldTruncate = config.truncate !== false;
+    const boxWidthPx = Math.max(24, Math.round(Number(config.boxWidthPx || config.widthPx || 0) || 0));
+    if (!boxWidthPx) {
+      return resolveOnScreenTextWrapResult(text, {
+        fallback,
+        maxChars: config.maxChars,
+        maxLines,
+        truncate: shouldTruncate
+      });
+    }
+    const measurer = createOnScreenTextWrapMeasurer();
+    if (!measurer) {
+      return resolveOnScreenTextWrapResult(text, {
+        fallback,
+        maxChars: config.maxChars,
+        maxLines,
+        truncate: shouldTruncate
+      });
+    }
+
+    const fontSizePx = Math.max(8, Number(config.fontSizePx || 16) || 16);
+    const fontFamily = String(config.fontFamily || '"Inter", system-ui, sans-serif').trim() || '"Inter", system-ui, sans-serif';
+    const fontWeight = normalizeFontWeight(config.fontWeight) === "bold" ? "800" : "500";
+    const fontStyle = normalizeFontStyle(config.fontStyle);
+    const letterSpacingEm = Number.isFinite(Number(config.letterSpacingEm))
+      ? Number(config.letterSpacingEm)
+      : -0.03;
+
+    Object.assign(measurer.style, {
+      fontFamily,
+      fontSize: `${fontSizePx}px`,
+      fontWeight,
+      fontStyle,
+      letterSpacing: `${letterSpacingEm}em`
+    });
+
+    const rawLines = String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim());
+    const sourceLines = rawLines.some(Boolean) ? rawLines : [fallback];
+    const lines = [];
+    let truncated = false;
+
+    const removeMeasurer = () => {
+      if (typeof measurer.remove === "function") measurer.remove();
+      else if (measurer.parentNode && typeof measurer.parentNode.removeChild === "function") measurer.parentNode.removeChild(measurer);
+    };
+
+    const fits = (value) => {
+      measurer.textContent = String(value || " ");
+      const width = Math.ceil(Number(measurer.scrollWidth || measurer.offsetWidth || 0));
+      return width <= (boxWidthPx + 1);
+    };
+
+    const pushLine = (line) => {
+      if (!line) return;
+      if (!shouldTruncate || lines.length < maxLines) lines.push(line);
+      else truncated = true;
+    };
+
+    const splitOversizedToken = (token) => {
+      let remaining = String(token || "");
+      while (remaining) {
+        if (shouldTruncate && lines.length >= maxLines) {
+          truncated = true;
+          return;
+        }
+        let chunk = "";
+        for (const ch of Array.from(remaining)) {
+          const next = chunk + ch;
+          if (!chunk || fits(next)) chunk = next;
+          else break;
+        }
+        if (!chunk) chunk = Array.from(remaining)[0] || "";
+        pushLine(chunk);
+        remaining = remaining.slice(chunk.length);
+      }
+    };
+
+    try {
+      for (const sourceLine of sourceLines) {
+        const words = String(sourceLine || fallback).split(" ").filter(Boolean);
+        let current = "";
+        for (const word of words) {
+          const next = current ? `${current} ${word}` : word;
+          if (fits(next)) {
+            current = next;
+            continue;
+          }
+          if (current) {
+            pushLine(current);
+            current = "";
+            if (shouldTruncate && lines.length >= maxLines) {
+              truncated = true;
+              break;
+            }
+          }
+          if (fits(word)) {
+            current = word;
+            continue;
+          }
+          splitOversizedToken(word);
+          if (shouldTruncate && lines.length >= maxLines) {
+            truncated = true;
+            break;
+          }
+        }
+        if (!truncated && current) pushLine(current);
+        if (truncated || (shouldTruncate && lines.length >= maxLines)) break;
+      }
+    } finally {
+      removeMeasurer();
+    }
+
+    const safeLines = lines.length ? (shouldTruncate ? lines.slice(0, maxLines) : lines) : (fallback ? [fallback] : []);
+    if (shouldTruncate && truncated && safeLines.length) {
+      const last = safeLines[safeLines.length - 1] || "";
+      safeLines[safeLines.length - 1] = `${last.slice(0, Math.max(0, last.length - 1)).trimEnd()}...`;
+    }
+    return {
+      text: safeLines.join("\n"),
+      truncated
+    };
+  }
+
   function wrapOnScreenTextRenderText(text, options) {
     return resolveOnScreenTextWrapResult(text, options).text;
   }
@@ -779,15 +948,25 @@
     let approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
     let maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
     let maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
-    let wrapResult = resolveOnScreenTextWrapResult(text, {
-      fallback: String(config.fallback || "").trim(),
-      maxChars,
-      maxLines,
-      truncate: false
-    });
+    const providedWrappedText = normalizeWrappedTextValue(config.wrappedText || "");
+    const resolveWrapResult = () => (providedWrappedText
+      ? { text: providedWrappedText, truncated: false }
+      : resolveOnScreenTextMeasuredWrapResult(text, {
+        fallback: String(config.fallback || "").trim(),
+        boxWidthPx,
+        maxChars,
+        maxLines,
+        truncate: false,
+        fontSizePx,
+        fontFamily: getOnScreenTextFontFamilyCss(settings.fontFamily),
+        fontWeight: settings.fontWeight,
+        fontStyle: settings.fontStyle,
+        letterSpacingEm: -0.03
+      }));
+    let wrapResult = resolveWrapResult();
     let renderedLineCount = Math.max(1, String(wrapResult.text || "").split("\n").length);
     const minReadableFontSizePx = 24;
-    while ((wrapResult.truncated || renderedLineCount * lineHeightPx > boxHeightPx) && fontSizePx > minReadableFontSizePx) {
+    while (!providedWrappedText && (wrapResult.truncated || renderedLineCount * lineHeightPx > boxHeightPx) && fontSizePx > minReadableFontSizePx) {
       fontSizePx -= fontSizePx > 48 ? 3 : 2;
       fontSizePx = Math.max(minReadableFontSizePx, fontSizePx);
       lineSpacingPx = Math.max(3, Math.round(fontSizePx * 0.13));
@@ -797,12 +976,7 @@
       approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
       maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
       maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
-      wrapResult = resolveOnScreenTextWrapResult(text, {
-        fallback: String(config.fallback || "").trim(),
-        maxChars,
-        maxLines,
-        truncate: false
-      });
+      wrapResult = resolveWrapResult();
       renderedLineCount = Math.max(1, String(wrapResult.text || "").split("\n").length);
     }
     const requiredTextHeightPx = Math.max(
@@ -898,6 +1072,7 @@
       textAlign,
       fontWeight: normalizeFontWeight(settings.fontWeight),
       fontStyle: normalizeFontStyle(settings.fontStyle),
+      text,
       wrappedText,
       rawXPx,
       rawYPx,
@@ -1305,6 +1480,7 @@
   return {
     resolveOnScreenTextExportCanvasSize,
     wrapOnScreenTextRenderText,
+    resolveOnScreenTextMeasuredWrapResult,
     resolveOnScreenTextRenderSpec,
     normalizeOnScreenTextTrackSettings,
     normalizeOnScreenTextClipItem,

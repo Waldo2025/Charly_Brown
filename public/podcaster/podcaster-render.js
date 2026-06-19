@@ -217,6 +217,7 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     previewWidthPx: width,
     previewHeightPx: height,
     text,
+    wrappedText: activeSegment.wrappedText || "",
     fallback: ""
   });
   const audioClip = payload?.dialogueAudioMap?.[String(activeSegment.rowId || "").trim()] || null;

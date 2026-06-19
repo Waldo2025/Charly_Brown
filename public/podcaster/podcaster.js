@@ -4232,6 +4232,8 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const rows = getSessionRows(activeSession);
   const cfg = getPodcastVideoConfig(activeSession);
   const settings = normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {});
+  const sourceDims = getOnScreenTextSourceDimensions();
+  const resolution = getOnScreenTextRenderResolution();
   const includeHidden = options?.includeHidden === true;
   if ((!settings.enabled || settings.showTrack === false) && !includeHidden) return { settings, segments: [] };
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
@@ -4258,11 +4260,23 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
       settings,
       { rowId }
     ) || layout;
+    const wrappedText = String(resolveSharedOnScreenTextRenderSpec({
+      settings,
+      layout: expandedLayout,
+      resolution,
+      sourceWidth: sourceDims.width,
+      sourceHeight: sourceDims.height,
+      previewWidthPx: sourceDims.width,
+      previewHeightPx: sourceDims.height,
+      text,
+      fallback: ""
+    })?.wrappedText || text).trim();
     return {
       id: `${rowId}-onscreen`,
       rowId,
       sceneIndex: index + 1,
       text,
+      wrappedText,
       startMs,
       durationMs,
       trimInMs: Math.max(0, Math.round(Number(clip?.trimInMs || 0) || 0)),

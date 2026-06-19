@@ -9368,6 +9368,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const normalizeOnScreenTextSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
     const text = clampText(segment?.text || "", 500);
+    const wrappedText = clampText(segment?.wrappedText || "", 500);
     if (!text) return null;
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
@@ -9376,6 +9377,7 @@ function normalizeMontageExportRequestBody(body = {}) {
       rowId: clampText(segment?.rowId || "", 140),
       sceneIndex: Math.max(1, Math.round(Number(segment?.sceneIndex || idx + 1) || idx + 1)),
       text,
+      wrappedText,
       startMs,
       durationMs,
       zIndex: Math.max(1, Math.round(Number(segment?.zIndex || idx + 1) || idx + 1)),
@@ -9965,6 +9967,7 @@ function normalizeMontageOnScreenTextExportLayout(options = {}) {
     sourceWidth,
     sourceHeight,
     text: segment.text || "",
+    wrappedText: segment.wrappedText || "",
     fallback: ""
   });
   const autoHeightPct = Math.max(
@@ -10908,6 +10911,7 @@ async function appendMontageSceneOnScreenTextAssFilters({
       sourceWidth: canvas.width,
       sourceHeight: canvas.height,
       text: segment.text || "",
+      wrappedText: segment.wrappedText || "",
       fallback: ""
     });
     const startSec = Math.max(0, (Math.max(0, Number(segment.startMs || 0) || 0) - sceneTimelineStartMs) / 1000);
@@ -11866,7 +11870,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       overlayCardCount: overlayCardSegments.length,
       exportMode: input.exportMode,
       entryCount: Array.isArray(input.entries) ? input.entries.length : 0,
-      hasBrandOverlay
+      hasBrandOverlay,
+      brandOverlayEnabled: input.brandOverlay?.enabled === true,
+      brandOverlayAssetPath: String(input.brandOverlay?.assetPath || "").trim() || null
     });
     let browserVisualCompleted = false;
     if (hasBrowserVisualPass) {
@@ -11930,6 +11936,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             sourceWidth: sourceDims.width,
             sourceHeight: sourceDims.height,
             text: segment.text || "",
+            wrappedText: segment.wrappedText || "",
             fallback: ""
           });
           return {
@@ -11966,6 +11973,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
             sourceWidth: sourceDims.width,
             sourceHeight: sourceDims.height,
             text: segment.text || "",
+            wrappedText: segment.wrappedText || "",
             fallback: ""
           });
           const startSec = Math.max(0, Number(segment.startMs || 0) / 1000);
