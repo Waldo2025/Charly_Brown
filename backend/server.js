@@ -9196,6 +9196,43 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
   return targetPath;
 }
 
+async function findLatestSessionDialogueAudioStoragePath({ sessionId = "", uid = "", rowId = "" } = {}) {
+  const sessionSlug = normalizeStorageSegment(sessionId, "session");
+  const rowSlug = normalizeStorageSegment(rowId, "row");
+  const ownerCandidates = Array.from(new Set([
+    String(uid || "").trim(),
+    String(uid || "").trim().toLowerCase(),
+    normalizeStorageSegment(uid, "anon")
+  ].map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!sessionSlug || !rowSlug || !ownerCandidates.length) return "";
+
+  const buckets = getStorageBucketCandidates();
+  let bestMatch = null;
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    for (const ownerSlug of ownerCandidates) {
+      const prefix = `podcaster/sessions/${sessionSlug}/owners/${ownerSlug}/audio/${rowSlug}-`;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const [files] = await bucket.getFiles({ prefix, maxResults: 50 });
+        for (const file of files) {
+          const filePath = String(file?.name || "").trim();
+          if (!filePath) continue;
+          // eslint-disable-next-line no-await-in-loop
+          const [metadata] = await file.getMetadata().catch(() => [{}]);
+          const updatedAtMs = Date.parse(String(metadata?.updated || metadata?.timeCreated || "").trim() || "") || 0;
+          if (!bestMatch || updatedAtMs > bestMatch.updatedAtMs) {
+            bestMatch = { filePath, updatedAtMs };
+          }
+        }
+      } catch (_) {
+        // Ignore per-prefix errors and continue with remaining buckets/owners.
+      }
+    }
+  }
+  return String(bestMatch?.filePath || "").trim();
+}
+
 function normalizeMontageExportRequestBody(body = {}) {
   const raw = body && typeof body === "object" ? body : {};
   const sessionId = clampText(raw?.sessionId || "", 140);
@@ -9543,7 +9580,7 @@ function shouldSkipMontageEntryError(error) {
   return code === "storage_not_found" || code === "missing_download_source";
 }
 
-function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = null } = {}) {
+function createMontageAssetDownloader({ tmpDir = "", uid = "", sessionId = "", shouldAbort = null } = {}) {
   const isAborted = () => {
     if (typeof shouldAbort !== "function") return false;
     try {
@@ -9601,6 +9638,7 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
     const assetTrace = {
       kind: String(kind || "video").trim() || "video",
       index: Math.max(0, Number(index || 0) || 0),
+      rowId: clampText(asset?.rowId || "", 140),
       storagePath: resolvedStoragePath,
       url: url ? redactUrlForLogs(url) : "",
       hasDataUrl: Boolean(dataUrl),
@@ -9782,6 +9820,32 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
                   url: url ? redactUrlForLogs(url) : ""
                 };
                 throw altError;
+              }
+            }
+          }
+          const recoveredStoragePath = String(
+            kind === "timeline-audio"
+              ? await findLatestSessionDialogueAudioStoragePath({
+                sessionId,
+                uid,
+                rowId: String(asset?.rowId || "").trim()
+              })
+              : ""
+          ).trim();
+          if (recoveredStoragePath) {
+            try {
+              console.info("[backend][montage-export][asset-download-branch]", {
+                ...assetTrace,
+                branch: "session_audio_recovery",
+                recoveredStoragePath
+              });
+              await downloadWithTimeout(() => downloadStoragePathToFile(recoveredStoragePath, outPath, { shouldAbort: isAborted }), "storage_download");
+              const validated = await validateDownloadedAsset(outPath);
+              logDownloadFinish("session_audio_recovery", { recoveredStoragePath, outPath: validated });
+              return validated;
+            } catch (recoveredError) {
+              if (String(recoveredError?.code || recoveredError?.message || "").trim() !== "storage_not_found") {
+                throw recoveredError;
               }
             }
           }
@@ -11235,7 +11299,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
     const shouldBurnSceneOnScreenText = input.exportMode !== "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const downloadInput = createMontageAssetDownloader({ tmpDir, uid, shouldAbort });
+    const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const skippedEntries = [];
     const exportedEntries = [];
@@ -12152,7 +12216,7 @@ async function renderMontagePreviewImage(rawInput = {}, context = {}) {
   const tmpDir = path.join(os.tmpdir(), `cb-montage-preview-${randomUUID()}`);
   await fs.promises.mkdir(tmpDir, { recursive: true });
   try {
-    const downloadInput = createMontageAssetDownloader({ tmpDir, uid });
+    const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId });
     const inputVideoPath = await downloadInput(targetEntry?.video || {}, "video", 0);
     const trimSec = Math.max(0, Number(targetEntry?.trimInMs || 0) / 1000);
     const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(inputVideoPath, "montage_preview_input").catch(() => ({ width: 1280, height: 720 }));

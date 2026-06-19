@@ -38,8 +38,20 @@ assert.match(
 
 assert.match(
   source,
+  /async function findLatestSessionDialogueAudioStoragePath\(\{ sessionId = "", uid = "", rowId = "" \} = \{\}\) \{[\s\S]*owners\/\$\{ownerSlug\}\/audio\/\$\{rowSlug\}-[\s\S]*maxResults: 50[\s\S]*\}/,
+  "El backend debe poder redescubrir el audio Gemini más reciente por sessionId, owner y rowId cuando el storagePath guardado ya no exista."
+);
+
+assert.match(
+  source,
   /const fallbackUrl = convertGsUrlToFirebaseStorageMediaUrl\(url\) \|\| url;[\s\S]*branch: "storage_path_url_fallback"[\s\S]*downloadUrlToFile\(fallbackUrl, outPath, \{ shouldAbort: isAborted \}\)/,
   "Si falla storagePath, el export debe reintentar timeline audio usando fallback HTTP derivado desde gs://."
+);
+
+assert.match(
+  source,
+  /kind === "timeline-audio"[\s\S]*findLatestSessionDialogueAudioStoragePath\(\{[\s\S]*sessionId,[\s\S]*uid,[\s\S]*rowId: String\(asset\?\.rowId \|\| ""\)\.trim\(\)[\s\S]*branch: "session_audio_recovery"[\s\S]*downloadStoragePathToFile\(recoveredStoragePath, outPath, \{ shouldAbort: isAborted \}\)/,
+  "Cuando falle un timeline-audio, el export debe intentar recuperar el último audio de la fila antes de declararlo faltante."
 );
 
 console.log("Podcaster montage export audio timeline fallback OK.");
