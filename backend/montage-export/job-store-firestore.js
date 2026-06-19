@@ -80,7 +80,12 @@ function sanitizePersistedRenderedSegments(renderedSegments = []) {
 
 function sanitizePersistedMediaRecord(record = null) {
   const source = record && typeof record === "object" ? record : null;
-  if (!source) return source;
+  if (!source) {
+    return {
+      sanitizedRecord: source,
+      redacted: false
+    };
+  }
   const nextRecord = { ...source };
   let redacted = false;
   if (typeof nextRecord.dataUrl === "string" && nextRecord.dataUrl.trim().startsWith("data:")) {

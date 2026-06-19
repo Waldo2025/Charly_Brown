@@ -219,6 +219,48 @@ test("createJob strips inline audio and media payloads from persisted request in
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.backgroundSegments[0], "dataUrl"), false);
 });
 
+test("createJob tolerates null media records while sanitizing persisted request input", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-inline-media-null",
+    sessionId: "session-inline-media-null",
+    ownerId: "user-inline-media-null",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-inline-media-null",
+        entries: [{
+          rowId: "row-1",
+          video: null,
+          audio: null
+        }],
+        backgroundMusic: null,
+        dialogueAudioMap: {
+          "row-1": null
+        },
+        audioTimeline: {
+          geminiSegments: [null],
+          backgroundSegments: [null]
+        }
+      }
+    },
+    totalScenes: 1
+  });
+
+  assert.equal(created.request.input.entries[0].video, null);
+  assert.equal(created.request.input.entries[0].audio, null);
+  assert.equal(created.request.input.backgroundMusic, null);
+  assert.equal(created.request.input.dialogueAudioMap["row-1"], null);
+  assert.equal(created.request.input.audioTimeline.geminiSegments[0], null);
+  assert.equal(created.request.input.audioTimeline.backgroundSegments[0], null);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "persistedInlineMediaRedacted"), false);
+});
+
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {
   const fakeDb = createFakeDocStore();
   const timestamps = [
