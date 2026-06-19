@@ -3,6 +3,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+let cachedMontageBrowserRendererAvailability = null;
+
 function normalizeMontageRenderMode(value = "", fallback = "browser") {
   const cleanValue = String(value || "").trim().toLowerCase();
   if (cleanValue === "browser") return "browser";
@@ -18,6 +20,28 @@ function shouldUseBrowserMontageRenderer(input = {}) {
 function pathToFileUrl(targetPath = "") {
   const resolved = path.resolve(String(targetPath || "").trim());
   return `file://${resolved.startsWith("/") ? "" : "/"}${resolved.replace(/\\/g, "/")}`;
+}
+
+function getMontageBrowserRendererAvailability() {
+  if (cachedMontageBrowserRendererAvailability) return cachedMontageBrowserRendererAvailability;
+  try {
+    const playwright = require("playwright");
+    cachedMontageBrowserRendererAvailability = {
+      available: Boolean(playwright?.chromium),
+      playwright
+    };
+  } catch (error) {
+    cachedMontageBrowserRendererAvailability = {
+      available: false,
+      code: String(error?.code || "").trim() || "playwright_unavailable",
+      message: String(error?.message || error || "playwright_unavailable")
+    };
+  }
+  return cachedMontageBrowserRendererAvailability;
+}
+
+function isMontageBrowserRendererAvailable() {
+  return getMontageBrowserRendererAvailability().available === true;
 }
 
 function buildMontageBrowserRenderBootstrap({
@@ -61,7 +85,13 @@ async function renderMontageBrowserOverlayVideo({
   viewport = { width: 1280, height: 720 },
   timeoutMs = 120000
 } = {}) {
-  const { chromium } = require("playwright");
+  const availability = getMontageBrowserRendererAvailability();
+  if (availability.available !== true || !availability.playwright?.chromium) {
+    const err = new Error(availability.message || "playwright_unavailable");
+    err.code = availability.code || "playwright_unavailable";
+    throw err;
+  }
+  const { chromium } = availability.playwright;
   const videoDir = path.resolve(String(outputDir || "").trim());
   await fs.promises.mkdir(videoDir, { recursive: true });
   const browser = await chromium.launch({
@@ -120,6 +150,8 @@ async function renderMontageBrowserOverlayVideo({
 module.exports = {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
+  getMontageBrowserRendererAvailability,
+  isMontageBrowserRendererAvailable,
   buildMontageBrowserRenderBootstrap,
   renderMontageBrowserOverlayVideo
 };

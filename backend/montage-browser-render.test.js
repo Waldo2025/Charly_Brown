@@ -5,6 +5,7 @@ const path = require("node:path");
 const {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
+  getMontageBrowserRendererAvailability,
   buildMontageBrowserRenderBootstrap
 } = require("./montage-browser-render.js");
 
@@ -32,6 +33,18 @@ test("shouldUseBrowserMontageRenderer enables browser mode only for normal video
     exportMode: "normal",
     onlyAudio: true
   }), false);
+});
+
+test("getMontageBrowserRendererAvailability reports a stable availability shape", () => {
+  const availability = getMontageBrowserRendererAvailability();
+  assert.equal(typeof availability, "object");
+  assert.equal(typeof availability.available, "boolean");
+  if (availability.available) {
+    assert.ok(availability.playwright?.chromium);
+  } else {
+    assert.ok(String(availability.code || "").trim());
+    assert.ok(String(availability.message || "").trim());
+  }
 });
 
 test("buildMontageBrowserRenderBootstrap embeds local render runtime config", () => {
