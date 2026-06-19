@@ -43,19 +43,19 @@ assert.match(
 
 assert.match(
   podcaster,
-  /const normalizeSharedOnScreenTextClipItem = typeof onScreenTextRenderSpecApi\.normalizeOnScreenTextClipItem === "function"/,
+  /const normalizeSharedOnScreenTextClipItem = requireOnScreenTextApiFunction\("normalizeOnScreenTextClipItem"\)/,
   "Podcaster debe enlazar la API compartida para clips."
 );
 
 assert.match(
   podcaster,
-  /const buildSharedDefaultOnScreenTextLayoutForRow = typeof onScreenTextRenderSpecApi\.buildDefaultOnScreenTextLayoutForRow === "function"/,
+  /const buildSharedDefaultOnScreenTextLayoutForRow = requireOnScreenTextApiFunction\("buildDefaultOnScreenTextLayoutForRow"\)/,
   "Podcaster debe enlazar la API compartida para layouts."
 );
 
 assert.match(
   podcaster,
-  /const getSharedOnScreenTextBgPresetClass = typeof onScreenTextRenderSpecApi\.getOnScreenTextBgPresetClass === "function"/,
+  /const getSharedOnScreenTextBgPresetClass = requireOnScreenTextApiFunction\("getOnScreenTextBgPresetClass"\)/,
   "Podcaster debe enlazar la API compartida para clases visuales."
 );
 

@@ -2975,8 +2975,8 @@ function sanitizePodcasterSession(raw = {}) {
     strokeColor: clampText(trackRaw?.strokeColor || "#0f172a", 24) || "#0f172a",
     strokeWidthPx: clampNumber(trackRaw?.strokeWidthPx, 0, 12, 2),
     textOpacity: clampNumber(trackRaw?.textOpacity, 0, 1, 1),
-    bgPreset: clampText(trackRaw?.bgPreset || "glass-dark", 40) || "glass-dark",
-    bgOpacity: clampNumber(trackRaw?.bgOpacity, 0, 1, 0.72),
+    bgPreset: clampText(trackRaw?.bgPreset || "none", 40) || "none",
+    bgOpacity: clampNumber(trackRaw?.bgOpacity, 0, 1, 0),
     bgScale: clampNumber(trackRaw?.bgScale, 0.6, 2.5, 1),
     shadowEnabled: trackRaw?.shadowEnabled !== false,
     shadowBlurPx: clampNumber(trackRaw?.shadowBlurPx, 0, 80, 18),
@@ -9967,11 +9967,13 @@ function normalizeMontageOnScreenTextExportLayout(options = {}) {
   const sourceDims = options?.sourceDims && typeof options.sourceDims === "object" ? options.sourceDims : {};
   const sourceWidth = Math.max(160, Math.round(Number(sourceDims.width || 1280) || 1280));
   const sourceHeight = Math.max(90, Math.round(Number(sourceDims.height || 720) || 720));
-  const widthPct = clampNumber(layout?.widthPct, 0.08, 0.96, 0.58);
+  const widthPct = clampNumber(settings?.boxWidthPct || layout?.widthPct, 0.22, 0.92, 0.58);
   const heightPct = clampNumber(layout?.heightPct, 0.05, 0.68, 0.14);
+  const overlayXPct = clampNumber(settings?.overlayXPct, 0, 1, 0.5);
+  const overlayYPct = clampNumber(settings?.overlayYPct, 0, 1, 0.86);
   const baseLayout = {
-    xPct: clampNumber(layout?.xPct, 0, Math.max(0, 1 - widthPct), 0.21),
-    yPct: clampNumber(layout?.yPct, 0, 0.99, 0.72),
+    xPct: Math.max(0, Math.min(1 - widthPct, overlayXPct - (widthPct / 2))),
+    yPct: Math.max(0, Math.min(1 - heightPct, overlayYPct - heightPct)),
     widthPct,
     heightPct
   };

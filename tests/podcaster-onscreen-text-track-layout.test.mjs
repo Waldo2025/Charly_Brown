@@ -77,7 +77,7 @@ test("montage export preview syncs karaoke overlay from the preview video elemen
 test("montage export preview falls back to scene index when row id is missing", () => {
   assert.ok(montageExportSource.includes("currentSceneIndex > 0 && !shouldSuspendMontagePreviewActivity()"));
   assert.ok(montageExportSource.includes("previewSceneIndex"));
-  assert.ok(montageExportSource.includes("entries[cleanSceneIndex - 1]"));
+  assert.ok(montageExportSource.includes("resolveMontageRenderEntryAtTime"));
   assert.ok(montageExportSource.includes("getMontageExportPreviewMediaTargets"));
   assert.ok(montageExportSource.includes("window.montageExportBusy && hasReadyPreview"));
   assert.ok(montageExportSource.includes("montageExportPreviewVideoAlt"));

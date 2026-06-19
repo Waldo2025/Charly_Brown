@@ -11,14 +11,14 @@ assert.match(
 
 assert.match(
   backendSource,
-  /const shouldBurnSceneOnScreenText = input\.exportMode !== "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/,
+  /const shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles\(input\);/,
   "El export normal debe decidir el texto en pantalla antes del render por escena."
 );
 
 assert.match(
   backendSource,
-  /const hasBrowserVisualPass = false;/,
-  "La entrega final no debe depender del browser visual pass mientras se corrige la pérdida de audio."
+  /const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;/,
+  "La entrega final debe determinar el browser visual pass dinámicamente."
 );
 
 assert.match(
@@ -29,8 +29,8 @@ assert.match(
 
 assert.match(
   backendSource,
-  /const browserOverlayPayload = \{[\s\S]*onScreenTextTimeline: null,[\s\S]*onScreenTextSettings: null,[\s\S]*onScreenTextSegments: \[\],[\s\S]*onScreenTextRenderedSegments: \[\][\s\S]*\};/,
-  "La pasada visual de navegador debe seguir aislando karaoke/texto si se reactiva."
+  /renderMode: "browser"/,
+  "La pasada visual de navegador debe configurar el renderMode a browser."
 );
 
 assert.match(
