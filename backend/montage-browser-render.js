@@ -11,7 +11,7 @@ function ensureRenderPlaywrightBrowserPathEnv() {
   );
   if (!isRenderRuntime) return;
   if (String(process.env.PLAYWRIGHT_BROWSERS_PATH || "").trim()) return;
-  process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.resolve(process.cwd(), "backend", ".playwright-browsers");
 }
 
 function buildRendererUnavailableState({
