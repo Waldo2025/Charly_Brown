@@ -2710,6 +2710,8 @@ export function buildMontageExportPayload(session = null) {
         const src = String(
           storedAudio?.downloadUrl
           || storedAudio?.storagePath
+          || storedAudio?.localDataUrl
+          || storedAudio?.dataUrl
           || segment?.audioSrc
           || runtime?.audioSrc
           || ""
@@ -2763,7 +2765,7 @@ export function buildMontageExportPayload(session = null) {
     if (!Array.isArray(segments) || !segments.length) return [];
     return splitBackgroundSegmentsByScene(segments
       .map((segment, idx) => {
-        const src = String(segment?.downloadUrl || segment?.storagePath || "").trim();
+        const src = String(segment?.downloadUrl || segment?.storagePath || segment?.localDataUrl || segment?.dataUrl || "").trim();
         if (!src) return null;
         const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
         const endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || 0) || 0));
@@ -2787,6 +2789,8 @@ export function buildMontageExportPayload(session = null) {
           url: src,
           storagePath: String(segment?.storagePath || "").trim(),
           downloadUrl: String(segment?.downloadUrl || "").trim(),
+          dataUrl: String(segment?.dataUrl || segment?.localDataUrl || "").trim(),
+          localDataUrl: String(segment?.localDataUrl || segment?.dataUrl || "").trim(),
           mimeType: String(segment?.mimeType || "").trim(),
           startMs,
           endMs,
@@ -2804,7 +2808,7 @@ export function buildMontageExportPayload(session = null) {
 
   const buildTrackBackgroundSegments = () => {
     const panelMusic = window.getPanelMontageMusicConfig();
-    const src = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || "").trim();
+    const src = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || panelMusic?.localDataUrl || panelMusic?.dataUrl || "").trim();
     const volumePct = normalizeLegacyPct(panelMusic?.volume ?? 0, 0);
     if (panelMusic?.sourceType !== "track" || !src || volumePct <= 0.0001) return [];
     if (Array.isArray(panelMusic?.sourceItems) && panelMusic.sourceItems.length) return [];
@@ -2836,6 +2840,8 @@ export function buildMontageExportPayload(session = null) {
         url: src,
         storagePath: String(panelMusic?.storagePath || "").trim(),
         downloadUrl: String(panelMusic?.downloadUrl || src || "").trim(),
+        dataUrl: String(panelMusic?.dataUrl || panelMusic?.localDataUrl || "").trim(),
+        localDataUrl: String(panelMusic?.localDataUrl || panelMusic?.dataUrl || "").trim(),
         mimeType: "audio/mpeg",
         startMs: cursorMs,
         endMs: cursorMs + chunkDurationMs,
@@ -2877,6 +2883,7 @@ export function buildMontageExportPayload(session = null) {
       const videoMimeType = String(primarySegment?.mimeType || clip?.mimeType || "video/mp4").trim() || "video/mp4";
       const audioStoragePath = String(audio?.storagePath || "").trim();
       const audioDownloadUrl = String(audio?.downloadUrl || "").trim();
+      const audioDataUrl = String(audio?.dataUrl || audio?.localDataUrl || "").trim();
       const audioMimeType = String(audio?.mimeType || "audio/ogg").trim() || "audio/ogg";
       const videoCacheKey = buildMontageSceneMediaCacheKey({
         sessionId,
@@ -2956,10 +2963,12 @@ export function buildMontageExportPayload(session = null) {
           },
           audio: useTimelineAudio
             ? null
-            : (audioStoragePath || audioDownloadUrl) ? {
+            : (audioStoragePath || audioDownloadUrl || audioDataUrl) ? {
               storagePath: audioStoragePath || "",
               url: audioDownloadUrl || "",
               downloadUrl: audioDownloadUrl || "",
+              dataUrl: audioDataUrl || "",
+              localDataUrl: audioDataUrl || "",
               mimeType: audioMimeType,
               localMediaCacheKey: audioCacheKey
             } : null,
@@ -2990,7 +2999,7 @@ export function buildMontageExportPayload(session = null) {
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
-  const trackUrl = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || "").trim();
+  const trackUrl = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || panelMusic?.localDataUrl || panelMusic?.dataUrl || "").trim();
   const trackVolumePct = Math.max(0, Math.min(200, Math.round(Number(panelMusic?.volume ?? 0))));
   const includeBackgroundMusic = Boolean(canUseTrackMusic && trackUrl && trackVolumePct > 0 && trackBackgroundSegments.length === 0);
   const backgroundMusic = includeBackgroundMusic ? {
@@ -2998,6 +3007,7 @@ export function buildMontageExportPayload(session = null) {
     downloadUrl: String(panelMusic?.downloadUrl || "").trim(),
     url: trackUrl,
     localDataUrl: String(panelMusic?.localDataUrl || "").trim(),
+    dataUrl: String(panelMusic?.dataUrl || panelMusic?.localDataUrl || "").trim(),
     volumePct: trackVolumePct,
     duckingWhenGeminiPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60)))
   } : null;

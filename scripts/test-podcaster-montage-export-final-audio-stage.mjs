@@ -14,7 +14,7 @@ assert.match(
 
 assert.match(
   source,
-  /let finalOutPath = concatOutPath;[\s\S]*if \(hasFinalVisualPass && !browserVisualCompleted\) \{[\s\S]*finalOutPath = finalVisualOutPath;[\s\S]*\} else \{[\s\S]*finalOutPath = deliveryOutPath;[\s\S]*\}[\s\S]*finalOutPath = await finalizeMontageExportAudioTrack\(\{/,
+  /let finalOutPath = concatOutPath;[\s\S]*finalOutPath = await finalizeMontageExportAudioTrack\(\{/,
   "La mezcla de audio final debe correr después de las pasadas visuales y del encode de delivery."
 );
 

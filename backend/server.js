@@ -9680,7 +9680,9 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", sessionId = "", s
       err.detail = { kind, index, storagePath: "", url: "", dataUrl: "" };
       throw err;
     }
-    const normalizedKind = kind === "audio" ? "audio" : (kind === "image" ? "image" : "video");
+    const normalizedKind = (kind === "audio" || kind === "timeline-audio" || kind === "music")
+      ? "audio"
+      : (kind === "image" ? "image" : "video");
     const isImageKind = normalizedKind === "image";
     const isAudioKind = normalizedKind === "audio";
     const ext = isAudioKind
@@ -10019,7 +10021,7 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 }
 
 function shouldUseMontageSceneAssSubtitles(input = {}) {
-  if (shouldUseBrowserMontageRenderer(input)) return false;
+  if (shouldUseBrowserMontageRenderer(input) && getMontageBrowserRendererAvailability().available === true) return false;
   if (String(input?.exportMode || "").trim() === "review") return false;
   return Boolean(input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
 }
@@ -11865,7 +11867,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     let finalOutPath = concatOutPath;
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const normalOnScreenTextEnabled = input.exportMode === "normal" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    const normalOnScreenTextEnabled = input.exportMode === "normal" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
