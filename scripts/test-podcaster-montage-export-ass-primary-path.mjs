@@ -17,8 +17,8 @@ assert.match(
 
 assert.match(
   backendSource,
-  /const hasBrowserVisualPass = shouldAttemptBrowserRenderer && Boolean\(\s*overlayCardSegments\.length\s*\|\|\s*hasBrandOverlay\s*\);/,
-  "El browser visual pass no debe re-renderizar texto en pantalla en export normal."
+  /const hasBrowserVisualPass = false;/,
+  "La entrega final no debe depender del browser visual pass mientras se corrige la pérdida de audio."
 );
 
 assert.match(
@@ -30,7 +30,7 @@ assert.match(
 assert.match(
   backendSource,
   /const browserOverlayPayload = \{[\s\S]*onScreenTextTimeline: null,[\s\S]*onScreenTextSettings: null,[\s\S]*onScreenTextSegments: \[\],[\s\S]*onScreenTextRenderedSegments: \[\][\s\S]*\};/,
-  "La pasada visual de navegador debe recibir el video ya quemado sin volver a montar karaoke/texto."
+  "La pasada visual de navegador debe seguir aislando karaoke/texto si se reactiva."
 );
 
 assert.match(

@@ -11025,6 +11025,159 @@ async function renderMontageBrowserFinalVisualPass({
   return browserFinalOutPath;
 }
 
+async function finalizeMontageExportAudioTrack({
+  input = {},
+  finalOutPath = "",
+  tmpDir = "",
+  outExt = "mp4",
+  exportedDurationSec = 0,
+  exportOffsetsByRowId = new Map(),
+  emitStage = () => {},
+  shouldAbort = () => false,
+  downloadInput = null,
+  jobId = ""
+} = {}) {
+  if (!finalOutPath || typeof downloadInput !== "function") return finalOutPath;
+
+  let nextOutPath = finalOutPath;
+  if (input.useTimelineAudio) {
+    const segmentInputs = [];
+    const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
+      input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
+      0.60
+    );
+    emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
+    logMontageMemory("mix_timeline_audio_start", {
+      jobId,
+      timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0
+    });
+    for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
+      const segment = input.timelineAudioSegments[i] || {};
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const p = await downloadInput({
+          storagePath: clampText(segment?.storagePath || "", 900),
+          url: String(segment?.url || "").trim(),
+          mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
+        }, "timeline-audio", i);
+        if (p) segmentInputs.push({ path: p, segment });
+      } catch (error) {
+        if (String(error?.code || "") === "storage_not_found") continue;
+        throw error;
+      }
+    }
+    if (input.useTimelineAudio && !segmentInputs.length) {
+      throw new Error("montage_timeline_audio_sources_missing");
+    }
+    if (segmentInputs.length) {
+      const timelineMixedOutPath = path.join(tmpDir, `montage-timeline-audio-final.${outExt}`);
+      const audioCodec = outExt === "webm" ? "libopus" : "aac";
+      const audioBitrate = outExt === "webm" ? "128k" : "160k";
+      const filters = [];
+      const labels = [];
+      segmentInputs.forEach((item, idx) => {
+        const segment = item.segment || {};
+        const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+        const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
+        const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
+        const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
+        const fadeInSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
+        const fadeOutSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
+        const inputIndex = idx + 1;
+        const label = `a${idx}`;
+        labels.push(label);
+        const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
+        const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
+        const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
+        const adjustedStartMs = exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
+        let finalAdjustedStartMs = adjustedStartMs;
+        let finalTrimInSec = trimInSec;
+        let finalDurationSec = durationSec;
+
+        if (finalAdjustedStartMs < 0) {
+          const shiftSec = Math.abs(finalAdjustedStartMs) / 1000;
+          finalTrimInSec += shiftSec;
+          finalDurationSec = Math.max(0.1, finalDurationSec - shiftSec);
+          finalAdjustedStartMs = 0;
+        }
+
+        const fadeParts = [volume.toFixed(3)];
+        const effectiveFadeInSec = Math.max(0, Math.min(finalDurationSec, fadeInSec));
+        const effectiveFadeOutSec = Math.max(0, Math.min(finalDurationSec, fadeOutSec));
+        if (effectiveFadeInSec > 0.001) {
+          fadeParts.push(`if(lt(t,${effectiveFadeInSec.toFixed(3)}),t/${effectiveFadeInSec.toFixed(3)},1)`);
+        }
+        if (effectiveFadeOutSec > 0.001) {
+          fadeParts.push(`if(gt(t,${Math.max(0, finalDurationSec - effectiveFadeOutSec).toFixed(3)}),(${finalDurationSec.toFixed(3)}-t)/${effectiveFadeOutSec.toFixed(3)},1)`);
+        }
+        const localVolumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
+        const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
+        const kind = String(segment?.kind || "").trim().toLowerCase();
+        const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
+        if (isBackgroundSegment && input.normalizedGeminiTimelineSegments.length) {
+          const segmentDuckVolume = normalizeMontageBackgroundDuckVolume(
+            segment?.duckingWhenGeminiPct ?? segment?.duckingPct,
+            configuredBackgroundDuckVolume
+          );
+          const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, segmentDuckVolume));
+          filters.push(`${baseChain},volume='${bgDuckExprEscaped}':eval=frame[${label}]`);
+        } else {
+          filters.push(`${baseChain}[${label}]`);
+        }
+      });
+      const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
+      const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
+      await runFfmpegCommand([
+        "-y", "-hide_banner", "-loglevel", "warning", "-i", nextOutPath,
+        ...segmentInputs.flatMap((item) => ["-i", item.path]),
+        "-filter_complex", `${filters.join(";")};${mix}`,
+        "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
+        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+        timelineMixedOutPath
+      ], { stage: "montage_mix_timeline_audio", shouldAbort: () => shouldAbort() });
+      nextOutPath = timelineMixedOutPath;
+    }
+    logMontageMemory("mix_timeline_audio_after", {
+      jobId,
+      timelineSegmentCount: segmentInputs.length
+    });
+  }
+
+  if (input.includeBackgroundMusic) {
+    emitStage("mix_background_music", 0.7, "Mezclando música de fondo.");
+    if (!input.backgroundMusic || typeof input.backgroundMusic !== "object") {
+      const err = new Error("includeBackgroundMusic requiere backgroundMusic.");
+      err.status = 400;
+      throw err;
+    }
+    const musicPath = await downloadInput(input.backgroundMusic, "music", 0);
+    const rawVolumePct = Number(input.backgroundMusic?.volumePct ?? 25);
+    const volume = Math.max(0, Math.min(1, (Number.isFinite(rawVolumePct) ? rawVolumePct : 25) / 100));
+    const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
+      input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
+      0.60
+    );
+    const mixedOutPath = path.join(tmpDir, `montage-mixed-final.${outExt}`);
+    const audioCodec = outExt === "webm" ? "libopus" : "aac";
+    const audioBitrate = outExt === "webm" ? "128k" : "160k";
+    shouldAbort() && (() => { throw new Error("montage_export_cancelled"); })();
+    await runFfmpegCommand([
+      "-y", "-hide_banner", "-loglevel", "warning",
+      "-i", nextOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
+      "-filter_complex",
+      input.normalizedGeminiTimelineSegments.length
+        ? `[1:a]volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
+        : `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
+      "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
+      ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
+      mixedOutPath
+    ], { stage: "montage_mix_music", shouldAbort: () => shouldAbort() });
+    nextOutPath = mixedOutPath;
+  }
+
+  return nextOutPath;
+}
+
 async function executeMontageExportPipeline(rawInput = {}, context = {}) {
   const input = rawInput && typeof rawInput === "object" ? rawInput : {};
   const uid = String(context?.uid || "").trim();
@@ -11574,136 +11727,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       ? Math.max(0.5, overlapPlan.totalDurationMs / 1000)
       : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
     let finalOutPath = concatOutPath;
-    if (input.useTimelineAudio) {
-      const segmentInputs = [];
-      const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
-        input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
-        0.60
-      );
-      emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
-      logMontageMemory("mix_timeline_audio_start", {
-        jobId,
-        timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0
-      });
-      for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
-        const segment = input.timelineAudioSegments[i] || {};
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          const p = await downloadInput({
-            storagePath: clampText(segment?.storagePath || "", 900),
-            url: String(segment?.url || "").trim(),
-            mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
-          }, "timeline-audio", i);
-          if (p) segmentInputs.push({ path: p, segment });
-        } catch (error) {
-          if (String(error?.code || "") === "storage_not_found") continue;
-          throw error;
-        }
-      }
-      if (segmentInputs.length) {
-        const timelineMixedOutPath = path.join(tmpDir, `montage-timeline-audio.${outExt}`);
-        const audioCodec = outExt === "webm" ? "libopus" : "aac";
-        const audioBitrate = outExt === "webm" ? "128k" : "160k";
-        const filters = [];
-        const labels = [];
-        segmentInputs.forEach((item, idx) => {
-          const segment = item.segment || {};
-          const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-          const trimInSec = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0) / 1000);
-          const durationSec = Math.max(0.1, Math.round(Number(segment?.durationMs || 0) || 0) / 1000);
-          const volume = Math.max(0, Math.min(2, Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100))) / 100));
-          const fadeInSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeInMs || 0) || 0) / 1000));
-          const fadeOutSec = Math.max(0, Math.min(durationSec, Math.round(Number(segment?.fadeOutMs || 0) || 0) / 1000));
-          const inputIndex = idx + 1;
-          const label = `a${idx}`;
-          labels.push(label);
-          const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
-          const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
-          const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
-          const adjustedStartMs = exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
-          let finalAdjustedStartMs = adjustedStartMs;
-          let finalTrimInSec = trimInSec;
-          let finalDurationSec = durationSec;
-          
-          if (finalAdjustedStartMs < 0) {
-            const shiftSec = Math.abs(finalAdjustedStartMs) / 1000;
-            finalTrimInSec += shiftSec;
-            finalDurationSec = Math.max(0.1, finalDurationSec - shiftSec);
-            finalAdjustedStartMs = 0;
-          }
-
-          const fadeParts = [volume.toFixed(3)];
-          const effectiveFadeInSec = Math.max(0, Math.min(finalDurationSec, fadeInSec));
-          const effectiveFadeOutSec = Math.max(0, Math.min(finalDurationSec, fadeOutSec));
-          if (effectiveFadeInSec > 0.001) {
-            fadeParts.push(`if(lt(t,${effectiveFadeInSec.toFixed(3)}),t/${effectiveFadeInSec.toFixed(3)},1)`);
-          }
-          if (effectiveFadeOutSec > 0.001) {
-            fadeParts.push(`if(gt(t,${Math.max(0, finalDurationSec - effectiveFadeOutSec).toFixed(3)}),(${finalDurationSec.toFixed(3)}-t)/${effectiveFadeOutSec.toFixed(3)},1)`);
-          }
-          const localVolumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
-          const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
-          const kind = String(segment?.kind || "").trim().toLowerCase();
-          const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
-          if (isBackgroundSegment && input.normalizedGeminiTimelineSegments.length) {
-            const segmentDuckVolume = normalizeMontageBackgroundDuckVolume(
-              segment?.duckingWhenGeminiPct ?? segment?.duckingPct,
-              configuredBackgroundDuckVolume
-            );
-            const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, segmentDuckVolume));
-            filters.push(`${baseChain},volume='${bgDuckExprEscaped}':eval=frame[${label}]`);
-          } else {
-            filters.push(`${baseChain}[${label}]`);
-          }
-        });
-        const videoDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, 0.40));
-        const mix = `${labels.map((label) => `[${label}]`).join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,aresample=48000[mix];[0:a]volume='${videoDuckExprEscaped}':eval=frame[v_ducked];[v_ducked][mix]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`;
-        await runFfmpegCommand([
-          "-y", "-hide_banner", "-loglevel", "warning", "-i", finalOutPath,
-          ...segmentInputs.flatMap((item) => ["-i", item.path]),
-          "-filter_complex", `${filters.join(";")};${mix}`,
-          "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
-          ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
-          timelineMixedOutPath
-        ], { stage: "montage_mix_timeline_audio", shouldAbort: () => shouldAbort() });
-        finalOutPath = timelineMixedOutPath;
-      }
-      logMontageMemory("mix_timeline_audio_after", {
-        jobId,
-        timelineSegmentCount: segmentInputs.length
-      });
-    }
-    if (input.includeBackgroundMusic) {
-      emitStage("mix_background_music", 0.7, "Mezclando música de fondo.");
-      if (!input.backgroundMusic || typeof input.backgroundMusic !== "object") {
-        const err = new Error("includeBackgroundMusic requiere backgroundMusic.");
-        err.status = 400;
-        throw err;
-      }
-      const musicPath = await downloadInput(input.backgroundMusic, "music", 0);
-      const rawVolumePct = Number(input.backgroundMusic?.volumePct ?? 25);
-      const volume = Math.max(0, Math.min(1, (Number.isFinite(rawVolumePct) ? rawVolumePct : 25) / 100));
-      const configuredBackgroundDuckVolume = normalizeMontageBackgroundDuckVolume(
-        input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
-        0.60
-      );
-      const mixedOutPath = path.join(tmpDir, `montage-mixed.${outExt}`);
-      const audioCodec = outExt === "webm" ? "libopus" : "aac";
-      const audioBitrate = outExt === "webm" ? "128k" : "160k";
-      throwIfCancelled("mix_background_music");
-      await runFfmpegCommand([
-        "-y", "-hide_banner", "-loglevel", "warning",
-        "-i", finalOutPath, "-stream_loop", "-1", "-i", musicPath, "-t", String(exportedDurationSec),
-        "-filter_complex",
-        input.normalizedGeminiTimelineSegments.length
-          ? `[1:a]volume='${escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, configuredBackgroundDuckVolume))}*${volume.toFixed(3)}':eval=frame[bg_ducked];[0:a][bg_ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`
-          : `[1:a]volume=${volume.toFixed(3)}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=-1.5dB[outa]`,
-        "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
-        ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
-        mixedOutPath
-      ], { stage: "montage_mix_music", shouldAbort: () => shouldAbort() });
-      finalOutPath = mixedOutPath;
-    }
 
     const reviewOnScreenTextEnabled = input.exportMode === "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
@@ -11711,10 +11734,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()));
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
-    const hasBrowserVisualPass = shouldAttemptBrowserRenderer && Boolean(
-      overlayCardSegments.length
-      || hasBrandOverlay
-    );
+    const hasBrowserVisualPass = false;
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || overlayCardSegments.length
@@ -11725,6 +11745,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       hasFinalVisualPass,
       hasBrowserVisualPass,
       renderMode: normalizeMontageRenderMode(input.renderMode || "browser"),
+      browserVisualPassDisabled: shouldAttemptBrowserRenderer,
       reviewOnScreenTextEnabled,
       hasTextSegments: Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length),
       overlayCardCount: overlayCardSegments.length,
@@ -12041,6 +12062,19 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
       finalOutPath = deliveryOutPath;
     }
+
+    finalOutPath = await finalizeMontageExportAudioTrack({
+      input,
+      finalOutPath,
+      tmpDir,
+      outExt,
+      exportedDurationSec,
+      exportOffsetsByRowId,
+      emitStage,
+      shouldAbort,
+      downloadInput,
+      jobId
+    });
 
     if (context?.previewOnly === true) {
       const previewBuffer = await fs.promises.readFile(finalOutPath);
