@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.209",
-  "build": "2026-1.0.10.210",
+  "version": "1.0.10.210",
+  "build": "2026-1.0.10.211",
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: El export de Podcaster incorpora un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke y cards mucho más fieles al preview, con fallback automático a ffmpeg-legacy si Chromium falla.",
@@ -13,6 +13,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El submit final del export de Podcaster ya no borra dataUrl/localDataUrl de los audios Gemini hidratados; el job ahora puede reutilizar el audio inline en Render en lugar de caer de nuevo al gs:// faltante. Se incrementan cache-busters para forzar la carga del fix.",
     "Corregido: El export de Podcaster ya no deja pasar gs:// como URL final del audio Gemini al hidratar assets de audio; ahora prioriza resolveStorageAudioUrl, reutiliza mejor el blob local y fuerza la carga del frontend nuevo con cache-busters actualizados.",
     "Corregido: Podcaster ahora intenta exportar la capa visual final con un renderer headless basado en navegador para acercar el MP4 al preview real del montaje y reducir la deriva del karaoke y overlays.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del nuevo renderer de exportación y su fallback controlado.",
@@ -145,5 +146,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.209"
+  "cache_version": "2026-1.0.10.210"
 }

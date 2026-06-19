@@ -35,6 +35,12 @@ assert.match(
   "Los assets de audio del export deben resolver primero con resolveStorageAudioUrl y no aceptar un gs:// crudo como URL final."
 );
 
+assert.doesNotMatch(
+  exportSource,
+  /const hasExplicitSource = Boolean\([\s\S]*clean\.dataUrl = ""[\s\S]*clean\.localDataUrl = ""/,
+  "El payload final del export no debe borrar dataUrl/localDataUrl ya hidratados justo antes del POST."
+);
+
 assert.match(
   exportSource,
   /localMediaCacheKey: String\(storedAudio\?\.localMediaCacheKey \|\| ""\)\.trim\(\)/,
