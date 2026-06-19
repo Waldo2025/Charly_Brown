@@ -11049,6 +11049,14 @@ async function renderMontageBrowserFinalVisualPass({
   emitStage = () => {},
   shouldAbort = () => false
 } = {}) {
+  const throwIfCancelled = (stage = "cancelled") => {
+    if (typeof shouldAbort === "function" && shouldAbort()) {
+      const err = new Error("export_cancelled");
+      err.code = "export_cancelled";
+      err.stage = stage;
+      throw err;
+    }
+  };
   const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_browser_visual_input").catch(() => ({ width: 1280, height: 720 }));
   const viewport = {
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
