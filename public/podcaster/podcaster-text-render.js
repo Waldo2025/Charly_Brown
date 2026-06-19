@@ -867,6 +867,12 @@
     return `\\${targetTag}c&H${bbggrr}&\\${targetTag}a&H${aa}&`;
   }
 
+  function formatAssOverrideNumber(value = 0) {
+    const numeric = Number(value || 0) || 0;
+    if (Math.abs(numeric) < 0.0005) return "0";
+    return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(3).replace(/\.?0+$/, "");
+  }
+
   function buildAssActiveWordColorOverlayText(text = "", activeWordIndex = -1, activeColor = "&H0015CCFA", baseColor = "&H00FCFAF8") {
     const tokens = tokenizeSubtitleText(text);
     if (!tokens.length) return "";
@@ -918,9 +924,16 @@
       if (!wrappedText) return;
       const fontFamily = resolveAssFontFamily(spec.fontFamily || settings.fontFamily || defaultFont, defaultFont);
       const fontSizePx = Math.max(16, Math.round(Number(spec.fontSizePx || 44) || 44));
+      const fontWeight = String(spec.fontWeight || settings.fontWeight || "").trim().toLowerCase();
+      const fontStyle = String(spec.fontStyle || settings.fontStyle || "").trim().toLowerCase();
+      const letterSpacingPx = Number.isFinite(Number(spec.letterSpacingPx))
+        ? Number(spec.letterSpacingPx)
+        : (typeof onScreenTextApi?.resolveOnScreenTextLetterSpacingEm === "function"
+          ? Number(onScreenTextApi.resolveOnScreenTextLetterSpacingEm(settings) || 0) * fontSizePx
+          : 0);
       const outlinePx = Math.max(0, Number(spec.strokeEnabled === false ? 0 : spec.strokeWidthPx || 0) || 0);
       const shadowPx = Math.max(0, Number(spec.shadowEnabled === false ? 0 : spec.shadowY || 0) || 0);
-      const shadowX = Math.max(0, Number(spec.shadowEnabled === false ? 0 : spec.shadowX || 0) || 0);
+      const shadowX = Number(spec.shadowEnabled === false ? 0 : spec.shadowX || 0) || 0;
       const textAlign = String(spec.textAlign || "center").trim().toLowerCase();
       const alignment = resolveAssAlignment(textAlign);
       const posX = textAlign === "left"
@@ -928,7 +941,7 @@
         : textAlign === "right"
           ? Math.round((Number(spec.rawXPx || 0) || 0) + (Number(spec.boxWidthPx || 0) || 0))
           : Math.round((Number(spec.rawXPx || 0) || 0) + ((Number(spec.boxWidthPx || 0) || 0) / 2));
-      const posY = Math.round(Number(spec.yPx || 0) || 0);
+      const posY = Math.round((Number(spec.yPx || 0) || 0) + (Number(spec.textOffsetYPx || 0) || 0));
       const stylePreset = String(settings?.stylePreset || "").trim().toLowerCase();
       const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
       const textOpacity = Math.max(0, Math.min(1, Number(settings?.textOpacity ?? spec.textOpacity ?? 1) || 0));
@@ -949,7 +962,7 @@
       const baseText = escapeAssText(wrappedText);
       const visibleStrokeWidth = Math.max(outlinePx, stylePreset === "3d" ? Math.round(fontSizePx * 0.055) : outlinePx, stylePreset === "3d" ? 2 : 0);
       const depthOffset = stylePreset === "3d" ? Math.max(2, Math.round(fontSizePx * 0.06)) : 0;
-      const baseCommon = `\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\q2\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\fsp0`;
+      const baseCommon = `\\fn${fontFamily}\\fs${fontSizePx}\\an${alignment}\\q2\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\fsp${formatAssOverrideNumber(letterSpacingPx)}\\b${fontWeight === "bold" ? "1" : "0"}\\i${fontStyle === "italic" ? "1" : "0"}`;
       const boxOverride = boxEnabled ? `\\bord${Math.max(visibleStrokeWidth, 2)}\\shad${Math.max(shadowPx, 2)}${formatAssOverrideColor(baseColor, "1")}${formatAssOverrideColor(baseColor, "2")}${formatAssOverrideColor(outlineColor, "3")}${formatAssOverrideColor(backColor, "4")}` : "";
       if (stylePreset === "3d") {
         const softShadowOverrides = `{${baseCommon}\\pos(${formatAssOverridePoint(posX)},${formatAssOverridePoint(posY)})\\bord0\\shad0\\xshad0\\yshad${Math.max(4, Math.round(fontSizePx * 0.15))}\\blur12${formatAssOverrideColor(depthColor, "1")}${formatAssOverrideColor(depthColor, "2")}${formatAssOverrideColor(depthColor, "3")}\\4a&HFF&}`;
