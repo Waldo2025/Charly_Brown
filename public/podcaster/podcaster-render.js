@@ -66,25 +66,21 @@ function injectStyles() {
       inset: 0;
       pointer-events: none;
     }
-    .montage-render-text {
+    .montage-render-text-layer .podcast-onscreen-text-overlay {
       position: absolute;
-      box-sizing: border-box;
-      color: var(--text-color, #f8fafc);
-      text-align: center;
-      font-weight: 800;
-      line-height: 1.18;
-      letter-spacing: -0.03em;
-      text-shadow:
-        0 2px 0 rgba(15, 23, 42, 0.95),
-        0 4px 18px rgba(2, 6, 23, 0.48);
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 1;
+      transform: none;
     }
-    .montage-render-text-word {
-      color: inherit;
-    }
-    .montage-render-text-word.is-active {
-      color: #facc15;
+    .montage-render-text-layer .podcast-on-screen-text-content {
+      pointer-events: none;
+      cursor: default;
+      z-index: 1;
     }
     .montage-render-card {
       position: absolute;
@@ -193,7 +189,7 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     const durationMs = Math.max(1, Number(segment?.durationMs || 0) || 1);
     return currentMs >= startMs && currentMs < (startMs + durationMs);
   }) || null;
-  if (!activeSegment || typeof globalThis.resolveOnScreenTextRenderSpec !== "function") {
+  if (!activeSegment || typeof globalThis.resolveOnScreenTextPreviewLayoutSpec !== "function") {
     if (renderState.lastTextSignature) {
       renderState.lastTextSignature = "";
       layer.innerHTML = "";
@@ -208,7 +204,8 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     }
     return;
   }
-  const spec = globalThis.resolveOnScreenTextRenderSpec({
+  const previewSpec = globalThis.resolveOnScreenTextPreviewLayoutSpec({
+    rowId: String(activeSegment.rowId || "").trim(),
     settings,
     layout: activeSegment.layout || {},
     resolution: payload?.resolution || "source",
@@ -220,38 +217,66 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
     wrappedText: activeSegment.wrappedText || "",
     fallback: ""
   });
+  const metrics = previewSpec?.metrics || {};
   const audioClip = payload?.dialogueAudioMap?.[String(activeSegment.rowId || "").trim()] || null;
   const activeWordIndex = typeof globalThis.resolveActiveKaraokeWordIndex === "function"
     ? globalThis.resolveActiveKaraokeWordIndex(audioClip?.wordTimings || [], currentMs, Number(activeSegment.startMs || 0) || 0, Number(audioClip?.playbackRate || 1) || 1)
     : -1;
   const markup = typeof globalThis.buildKaraokeSubtitleMarkup === "function"
     ? globalThis.buildKaraokeSubtitleMarkup(text, audioClip?.wordTimings || [], activeWordIndex)
-        .replace(/podcast-karaoke-word/g, "montage-render-text-word")
     : escapeHtml(text);
   const signature = JSON.stringify({
     id: activeSegment.id || activeSegment.rowId || "",
     activeWordIndex,
     text,
-    x: spec.rawXPx,
-    y: spec.yPx,
-    w: spec.boxWidthPx,
-    fontSizePx: spec.fontSizePx
+    xPct: previewSpec?.xPct,
+    yPct: previewSpec?.yPct,
+    w: previewSpec?.bubbleWidthPx,
+    h: previewSpec?.bubbleHeightPx,
+    fontSizePx: metrics.previewFontSizePx,
+    wrappedText: previewSpec?.wrappedText || text,
+    presetClass: previewSpec?.presetClass,
+    bgClass: previewSpec?.bgClass
   });
   if (signature === renderState.lastTextSignature) return;
   renderState.lastTextSignature = signature;
-  layer.innerHTML = `
-    <div
-      class="montage-render-text"
-      style="
-        left:${Math.max(0, Number(spec.rawXPx || 0) || 0)}px;
-        top:${Math.max(0, Number(spec.yPx || 0) || 0)}px;
-        width:${Math.max(1, Number(spec.boxWidthPx || width) || width)}px;
-        font-size:${Math.max(12, Number(spec.fontSizePx || 44) || 44)}px;
-        color:${escapeHtml(spec.textColor || settings.textColor || "#f8fafc")};
-        font-family:${escapeHtml(spec.fontFamily || settings.fontFamily || "Inter")};
-      "
-    >${markup}</div>
-  `;
+  const inlineStyle = typeof globalThis.buildOnScreenTextBubbleInlineStyle === "function"
+    ? globalThis.buildOnScreenTextBubbleInlineStyle(settings, {
+      metrics,
+      xPct: previewSpec?.xPct ?? activeSegment?.layout?.xPct ?? 0,
+      yPct: previewSpec?.yPct ?? activeSegment?.layout?.yPct ?? 0
+    })
+    : "";
+  const rawCssText = String(inlineStyle || "");
+  const presetClass = String(
+    previewSpec?.presetClass
+    || (typeof globalThis.getOnScreenTextStylePresetClass === "function"
+      ? globalThis.getOnScreenTextStylePresetClass(settings.stylePreset)
+      : "is-style-3d")
+  ).trim() || "is-style-3d";
+  const bgClass = String(
+    previewSpec?.bgClass
+    || (typeof globalThis.getOnScreenTextBgPresetClass === "function"
+      ? globalThis.getOnScreenTextBgPresetClass(settings.bgPreset)
+      : "is-bg-none")
+  ).trim() || "is-bg-none";
+  layer.innerHTML = `<div class="podcast-onscreen-text-overlay is-visible" aria-hidden="true"><div class="podcast-on-screen-text-content ${presetClass} ${bgClass}" data-row-id="${escapeHtml(String(activeSegment.rowId || "").trim())}">${markup}</div></div>`;
+  const contentNode = layer.querySelector(".podcast-on-screen-text-content");
+  if (contentNode) {
+    rawCssText.split(";").filter(Boolean).forEach((prop) => {
+      const [key, ...valParts] = prop.split(":");
+      if (!key || !valParts.length) return;
+      const value = valParts.join(":").trim();
+      contentNode.style.setProperty(key.trim(), value);
+    });
+    const bubbleWidthPx = Number(previewSpec?.bubbleWidthPx || 0) || 0;
+    const bubbleHeightPx = Number(previewSpec?.bubbleHeightPx || 0) || 0;
+    if (bubbleWidthPx > 0 && bubbleHeightPx > 0) {
+      contentNode.style.setProperty("--pod-onscreen-text-bubble-width", `${bubbleWidthPx}px`);
+      contentNode.style.setProperty("min-height", `${bubbleHeightPx}px`);
+      contentNode.style.setProperty("height", "auto");
+    }
+  }
 }
 
 async function boot() {

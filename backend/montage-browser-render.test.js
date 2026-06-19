@@ -50,6 +50,7 @@ test("buildMontageBrowserRenderBootstrap embeds local render runtime config", ()
 
   assert.match(html, /__PODCASTER_MONTAGE_RENDER_CONFIG__/);
   assert.match(html, /file:\/\/\/tmp\/base-video\.mp4/);
+  assert.match(html, /podcaster\.css/);
   assert.match(html, /podcaster-render\.js/);
   assert.match(html, /podcaster-text-render\.js/);
 });
