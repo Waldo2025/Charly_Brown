@@ -143,20 +143,17 @@ test("createJob strips inline on-screen raster payloads from persisted request i
   assert.equal(created.request.input.persistedInlineRastersRedacted, true);
   assert.equal(created.request.input.persistedInlineRasterFrameCount, 3);
   assert.equal(created.request.input.persistedInlineRasterSegmentCount, 2);
+  assert.equal(created.request.input.persistedRequestCompacted, true);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "entriesRaw"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "audioTimelineRaw"), false);
   assert.equal(
     Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextTimelineRaw || {}, "renderedSegments"),
     false
   );
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(created.request.input.onScreenTextRenderedSegments[0].renderedFrames[0], "dataUrl"),
-    false
-  );
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(fakeDb.docs.get("job-raster-redact").request.input.onScreenTextRenderedSegments[0].renderedFrames[1], "dataUrl"),
-    false
-  );
+  assert.equal(Array.isArray(created.request.input.onScreenTextRenderedSegments), true);
+  assert.equal(created.request.input.onScreenTextRenderedSegments.length, 0);
+  assert.equal(created.request.input.persistedOnScreenTextRenderedSegmentCount, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "onScreenTextTimeline"), false);
 });
 
 test("createJob strips inline audio and media payloads from persisted request input", async () => {
@@ -214,9 +211,16 @@ test("createJob strips inline audio and media payloads from persisted request in
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].video, "dataUrl"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].audio, "localDataUrl"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.backgroundMusic, "localDataUrl"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.dialogueAudioMap["row-1"], "dataUrl"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.geminiSegments[0], "localDataUrl"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.backgroundSegments[0], "dataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), false);
+  assert.equal(created.request.input.persistedDialogueAudioRowCount, 1);
+  assert.deepEqual(created.request.input.audioTimeline, {
+    enabled: true,
+    mode: "",
+    durationMs: 0,
+    geminiSegmentCount: 1,
+    backgroundSegmentCount: 1
+  });
+  assert.equal(created.request.input.persistedRequestCompacted, true);
 });
 
 test("createJob tolerates null media records while sanitizing persisted request input", async () => {
@@ -255,10 +259,98 @@ test("createJob tolerates null media records while sanitizing persisted request 
   assert.equal(created.request.input.entries[0].video, null);
   assert.equal(created.request.input.entries[0].audio, null);
   assert.equal(created.request.input.backgroundMusic, null);
-  assert.equal(created.request.input.dialogueAudioMap["row-1"], null);
-  assert.equal(created.request.input.audioTimeline.geminiSegments[0], null);
-  assert.equal(created.request.input.audioTimeline.backgroundSegments[0], null);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), false);
+  assert.equal(created.request.input.persistedDialogueAudioRowCount, 1);
+  assert.deepEqual(created.request.input.audioTimeline, {
+    enabled: true,
+    mode: "",
+    durationMs: 0,
+    geminiSegmentCount: 1,
+    backgroundSegmentCount: 1
+  });
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "persistedInlineMediaRedacted"), false);
+  assert.equal(created.request.input.persistedRequestCompacted, true);
+});
+
+test("createJob compacts heavy montage request arrays to avoid oversized Firestore job snapshots", async () => {
+  const fakeDb = createFakeDocStore();
+  const store = createMontageExportJobStore({
+    db: fakeDb,
+    now: () => "2026-04-27T15:00:00.000Z"
+  });
+
+  const created = await store.createJob({
+    jobId: "job-compact-payload",
+    sessionId: "session-compact-payload",
+    ownerId: "user-compact-payload",
+    request: {
+      baseUrl: "https://example.com",
+      input: {
+        sessionId: "session-compact-payload",
+        entries: Array.from({ length: 40 }, (_, index) => ({
+          rowId: `row-${index + 1}`,
+          startMs: index * 1000,
+          durationMs: 1000,
+          video: {
+            downloadUrl: `https://example.com/video-${index + 1}.mp4`,
+            dataUrl: "data:video/mp4;base64,AAAA"
+          }
+        })),
+        dialogueAudioMap: Object.fromEntries(
+          Array.from({ length: 40 }, (_, index) => [
+            `row-${index + 1}`,
+            {
+              downloadUrl: `https://example.com/audio-${index + 1}.wav`,
+              dataUrl: "data:audio/wav;base64,BBBB"
+            }
+          ])
+        ),
+        audioTimeline: {
+          enabled: true,
+          durationMs: 40000,
+          mode: "timeline",
+          geminiSegments: Array.from({ length: 40 }, (_, index) => ({
+            rowId: `row-${index + 1}`,
+            localDataUrl: "data:audio/wav;base64,CCCC"
+          })),
+          backgroundSegments: Array.from({ length: 12 }, (_, index) => ({
+            id: `bg-${index + 1}`,
+            dataUrl: "data:audio/mp3;base64,DDDD"
+          }))
+        },
+        onScreenTextTimeline: {
+          enabled: true,
+          settings: { karaokeMode: "party" },
+          segments: Array.from({ length: 40 }, (_, index) => ({
+            rowId: `row-${index + 1}`,
+            text: `Linea ${index + 1}`
+          }))
+        },
+        onScreenTextRenderedSegments: Array.from({ length: 40 }, (_, index) => ({
+          rowId: `row-${index + 1}`,
+          renderedFrames: [{
+            kind: "base",
+            dataUrl: "data:image/png;base64,EEEE"
+          }]
+        })),
+        overlayCards: {
+          segments: Array.from({ length: 15 }, (_, index) => ({ id: `card-${index + 1}` }))
+        }
+      }
+    },
+    totalScenes: 40
+  });
+
+  assert.equal(created.request.input.persistedRequestCompacted, true);
+  assert.equal(created.request.input.persistedEntryCount, 40);
+  assert.equal(created.request.input.entries.length, 24);
+  assert.equal(created.request.input.persistedDialogueAudioRowCount, 40);
+  assert.equal(created.request.input.audioTimeline.durationMs, 40000);
+  assert.equal(created.request.input.audioTimeline.geminiSegmentCount, 40);
+  assert.equal(created.request.input.audioTimeline.backgroundSegmentCount, 12);
+  assert.equal(created.request.input.onScreenTextTimeline.segmentCount, 40);
+  assert.equal(created.request.input.persistedOnScreenTextRenderedSegmentCount, 40);
+  assert.deepEqual(created.request.input.overlayCards, { segmentCount: 15 });
 });
 
 test("updateJob merges progress and heartbeat without deleting request metadata", async () => {

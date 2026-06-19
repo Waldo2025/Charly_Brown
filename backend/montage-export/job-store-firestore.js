@@ -102,6 +102,40 @@ function sanitizePersistedMediaRecord(record = null) {
   };
 }
 
+function summarizePersistedMontageEntry(entry = null) {
+  const source = entry && typeof entry === "object" ? entry : null;
+  if (!source) return source;
+  return stripUndefinedDeep({
+    rowId: String(source.rowId || "").trim(),
+    startMs: Math.max(0, Number(source.startMs || 0) || 0),
+    durationMs: Math.max(0, Number(source.durationMs || 0) || 0),
+    useNativeVideoAudio: source.useNativeVideoAudio === true,
+    veoVolumeOverridePct: Number.isFinite(Number(source.veoVolumeOverridePct))
+      ? Math.max(0, Math.min(200, Math.round(Number(source.veoVolumeOverridePct) || 0)))
+      : undefined,
+    video: source.video && typeof source.video === "object"
+      ? stripUndefinedDeep({
+        storagePath: String(source.video.storagePath || "").trim(),
+        url: String(source.video.url || source.video.downloadUrl || "").trim(),
+        downloadUrl: String(source.video.downloadUrl || source.video.url || "").trim(),
+        mimeType: String(source.video.mimeType || "").trim(),
+        type: String(source.video.type || source.video.mediaKind || "").trim(),
+        mediaKind: String(source.video.mediaKind || source.video.type || "").trim(),
+        localMediaCacheKey: String(source.video.localMediaCacheKey || "").trim()
+      })
+      : null,
+    audio: source.audio && typeof source.audio === "object"
+      ? stripUndefinedDeep({
+        storagePath: String(source.audio.storagePath || "").trim(),
+        url: String(source.audio.url || source.audio.downloadUrl || "").trim(),
+        downloadUrl: String(source.audio.downloadUrl || source.audio.url || "").trim(),
+        mimeType: String(source.audio.mimeType || "").trim(),
+        localMediaCacheKey: String(source.audio.localMediaCacheKey || "").trim()
+      })
+      : null
+  });
+}
+
 function sanitizeMontageExportPersistedInput(input = null) {
   const source = input && typeof input === "object" ? input : null;
   if (!source) return null;
@@ -202,6 +236,72 @@ function sanitizeMontageExportPersistedInput(input = null) {
     nextInput.persistedInlineMediaRedacted = true;
     nextInput.persistedInlineMediaRecordCount = redactedMediaRecordCount;
   }
+
+  const originalEntryCount = Array.isArray(nextInput.entries) ? nextInput.entries.length : 0;
+  const originalDialogueAudioCount = nextInput.dialogueAudioMap && typeof nextInput.dialogueAudioMap === "object"
+    ? Object.keys(nextInput.dialogueAudioMap).length
+    : 0;
+  const originalOnScreenTextRenderedSegmentCount = Array.isArray(nextInput.onScreenTextRenderedSegments)
+    ? nextInput.onScreenTextRenderedSegments.length
+    : 0;
+  const originalOnScreenTextSegmentCount = Array.isArray(nextInput.onScreenTextTimeline?.segments)
+    ? nextInput.onScreenTextTimeline.segments.length
+    : 0;
+  const originalOverlayCardCount = Array.isArray(nextInput.overlayCards?.segments)
+    ? nextInput.overlayCards.segments.length
+    : (Array.isArray(nextInput.overlayCards) ? nextInput.overlayCards.length : 0);
+  const originalGeminiSegmentCount = Array.isArray(nextInput.audioTimeline?.geminiSegments)
+    ? nextInput.audioTimeline.geminiSegments.length
+    : 0;
+  const originalBackgroundSegmentCount = Array.isArray(nextInput.audioTimeline?.backgroundSegments)
+    ? nextInput.audioTimeline.backgroundSegments.length
+    : 0;
+
+  if (Array.isArray(nextInput.entries)) {
+    nextInput.entries = nextInput.entries.slice(0, 24).map((entry) => summarizePersistedMontageEntry(entry));
+  }
+
+  if (nextInput.dialogueAudioMap && typeof nextInput.dialogueAudioMap === "object") {
+    delete nextInput.dialogueAudioMap;
+    nextInput.persistedDialogueAudioRowCount = originalDialogueAudioCount;
+  }
+
+  if (nextInput.audioTimeline && typeof nextInput.audioTimeline === "object") {
+    nextInput.audioTimeline = stripUndefinedDeep({
+      enabled: nextInput.audioTimeline.enabled !== false,
+      mode: String(nextInput.audioTimeline.mode || "").trim(),
+      durationMs: Math.max(0, Number(nextInput.audioTimeline.durationMs || 0) || 0),
+      geminiSegmentCount: originalGeminiSegmentCount,
+      backgroundSegmentCount: originalBackgroundSegmentCount
+    });
+  }
+
+  if (nextInput.onScreenTextTimeline && typeof nextInput.onScreenTextTimeline === "object") {
+    nextInput.onScreenTextTimeline = stripUndefinedDeep({
+      enabled: nextInput.onScreenTextTimeline.enabled !== false,
+      segmentCount: originalOnScreenTextSegmentCount
+    });
+  }
+
+  if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
+    nextInput.onScreenTextRenderedSegments = [];
+    nextInput.persistedOnScreenTextRenderedSegmentCount = originalOnScreenTextRenderedSegmentCount;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextInput, "overlayCards")) {
+    nextInput.overlayCards = {
+      segmentCount: originalOverlayCardCount
+    };
+  }
+
+  if (nextInput.brandOverlay && typeof nextInput.brandOverlay === "object") {
+    nextInput.brandOverlay = {
+      enabled: nextInput.brandOverlay.enabled === true
+    };
+  }
+
+  nextInput.persistedRequestCompacted = true;
+  nextInput.persistedEntryCount = originalEntryCount;
 
   return nextInput;
 }

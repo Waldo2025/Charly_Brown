@@ -54,6 +54,23 @@ test("canAutoResumeInterruptedMontageExportJob returns false when inline rasters
   assert.equal(result, false);
 });
 
+test("canAutoResumeInterruptedMontageExportJob returns false when the persisted request was compacted", () => {
+  const result = canAutoResumeInterruptedMontageExportJob({
+    status: "running",
+    stage: "render_scene_segments",
+    request: {
+      input: {
+        sessionId: "session-1",
+        persistedRequestCompacted: true
+      }
+    }
+  }, {
+    queueAvailable: false
+  });
+
+  assert.equal(result, false);
+});
+
 test("buildAutoResumeInterruptedMontageExportJobPatch keeps the request and marks the job as restarting", () => {
   const patch = buildAutoResumeInterruptedMontageExportJobPatch({
     request: {
