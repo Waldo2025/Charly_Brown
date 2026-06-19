@@ -30,4 +30,16 @@ assert.match(
   "El downloader del export debe preferir fuentes durables y tratar data URLs inline al normalizar el audio."
 );
 
+assert.match(
+  source,
+  /function convertGsUrlToFirebaseStorageMediaUrl\(url = ""\) \{[\s\S]*firebasestorage\.googleapis\.com\/v0\/b\/\$\{encodeURIComponent\(bucket\)\}\/o\/\$\{encodeURIComponent\(objectPath\)\}\?alt=media[\s\S]*\}/,
+  "El backend debe convertir gs://bucket/object a Firebase media URL para el fallback de export."
+);
+
+assert.match(
+  source,
+  /const fallbackUrl = convertGsUrlToFirebaseStorageMediaUrl\(url\) \|\| url;[\s\S]*branch: "storage_path_url_fallback"[\s\S]*downloadUrlToFile\(fallbackUrl, outPath, \{ shouldAbort: isAborted \}\)/,
+  "Si falla storagePath, el export debe reintentar timeline audio usando fallback HTTP derivado desde gs://."
+);
+
 console.log("Podcaster montage export audio timeline fallback OK.");

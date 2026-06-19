@@ -8815,6 +8815,18 @@ function parseFirebaseStorageGoogleApisObjectUrl(url = "") {
   }
 }
 
+function convertGsUrlToFirebaseStorageMediaUrl(url = "") {
+  const clean = String(url || "").trim();
+  if (!clean.startsWith("gs://")) return "";
+  const withoutScheme = clean.replace(/^gs:\/\//i, "");
+  const slashIndex = withoutScheme.indexOf("/");
+  if (slashIndex < 0) return "";
+  const bucket = String(withoutScheme.slice(0, slashIndex) || "").trim();
+  const objectPath = String(withoutScheme.slice(slashIndex + 1) || "").trim();
+  if (!bucket || !objectPath) return "";
+  return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+}
+
 function deriveStoragePathFromMediaSource(url = "", storagePath = "") {
   const cleanStoragePath = normalizeStorageFilePath(storagePath);
   if (cleanStoragePath) return cleanStoragePath;
@@ -9021,7 +9033,8 @@ async function downloadStoragePathToFile(storagePath = "", outPath = "", options
 }
 
 async function downloadUrlToFile(url = "", outPath = "", options = {}) {
-  const cleanUrl = String(url || "").trim();
+  const rawUrl = String(url || "").trim();
+  const cleanUrl = convertGsUrlToFirebaseStorageMediaUrl(rawUrl) || rawUrl;
   const targetPath = String(outPath || "").trim();
   const shouldAbort = typeof options?.shouldAbort === "function" ? options.shouldAbort : null;
   const isAborted = () => {
@@ -9049,7 +9062,7 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
     } catch (_) {
       const err = new Error("local_file_not_found");
       err.code = "local_file_not_found";
-      err.detail = { url: cleanUrl, resolvedPath: localPath };
+      err.detail = { url: cleanUrl, sourceUrl: rawUrl, resolvedPath: localPath };
       throw err;
     }
   }
@@ -9057,7 +9070,7 @@ async function downloadUrlToFile(url = "", outPath = "", options = {}) {
   if (!isAllowedRemoteMediaUrl(cleanUrl)) {
     const err = new Error("url_not_allowed");
     err.code = "url_not_allowed";
-    err.detail = { url: cleanUrl };
+    err.detail = { url: cleanUrl, sourceUrl: rawUrl };
     throw err;
   }
 
@@ -9773,8 +9786,16 @@ function createMontageAssetDownloader({ tmpDir = "", uid = "", shouldAbort = nul
             }
           }
           if (url && !parseFirebaseStorageGoogleApisObjectUrl(url) && !isDirectHttpUrl(url)) {
-            await downloadWithTimeout(() => downloadUrlToFile(url, outPath, { shouldAbort: isAborted }), "url_download");
-            return validateDownloadedAsset(outPath);
+            const fallbackUrl = convertGsUrlToFirebaseStorageMediaUrl(url) || url;
+            console.info("[backend][montage-export][asset-download-branch]", {
+              ...assetTrace,
+              branch: "storage_path_url_fallback",
+              fallbackUrl: redactUrlForLogs(fallbackUrl)
+            });
+            await downloadWithTimeout(() => downloadUrlToFile(fallbackUrl, outPath, { shouldAbort: isAborted }), "url_download");
+            const validated = await validateDownloadedAsset(outPath);
+            logDownloadFinish("storage_path_url_fallback", { outPath: validated });
+            return validated;
           }
         }
         error.detail = {
