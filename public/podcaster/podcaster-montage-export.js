@@ -1313,6 +1313,7 @@ export function describeMontageExportStage(stage = "", mode = window.montageExpo
     download_assets: "Descargando recursos fuente…",
     render_scene_segments: "Renderizando escenas…",
     concat_timeline: "Uniendo timeline final…",
+    encode_visual_pass: "Codificando capas visuales finales…",
     mix_timeline_audio: "Mezclando narración del timeline…",
     mix_background_music: "Mezclando música de fondo…",
     boot_renderer: "Iniciando renderer fiel al preview…",

@@ -181,6 +181,26 @@ function placeBrandOverlay(img, overlay = {}, width = 1280) {
   img.style.opacity = `${Math.max(0, Math.min(1, Number(overlay.opacity ?? 1)) || 1)}`;
 }
 
+function prepareBrandOverlay(img, overlay = {}, width = 1280) {
+  placeBrandOverlay(img, overlay, width);
+  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlay.assetPath) {
+    return Promise.resolve();
+  }
+  if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const handleLoad = () => {
+      img.removeEventListener("error", handleError);
+      resolve();
+    };
+    const handleError = () => {
+      img.removeEventListener("load", handleLoad);
+      reject(new Error("brand_overlay_load_failed"));
+    };
+    img.addEventListener("load", handleLoad, { once: true });
+    img.addEventListener("error", handleError, { once: true });
+  });
+}
+
 function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, height = 720) {
   const segments = Array.isArray(payload?.onScreenTextTimeline?.segments) ? payload.onScreenTextTimeline.segments : [];
   const settings = payload?.onScreenTextTimeline?.settings || {};
@@ -280,78 +300,82 @@ function renderOnScreenText(layer, payload = {}, currentMs = 0, width = 1280, he
 }
 
 async function boot() {
-  const config = globalThis.__PODCASTER_MONTAGE_RENDER_CONFIG__ || {};
-  const payload = config.payload && typeof config.payload === "object" ? config.payload : {};
-  const renderMode = normalizeMontageRenderMode(payload.renderMode || config.renderMode || "browser");
-  if (renderMode !== "browser") {
-    globalThis.__podcasterMontageRenderError = "render_mode_not_browser";
-    return;
-  }
-
-  injectStyles();
-  const stage = document.createElement("div");
-  stage.className = "montage-render-stage";
-  const video = document.createElement("video");
-  video.src = String(config.baseVideoUrl || "").trim();
-  video.preload = "auto";
-  video.autoplay = false;
-  video.muted = true;
-  video.playsInline = true;
-  video.crossOrigin = "anonymous";
-  const subtitleCanvas = document.createElement("canvas");
-  const cardsLayer = document.createElement("div");
-  cardsLayer.className = "montage-render-cards";
-  const textLayer = document.createElement("div");
-  textLayer.className = "montage-render-text-layer";
-  const brandImg = document.createElement("img");
-  brandImg.className = "montage-render-brand";
-  brandImg.hidden = true;
-  stage.append(video, subtitleCanvas, textLayer, cardsLayer, brandImg);
-  document.body.append(stage);
-
-  const width = Math.max(2, Math.round(Number(config.viewport?.width || config.width || 1280) || 1280));
-  const height = Math.max(2, Math.round(Number(config.viewport?.height || config.height || 720) || 720));
-  subtitleCanvas.width = width;
-  subtitleCanvas.height = height;
-  subtitleCanvas.hidden = true;
-  placeBrandOverlay(brandImg, payload.brandOverlay || null, width);
-  globalThis.__podcasterMontageRenderReady = true;
-
-  const tick = () => {
-    if (renderState.completed) return;
-    const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
-    updateCards(cardsLayer, payload.overlayCards?.segments || payload.overlayCards || [], currentMs);
-    renderOnScreenText(textLayer, payload, currentMs, width, height);
-    if (!video.paused && !video.ended) requestAnimationFrame(tick);
-  };
-
-  const finish = () => {
-    renderState.completed = true;
-    globalThis.__podcasterMontageRenderDone = true;
-  };
-
-  video.addEventListener("loadedmetadata", () => {
-    renderOnScreenText(textLayer, payload, 0, width, height);
-  });
-  video.addEventListener("play", () => {
-    if (!renderState.started) renderState.started = true;
-    requestAnimationFrame(tick);
-  });
-  video.addEventListener("timeupdate", () => {
-    const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
-    renderOnScreenText(textLayer, payload, currentMs, width, height);
-  });
-  video.addEventListener("ended", finish);
-  video.addEventListener("error", () => {
-    globalThis.__podcasterMontageRenderError = "video_playback_error";
-    finish();
-  });
-
   try {
-    await video.play();
+    const config = globalThis.__PODCASTER_MONTAGE_RENDER_CONFIG__ || {};
+    const payload = config.payload && typeof config.payload === "object" ? config.payload : {};
+    const renderMode = normalizeMontageRenderMode(payload.renderMode || config.renderMode || "browser");
+    if (renderMode !== "browser") {
+      globalThis.__podcasterMontageRenderError = "render_mode_not_browser";
+      return;
+    }
+
+    injectStyles();
+    const stage = document.createElement("div");
+    stage.className = "montage-render-stage";
+    const video = document.createElement("video");
+    video.src = String(config.baseVideoUrl || "").trim();
+    video.preload = "auto";
+    video.autoplay = false;
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = "anonymous";
+    const subtitleCanvas = document.createElement("canvas");
+    const cardsLayer = document.createElement("div");
+    cardsLayer.className = "montage-render-cards";
+    const textLayer = document.createElement("div");
+    textLayer.className = "montage-render-text-layer";
+    const brandImg = document.createElement("img");
+    brandImg.className = "montage-render-brand";
+    brandImg.hidden = true;
+    stage.append(video, subtitleCanvas, textLayer, cardsLayer, brandImg);
+    document.body.append(stage);
+
+    const width = Math.max(2, Math.round(Number(config.viewport?.width || config.width || 1280) || 1280));
+    const height = Math.max(2, Math.round(Number(config.viewport?.height || config.height || 720) || 720));
+    subtitleCanvas.width = width;
+    subtitleCanvas.height = height;
+    subtitleCanvas.hidden = true;
+    await prepareBrandOverlay(brandImg, payload.brandOverlay || null, width);
+    globalThis.__podcasterMontageRenderReady = true;
+
+    const tick = () => {
+      if (renderState.completed) return;
+      const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
+      updateCards(cardsLayer, payload.overlayCards?.segments || payload.overlayCards || [], currentMs);
+      renderOnScreenText(textLayer, payload, currentMs, width, height);
+      if (!video.paused && !video.ended) requestAnimationFrame(tick);
+    };
+
+    const finish = () => {
+      renderState.completed = true;
+      globalThis.__podcasterMontageRenderDone = true;
+    };
+
+    video.addEventListener("loadedmetadata", () => {
+      renderOnScreenText(textLayer, payload, 0, width, height);
+    });
+    video.addEventListener("play", () => {
+      if (!renderState.started) renderState.started = true;
+      requestAnimationFrame(tick);
+    });
+    video.addEventListener("timeupdate", () => {
+      const currentMs = Math.max(0, Math.round((Number(video.currentTime || 0) || 0) * 1000));
+      renderOnScreenText(textLayer, payload, currentMs, width, height);
+    });
+    video.addEventListener("ended", finish);
+    video.addEventListener("error", () => {
+      globalThis.__podcasterMontageRenderError = "video_playback_error";
+      finish();
+    });
+
+    try {
+      await video.play();
+    } catch (error) {
+      globalThis.__podcasterMontageRenderError = String(error?.message || error || "video_play_failed");
+      finish();
+    }
   } catch (error) {
-    globalThis.__podcasterMontageRenderError = String(error?.message || error || "video_play_failed");
-    finish();
+    globalThis.__podcasterMontageRenderError = String(error?.message || error || "montage_render_boot_failed");
   }
 }
 

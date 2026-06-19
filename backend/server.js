@@ -9455,8 +9455,8 @@ function normalizeMontageExportRequestBody(body = {}) {
       .filter(Boolean);
   }
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
-    ? onScreenTextTimelineRaw.settings
-    : (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null);
+    ? normalizeOnScreenTextTrackSettings(onScreenTextTimelineRaw.settings)
+    : (onScreenTextSegments.length ? normalizeOnScreenTextTrackSettings({ enabled: true, showTrack: true, fontSizePx: 44 }) : null);
   const onScreenTextRenderedSegmentsRaw = Array.isArray(raw?.onScreenTextRenderedSegments)
     ? raw.onScreenTextRenderedSegments
     : (Array.isArray(onScreenTextTimelineRaw?.renderedSegments) ? onScreenTextTimelineRaw.renderedSegments : []);
@@ -9510,7 +9510,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextRenderedSegments,
-    onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? normalizeOnScreenTextTrackSettings({ enabled: true, showTrack: true, fontSizePx: 44 }) : null),
     dialogueAudioMap,
     overlayCards,
     brandOverlay,
@@ -9558,7 +9558,7 @@ function validateMontageExportRequest(input = {}) {
     err.status = 400;
     throw err;
   }
-  if (!new Set(["browser", "ffmpeg-legacy"]).has(normalizeMontageRenderMode(input?.renderMode || "browser"))) {
+  if (!new Set(["browser"]).has(normalizeMontageRenderMode(input?.renderMode || "browser"))) {
     const err = new Error("Render mode inválido.");
     err.status = 400;
     throw err;
@@ -11160,7 +11160,7 @@ async function finalizeMontageExportAudioTrack({
       input.backgroundMusic?.duckingWhenGeminiPct ?? input.backgroundMusicDuckingPct,
       0.60
     );
-    emitStage("mix_timeline_audio", 0.58, "Preparando mezcla del audio del timeline.");
+    emitStage("mix_timeline_audio", 0.88, "Preparando mezcla del audio del timeline.");
     logMontageMemory("mix_timeline_audio_start", {
       jobId,
       timelineSegmentCount: Array.isArray(input.timelineAudioSegments) ? input.timelineAudioSegments.length : 0
@@ -11255,7 +11255,7 @@ async function finalizeMontageExportAudioTrack({
   }
 
   if (input.includeBackgroundMusic) {
-    emitStage("mix_background_music", 0.7, "Mezclando música de fondo.");
+    emitStage("mix_background_music", 0.92, "Mezclando música de fondo.");
     if (!input.backgroundMusic || typeof input.backgroundMusic !== "object") {
       const err = new Error("includeBackgroundMusic requiere backgroundMusic.");
       err.status = 400;
@@ -11854,6 +11854,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     );
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const hasBrowserVisualPass = shouldAttemptBrowserRenderer && hasFinalVisualPass;
+    const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
+    const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
+    const visualEncodeMessage = hasPostVisualAudioFinalization
+      ? "Codificando capas visuales finales."
+      : "Codificando archivo final con la calidad de exportación.";
     console.info("[backend][montage-export][visual-pass-decision]", {
       hasFinalVisualPass,
       hasBrowserVisualPass,
@@ -11869,31 +11874,21 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       brandOverlayEnabled: input.brandOverlay?.enabled === true,
       brandOverlayAssetPath: String(input.brandOverlay?.assetPath || "").trim() || null
     });
-    let browserVisualCompleted = false;
     if (hasBrowserVisualPass) {
-      try {
-        finalOutPath = await renderMontageBrowserFinalVisualPass({
-          input: {
-            ...input,
-            overlayCards: overlayCardSegments
-          },
-          finalOutPath,
-          tmpDir,
-          outExt,
-          deliveryParams,
-          emitStage,
-          shouldAbort
-        });
-        browserVisualCompleted = true;
-      } catch (browserRenderError) {
-        console.warn("[backend][montage-export][browser-render-fallback]", {
-          jobId,
-          message: String(browserRenderError?.message || browserRenderError),
-          code: String(browserRenderError?.code || "").trim() || null
-        });
-      }
+      finalOutPath = await renderMontageBrowserFinalVisualPass({
+        input: {
+          ...input,
+          overlayCards: overlayCardSegments
+        },
+        finalOutPath,
+        tmpDir,
+        outExt,
+        deliveryParams,
+        emitStage,
+        shouldAbort
+      });
     }
-    if (hasFinalVisualPass && !browserVisualCompleted) {
+    if (hasFinalVisualPass && !hasBrowserVisualPass) {
       const sourceDims = await probeMediaVideoDimensionsWithFfmpeg(finalOutPath, "montage_final_visuals_input").catch(() => ({ width: 1280, height: 720 }));
       const visualDims = input.exportMode === "review"
         ? resolveMontageReviewCanvasSize(input.resolution, sourceDims.width, sourceDims.height)
@@ -12057,7 +12052,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       }
 
       if (reviewFilter || visualFilters.length) {
-        emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+        emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
         const finalVisualOutPath = path.join(tmpDir, `montage-final-visuals.${outExt}`);
         const finalVisualArgs = [
           "-y", "-hide_banner", "-loglevel", "warning",
@@ -12097,7 +12092,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           shouldAbort: () => shouldAbort(),
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
           onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
-            emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.", {
+            emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
@@ -12111,7 +12106,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         });
         finalOutPath = finalVisualOutPath;
       } else {
-        emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+        emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
         const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
         throwIfCancelled("montage_encode_delivery");
         await runFfmpegCommand([
@@ -12131,7 +12126,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           shouldAbort: () => shouldAbort(),
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
           onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
-            emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
+            emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
               lastHeartbeatAt: new Date().toISOString()
             });
             console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
@@ -12146,7 +12141,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         finalOutPath = deliveryOutPath;
       }
     } else {
-      emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.");
+      emitStage(visualEncodeStage, 0.84, visualEncodeMessage);
       const deliveryOutPath = path.join(tmpDir, `montage-delivery.${outExt}`);
       throwIfCancelled("montage_encode_delivery");
       await runFfmpegCommand([
@@ -12166,7 +12161,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         shouldAbort: () => shouldAbort(),
         heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
         onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
-          emitStage("encode_delivery", 0.96, "Codificando archivo final con la calidad de exportación.", {
+          emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
             lastHeartbeatAt: new Date().toISOString()
           });
           console.info("[backend][montage-export][ffmpeg-stage-heartbeat]", {
@@ -12193,6 +12188,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       downloadInput,
       jobId
     });
+
+    emitStage("cache_output", 0.96, "Preparando descarga final.");
 
     if (context?.previewOnly === true) {
       const previewBuffer = await fs.promises.readFile(finalOutPath);

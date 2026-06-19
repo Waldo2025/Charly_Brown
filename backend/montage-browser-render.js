@@ -5,8 +5,8 @@ const path = require("node:path");
 
 function normalizeMontageRenderMode(value = "", fallback = "browser") {
   const cleanValue = String(value || "").trim().toLowerCase();
-  if (cleanValue === "browser" || cleanValue === "ffmpeg-legacy") return cleanValue;
-  return String(fallback || "browser").trim().toLowerCase() === "ffmpeg-legacy" ? "ffmpeg-legacy" : "browser";
+  if (cleanValue === "browser") return "browser";
+  return "browser";
 }
 
 function shouldUseBrowserMontageRenderer(input = {}) {

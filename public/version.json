@@ -4,7 +4,7 @@
   "branch": "codex-bootstrap",
   "changelog": [
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
-    "Corregido: El export de Podcaster incorpora un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke y cards mucho más fieles al preview, con fallback automático a ffmpeg-legacy si Chromium falla.",
+    "Corregido: El export de Podcaster usa un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke, cards y logo fieles al preview.",
     "Corregido: El export final de Podcaster ahora guarda el MP4 en Storage mediante upload no resumable, evitando el fetch OAuth a googleapis.com/oauth2/v4/token que estaba cerrándose prematuramente en Render.",
     "Corregido: Podcaster ahora sanea dialogueVideoMap para no guardar type undefined en Firestore y proxy-media deja de cerrar streams válidos de forma prematura durante exportaciones con mezcla de audio timeline.",
     "Corregido: Se solucionó de raíz el error 403 Forbidden y Premature close en proxy-image y proxy-media mediante la firma offline y local de las URLs de Firebase Storage y su descarga/transmisión directa via HTTPS, lo que evita por completo la necesidad de contactar al endpoint de tokens de Google que se interrumpía en Render.",
