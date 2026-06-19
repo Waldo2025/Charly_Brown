@@ -26,8 +26,8 @@ assert.match(
 
 assert.match(
   source,
-  /const p = await downloadInput\(\{[\s\S]*rowId: clampText\(segment\?\.rowId \|\| "", 140\),[\s\S]*storagePath: clampText\(segment\?\.storagePath \|\| "", 900\),[\s\S]*url: String\(segment\?\.url \|\| ""\)\.trim\(\),[\s\S]*downloadUrl: String\(segment\?\.downloadUrl \|\| ""\)\.trim\(\),[\s\S]*dataUrl: String\(segment\?\.dataUrl \|\| ""\)\.trim\(\),[\s\S]*localDataUrl: String\(segment\?\.localDataUrl \|\| ""\)\.trim\(\),[\s\S]*mimeType: clampText\(segment\?\.mimeType \|\| "audio\/mpeg", 120\)/,
-  "La mezcla final debe pasar rowId y todas las fuentes de audio al downloader para que funcionen la recuperación por fila y los fallbacks."
+  /const buildTimelineAudioDownloadAsset = \(segment = \{\}\) => \{[\s\S]*const fallbackClip = rowId \? \(input\.dialogueAudioMap\?\.\[rowId\] \|\| null\) : null;[\s\S]*dataUrl: segmentDataUrl \|\| fallbackDataUrl,[\s\S]*localDataUrl: String\(segment\?\.localDataUrl \|\| ""\)\.trim\(\) \|\| fallbackDataUrl,[\s\S]*localMediaCacheKey: String\(segment\?\.localMediaCacheKey \|\| fallbackClip\?\.localMediaCacheKey \|\| ""\)\.trim\(\),[\s\S]*const p = await downloadInput\(segmentAsset, "timeline-audio", i\);/,
+  "La mezcla final debe combinar el segmento del timeline con el clip de dialogueAudioMap para reutilizar dataUrl/cache local y los fallbacks por fila."
 );
 
 console.log("Podcaster montage export final audio stage OK.");

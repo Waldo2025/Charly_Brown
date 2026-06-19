@@ -1435,7 +1435,7 @@ async function streamStorageObjectToResponse(req, res, storagePath = "", rangeHe
 const MONTAGE_EXPORT_CACHE_DIR = path.join(os.tmpdir(), "cb-montage-exports-cache");
 const MONTAGE_EXPORT_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 const MONTAGE_EXPORT_CACHE_MAX_ITEMS = 40;
-const MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES = 2_500_000;
+const MONTAGE_EXPORT_INLINE_DATA_URL_MAX_BYTES = 12_000_000;
 const MONTAGE_EXPORT_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const MONTAGE_EXPORT_RECENT_SNAPSHOT_GRACE_MS = DEFAULT_RECENT_SNAPSHOT_GRACE_MS;
 const MONTAGE_EXPORT_SCENE_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
@@ -9298,7 +9298,9 @@ function normalizeMontageExportRequestBody(body = {}) {
       );
       const downloadUrl = clampText(clip?.downloadUrl || clip?.url || "", 3000);
       const storagePath = clampText(clip?.storagePath || "", 900);
-      if (!downloadUrl && !storagePath && !wordTimings.length && !durationSec && !durationMs) return;
+      const dataUrl = clampText(String(clip?.dataUrl || clip?.localDataUrl || "").trim(), 16_000_000);
+      const localMediaCacheKey = clampText(String(clip?.localMediaCacheKey || "").trim(), 400);
+      if (!downloadUrl && !storagePath && !dataUrl && !localMediaCacheKey && !wordTimings.length && !durationSec && !durationMs) return;
       nextMap[key] = {
         rowId: key,
         targetSpeechLine,
@@ -9310,6 +9312,9 @@ function normalizeMontageExportRequestBody(body = {}) {
         words,
         downloadUrl,
         storagePath,
+        dataUrl,
+        localDataUrl: dataUrl,
+        localMediaCacheKey,
         mimeType: clampText(clip?.mimeType || "audio/wav", 120) || "audio/wav"
       };
     });
@@ -9320,6 +9325,8 @@ function normalizeMontageExportRequestBody(body = {}) {
     if (!segment || typeof segment !== "object") return null;
     const url = String(segment?.url || segment?.downloadUrl || segment?.localDataUrl || segment?.dataUrl || "").trim();
     const storagePath = clampText(segment?.storagePath || "", 900);
+    const dataUrl = clampText(String(segment?.dataUrl || segment?.localDataUrl || "").trim(), 16_000_000);
+    const localMediaCacheKey = clampText(String(segment?.localMediaCacheKey || "").trim(), 400);
     const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
     const durationMs = Math.max(500, Math.round(Number(segment?.durationMs || 0) || 0));
     const trimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
@@ -9333,7 +9340,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     const duckingWhenGeminiPct = Number.isFinite(rawDuckPct)
       ? Math.max(40, Math.min(100, rawDuckPct))
       : null;
-    if (!storagePath && !url) return null;
+    if (!storagePath && !url && !dataUrl && !localMediaCacheKey) return null;
     if (volumePct <= 0.0001) return null;
     return {
       kind: clampText(segment?.kind || "audio", 40) || "audio",
@@ -9343,6 +9350,9 @@ function normalizeMontageExportRequestBody(body = {}) {
       loopIndex: Math.max(0, Math.floor(Number(segment?.loopIndex || 0) || 0)),
       url,
       storagePath,
+      dataUrl,
+      localDataUrl: dataUrl,
+      localMediaCacheKey,
       mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg",
       startMs,
       durationMs,
@@ -11124,6 +11134,29 @@ async function finalizeMontageExportAudioTrack({
 } = {}) {
   if (!finalOutPath || typeof downloadInput !== "function") return finalOutPath;
 
+  const buildTimelineAudioDownloadAsset = (segment = {}) => {
+    const rowId = String(segment?.rowId || "").trim();
+    const fallbackClip = rowId ? (input.dialogueAudioMap?.[rowId] || null) : null;
+    const segmentUrl = String(segment?.url || segment?.downloadUrl || "").trim();
+    const fallbackUrl = String(fallbackClip?.downloadUrl || fallbackClip?.url || "").trim();
+    const segmentDataUrl = String(segment?.dataUrl || segment?.localDataUrl || "").trim();
+    const fallbackDataUrl = String(fallbackClip?.dataUrl || fallbackClip?.localDataUrl || "").trim();
+    const segmentStoragePath = clampText(segment?.storagePath || "", 900);
+    const fallbackStoragePath = clampText(fallbackClip?.storagePath || "", 900);
+    return {
+      ...(fallbackClip && typeof fallbackClip === "object" ? fallbackClip : {}),
+      ...(segment && typeof segment === "object" ? segment : {}),
+      rowId: clampText(rowId || fallbackClip?.rowId || "", 140),
+      storagePath: segmentStoragePath || fallbackStoragePath,
+      url: segmentUrl || fallbackUrl,
+      downloadUrl: String(segment?.downloadUrl || "").trim() || fallbackUrl,
+      dataUrl: segmentDataUrl || fallbackDataUrl,
+      localDataUrl: String(segment?.localDataUrl || "").trim() || fallbackDataUrl,
+      localMediaCacheKey: String(segment?.localMediaCacheKey || fallbackClip?.localMediaCacheKey || "").trim(),
+      mimeType: clampText(segment?.mimeType || fallbackClip?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
+    };
+  };
+
   let nextOutPath = finalOutPath;
   if (input.useTimelineAudio) {
     const segmentInputs = [];
@@ -11139,16 +11172,9 @@ async function finalizeMontageExportAudioTrack({
     for (let i = 0; i < input.timelineAudioSegments.length; i += 1) {
       const segment = input.timelineAudioSegments[i] || {};
       try {
+        const segmentAsset = buildTimelineAudioDownloadAsset(segment);
         // eslint-disable-next-line no-await-in-loop
-        const p = await downloadInput({
-          rowId: clampText(segment?.rowId || "", 140),
-          storagePath: clampText(segment?.storagePath || "", 900),
-          url: String(segment?.url || "").trim(),
-          downloadUrl: String(segment?.downloadUrl || "").trim(),
-          dataUrl: String(segment?.dataUrl || "").trim(),
-          localDataUrl: String(segment?.localDataUrl || "").trim(),
-          mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
-        }, "timeline-audio", i);
+        const p = await downloadInput(segmentAsset, "timeline-audio", i);
         if (p) segmentInputs.push({ path: p, segment });
       } catch (error) {
         if (String(error?.code || "") === "storage_not_found") continue;

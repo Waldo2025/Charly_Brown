@@ -2006,7 +2006,14 @@ export function formatMontageSkippedEntries(skippedEntries = [], maxItems = 3) {
 }
 
 const MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES = 2_500_000;
-const MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES = 6_000_000;
+const MONTAGE_EXPORT_INLINE_AUDIO_MAX_BYTES = 12_000_000;
+const MONTAGE_EXPORT_INLINE_MEDIA_MAX_TOTAL_BYTES = 18_000_000;
+
+function getMontageInlineMediaMaxBytes(kind = "video") {
+  return String(kind || "").trim().toLowerCase() === "audio"
+    ? MONTAGE_EXPORT_INLINE_AUDIO_MAX_BYTES
+    : MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES;
+}
 
 function estimateMontageDataUrlBytes(dataUrl = "") {
   const cleanDataUrl = String(dataUrl || "").trim();
@@ -2325,10 +2332,11 @@ async function blobToDataUrl(blob = null, mimeType = "application/octet-stream")
 }
 
 async function resolveCachedMontageMediaDataUrl(asset = {}, kind = "video", budget = {}) {
+  const maxBytes = getMontageInlineMediaMaxBytes(kind);
   const rawDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
   if (rawDataUrl.startsWith("data:")) {
     const bytes = estimateMontageDataUrlBytes(rawDataUrl);
-    if (bytes > 0 && bytes <= MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES && bytes <= Math.max(0, Number(budget?.remainingBytes || 0) || 0)) {
+    if (bytes > 0 && bytes <= maxBytes && bytes <= Math.max(0, Number(budget?.remainingBytes || 0) || 0)) {
       return rawDataUrl;
     }
   }
@@ -2351,7 +2359,7 @@ async function resolveCachedMontageMediaDataUrl(asset = {}, kind = "video", budg
       blob = null;
     }
     const sizeBytes = Math.max(0, Number(blob?.size || 0) || 0);
-    if (!sizeBytes || sizeBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) continue;
+    if (!sizeBytes || sizeBytes > maxBytes) continue;
     if (budget && Number.isFinite(Number(budget.remainingBytes)) && sizeBytes > Number(budget.remainingBytes || 0)) continue;
     let dataUrl = "";
     try {
@@ -2361,7 +2369,7 @@ async function resolveCachedMontageMediaDataUrl(asset = {}, kind = "video", budg
     }
     if (!dataUrl.startsWith("data:")) continue;
     const dataUrlBytes = estimateMontageDataUrlBytes(dataUrl);
-    if (!dataUrlBytes || dataUrlBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) continue;
+    if (!dataUrlBytes || dataUrlBytes > maxBytes) continue;
     if (budget && Number.isFinite(Number(budget.remainingBytes)) && dataUrlBytes > Number(budget.remainingBytes || 0)) continue;
     return dataUrl;
   }
@@ -2371,12 +2379,13 @@ async function resolveCachedMontageMediaDataUrl(asset = {}, kind = "video", budg
 
 async function maybeInlineMontageMediaAsset(asset = null, kind = "video", budget = {}) {
   if (!asset || typeof asset !== "object") return asset;
+  const maxBytes = getMontageInlineMediaMaxBytes(kind);
   const directDataUrl = String(asset?.dataUrl || asset?.localDataUrl || "").trim();
   const inlineDataUrl = await resolveCachedMontageMediaDataUrl(asset, kind, budget);
   const dataUrl = inlineDataUrl || directDataUrl;
   if (!dataUrl.startsWith("data:")) return asset;
   const sizeBytes = estimateMontageDataUrlBytes(dataUrl);
-  if (!sizeBytes || sizeBytes > MONTAGE_EXPORT_INLINE_MEDIA_MAX_BYTES) return asset;
+  if (!sizeBytes || sizeBytes > maxBytes) return asset;
   if (budget && Number.isFinite(Number(budget.remainingBytes)) && sizeBytes > Number(budget.remainingBytes || 0)) return asset;
   if (budget && Number.isFinite(Number(budget.remainingBytes))) {
     budget.remainingBytes = Math.max(0, Number(budget.remainingBytes || 0) - sizeBytes);
