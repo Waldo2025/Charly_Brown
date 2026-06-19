@@ -83,7 +83,6 @@ const {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
   getMontageBrowserRendererAvailability,
-  isMontageBrowserRendererAvailable,
   renderMontageBrowserOverlayVideo
 } = require("./montage-browser-render.js");
 const {
@@ -10004,7 +10003,7 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 }
 
 function shouldUseMontageSceneAssSubtitles(input = {}) {
-  if (shouldUseBrowserMontageRenderer(input) && isMontageBrowserRendererAvailable()) return false;
+  if (shouldUseBrowserMontageRenderer(input)) return false;
   if (String(input?.exportMode || "").trim() === "review") return false;
   return Boolean(input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
 }
@@ -11864,7 +11863,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     );
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const browserRendererAvailability = shouldAttemptBrowserRenderer ? getMontageBrowserRendererAvailability() : { available: false };
-    const hasBrowserVisualPass = shouldAttemptBrowserRenderer && hasFinalVisualPass && browserRendererAvailability.available === true;
+    const hasBrowserVisualPass = shouldAttemptBrowserRenderer && hasFinalVisualPass;
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
     const visualEncodeMessage = hasPostVisualAudioFinalization
@@ -11888,11 +11887,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       brandOverlayAssetPath: String(input.brandOverlay?.assetPath || "").trim() || null
     });
     if (shouldAttemptBrowserRenderer && browserRendererAvailability.available !== true) {
-      console.warn("[backend][montage-export][browser-renderer-unavailable]", {
+      const browserRendererError = new Error(browserRendererAvailability.message || "playwright_unavailable");
+      browserRendererError.code = browserRendererAvailability.code || "playwright_unavailable";
+      console.error("[backend][montage-export][browser-renderer-unavailable]", {
         jobId,
         code: browserRendererAvailability.code || "playwright_unavailable",
         message: browserRendererAvailability.message || "playwright_unavailable"
       });
+      throw browserRendererError;
     }
     if (hasBrowserVisualPass) {
       finalOutPath = await renderMontageBrowserFinalVisualPass({
