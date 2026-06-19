@@ -2091,6 +2091,10 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
   }
 
   const sourceUrl = await resolveMontageSceneMediaSourceUrl(asset, kind);
+  const cachedPlaybackBlobUrl = sourceUrl && typeof window.playbackController?.getBlobUrlSync === "function"
+    ? String(window.playbackController.getBlobUrlSync(sourceUrl) || "").trim()
+    : "";
+  const effectiveFetchUrl = cachedPlaybackBlobUrl || sourceUrl;
 
   if (!sourceUrl || sourceUrl.startsWith("gs://")) {
     return {
@@ -2102,7 +2106,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
   }
 
   try {
-    const blob = await fetchMontageMediaBlob(sourceUrl);
+    const blob = await fetchMontageMediaBlob(effectiveFetchUrl);
     if (!(blob instanceof Blob)) {
       return {
         ...asset,
@@ -2114,7 +2118,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
     if (cacheKey) {
       await putPodcasterLocalMediaBlob(cacheKey, blob, {
         mimeType: String(blob.type || mimeType || "").trim() || mimeType,
-        sourceUrl,
+        sourceUrl: effectiveFetchUrl,
         storagePath: String(asset?.storagePath || "").trim(),
         kind
       });
@@ -2127,7 +2131,7 @@ async function hydrateMontageSceneMediaAsset(asset = null, kind = "video") {
           montageExportHydratedMediaCache.set(cacheKey, dataUrl);
           void putPodcasterLocalMediaDataUrl(cacheKey, dataUrl, {
             mimeType: String(blob.type || mimeType || "").trim() || mimeType,
-            sourceUrl,
+            sourceUrl: effectiveFetchUrl,
             storagePath: String(asset?.storagePath || "").trim(),
             kind
           }).catch(() => { });
@@ -2633,6 +2637,9 @@ export function buildMontageExportPayload(session = null) {
           url: src,
           storagePath: String(storedAudio?.storagePath || "").trim(),
           downloadUrl: String(storedAudio?.downloadUrl || "").trim(),
+          dataUrl: String(storedAudio?.dataUrl || storedAudio?.localDataUrl || "").trim(),
+          localDataUrl: String(storedAudio?.localDataUrl || storedAudio?.dataUrl || "").trim(),
+          localMediaCacheKey: String(storedAudio?.localMediaCacheKey || "").trim(),
           mimeType: String(storedAudio?.mimeType || "").trim(),
           startMs,
           durationMs,

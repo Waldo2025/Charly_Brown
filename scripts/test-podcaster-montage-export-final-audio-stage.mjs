@@ -24,4 +24,10 @@ assert.match(
   "Si el timeline esperaba audio y no encontró fuentes válidas, el export debe fallar explícitamente."
 );
 
+assert.match(
+  source,
+  /const p = await downloadInput\(\{[\s\S]*rowId: clampText\(segment\?\.rowId \|\| "", 140\),[\s\S]*storagePath: clampText\(segment\?\.storagePath \|\| "", 900\),[\s\S]*url: String\(segment\?\.url \|\| ""\)\.trim\(\),[\s\S]*downloadUrl: String\(segment\?\.downloadUrl \|\| ""\)\.trim\(\),[\s\S]*dataUrl: String\(segment\?\.dataUrl \|\| ""\)\.trim\(\),[\s\S]*localDataUrl: String\(segment\?\.localDataUrl \|\| ""\)\.trim\(\),[\s\S]*mimeType: clampText\(segment\?\.mimeType \|\| "audio\/mpeg", 120\)/,
+  "La mezcla final debe pasar rowId y todas las fuentes de audio al downloader para que funcionen la recuperación por fila y los fallbacks."
+);
+
 console.log("Podcaster montage export final audio stage OK.");

@@ -11141,8 +11141,12 @@ async function finalizeMontageExportAudioTrack({
       try {
         // eslint-disable-next-line no-await-in-loop
         const p = await downloadInput({
+          rowId: clampText(segment?.rowId || "", 140),
           storagePath: clampText(segment?.storagePath || "", 900),
           url: String(segment?.url || "").trim(),
+          downloadUrl: String(segment?.downloadUrl || "").trim(),
+          dataUrl: String(segment?.dataUrl || "").trim(),
+          localDataUrl: String(segment?.localDataUrl || "").trim(),
           mimeType: clampText(segment?.mimeType || "audio/mpeg", 120) || "audio/mpeg"
         }, "timeline-audio", i);
         if (p) segmentInputs.push({ path: p, segment });

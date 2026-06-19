@@ -3712,7 +3712,9 @@ function normalizeDialogueAudioMap(raw = {}) {
     const mediaRef = normalizePersistedMediaReference(clip.downloadUrl || "", clip.storagePath || "");
     const downloadUrl = String(mediaRef.downloadUrl || "").trim();
     const storagePath = String(mediaRef.storagePath || "").trim();
-    if (!storagePath && !downloadUrl) return;
+    const dataUrl = String(clip.dataUrl || clip.localDataUrl || "").trim();
+    const localMediaCacheKey = String(clip.localMediaCacheKey || "").trim();
+    if (!storagePath && !downloadUrl && !dataUrl && !localMediaCacheKey) return;
     next[key] = {
       rowId: key,
       speaker: String(clip.speaker || "").trim(),
@@ -3724,6 +3726,9 @@ function normalizeDialogueAudioMap(raw = {}) {
       targetSpeechLine: String(clip.targetSpeechLine || "").trim(),
       wordTimings: normalizeKaraokeWordTimings(clip, String(clip.targetSpeechLine || "").trim()),
       updatedAt: String(clip.updatedAt || nowIso()).trim() || nowIso(),
+      dataUrl,
+      localDataUrl: dataUrl,
+      localMediaCacheKey,
       downloadUrl,
       storagePath
     };
@@ -3760,7 +3765,9 @@ function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
   );
   const downloadUrl = String(mediaRef.downloadUrl || audioSrc).trim();
   const storagePath = String(mediaRef.storagePath || "").trim();
-  if (!downloadUrl && !storagePath) return null;
+  const dataUrl = String(segment?.dataUrl || segment?.localDataUrl || "").trim();
+  const localMediaCacheKey = String(segment?.localMediaCacheKey || "").trim();
+  if (!downloadUrl && !storagePath && !dataUrl && !localMediaCacheKey) return null;
   return {
     rowId: key,
     speaker: "",
@@ -3770,6 +3777,9 @@ function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
     durationSec: Math.max(0, Number(segment?.durationMs || 0) / 1000),
     targetSpeechLine: "",
     updatedAt: String(track?.updatedAt || nowIso()).trim() || nowIso(),
+    dataUrl,
+    localDataUrl: dataUrl,
+    localMediaCacheKey,
     downloadUrl,
     storagePath
   };
