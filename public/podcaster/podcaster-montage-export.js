@@ -2034,8 +2034,17 @@ async function resolveMontageSceneMediaSourceUrl(asset = {}, kind = "video") {
     }
   }
 
-  const resolvedProxyUrl = String(window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath) || "").trim()
-    || String(window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath) || "").trim();
+  const resolveCandidate = (value = "") => {
+    const clean = String(value || "").trim();
+    return clean && !clean.startsWith("gs://") ? clean : "";
+  };
+  const preferredResolver = kind === "audio"
+    ? window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath)
+    : window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath);
+  const fallbackResolver = kind === "audio"
+    ? window.resolveStorageVideoUrl?.(directDownloadUrl, storagePath)
+    : window.resolveStorageAudioUrl?.(directDownloadUrl, storagePath);
+  const resolvedProxyUrl = resolveCandidate(preferredResolver) || resolveCandidate(fallbackResolver);
   if (resolvedProxyUrl) return resolvedProxyUrl;
 
   if (storageGsUrl) return storageGsUrl;
