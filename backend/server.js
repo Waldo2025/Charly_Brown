@@ -11332,7 +11332,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
-    const shouldBurnSceneOnScreenText = input.exportMode !== "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    const shouldBurnSceneOnScreenText = shouldUseMontageSceneAssSubtitles(input);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const skippedEntries = [];
