@@ -12558,7 +12558,9 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
     if (isMontageExportJobInterruptedByBackendRestart(job) && !hasActiveMontageWorkerForJob) {
       if (canAutoResumeInterruptedMontageExportJob(job, { queueAvailable: Boolean(montageExportQueue) })) {
         const request = job.request && typeof job.request === "object" ? job.request : null;
-        const input = request?.input && typeof request.input === "object" ? request.input : null;
+        const input = request?.input && typeof request.input === "object"
+          ? normalizeMontageExportRequestBody(request.input)
+          : null;
         const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
         if (slot.ok && input) {
           const restartPatch = buildAutoResumeInterruptedMontageExportJobPatch(job);
