@@ -5,6 +5,25 @@ const path = require("node:path");
 
 let cachedMontageBrowserRendererAvailability = null;
 
+function buildRendererUnavailableState({
+  code = "playwright_unavailable",
+  message = "playwright_unavailable",
+  rawCode = "",
+  playwrightModuleAvailable = false,
+  playwrightChromiumExecutablePresent = false,
+  playwrightChromiumExecutablePath = ""
+} = {}) {
+  return {
+    available: false,
+    code,
+    message,
+    rawCode: String(rawCode || "").trim() || undefined,
+    playwrightModuleAvailable: playwrightModuleAvailable === true,
+    playwrightChromiumExecutablePresent: playwrightChromiumExecutablePresent === true,
+    playwrightChromiumExecutablePath: String(playwrightChromiumExecutablePath || "").trim() || undefined
+  };
+}
+
 function normalizeMontageRenderMode(value = "", fallback = "browser") {
   const cleanValue = String(value || "").trim().toLowerCase();
   if (cleanValue === "browser") return "browser";
@@ -26,16 +45,53 @@ function getMontageBrowserRendererAvailability() {
   if (cachedMontageBrowserRendererAvailability) return cachedMontageBrowserRendererAvailability;
   try {
     const playwright = require("playwright");
+    const playwrightModuleAvailable = true;
+    const chromium = playwright?.chromium || null;
+    if (!chromium || typeof chromium.launch !== "function") {
+      cachedMontageBrowserRendererAvailability = buildRendererUnavailableState({
+        code: "playwright_chromium_unavailable",
+        message: "Playwright Chromium no esta disponible en este runtime.",
+        playwrightModuleAvailable
+      });
+      return cachedMontageBrowserRendererAvailability;
+    }
+    let executablePath = "";
+    try {
+      executablePath = String(chromium.executablePath?.() || "").trim();
+    } catch (error) {
+      cachedMontageBrowserRendererAvailability = buildRendererUnavailableState({
+        code: "playwright_chromium_unavailable",
+        message: String(error?.message || error || "playwright_chromium_unavailable"),
+        rawCode: String(error?.code || "").trim(),
+        playwrightModuleAvailable
+      });
+      return cachedMontageBrowserRendererAvailability;
+    }
+    const executablePresent = Boolean(executablePath) && fs.existsSync(executablePath);
+    if (!executablePresent) {
+      cachedMontageBrowserRendererAvailability = buildRendererUnavailableState({
+        code: "playwright_chromium_missing",
+        message: executablePath
+          ? `Chromium de Playwright no esta instalado en ${executablePath}.`
+          : "Chromium de Playwright no esta instalado.",
+        playwrightModuleAvailable,
+        playwrightChromiumExecutablePath: executablePath
+      });
+      return cachedMontageBrowserRendererAvailability;
+    }
     cachedMontageBrowserRendererAvailability = {
       available: Boolean(playwright?.chromium),
-      playwright
+      playwright,
+      playwrightModuleAvailable,
+      playwrightChromiumExecutablePresent: true,
+      playwrightChromiumExecutablePath: executablePath
     };
   } catch (error) {
-    cachedMontageBrowserRendererAvailability = {
-      available: false,
-      code: String(error?.code || "").trim() || "playwright_unavailable",
-      message: String(error?.message || error || "playwright_unavailable")
-    };
+    cachedMontageBrowserRendererAvailability = buildRendererUnavailableState({
+      code: "playwright_unavailable",
+      message: String(error?.message || error || "playwright_unavailable"),
+      rawCode: String(error?.code || "").trim()
+    });
   }
   return cachedMontageBrowserRendererAvailability;
 }

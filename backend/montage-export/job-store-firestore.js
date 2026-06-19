@@ -267,29 +267,7 @@ function sanitizeMontageExportPersistedInput(input = null) {
     : 0;
 
   if (Array.isArray(nextInput.entries)) {
-    nextInput.entries = nextInput.entries.slice(0, 24).map((entry) => summarizePersistedMontageEntry(entry));
-  }
-
-  if (nextInput.dialogueAudioMap && typeof nextInput.dialogueAudioMap === "object") {
-    delete nextInput.dialogueAudioMap;
-    nextInput.persistedDialogueAudioRowCount = originalDialogueAudioCount;
-  }
-
-  if (nextInput.audioTimeline && typeof nextInput.audioTimeline === "object") {
-    nextInput.audioTimeline = stripUndefinedDeep({
-      enabled: nextInput.audioTimeline.enabled !== false,
-      mode: String(nextInput.audioTimeline.mode || "").trim(),
-      durationMs: Math.max(0, Number(nextInput.audioTimeline.durationMs || 0) || 0),
-      geminiSegmentCount: originalGeminiSegmentCount,
-      backgroundSegmentCount: originalBackgroundSegmentCount
-    });
-  }
-
-  if (nextInput.onScreenTextTimeline && typeof nextInput.onScreenTextTimeline === "object") {
-    nextInput.onScreenTextTimeline = stripUndefinedDeep({
-      enabled: nextInput.onScreenTextTimeline.enabled !== false,
-      segmentCount: originalOnScreenTextSegmentCount
-    });
+    nextInput.entries = nextInput.entries.map((entry) => summarizePersistedMontageEntry(entry));
   }
 
   if (Array.isArray(nextInput.onScreenTextRenderedSegments)) {
@@ -297,20 +275,13 @@ function sanitizeMontageExportPersistedInput(input = null) {
     nextInput.persistedOnScreenTextRenderedSegmentCount = originalOnScreenTextRenderedSegmentCount;
   }
 
-  if (Object.prototype.hasOwnProperty.call(nextInput, "overlayCards")) {
-    nextInput.overlayCards = {
-      segmentCount: originalOverlayCardCount
-    };
-  }
-
-  if (nextInput.brandOverlay && typeof nextInput.brandOverlay === "object") {
-    nextInput.brandOverlay = {
-      enabled: nextInput.brandOverlay.enabled === true
-    };
-  }
-
   nextInput.persistedRequestCompacted = true;
   nextInput.persistedEntryCount = originalEntryCount;
+  nextInput.persistedDialogueAudioRowCount = originalDialogueAudioCount;
+  nextInput.persistedGeminiSegmentCount = originalGeminiSegmentCount;
+  nextInput.persistedBackgroundSegmentCount = originalBackgroundSegmentCount;
+  nextInput.persistedOnScreenTextSegmentCount = originalOnScreenTextSegmentCount;
+  nextInput.persistedOverlayCardCount = originalOverlayCardCount;
 
   return nextInput;
 }

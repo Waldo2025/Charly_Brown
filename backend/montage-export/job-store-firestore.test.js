@@ -211,15 +211,13 @@ test("createJob strips inline audio and media payloads from persisted request in
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].video, "dataUrl"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.entries[0].audio, "localDataUrl"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.backgroundMusic, "localDataUrl"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), true);
   assert.equal(created.request.input.persistedDialogueAudioRowCount, 1);
-  assert.deepEqual(created.request.input.audioTimeline, {
-    enabled: true,
-    mode: "",
-    durationMs: 0,
-    geminiSegmentCount: 1,
-    backgroundSegmentCount: 1
-  });
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.dialogueAudioMap["row-1"], "dataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.geminiSegments[0], "localDataUrl"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input.audioTimeline.backgroundSegments[0], "dataUrl"), false);
+  assert.equal(created.request.input.persistedGeminiSegmentCount, 1);
+  assert.equal(created.request.input.persistedBackgroundSegmentCount, 1);
   assert.equal(created.request.input.persistedRequestCompacted, true);
 });
 
@@ -259,15 +257,13 @@ test("createJob tolerates null media records while sanitizing persisted request 
   assert.equal(created.request.input.entries[0].video, null);
   assert.equal(created.request.input.entries[0].audio, null);
   assert.equal(created.request.input.backgroundMusic, null);
-  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "dialogueAudioMap"), true);
   assert.equal(created.request.input.persistedDialogueAudioRowCount, 1);
-  assert.deepEqual(created.request.input.audioTimeline, {
-    enabled: true,
-    mode: "",
-    durationMs: 0,
-    geminiSegmentCount: 1,
-    backgroundSegmentCount: 1
-  });
+  assert.equal(created.request.input.dialogueAudioMap["row-1"], null);
+  assert.deepEqual(created.request.input.audioTimeline.geminiSegments, [null]);
+  assert.deepEqual(created.request.input.audioTimeline.backgroundSegments, [null]);
+  assert.equal(created.request.input.persistedGeminiSegmentCount, 1);
+  assert.equal(created.request.input.persistedBackgroundSegmentCount, 1);
   assert.equal(Object.prototype.hasOwnProperty.call(created.request.input, "persistedInlineMediaRedacted"), false);
   assert.equal(created.request.input.persistedRequestCompacted, true);
 });
@@ -333,6 +329,15 @@ test("createJob compacts heavy montage request arrays to avoid oversized Firesto
             dataUrl: "data:image/png;base64,EEEE"
           }]
         })),
+        brandOverlay: {
+          enabled: true,
+          assetPath: "storage/brand/logo.png",
+          assetUrl: "https://example.com/logo.png",
+          position: "top-right",
+          widthPct: 0.08,
+          marginPct: 0.03,
+          opacity: 0.9
+        },
         overlayCards: {
           segments: Array.from({ length: 15 }, (_, index) => ({ id: `card-${index + 1}` }))
         }
@@ -343,14 +348,29 @@ test("createJob compacts heavy montage request arrays to avoid oversized Firesto
 
   assert.equal(created.request.input.persistedRequestCompacted, true);
   assert.equal(created.request.input.persistedEntryCount, 40);
-  assert.equal(created.request.input.entries.length, 24);
+  assert.equal(created.request.input.entries.length, 40);
   assert.equal(created.request.input.persistedDialogueAudioRowCount, 40);
+  assert.equal(Object.keys(created.request.input.dialogueAudioMap || {}).length, 40);
   assert.equal(created.request.input.audioTimeline.durationMs, 40000);
-  assert.equal(created.request.input.audioTimeline.geminiSegmentCount, 40);
-  assert.equal(created.request.input.audioTimeline.backgroundSegmentCount, 12);
-  assert.equal(created.request.input.onScreenTextTimeline.segmentCount, 40);
+  assert.equal(created.request.input.audioTimeline.geminiSegments.length, 40);
+  assert.equal(created.request.input.audioTimeline.backgroundSegments.length, 12);
+  assert.equal(created.request.input.persistedGeminiSegmentCount, 40);
+  assert.equal(created.request.input.persistedBackgroundSegmentCount, 12);
+  assert.deepEqual(created.request.input.onScreenTextTimeline.settings, { karaokeMode: "party" });
+  assert.equal(created.request.input.onScreenTextTimeline.segments.length, 40);
+  assert.equal(created.request.input.persistedOnScreenTextSegmentCount, 40);
   assert.equal(created.request.input.persistedOnScreenTextRenderedSegmentCount, 40);
-  assert.deepEqual(created.request.input.overlayCards, { segmentCount: 15 });
+  assert.equal(created.request.input.overlayCards.segments.length, 15);
+  assert.equal(created.request.input.persistedOverlayCardCount, 15);
+  assert.deepEqual(created.request.input.brandOverlay, {
+    enabled: true,
+    assetPath: "storage/brand/logo.png",
+    assetUrl: "https://example.com/logo.png",
+    position: "top-right",
+    widthPct: 0.08,
+    marginPct: 0.03,
+    opacity: 0.9
+  });
 });
 
 test("createJob drops derived timeline arrays that can duplicate inline export payloads", async () => {

@@ -979,8 +979,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: MAX_BODY }));
 
-app.get("/api/health", (_req, res) => {
-  return res.status(200).json({
+function buildBackendHealthPayload() {
+  const browserRenderer = getMontageBrowserRendererAvailability();
+  return {
     ok: true,
     service: "gemini-backend",
     port: PORT,
@@ -989,8 +990,17 @@ app.get("/api/health", (_req, res) => {
     moodleModuleGraphicsRoute: true,
     podcasterDialogueAudioRoute: true,
     podcasterMusicGenerateRoute: true,
+    browserRendererAvailable: browserRenderer.available === true,
+    browserRendererCode: browserRenderer.available === true ? null : (browserRenderer.code || null),
+    browserRendererMessage: browserRenderer.available === true ? null : (browserRenderer.message || null),
+    playwrightModuleAvailable: browserRenderer.playwrightModuleAvailable === true,
+    playwrightChromiumExecutablePresent: browserRenderer.playwrightChromiumExecutablePresent === true,
     startupSignature: BACKEND_BOOT_SIGNATURE,
-  });
+  };
+}
+
+app.get("/api/health", (_req, res) => {
+  return res.status(200).json(buildBackendHealthPayload());
 });
 
 if (!admin.apps.length) {
@@ -13438,19 +13448,6 @@ app.post("/api/podcaster/music/generate", async (req, res) => {
   }
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "gemini-backend",
-    hasGeminiKey: hasGeminiKey(),
-    moodleShareUsersRoute: true,
-    moodleModuleGraphicsRoute: true,
-    podcasterDialogueAudioRoute: true,
-    podcasterMusicGenerateRoute: true,
-    startupSignature: BACKEND_BOOT_SIGNATURE,
-  });
-});
-
 app.post("/api/mineblox/screenshots/upload", async (req, res) => {
   try {
     return await handleMinebloxScreenshotUpload(req, res);
@@ -14330,6 +14327,7 @@ app.use((error, req, res, next) => {
 
 if (IS_MAIN_MODULE) {
   app.listen(PORT, HOST, () => {
+    const healthPayload = buildBackendHealthPayload();
     console.log("[backend] startup signature", {
       file: "backend/server.js",
       pid: process.pid,
@@ -14337,7 +14335,11 @@ if (IS_MAIN_MODULE) {
       startupSignature: BACKEND_BOOT_SIGNATURE,
       montageRenderRuntime: IS_RENDER_RUNTIME ? "render" : "non-render",
       moodleModuleGraphicsRoute: true,
-      podcasterDialogueAudioRoute: true
+      podcasterDialogueAudioRoute: true,
+      browserRendererAvailable: healthPayload.browserRendererAvailable,
+      browserRendererCode: healthPayload.browserRendererCode,
+      playwrightModuleAvailable: healthPayload.playwrightModuleAvailable,
+      playwrightChromiumExecutablePresent: healthPayload.playwrightChromiumExecutablePresent
     });
     console.log(`[gemini-backend] listening on http://${HOST}:${PORT}`);
   });
@@ -14348,6 +14350,7 @@ module.exports = {
   db,
   storageBucket,
   montageExportJobStore,
+  buildBackendHealthPayload,
   executeMontageExportPipeline,
   buildMontageSceneFailure,
   getBackendPublicBaseUrl,

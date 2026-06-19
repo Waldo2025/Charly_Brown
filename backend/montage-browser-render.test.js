@@ -39,8 +39,12 @@ test("getMontageBrowserRendererAvailability reports a stable availability shape"
   const availability = getMontageBrowserRendererAvailability();
   assert.equal(typeof availability, "object");
   assert.equal(typeof availability.available, "boolean");
+  assert.equal(typeof availability.playwrightModuleAvailable, "boolean");
+  assert.equal(typeof availability.playwrightChromiumExecutablePresent, "boolean");
   if (availability.available) {
     assert.ok(availability.playwright?.chromium);
+    assert.equal(availability.playwrightModuleAvailable, true);
+    assert.equal(availability.playwrightChromiumExecutablePresent, true);
   } else {
     assert.ok(String(availability.code || "").trim());
     assert.ok(String(availability.message || "").trim());
