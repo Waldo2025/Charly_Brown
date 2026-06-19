@@ -11935,7 +11935,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       let filterIndex = 0;
       const filterSegments = [];
 
-      if (reviewOnScreenTextEnabled) {
+      if (reviewOnScreenTextEnabled || normalOnScreenTextEnabled) {
         emitStage("apply_onscreen_text", 0.8, "Aplicando texto en pantalla y capas finales.");
         const onScreenTextSettings = {
           ...input.onScreenTextSettings,
