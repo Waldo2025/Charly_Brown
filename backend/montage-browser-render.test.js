@@ -1,42 +1,55 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 
 const {
-  buildMontageBrowserFinalVisualPayload
+  normalizeMontageRenderMode,
+  shouldUseBrowserMontageRenderer,
+  buildMontageBrowserRenderBootstrap
 } = require("./montage-browser-render.js");
 
-test("browser final visual payload preserves on-screen text timeline and brand asset url", () => {
-  const payload = buildMontageBrowserFinalVisualPayload({
-    renderMode: "browser",
-    onScreenTextSettings: {
-      enabled: true,
-      fontFamily: "Inter"
-    },
-    onScreenTextSegments: [
-      {
-        id: "row-1-onscreen",
-        rowId: "row-1",
-        text: "Linea uno linea dos",
-        wrappedText: "Linea uno\nlinea dos",
-        startMs: 0,
-        durationMs: 2400,
-        layout: { xPct: 0.21, yPct: 0.72, widthPct: 0.58, heightPct: 0.14 }
-      }
-    ],
-    overlayCards: [{ id: "card-1" }],
-    brandOverlay: {
-      enabled: true,
-      assetPath: "public/podcaster/logo.png",
-      position: "top-right"
-    }
-  }, "/Users/waldolopez/Documents/CharlyBrown");
+test("normalizeMontageRenderMode defaults invalid values to browser", () => {
+  assert.equal(normalizeMontageRenderMode("browser"), "browser");
+  assert.equal(normalizeMontageRenderMode("ffmpeg-legacy"), "ffmpeg-legacy");
+  assert.equal(normalizeMontageRenderMode("invalid"), "browser");
+});
 
-  assert.equal(payload.renderMode, "browser");
-  assert.equal(payload.onScreenTextTimeline.enabled, true);
-  assert.equal(payload.onScreenTextTimeline.settings.fontFamily, "Inter");
-  assert.equal(payload.onScreenTextTimeline.segments.length, 1);
-  assert.equal(payload.onScreenTextTimeline.segments[0].wrappedText, "Linea uno\nlinea dos");
-  assert.equal(payload.onScreenTextSegments.length, 1);
-  assert.equal(payload.overlayCards.length, 1);
-  assert.match(payload.brandOverlay.assetUrl, /^file:\/\/\/Users\/waldolopez\/Documents\/CharlyBrown\/public\/podcaster\/logo\.png$/);
+test("shouldUseBrowserMontageRenderer enables browser mode only for normal video exports", () => {
+  assert.equal(shouldUseBrowserMontageRenderer({
+    renderMode: "browser",
+    exportMode: "normal",
+    onlyAudio: false
+  }), true);
+
+  assert.equal(shouldUseBrowserMontageRenderer({
+    renderMode: "browser",
+    exportMode: "review",
+    onlyAudio: false
+  }), false);
+
+  assert.equal(shouldUseBrowserMontageRenderer({
+    renderMode: "browser",
+    exportMode: "normal",
+    onlyAudio: true
+  }), false);
+});
+
+test("buildMontageBrowserRenderBootstrap embeds local render runtime config", () => {
+  const publicRoot = path.resolve(__dirname, "..", "public");
+  const html = buildMontageBrowserRenderBootstrap({
+    publicRoot,
+    payload: {
+      sessionId: "session-1",
+      renderMode: "browser",
+      overlayCards: [],
+      onScreenTextTimeline: null
+    },
+    baseVideoPath: "/tmp/base-video.mp4",
+    viewport: { width: 1280, height: 720 }
+  });
+
+  assert.match(html, /__PODCASTER_MONTAGE_RENDER_CONFIG__/);
+  assert.match(html, /file:\/\/\/tmp\/base-video\.mp4/);
+  assert.match(html, /podcaster-render\.js/);
+  assert.match(html, /podcaster-text-render\.js/);
 });

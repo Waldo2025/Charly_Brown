@@ -20,33 +20,6 @@ function pathToFileUrl(targetPath = "") {
   return `file://${resolved.startsWith("/") ? "" : "/"}${resolved.replace(/\\/g, "/")}`;
 }
 
-function buildMontageBrowserFinalVisualPayload(input = {}, cwd = process.cwd()) {
-  const source = input && typeof input === "object" ? input : {};
-  const onScreenTextSegments = Array.isArray(source.onScreenTextSegments) ? source.onScreenTextSegments : [];
-  const onScreenTextSettings = source.onScreenTextSettings && typeof source.onScreenTextSettings === "object"
-    ? source.onScreenTextSettings
-    : null;
-  const brandOverlay = source?.brandOverlay?.assetPath
-    ? {
-      ...source.brandOverlay,
-      assetUrl: pathToFileUrl(path.resolve(String(cwd || process.cwd()).trim() || process.cwd(), String(source.brandOverlay.assetPath || "").trim()))
-    }
-    : source?.brandOverlay || null;
-  return {
-    ...source,
-    renderMode: "browser",
-    onScreenTextTimeline: onScreenTextSettings && onScreenTextSegments.length
-      ? {
-        enabled: true,
-        settings: onScreenTextSettings,
-        segments: onScreenTextSegments
-      }
-      : null,
-    onScreenTextSegments,
-    brandOverlay
-  };
-}
-
 function buildMontageBrowserRenderBootstrap({
   publicRoot = "",
   payload = {},
@@ -146,7 +119,6 @@ async function renderMontageBrowserOverlayVideo({
 module.exports = {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
-  buildMontageBrowserFinalVisualPayload,
   buildMontageBrowserRenderBootstrap,
   renderMontageBrowserOverlayVideo
 };

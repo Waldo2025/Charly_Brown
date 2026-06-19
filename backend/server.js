@@ -82,7 +82,6 @@ const {
 const {
   normalizeMontageRenderMode,
   shouldUseBrowserMontageRenderer,
-  buildMontageBrowserFinalVisualPayload,
   renderMontageBrowserOverlayVideo
 } = require("./montage-browser-render.js");
 const {
@@ -11054,7 +11053,25 @@ async function renderMontageBrowserFinalVisualPass({
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
   };
-    const browserPayload = buildMontageBrowserFinalVisualPayload(input, process.cwd());
+    const browserOverlayPayload = {
+      ...input,
+      // Export normal already burns on-screen text per scene via ASS/libass.
+      // The browser visual pass should only add overlays/branding on top of that result.
+      onScreenTextTimeline: null,
+      onScreenTextSettings: null,
+      onScreenTextSegments: [],
+      onScreenTextRenderedSegments: []
+    };
+    const browserPayload = {
+      ...browserOverlayPayload,
+      renderMode: "browser",
+      brandOverlay: browserOverlayPayload?.brandOverlay?.assetPath
+        ? {
+          ...browserOverlayPayload.brandOverlay,
+          assetUrl: `file://${path.resolve(process.cwd(), String(browserOverlayPayload.brandOverlay.assetPath || "").trim()).replace(/\\/g, "/")}`
+        }
+        : browserOverlayPayload?.brandOverlay
+    };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");
   const totalDurationMs = Math.max(
@@ -11315,9 +11332,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const intermediateParams = resolveMontageIntermediateVideoParams(input.format);
     const outExt = getMontageExportExtension(input.format);
     const scaleFilter = resolveMontageExportScaleFilter(input.resolution);
-    const shouldBurnSceneOnScreenText = input.exportMode !== "review"
-      && normalizeMontageRenderMode(input.renderMode || "browser") !== "browser"
-      && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    const shouldBurnSceneOnScreenText = input.exportMode !== "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
     const downloadInput = createMontageAssetDownloader({ tmpDir, uid, sessionId: input.sessionId, shouldAbort });
     const intermediatePaths = [];
     const skippedEntries = [];
@@ -11844,7 +11859,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || hasBrandOverlay
     );
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
-    const hasBrowserVisualPass = shouldAttemptBrowserRenderer && hasFinalVisualPass;
+    const hasBrowserVisualPass = false;
     console.info("[backend][montage-export][visual-pass-decision]", {
       hasFinalVisualPass,
       hasBrowserVisualPass,
