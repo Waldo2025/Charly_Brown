@@ -12,7 +12,7 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=256
+        value: --max-old-space-size=1024
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/src/backend/.playwright-browsers
       - key: API_HOST
@@ -48,7 +48,7 @@ services:
       - key: NODE_VERSION
         value: 22.14.0
       - key: NODE_OPTIONS
-        value: --max-old-space-size=256
+        value: --max-old-space-size=1024
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/project/src/backend/.playwright-browsers
       - key: FIREBASE_PROJECT_ID
