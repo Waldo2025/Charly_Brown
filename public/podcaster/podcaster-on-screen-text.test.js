@@ -101,3 +101,36 @@ test("render spec preserves frontend wrappedText for export parity", () => {
     global.document = previousDocument;
   }
 });
+
+test("render spec keeps 3d/bg-none tracking and vertical offset for export parity", () => {
+  const previousDocument = global.document;
+  global.document = undefined;
+  try {
+    const spec = resolveOnScreenTextRenderSpec({
+      settings: {
+        fontFamily: "Inter",
+        fontSizePx: 44,
+        fontWeight: "bold",
+        fontStyle: "normal",
+        stylePreset: "3d",
+        bgPreset: "none"
+      },
+      layout: {
+        xPct: 0.21,
+        yPct: 0.72,
+        widthPct: 0.58,
+        heightPct: 0.14
+      },
+      sourceWidth: 1280,
+      sourceHeight: 720,
+      resolution: "source",
+      text: "El inventor Marcos preparaba con nerviosismo el Dispositivo Beta en su laboratorio, listo para la prueba final.",
+      wrappedText: "El inventor Marcos preparaba con nerviosismo el Dispositivo Beta en su laboratorio,\nlisto para la prueba final."
+    });
+    assert.equal(spec.letterSpacingEm, -0.03);
+    assert.equal(spec.letterSpacingPx, -1.32);
+    assert.equal(spec.textOffsetYPx, 7);
+  } finally {
+    global.document = previousDocument;
+  }
+});

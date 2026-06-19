@@ -229,6 +229,13 @@
     return String(value || "").trim().toLowerCase() === "italic" ? "italic" : "normal";
   }
 
+  function resolveOnScreenTextLetterSpacingEm(settings = {}) {
+    const stylePreset = String(settings?.stylePreset || "").trim().toLowerCase();
+    const bgPreset = String(settings?.bgPreset || "").trim().toLowerCase();
+    if (stylePreset === "3d" && bgPreset === "none") return -0.03;
+    return 0;
+  }
+
   function buildCanonicalOnScreenTextLayoutBounds(widthPct = STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT, heightPct = STUDIO_ONSCREEN_TEXT_DEFAULT_HEIGHT_PCT, settings = null) {
     const current = normalizeOnScreenTextTrackSettings(settings || {});
     const safeWidthPct = clampNumber(widthPct, 0.08, 0.9, STUDIO_ONSCREEN_TEXT_DEFAULT_WIDTH_PCT);
@@ -948,6 +955,7 @@
     let approxCharWidthPx = Math.max(9, fontSizePx * 0.56);
     let maxChars = Math.max(10, Math.floor(boxWidthPx / approxCharWidthPx));
     let maxLines = Math.max(2, Math.floor(boxHeightPx / lineHeightPx));
+    const letterSpacingEm = resolveOnScreenTextLetterSpacingEm(settings);
     const providedWrappedText = normalizeWrappedTextValue(config.wrappedText || "");
     const resolveWrapResult = () => (providedWrappedText
       ? { text: providedWrappedText, truncated: false }
@@ -961,7 +969,7 @@
         fontFamily: getOnScreenTextFontFamilyCss(settings.fontFamily),
         fontWeight: settings.fontWeight,
         fontStyle: settings.fontStyle,
-        letterSpacingEm: -0.03
+        letterSpacingEm
       }));
     let wrapResult = resolveWrapResult();
     let renderedLineCount = Math.max(1, String(wrapResult.text || "").split("\n").length);
@@ -1031,6 +1039,9 @@
     let xExpr = `${rawXPx}+(${boxWidthPx}-text_w)/2`;
     if (textAlign === "left") xExpr = String(rawXPx);
     else if (textAlign === "right") xExpr = `${rawXPx + boxWidthPx}-text_w`;
+    const textOffsetYPx = settings.stylePreset === "3d" && settings.bgPreset === "none"
+      ? Math.round(fontSizePx * 0.16)
+      : 0;
 
     return {
       exportCanvasWidth,
@@ -1048,6 +1059,8 @@
       lineSpacingPx,
       lineHeightPx,
       previewLineHeightPx: Math.max(1, Math.round(lineHeightPx * previewScaleY * 1000) / 1000),
+      letterSpacingEm,
+      letterSpacingPx: Math.round(fontSizePx * letterSpacingEm * 1000) / 1000,
       approxCharWidthPx,
       maxChars,
       maxLines,
@@ -1082,6 +1095,7 @@
       bottomSafetyPx,
       bottomSafetyPct: Math.max(0, Math.min(1, bottomSafetyPx / exportCanvasHeight)),
       yPx,
+      textOffsetYPx,
       xExpr
     };
   }
@@ -1506,6 +1520,7 @@
     buildOnScreenTextBubbleInlineStyle,
     inferOnScreenTextLookPreset,
     resolveOnScreenTextPreviewLayoutSpec,
+    resolveOnScreenTextLetterSpacingEm,
     shouldRepairLegacyOnScreenTextLayout,
     getOnScreenTextResizeHandles,
     buildOnScreenTextSelectionFrameHtml,
