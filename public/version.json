@@ -1,9 +1,9 @@
 {
-  "version": "1.0.10.216",
-  "build": "2026-1.0.10.216",
+  "version": "1.0.10.217",
+  "build": "2026-1.0.10.217",
   "branch": "codex-bootstrap",
   "changelog": [
-    "Corregido: El export de montage ahora recupera correctamente el logo.png, el volumen de la música de fondo y evita la duplicación de audio de diálogo en escenas de la biblioteca, alineando el renderizado visual y tipografía de los subtítulos de karaoke con el preview del editor.",
+    "Corregido: El audio de fondo MP3 subido localmente ahora se escucha en el export de montage: buildUploadedPanelMusicSegments ahora incluye localMediaCacheKey derivado de resolvePanelMusicSessionCacheKey para que hydrateMontageSceneMediaAsset recupere el audio del IndexedDB correctamente. El audio Gemini duplicado con desfase también fue corregido.",
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
     "Corregido: El export de Podcaster usa un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke, cards y logo fieles al preview.",
     "Corregido: El export final de Podcaster ahora guarda el MP4 en Storage mediante upload no resumable, evitando el fetch OAuth a googleapis.com/oauth2/v4/token que estaba cerrándose prematuramente en Render.",
@@ -15,7 +15,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
-    "Actualizado: Se incrementan version.json y los cache-busters de Podcaster para forzar la carga del frontend alineado con el fix de logo, música de fondo y duplicación de audio de diálogo en el timeline persistido en Firestore.",
+    "Actualizado: Se incrementan version.json y los cache-busters de podcaster-montage-export.js y podcaster-panel-music.js para forzar la carga del fix de audio de fondo MP3 en el export de montage.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el fix de instalación local de Chromium/Playwright en Render.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con los fixes de memoria, cola de export y runtime del browser renderer en Render.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el endurecimiento del browser renderer y la persistencia fiel del payload de export.",
@@ -155,5 +155,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.216"
+  "cache_version": "2026-1.0.10.217"
 }
