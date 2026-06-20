@@ -2675,7 +2675,7 @@ export function buildMontageExportPayload(session = null) {
         const overlapStartMs = Math.max(segmentStartMs, sceneStartMs);
         const overlapEndMs = Math.min(segmentEndMs, sceneEndMs);
         const overlapDurationMs = Math.max(0, overlapEndMs - overlapStartMs);
-        if (overlapDurationMs < STUDIO_TIMELINE_MIN_CLIP_MS) return [];
+        if (overlapDurationMs <= 0) return [];
         const sceneVolumePct = window.getSceneBackgroundMusicVolumeOverridePct(activeSession, rowId);
         const effectiveVolumePct = baseVolumePct * (Number.isFinite(sceneVolumePct) ? (sceneVolumePct / 100) : 1);
         if (effectiveVolumePct <= 0.0001) return [];
@@ -2705,6 +2705,18 @@ export function buildMontageExportPayload(session = null) {
       .map((segment, idx) => {
         const rowId = String(segment?.rowId || "").trim();
         if (!rowId) return null;
+        const rows = window.getSessionRows?.(activeSession) || [];
+        const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+        const clip = window.resolveDialogueVideoForRow?.(activeSession, rowId) || null;
+        const checkLib = typeof window.isPublicLibrarySceneRow === "function"
+          ? window.isPublicLibrarySceneRow
+          : (r, c) => Boolean(r?.sourcePublicSceneLibraryId || r?.publicSceneLibraryId || c?.publicSceneLibraryId || c?.model === "public-scene-library");
+        const hasExplicitAudio = typeof window.hasExplicitDialogueAudioForRow === "function"
+          ? window.hasExplicitDialogueAudioForRow(activeSession, rowId)
+          : false;
+        if (checkLib(row, clip) && !hasExplicitAudio) {
+          return null;
+        }
         const runtime = runtimeByRowId.get(rowId) || null;
         const storedAudio = window.resolveDialogueAudioForRow(activeSession, rowId);
         const src = String(

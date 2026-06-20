@@ -11100,15 +11100,27 @@ async function renderMontageBrowserFinalVisualPass({
     width: Math.max(2, Math.round(Number(sourceDims.width || 1280) || 1280)),
     height: Math.max(2, Math.round(Number(sourceDims.height || 720) || 720))
   };
+  let brandOverlay = input?.brandOverlay;
+  if (brandOverlay?.assetPath && brandOverlay.enabled === true) {
+    const resolvedBrandPath = resolveBrandOverlayAssetPath(brandOverlay.assetPath);
+    if (resolvedBrandPath && fs.existsSync(resolvedBrandPath)) {
+      try {
+        const ext = path.extname(resolvedBrandPath).toLowerCase().replace(".", "");
+        const mime = ext === "png" ? "image/png" : (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
+        const base64 = fs.readFileSync(resolvedBrandPath).toString("base64");
+        brandOverlay = {
+          ...brandOverlay,
+          assetUrl: `data:${mime};base64,${base64}`
+        };
+      } catch (err) {
+        console.warn("[backend][montage-export][brand-overlay-base64-failed]", err.message);
+      }
+    }
+  }
   const browserPayload = {
     ...input,
     renderMode: "browser",
-    brandOverlay: input?.brandOverlay?.assetPath
-      ? {
-        ...input.brandOverlay,
-        assetUrl: `file://${path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()).replace(/\\/g, "/")}`
-      }
-      : input?.brandOverlay
+    brandOverlay
   };
   const bootstrapHtmlPath = path.join(tmpDir, "montage-browser-render.html");
   const renderOutputDir = path.join(tmpDir, "montage-browser-recording");

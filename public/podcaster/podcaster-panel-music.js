@@ -1171,7 +1171,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
     }).filter((segment) => segment.sourceUrl);
     const sourceUrl = (!uploadedMode && panelMusicState.sourceType === "track") ? resolvePanelMusicTrackSrc() : "";
     const sourceType = uploadedMode
-      ? (sourceItems.length ? "track" : "none")
+      ? (activeTrack || sourceItems.length ? "track" : "none")
       : (panelMusicState.sourceType === "track" ? "track" : "none");
     return {
       sourceType,
