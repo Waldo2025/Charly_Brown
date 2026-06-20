@@ -2803,6 +2803,7 @@ export function buildMontageExportPayload(session = null) {
           downloadUrl: String(segment?.downloadUrl || "").trim(),
           dataUrl: String(segment?.dataUrl || segment?.localDataUrl || "").trim(),
           localDataUrl: String(segment?.localDataUrl || segment?.dataUrl || "").trim(),
+          localMediaCacheKey: String(segment?.localMediaCacheKey || "").trim(),
           mimeType: String(segment?.mimeType || "").trim(),
           startMs,
           endMs,

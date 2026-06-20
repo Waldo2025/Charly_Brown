@@ -678,6 +678,10 @@ export function createPodcasterPanelMusicApi(deps = {}) {
 
   function buildUploadedPanelMusicSegments(session = null) {
     const activeSession = session || getActiveSession();
+    const sessionId = String(activeSession?.id || "").trim();
+    // Clave de IndexedDB donde está guardado el audio subido localmente.
+    // Se incluye en cada segmento para que hydrateMontageSceneMediaAsset pueda recuperarlo.
+    const uploadedLocalMediaCacheKey = sessionId ? resolvePanelMusicSessionCacheKey(sessionId, "uploaded") : "";
     const allTracks = getPanelMusicUploadedTracks();
     const uploadedTracks = getEnabledPanelMusicUploadedTracks().filter((track) => getPanelMusicTrackDurationSec(track) > 0.05);
     const entries = buildTimelineRuntimeEntries(activeSession);
@@ -745,6 +749,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
           ...single,
           slotLabel: String(single.slotLabel || "Audio 1").trim() || "Audio 1",
           trackIndex: fullTrackIndex,
+          localMediaCacheKey: single.localMediaCacheKey || uploadedLocalMediaCacheKey,
           startMs,
           endMs: startMs + trimOutMs,
           durationSec: getPanelMusicTrackDurationSec(single),
@@ -784,6 +789,7 @@ export function createPodcasterPanelMusicApi(deps = {}) {
         ...track,
         slotLabel: String(track.slotLabel || `Audio ${index + 1}`).trim() || `Audio ${index + 1}`,
         trackIndex: fullTrackIndex,
+        localMediaCacheKey: track.localMediaCacheKey || uploadedLocalMediaCacheKey,
         startMs,
         endMs: startMs + visibleDurationMs,
         durationSec: getPanelMusicTrackDurationSec(track),
