@@ -3791,6 +3791,12 @@ function resolveFallbackDialogueAudioForRow(session = null, rowId = "") {
 function resolveDialogueAudioForRow(session = null, rowId = "") {
   const key = String(rowId ?? "").trim();
   if (!key) return null;
+  const rows = getSessionRows(session);
+  const row = rows.find((item) => String(item?.id || "").trim() === key) || null;
+  const clip = resolveDialogueVideoForRow(session, key);
+  if (isPublicLibrarySceneRow(row, clip) && !hasExplicitDialogueAudioForRow(session, key)) {
+    return null;
+  }
   return getDialogueAudioMap(session)[key] || resolveFallbackDialogueAudioForRow(session, key);
 }
 

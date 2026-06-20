@@ -3000,7 +3000,7 @@ export function buildMontageExportPayload(session = null) {
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
   const trackUrl = String(panelMusic?.downloadUrl || panelMusic?.storagePath || panelMusic?.sourceUrl || panelMusic?.localDataUrl || panelMusic?.dataUrl || "").trim();
-  const trackVolumePct = Math.max(0, Math.min(200, Math.round(Number(panelMusic?.volume ?? 0))));
+  const trackVolumePct = normalizeLegacyPct(panelMusic?.volume ?? 0, 0);
   const includeBackgroundMusic = Boolean(canUseTrackMusic && trackUrl && trackVolumePct > 0 && trackBackgroundSegments.length === 0);
   const backgroundMusic = includeBackgroundMusic ? {
     storagePath: String(panelMusic?.storagePath || "").trim(),

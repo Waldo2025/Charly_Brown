@@ -9483,12 +9483,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     }).filter(Boolean);
   const brandOverlay = brandOverlayRaw ? (() => {
     const assetPathRaw = clampText(brandOverlayRaw?.assetPath || "", 320);
-    const cleanRelativeAssetPath = assetPathRaw.replace(/^[/\\]+/g, "");
-    const resolvedAssetPath = cleanRelativeAssetPath
-      ? path.resolve(repoRoot, cleanRelativeAssetPath)
-      : "";
-    const isSafeResolvedPath = resolvedAssetPath
-      && (resolvedAssetPath === repoRoot || resolvedAssetPath.startsWith(`${repoRoot}${path.sep}`));
+    const resolvedAssetPath = resolveBrandOverlayAssetPath(assetPathRaw);
     const position = ["top-right", "top-left", "bottom-right", "bottom-left"].includes(String(brandOverlayRaw?.position || "").trim())
       ? String(brandOverlayRaw.position).trim()
       : "top-right";
@@ -9496,7 +9491,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
     return {
       enabled: brandOverlayRaw?.enabled !== false,
-      assetPath: isSafeResolvedPath ? resolvedAssetPath : "",
+      assetPath: resolvedAssetPath,
       assetUrl: clampText(brandOverlayRaw?.assetUrl || "", 900),
       position,
       marginPct: clampNumber(brandOverlayRaw?.marginPct, 0, 0.2, defaultBrandMarginPct),
@@ -10995,6 +10990,29 @@ async function appendMontageSceneOnScreenTextAssFilters({
   };
 }
 
+function resolveBrandOverlayAssetPath(assetPathRaw = "") {
+  const cleanPath = String(assetPathRaw || "").trim().replace(/^[/\\]+/g, "");
+  if (!cleanPath) return "";
+  const repoRoot = path.resolve(__dirname, "..");
+  const candidates = [
+    path.resolve(repoRoot, "public", cleanPath),
+    path.resolve(repoRoot, cleanPath),
+    path.resolve(process.cwd(), cleanPath),
+    path.resolve(process.cwd(), "public", cleanPath)
+  ];
+  for (const cand of candidates) {
+    const resolved = path.resolve(cand);
+    if (fs.existsSync(resolved) && (resolved === repoRoot || resolved.startsWith(`${repoRoot}${path.sep}`))) {
+      return resolved;
+    }
+  }
+  const fallback = path.resolve(repoRoot, "public", cleanPath);
+  if (fallback === repoRoot || fallback.startsWith(`${repoRoot}${path.sep}`)) {
+    return fallback;
+  }
+  return "";
+}
+
 function buildMontageBrandOverlayFilter(brandOverlay = null, {
   width = 1280,
   height = 720,
@@ -11003,7 +11021,8 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
   outputLabel = "vout"
 } = {}) {
   if (!brandOverlay || typeof brandOverlay !== "object") return "";
-  if (brandOverlay.enabled !== true || !brandOverlay.assetPath || !fs.existsSync(brandOverlay.assetPath)) return "";
+  const resolvedPath = resolveBrandOverlayAssetPath(brandOverlay.assetPath);
+  if (brandOverlay.enabled !== true || !resolvedPath || !fs.existsSync(resolvedPath)) return "";
   const sourceWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
   const defaultBrandWidthPct = reelModeEnabled ? 0.09 : 0.05;
   const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
@@ -11018,7 +11037,7 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     ? `H-h-${marginPx}`
     : `${marginPx}`;
   return [
-    `movie=filename='${escapeFfmpegFilterPath(brandOverlay.assetPath)}',format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `movie=filename='${escapeFfmpegFilterPath(resolvedPath)}',format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
     `${baseInputLabel}[brand]overlay=eof_action=pass:shortest=0:x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
   ].join(";");
 }
@@ -11871,7 +11890,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
-    const hasBrandOverlay = input.brandOverlay?.enabled === true && input.brandOverlay?.assetPath && fs.existsSync(path.resolve(process.cwd(), String(input.brandOverlay.assetPath || "").trim()));
+    const resolvedBrandPath = input.brandOverlay?.enabled === true ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath) : "";
+    const hasBrandOverlay = Boolean(resolvedBrandPath && fs.existsSync(resolvedBrandPath));
     const hasFinalVisualPass = Boolean(
       reviewOnScreenTextEnabled
       || normalOnScreenTextEnabled

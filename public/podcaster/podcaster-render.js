@@ -336,6 +336,9 @@ async function boot() {
     subtitleCanvas.height = height;
     subtitleCanvas.hidden = true;
     await prepareBrandOverlay(brandImg, payload.brandOverlay || null, width);
+    try {
+      await document.fonts.ready;
+    } catch (_) {}
     globalThis.__podcasterMontageRenderReady = true;
 
     const tick = () => {

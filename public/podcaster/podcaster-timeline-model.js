@@ -1637,7 +1637,18 @@ function resolveTimelineClipMix(session = null, rowId = "") {
   const veoOverride = toFiniteNumber(clip?.veoVolumeOverridePct, Number.NaN);
   const geminiOverride = toFiniteNumber(clip?.geminiVolumeOverridePct, Number.NaN);
   let veoPct = Number.isFinite(veoOverride) ? Math.max(0, Math.min(100, Math.round(veoOverride))) : fallbackVeoPct;
-  const hasGeminiSegment = (dialogueTrack.enabled !== false) && (dialogueTrack.segments || []).some(s => String(s.rowId || "").trim() === key);
+  const rows = getSessionRows(activeSession);
+  const row = rows.find((item) => String(item?.id || "").trim() === key) || null;
+  const checkLib = typeof window.isPublicLibrarySceneRow === "function"
+    ? window.isPublicLibrarySceneRow
+    : (r, c) => Boolean(r?.sourcePublicSceneLibraryId || r?.publicSceneLibraryId || c?.publicSceneLibraryId || c?.model === "public-scene-library");
+  const hasExplicitAudio = typeof window.hasExplicitDialogueAudioForRow === "function"
+    ? window.hasExplicitDialogueAudioForRow(activeSession, key)
+    : false;
+  let hasGeminiSegment = (dialogueTrack.enabled !== false) && (dialogueTrack.segments || []).some(s => String(s.rowId || "").trim() === key);
+  if (checkLib(row, clip) && !hasExplicitAudio) {
+    hasGeminiSegment = false;
+  }
 
   if (hasGeminiSegment && !Number.isFinite(veoOverride)) {
     veoPct = 0;
