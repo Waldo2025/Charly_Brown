@@ -48,8 +48,13 @@ test("imported alumno rendering prioritizes rawHtmlExact and teacher notes use a
   const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
   assert.match(source, /const rawHtmlExact = String\(runtimePayload\.rawHtmlExact \|\| ""\)\.trim\(\);/);
   assert.match(source, /rawHtmlExact,\s*structuredHtml,\s*originalHtml,\s*plainText,/);
+  assert.match(source, /function _unidadRenderImportedAlumnoHtmlSmart\(/);
   assert.match(source, /function _unidadRenderImportedAlumnoHtmlExact\(/);
+  assert.match(source, /extraerActividades\(raw\)/);
+  assert.match(source, /looksLikeMultipleActivities/);
+  assert.match(source, /return _unidadConvertImportedTextToAscHtml\(raw, options\);/);
   assert.match(source, /importedTextPayload\.rawHtmlExact[\s\S]*\|\|\s*importedTextPayload\.structuredHtml[\s\S]*\|\|\s*importedTextPayload\.originalHtml/);
+  assert.match(source, /htmlAlumno = _unidadRenderImportedAlumnoHtmlSmart\(importedSource, \{/);
   assert.match(source, /function _unidadGenerarNotasMaestroDesdeDocumentoImportado\(/);
   assert.match(source, /importedTextPayload\s*\?\s*await _unidadGenerarNotasMaestroDesdeDocumentoImportado\(/);
 });
@@ -112,4 +117,3 @@ test("proyectos generation combines imported payloads, obtains objectives dynami
   assert.match(source, /const containsProyectos = projectRows\.some\(row => row\.subtema === "Proyectos"\);/);
   assert.match(source, /delete secuenciaActual\["Proyectos_T"\];/);
 });
-

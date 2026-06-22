@@ -24020,6 +24020,28 @@ function _unidadRenderImportedAlumnoHtmlExact(source = "", options = {}) {
   `.trim();
 }
 
+function _unidadRenderImportedAlumnoHtmlSmart(source = "", options = {}) {
+  const raw = String(source || "").trim();
+  if (!raw) return "";
+
+  const structured = extraerActividades(raw);
+  if (structured.actividadesNormales.length || structured.actividadesFichas.length) {
+    return _unidadConvertImportedTextToAscHtml(raw, options);
+  }
+
+  const plainLines = _unidadImportedPlainLines(raw);
+  const looksLikeMultipleActivities = plainLines.some((line) => {
+    const safe = String(line || "").replace(/\s+/g, " ").trim();
+    return /^actividad\s+\d+[\.:]/i.test(safe) || /^\d+\.\s+/.test(safe);
+  });
+
+  if (looksLikeMultipleActivities) {
+    return _unidadConvertImportedTextToAscHtml(raw, options);
+  }
+
+  return _unidadRenderImportedAlumnoHtmlExact(raw, options);
+}
+
 function _unidadDemoteImportedActivityHeadings(html = "") {
   const source = String(html || "").trim();
   if (!source || typeof DOMParser === "undefined") return source;
@@ -28909,7 +28931,7 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
             || importedTextPayload.plainText
             || ""
           ).trim();
-          htmlAlumno = _unidadRenderImportedAlumnoHtmlExact(importedSource, {
+          htmlAlumno = _unidadRenderImportedAlumnoHtmlSmart(importedSource, {
             fallbackTitle: importedOwnTitle || formatearSubtema(subtema)
           });
           logVisual(`✅ Contenido del alumno reutilizado desde texto importado (${htmlAlumno.length} caracteres)`);
