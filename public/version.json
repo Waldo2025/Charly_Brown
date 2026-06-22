@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.217",
-  "build": "2026-1.0.10.217",
+  "version": "1.0.10.218",
+  "build": "2026-1.0.10.218",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Actualizado: Se incrementa la resiliencia ante fallas de red de Google OAuth2 en backend e implementa reintentos automáticos elegantes para VEO ante backend_busy en el frontend. Se corrigen bugs del logo de marca en la exportación de montaje y la sincronización automática de Party Karaoke cuando los subtítulos están ocultos.",
     "Corregido: El audio de fondo MP3 subido localmente ahora se escucha en el export de montage: buildUploadedPanelMusicSegments ahora incluye localMediaCacheKey derivado de resolvePanelMusicSessionCacheKey para que hydrateMontageSceneMediaAsset recupere el audio del IndexedDB correctamente. El audio Gemini duplicado con desfase también fue corregido.",
     "Corregido: El polling de montage export en Podcaster ahora puede recuperar el estado del job desde Firestore cuando Firebase Hosting redirige /api a Render y la respuesta 502/503 queda bloqueada por CORS, evitando que el seguimiento se quede atorado en 'Aplicando texto en pantalla y capas finales'.",
     "Corregido: El export de Podcaster usa un renderer headless en navegador para capturar la capa visual final del montaje con texto karaoke, cards y logo fieles al preview.",
