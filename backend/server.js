@@ -1177,7 +1177,7 @@ function getStorageBucketCandidates() {
 let resolvedWritableStorageBucket = null;
 let resolvedWritableStorageBucketPromise = null;
 
-async function withRetry(fn, retries = 3, delayMs = 200) {
+async function withRetry(fn, retries = 6, delayMs = 500) {
   let lastErr = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
