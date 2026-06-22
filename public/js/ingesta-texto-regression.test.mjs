@@ -44,7 +44,7 @@ test("ingesta stores exact raw html separately from optional structured analysis
   assert.match(source, /structuredHtml:\s*item\.structuredHtml \|\| ""/);
 });
 
-test("imported alumno rendering prioritizes rawHtmlExact and teacher notes use a dedicated imported-document path", async () => {
+test("imported alumno rendering prioritizes Gemini structuredHtml and teacher notes use final alumno activities", async () => {
   const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
   assert.match(source, /const rawHtmlExact = String\(runtimePayload\.rawHtmlExact \|\| ""\)\.trim\(\);/);
   assert.match(source, /rawHtmlExact,\s*structuredHtml,\s*originalHtml,\s*plainText,/);
@@ -53,10 +53,10 @@ test("imported alumno rendering prioritizes rawHtmlExact and teacher notes use a
   assert.match(source, /extraerActividades\(raw\)/);
   assert.match(source, /looksLikeMultipleActivities/);
   assert.match(source, /return _unidadConvertImportedTextToAscHtml\(raw, options\);/);
-  assert.match(source, /importedTextPayload\.rawHtmlExact[\s\S]*\|\|\s*importedTextPayload\.structuredHtml[\s\S]*\|\|\s*importedTextPayload\.originalHtml/);
+  assert.match(source, /importedTextPayload\.structuredHtml[\s\S]*\|\|\s*importedTextPayload\.rawHtmlExact[\s\S]*\|\|\s*importedTextPayload\.originalHtml/);
   assert.match(source, /htmlAlumno = _unidadRenderImportedAlumnoHtmlSmart\(importedSource, \{/);
-  assert.match(source, /function _unidadGenerarNotasMaestroDesdeDocumentoImportado\(/);
-  assert.match(source, /importedTextPayload\s*\?\s*await _unidadGenerarNotasMaestroDesdeDocumentoImportado\(/);
+  assert.match(source, /const actividadesAlumnoParaMaestro = extraerActividades\(htmlAlumnoSoloMain\);/);
+  assert.match(source, /notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion\(\{/);
 });
 
 test("teacher notes fallback cleans duplicated resource continuation from lead text", async () => {

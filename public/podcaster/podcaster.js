@@ -4243,8 +4243,14 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const sourceDims = getOnScreenTextSourceDimensions();
   const resolution = getOnScreenTextRenderResolution();
   const includeHidden = options?.includeHidden === true;
-  if ((!settings.enabled || settings.showTrack === false) && !includeHidden) return { settings, segments: [] };
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
+  const clips = Object.values(clipMap || {});
+  const trackVisible = settings.enabled !== false && settings.showTrack !== false;
+  const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
+  const suppressFallbackFromEntries = includeHidden !== true && (!trackVisible || allHidden);
+  if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
+    return { settings, segments: [], suppressFallbackFromEntries };
+  }
   const layoutMap = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
   const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
   const segments = rows.map((row, index) => {
@@ -4294,7 +4300,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
       layout: expandedLayout
     };
   }).filter(Boolean);
-  return { settings, segments };
+  return { settings, segments, suppressFallbackFromEntries };
 }
 
 function buildDefaultOnScreenTextClipsByRowId(session = null) {

@@ -28925,8 +28925,8 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         let htmlAlumno = "";
         if (importedTextPayload) {
           const importedSource = String(
-            importedTextPayload.rawHtmlExact
-            || importedTextPayload.structuredHtml
+            importedTextPayload.structuredHtml
+            || importedTextPayload.rawHtmlExact
             || importedTextPayload.originalHtml
             || importedTextPayload.plainText
             || ""
@@ -29194,28 +29194,25 @@ Debe ser diferente a estos títulos ya usados: ${evitar || "ninguno"}.
         logVisual(`⏳ Generando notas del maestro para ${subtema}...`);
         let notasFinalesColMaestro = "";
         if (htmlAlumnoSoloMain.trim()) {
-          notasFinalesColMaestro = importedTextPayload
-            ? await _unidadGenerarNotasMaestroDesdeDocumentoImportado({
-              importedTextPayload,
-              categoria,
-              subtema,
-              tituloCreativo: tituloCreativoLimpioBase,
-              grado: gradoTexto,
-              nivel,
-              teacherNotesFormat
-            })
-            : await _unidadGenerarNotasMaestroSeccion({
-              promptContenidoActividades: htmlAlumnoSoloMain,
-              fallbackContenidoActividades: htmlAlumnoSoloMain,
-              categoria,
-              subtema,
-              tituloCreativo: tituloCreativoLimpioBase,
-              tituloSeccion: tituloCreativoLimpioBase,
-              grado: gradoTexto,
-              nivel,
-              expectedActivityCount: importedUsesOwnHeading ? 0 : cantidad,
-              teacherNotesFormat
-            });
+          const actividadesAlumnoParaMaestro = extraerActividades(htmlAlumnoSoloMain);
+          const totalActividadesAlumno = (
+            (Array.isArray(actividadesAlumnoParaMaestro.actividadesNormales)
+              ? actividadesAlumnoParaMaestro.actividadesNormales.length
+              : 0)
+            || (importedUsesOwnHeading ? 0 : cantidad)
+          );
+          notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion({
+            promptContenidoActividades: htmlAlumnoSoloMain,
+            fallbackContenidoActividades: htmlAlumnoSoloMain,
+            categoria,
+            subtema,
+            tituloCreativo: tituloCreativoLimpioBase,
+            tituloSeccion: tituloCreativoLimpioBase,
+            grado: gradoTexto,
+            nivel,
+            expectedActivityCount: totalActividadesAlumno,
+            teacherNotesFormat
+          });
         }
 
         if (String(categoria || "").trim() === "Matemáticas") {

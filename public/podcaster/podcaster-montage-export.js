@@ -2606,9 +2606,17 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
     ? onScreenTextTimeline
     : { settings: null, segments: [] };
   const existingSegments = Array.isArray(baseTimeline.segments) ? baseTimeline.segments.filter(Boolean) : [];
+  if (baseTimeline?.suppressFallbackFromEntries === true) {
+    return {
+      settings: baseTimeline.settings || null,
+      segments: [],
+      suppressFallbackFromEntries: true
+    };
+  }
   if (existingSegments.length) return {
     settings: baseTimeline.settings || null,
-    segments: existingSegments
+    segments: existingSegments,
+    suppressFallbackFromEntries: baseTimeline?.suppressFallbackFromEntries === true
   };
   const segmentByRowId = new Map(
     (Array.isArray(geminiTimelineSegments) ? geminiTimelineSegments : [])
@@ -2646,7 +2654,8 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
     .filter(Boolean);
   return {
     settings: baseTimeline.settings || (fallbackSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
-    segments: fallbackSegments
+    segments: fallbackSegments,
+    suppressFallbackFromEntries: false
   };
 }
 
@@ -3046,6 +3055,8 @@ export function buildMontageExportPayload(session = null) {
   const effectiveOnScreenTextTimeline = onScreenTextTimeline.segments.length
     ? onScreenTextTimeline
     : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments);
+  const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
+    || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
 
   const panelMusic = window.getPanelMontageMusicConfig();
   const canUseTrackMusic = panelMusic?.sourceType === "track" && (panelMusic?.sourceItems || []).length === 0;
@@ -3079,10 +3090,11 @@ export function buildMontageExportPayload(session = null) {
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
     filename: String(window.montageExportState.filename || defaultMontageExportFilename()).trim(),
-    onScreenTextTimeline: effectiveOnScreenTextTimeline.segments.length ? {
-      enabled: true,
+    onScreenTextTimeline: shouldSendOnScreenTextTimeline ? {
+      enabled: effectiveOnScreenTextTimeline.segments.length > 0,
       settings: effectiveOnScreenTextTimeline.settings,
-      segments: effectiveOnScreenTextTimeline.segments
+      segments: effectiveOnScreenTextTimeline.segments,
+      suppressFallbackFromEntries: effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true
     } : null,
     onScreenTextRenderedSegments: [],
     dialogueAudioMap,

@@ -18,7 +18,7 @@ assert.match(
 
 assert.match(
   podcasterSource,
-  /if \(\(!settings\.enabled \|\| settings\.showTrack === false\) && !includeHidden\) return \{ settings, segments: \[\] \};/,
+  /if \(\(!settings\.enabled \|\| settings\.showTrack === false\) && !includeHidden\) \{\s*return \{ settings, segments: \[\], suppressFallbackFromEntries \};\s*\}/,
   "El builder debe permitir incluir el track aunque esté oculto cuando se exporta party karaoke."
 );
 

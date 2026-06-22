@@ -71,3 +71,28 @@ test("teacher notes add a final adaptation paragraph for diverse learning and ac
     "Adaptation guidance should mention concrete examples of diverse learning and accessibility needs"
   );
 });
+
+test("teacher notes for imported alumno content are generated from htmlAlumnoSoloMain activities", async () => {
+  const source = await readFile(GENERAR_UNIDAD_PATH, "utf8");
+
+  assert.match(
+    source,
+    /const actividadesAlumnoParaMaestro = extraerActividades\(htmlAlumnoSoloMain\);/,
+    "Teacher notes should extract the final alumno activities before building col-maestro"
+  );
+  assert.match(
+    source,
+    /const totalActividadesAlumno = \(/,
+    "Teacher notes should compute the effective activity count from col-alumno"
+  );
+  assert.match(
+    source,
+    /notasFinalesColMaestro = await _unidadGenerarNotasMaestroSeccion\(\{[\s\S]*promptContenidoActividades: htmlAlumnoSoloMain,[\s\S]*expectedActivityCount: totalActividadesAlumno,/,
+    "Teacher notes should be generated from the final alumno HTML instead of the raw imported document path"
+  );
+  assert.doesNotMatch(
+    source,
+    /notasFinalesColMaestro = importedTextPayload\s*\?/,
+    "Teacher notes should no longer branch to the imported-document path when building col-maestro"
+  );
+});
