@@ -9,6 +9,7 @@ window.__CHARLY_CONFIG__ = Object.assign(
       ? "http://127.0.0.1:8787/api"
       : "/api",
     remoteApiBaseUrl: "https://charly-brown-gemini-backend.onrender.com/api",
+    exportApiBaseUrl: "https://snoopy-export.onrender.com/api",
     allowSameOriginApi: true,
     allowDirectGemini: false,
     forceDirectGemini: false,

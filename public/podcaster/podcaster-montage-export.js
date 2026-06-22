@@ -3,7 +3,7 @@
  * Handles configurations, filenames, Excel review row builders, and download utilities.
  */
 
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
+import { authFetchJson, buildApiUrlPreferRemote, buildExportApiUrl, getRemoteApiBase, resolveApiBase } from "../js/api-client-podcaster.js";
 import { doc as firestoreDoc, getDoc as firestoreGetDoc } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 import JASSUB from "../vendor/jassub/jassub.js";
 import {
@@ -398,6 +398,10 @@ function isMontageExportStatusRedirectFailure(error = null) {
       || message.includes("fetch failed")
       || message.includes("networkerror")
     );
+}
+
+function buildMontageExportEndpoint(path = "") {
+  return buildExportApiUrl(path);
 }
 
 function sanitizeMontageExportJobFirestorePayload(job = null) {
@@ -1215,7 +1219,7 @@ export async function closeMontageExportModal({ cancelActiveJob = true } = {}) {
 async function requestMontageExportCancel(jobId = "") {
   const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) return false;
-  await authFetchJson("/api/podcaster/montage/export-cancel", {
+  await authFetchJson(buildMontageExportEndpoint("/api/podcaster/montage/export-cancel"), {
     method: "POST",
     body: { jobId: cleanJobId },
     keepalive: true
@@ -1402,7 +1406,7 @@ export async function pollMontageExportJob(jobId = "") {
     // En Hosting esto hoy termina en un redirect 302 hacia Render, no en un reverse proxy real.
     // Si Render responde 502/503, el navegador puede terminar mostrando un Failed to fetch por CORS
     // aunque el job haya arrancado bien en el backend.
-    const exportStatusUrl = buildApiUrl(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
+    const exportStatusUrl = buildMontageExportEndpoint(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(cleanJobId)}`);
     logMontageExportDevtools("poll_request", {
       jobId: cleanJobId,
       url: exportStatusUrl,
@@ -3180,7 +3184,7 @@ export async function runMontageExport() {
       loadingMeta: "Manteniendo el preview del montaje mientras inicia la exportación…"
     }).catch(() => { });
     const submissionPayload = stripMontageExportSubmissionPayload(prepared.payload);
-    const data = await authFetchJson("/api/podcaster/montage/export", {
+    const data = await authFetchJson(buildMontageExportEndpoint("/api/podcaster/montage/export"), {
       method: "POST",
       body: submissionPayload
     });

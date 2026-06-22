@@ -71,6 +71,32 @@ function buildGenerationErrorMessage(error = null, fallback = "") {
   return String(fallback || error || "No se pudo completar la acción.").trim() || "No se pudo completar la acción.";
 }
 
+function extractDialogueVideoBusyDetail(source = null) {
+  const detail = source?.detail && typeof source.detail === "object"
+    ? source.detail
+    : (source && typeof source === "object" ? source : null);
+  if (!detail) return null;
+  return {
+    kind: String(detail.kind || detail.requestedKind || "").trim(),
+    activeJobId: String(detail.activeJobId || "").trim(),
+    activeCount: Math.max(0, Number(detail.activeCount || 0) || 0),
+    fallbackMode: String(detail.fallbackMode || "").trim(),
+    reason: String(detail.reason || "").trim()
+  };
+}
+
+function buildDialogueVideoBusyHint(source = null, attempt = 0, maxAttempts = 0) {
+  const detail = extractDialogueVideoBusyDetail(source);
+  const attemptLabel = maxAttempts > 0 ? ` (intento ${attempt}/${maxAttempts})` : "";
+  if (detail?.fallbackMode === "direct_in_memory" || detail?.reason === "bullmq_queue_unavailable") {
+    return `Backend ocupado con una exportación pesada en Render. Reintentando${attemptLabel}...`;
+  }
+  if (detail?.kind === "dialogue_video" || detail?.activeCount > 0) {
+    return `Backend ocupado con otra generación de escena. Reintentando${attemptLabel}...`;
+  }
+  return `Servidor ocupado. Reintentando${attemptLabel}...`;
+}
+
 function hasVisualReferenceTrace(details = {}) {
   return Boolean(
     details?.referenceImageCount
@@ -605,7 +631,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
       });
 
       let resp = null;
-      const maxBusyRetries = 30;
+      const maxBusyRetries = 6;
       const busyRetryDelayMs = 10000;
 
       for (let attempt = 0; attempt <= maxBusyRetries; attempt++) {
@@ -625,7 +651,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           const isBusy = status === 503 && (code === "backend_busy" || String(resp?.message || "").includes("pausó temporalmente VEO"));
 
           if (isBusy && attempt < maxBusyRetries) {
-            const message = `Servidor ocupado. Reintentando en 10s... (intento ${attempt + 1}/${maxBusyRetries})`;
+            const message = `${buildDialogueVideoBusyHint(resp, attempt + 1, maxBusyRetries)} en 10s.`;
             if (typeof options.onJobUpdate === "function") {
               try { options.onJobUpdate({ stage: "busy", hint: message }); } catch (_) {}
             }
@@ -648,7 +674,7 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
           const isBusy = status === 503 && (code === "backend_busy" || String(err.message || "").includes("pausó temporalmente VEO"));
 
           if (isBusy && attempt < maxBusyRetries) {
-            const message = `Servidor ocupado. Reintentando en 10s... (intento ${attempt + 1}/${maxBusyRetries})`;
+            const message = `${buildDialogueVideoBusyHint(err, attempt + 1, maxBusyRetries)} en 10s.`;
             if (typeof options.onJobUpdate === "function") {
               try { options.onJobUpdate({ stage: "busy", hint: message }); } catch (_) {}
             }

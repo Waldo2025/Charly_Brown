@@ -3,6 +3,7 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth
 const DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8787/api";
 const DEFAULT_REMOTE_API_BASE_SAFE = "/api";
 const DEFAULT_RENDER_API_BASE = "https://charly-brown-gemini-backend.onrender.com/api";
+const DEFAULT_EXPORT_API_BASE = "https://snoopy-export.onrender.com/api";
 
 function getAlternateLocalApiUrl(url = "") {
   const finalUrl = String(url || "").trim();
@@ -48,6 +49,10 @@ function getConfiguredApiBase() {
 
 export function getRemoteApiBase() {
   return String(window.__CHARLY_CONFIG__?.remoteApiBaseUrl || DEFAULT_RENDER_API_BASE).trim().replace(/\/+$/, "");
+}
+
+export function getExportApiBase() {
+  return String(window.__CHARLY_CONFIG__?.exportApiBaseUrl || DEFAULT_EXPORT_API_BASE).trim().replace(/\/+$/, "");
 }
 
 export function isLoopbackApiBase(url = "") {
@@ -117,6 +122,13 @@ export function buildApiUrlPreferRemote(path = "") {
     return buildApiUrlFromBase(remoteBase, input);
   }
   return buildApiUrl(input);
+}
+
+export function buildExportApiUrl(path = "") {
+  const input = String(path || "").trim();
+  if (!input) return getExportApiBase();
+  if (/^https?:\/\//i.test(input)) return input;
+  return buildApiUrlFromBase(getExportApiBase(), input);
 }
 
 export function buildApiUrlFromBase(base, path = "") {
@@ -304,7 +316,8 @@ export async function authFetchJson(url, options = {}) {
     // Suppress noisy logs for known transient backend 503 error montage_export_queue_unavailable to avoid log flood
     const isMontageQueueUnavailable = response.status === 503 && data && (data.error === 'montage_export_queue_unavailable' || data.code === 'montage_export_queue_unavailable');
     const isMontageBusyWithExport = response.status === 429 && data && (data.error === 'backend_busy_with_export' || data.code === 'backend_busy_with_export');
-    if (!isMontageQueueUnavailable && !isMontageBusyWithExport) {
+    const isBackendBusy = response.status === 503 && data && (data.error === 'backend_busy' || data.code === 'backend_busy');
+    if (!isMontageQueueUnavailable && !isMontageBusyWithExport && !isBackendBusy) {
       try {
         console.error("[api-client] request failed", {
           url: finalUrl,
