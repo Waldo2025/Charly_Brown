@@ -31,14 +31,13 @@ if (!/buildTrackBackgroundSegments/.test(montageExportSource) || !/backgroundSeg
   throw new Error("El export debe incluir segmentos de fondo por escena en audioTimeline.");
 }
 
-if (!/effectiveVolumePct = baseVolumePct \* \(Number\.isFinite\(sceneVolumePct\) \? \(sceneVolumePct \/ 100\) : 1\)/.test(montageExportSource)
-  || !/const shouldApplyFadeIn = Math\.abs\(overlapStartMs - segmentStartMs\) <= 1;/.test(montageExportSource)
-  || !/const shouldApplyFadeOut = Math\.abs\(overlapEndMs - segmentEndMs\) <= 1;/.test(montageExportSource)
-  || !/fadeOutMs: shouldApplyFadeOut \? Math\.max\(0, Math\.min\(overlapDurationMs, Number\(segment\?\.fadeOutMs \|\| 0\) \|\| 0\)\) : 0/.test(montageExportSource)
+if (!/const buildSceneBackgroundAutomationWindows = \(\) => \{/.test(montageExportSource)
+  || !/const sceneVolumePct = window\.getSceneBackgroundMusicVolumeOverridePct\(activeSession, rowId\);/.test(montageExportSource)
+  || !/sceneBackgroundAutomation:\s*backgroundAutomationWindows/.test(montageExportSource)
   || !/id: `track-bg-loop-\$\{loopIndex\}-\$\{cursorMs\}`/.test(montageExportSource)
   || !/duckingWhenGeminiPct: Math\.max\(40, Math\.min\(100, Number\(segment\?\.duckingWhenGeminiPct \?\? segment\?\.duckingPct \?\? panelMusic\?\.duckingWhenGeminiPct \?\? 60\)\)\)/.test(montageExportSource)
   || !/duckingWhenGeminiPct: Math\.max\(40, Math\.min\(100, Number\(panelMusic\?\.duckingWhenGeminiPct \?\? 60\)\)\)/.test(montageExportSource)) {
-  throw new Error("El payload de export debe conservar volumen por escena, ducking y fades solo en bordes reales del audio de fondo.");
+  throw new Error("El payload de export debe conservar overrides por escena como automatización sin cortar la continuidad del audio de fondo.");
 }
 
 if (!/const mix = entry\?\.rowId \? this\.deps\?\.resolveTimelineClipMix\?\.\(session, entry\.rowId\) : null;/.test(playbackSource)
@@ -49,8 +48,9 @@ if (!/const mix = entry\?\.rowId \? this\.deps\?\.resolveTimelineClipMix\?\.\(se
 
 if (!/const volumePct = Math\.max\(0, Math\.min\(200, legacyScaledPct\)\)/.test(readFileSync(new URL("../backend/server.js", import.meta.url), "utf8"))
   || !/fadeInMs/.test(readFileSync(new URL("../backend/server.js", import.meta.url), "utf8"))
-  || !/segmentDuckVolume = normalizeMontageBackgroundDuckVolume/.test(readFileSync(new URL("../backend/server.js", import.meta.url), "utf8"))) {
-  throw new Error("El backend debe preservar volumen 0-200, fades y ducking por segmento para el audio de fondo.");
+  || !/segmentDuckVolume = normalizeMontageBackgroundDuckVolume/.test(readFileSync(new URL("../backend/server.js", import.meta.url), "utf8"))
+  || !/buildFfmpegAutomationVolumeExpr/.test(readFileSync(new URL("../backend/server.js", import.meta.url), "utf8"))) {
+  throw new Error("El backend debe preservar volumen 0-200, fades, ducking y automatización por escena para el audio de fondo.");
 }
 
 console.log("Podcast scene background volume override OK.");

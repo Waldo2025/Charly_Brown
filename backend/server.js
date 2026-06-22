@@ -411,6 +411,46 @@ function buildFfmpegDuckVolumeExpr(segments = [], duckVolume = 0.46) {
   return `if(gt(${activeExpr},0),${factor},1)`;
 }
 
+function buildFfmpegAutomationVolumeExpr(windows = [], fallbackVolume = 1) {
+  const list = (Array.isArray(windows) ? windows : [])
+    .map((windowConfig) => {
+      const startSec = Math.max(0, Number(windowConfig?.startMs || 0) / 1000);
+      const endSec = Math.max(startSec + 0.05, Number(windowConfig?.endMs || 0) / 1000);
+      const volumePct = Math.max(0, Math.min(200, Number(windowConfig?.volumePct ?? 100)));
+      return {
+        startSec,
+        endSec,
+        factor: (volumePct / 100).toFixed(3)
+      };
+    })
+    .filter((windowConfig) => windowConfig.endSec > windowConfig.startSec)
+    .sort((a, b) => a.startSec - b.startSec);
+  const baseFactor = Math.max(0, Math.min(2, Number(fallbackVolume) || 1)).toFixed(3);
+  if (!list.length) return baseFactor;
+  return list.reduceRight(
+    (expr, windowConfig) => `if(between(t,${windowConfig.startSec.toFixed(3)},${windowConfig.endSec.toFixed(3)}),${windowConfig.factor},${expr})`,
+    baseFactor
+  );
+}
+
+function getSceneAutomationWindowsForSegment(segment = {}, sceneBackgroundAutomation = []) {
+  const startMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
+  const durationMs = Math.max(0, Math.round(Number(segment?.durationMs || 0) || 0));
+  const endMs = startMs + durationMs;
+  return (Array.isArray(sceneBackgroundAutomation) ? sceneBackgroundAutomation : [])
+    .map((windowConfig) => {
+      const overlapStartMs = Math.max(startMs, Math.round(Number(windowConfig?.startMs || 0) || 0));
+      const overlapEndMs = Math.min(endMs, Math.round(Number(windowConfig?.endMs || 0) || 0));
+      if (overlapEndMs <= overlapStartMs) return null;
+      return {
+        ...windowConfig,
+        startMs: overlapStartMs,
+        endMs: overlapEndMs
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizeMontageBackgroundDuckVolume(input = null, fallback = 0.60) {
   if (input === null || input === undefined || input === "") {
     return Math.max(0, Math.min(1, Number(fallback) || 0.60));
@@ -9288,6 +9328,9 @@ function normalizeMontageExportRequestBody(body = {}) {
     : {};
   const geminiSegmentsRaw = Array.isArray(audioTimelineRaw?.geminiSegments) ? audioTimelineRaw.geminiSegments : [];
   const backgroundSegmentsRaw = Array.isArray(audioTimelineRaw?.backgroundSegments) ? audioTimelineRaw.backgroundSegments : [];
+  const sceneBackgroundAutomationRaw = Array.isArray(audioTimelineRaw?.sceneBackgroundAutomation)
+    ? audioTimelineRaw.sceneBackgroundAutomation
+    : [];
   const repoRoot = path.resolve(__dirname, "..");
 
   const normalizeExportDialogueAudioMap = (sourceMap = {}) => {
@@ -9380,6 +9423,22 @@ function normalizeMontageExportRequestBody(body = {}) {
     };
   };
 
+  const normalizeSceneBackgroundAutomationWindow = (windowConfig = {}, idx = 0) => {
+    if (!windowConfig || typeof windowConfig !== "object") return null;
+    const startMs = Math.max(0, Math.round(Number(windowConfig?.startMs || 0) || 0));
+    const endMs = Math.max(startMs + 500, Math.round(Number(windowConfig?.endMs || startMs + 500) || 0));
+    const rawVolumePct = Number(windowConfig?.volumePct ?? 100);
+    const legacyScaledPct = Number.isFinite(rawVolumePct) && rawVolumePct > 0 && rawVolumePct <= 1 ? rawVolumePct * 100 : rawVolumePct;
+    const volumePct = Math.max(0, Math.min(200, legacyScaledPct));
+    return {
+      id: clampText(windowConfig?.id || `bg-window-${idx + 1}`, 140) || `bg-window-${idx + 1}`,
+      rowId: clampText(windowConfig?.rowId || "", 140),
+      startMs,
+      endMs,
+      volumePct
+    };
+  };
+
   const normalizeOnScreenTextSegment = (segment = {}, idx = 0) => {
     if (!segment || typeof segment !== "object") return null;
     const text = clampText(segment?.text || "", 500);
@@ -9432,6 +9491,10 @@ function normalizeMontageExportRequestBody(body = {}) {
   const timelineAudioSegments = [...geminiSegmentsRaw, ...backgroundSegmentsRaw]
     .slice(0, 600)
     .map((segment, idx) => normalizeTimelineAudioSegment(segment, idx))
+    .filter(Boolean);
+  const sceneBackgroundAutomation = sceneBackgroundAutomationRaw
+    .slice(0, 600)
+    .map((windowConfig, idx) => normalizeSceneBackgroundAutomationWindow(windowConfig, idx))
     .filter(Boolean);
   const dialogueAudioMap = normalizeExportDialogueAudioMap(dialogueAudioMapRaw);
   const normalizedGeminiTimelineSegments = timelineAudioSegments.filter((segment) => !isTimelineBackgroundAudioKind(segment?.kind));
@@ -9525,6 +9588,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     overlayCards,
     brandOverlay,
     backgroundMusic: raw?.backgroundMusic && typeof raw.backgroundMusic === "object" ? raw.backgroundMusic : null,
+    sceneBackgroundAutomation,
     backgroundMusicDuckingPct: (() => {
       const rawValue = Number(raw?.backgroundMusicDuckingPct ?? raw?.backgroundMusic?.duckingWhenGeminiPct);
       if (!Number.isFinite(rawValue)) return 60;
@@ -11255,10 +11319,13 @@ async function finalizeMontageExportAudioTrack({
         const inputIndex = idx + 1;
         const label = `a${idx}`;
         labels.push(label);
-        const exportOffset = exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null;
+        const kind = String(segment?.kind || "").trim().toLowerCase();
+        const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
+        const shouldOffsetByScene = !isBackgroundSegment || Boolean(String(segment?.rowId || "").trim());
+        const exportOffset = shouldOffsetByScene ? (exportOffsetsByRowId.get(String(segment?.rowId || "").trim()) || null) : null;
         const baseTimelineStartMs = Math.max(0, Math.round(Number(exportOffset?.timelineStartMs || 0) || 0));
         const relativeStartMs = Math.max(0, startMs - baseTimelineStartMs);
-        const adjustedStartMs = exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
+        const adjustedStartMs = shouldOffsetByScene && exportOffset ? Math.max(0, exportOffset.startMs + relativeStartMs) : startMs;
         let finalAdjustedStartMs = adjustedStartMs;
         let finalTrimInSec = trimInSec;
         let finalDurationSec = durationSec;
@@ -11281,15 +11348,24 @@ async function finalizeMontageExportAudioTrack({
         }
         const localVolumeExpr = escapeFfmpegExpr(fadeParts.join("*"));
         const baseChain = `[${inputIndex}:a]atrim=start=${finalTrimInSec.toFixed(3)}:duration=${finalDurationSec.toFixed(3)},asetpts=PTS-STARTPTS,volume='${localVolumeExpr}':eval=frame,adelay=${Math.round(finalAdjustedStartMs)}ms|${Math.round(finalAdjustedStartMs)}ms`;
-        const kind = String(segment?.kind || "").trim().toLowerCase();
-        const isBackgroundSegment = kind === "uploaded" || kind === "background-track" || kind === "background" || kind === "music";
+        const segmentAutomationWindows = isBackgroundSegment ? getSceneAutomationWindowsForSegment(segment, input.sceneBackgroundAutomation) : [];
+        const automationExprEscaped = segmentAutomationWindows.length
+          ? escapeFfmpegExpr(buildFfmpegAutomationVolumeExpr(segmentAutomationWindows, 1))
+          : "";
+        const filterSuffixes = [];
+        if (automationExprEscaped) {
+          filterSuffixes.push(`volume='${automationExprEscaped}':eval=frame`);
+        }
         if (isBackgroundSegment && input.normalizedGeminiTimelineSegments.length) {
           const segmentDuckVolume = normalizeMontageBackgroundDuckVolume(
             segment?.duckingWhenGeminiPct ?? segment?.duckingPct,
             configuredBackgroundDuckVolume
           );
           const bgDuckExprEscaped = escapeFfmpegExpr(buildFfmpegDuckVolumeExpr(input.normalizedGeminiTimelineSegments, segmentDuckVolume));
-          filters.push(`${baseChain},volume='${bgDuckExprEscaped}':eval=frame[${label}]`);
+          filterSuffixes.push(`volume='${bgDuckExprEscaped}':eval=frame`);
+        }
+        if (filterSuffixes.length) {
+          filters.push(`${baseChain},${filterSuffixes.join(",")}[${label}]`);
         } else {
           filters.push(`${baseChain}[${label}]`);
         }

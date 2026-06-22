@@ -2659,41 +2659,23 @@ export function buildMontageExportPayload(session = null) {
     return Math.max(0, Math.min(ceiling, scaled));
   };
 
-  const splitBackgroundSegmentsByScene = (segmentList = []) => {
+  const buildSceneBackgroundAutomationWindows = () => {
     const sceneEntries = runtimeEntries
       .slice()
       .sort((a, b) => Number(a?.startMs || 0) - Number(b?.startMs || 0));
-    return segmentList.flatMap((segment) => {
-      const segmentStartMs = Math.max(0, Math.round(Number(segment?.startMs || 0) || 0));
-      const segmentEndMs = Math.max(segmentStartMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(segment?.endMs || segmentStartMs + STUDIO_TIMELINE_MIN_CLIP_MS) || 0));
-      const segmentTrimInMs = Math.max(0, Math.round(Number(segment?.trimInMs || 0) || 0));
-      const baseVolumePct = Math.max(0, Math.min(200, Number(segment?.volumePct ?? 100)));
-      return sceneEntries.flatMap((entry) => {
-        const rowId = String(entry?.rowId || "").trim();
-        const sceneStartMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
-        const sceneEndMs = Math.max(sceneStartMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.endMs || sceneStartMs + STUDIO_TIMELINE_MIN_CLIP_MS) || 0));
-        const overlapStartMs = Math.max(segmentStartMs, sceneStartMs);
-        const overlapEndMs = Math.min(segmentEndMs, sceneEndMs);
-        const overlapDurationMs = Math.max(0, overlapEndMs - overlapStartMs);
-        if (overlapDurationMs <= 0) return [];
-        const sceneVolumePct = window.getSceneBackgroundMusicVolumeOverridePct(activeSession, rowId);
-        const effectiveVolumePct = baseVolumePct * (Number.isFinite(sceneVolumePct) ? (sceneVolumePct / 100) : 1);
-        if (effectiveVolumePct <= 0.0001) return [];
-        const shouldApplyFadeIn = Math.abs(overlapStartMs - segmentStartMs) <= 1;
-        const shouldApplyFadeOut = Math.abs(overlapEndMs - segmentEndMs) <= 1;
-        return [{
-          ...segment,
-          id: String(segment?.id || "bg").trim() ? `${String(segment?.id || "bg").trim()}-${rowId}-${overlapStartMs}` : `bg-${rowId}-${overlapStartMs}`,
-          rowId,
-          startMs: overlapStartMs,
-          durationMs: overlapDurationMs,
-          trimInMs: segmentTrimInMs + (overlapStartMs - segmentStartMs),
-          trimOutMs: segmentTrimInMs + (overlapStartMs - segmentStartMs) + overlapDurationMs,
-          fadeInMs: shouldApplyFadeIn ? Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeInMs || 0) || 0)) : 0,
-          fadeOutMs: shouldApplyFadeOut ? Math.max(0, Math.min(overlapDurationMs, Number(segment?.fadeOutMs || 0) || 0)) : 0,
-          volumePct: Math.max(0, Math.min(200, effectiveVolumePct))
-        }];
-      });
+    return sceneEntries.map((entry) => {
+      const rowId = String(entry?.rowId || "").trim();
+      if (!rowId) return null;
+      const sceneVolumePct = window.getSceneBackgroundMusicVolumeOverridePct(activeSession, rowId);
+      if (!Number.isFinite(sceneVolumePct)) return null;
+      const startMs = Math.max(0, Math.round(Number(entry?.startMs || 0) || 0));
+      const endMs = Math.max(startMs + STUDIO_TIMELINE_MIN_CLIP_MS, Math.round(Number(entry?.endMs || startMs + STUDIO_TIMELINE_MIN_CLIP_MS) || 0));
+      return {
+        rowId,
+        startMs,
+        endMs,
+        volumePct: Math.max(0, Math.min(200, Number(sceneVolumePct) || 0))
+      };
     }).filter(Boolean);
   };
 
@@ -2775,7 +2757,7 @@ export function buildMontageExportPayload(session = null) {
     const segments = window.buildUploadedPanelMusicSegments(activeSession);
     const panelMusic = window.getPanelMontageMusicConfig();
     if (!Array.isArray(segments) || !segments.length) return [];
-    return splitBackgroundSegmentsByScene(segments
+    return segments
       .map((segment, idx) => {
         const src = String(segment?.downloadUrl || segment?.storagePath || segment?.localDataUrl || segment?.dataUrl || "").trim();
         if (!src) return null;
@@ -2816,7 +2798,7 @@ export function buildMontageExportPayload(session = null) {
           volumePct
         };
       })
-      .filter(Boolean));
+      .filter(Boolean);
   };
 
   const buildTrackBackgroundSegments = () => {
@@ -2868,10 +2850,11 @@ export function buildMontageExportPayload(session = null) {
       });
       cursorMs += chunkDurationMs;
     }
-    return splitBackgroundSegmentsByScene(segments);
+    return segments;
   };
 
   const geminiTimelineSegments = montageAudioMode === "gemini-live-per-scene" ? buildGeminiTimelineSegments() : [];
+  const backgroundAutomationWindows = buildSceneBackgroundAutomationWindows();
   const uploadedBackgroundSegments = buildUploadedBackgroundSegments();
   const trackBackgroundSegments = buildTrackBackgroundSegments();
   const useTimelineAudio = geminiTimelineSegments.length > 0 || uploadedBackgroundSegments.length > 0 || trackBackgroundSegments.length > 0;
@@ -3055,7 +3038,8 @@ export function buildMontageExportPayload(session = null) {
       durationMs: timelineDurationMs,
       mode: "timeline",
       geminiSegments: geminiTimelineSegments,
-      backgroundSegments: [...uploadedBackgroundSegments, ...trackBackgroundSegments]
+      backgroundSegments: [...uploadedBackgroundSegments, ...trackBackgroundSegments],
+      sceneBackgroundAutomation: backgroundAutomationWindows
     } : null,
     bitrateSettings: {
       mode: window.montageExportState.bitrateMode,
