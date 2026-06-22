@@ -4247,7 +4247,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const clips = Object.values(clipMap || {});
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
   const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
-  const suppressFallbackFromEntries = includeHidden !== true && (!trackVisible || allHidden);
+  const suppressFallbackFromEntries = allHidden || (includeHidden !== true && !trackVisible);
   if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
     return { settings, segments: [], suppressFallbackFromEntries };
   }
@@ -4258,7 +4258,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
     if (!rowId) return null;
     const clip = clipMap[rowId] || null;
     if (!clip) return null;
-    if (clip.hidden === true && !includeHidden) return null;
+    if (clip.hidden === true) return null;
     const text = getOnScreenTextClipText(row);
     if (!text) return null;
     const runtime = runtimeByRowId.get(rowId) || null;

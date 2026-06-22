@@ -12,7 +12,7 @@ import { getDefaultFirebaseApp } from "./firebase-default-app.js";
 import { escapeHtml, safeUrl, sanitizeRichText, sanitizeTextInput } from "./security-utils.js?v=2026-1.0.0.59";
 import { bootstrapFirebaseAppCheck } from "./firebase-app-check.js?v=2026-1.0.0.59";
 import { getStorage, ref, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
-import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, hasAvailableApiBase } from "./api-client.js";
+import { authFetchJson, buildApiUrl, buildApiUrlPreferRemote, buildExportApiUrl, hasAvailableApiBase } from "./api-client.js";
 import { PodcasterPlaybackController } from "../podcaster/podcaster-playback-controller.js?v=2026-1.0.1.34";
 import { syncReelModeUi, resolveEffectiveExportResolution } from "../podcaster/podcaster-reels.js";
 import { buildAugmentedTimelineRuntimeEntries } from "../podcaster/podcaster-scene-timing.js";
@@ -2601,13 +2601,18 @@ function resolveDashboardRowOnScreenText(row = null) {
 
 function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntries = []) {
   const activeSession = session || currentMultimediaSession;
-  if (!activeSession) return { settings: { enabled: false }, segments: [] };
+  if (!activeSession) return { settings: { enabled: false }, segments: [], suppressFallbackFromEntries: true };
   const rows = extractDashboardSessionRows(activeSession) || [];
   const cfg = getPodcastVideoConfig(activeSession) || {};
   const settings = typeof window.normalizeOnScreenTextTrackSettings === 'function'
     ? window.normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {})
     : { enabled: true, showTrack: true };
-  if (!settings.enabled || settings.showTrack === false) return { settings, segments: [] };
+  const trackVisible = settings.enabled !== false && settings.showTrack !== false;
+  const clipMap = cfg.timelineOnScreenTextClipsByRowId || {};
+  const clips = Object.values(clipMap || {});
+  const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
+  const suppressFallbackFromEntries = allHidden || !trackVisible;
+  if (!trackVisible) return { settings, segments: [], suppressFallbackFromEntries };
 
   const clipMap = cfg.timelineOnScreenTextClipsByRowId || {};
   const layoutMap = cfg.timelineOnScreenTextLayoutByRowId || {};
@@ -2646,7 +2651,7 @@ function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntrie
       layout
     };
   }).filter(Boolean);
-  return { settings, segments };
+  return { settings, segments, suppressFallbackFromEntries };
 }
 
 function resolveDashboardRowVisualNotes(row = null) {
@@ -4379,15 +4384,16 @@ function initMultimediaPlayer() {
           enabled: true,
           backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
         },
-        onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
-          enabled: true,
+        onScreenTextTimeline: (onScreenTextTimeline.segments.length || onScreenTextTimeline.suppressFallbackFromEntries === true) ? {
+          enabled: onScreenTextTimeline.segments.length > 0,
           settings: onScreenTextTimeline.settings,
-          segments: onScreenTextTimeline.segments
+          segments: onScreenTextTimeline.segments,
+          suppressFallbackFromEntries: onScreenTextTimeline.suppressFallbackFromEntries === true
         } : null,
         brandOverlay: buildDashboardBrandOverlay()
       };
 
-      const result = await authFetchJson("/api/podcaster/montage/export", {
+      const result = await authFetchJson(buildExportApiUrl("/api/podcaster/montage/export"), {
         method: "POST",
         body: payload
       });
@@ -5102,15 +5108,16 @@ async function startMontageExport() {
         enabled: true,
         backgroundSegments: effectivePanelMusicConfig?.sourceItems || []
       },
-      onScreenTextTimeline: onScreenTextTimeline.segments.length ? {
-        enabled: true,
+      onScreenTextTimeline: (onScreenTextTimeline.segments.length || onScreenTextTimeline.suppressFallbackFromEntries === true) ? {
+        enabled: onScreenTextTimeline.segments.length > 0,
         settings: onScreenTextTimeline.settings,
-        segments: onScreenTextTimeline.segments
+        segments: onScreenTextTimeline.segments,
+        suppressFallbackFromEntries: onScreenTextTimeline.suppressFallbackFromEntries === true
       } : null,
       brandOverlay: buildDashboardBrandOverlay()
     };
 
-    const response = await authFetchJson("/api/podcaster/montage/export", {
+    const response = await authFetchJson(buildExportApiUrl("/api/podcaster/montage/export"), {
       method: "POST",
       body: payload
     });
@@ -5138,7 +5145,7 @@ async function pollExportStatus() {
   if (!exportJobState.jobId) return;
 
   try {
-    const exportStatusUrl = buildApiUrlPreferRemote(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
+    const exportStatusUrl = buildExportApiUrl(`/api/podcaster/montage/export-status?jobId=${encodeURIComponent(exportJobState.jobId)}`);
     const data = await authFetchJson(exportStatusUrl, {
       auth: false
     });
