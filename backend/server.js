@@ -9443,6 +9443,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
     ? raw.onScreenTextTimeline
     : null;
+  const hasExplicitOnScreenTextTimeline = Boolean(onScreenTextTimelineRaw);
   const suppressOnScreenTextFallbackFromEntries = onScreenTextTimelineRaw?.suppressFallbackFromEntries === true;
   const overlayCards = normalizeMontageOverlayCards(raw?.overlayCards || null);
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
@@ -9627,7 +9628,7 @@ function normalizeMontageExportRequestBody(body = {}) {
   let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
     ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
     : [];
-  if (!onScreenTextSegments.length && !suppressOnScreenTextFallbackFromEntries) {
+  if (!onScreenTextSegments.length && !hasExplicitOnScreenTextTimeline && !suppressOnScreenTextFallbackFromEntries) {
     onScreenTextSegments = entries
       .map((entry, idx) => {
         const text = clampText(entry?.onScreenText || "", 500);

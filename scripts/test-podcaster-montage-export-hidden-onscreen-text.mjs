@@ -18,14 +18,20 @@ assert.match(
 
 assert.match(
   backendSource,
+  /const hasExplicitOnScreenTextTimeline = Boolean\(onScreenTextTimelineRaw\);/,
+  "El backend debe distinguir entre timeline ausente y timeline explícito vacío."
+);
+
+assert.match(
+  backendSource,
   /const suppressOnScreenTextFallbackFromEntries = onScreenTextTimelineRaw\?\.suppressFallbackFromEntries === true;/,
   "El backend debe reconocer la marca que bloquea el fallback del texto en pantalla."
 );
 
 assert.match(
   backendSource,
-  /if \(!onScreenTextSegments\.length && !suppressOnScreenTextFallbackFromEntries\) \{/,
-  "El backend no debe reinyectar texto desde entries cuando el frontend lo mandó oculto."
+  /if \(!onScreenTextSegments\.length && !hasExplicitOnScreenTextTimeline && !suppressOnScreenTextFallbackFromEntries\) \{/,
+  "El backend solo debe reconstruir texto desde entries cuando el timeline no vino en el request."
 );
 
 console.log("Podcaster montage export hidden onscreen text suppression OK.");
