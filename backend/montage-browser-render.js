@@ -163,7 +163,9 @@ async function renderMontageBrowserOverlayVideo({
   bootstrapHtmlPath = "",
   outputDir = "",
   viewport = { width: 1280, height: 720 },
-  timeoutMs = 120000
+  timeoutMs = 120000,
+  shouldAbort = null,
+  registerAbortHandler = null
 } = {}) {
   const availability = getMontageBrowserRendererAvailability();
   if (availability.available !== true || !availability.playwright?.chromium) {
@@ -183,6 +185,8 @@ async function renderMontageBrowserOverlayVideo({
   });
   let context = null;
   let page = null;
+  let abortPollTimer = null;
+  let unregisterAbortHandler = null;
   try {
     context = await browser.newContext({
       viewport: {
@@ -200,6 +204,35 @@ async function renderMontageBrowserOverlayVideo({
     page = await context.newPage();
     const html = buildMontageBrowserRenderBootstrap({ publicRoot, payload, baseVideoPath, viewport });
     await fs.promises.writeFile(bootstrapHtmlPath, html, "utf8");
+    const abortBrowserRender = async () => {
+      try {
+        if (page && !page.isClosed()) await page.close();
+      } catch (_) {}
+      try {
+        if (context) await context.close();
+      } catch (_) {}
+      try {
+        await browser.close();
+      } catch (_) {}
+    };
+    if (typeof shouldAbort === "function") {
+      abortPollTimer = setInterval(() => {
+        let aborted = false;
+        try {
+          aborted = shouldAbort() === true;
+        } catch (_) {
+          aborted = false;
+        }
+        if (!aborted) return;
+        void abortBrowserRender();
+      }, 300);
+      if (typeof abortPollTimer.unref === "function") abortPollTimer.unref();
+    }
+    if (typeof registerAbortHandler === "function") {
+      unregisterAbortHandler = registerAbortHandler(() => {
+        void abortBrowserRender();
+      });
+    }
     await page.goto(pathToFileUrl(bootstrapHtmlPath), { waitUntil: "load", timeout: timeoutMs });
     await page.waitForFunction(() => window.__podcasterMontageRenderReady === true, { timeout: Math.min(timeoutMs, 30000) });
     await page.waitForFunction(() => window.__podcasterMontageRenderDone === true || Boolean(window.__podcasterMontageRenderError), { timeout: timeoutMs });
@@ -215,6 +248,11 @@ async function renderMontageBrowserOverlayVideo({
     await browser.close();
     return videoHandle ? await videoHandle.path() : "";
   } finally {
+    if (abortPollTimer) {
+      clearInterval(abortPollTimer);
+      abortPollTimer = null;
+    }
+    if (typeof unregisterAbortHandler === "function") unregisterAbortHandler();
     try {
       if (page && !page.isClosed()) await page.close();
     } catch (_) {}
