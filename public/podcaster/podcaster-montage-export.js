@@ -1878,7 +1878,18 @@ export function syncMontageExportUi() {
     window.els.montageExportIncludeLogo.checked = state.includeLogo !== false;
   }
   if (window.els.montageExportPartyKaraoke) {
-    window.els.montageExportPartyKaraoke.checked = state.partyKaraoke !== false;
+    const session = window.getActiveSession?.() || null;
+    const cfg = window.getPodcastVideoConfig?.(session) || {};
+    const settings = window.normalizeOnScreenTextTrackSettings?.(cfg.onScreenTextTrack || {}) || { enabled: true, showTrack: true };
+    const clipMap = window.ensureOnScreenTextClipsByRowId?.(session, { persist: false }) || {};
+    const clips = Object.values(clipMap);
+    const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
+    const trackVisible = settings.enabled !== false && settings.showTrack !== false;
+    const isTextEnabled = trackVisible && !allHidden;
+
+    const shouldBeChecked = isTextEnabled && state.partyKaraoke !== false;
+    window.els.montageExportPartyKaraoke.checked = shouldBeChecked;
+    window.montageExportState.partyKaraoke = shouldBeChecked;
   }
   if (window.els.montageExportReviewExcelField) {
     window.els.montageExportReviewExcelField.hidden = state.exportMode !== "review";

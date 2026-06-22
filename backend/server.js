@@ -32,6 +32,9 @@ const {
   createProcessMontageExportJob
 } = require("./montage-export/worker-runner.js");
 const {
+  createMontageExportCancelController
+} = require("./montage-export/cancel-controller.js");
+const {
   shouldContinueVariantFallback
 } = require("./podcaster-video-variant-fallback.js");
 const {
@@ -1546,6 +1549,27 @@ const MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS = Math.max(
   Number(process.env.MONTAGE_EXPORT_STATUS_READ_TIMEOUT_MS || 6500) || 6500
 );
 const montageExportJobs = new Map();
+const activeMontageExportCancelControllers = new Map();
+
+function registerActiveMontageExportCancelController(jobId = "") {
+  const cleanJobId = clampExportId(jobId);
+  if (!cleanJobId) return null;
+  const controller = createMontageExportCancelController(cleanJobId);
+  activeMontageExportCancelControllers.set(cleanJobId, controller);
+  return controller;
+}
+
+function getActiveMontageExportCancelController(jobId = "") {
+  const cleanJobId = clampExportId(jobId);
+  if (!cleanJobId) return null;
+  return activeMontageExportCancelControllers.get(cleanJobId) || null;
+}
+
+function clearActiveMontageExportCancelController(jobId = "") {
+  const cleanJobId = clampExportId(jobId);
+  if (!cleanJobId) return false;
+  return activeMontageExportCancelControllers.delete(cleanJobId);
+}
 
 function getMontageExportJobMetaPath(jobId = "") {
   const clean = clampExportId(jobId);
@@ -2106,12 +2130,22 @@ function runMontageExportDirectJob({
 } = {}) {
   const cleanJobId = clampExportId(jobId);
   if (!cleanJobId || !input || typeof input !== "object") return false;
+  const cancelController = registerActiveMontageExportCancelController(cleanJobId);
   setImmediate(async () => {
     try {
       const directJobStore = createDirectMontageExportJobStoreBridge();
       const processFn = createProcessMontageExportJob({
         jobStore: directJobStore,
-        executeMontageExportPipeline,
+        executeMontageExportPipeline: (pipelineInput, pipelineContext = {}) => executeMontageExportPipeline(pipelineInput, {
+          ...pipelineContext,
+          shouldAbort: () => {
+            const pipelineAbort = typeof pipelineContext?.shouldAbort === "function" ? pipelineContext.shouldAbort() === true : false;
+            return cancelController?.isCancelled() === true || pipelineAbort;
+          },
+          registerAbortHandler: typeof cancelController?.registerAbortHandler === "function"
+            ? cancelController.registerAbortHandler
+            : pipelineContext?.registerAbortHandler
+        }),
         buildMontageSceneFailure
       });
       await processFn({
@@ -2130,6 +2164,7 @@ function runMontageExportDirectJob({
         stack: String(err?.stack || "").trim() || null
       });
     } finally {
+      clearActiveMontageExportCancelController(cleanJobId);
       const released = releaseHeavyWorkSlot("montage_export", cleanJobId);
       logHeavyWorkSlots("montage_export", "release_direct_job", {
         jobId: cleanJobId,
@@ -4465,12 +4500,31 @@ function runFfmpegCommand(args = [], context = {}) {
     let stderr = "";
     const shouldAbort = typeof context?.shouldAbort === "function" ? context.shouldAbort : null;
     const onHeartbeat = typeof context?.onHeartbeat === "function" ? context.onHeartbeat : null;
+    const registerAbortHandler = typeof context?.registerAbortHandler === "function" ? context.registerAbortHandler : null;
+    let unregisterAbortHandler = null;
+    const abortChildProcess = () => {
+      if (settled || didTimeout || didAbort) return;
+      didAbort = true;
+      console.warn("[backend][ffmpeg][abort]", {
+        stage,
+        pid: child.pid || null
+      });
+      try {
+        child.kill("SIGTERM");
+      } catch (_) {}
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch (_) {}
+      }, 1200).unref?.();
+    };
     const finalizeReject = (error) => {
       if (settled) return;
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
       if (abortPollTimer) clearInterval(abortPollTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (typeof unregisterAbortHandler === "function") unregisterAbortHandler();
       reject(error);
     };
     const finalizeResolve = (value) => {
@@ -4479,6 +4533,7 @@ function runFfmpegCommand(args = [], context = {}) {
       if (timeoutId) clearTimeout(timeoutId);
       if (abortPollTimer) clearInterval(abortPollTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (typeof unregisterAbortHandler === "function") unregisterAbortHandler();
       resolve(value);
     };
     if (timeoutMs > 0) {
@@ -4509,21 +4564,12 @@ function runFfmpegCommand(args = [], context = {}) {
           aborted = false;
         }
         if (!aborted) return;
-        didAbort = true;
-        console.warn("[backend][ffmpeg][abort]", {
-          stage,
-          pid: child.pid || null
-        });
-        try {
-          child.kill("SIGTERM");
-        } catch (_) {}
-        setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch (_) {}
-        }, 1200).unref?.();
+        abortChildProcess();
       }, 400);
       if (typeof abortPollTimer.unref === "function") abortPollTimer.unref();
+    }
+    if (registerAbortHandler) {
+      unregisterAbortHandler = registerAbortHandler(abortChildProcess);
     }
     if (onHeartbeat) {
       const heartbeatIntervalMs = Math.max(1000, Number(context?.heartbeatIntervalMs || MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS) || MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS);
@@ -11133,7 +11179,11 @@ async function appendMontageSceneOnScreenTextAssFilters({
 }
 
 function resolveBrandOverlayAssetPath(assetPathRaw = "") {
-  const cleanPath = String(assetPathRaw || "").trim().replace(/^[/\\]+/g, "");
+  const inputPath = String(assetPathRaw || "").trim();
+  if (path.isAbsolute(inputPath) && fs.existsSync(inputPath)) {
+    return inputPath;
+  }
+  const cleanPath = inputPath.replace(/^[/\\]+/g, "");
   if (!cleanPath) return "";
   const repoRoot = path.resolve(__dirname, "..");
   const candidates = [
@@ -11226,7 +11276,8 @@ async function renderMontageBrowserFinalVisualPass({
   outExt = "mp4",
   deliveryParams = {},
   emitStage = () => {},
-  shouldAbort = () => false
+  shouldAbort = () => false,
+  registerAbortHandler = null
 } = {}) {
   const throwIfCancelled = (stage = "cancelled") => {
     if (typeof shouldAbort === "function" && shouldAbort()) {
@@ -11282,7 +11333,9 @@ async function renderMontageBrowserFinalVisualPass({
     bootstrapHtmlPath,
     outputDir: renderOutputDir,
     viewport,
-    timeoutMs: Math.max(120000, totalDurationMs + 45000)
+    timeoutMs: Math.max(120000, totalDurationMs + 45000),
+    shouldAbort,
+    registerAbortHandler
   });
   if (!renderedVideoPath) {
     const err = new Error("browser_render_output_missing");
@@ -11310,7 +11363,8 @@ async function renderMontageBrowserFinalVisualPass({
     browserFinalOutPath
   ], {
     stage: "montage_browser_transcode",
-    shouldAbort: () => shouldAbort()
+    shouldAbort: () => shouldAbort(),
+    registerAbortHandler
   });
   return browserFinalOutPath;
 }
@@ -11325,7 +11379,8 @@ async function finalizeMontageExportAudioTrack({
   emitStage = () => {},
   shouldAbort = () => false,
   downloadInput = null,
-  jobId = ""
+  jobId = "",
+  registerAbortHandler = null
 } = {}) {
   if (!finalOutPath || typeof downloadInput !== "function") return finalOutPath;
 
@@ -11456,7 +11511,11 @@ async function finalizeMontageExportAudioTrack({
         "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         timelineMixedOutPath
-      ], { stage: "montage_mix_timeline_audio", shouldAbort: () => shouldAbort() });
+      ], {
+        stage: "montage_mix_timeline_audio",
+        shouldAbort: () => shouldAbort(),
+        registerAbortHandler
+      });
       nextOutPath = timelineMixedOutPath;
     }
     logMontageMemory("mix_timeline_audio_after", {
@@ -11493,7 +11552,11 @@ async function finalizeMontageExportAudioTrack({
       "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", audioCodec, "-ar", "48000", "-b:a", audioBitrate,
       ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
       mixedOutPath
-    ], { stage: "montage_mix_music", shouldAbort: () => shouldAbort() });
+    ], {
+      stage: "montage_mix_music",
+      shouldAbort: () => shouldAbort(),
+      registerAbortHandler
+    });
     nextOutPath = mixedOutPath;
   }
 
@@ -11873,6 +11936,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           timeoutMs: MONTAGE_EXPORT_SCENE_RENDER_TIMEOUT_MS,
           timeoutCode: "scene_render_timeout",
           shouldAbort: () => shouldAbort(),
+          registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
           onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitSceneSubstage({
@@ -12022,7 +12086,11 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         "-c:v", "copy", "-c:a", "copy",
         ...(outExt === "mp4" ? ["-movflags", "+faststart"] : []),
         concatOutPath
-      ], { stage: "montage_concat", shouldAbort: () => shouldAbort() });
+      ], {
+        stage: "montage_concat",
+        shouldAbort: () => shouldAbort(),
+        registerAbortHandler: context?.registerAbortHandler
+      });
     }
     logMontageMemory("concat_timeline_after", { jobId, exportedSceneCount: exportedEntries.length });
 
@@ -12110,7 +12178,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         outExt,
         deliveryParams,
         emitStage,
-        shouldAbort
+        shouldAbort,
+        registerAbortHandler: context?.registerAbortHandler
       });
     }
     if (hasFinalVisualPass && !hasBrowserVisualPass) {
@@ -12320,6 +12389,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         await runFfmpegCommand(finalVisualArgs, {
           stage: "montage_final_visuals",
           shouldAbort: () => shouldAbort(),
+          registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
           onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
@@ -12354,6 +12424,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
         ], {
           stage: "montage_encode_delivery",
           shouldAbort: () => shouldAbort(),
+          registerAbortHandler: context?.registerAbortHandler,
           heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
           onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
             emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
@@ -12389,6 +12460,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       ], {
         stage: "montage_encode_delivery",
         shouldAbort: () => shouldAbort(),
+        registerAbortHandler: context?.registerAbortHandler,
         heartbeatIntervalMs: MONTAGE_EXPORT_FFMPEG_HEARTBEAT_MS,
         onHeartbeat: ({ elapsedMs = 0, stderr = "", stdout = "" } = {}) => {
           emitStage(visualEncodeStage, 0.84, visualEncodeMessage, {
@@ -12416,7 +12488,8 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       emitStage,
       shouldAbort,
       downloadInput,
-      jobId
+      jobId,
+      registerAbortHandler: context?.registerAbortHandler
     });
 
     emitStage("cache_output", 0.96, "Preparando descarga final.");
@@ -12899,6 +12972,10 @@ app.post("/api/podcaster/montage/export-cancel", async (req, res) => {
       heartbeatAt: cancelledAt
     });
     upsertMontageExportJob(jobId, cancelledJob);
+    const activeCancelController = getActiveMontageExportCancelController(jobId);
+    if (activeCancelController) {
+      activeCancelController.cancel();
+    }
     return res.status(200).json({
       ok: true,
       cancelled: true,

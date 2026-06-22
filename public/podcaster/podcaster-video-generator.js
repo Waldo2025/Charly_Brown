@@ -604,16 +604,63 @@ async function generateDialogueVideoForRow(rowId = "", options = {}) {
         ...traceMeta
       });
 
-      const resp = await authFetchJson("/api/podcaster/dialogue-videos/generate", {
-        method: "POST",
-        body: JSON.stringify(body)
-      });
+      let resp = null;
+      const maxBusyRetries = 30;
+      const busyRetryDelayMs = 10000;
 
-      if (!resp?.ok) {
-        const startError = new Error(buildGenerationErrorMessage(resp, "Error al iniciar generación."));
-        startError.status = Number(resp?.status || 500) || 500;
-        startError.detail = resp?.detail || resp?.error || null;
-        throw startError;
+      for (let attempt = 0; attempt <= maxBusyRetries; attempt++) {
+        try {
+          resp = await authFetchJson("/api/podcaster/dialogue-videos/generate", {
+            method: "POST",
+            body: JSON.stringify(body)
+          });
+
+          if (resp?.ok) {
+            break;
+          }
+
+          const status = Number(resp?.status || 500) || 500;
+          const detail = resp?.detail || resp?.error || {};
+          const code = detail?.code || detail?.error || resp?.code || resp?.error || "";
+          const isBusy = status === 503 && (code === "backend_busy" || String(resp?.message || "").includes("pausó temporalmente VEO"));
+
+          if (isBusy && attempt < maxBusyRetries) {
+            const message = `Servidor ocupado. Reintentando en 10s... (intento ${attempt + 1}/${maxBusyRetries})`;
+            if (typeof options.onJobUpdate === "function") {
+              try { options.onJobUpdate({ stage: "busy", hint: message }); } catch (_) {}
+            }
+            if (!silent) {
+              setGenerationStatus(message, "is-busy");
+              setPodcastVideoStatus(message);
+            }
+            await sleep(busyRetryDelayMs);
+            continue;
+          }
+
+          const startError = new Error(buildGenerationErrorMessage(resp, "Error al iniciar generación."));
+          startError.status = status;
+          startError.detail = resp?.detail || resp?.error || null;
+          throw startError;
+        } catch (err) {
+          const status = Number(err.status || 0) || 0;
+          const detail = err.detail || {};
+          const code = detail?.code || detail?.error || err.message || "";
+          const isBusy = status === 503 && (code === "backend_busy" || String(err.message || "").includes("pausó temporalmente VEO"));
+
+          if (isBusy && attempt < maxBusyRetries) {
+            const message = `Servidor ocupado. Reintentando en 10s... (intento ${attempt + 1}/${maxBusyRetries})`;
+            if (typeof options.onJobUpdate === "function") {
+              try { options.onJobUpdate({ stage: "busy", hint: message }); } catch (_) {}
+            }
+            if (!silent) {
+              setGenerationStatus(message, "is-busy");
+              setPodcastVideoStatus(message);
+            }
+            await sleep(busyRetryDelayMs);
+            continue;
+          }
+          throw err;
+        }
       }
 
       traceVisualReferenceScene("request-accepted", {

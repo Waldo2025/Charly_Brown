@@ -19544,6 +19544,9 @@ registerPodcasterScriptEditorRuntime(podcasterScriptEditorRuntimeApi);
 Object.assign(window, {
   ...podcasterGenerationRuntimeApi,
   ...podcasterScriptEditorRuntimeApi,
+  normalizeOnScreenTextTrackSettings,
+  ensureOnScreenTextClipsByRowId,
+  ensureOnScreenTextLayoutByRowId,
   getPodcastVideoConfig,
   upsertPodcastVideoConfig,
   updateTimelineClipForRow,

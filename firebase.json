@@ -90,6 +90,21 @@
     ],
     "redirects": [
       {
+        "source": "/api/podcaster/montage/export",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/montage/export",
+        "type": 302
+      },
+      {
+        "source": "/api/podcaster/montage/export-status",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/montage/export-status",
+        "type": 302
+      },
+      {
+        "source": "/api/podcaster/montage/export-cancel",
+        "destination": "https://snoopy-export.onrender.com/api/podcaster/montage/export-cancel",
+        "type": 302
+      },
+      {
         "source": "/api/:path*",
         "destination": "https://charly-brown-gemini-backend.onrender.com/api/:path*",
         "type": 302
