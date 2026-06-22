@@ -5332,20 +5332,51 @@ async function generateMoodleModuleGraphicElementAsset({
 }
 
 async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metadata = {} }) {
-  const targetBucket = await resolveWritableStorageBucket();
-  const file = targetBucket.file(assetPath);
   const token = randomUUID();
-  await withRetry(() => file.save(buffer, {
-    resumable: false,
-    contentType: mimeType,
-    metadata: {
-      cacheControl: "public,max-age=86400",
-      metadata: {
-        firebaseStorageDownloadTokens: token,
-        ...metadata,
-      },
-    },
-  }));
+  const tempUploadPath = path.join(os.tmpdir(), `cb-storage-upload-${token}`);
+  const candidateBuckets = getStorageBucketCandidates();
+  let targetBucket = await resolveWritableStorageBucket();
+  let lastUploadError = null;
+  await fs.promises.writeFile(tempUploadPath, buffer);
+  try {
+    for (const candidateBucket of candidateBuckets) {
+      if (!candidateBucket) continue;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await uploadFileToBucketNonResumable({
+          bucket: candidateBucket,
+          destination: assetPath,
+          filePath: tempUploadPath,
+          contentType: mimeType,
+          cacheControl: "public,max-age=86400",
+          metadata: {
+            firebaseStorageDownloadTokens: token,
+            ...metadata,
+          }
+        });
+        targetBucket = candidateBucket;
+        resolvedWritableStorageBucket = candidateBucket;
+        lastUploadError = null;
+        break;
+      } catch (error) {
+        lastUploadError = error;
+        console.warn("[backend][storage] asset upload failed on bucket candidate", {
+          bucket: String(candidateBucket?.name || "").trim(),
+          path: String(assetPath || "").trim(),
+          message: String(error?.message || error),
+          code: String(error?.code || "").trim() || null,
+          status: Number(error?.status || 0) || undefined
+        });
+        const status = Number(error?.status || 0) || 0;
+        const code = String(error?.code || "").trim();
+        const isRetryableCandidateFailure = code === "signed_url_upload_failed" && (status === 404 || status === 403);
+        if (!isRetryableCandidateFailure) throw error;
+      }
+    }
+    if (lastUploadError) throw lastUploadError;
+  } finally {
+    await fs.promises.rm(tempUploadPath, { force: true }).catch(() => {});
+  }
   return {
     path: assetPath,
     downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
