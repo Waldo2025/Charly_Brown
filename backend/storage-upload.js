@@ -52,7 +52,14 @@ async function uploadFileToBucketNonResumable({
       version: "v4",
       action: "write",
       expires: Date.now() + 5 * 60 * 1000,
-      ...(contentType ? { contentType } : {})
+      ...(contentType ? { contentType } : {}),
+      ...(Object.keys(headers).some((key) => key !== "content-type" && key !== "content-length")
+        ? {
+          extensionHeaders: Object.fromEntries(
+            Object.entries(headers).filter(([key]) => key !== "content-type" && key !== "content-length")
+          )
+        }
+        : {})
     });
     const response = await fetchImpl(signedUrl, {
       method: "PUT",

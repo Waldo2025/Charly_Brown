@@ -98,3 +98,61 @@ test("uploadFileToBucketNonResumable prefers signed url PUT before sdk stream fa
   assert.equal(fetchCall.options.method, "PUT");
   assert.equal(fetchCall.options.headers["content-type"], "video/mp4");
 });
+
+test("uploadFileToBucketNonResumable signs custom metadata headers used by the PUT request", async () => {
+  const tempFile = path.join(os.tmpdir(), `cb-storage-upload-meta-${Date.now()}.txt`);
+  fs.writeFileSync(tempFile, "hola");
+  let signedUrlOptions = null;
+  const bucket = {
+    file(destination) {
+      assert.equal(destination, "podcaster/uploads/file.png");
+      return {
+        async getSignedUrl(options = {}) {
+          signedUrlOptions = options;
+          return ["https://signed.example/upload-meta"];
+        },
+        createWriteStream() {
+          return new Writable({
+            write(_chunk, _encoding, callback) {
+              callback();
+            }
+          });
+        }
+      };
+    }
+  };
+
+  try {
+    await uploadFileToBucketNonResumable({
+      bucket,
+      destination: "podcaster/uploads/file.png",
+      filePath: tempFile,
+      contentType: "image/png",
+      cacheControl: "public,max-age=86400",
+      metadata: {
+        firebaseStorageDownloadTokens: "token-123",
+        source: "dialogue-video"
+      },
+      fetchImpl: async (_url, options = {}) => {
+        if (options?.body && typeof options.body.on === "function") {
+          await new Promise((resolve, reject) => {
+            options.body.on("data", () => {});
+            options.body.on("end", resolve);
+            options.body.on("error", reject);
+          });
+        }
+        return { ok: true, status: 200 };
+      }
+    });
+  } finally {
+    fs.unlinkSync(tempFile);
+  }
+
+  assert.ok(signedUrlOptions, "Debe solicitar signed URL.");
+  assert.equal(signedUrlOptions.contentType, "image/png");
+  assert.deepEqual(signedUrlOptions.extensionHeaders, {
+    "cache-control": "public,max-age=86400",
+    "x-goog-meta-firebaseStorageDownloadTokens": "token-123",
+    "x-goog-meta-source": "dialogue-video"
+  });
+});
