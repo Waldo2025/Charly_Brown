@@ -11,36 +11,97 @@ const {
   DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES
 } = require("./podcaster-stability.js");
 
-test("heavy work coordinator blocks incompatible concurrent jobs", () => {
-  const coordinator = createHeavyWorkCoordinator();
+test("heavy work coordinator allows one montage export and one dialogue video at the same time", () => {
+  const coordinator = createHeavyWorkCoordinator({
+    montageExportMaxConcurrent: 2,
+    dialogueVideoMaxConcurrent: 1
+  });
 
   const first = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
   assert.equal(first.ok, true);
 
   const second = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-1");
-  assert.equal(second.ok, false);
-  assert.equal(second.error.code, "backend_busy");
-  assert.equal(second.error.status, 503);
-  assert.equal(second.error.detail.kind, "montage_export");
-  assert.equal(second.error.detail.requestedKind, "dialogue_video");
-  assert.equal(second.error.detail.activeJobId, "job-export-1");
+  assert.equal(second.ok, true);
 
   coordinator.releaseHeavyWorkSlot("montage_export", "job-export-1");
-
-  const third = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-1");
-  assert.equal(third.ok, true);
+  coordinator.releaseHeavyWorkSlot("dialogue_video", "job-video-1");
 });
 
-test("heavy work coordinator reports dialogue video as the blocking job kind", () => {
-  const coordinator = createHeavyWorkCoordinator();
+test("heavy work coordinator allows multiple montage exports until the configured limit", () => {
+  const coordinator = createHeavyWorkCoordinator({
+    montageExportMaxConcurrent: 2,
+    dialogueVideoMaxConcurrent: 1
+  });
+
+  const first = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
+  assert.equal(first.ok, true);
+
+  const second = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-2");
+  assert.equal(second.ok, true);
+  assert.deepEqual(coordinator.getActiveJobIds("montage_export"), ["job-export-1", "job-export-2"]);
+
+  coordinator.releaseHeavyWorkSlot("montage_export", "job-export-1");
+  coordinator.releaseHeavyWorkSlot("montage_export", "job-export-2");
+});
+
+test("heavy work coordinator blocks a montage export once the configured limit is full", () => {
+  const coordinator = createHeavyWorkCoordinator({
+    montageExportMaxConcurrent: 2,
+    dialogueVideoMaxConcurrent: 1
+  });
+
+  const first = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
+  assert.equal(first.ok, true);
+
+  const second = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-2");
+  assert.equal(second.ok, true);
+
+  const third = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-3");
+  assert.equal(third.ok, false);
+  assert.equal(third.error.detail.kind, "montage_export");
+  assert.equal(third.error.detail.requestedKind, "montage_export");
+  assert.equal(third.error.detail.activeJobId, "job-export-1");
+  assert.deepEqual(third.error.detail.activeJobIds, ["job-export-1", "job-export-2"]);
+  assert.equal(third.error.detail.activeCount, 2);
+  assert.equal(third.error.detail.maxConcurrent, 2);
+});
+
+test("heavy work coordinator can release one montage export without affecting the others", () => {
+  const coordinator = createHeavyWorkCoordinator({
+    montageExportMaxConcurrent: 2,
+    dialogueVideoMaxConcurrent: 1
+  });
+
+  const first = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
+  assert.equal(first.ok, true);
+
+  const second = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-2");
+  assert.equal(second.ok, true);
+
+  assert.equal(coordinator.releaseHeavyWorkSlot("montage_export", "job-export-1"), true);
+  assert.deepEqual(coordinator.getActiveJobIds("montage_export"), ["job-export-2"]);
+
+  const third = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-3");
+  assert.equal(third.ok, true);
+  assert.deepEqual(coordinator.getActiveJobIds("montage_export"), ["job-export-2", "job-export-3"]);
+
+  coordinator.releaseHeavyWorkSlot("montage_export", "job-export-2");
+  coordinator.releaseHeavyWorkSlot("montage_export", "job-export-3");
+});
+
+test("heavy work coordinator blocks a second dialogue video while one is active", () => {
+  const coordinator = createHeavyWorkCoordinator({
+    montageExportMaxConcurrent: 2,
+    dialogueVideoMaxConcurrent: 1
+  });
 
   const first = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-1");
   assert.equal(first.ok, true);
 
-  const second = coordinator.tryAcquireHeavyWorkSlot("montage_export", "job-export-1");
+  const second = coordinator.tryAcquireHeavyWorkSlot("dialogue_video", "job-video-2");
   assert.equal(second.ok, false);
   assert.equal(second.error.detail.kind, "dialogue_video");
-  assert.equal(second.error.detail.requestedKind, "montage_export");
+  assert.equal(second.error.detail.requestedKind, "dialogue_video");
   assert.equal(second.error.detail.activeJobId, "job-video-1");
 });
 

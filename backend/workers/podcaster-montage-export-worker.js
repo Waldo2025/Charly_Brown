@@ -11,6 +11,11 @@ const {
   createProcessMontageExportJob
 } = require("../montage-export/worker-runner.js");
 
+const workerConcurrency = Math.max(
+  1,
+  Number(process.env.MONTAGE_EXPORT_WORKER_CONCURRENCY || process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 2) || 2
+);
+
 const processor = createProcessMontageExportJob({
   jobStore: montageExportJobStore,
   executeMontageExportPipeline,
@@ -22,10 +27,14 @@ const worker = createBullMqWorker(async (job) => {
     job.data.baseUrl = getBackendPublicBaseUrl();
   }
   return processor(job);
+}, {
+  concurrency: workerConcurrency
 });
 
 worker.on("ready", () => {
-  console.info("[worker][montage-export] ready");
+  console.info("[worker][montage-export] ready", {
+    concurrency: workerConcurrency
+  });
 });
 
 worker.on("failed", (job, error) => {

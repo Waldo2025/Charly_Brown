@@ -3,34 +3,83 @@ const DIALOGUE_VIDEO_MAX_REFERENCE_VIDEO_COUNT = 1;
 const DIALOGUE_VIDEO_MAX_CONTINUITY_FRAME_COUNT = 1;
 const DIALOGUE_VIDEO_INLINE_REFERENCE_BUDGET_BYTES = 7 * 1024 * 1024;
 
-function createHeavyWorkCoordinator() {
+function createHeavyWorkCoordinator({
+  montageExportMaxConcurrent = Number(process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 2) || 2,
+  dialogueVideoMaxConcurrent = Number(process.env.DIALOGUE_VIDEO_MAX_CONCURRENT || 1) || 1
+} = {}) {
+  const safeMontageExportMaxConcurrent = Math.max(1, Number(montageExportMaxConcurrent) || 2);
+  const safeDialogueVideoMaxConcurrent = Math.max(1, Number(dialogueVideoMaxConcurrent) || 1);
   const state = {
+    activeMontageExportJobIds: [],
     activeMontageExportJobId: "",
+    activeDialogueVideoJobIds: [],
     activeDialogueVideoJobId: "",
-    lastUpdatedAt: ""
+    lastUpdatedAt: "",
+    limits: {
+      montage_export: safeMontageExportMaxConcurrent,
+      dialogue_video: safeDialogueVideoMaxConcurrent
+    }
   };
 
   const updateTimestamp = () => {
     state.lastUpdatedAt = new Date().toISOString();
   };
 
-  const getActiveJobId = () => String(state.activeMontageExportJobId || state.activeDialogueVideoJobId || "").trim();
+  const syncLegacyFields = () => {
+    state.activeMontageExportJobId = String(state.activeMontageExportJobIds[0] || "").trim();
+    state.activeDialogueVideoJobId = String(state.activeDialogueVideoJobIds[0] || "").trim();
+  };
+
+  const buildStateSnapshot = () => ({
+    ...state,
+    activeMontageExportJobIds: [...state.activeMontageExportJobIds],
+    activeDialogueVideoJobIds: [...state.activeDialogueVideoJobIds],
+    limits: { ...state.limits }
+  });
+
+  const getActiveJobIds = (kind = "") => {
+    const cleanKind = String(kind || "").trim();
+    if (cleanKind === "montage_export") return [...state.activeMontageExportJobIds];
+    if (cleanKind === "dialogue_video") return [...state.activeDialogueVideoJobIds];
+    return [
+      ...state.activeMontageExportJobIds,
+      ...state.activeDialogueVideoJobIds
+    ];
+  };
+
+  const getActiveJobId = (kind = "") => {
+    const cleanKind = String(kind || "").trim();
+    return String(getActiveJobIds(cleanKind)[0] || "").trim();
+  };
+
+  const hasActiveJob = (kind = "", jobId = "") => {
+    const cleanKind = String(kind || "").trim();
+    const cleanJobId = String(jobId || "").trim();
+    if (!cleanKind || !cleanJobId) return false;
+    return getActiveJobIds(cleanKind).includes(cleanJobId);
+  };
+
   const getActiveKind = () => {
-    if (String(state.activeMontageExportJobId || "").trim()) return "montage_export";
-    if (String(state.activeDialogueVideoJobId || "").trim()) return "dialogue_video";
+    if (state.activeMontageExportJobIds.length) return "montage_export";
+    if (state.activeDialogueVideoJobIds.length) return "dialogue_video";
     return "";
   };
 
   const buildHeavyWorkBusyError = (kind = "", activeJobId = "") => {
     const resolvedActiveKind = getActiveKind();
     const resolvedRequestedKind = String(kind || "").trim();
+    const resolvedActiveJobIds = getActiveJobIds(resolvedRequestedKind);
+    const resolvedActiveJobId = String(activeJobId || resolvedActiveJobIds[0] || "").trim();
     const error = new Error("backend_busy");
     error.code = "backend_busy";
     error.status = 503;
     error.detail = {
-      kind: resolvedActiveKind || resolvedRequestedKind || "unknown",
+      kind: resolvedRequestedKind || resolvedActiveKind || "unknown",
       requestedKind: resolvedRequestedKind || undefined,
-      activeJobId: String(activeJobId || "").trim(),
+      activeJobId: resolvedActiveJobId,
+      activeJobIds: resolvedActiveJobIds,
+      activeCount: resolvedActiveJobIds.length,
+      maxConcurrent: Number(state.limits?.[resolvedRequestedKind] || 1) || 1,
       retryable: true
     };
     return error;
@@ -39,7 +88,7 @@ function createHeavyWorkCoordinator() {
   const tryAcquireHeavyWorkSlot = (kind = "", jobId = "") => {
     const cleanKind = String(kind || "").trim();
     const cleanJobId = String(jobId || "").trim();
-    const activeJobId = getActiveJobId();
+    const activeJobId = getActiveJobId(cleanKind);
     if (!cleanJobId) {
       return {
         ok: false,
@@ -47,26 +96,34 @@ function createHeavyWorkCoordinator() {
       };
     }
     if (cleanKind === "montage_export") {
-      if (state.activeMontageExportJobId || state.activeDialogueVideoJobId) {
+      if (hasActiveJob(cleanKind, cleanJobId)) {
+        return { ok: true, state: buildStateSnapshot() };
+      }
+      if (state.activeMontageExportJobIds.length >= state.limits.montage_export) {
         return {
           ok: false,
           error: buildHeavyWorkBusyError(cleanKind, activeJobId)
         };
       }
-      state.activeMontageExportJobId = cleanJobId;
+      state.activeMontageExportJobIds.push(cleanJobId);
+      syncLegacyFields();
       updateTimestamp();
-      return { ok: true, state: { ...state } };
+      return { ok: true, state: buildStateSnapshot() };
     }
     if (cleanKind === "dialogue_video") {
-      if (state.activeMontageExportJobId || state.activeDialogueVideoJobId) {
+      if (hasActiveJob(cleanKind, cleanJobId)) {
+        return { ok: true, state: buildStateSnapshot() };
+      }
+      if (state.activeDialogueVideoJobIds.length >= state.limits.dialogue_video) {
         return {
           ok: false,
           error: buildHeavyWorkBusyError(cleanKind, activeJobId)
         };
       }
-      state.activeDialogueVideoJobId = cleanJobId;
+      state.activeDialogueVideoJobIds.push(cleanJobId);
+      syncLegacyFields();
       updateTimestamp();
-      return { ok: true, state: { ...state } };
+      return { ok: true, state: buildStateSnapshot() };
     }
     return {
       ok: false,
@@ -77,13 +134,15 @@ function createHeavyWorkCoordinator() {
   const releaseHeavyWorkSlot = (kind = "", jobId = "") => {
     const cleanKind = String(kind || "").trim();
     const cleanJobId = String(jobId || "").trim();
-    if (cleanKind === "montage_export" && String(state.activeMontageExportJobId || "").trim() === cleanJobId) {
-      state.activeMontageExportJobId = "";
+    if (cleanKind === "montage_export" && hasActiveJob(cleanKind, cleanJobId)) {
+      state.activeMontageExportJobIds = state.activeMontageExportJobIds.filter((activeJobId) => activeJobId !== cleanJobId);
+      syncLegacyFields();
       updateTimestamp();
       return true;
     }
-    if (cleanKind === "dialogue_video" && String(state.activeDialogueVideoJobId || "").trim() === cleanJobId) {
-      state.activeDialogueVideoJobId = "";
+    if (cleanKind === "dialogue_video" && hasActiveJob(cleanKind, cleanJobId)) {
+      state.activeDialogueVideoJobIds = state.activeDialogueVideoJobIds.filter((activeJobId) => activeJobId !== cleanJobId);
+      syncLegacyFields();
       updateTimestamp();
       return true;
     }
@@ -93,6 +152,9 @@ function createHeavyWorkCoordinator() {
   return {
     state,
     buildHeavyWorkBusyError,
+    getActiveJobId,
+    getActiveJobIds,
+    hasActiveJob,
     tryAcquireHeavyWorkSlot,
     releaseHeavyWorkSlot
   };

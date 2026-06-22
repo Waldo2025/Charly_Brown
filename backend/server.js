@@ -254,6 +254,8 @@ const MAX_ANALIZAR_PDF_UPLOAD_BYTES = 260 * 1024 * 1024;
 const MAX_REFERENCE_FRAME_BYTES = 6 * 1024 * 1024;
 const MAX_MONTAGE_EXPORT_SCENES = 40;
 const MAX_MONTAGE_EXPORT_TOTAL_SEC = 10 * 60;
+const MONTAGE_EXPORT_MAX_CONCURRENT = Math.max(1, Number(process.env.MONTAGE_EXPORT_MAX_CONCURRENT || 2) || 2);
+const DIALOGUE_VIDEO_MAX_CONCURRENT = Math.max(1, Number(process.env.DIALOGUE_VIDEO_MAX_CONCURRENT || 1) || 1);
 const DIALOGUE_VIDEO_JOB_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PODCASTER_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_PODCASTER_VIDEO_MODEL = "veo-3.1-generate-preview";
@@ -316,12 +318,17 @@ function applyVeoHdParameters(parameters = {}, aspectRatio = "16:9") {
 }
 
 const dialogueVideoJobs = new Map();
-const heavyWorkCoordinator = createHeavyWorkCoordinator();
-const heavyWorkState = heavyWorkCoordinator.state;
+const heavyWorkCoordinator = createHeavyWorkCoordinator({
+  montageExportMaxConcurrent: MONTAGE_EXPORT_MAX_CONCURRENT,
+  dialogueVideoMaxConcurrent: DIALOGUE_VIDEO_MAX_CONCURRENT
+});
 const {
   tryAcquireHeavyWorkSlot,
   releaseHeavyWorkSlot,
-  buildHeavyWorkBusyError
+  buildHeavyWorkBusyError,
+  getActiveJobId: getTrackedHeavyWorkJobId,
+  getActiveJobIds: getTrackedHeavyWorkJobIds,
+  hasActiveJob: hasTrackedHeavyWorkJob
 } = heavyWorkCoordinator;
 let cleanupIntervalRunning = false;
 
@@ -1793,13 +1800,21 @@ function logHeavyWorkMemory(kind = "", stage = "", extra = {}) {
   });
 }
 
-function getActiveHeavyWorkJobId() {
-  return String(heavyWorkState.activeMontageExportJobId || heavyWorkState.activeDialogueVideoJobId || "").trim();
+function getActiveHeavyWorkJobId(kind = "") {
+  return String(getTrackedHeavyWorkJobId(kind)).trim();
+}
+
+function getActiveHeavyWorkJobIds(kind = "") {
+  return Array.isArray(getTrackedHeavyWorkJobIds(kind)) ? getTrackedHeavyWorkJobIds(kind) : [];
+}
+
+function hasActiveHeavyWorkJob(kind = "", jobId = "") {
+  return Boolean(hasTrackedHeavyWorkJob(kind, jobId));
 }
 
 function getActiveHeavyWorkKind() {
-  if (String(heavyWorkState.activeMontageExportJobId || "").trim()) return "montage_export";
-  if (String(heavyWorkState.activeDialogueVideoJobId || "").trim()) return "dialogue_video";
+  if (getActiveHeavyWorkJobIds("montage_export").length) return "montage_export";
+  if (getActiveHeavyWorkJobIds("dialogue_video").length) return "dialogue_video";
   return "";
 }
 
@@ -5231,7 +5246,7 @@ async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metada
   const targetBucket = await resolveWritableStorageBucket();
   const file = targetBucket.file(assetPath);
   const token = randomUUID();
-  await file.save(buffer, {
+  await withRetry(() => file.save(buffer, {
     resumable: false,
     contentType: mimeType,
     metadata: {
@@ -5241,7 +5256,7 @@ async function uploadScreenshotAsset({ path: assetPath, buffer, mimeType, metada
         ...metadata,
       },
     },
-  });
+  }));
   return {
     path: assetPath,
     downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
@@ -5258,18 +5273,24 @@ async function uploadBinaryFileAsset({ path: assetPath, filePath, mimeType, meta
   const targetBucket = await resolveWritableStorageBucket();
   const file = targetBucket.file(assetPath);
   const token = randomUUID();
-  const writeStream = file.createWriteStream({
-    resumable: false,
-    contentType: mimeType,
-    metadata: {
-      cacheControl: "public,max-age=86400",
+  await withRetry(() => new Promise((resolve, reject) => {
+    const readStream = fs.createReadStream(sourcePath);
+    const writeStream = file.createWriteStream({
+      resumable: false,
+      contentType: mimeType,
       metadata: {
-        firebaseStorageDownloadTokens: token,
-        ...metadata,
+        cacheControl: "public,max-age=86400",
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+          ...metadata,
+        },
       },
-    },
-  });
-  await pipeline(fs.createReadStream(sourcePath), writeStream);
+    });
+    readStream.on("error", reject);
+    writeStream.on("error", reject);
+    writeStream.on("finish", resolve);
+    readStream.pipe(writeStream);
+  }));
   return {
     path: assetPath,
     downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${targetBucket.name}/o/${encodeURIComponent(assetPath)}?alt=media&token=${token}`,
@@ -6952,10 +6973,9 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
-    const activeHeavyWorkKind = getActiveHeavyWorkKind();
-    const activeHeavyWorkJobId = getActiveHeavyWorkJobId();
-    if (activeHeavyWorkKind) {
-      return res.status(503).json(buildBackendBusyJson("dialogue_video", activeHeavyWorkJobId));
+    const activeDialogueVideoJobId = getActiveHeavyWorkJobId("dialogue_video");
+    if (activeDialogueVideoJobId) {
+      return res.status(503).json(buildBackendBusyJson("dialogue_video", activeDialogueVideoJobId));
     }
     const jobId = clampExportId(randomUUID());
     const initial = upsertDialogueVideoJob(jobId, {
@@ -7045,7 +7065,7 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
   const jobId = clampExportId(jobMeta?.jobId || "") || clampExportId(randomUUID());
   const slot = tryAcquireHeavyWorkSlot("dialogue_video", jobId);
   if (!slot?.ok) {
-    const busyError = slot?.error || buildHeavyWorkBusyError("dialogue_video", getActiveHeavyWorkJobId());
+    const busyError = slot?.error || buildHeavyWorkBusyError("dialogue_video", getActiveHeavyWorkJobId("dialogue_video"));
     return res.status(Number(busyError?.status || 503)).json(buildBackendBusyJson("dialogue_video", String(busyError?.detail?.activeJobId || "").trim()));
   }
   try {
@@ -12514,31 +12534,24 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       }
     }
 
-    const slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+    let slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
     if (!slot.ok) {
-      const activeJobId = String(slot.error?.detail?.activeJobId || "").trim();
-      if (activeJobId) {
+      const activeJobIds = Array.isArray(slot.error?.detail?.activeJobIds)
+        ? slot.error.detail.activeJobIds
+        : [String(slot.error?.detail?.activeJobId || "").trim()].filter(Boolean);
+      let releasedAnyStaleSlot = false;
+      for (const activeJobId of activeJobIds) {
         const activeJob = await resolveMontageExportJobSnapshot(activeJobId).catch(() => null);
-        if (!activeJob) {
-          releaseHeavyWorkSlot("montage_export", activeJobId);
-          const retrySlot = tryAcquireHeavyWorkSlot("montage_export", jobId);
-          if (retrySlot.ok) {
-            // Continue with the fresh slot below.
-          } else {
-            return res.status(429).json({
-              error: "backend_busy_with_export",
-              message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
-              detail: retrySlot.error?.detail
-            });
-          }
-        } else {
-          return res.status(429).json({
-            error: "backend_busy_with_export",
-            message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
-            detail: slot.error?.detail
-          });
+        const activeStatus = String(activeJob?.status || "").trim().toLowerCase();
+        const activeJobFinished = ["ready", "error", "failed", "cancelled", "completed"].includes(activeStatus);
+        if (!activeJob || activeJobFinished) {
+          releasedAnyStaleSlot = releaseHeavyWorkSlot("montage_export", activeJobId) || releasedAnyStaleSlot;
         }
-      } else {
+      }
+      if (releasedAnyStaleSlot) {
+        slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
+      }
+      if (!slot.ok) {
         return res.status(429).json({
           error: "backend_busy_with_export",
           message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
@@ -12547,19 +12560,7 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
       }
     }
 
-    if (!getActiveHeavyWorkJobId() || getActiveHeavyWorkJobId() !== jobId) {
-      const refreshedSlot = tryAcquireHeavyWorkSlot("montage_export", jobId);
-      if (!refreshedSlot.ok) {
-        return res.status(429).json({
-          error: "backend_busy_with_export",
-          message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
-          detail: refreshedSlot.error?.detail
-        });
-      }
-    }
-
-    const activeJobId = getActiveHeavyWorkJobId();
-    if (!activeJobId || activeJobId !== jobId) {
+    if (!hasActiveHeavyWorkJob("montage_export", jobId)) {
       return res.status(429).json({
         error: "backend_busy_with_export",
         message: "El servidor está procesando otra tarea pesada. Intenta en un momento.",
@@ -12606,7 +12607,7 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
       const errorCode = String(error?.code || "").trim();
       const timeoutFallback = status === 202 || errorCode === "montage_export_status_timeout";
       if (timeoutFallback || status >= 500) {
-        if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
+        if (hasActiveHeavyWorkJob("montage_export", jobId)) {
           console.warn("[backend][montage-export] export-status recovered active worker after status read failure", {
             jobId,
             status: status || null,
@@ -12646,7 +12647,7 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
     });
 
     if (!job) {
-      if (getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId) {
+      if (hasActiveHeavyWorkJob("montage_export", jobId)) {
         console.warn("[backend][montage-export] export-status recovered from active heavy-work slot", { jobId });
         return res.status(200).json(sanitizeMontageExportJobPublicPayload({
           jobId,
@@ -12661,16 +12662,13 @@ app.get("/api/podcaster/montage/export-status", async (req, res) => {
           lastHeartbeatAt: new Date().toISOString()
         }));
       }
-      if (getActiveHeavyWorkKind() === "montage_export") {
-        const activeJobId = getActiveHeavyWorkJobId();
-        if (activeJobId === jobId) {
-          releaseHeavyWorkSlot("montage_export", jobId);
-          console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
-        }
+      if (hasActiveHeavyWorkJob("montage_export", jobId)) {
+        releaseHeavyWorkSlot("montage_export", jobId);
+        console.warn("[backend][montage-export] released stale heavy-work slot after job_not_found", { jobId });
       }
       return res.status(404).json({ error: "job_not_found", code: "job_not_found" });
     }
-    const hasActiveMontageWorkerForJob = getActiveHeavyWorkKind() === "montage_export" && getActiveHeavyWorkJobId() === jobId;
+    const hasActiveMontageWorkerForJob = hasActiveHeavyWorkJob("montage_export", jobId);
     if (isMontageExportJobInterruptedByBackendRestart(job) && !hasActiveMontageWorkerForJob) {
       if (canAutoResumeInterruptedMontageExportJob(job, { queueAvailable: Boolean(montageExportQueue) })) {
         const request = job.request && typeof job.request === "object" ? job.request : null;
