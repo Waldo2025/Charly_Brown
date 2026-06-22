@@ -188,6 +188,7 @@ const buildSharedOnScreenTextPreviewShadowCss = requireOnScreenTextApiFunction("
 const wrapSharedOnScreenTextPreviewText = requireOnScreenTextApiFunction("wrapOnScreenTextPreviewText");
 const resolveSharedOnScreenTextPreviewWrapFromMeasuredWidth = requireOnScreenTextApiFunction("resolveOnScreenTextPreviewWrapFromMeasuredWidth");
 const buildSharedOnScreenTextBubbleInlineStyle = requireOnScreenTextApiFunction("buildOnScreenTextBubbleInlineStyle");
+const resolveSharedOnScreenTextClipVisibleTiming = requireOnScreenTextApiFunction("resolveOnScreenTextClipVisibleTiming");
 const applySharedOnScreenTextTrackSettingValue = requireOnScreenTextApiFunction("applyOnScreenTextTrackSettingValue");
 const applySharedOnScreenTextLookPresetValue = requireOnScreenTextApiFunction("applyOnScreenTextLookPresetValue");
 const buildSharedOnScreenTextTrackModalMarkup = requireOnScreenTextApiFunction("buildOnScreenTextTrackModalMarkup");
@@ -4255,10 +4256,11 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
     const text = getOnScreenTextClipText(row);
     if (!text) return null;
     const runtime = runtimeByRowId.get(rowId) || null;
-    const startMs = Math.max(0, Math.round(Number(clip?.startMs ?? runtime?.startMs ?? 0) || 0));
+    const clipVisibleTiming = resolveSharedOnScreenTextClipVisibleTiming(clip, runtime?.startMs ?? 0);
+    const startMs = Math.max(0, Math.round(Number(clipVisibleTiming?.startMs ?? runtime?.startMs ?? 0) || 0));
     const durationMs = Math.max(
       STUDIO_TIMELINE_MIN_CLIP_MS,
-      Math.round(getOnScreenTextClipEffectiveDurationMs(clip))
+      Math.round(Number(clipVisibleTiming?.durationMs ?? getOnScreenTextClipEffectiveDurationMs(clip)) || getOnScreenTextClipEffectiveDurationMs(clip))
     );
     const layout = layoutMap[rowId] || buildDefaultOnScreenTextLayoutForRow({ ...row, index: index + 1 }, settings);
     const expandedLayout = expandOnScreenTextLayoutToFitText(

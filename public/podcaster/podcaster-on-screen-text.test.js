@@ -3,7 +3,8 @@ const assert = require("node:assert/strict");
 
 const {
   resolveOnScreenTextMeasuredWrapResult,
-  resolveOnScreenTextRenderSpec
+  resolveOnScreenTextRenderSpec,
+  resolveOnScreenTextClipVisibleTiming
 } = require("./podcaster-on-screen-text.js");
 
 function createFakeDocument() {
@@ -133,4 +134,15 @@ test("render spec keeps 3d/bg-none tracking and vertical offset for export parit
   } finally {
     global.document = previousDocument;
   }
+});
+
+test("clip visible timing offsets start by trimIn and shortens duration by trim window", () => {
+  const timing = resolveOnScreenTextClipVisibleTiming({
+    startMs: 4000,
+    trimInMs: 750,
+    trimOutMs: 3250
+  });
+
+  assert.equal(timing.startMs, 4750);
+  assert.equal(timing.durationMs, 2500);
 });

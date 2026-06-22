@@ -1491,6 +1491,16 @@
     return Math.max(STUDIO_TIMELINE_MIN_CLIP_MS, trimOutMs - trimInMs);
   }
 
+  function resolveOnScreenTextClipVisibleTiming(clip = null, fallbackStartMs = 0) {
+    const baseStartMs = Math.max(0, Math.round(Number(clip?.startMs ?? fallbackStartMs ?? 0) || 0));
+    const trimInMs = Math.max(0, Math.round(Number(clip?.trimInMs || 0) || 0));
+    const durationMs = getOnScreenTextClipEffectiveDurationMs(clip);
+    return {
+      startMs: baseStartMs + trimInMs,
+      durationMs
+    };
+  }
+
   return {
     resolveOnScreenTextExportCanvasSize,
     wrapOnScreenTextRenderText,
@@ -1525,6 +1535,7 @@
     getOnScreenTextResizeHandles,
     buildOnScreenTextSelectionFrameHtml,
     getOnScreenTextClipEffectiveDurationMs,
+    resolveOnScreenTextClipVisibleTiming,
     toFiniteNumber
   };
 });
