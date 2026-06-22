@@ -1143,6 +1143,25 @@ try {
 } catch (err) {
   console.warn("[backend] Failed to initialize BullMQ queue, falling back to direct in-memory execution:", err.message || err);
 }
+
+function isDirectMontageExportFallbackMode() {
+  return !montageExportQueueConfigured || !montageExportQueue;
+}
+
+function buildDirectFallbackBusyDetail(kind = "", activeJobIds = []) {
+  return {
+    kind: String(kind || "").trim() || "unknown",
+    requestedKind: String(kind || "").trim() || "unknown",
+    activeJobId: String(activeJobIds[0] || "").trim(),
+    activeJobIds: Array.isArray(activeJobIds) ? activeJobIds.filter(Boolean) : [],
+    activeCount: Array.isArray(activeJobIds) ? activeJobIds.filter(Boolean).length : 0,
+    fallbackMode: "direct_in_memory",
+    queueConfigured: montageExportQueueConfigured === true,
+    queueAvailable: Boolean(montageExportQueue),
+    retryable: true,
+    reason: "bullmq_queue_unavailable"
+  };
+}
 const analizarPdfJobStore = createAnalizarPdfJobStore();
 const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
@@ -6997,6 +7016,17 @@ app.post("/api/podcaster/dialogue-videos/generate", async (req, res) => {
     if (!uid) {
       return res.status(401).json({ error: "AUTH_REQUIRED" });
     }
+    if (isDirectMontageExportFallbackMode()) {
+      const activeDirectExportJobIds = getActiveHeavyWorkJobIds("montage_export");
+      if (activeDirectExportJobIds.length) {
+        return res.status(503).json({
+          error: "backend_busy",
+          code: "backend_busy",
+          message: "El backend está exportando en modo directo y pausó temporalmente VEO para evitar reinicios por memoria.",
+          detail: buildDirectFallbackBusyDetail("dialogue_video", activeDirectExportJobIds)
+        });
+      }
+    }
     const activeDialogueVideoJobId = getActiveHeavyWorkJobId("dialogue_video");
     if (activeDialogueVideoJobId) {
       return res.status(503).json(buildBackendBusyJson("dialogue_video", activeDialogueVideoJobId));
@@ -12563,6 +12593,23 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         return res.status(202).json(sanitizeMontageExportJobPublicPayload(initial));
       } catch (enqueueErr) {
         console.error("[backend][montage-export] Failed to enqueue to BullMQ, falling back to direct run:", enqueueErr.message || enqueueErr);
+      }
+    }
+
+    if (isDirectMontageExportFallbackMode()) {
+      const activeDirectExportJobIds = getActiveHeavyWorkJobIds("montage_export");
+      if (activeDirectExportJobIds.length && !hasActiveHeavyWorkJob("montage_export", jobId)) {
+        logHeavyWorkSlots("montage_export", "direct_fallback_rejected", {
+          jobId,
+          mode: "direct",
+          reason: "bullmq_queue_unavailable"
+        });
+        return res.status(429).json({
+          error: "backend_busy_with_export",
+          code: "backend_busy_with_export",
+          message: "El backend está en modo directo sin cola Redis; solo permite un export pesado a la vez para evitar reinicios por memoria.",
+          detail: buildDirectFallbackBusyDetail("montage_export", activeDirectExportJobIds)
+        });
       }
     }
 
