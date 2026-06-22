@@ -1800,6 +1800,26 @@ function logHeavyWorkMemory(kind = "", stage = "", extra = {}) {
   });
 }
 
+function getHeavyWorkMaxConcurrent(kind = "") {
+  const cleanKind = String(kind || "").trim();
+  if (cleanKind === "montage_export") return MONTAGE_EXPORT_MAX_CONCURRENT;
+  if (cleanKind === "dialogue_video") return DIALOGUE_VIDEO_MAX_CONCURRENT;
+  return 1;
+}
+
+function logHeavyWorkSlots(kind = "", stage = "", extra = {}) {
+  const cleanKind = String(kind || "").trim() || "unknown";
+  const activeJobIds = getActiveHeavyWorkJobIds(cleanKind);
+  console.info("[backend][heavy-work][slots]", {
+    kind: cleanKind,
+    stage: String(stage || "").trim() || "unknown",
+    activeCount: activeJobIds.length,
+    maxConcurrent: getHeavyWorkMaxConcurrent(cleanKind),
+    activeJobIds,
+    ...extra
+  });
+}
+
 function getActiveHeavyWorkJobId(kind = "") {
   return String(getTrackedHeavyWorkJobId(kind)).trim();
 }
@@ -2091,7 +2111,11 @@ function runMontageExportDirectJob({
         stack: String(err?.stack || "").trim() || null
       });
     } finally {
-      releaseHeavyWorkSlot("montage_export", cleanJobId);
+      const released = releaseHeavyWorkSlot("montage_export", cleanJobId);
+      logHeavyWorkSlots("montage_export", "release_direct_job", {
+        jobId: cleanJobId,
+        released
+      });
     }
   });
   return true;
@@ -8475,7 +8499,11 @@ app.post("/api/podcaster/dialogue-videos/generate-sync", async (req, res) => {
       detail: error?.detail && typeof error.detail === "object" ? error.detail : undefined
     });
   } finally {
-    releaseHeavyWorkSlot("dialogue_video", jobId);
+    const released = releaseHeavyWorkSlot("dialogue_video", jobId);
+    logHeavyWorkSlots("dialogue_video", "release_sync_job", {
+      jobId,
+      released
+    });
   }
 });
 
@@ -12520,6 +12548,10 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 
     if (montageExportQueue) {
       console.info("[backend][montage-export] Enqueuing export job to BullMQ:", jobId);
+      logHeavyWorkSlots("montage_export", "enqueue_request", {
+        jobId,
+        mode: "queue"
+      });
       try {
         await montageExportQueue.enqueueExportJob({
           jobId,
@@ -12536,6 +12568,10 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
 
     let slot = tryAcquireHeavyWorkSlot("montage_export", jobId);
     if (!slot.ok) {
+      logHeavyWorkSlots("montage_export", "acquire_rejected", {
+        jobId,
+        detail: slot.error?.detail || null
+      });
       const activeJobIds = Array.isArray(slot.error?.detail?.activeJobIds)
         ? slot.error.detail.activeJobIds
         : [String(slot.error?.detail?.activeJobId || "").trim()].filter(Boolean);
@@ -12546,6 +12582,13 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         const activeJobFinished = ["ready", "error", "failed", "cancelled", "completed"].includes(activeStatus);
         if (!activeJob || activeJobFinished) {
           releasedAnyStaleSlot = releaseHeavyWorkSlot("montage_export", activeJobId) || releasedAnyStaleSlot;
+          if (releasedAnyStaleSlot) {
+            logHeavyWorkSlots("montage_export", "release_stale_slot", {
+              jobId,
+              releasedJobId: activeJobId,
+              previousStatus: activeStatus || null
+            });
+          }
         }
       }
       if (releasedAnyStaleSlot) {
@@ -12567,6 +12610,11 @@ app.post("/api/podcaster/montage/export", async (req, res) => {
         detail: slot.error?.detail
       });
     }
+
+    logHeavyWorkSlots("montage_export", "acquire_direct_job", {
+      jobId,
+      mode: "direct"
+    });
 
     runMontageExportDirectJob({
       jobId,
