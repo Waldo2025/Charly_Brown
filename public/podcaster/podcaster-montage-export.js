@@ -1277,10 +1277,36 @@ export function setMontageExportStatus(text = "", hint = "", options = {}) {
   }
 }
 
+function setConfirmMontageExportButtonState({
+  disabled = false,
+  loading = false,
+  label = ""
+} = {}) {
+  const button = window.els.confirmMontageExportBtn;
+  if (!button) return;
+  const textEl = button.querySelector("span");
+  const iconEl = button.querySelector("i");
+  const nextLabel = String(label || "").trim() || (loading ? "Iniciando exportación…" : "Exportar");
+  button.disabled = Boolean(disabled);
+  button.classList.toggle("is-loading", Boolean(loading));
+  button.setAttribute("aria-busy", loading ? "true" : "false");
+  if (textEl) textEl.textContent = nextLabel;
+  if (iconEl) {
+    iconEl.className = loading
+      ? "fas fa-spinner spinner-icon"
+      : "fas fa-file-export";
+    iconEl.setAttribute("aria-hidden", "true");
+  }
+}
+
 export function setMontageExportBusy(isBusy = false) {
   montageExportBusy = Boolean(isBusy);
   window.montageExportBusy = montageExportBusy;
-  if (window.els.confirmMontageExportBtn) window.els.confirmMontageExportBtn.disabled = Boolean(isBusy);
+  setConfirmMontageExportButtonState({
+    disabled: Boolean(isBusy),
+    loading: Boolean(isBusy),
+    label: Boolean(isBusy) ? "Exportación en curso…" : "Exportar"
+  });
   if (window.els.continueMontageExportBtn) window.els.continueMontageExportBtn.disabled = Boolean(isBusy);
   if (window.els.generateAllDialogueVideosBtn) window.els.generateAllDialogueVideosBtn.disabled = Boolean(isBusy) || window.podcastVideoState.busy;
   if (window.els.regenerateAllDialogueVideosBtn) window.els.regenerateAllDialogueVideosBtn.disabled = Boolean(isBusy) || window.podcastVideoState.busy;
@@ -1917,6 +1943,11 @@ export function openMontageExportModal() {
   setMontageExportPreviewPaused(false);
   setMontageExportBusy(false);
   setMontageExportProgress(null);
+  setConfirmMontageExportButtonState({
+    disabled: false,
+    loading: false,
+    label: "Exportar"
+  });
   bindMontageExportPreviewJassub();
 
   const session = window.getActiveSession();
@@ -1958,6 +1989,11 @@ export async function handleMontageExportConfirmClick(event = null) {
     );
     return;
   }
+  setConfirmMontageExportButtonState({
+    disabled: true,
+    loading: true,
+    label: "Preparando exportación…"
+  });
   try {
     await runMontageExport();
   } catch (error) {
@@ -1967,6 +2003,13 @@ export async function handleMontageExportConfirmClick(event = null) {
       String(error?.message || error || "Revisa el timeline e inténtalo de nuevo.").trim(),
       { tone: "error" }
     );
+    if (!window.montageExportBusy && !montageExportSubmitLocked) {
+      setConfirmMontageExportButtonState({
+        disabled: false,
+        loading: false,
+        label: "Exportar"
+      });
+    }
   }
 }
 
@@ -3064,6 +3107,11 @@ export function buildMontageExportPayload(session = null) {
 export async function runMontageExport() {
   if (window.montageExportBusy || montageExportSubmitLocked) return;
   montageExportSubmitLocked = true;
+  setConfirmMontageExportButtonState({
+    disabled: true,
+    loading: true,
+    label: "Preparando exportación…"
+  });
   const previousJobId = String(window.montageExportJobState.jobId || "").trim();
   try {
     const session = window.getActiveSession?.() || null;
@@ -3099,6 +3147,11 @@ export async function runMontageExport() {
     setMontageExportContinueButton({ visible: false });
     setMontageExportProgress(0.08);
     setMontageExportStatus("Preparando exportación…", "Enviando job al backend.", { tone: "neutral" });
+    setConfirmMontageExportButtonState({
+      disabled: true,
+      loading: true,
+      label: "Iniciando exportación…"
+    });
     refreshMontageExportPreviewNow({
       force: true,
       loadingMeta: "Manteniendo el preview del montaje mientras inicia la exportación…"
@@ -3217,6 +3270,13 @@ export async function runMontageExport() {
     setMontageExportBusy(false);
   } finally {
     montageExportSubmitLocked = false;
+    if (!window.montageExportBusy) {
+      setConfirmMontageExportButtonState({
+        disabled: false,
+        loading: false,
+        label: "Exportar"
+      });
+    }
   }
 }
 
