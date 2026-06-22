@@ -27267,15 +27267,109 @@ ${documentoFuente}
   `;
 }
 
+function _unidadBuildImportedTeacherNotesFallbackSourceHtml(documentoFuente = "") {
+  const source = String(documentoFuente || "").trim();
+  if (!source) return "";
+
+  const directStructured = extraerActividades(source);
+  if (directStructured.actividadesNormales.length || directStructured.actividadesFichas.length) {
+    return source;
+  }
+
+  if (typeof DOMParser === "undefined") {
+    return source;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
+    const root = doc.body.firstElementChild || doc.body;
+    if (!(root instanceof Element)) return source;
+
+    const blocks = [];
+    let currentParts = [];
+
+    const pushCurrent = () => {
+      const html = currentParts.join("").trim();
+      if (html) blocks.push(html);
+      currentParts = [];
+    };
+
+    const childNodes = Array.from(root.children);
+    childNodes.forEach((node) => {
+      if (!(node instanceof Element)) return;
+      const tag = String(node.tagName || "").toUpperCase();
+      const text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) return;
+
+      const isHeading = /^H[1-6]$/.test(tag);
+      const isNumberedLead = /^\d+[.):-]?\s+\S/.test(text);
+      const isStrongLead = tag === "P" && !!node.querySelector("strong");
+      const isStepList = tag === "OL" || tag === "UL";
+      const isTable = tag === "TABLE";
+      const isLooseParagraph = tag === "P" || tag === "DIV";
+
+      if (isHeading) {
+        pushCurrent();
+        return;
+      }
+
+      if (isNumberedLead || isStrongLead) {
+        pushCurrent();
+        currentParts.push(node.outerHTML);
+        return;
+      }
+
+      if (isStepList || isTable) {
+        if (!currentParts.length) {
+          currentParts.push(`<p><strong>${text}</strong></p>`);
+        }
+        currentParts.push(node.outerHTML);
+        pushCurrent();
+        return;
+      }
+
+      if (isLooseParagraph) {
+        currentParts.push(node.outerHTML);
+      }
+    });
+
+    pushCurrent();
+
+    if (!blocks.length) return source;
+
+    return blocks
+      .map((html) => `<div class="activity">${html}</div>`)
+      .join("");
+  } catch (_) {
+    return source;
+  }
+}
+
 function _unidadBuildTeacherNotesImportedFallbackHtml({
+  documentoFuente = "",
   categoria = "",
   subtema = "",
   tituloSeccion = "",
+  grado = "",
   teacherNotesFormat = TEACHER_NOTES_FORMATS.DEFAULT
 } = {}) {
   const safeTeacherNotesFormat = normalizeTeacherNotesFormat(teacherNotesFormat);
   const generalHeadingLabel = getTeacherGeneralHeading(safeTeacherNotesFormat);
   const safeTitulo = String(tituloSeccion || formatearSubtema(subtema)).trim() || formatearSubtema(subtema);
+  const fuenteDoc = String(documentoFuente || "").trim();
+  if (fuenteDoc) {
+    const fuenteFallback = _unidadBuildImportedTeacherNotesFallbackSourceHtml(fuenteDoc);
+    return _unidadBuildTeacherNotesStructuredHtml({
+      contenidoActividades: fuenteFallback,
+      categoria,
+      subtema,
+      tituloCreativo: safeTitulo,
+      grado,
+      rawHtml: "",
+      teacherNotesFormat: safeTeacherNotesFormat
+    });
+  }
   return `
     <div class="unidad-teacher-notes">
       <h3>${generalHeadingLabel}</h3>
@@ -27313,9 +27407,11 @@ async function _unidadGenerarNotasMaestroDesdeDocumentoImportado({
   if (!documentoFuente) {
     return _unidadFinalizeTeacherNotesHtml(
       _unidadBuildTeacherNotesImportedFallbackHtml({
+        documentoFuente,
         categoria,
         subtema,
         tituloSeccion: tituloCreativo,
+        grado,
         teacherNotesFormat: safeTeacherNotesFormat
       }),
       { categoria, subtema, grado }
@@ -27351,9 +27447,11 @@ async function _unidadGenerarNotasMaestroDesdeDocumentoImportado({
 
   return _unidadFinalizeTeacherNotesHtml(
     _unidadBuildTeacherNotesImportedFallbackHtml({
+      documentoFuente,
       categoria,
       subtema,
       tituloSeccion: tituloCreativo,
+      grado,
       teacherNotesFormat: safeTeacherNotesFormat
     }),
     { categoria, subtema, grado }
