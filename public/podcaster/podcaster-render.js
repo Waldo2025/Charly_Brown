@@ -161,7 +161,8 @@ function updateCards(layer, cards = [], currentMs = 0) {
 }
 
 function placeBrandOverlay(img, overlay = {}, width = 1280) {
-  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlay.assetPath) {
+  const overlaySrc = overlay?.assetUrl || overlay?.assetPath || "";
+  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlaySrc) {
     img.hidden = true;
     return;
   }
@@ -171,7 +172,7 @@ function placeBrandOverlay(img, overlay = {}, width = 1280) {
   const marginPx = Math.round(width * marginPct);
   const overlayWidthPx = Math.max(48, Math.round(width * widthPct));
   img.hidden = false;
-  img.src = overlay.assetUrl || overlay.assetPath;
+  img.src = overlaySrc;
   img.style.width = `${overlayWidthPx}px`;
   img.style.height = "auto";
   img.style.left = side.includes("left") ? `${marginPx}px` : "auto";
@@ -179,11 +180,13 @@ function placeBrandOverlay(img, overlay = {}, width = 1280) {
   img.style.top = side.includes("bottom") ? "auto" : `${marginPx}px`;
   img.style.bottom = side.includes("bottom") ? `${marginPx}px` : "auto";
   img.style.opacity = `${Math.max(0, Math.min(1, Number(overlay.opacity ?? 1)) || 1)}`;
+  img.style.zIndex = "40";
 }
 
 function prepareBrandOverlay(img, overlay = {}, width = 1280) {
   placeBrandOverlay(img, overlay, width);
-  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlay.assetPath) {
+  const overlaySrc = overlay?.assetUrl || overlay?.assetPath || "";
+  if (!overlay || typeof overlay !== "object" || overlay.enabled !== true || !overlaySrc) {
     return Promise.resolve();
   }
   if (img.complete && img.naturalWidth > 0) return Promise.resolve();

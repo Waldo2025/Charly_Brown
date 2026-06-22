@@ -11160,11 +11160,10 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
   height = 720,
   reelModeEnabled = false,
   baseInputLabel = "[0:v]",
+  brandInputLabel = "[1:v]",
   outputLabel = "vout"
 } = {}) {
-  if (!brandOverlay || typeof brandOverlay !== "object") return "";
-  const resolvedPath = resolveBrandOverlayAssetPath(brandOverlay.assetPath);
-  if (brandOverlay.enabled !== true || !resolvedPath || !fs.existsSync(resolvedPath)) return "";
+  if (!brandOverlay || typeof brandOverlay !== "object" || brandOverlay.enabled !== true) return "";
   const sourceWidth = Math.max(2, Math.round(Number(width || 1280) || 1280));
   const defaultBrandWidthPct = reelModeEnabled ? 0.09 : 0.05;
   const defaultBrandMarginPct = reelModeEnabled ? 0.03 : 0.025;
@@ -11179,7 +11178,7 @@ function buildMontageBrandOverlayFilter(brandOverlay = null, {
     ? `H-h-${marginPx}`
     : `${marginPx}`;
   return [
-    `movie=filename='${escapeFfmpegFilterPath(resolvedPath)}',format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
+    `${brandInputLabel}format=rgba${opacity < 0.999 ? `,colorchannelmixer=aa=${opacity.toFixed(3)}` : ""},scale=${overlayWidthPx}:-1[brand]`,
     `${baseInputLabel}[brand]overlay=eof_action=pass:shortest=0:x=${xExpr}:y=${yExpr}:format=auto[${outputLabel}]`
   ].join(";");
 }
@@ -12257,11 +12256,13 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       }
 
       if (hasBrandOverlay) {
+        emitStage("apply_brand_overlay", 0.92, "Aplicando logo de marca.");
         const brandFilterComplex = buildMontageBrandOverlayFilter(input.brandOverlay, {
           width: visualDims.width,
           height: visualDims.height,
           reelModeEnabled: input.reelModeEnabled === true,
           baseInputLabel: currentLabel,
+          brandInputLabel: "[1:v]",
           outputLabel: `brand_out_${filterIndex + 1}`
         });
         if (brandFilterComplex) {
@@ -12285,6 +12286,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           "-i", finalOutPath
         ];
         const isReviewVisualPass = Boolean(reviewFilter && input.exportMode === "review");
+        if (!isReviewVisualPass && useFilterComplexForVisual && hasBrandOverlay) {
+          finalVisualArgs.push("-loop", "1", "-i", resolvedBrandPath);
+        }
         const baseVideoChain = isReviewVisualPass
           ? reviewFilter
           : (visualFilters.join(",") || "format=rgba");
