@@ -42,8 +42,10 @@ function extractMaybeAsyncFunction(name) {
 const context = {
   console,
   Buffer,
+  URL,
   btoa: (value) => Buffer.from(value, "binary").toString("base64"),
   buildApiUrlPreferRemote: (path) => `https://remote.test${path}`,
+  buildExportApiUrl: (path) => `https://export.test${path}`,
   window: {
     location: {
       origin: "https://charly-brown.web.app"
@@ -303,20 +305,57 @@ test("montage export normalizes relative proxy-media urls for backend submission
   assert.equal(stripped.backgroundMusic.dataUrl, "");
   assert.equal(
     stripped.backgroundMusic.url,
-    "https://remote.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
+    "https://export.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
   );
   assert.equal(
     stripped.backgroundMusic.downloadUrl,
-    "https://remote.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
+    "https://export.test/api/assets/proxy-media?storagePath=podcaster%2Flibrary%2Fmusic%2Ftrack.mp3"
   );
   assert.equal(stripped.audioTimeline.backgroundSegments[0].dataUrl, "");
   assert.equal(
     stripped.audioTimeline.backgroundSegments[0].url,
-    "https://remote.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
+    "https://export.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
   );
   assert.equal(
     stripped.audioTimeline.backgroundSegments[0].downloadUrl,
-    "https://remote.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
+    "https://export.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Ftrack.mp3%3Falt%3Dmedia"
+  );
+});
+
+test("montage export rewrites absolute gemini proxy-media urls to the export backend", () => {
+  const payload = {
+    entries: [
+      {
+        rowId: "row-1",
+        video: {
+          url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Fscene.mp4%3Falt%3Dmedia",
+          downloadUrl: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fabc%2Fvideos%2Fscene.mp4"
+        },
+        audio: {
+          url: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fabc%2Faudio%2Fclip.wav",
+          downloadUrl: "https://charly-brown-gemini-backend.onrender.com/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Fclip.wav%3Falt%3Dmedia"
+        }
+      }
+    ]
+  };
+
+  const stripped = context.stripMontageExportSubmissionPayload(payload);
+
+  assert.equal(
+    stripped.entries[0].video.url,
+    "https://export.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Fscene.mp4%3Falt%3Dmedia"
+  );
+  assert.equal(
+    stripped.entries[0].video.downloadUrl,
+    "https://export.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fabc%2Fvideos%2Fscene.mp4"
+  );
+  assert.equal(
+    stripped.entries[0].audio.url,
+    "https://export.test/api/assets/proxy-media?storagePath=podcaster%2Fsessions%2Fabc%2Faudio%2Fclip.wav"
+  );
+  assert.equal(
+    stripped.entries[0].audio.downloadUrl,
+    "https://export.test/api/assets/proxy-media?url=https%3A%2F%2Ffirebasestorage.googleapis.com%2Fv0%2Fb%2Fbucket%2Fo%2Fclip.wav%3Falt%3Dmedia"
   );
 });
 

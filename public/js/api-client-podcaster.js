@@ -11,4 +11,4 @@ export {
   hasAvailableApiBase,
   isLoopbackApiBase,
   resolveApiBase
-} from "./api-client.js?v=2026-06-22.2";
+} from "./api-client.js?v=2026-06-22.6";

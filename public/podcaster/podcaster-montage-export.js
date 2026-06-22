@@ -2520,7 +2520,33 @@ function stripInlineMontageMediaRecord(record = null) {
 function normalizeMontageSubmissionMediaUrl(value = "") {
   const cleanValue = String(value || "").trim();
   if (!cleanValue) return "";
-  if (/^(?:data:|https?:\/\/|gs:\/\/)/i.test(cleanValue)) return cleanValue;
+  if (/^(?:data:|gs:\/\/)/i.test(cleanValue)) return cleanValue;
+  const buildExportProxyUrl = (path = "") => {
+    const cleanPath = String(path || "").trim();
+    if (!cleanPath) return "";
+    try {
+      if (typeof buildExportApiUrl === "function") {
+        const absolute = String(buildExportApiUrl(cleanPath) || "").trim();
+        if (absolute) return absolute;
+      }
+    } catch (_) {
+      // fallback below
+    }
+    try {
+      return new URL(cleanPath, window.location.origin).toString();
+    } catch (_) {
+      return cleanPath;
+    }
+  };
+  try {
+    const parsed = new URL(cleanValue, window.location.origin);
+    const proxyPath = `${parsed.pathname || ""}${parsed.search || ""}`;
+    const isProxyAssetRoute = /^\/api\/assets\/proxy-(?:media|image)\?/i.test(proxyPath);
+    if (isProxyAssetRoute) return buildExportProxyUrl(proxyPath);
+  } catch (_) {
+    // keep legacy handling below
+  }
+  if (/^https?:\/\//i.test(cleanValue)) return cleanValue;
   if (!cleanValue.startsWith("/api/")) return cleanValue;
   try {
     if (typeof buildApiUrlPreferRemote === "function") {

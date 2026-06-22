@@ -9,6 +9,10 @@ const runtimeConfigSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/js/runtime-config.js",
   "utf8"
 );
+const podcasterHtmlSource = fs.readFileSync(
+  "/Users/waldolopez/Documents/CharlyBrown/public/podcaster.html",
+  "utf8"
+);
 const montageExportSource = fs.readFileSync(
   "/Users/waldolopez/Documents/CharlyBrown/public/podcaster/podcaster-montage-export.js",
   "utf8"
@@ -18,6 +22,12 @@ assert.match(
   runtimeConfigSource,
   /exportApiBaseUrl:\s*"https:\/\/snoopy-export\.onrender\.com\/api"/,
   "El runtime config debe publicar una base separada para el backend de export."
+);
+
+assert.match(
+  podcasterHtmlSource,
+  /<script src="js\/runtime-config-loader\.js\?v=2026-06-22\.6" defer><\/script>/,
+  "podcaster.html debe forzar la recarga del runtime-config-loader alineado con el split de backends."
 );
 
 assert.match(
