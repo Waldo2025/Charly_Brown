@@ -22,10 +22,10 @@ assert.match(
   "El builder debe permitir incluir el track aunque esté oculto cuando se exporta party karaoke."
 );
 
-assert.match(
+assert.doesNotMatch(
   montageExportSource,
   /includeHidden:\s*window\.montageExportState\.partyKaraoke !== false/,
-  "La exportación debe forzar la inclusión del texto en pantalla cuando party karaoke está activo."
+  "La exportación ya no debe forzar la inclusión del texto en pantalla cuando party karaoke está activo."
 );
 
 assert.match(

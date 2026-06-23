@@ -5,7 +5,7 @@ const backendSource = readFileSync(new URL("../backend/server.js", import.meta.u
 
 assert.match(
   backendSource,
-  /const reviewOnScreenTextEnabled = input\.exportMode === "review" && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/,
+  /const reviewOnScreenTextEnabled = input\.exportMode === "review" && isTextTrackVisible && Boolean\(input\.onScreenTextSettings && input\.onScreenTextSegments\.length\);/,
   "El pass final debe aplicar texto en pantalla solo en export review."
 );
 

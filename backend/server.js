@@ -10215,7 +10215,6 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 }
 
 function shouldUseMontageSceneAssSubtitles(input = {}) {
-  if (shouldUseBrowserMontageRenderer(input) && getMontageBrowserRendererAvailability().available === true) return false;
   if (String(input?.exportMode || "").trim() === "review") return false;
   const isTextTrackVisible = input?.onScreenTextSettings?.enabled !== false && input?.onScreenTextSettings?.showTrack !== false;
   return Boolean(isTextTrackVisible && input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
