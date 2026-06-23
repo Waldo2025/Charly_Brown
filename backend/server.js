@@ -12304,7 +12304,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
           fs.writeFileSync(assPath, assContent, "utf8");
           filterIndex += 1;
           const outLabel = `[ontxt_ass_${filterIndex}]`;
-          filterSegments.push(`${currentLabel}ass='${escapeFfmpegFilterPath(assPath)}'${outLabel}`);
+          filterSegments.push(`${currentLabel}ass=filename='${escapeFfmpegFilterPath(assPath)}'${outLabel}`);
           currentLabel = outLabel;
         }
 
