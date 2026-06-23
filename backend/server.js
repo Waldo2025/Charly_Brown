@@ -101,9 +101,14 @@ const {
   resolveAnalyzerScript,
   sanitizeResultSummary,
   sanitizeAnalizarPdfSession,
-  sanitizeStyleMapping,
-  spawnAnalizarPdfPythonJob
+  sanitizeStyleMapping
 } = require("./analizar-pdf.js");
+const {
+  createAnalizarPdfProcessingQueue
+} = require("./analizar-pdf-processing-queue.js");
+const {
+  runAnalizarPdfJobInWorker
+} = require("./analizar-pdf-worker-client.js");
 
 let admin = null;
 let GoogleGenAI = null;
@@ -1018,7 +1023,12 @@ const corsOptions = {
     "X-Requested-With",
     "Cache-Control",
     "Pragma",
-    "Expires"
+    "Expires",
+    "X-Session-Id",
+    "X-Revision-Id",
+    "X-File-Id",
+    "X-Mapping-Id",
+    "X-File-Name"
   ],
   exposedHeaders: ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -1169,6 +1179,148 @@ const analizarPdfJobStore = createAnalizarPdfJobStore();
 const analizarPdfGeneratedFileStore = new Map();
 const ANALIZAR_PDF_COLLECTION = "analizarPDF";
 const ANALIZAR_PDF_STYLE_MAPPINGS_COLLECTION = "analizarPDFStyleMappings";
+
+function buildAnalizarPdfFileStatePatch({
+  analysisStatus = "queued",
+  jobId = "",
+  rawFileName = "",
+  sourceType = "",
+  mappingId = "",
+  mappingTitle = "",
+  mappingUpdatedAt = "",
+  sourceAssetPath = "",
+  result = undefined,
+  resultSummary = undefined
+} = {}) {
+  const patch = {
+    analysisStatus,
+    analysisJobId: jobId,
+    documentName: rawFileName,
+    fileName: rawFileName,
+    sourceType,
+    mappingId,
+    mappingTitle,
+    mappingUpdatedAt,
+    sourceAssetPath
+  };
+  if (result !== undefined) {
+    patch.result = result;
+  }
+  if (resultSummary !== undefined) {
+    patch.resultSummary = resultSummary;
+  }
+  return patch;
+}
+
+async function processQueuedAnalizarPdfJob(job = {}) {
+  const {
+    jobId,
+    uid,
+    sessionId,
+    revisionId,
+    fileId,
+    mappingId,
+    rawFileName,
+    selectedMapping,
+    sourceType,
+    stableSourcePath,
+    tempFilePath,
+    scriptPath,
+    session
+  } = job;
+
+  try {
+    logAnalizarPdf("job.processing.start", {
+      jobId,
+      sessionId,
+      revisionId,
+      fileId,
+      tempFilePath
+    });
+    analizarPdfJobStore.set(jobId, { status: "processing", startedAt: new Date().toISOString() });
+    await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
+      analysisStatus: "processing",
+      jobId,
+      rawFileName,
+      sourceType,
+      mappingId: selectedMapping?.id || mappingId || "",
+      mappingTitle: selectedMapping?.title || "",
+      mappingUpdatedAt: selectedMapping?.updatedAt || "",
+      sourceAssetPath: stableSourcePath
+    }));
+
+    const result = await runAnalizarPdfJobInWorker({
+      scriptPath,
+      pdfPath: tempFilePath,
+      session: {
+        ...session,
+        analysisMapping: selectedMapping || null
+      }
+    });
+    const resultSummary = buildResultSummary(result);
+    const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
+      analysisStatus: "completed",
+      jobId,
+      rawFileName,
+      sourceType,
+      mappingId: selectedMapping?.id || mappingId || "",
+      mappingTitle: selectedMapping?.title || "",
+      mappingUpdatedAt: selectedMapping?.updatedAt || "",
+      sourceAssetPath: stableSourcePath,
+      result,
+      resultSummary
+    }));
+    logAnalizarPdf("job.completed", {
+      jobId,
+      sessionId,
+      resultSummary
+    });
+    analizarPdfJobStore.set(jobId, {
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      resultSummary,
+      session: persistedSession
+    });
+    return result;
+  } catch (error) {
+    logAnalizarPdf("job.failed", {
+      jobId,
+      sessionId,
+      message: String(error?.message || error),
+      stack: String(error?.stack || "")
+    });
+    const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, buildAnalizarPdfFileStatePatch({
+      analysisStatus: "failed",
+      jobId,
+      rawFileName,
+      sourceType,
+      mappingId: selectedMapping?.id || mappingId || "",
+      mappingTitle: selectedMapping?.title || "",
+      mappingUpdatedAt: selectedMapping?.updatedAt || "",
+      sourceAssetPath: stableSourcePath
+    })).catch(() => null);
+    analizarPdfJobStore.set(jobId, {
+      status: "failed",
+      error: String(error?.message || error),
+      session: persistedSession
+    });
+    throw error;
+  } finally {
+    try {
+      fs.unlinkSync(tempFilePath);
+      logAnalizarPdf("job.tempfile.deleted", {
+        jobId,
+        tempFilePath
+      });
+    } catch (_) {
+      // noop
+    }
+  }
+}
+
+const analizarPdfProcessingQueue = createAnalizarPdfProcessingQueue({
+  runJob: processQueuedAnalizarPdfJob
+});
 
 function getStorageBucketCandidates() {
   return STORAGE_BUCKET_CANDIDATES.filter(Boolean);
@@ -5869,108 +6021,41 @@ app.post("/api/analizar-pdf/analyze", async (req, res) => {
       createdAt: new Date().toISOString()
     });
     await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
-      analysisStatus: "queued",
-      analysisJobId: jobId,
-      documentName: rawFileName,
-      fileName: rawFileName,
-      sourceType: session.sourceType,
-      mappingId: selectedMapping?.id || mappingId || "",
-      mappingTitle: selectedMapping?.title || "",
-      mappingUpdatedAt: selectedMapping?.updatedAt || "",
-      sourceAssetPath: stableSourcePath
+      ...buildAnalizarPdfFileStatePatch({
+        analysisStatus: "queued",
+        jobId,
+        rawFileName,
+        sourceType: session.sourceType,
+        mappingId: selectedMapping?.id || mappingId || "",
+        mappingTitle: selectedMapping?.title || "",
+        mappingUpdatedAt: selectedMapping?.updatedAt || "",
+        sourceAssetPath: stableSourcePath
+      })
     });
     fs.copyFileSync(tempFilePath, stableSourcePath);
     logAnalizarPdf("job.queued", { jobId, sessionId, ownerId: uid });
 
-    void (async () => {
-      try {
-        logAnalizarPdf("job.processing.start", {
-          jobId,
-          sessionId,
-          revisionId,
-          fileId,
-          tempFilePath
-        });
-        analizarPdfJobStore.set(jobId, { status: "processing", startedAt: new Date().toISOString() });
-        await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
-          analysisStatus: "processing",
-          analysisJobId: jobId,
-          documentName: rawFileName,
-          fileName: rawFileName,
-          sourceType: session.sourceType,
-          mappingId: selectedMapping?.id || mappingId || "",
-          mappingTitle: selectedMapping?.title || "",
-          mappingUpdatedAt: selectedMapping?.updatedAt || "",
-          sourceAssetPath: stableSourcePath
-        });
-        const result = await spawnAnalizarPdfPythonJob({
-          scriptPath,
-          pdfPath: tempFilePath,
-          session: {
-            ...session,
-            analysisMapping: selectedMapping || null
-          }
-        });
-        const resultSummary = buildResultSummary(result);
-        const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
-          analysisStatus: "completed",
-          analysisJobId: jobId,
-          documentName: rawFileName,
-          fileName: rawFileName,
-          sourceType: session.sourceType,
-          mappingId: selectedMapping?.id || mappingId || "",
-          mappingTitle: selectedMapping?.title || "",
-          mappingUpdatedAt: selectedMapping?.updatedAt || "",
-          sourceAssetPath: stableSourcePath,
-          result,
-          resultSummary
-        });
-        logAnalizarPdf("job.completed", {
-          jobId,
-          sessionId,
-          resultSummary
-        });
-        analizarPdfJobStore.set(jobId, {
-          status: "completed",
-          completedAt: new Date().toISOString(),
-          resultSummary,
-          session: persistedSession
-        });
-      } catch (error) {
-        logAnalizarPdf("job.failed", {
-          jobId,
-          sessionId,
-          message: String(error?.message || error),
-          stack: String(error?.stack || "")
-        });
-        const persistedSession = await updateAnalizarPdfFileState(uid, sessionId, revisionId, fileId, {
-          analysisStatus: "failed",
-          analysisJobId: jobId,
-          documentName: rawFileName,
-          fileName: rawFileName,
-          sourceType: session.sourceType,
-          mappingId: selectedMapping?.id || mappingId || "",
-          mappingTitle: selectedMapping?.title || "",
-          mappingUpdatedAt: selectedMapping?.updatedAt || "",
-          sourceAssetPath: stableSourcePath
-        }).catch(() => null);
-        analizarPdfJobStore.set(jobId, {
-          status: "failed",
-          error: String(error?.message || error),
-          session: persistedSession
-        });
-      } finally {
-        try {
-          fs.unlinkSync(tempFilePath);
-          logAnalizarPdf("job.tempfile.deleted", {
-            jobId,
-            tempFilePath
-          });
-        } catch (_) {
-          // noop
-        }
-      }
-    })();
+    void analizarPdfProcessingQueue.enqueue({
+      jobId,
+      uid,
+      sessionId,
+      revisionId,
+      fileId,
+      mappingId,
+      rawFileName,
+      selectedMapping,
+      sourceType: session.sourceType,
+      stableSourcePath,
+      tempFilePath,
+      scriptPath,
+      session
+    }).catch((error) => {
+      logAnalizarPdf("job.queue.rejected", {
+        jobId,
+        sessionId,
+        message: String(error?.message || error)
+      });
+    });
 
     return res.status(202).json({
       ok: true,

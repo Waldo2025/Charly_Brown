@@ -671,6 +671,11 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   cursor: pointer;
 }
 
+.analizar-pdf-subrecord-card.is-processing {
+  border-color: color-mix(in srgb, var(--ap-accent) 34%, var(--ap-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ap-accent) 14%, transparent);
+}
+
 .analizar-pdf-subrecord-card-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -708,6 +713,22 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
   padding: 0;
 }
 
+.analizar-pdf-subrecord-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analizar-pdf-subrecord-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--ap-accent) 22%, #ffffff);
+  border-top-color: var(--ap-accent);
+  flex: 0 0 auto;
+  animation: analizar-pdf-subrecord-spin 0.9s linear infinite;
+}
+
 .analizar-pdf-subrecord-delete-btn {
   flex: 0 0 auto;
   align-self: start;
@@ -733,6 +754,12 @@ body:has(.analizar-pdf-boot-spinner:not([hidden])) {
 
 .analizar-pdf-subrecord-card.is-active {
   background: var(--ap-surface-alt);
+}
+
+@keyframes analizar-pdf-subrecord-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .analizar-pdf-results-toolbar {

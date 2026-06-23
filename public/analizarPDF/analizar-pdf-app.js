@@ -722,10 +722,20 @@ function normalizeStyleMapping(raw = {}, index = 0) {
   const nivel = String(source.nivel || "").trim();
   const grado = String(source.grado || "").trim();
   const unidad = String(source.unidad || "").trim();
+  const fallbackId = `mapping_${index + 1}`;
+  const hasExplicitId = Object.prototype.hasOwnProperty.call(source, "id");
+  const explicitId = hasExplicitId
+    ? String(source.id || "").trim()
+    : "";
+  const resolvedId = hasExplicitId ? explicitId : fallbackId;
+  const explicitMappingSlug = Object.prototype.hasOwnProperty.call(source, "mappingSlug")
+    ? String(source.mappingSlug || "").trim()
+    : "";
+  const resolvedMappingSlug = explicitMappingSlug || resolvedId;
   return {
-    id: String(source.id || `mapping_${index + 1}`).trim() || `mapping_${index + 1}`,
+    id: resolvedId,
     title: String(source.title || "Mapeo sin título").trim() || "Mapeo sin título",
-    mappingSlug: String(source.mappingSlug || source.id || `mapping_${index + 1}`).trim(),
+    mappingSlug: resolvedMappingSlug,
     scopeKey: String(source.scopeKey || buildMappingScopeKey({ bookType, nivel, grado, unidad })).trim(),
     bookType,
     nivel,
@@ -757,6 +767,9 @@ function resolveSuggestedMappingEntries(info = {}) {
   const bookType = String(info?.bookType || "").trim().toUpperCase();
   if (bookType === "LA" && unidad === "Proyecto") {
     return buildMappingTemplateEntries(LA_PROYECTO_MAPPING_TEMPLATE);
+  }
+  if (/^recortables?$/i.test(unidad)) {
+    return buildMappingTemplateEntries(bookType === "LA" ? LA_PROYECTO_MAPPING_TEMPLATE : PROYECTO_IDML_MAPPING_TEMPLATE);
   }
   if (bookType === "LA" && /^unidad\s+\d+/i.test(unidad) && grado === "primero") {
     return buildMappingTemplateEntries(LA_UNIDAD_PRIMERO_MAPPING_TEMPLATE);
@@ -846,6 +859,14 @@ function getActiveRevision(session = null) {
 function getActiveFile(session = null, revision = getActiveRevision(session)) {
   const fileId = String(state.activeFileId || "").trim();
   return revision?.files?.find((entry) => entry.id === fileId) || revision?.files?.[0] || null;
+}
+
+function isRevisionBusy(revision = null) {
+  const revisionStatus = String(revision?.analysisStatus || "").trim().toLowerCase();
+  if (isBusyAnalysisStatus(revisionStatus)) {
+    return true;
+  }
+  return Array.isArray(revision?.files) && revision.files.some((file) => isBusyAnalysisStatus(file?.analysisStatus || ""));
 }
 
 function resolveMappingEntriesForRevision(revision = null) {
@@ -1436,16 +1457,21 @@ function renderRevisionList(session = null) {
     els.revisionList.innerHTML = `<div class="analizar-pdf-empty-state">No hay fichas editoriales todavía.</div>`;
     return;
   }
-  els.revisionList.innerHTML = revisions.map((revision, index) => `
+  els.revisionList.innerHTML = revisions.map((revision, index) => {
+    const isBusy = isRevisionBusy(revision);
+    return `
     <article
       id="analizarPdfEditorialPanel-${escapeAttr(revision.id)}"
-      class="analizar-pdf-subrecord-card${revision.id === activeRevisionId ? " is-active" : ""}"
+      class="analizar-pdf-subrecord-card${revision.id === activeRevisionId ? " is-active" : ""}${isBusy ? " is-processing" : ""}"
       data-revision-id="${escapeAttr(revision.id)}"
       draggable="true"
     >
       <div class="analizar-pdf-subrecord-card-row">
         <button type="button" class="analizar-pdf-subrecord-card-select" data-action="select-revision" data-revision-id="${escapeAttr(revision.id)}">
-          <span>${escapeHtml(revision.title || "Nueva ficha editorial")}</span>
+          <span class="analizar-pdf-subrecord-card-title">
+            <span>${escapeHtml(revision.title || "Nueva ficha editorial")}</span>
+            ${isBusy ? '<span class="analizar-pdf-subrecord-spinner" aria-label="Ficha en proceso" title="Ficha en proceso"></span>' : ""}
+          </span>
           <small>${escapeHtml([
             revision.unidad || "Unidad pendiente",
             revision.revisionNumero || "Revisión pendiente",
@@ -1488,7 +1514,8 @@ function renderRevisionList(session = null) {
         </div>
       </div>
     </article>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderFileList(session = null) {
@@ -1873,7 +1900,7 @@ function upsertRevisionIntoSession(session = null, filesToMerge = []) {
       },
       files: []
     };
-    draft.revisions.unshift(revision);
+    draft.revisions.push(revision);
   } else {
     revision.title = revisionTitle;
     if (revisionKey) {
@@ -2045,7 +2072,7 @@ async function handleCreateRevision() {
   const nextSession = mutateActiveSession((draft) => {
     draft.revisions = Array.isArray(draft.revisions) ? draft.revisions : [];
     const draftRevision = createDraftRevision(draft);
-    draft.revisions.unshift(draftRevision);
+    draft.revisions.push(draftRevision);
     draft.bibliographicInfo.unidad = "";
     draft.bibliographicInfo.revisionNumero = "";
     return draft;
@@ -2053,7 +2080,7 @@ async function handleCreateRevision() {
   if (!nextSession) {
     return;
   }
-  state.activeRevisionId = String(nextSession.revisions?.[0]?.id || "").trim();
+  state.activeRevisionId = String(nextSession.revisions?.[nextSession.revisions.length - 1]?.id || "").trim();
   state.activeFileId = "";
   const saved = await saveSession(nextSession);
   store.upsertSession(saved);
@@ -2679,7 +2706,7 @@ function bindEditorEvents() {
   });
 
   els.duplicateMappingBtn?.addEventListener("click", () => {
-    const mapping = getActiveMapping();
+    const mapping = collectCurrentMappingDraftFromDom();
     if (!mapping) return;
     state.activeMappingId = "";
     state.__mappingDraft = normalizeStyleMapping({
