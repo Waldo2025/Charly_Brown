@@ -4248,7 +4248,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
   const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
   const suppressFallbackFromEntries = allHidden || !trackVisible;
-  if (!trackVisible) {
+  if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
     return { settings, segments: [], suppressFallbackFromEntries };
   }
   const layoutMap = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
@@ -4256,6 +4256,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const segments = rows.map((row, index) => {
     const rowId = String(row?.id || "").trim();
     if (!rowId) return null;
+    if (!trackVisible) return null;
     const clip = clipMap[rowId] || null;
     if (!clip) return null;
     if (clip.hidden === true) return null;
@@ -4752,7 +4753,7 @@ function syncOnScreenTextClipVisibilityFromRowText(rowId = "", text = "", option
 function syncPodcastOnScreenTextOverlay(session = null, options = {}) {
   const currentMs = Math.max(0, Number(options?.currentMs ?? podcastVideoState.montageCursorMs ?? 0) || 0);
   if (typeof playbackController?.syncOverlay === "function") {
-    playbackController.syncOverlay(currentMs, options);
+    return playbackController.syncOverlay(currentMs, options);
   }
   if (typeof playbackController?.syncStylizedText === "function") {
     playbackController.syncStylizedText(currentMs, options);
