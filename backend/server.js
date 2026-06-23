@@ -12164,6 +12164,7 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       || overlayCardSegments.length
       || (input.exportMode === "review" && exportedEntries.length)
       || hasBrandOverlay
+      || finalShouldAttemptBrowserRenderer
     );
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const browserRendererAvailability = shouldAttemptBrowserRenderer ? getMontageBrowserRendererAvailability() : { available: false };
