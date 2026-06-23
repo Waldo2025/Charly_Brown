@@ -4246,7 +4246,12 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const clipMap = ensureOnScreenTextClipsByRowId(activeSession, { persist: false });
   const clips = Object.values(clipMap || {});
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
-  const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
+  const allHidden = clips.length > 0 && clips.every((clip) => {
+    if (clip?.hidden === true) return true;
+    const row = rows.find(r => String(r?.id || "") === clip.rowId);
+    const text = row ? getOnScreenTextClipText(row) : "";
+    return !text;
+  });
   const suppressFallbackFromEntries = allHidden || !trackVisible;
   if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
     return { settings, segments: [], suppressFallbackFromEntries };
@@ -4259,7 +4264,7 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
     if (!trackVisible) return null;
     const clip = clipMap[rowId] || null;
     if (!clip) return null;
-    if (clip.hidden === true) return null;
+    if (clip.hidden === true && !includeHidden) return null;
     const text = getOnScreenTextClipText(row);
     if (!text) return null;
     const runtime = runtimeByRowId.get(rowId) || null;
