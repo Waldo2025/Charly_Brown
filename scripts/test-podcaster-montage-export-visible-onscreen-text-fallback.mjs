@@ -81,8 +81,8 @@ assert.equal(hiddenFallback.segments.length, 0, "Si el timeline marca suppressFa
 
 assert.match(
   source,
-  /buildMontageFallbackOnScreenTextTimeline\(onScreenTextTimeline,\s*validEntries,\s*geminiTimelineSegments\)/,
-  "buildMontageExportPayload debe usar el fallback solo cuando el timeline visible llegue sin segmentos."
+  /resolveEffectiveMontageOnScreenTextTimeline\(\{\s*activeSession,\s*onScreenTextTimeline,\s*validEntries,\s*geminiTimelineSegments\s*\}\)/m,
+  "buildMontageExportPayload debe resolver el timeline efectivo antes de decidir si reconstruye el texto visible."
 );
 
 console.log("Podcaster montage export visible onscreen text fallback OK.");

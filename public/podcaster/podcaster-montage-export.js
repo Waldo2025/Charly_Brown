@@ -2691,6 +2691,60 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
   };
 }
 
+function resolveEffectiveMontageOnScreenTextTimeline({
+  activeSession = null,
+  onScreenTextTimeline = null,
+  validEntries = [],
+  geminiTimelineSegments = []
+} = {}) {
+  const baseTimeline = onScreenTextTimeline && typeof onScreenTextTimeline === "object"
+    ? onScreenTextTimeline
+    : { settings: null, segments: [], suppressFallbackFromEntries: false };
+  const settings = baseTimeline?.settings || null;
+  const clipMap = window.ensureOnScreenTextClipsByRowId?.(activeSession, { persist: false }) || {};
+  const clips = Object.values(clipMap || {});
+  const rows = Array.isArray(window.getSessionRows?.(activeSession)) ? window.getSessionRows(activeSession) : [];
+  const trackVisible = settings?.enabled !== false && settings?.showTrack !== false;
+  const allHidden = clips.length > 0 && clips.every((clip) => {
+    if (clip?.hidden === true) return true;
+    const rowId = String(clip?.rowId || "").trim();
+    const row = rows.find((item) => String(item?.id || "").trim() === rowId) || null;
+    const text = String(row?.onScreenText || row?.textoPantalla || row?.textoEnPantalla || "").trim();
+    return !text;
+  });
+  const shouldSuppressFallback = baseTimeline?.suppressFallbackFromEntries === true || allHidden || !trackVisible;
+
+  if (shouldSuppressFallback) {
+    return {
+      settings,
+      segments: [],
+      suppressFallbackFromEntries: true,
+      debug: {
+        trackVisible,
+        allHidden,
+        clipCount: clips.length
+      }
+    };
+  }
+
+  const nextTimeline = Array.isArray(baseTimeline?.segments) && baseTimeline.segments.length
+    ? {
+      settings,
+      segments: baseTimeline.segments.filter(Boolean),
+      suppressFallbackFromEntries: false
+    }
+    : buildMontageFallbackOnScreenTextTimeline(baseTimeline, validEntries, geminiTimelineSegments);
+
+  return {
+    ...nextTimeline,
+    debug: {
+      trackVisible,
+      allHidden,
+      clipCount: clips.length
+    }
+  };
+}
+
 async function buildMontageExportPayloadForSubmission(session = null) {
   const activeSession = session || window.getActiveSession?.() || null;
   if (activeSession) {
@@ -3082,15 +3136,14 @@ export function buildMontageExportPayload(session = null) {
     activeSession,
     validEntries.map((entry) => entry?.rowId)
   );
-  // If the track is explicitly disabled or hidden, skip the fallback entirely so the
-  // backend never receives segments for a deactivated track.
-  const isTextTrackDisabled = onScreenTextTimeline.settings?.enabled === false
-    || onScreenTextTimeline.settings?.showTrack === false;
-  const effectiveOnScreenTextTimeline = isTextTrackDisabled
-    ? { settings: onScreenTextTimeline.settings, segments: [], suppressFallbackFromEntries: true }
-    : (onScreenTextTimeline.segments.length
-      ? onScreenTextTimeline
-      : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments));
+  // Revalidate the effective visibility at submit time so hidden text never leaks into
+  // export, even if the timeline DOM or cached segments are stale.
+  const effectiveOnScreenTextTimeline = resolveEffectiveMontageOnScreenTextTimeline({
+    activeSession,
+    onScreenTextTimeline,
+    validEntries,
+    geminiTimelineSegments
+  });
   const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
     || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
 
@@ -3181,6 +3234,8 @@ export async function runMontageExport() {
       entries: Array.isArray(prepared?.payload?.entries) ? prepared.payload.entries.length : 0,
       onScreenTextSegments: Array.isArray(prepared?.payload?.onScreenTextTimeline?.segments) ? prepared.payload.onScreenTextTimeline.segments.length : 0,
       onScreenTextRenderedSegments: Array.isArray(prepared?.payload?.onScreenTextRenderedSegments) ? prepared.payload.onScreenTextRenderedSegments.length : 0,
+      onScreenTextSuppressFallback: prepared?.payload?.onScreenTextTimeline?.suppressFallbackFromEntries === true,
+      onScreenTextEnabled: prepared?.payload?.onScreenTextTimeline?.enabled === true,
       exportMode: String(window.montageExportState.exportMode || "").trim() || undefined,
       onlyAudio: window.montageExportState.onlyAudio === true,
       includeLogo: window.montageExportState.includeLogo !== false,
