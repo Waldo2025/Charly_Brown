@@ -2736,9 +2736,7 @@ export function buildMontageExportPayload(session = null) {
   );
   const montageAudioMode = String(videoCfg?.audioMode || "gemini-live-per-scene").trim().toLowerCase();
   const runtimeByRowId = new Map(runtimeEntries.map((entry) => [String(entry?.rowId || "").trim(), entry]));
-  const onScreenTextTimeline = window.buildMontageOnScreenTextSegments?.(activeSession, runtimeEntries, {
-    includeHidden: window.montageExportState.partyKaraoke !== false
-  }) || {
+  const onScreenTextTimeline = window.buildMontageOnScreenTextSegments?.(activeSession, runtimeEntries, {}) || {
     settings: null,
     segments: []
   };
