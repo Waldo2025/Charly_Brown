@@ -9659,7 +9659,14 @@ function normalizeMontageExportRequestBody(body = {}) {
   let onScreenTextSegments = Array.isArray(onScreenTextTimelineRaw?.segments)
     ? onScreenTextTimelineRaw.segments.slice(0, 400).map((segment, idx) => normalizeOnScreenTextSegment(segment, idx)).filter(Boolean)
     : [];
-  if (!onScreenTextSegments.length && !hasExplicitOnScreenTextTimeline && !suppressOnScreenTextFallbackFromEntries) {
+  // Check BOTH the nested settings AND the top-level `enabled` flag that the frontend sends
+  const isExplicitlyDisabledOrHidden =
+    onScreenTextTimelineRaw?.settings?.enabled === false ||
+    onScreenTextTimelineRaw?.settings?.showTrack === false ||
+    onScreenTextTimelineRaw?.enabled === false;
+  if (isExplicitlyDisabledOrHidden) {
+    onScreenTextSegments = [];
+  } else if (!onScreenTextSegments.length && !hasExplicitOnScreenTextTimeline && !suppressOnScreenTextFallbackFromEntries) {
     onScreenTextSegments = entries
       .map((entry, idx) => {
         const text = clampText(entry?.onScreenText || "", 500);
@@ -9689,9 +9696,11 @@ function normalizeMontageExportRequestBody(body = {}) {
       })
       .filter(Boolean);
   }
+  // Do NOT hardcode enabled:true here — if the timeline sent no settings and the track is
+  // disabled/hidden we should get null (no settings), not a fake "enabled" settings object.
   const onScreenTextSettings = onScreenTextTimelineRaw?.settings && typeof onScreenTextTimelineRaw.settings === "object"
     ? normalizeOnScreenTextTrackSettings(onScreenTextTimelineRaw.settings)
-    : (onScreenTextSegments.length ? normalizeOnScreenTextTrackSettings({ enabled: true, showTrack: true, fontSizePx: 44 }) : null);
+    : null;
   const onScreenTextRenderedSegmentsRaw = Array.isArray(raw?.onScreenTextRenderedSegments)
     ? raw.onScreenTextRenderedSegments
     : (Array.isArray(onScreenTextTimelineRaw?.renderedSegments) ? onScreenTextTimelineRaw.renderedSegments : []);
@@ -9740,7 +9749,7 @@ function normalizeMontageExportRequestBody(body = {}) {
     useTimelineAudio,
     onScreenTextSegments,
     onScreenTextRenderedSegments,
-    onScreenTextSettings: onScreenTextSettings || (onScreenTextSegments.length ? normalizeOnScreenTextTrackSettings({ enabled: true, showTrack: true, fontSizePx: 44 }) : null),
+    onScreenTextSettings: onScreenTextSettings,
     dialogueAudioMap,
     overlayCards,
     brandOverlay,
@@ -10239,7 +10248,8 @@ function buildMontageOnScreenTextRenderedSegmentMap(renderedSegments = []) {
 function shouldUseMontageSceneAssSubtitles(input = {}) {
   if (shouldUseBrowserMontageRenderer(input) && getMontageBrowserRendererAvailability().available === true) return false;
   if (String(input?.exportMode || "").trim() === "review") return false;
-  return Boolean(input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
+  const isTextTrackVisible = input?.onScreenTextSettings?.enabled !== false && input?.onScreenTextSettings?.showTrack !== false;
+  return Boolean(isTextTrackVisible && input?.onScreenTextSettings && Array.isArray(input?.onScreenTextSegments) && input.onScreenTextSegments.length);
 }
 
 function doesMontageOnScreenTextSegmentBelongToScene(segment = {}, entry = {}, sceneIndex = 1, sceneStartMs = 0, sceneEndMs = 0) {
@@ -12155,8 +12165,9 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       : exportedEntries.reduce((acc, item) => acc + Math.max(0, Number(item?.durationSec || 0)), 0);
     let finalOutPath = concatOutPath;
 
-    const reviewOnScreenTextEnabled = input.exportMode === "review" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
-    const normalOnScreenTextEnabled = input.exportMode === "normal" && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
+    const isTextTrackVisible = input.onScreenTextSettings?.enabled !== false && input.onScreenTextSettings?.showTrack !== false;
+    const reviewOnScreenTextEnabled = input.exportMode === "review" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length);
+    const normalOnScreenTextEnabled = input.exportMode === "normal" && isTextTrackVisible && Boolean(input.onScreenTextSettings && input.onScreenTextSegments.length) && !shouldBurnSceneOnScreenText;
     const overlayCardSegments = Array.isArray(input.overlayCards?.segments)
       ? input.overlayCards.segments
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);

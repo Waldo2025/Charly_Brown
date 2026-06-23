@@ -2682,8 +2682,10 @@ function buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline = null, e
       };
     })
     .filter(Boolean);
+  // IMPORTANT: Do NOT hardcode enabled:true — inherit real settings so the backend can
+  // honour the track's actual disabled/hidden state during export.
   return {
-    settings: baseTimeline.settings || (fallbackSegments.length ? { enabled: true, showTrack: true, fontSizePx: 44 } : null),
+    settings: baseTimeline.settings || (fallbackSegments.length ? { fontSizePx: 44 } : null),
     segments: fallbackSegments,
     suppressFallbackFromEntries: false
   };
@@ -3082,9 +3084,15 @@ export function buildMontageExportPayload(session = null) {
     activeSession,
     validEntries.map((entry) => entry?.rowId)
   );
-  const effectiveOnScreenTextTimeline = onScreenTextTimeline.segments.length
-    ? onScreenTextTimeline
-    : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments);
+  // If the track is explicitly disabled or hidden, skip the fallback entirely so the
+  // backend never receives segments for a deactivated track.
+  const isTextTrackDisabled = onScreenTextTimeline.settings?.enabled === false
+    || onScreenTextTimeline.settings?.showTrack === false;
+  const effectiveOnScreenTextTimeline = isTextTrackDisabled
+    ? { settings: onScreenTextTimeline.settings, segments: [], suppressFallbackFromEntries: true }
+    : (onScreenTextTimeline.segments.length
+      ? onScreenTextTimeline
+      : buildMontageFallbackOnScreenTextTimeline(onScreenTextTimeline, validEntries, geminiTimelineSegments));
   const shouldSendOnScreenTextTimeline = effectiveOnScreenTextTimeline.segments.length
     || effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true;
 
@@ -3120,8 +3128,8 @@ export function buildMontageExportPayload(session = null) {
     backgroundMusic,
     backgroundMusicDuckingPct: Math.max(40, Math.min(100, Number(panelMusic?.duckingWhenGeminiPct ?? 60))),
     filename: String(window.montageExportState.filename || defaultMontageExportFilename()).trim(),
-    onScreenTextTimeline: shouldSendOnScreenTextTimeline ? {
-      enabled: effectiveOnScreenTextTimeline.segments.length > 0,
+    onScreenTextTimeline: effectiveOnScreenTextTimeline ? {
+      enabled: effectiveOnScreenTextTimeline.settings?.enabled !== false && effectiveOnScreenTextTimeline.settings?.showTrack !== false,
       settings: effectiveOnScreenTextTimeline.settings,
       segments: effectiveOnScreenTextTimeline.segments,
       suppressFallbackFromEntries: effectiveOnScreenTextTimeline.suppressFallbackFromEntries === true
