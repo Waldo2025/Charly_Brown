@@ -9474,8 +9474,6 @@ function normalizeMontageExportRequestBody(body = {}) {
   const onScreenTextTimelineRaw = raw?.onScreenTextTimeline && typeof raw.onScreenTextTimeline === "object"
     ? raw.onScreenTextTimeline
     : null;
-  const hasExplicitOnScreenTextTimeline = Boolean(onScreenTextTimelineRaw);
-  const suppressOnScreenTextFallbackFromEntries = onScreenTextTimelineRaw?.suppressFallbackFromEntries === true;
   const overlayCards = normalizeMontageOverlayCards(raw?.overlayCards || null);
   const brandOverlayRaw = raw?.brandOverlay && typeof raw.brandOverlay === "object"
     ? raw.brandOverlay
@@ -9666,35 +9664,6 @@ function normalizeMontageExportRequestBody(body = {}) {
     onScreenTextTimelineRaw?.enabled === false;
   if (isExplicitlyDisabledOrHidden) {
     onScreenTextSegments = [];
-  } else if (!onScreenTextSegments.length && !hasExplicitOnScreenTextTimeline && !suppressOnScreenTextFallbackFromEntries) {
-    onScreenTextSegments = entries
-      .map((entry, idx) => {
-        const text = clampText(entry?.onScreenText || "", 500);
-        if (!text) return null;
-        const geminiSeg = normalizedGeminiTimelineSegments.find((s) => s.rowId === entry.rowId);
-        const startMs = geminiSeg
-          ? geminiSeg.startMs
-          : Math.max(0, Math.round(Number(entry?.timelineStartMs || 0) || 0));
-        const durationMs = geminiSeg
-          ? geminiSeg.durationMs
-          : Math.max(500, Math.round(Number(entry?.durationMs || 0) || 0));
-        return {
-          id: clampText(`${entry?.rowId || idx + 1}-entry-text`, 140),
-          rowId: clampText(entry?.rowId || "", 140),
-          sceneIndex: Math.max(1, Math.round(Number(entry?.sceneIndex || idx + 1) || idx + 1)),
-          text,
-          startMs,
-          durationMs,
-          zIndex: idx + 1,
-          layout: {
-            yPct: 0.72,
-            widthPct: 0.58,
-            heightPct: 0.14,
-            xPct: 0.21
-          }
-        };
-      })
-      .filter(Boolean);
   }
   // Do NOT hardcode enabled:true here — if the timeline sent no settings and the track is
   // disabled/hidden we should get null (no settings), not a fake "enabled" settings object.

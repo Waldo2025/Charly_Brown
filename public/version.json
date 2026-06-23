@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10.220",
-  "build": "2026-1.0.10.220",
+  "version": "1.0.10.221",
+  "build": "2026-1.0.10.221",
   "branch": "codex-bootstrap",
   "changelog": [
     "Actualizado: Se incrementan nuevamente los cache-busters de Podcaster a la v2026-06-22.6 y version.json a la build 1.0.10.220 para forzar la recarga del frontend con el split correcto de backends (Gemini separado de snoopy-export).",
@@ -18,6 +18,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Actualizado: Se elimina el fallback de texto en pantalla y su reconstrucción desde entries tanto en frontend como backend en el export de montage (persistido en Firestore), y se incrementa el cache-buster a la v2026-06-23.2.",
     "Actualizado: Se incrementan version.json y los cache-busters de podcaster-montage-export.js y podcaster-panel-music.js para forzar la carga del fix de audio de fondo MP3 en el export de montage.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con el fix de instalación local de Chromium/Playwright en Render.",
     "Actualizado: Se incrementan version.json y los cache-busters principales de Podcaster para forzar la carga del frontend alineado con los fixes de memoria, cola de export y runtime del browser renderer en Render.",
@@ -158,5 +159,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.217"
+  "cache_version": "2026-1.0.10.221"
 }
