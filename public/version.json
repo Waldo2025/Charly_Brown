@@ -1,8 +1,9 @@
 {
-  "version": "1.0.10.223",
-  "build": "2026-1.0.10.223",
+  "version": "1.0.10.224",
+  "build": "2026-1.0.10.224",
   "branch": "codex-bootstrap",
   "changelog": [
+    "Corregido: El export de Podcaster vuelve a reconstruir el texto en pantalla desde las escenas solo cuando el track está visible pero el timeline llega vacío; si está oculto, no revive. Se incrementan los cache-busters de podcaster.js y podcaster-montage-export.js.",
     "Corregido: Se soluciona la omisión del texto en pantalla (subtítulos) en las exportaciones normales de video con Playwright habilitado al forzar el quemado de subtítulos ASS por escena sin importar la disponibilidad del browser renderer.",
     "Actualizado: Se incrementan nuevamente los cache-busters de Podcaster a la v2026-06-22.6 y version.json a la build 1.0.10.220 para forzar la recarga del frontend con el split correcto de backends (Gemini separado de snoopy-export).",
     "Actualizado: Se incrementa el cache-buster del cargador de configuración runtime y de api-client-podcaster a la v2026-06-22.5, obligando al navegador a recargar y respetar el flujo de backends correcto (exportaciones a snoopy-export y Gemini a su backend correspondiente) en podcaster.html.",
@@ -19,6 +20,7 @@
     "Corregido: El renderizado del karaoke de texto en pantalla en el export MP4 fallaba al dibujar la superposición amarilla de la palabra activa en algunas versiones de libass/ffmpeg debido al tag de transparencia (\\alpha&HFF&). Se rediseñó el sistema de active-word para usar anulaciones explícitas de color (\\c) en vez de alfa, garantizando que el amarillo superponga a la base blanca y sea perfectamente visible."
   ],
   "releaseNotes": [
+    "Corregido: El export de Podcaster vuelve a renderizar texto en pantalla cuando el track está visible aunque el timeline de export llegue vacío; si está oculto, sigue sin renderizarse. Se incrementan version.json y los cache-busters principales de Podcaster.",
     "Corregido: Se corrige la exportación de video sin texto en pantalla (subtítulos) cuando el track está visible y con modo karaoke activo, forzando la quema de subtítulos por escena.",
     "Corregido: Se soluciona el fallo en el export de montage al procesar el texto en pantalla (persistido en Firestore) corrigiendo el error de sintaxis del filtro 'ass' de FFmpeg en el backend.",
     "Actualizado: Se elimina el fallback de texto en pantalla y su reconstrucción desde entries tanto en frontend como backend en el export de montage (persistido en Firestore), y se incrementa el cache-buster a la v2026-06-23.2.",
@@ -162,5 +164,5 @@
     "Diagnóstico: Solo se veía sombra del texto en pantalla en el export MP4 — se investiga fill/stroke y renderizado SVG en backend para corregir la visibilidad del karaoke en party mode.",
     "Corregido: El polling de export-status ahora usa el proxy same-origin /api de Firebase Hosting (buildApiUrl) en vez de apuntar directo a Render (buildApiUrlPreferRemote). Cuando Render cae con 502/503, omite los headers CORS y el browser bloqueaba el fetch con 'Failed to fetch'. El proxy de Firebase maneja CORS correctamente incluso con errores del backend."
   ],
-  "cache_version": "2026-1.0.10.233"
+  "cache_version": "2026-1.0.10.234"
 }
