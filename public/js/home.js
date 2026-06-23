@@ -2603,7 +2603,7 @@ function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntrie
   const activeSession = session || currentMultimediaSession;
   if (!activeSession) return { settings: { enabled: false }, segments: [], suppressFallbackFromEntries: true };
   const rows = extractDashboardSessionRows(activeSession) || [];
-  const cfg = getPodcastVideoConfig(activeSession) || {};
+  const cfg = multimediaPlaybackDeps.getPodcastVideoConfig(activeSession) || {};
   const settings = typeof window.normalizeOnScreenTextTrackSettings === 'function'
     ? window.normalizeOnScreenTextTrackSettings(cfg?.onScreenTextTrack || {})
     : { enabled: true, showTrack: true };
@@ -2614,7 +2614,6 @@ function buildDashboardMontageOnScreenTextSegments(session = null, runtimeEntrie
   const suppressFallbackFromEntries = allHidden || !trackVisible;
   if (!trackVisible) return { settings, segments: [], suppressFallbackFromEntries };
 
-  const clipMap = cfg.timelineOnScreenTextClipsByRowId || {};
   const layoutMap = cfg.timelineOnScreenTextLayoutByRowId || {};
   const runtimeByRowId = new Map((Array.isArray(runtimeEntries) ? runtimeEntries : []).map((entry) => [String(entry?.rowId || "").trim(), entry]));
   

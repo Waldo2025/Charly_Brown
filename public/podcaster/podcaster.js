@@ -4247,8 +4247,8 @@ function buildMontageOnScreenTextSegments(session = null, runtimeEntries = [], o
   const clips = Object.values(clipMap || {});
   const trackVisible = settings.enabled !== false && settings.showTrack !== false;
   const allHidden = clips.length > 0 && clips.every((clip) => clip?.hidden === true);
-  const suppressFallbackFromEntries = allHidden || (includeHidden !== true && !trackVisible);
-  if ((!settings.enabled || settings.showTrack === false) && !includeHidden) {
+  const suppressFallbackFromEntries = allHidden || !trackVisible;
+  if (!trackVisible) {
     return { settings, segments: [], suppressFallbackFromEntries };
   }
   const layoutMap = ensureOnScreenTextLayoutByRowId(activeSession, { persist: false });
