@@ -2542,6 +2542,16 @@ function stripInlineMontageMediaRecord(record = null) {
   const clean = { ...record };
   clean.url = normalizeMontageSubmissionMediaUrl(clean.url);
   clean.downloadUrl = normalizeMontageSubmissionMediaUrl(clean.downloadUrl);
+  const hasDurableSource = Boolean(
+    String(clean.storagePath || "").trim()
+    || String(clean.downloadUrl || "").trim()
+    || String(clean.url || "").trim()
+    || String(clean.localMediaCacheKey || "").trim()
+  );
+  if (hasDurableSource) {
+    clean.dataUrl = "";
+    clean.localDataUrl = "";
+  }
   return clean;
 }
 
