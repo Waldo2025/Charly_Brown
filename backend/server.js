@@ -11344,6 +11344,10 @@ async function renderMontageBrowserFinalVisualPass({
   }
   const browserPayload = {
     ...input,
+    onScreenTextTimeline: {
+      settings: input.onScreenTextSettings,
+      segments: input.onScreenTextSegments
+    },
     renderMode: "browser",
     brandOverlay
   };
@@ -12158,14 +12162,6 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       : (Array.isArray(input.overlayCards) ? input.overlayCards : []);
     const resolvedBrandPath = input.brandOverlay?.enabled === true ? resolveBrandOverlayAssetPath(input.brandOverlay?.assetPath) : "";
     const hasBrandOverlay = Boolean(resolvedBrandPath && fs.existsSync(resolvedBrandPath));
-    const hasFinalVisualPass = Boolean(
-      reviewOnScreenTextEnabled
-      || normalOnScreenTextEnabled
-      || overlayCardSegments.length
-      || (input.exportMode === "review" && exportedEntries.length)
-      || hasBrandOverlay
-      || finalShouldAttemptBrowserRenderer
-    );
     const shouldAttemptBrowserRenderer = shouldUseBrowserMontageRenderer(input);
     const browserRendererAvailability = shouldAttemptBrowserRenderer ? getMontageBrowserRendererAvailability() : { available: false };
     let finalShouldAttemptBrowserRenderer = shouldAttemptBrowserRenderer;
@@ -12178,6 +12174,14 @@ async function executeMontageExportPipeline(rawInput = {}, context = {}) {
       });
       finalShouldAttemptBrowserRenderer = false;
     }
+    const hasFinalVisualPass = Boolean(
+      reviewOnScreenTextEnabled
+      || normalOnScreenTextEnabled
+      || overlayCardSegments.length
+      || (input.exportMode === "review" && exportedEntries.length)
+      || hasBrandOverlay
+      || finalShouldAttemptBrowserRenderer
+    );
     const hasBrowserVisualPass = finalShouldAttemptBrowserRenderer && hasFinalVisualPass;
     const hasPostVisualAudioFinalization = input.useTimelineAudio || input.includeBackgroundMusic;
     const visualEncodeStage = hasPostVisualAudioFinalization ? "encode_visual_pass" : "encode_delivery";
